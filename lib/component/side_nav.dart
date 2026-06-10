@@ -17,6 +17,7 @@ class DestinationDesc {
 }
 
 const double _drawerDestinationHeight = 64.0;
+const double _navVisualTopBias = 36.0;
 
 final destinations = <DestinationDesc>[
   DestinationDesc(Symbols.library_music, "音乐", app_paths.AUDIOS_PAGE),
@@ -123,7 +124,7 @@ class SideNav extends StatelessWidget {
                   ),
                 ),
                 child: NavigationRail(
-                  groupAlignment: 0.0,
+                  groupAlignment: -0.14,
                   backgroundColor: Colors.transparent,
                   selectedIndex: selected,
                   onDestinationSelected: onDestinationSelected,
@@ -163,7 +164,8 @@ class _CenteredNavigationDrawer extends StatelessWidget {
         final destinationBlockHeight =
             destinations.length * _drawerDestinationHeight;
         final topPadding =
-            ((availableHeight - destinationBlockHeight) / 2).clamp(32.0, 280.0);
+            ((availableHeight - destinationBlockHeight) / 2 - _navVisualTopBias)
+                .clamp(24.0, 240.0);
 
         return NavigationDrawer(
           backgroundColor: Colors.transparent,

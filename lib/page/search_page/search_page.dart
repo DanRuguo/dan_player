@@ -56,47 +56,52 @@ class SearchPage extends StatelessWidget {
       color: scheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              "搜索",
-              style: TextStyle(
-                color: scheme.onSurface,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const Padding(padding: EdgeInsets.only(bottom: 32.0)),
-            SizedBox(
-              width: 400,
-              child: Focus(
-                onFocusChange: HotkeysHelper.onFocusChanges,
-                child: Hero(
-                  tag: SEARCH_BAR_KEY,
-                  child: TextField(
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      suffixIcon: Padding(
-                        padding: EdgeInsets.only(right: 12.0),
-                        child: Icon(Symbols.search),
-                      ),
-                      hintText: "搜索歌曲、艺术家、专辑",
-                      border: OutlineInputBorder(),
-                    ),
-
-                    /// when 'enter' is pressed
-                    onSubmitted: (String query) {
-                      context.push(
-                        app_paths.SEARCH_RESULT_PAGE,
-                        extra: UnionSearchResult.search(query),
-                      );
-                    },
+        child: Center(
+          child: Transform.translate(
+            offset: const Offset(0, -40.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  "搜索",
+                  style: TextStyle(
+                    color: scheme.onSurface,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-              ),
+                const Padding(padding: EdgeInsets.only(bottom: 32.0)),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 400.0),
+                  child: Focus(
+                    onFocusChange: HotkeysHelper.onFocusChanges,
+                    child: Hero(
+                      tag: SEARCH_BAR_KEY,
+                      child: TextField(
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          suffixIcon: Padding(
+                            padding: EdgeInsets.only(right: 12.0),
+                            child: Icon(Symbols.search),
+                          ),
+                          hintText: "搜索歌曲、艺术家、专辑",
+                          border: OutlineInputBorder(),
+                        ),
+
+                        /// when 'enter' is pressed
+                        onSubmitted: (String query) {
+                          context.push(
+                            app_paths.SEARCH_RESULT_PAGE,
+                            extra: UnionSearchResult.search(query),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

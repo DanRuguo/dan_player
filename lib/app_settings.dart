@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 import 'package:dan_player/src/rust/api/system_theme.dart';
 import 'package:dan_player/utils.dart';
@@ -84,6 +84,10 @@ class AppSettings {
 
   /// 歌词来源：true，本地优先；false，在线优先
   bool localLyricFirst = true;
+
+  /// 用户自定义歌词接口；为空时使用内置 QQ / 酷狗 / 网易搜索。
+  String? lyricApiUrl;
+
   Size windowSize = const Size(1280, 756);
   bool isWindowMaximized = false;
 
@@ -97,23 +101,31 @@ class AppSettings {
   static AppSettings get instance => _instance;
 
   static ThemeMode getWindowsThemeMode() {
-    final systemTheme = SystemTheme.getSystemTheme();
+    try {
+      final systemTheme = SystemTheme.getSystemTheme();
 
-    final isDarkMode = (((5 * systemTheme.fore.$3) +
-            (2 * systemTheme.fore.$2) +
-            systemTheme.fore.$4) >
-        (8 * 128));
-    return isDarkMode ? ThemeMode.dark : ThemeMode.light;
+      final isDarkMode = (((5 * systemTheme.fore.$3) +
+              (2 * systemTheme.fore.$2) +
+              systemTheme.fore.$4) >
+          (8 * 128));
+      return isDarkMode ? ThemeMode.dark : ThemeMode.light;
+    } catch (_) {
+      return ThemeMode.system;
+    }
   }
 
   static int getWindowsTheme() {
-    final systemTheme = SystemTheme.getSystemTheme();
-    return Color.fromARGB(
-      systemTheme.accent.$1,
-      systemTheme.accent.$2,
-      systemTheme.accent.$3,
-      systemTheme.accent.$4,
-    ).value;
+    try {
+      final systemTheme = SystemTheme.getSystemTheme();
+      return Color.fromARGB(
+        systemTheme.accent.$1,
+        systemTheme.accent.$2,
+        systemTheme.accent.$3,
+        systemTheme.accent.$4,
+      ).toARGB32();
+    } catch (_) {
+      return Colors.amber.toARGB32();
+    }
   }
 
   AppSettings._();
@@ -145,6 +157,12 @@ class AppSettings {
     if (llf != null) {
       _instance.localLyricFirst = llf == 1 ? true : false;
     }
+
+    final lyricApiUrl = settingsMap["LyricApiUrl"];
+    _instance.lyricApiUrl =
+        lyricApiUrl is String && lyricApiUrl.trim().isNotEmpty
+            ? lyricApiUrl.trim()
+            : null;
 
     final sizeStr = settingsMap["WindowSize"];
     if (sizeStr != null) {
@@ -206,6 +224,12 @@ class AppSettings {
         _instance.localLyricFirst = llf;
       }
 
+      final lyricApiUrl = settingsMap["LyricApiUrl"];
+      _instance.lyricApiUrl =
+          lyricApiUrl is String && lyricApiUrl.trim().isNotEmpty
+              ? lyricApiUrl.trim()
+              : null;
+
       final sizeStr = settingsMap["WindowSize"];
       if (sizeStr != null) {
         final sizeStrs = (sizeStr as String).split(",");
@@ -242,6 +266,7 @@ class AppSettings {
         "DefaultTheme": defaultTheme,
         "ArtistSeparator": artistSeparator,
         "LocalLyricFirst": localLyricFirst,
+        "LyricApiUrl": lyricApiUrl,
         "IsWindowMaximized": isMaximized,
         "FontFamily": fontFamily,
         "FontPath": fontPath,

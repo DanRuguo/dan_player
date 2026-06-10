@@ -1,4 +1,4 @@
-﻿import 'package:dan_player/page/page_scaffold.dart';
+import 'package:dan_player/page/page_scaffold.dart';
 import 'package:dan_player/page/settings_page/artist_separator_editor.dart';
 import 'package:dan_player/page/settings_page/check_update.dart';
 import 'package:dan_player/page/settings_page/create_issue.dart';
@@ -20,6 +20,8 @@ class SettingsPage extends StatelessWidget {
           AudioLibraryEditor(),
           SizedBox(height: 16.0),
           DefaultLyricSourceControl(),
+          SizedBox(height: 16.0),
+          LyricApiEditor(),
           SizedBox(height: 16.0),
           DynamicThemeSwitch(),
           SizedBox(height: 16.0),
