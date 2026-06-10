@@ -53,6 +53,22 @@ void EnableFullDpiSupportIfAvailable(HWND hwnd) {
   FreeLibrary(user32_module);
 }
 
+bool IsSystemAppThemeDark() {
+  DWORD light_mode;
+  DWORD light_mode_size = sizeof(light_mode);
+  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
+                               kGetPreferredBrightnessRegValue,
+                               RRF_RT_REG_DWORD, nullptr, &light_mode,
+                               &light_mode_size);
+  return result == ERROR_SUCCESS && light_mode == 0;
+}
+
+HBRUSH GetStartupBackgroundBrush() {
+  static HBRUSH light_brush = CreateSolidBrush(RGB(247, 244, 237));
+  static HBRUSH dark_brush = CreateSolidBrush(RGB(16, 16, 14));
+  return IsSystemAppThemeDark() ? dark_brush : light_brush;
+}
+
 }  // namespace
 
 // Manages the Win32Window's window class registration.
@@ -97,7 +113,7 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.hInstance = GetModuleHandle(nullptr);
     window_class.hIcon =
         LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    window_class.hbrBackground = 0;
+    window_class.hbrBackground = GetStartupBackgroundBrush();
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
     RegisterClass(&window_class);

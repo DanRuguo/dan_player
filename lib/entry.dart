@@ -2,6 +2,7 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/app_shell.dart';
+import 'package:dan_player/component/startup_splash.dart';
 import 'package:dan_player/page/album_detail_page.dart';
 import 'package:dan_player/page/albums_page.dart';
 import 'package:dan_player/page/artist_detail_page.dart';
@@ -146,6 +147,9 @@ class Entry extends StatelessWidget {
           localizationsDelegates: GlobalMaterialLocalizations.delegates,
           supportedLocales: supportedLocales,
           routerConfig: config,
+          builder: (context, child) => StartupSplash(
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
     );
