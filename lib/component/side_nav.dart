@@ -16,6 +16,8 @@ class DestinationDesc {
   DestinationDesc(this.icon, this.label, this.desPath);
 }
 
+const double _drawerDestinationHeight = 64.0;
+
 final destinations = <DestinationDesc>[
   DestinationDesc(Symbols.library_music, "音乐", app_paths.AUDIOS_PAGE),
   DestinationDesc(Symbols.artist, "艺术家", app_paths.ARTISTS_PAGE),
@@ -55,6 +57,8 @@ class SideNav extends StatelessWidget {
       builder: (context, screenType) {
         final scheme = Theme.of(context).colorScheme;
         final labelTheme = NavigationDrawerThemeData(
+          tileHeight: _drawerDestinationHeight,
+          indicatorSize: const Size(272.0, 56.0),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return danCjkTextStyle(
@@ -82,18 +86,9 @@ class SideNav extends StatelessWidget {
               screenType: screenType,
               child: NavigationDrawerTheme(
                 data: labelTheme,
-                child: NavigationDrawer(
-                  backgroundColor: Colors.transparent,
+                child: _CenteredNavigationDrawer(
                   selectedIndex: selected,
                   onDestinationSelected: onDestinationSelected,
-                  children: List.generate(
-                    destinations.length,
-                    (i) => NavigationDrawerDestination(
-                      icon: Icon(destinations[i].icon, size: 28.0),
-                      selectedIcon: Icon(destinations[i].icon, size: 28.0),
-                      label: Text(destinations[i].label),
-                    ),
-                  ),
                 ),
               ),
             );
@@ -128,6 +123,7 @@ class SideNav extends StatelessWidget {
                   ),
                 ),
                 child: NavigationRail(
+                  groupAlignment: 0.0,
                   backgroundColor: Colors.transparent,
                   selectedIndex: selected,
                   onDestinationSelected: onDestinationSelected,
@@ -143,6 +139,52 @@ class SideNav extends StatelessWidget {
               ),
             );
         }
+      },
+    );
+  }
+}
+
+class _CenteredNavigationDrawer extends StatelessWidget {
+  const _CenteredNavigationDrawer({
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableHeight = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : MediaQuery.sizeOf(context).height;
+        final destinationBlockHeight =
+            destinations.length * _drawerDestinationHeight;
+        final topPadding =
+            ((availableHeight - destinationBlockHeight) / 2).clamp(32.0, 280.0);
+
+        return NavigationDrawer(
+          backgroundColor: Colors.transparent,
+          selectedIndex: selectedIndex,
+          onDestinationSelected: onDestinationSelected,
+          tilePadding: const EdgeInsetsDirectional.only(
+            start: 12.0,
+            end: 18.0,
+          ),
+          children: [
+            SizedBox(height: topPadding),
+            ...List.generate(
+              destinations.length,
+              (i) => NavigationDrawerDestination(
+                icon: Icon(destinations[i].icon, size: 28.0),
+                selectedIcon: Icon(destinations[i].icon, size: 28.0),
+                label: Text(destinations[i].label),
+              ),
+            ),
+          ],
+        );
       },
     );
   }

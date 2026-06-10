@@ -27,3 +27,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: DanPingFangSC
+      fonts:
+        - asset: assets/fonts/PingFangSC-Regular.ttf

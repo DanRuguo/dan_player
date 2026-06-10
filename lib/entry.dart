@@ -1,5 +1,6 @@
-﻿import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/app_shell.dart';
 import 'package:dan_player/page/album_detail_page.dart';
 import 'package:dan_player/page/albums_page.dart';
@@ -86,7 +87,8 @@ class Entry extends StatelessWidget {
         isDark ? colorScheme.onSurface : colorScheme.onPrimary;
 
     return ThemeData(
-      fontFamily: fontFamily,
+      fontFamily: fontFamily ?? danEmbeddedFontFamily,
+      fontFamilyFallback: danFontFamilyFallback,
       colorScheme: colorScheme,
       brightness: colorScheme.brightness,
       primaryColor: primarySurfaceColor,

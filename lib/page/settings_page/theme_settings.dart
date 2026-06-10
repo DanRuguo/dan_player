@@ -1,8 +1,9 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:dan_player/src/rust/api/installed_font.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/services.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/page/settings_page/theme_picker_dialog.dart';
 import 'package:dan_player/theme_provider.dart';
@@ -250,7 +251,7 @@ class _FontSelector extends StatelessWidget {
                   ),
                 ),
               ),
-              Text("当前字体：${theme.fontFamily ?? "默认"}"),
+              Text("当前字体：${danFontDisplayName(theme.fontFamily)}"),
               const SizedBox(height: 8.0),
               Expanded(
                 child: Material(

@@ -1,4 +1,5 @@
-﻿import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
@@ -14,7 +15,7 @@ class ThemeProvider extends ChangeNotifier {
     brightness: Brightness.dark,
   );
 
-  String? fontFamily = AppSettings.instance.fontFamily;
+  String fontFamily = danEmbeddedFontFamily;
 
   ColorScheme get currScheme =>
       themeMode == ThemeMode.dark ? darkScheme : lightScheme;
@@ -116,7 +117,7 @@ class ThemeProvider extends ChangeNotifier {
   }
 
   void changeFontFamily(String? fontFamily) {
-    this.fontFamily = fontFamily;
+    this.fontFamily = fontFamily ?? danEmbeddedFontFamily;
     notifyListeners();
   }
 

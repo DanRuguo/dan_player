@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:desktop_lyric/component/desktop_lyric_body.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import 'package:win32/win32.dart' as win32;
+import 'package:window_manager/window_manager.dart';
 
 class ActionRow extends StatelessWidget {
   const ActionRow({super.key});
@@ -123,7 +125,23 @@ class ActionRow extends StatelessWidget {
   }
 }
 
-final _COLOR_SELECTOR_CONTROLLER = MenuController();
+final _colorSelectorController = MenuController();
+
+const Size _colorSelectorWindowSize = Size(800.0, 360.0);
+const Size _colorSelectorMinimumSize = Size(520.0, 320.0);
+const Size _compactMinimumSize = Size(320.0, 72.0);
+
+void _showColorSelectorWindow() {
+  ALWAYS_SHOW_ACTION_ROW = true;
+  unawaited(windowManager.setMinimumSize(_colorSelectorMinimumSize));
+  unawaited(windowManager.setSize(_colorSelectorWindowSize));
+}
+
+void _restoreCompactWindow() {
+  ALWAYS_SHOW_ACTION_ROW = false;
+  unawaited(windowManager.setMinimumSize(_compactMinimumSize));
+  resizeWithForegroundSize();
+}
 
 class _ShowColorSelectorBtn extends StatelessWidget {
   const _ShowColorSelectorBtn();
@@ -132,13 +150,13 @@ class _ShowColorSelectorBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeChangedMessage>();
     return MenuAnchor(
-      controller: _COLOR_SELECTOR_CONTROLLER,
+      controller: _colorSelectorController,
       consumeOutsideTap: true,
       onOpen: () {
-        ALWAYS_SHOW_ACTION_ROW = true;
+        _showColorSelectorWindow();
       },
       onClose: () {
-        ALWAYS_SHOW_ACTION_ROW = false;
+        _restoreCompactWindow();
       },
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll(
@@ -160,9 +178,9 @@ class _ShowColorSelectorBtn extends StatelessWidget {
       ),
       menuChildren: [
         SizedBox(
-          width: 292.0,
+          width: 360.0,
           child: Padding(
-            padding: const EdgeInsets.all(14.0),
+            padding: const EdgeInsets.all(16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -255,12 +273,18 @@ class _OpacityControl extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: _SectionLabel(text: "背景不透明度", theme: theme)),
-              Text(
-                "${(opacity * 100).round()}%",
-                style: TextStyle(
-                  color: Color(theme.onSurface).withValues(alpha: 0.72),
-                  fontSize: 12.0,
+              Expanded(
+                child: _SectionLabel(text: "背景不透明度", theme: theme),
+              ),
+              SizedBox(
+                width: 48.0,
+                child: Text(
+                  "${(opacity * 100).round()}%",
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: Color(theme.onSurface).withValues(alpha: 0.72),
+                    fontSize: 12.0,
+                  ),
                 ),
               ),
             ],
@@ -275,6 +299,7 @@ class _OpacityControl extends StatelessWidget {
               trackHeight: 4.0,
             ),
             child: Slider(
+              padding: const EdgeInsets.symmetric(horizontal: 2.0),
               value: opacity,
               onChanged: (newOpacity) {
                 BACKGROUND_OPACITY.value = newOpacity;
@@ -302,7 +327,7 @@ class _ThemeColorButton extends StatelessWidget {
       child: FilledButton.tonalIcon(
         onPressed: () {
           textDisplayController.usePlayerTheme();
-          _COLOR_SELECTOR_CONTROLLER.close();
+          _colorSelectorController.close();
         },
         style: FilledButton.styleFrom(
           backgroundColor: Color(theme.primary).withValues(alpha: 0.13),
@@ -313,7 +338,10 @@ class _ThemeColorButton extends StatelessWidget {
           ),
         ),
         icon: Icon(usingTheme ? Symbols.check : Symbols.palette),
-        label: Text(usingTheme ? "正在跟随播放器主题" : "跟随播放器主题"),
+        label: Text(
+          usingTheme ? "正在跟随播放器主题" : "跟随播放器主题",
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }
@@ -378,7 +406,7 @@ class _ColorTile extends StatelessWidget {
           customBorder: const CircleBorder(),
           onTap: () {
             textDisplayController.spcifiyColor(color);
-            _COLOR_SELECTOR_CONTROLLER.close();
+            _colorSelectorController.close();
           },
           child: selected
               ? const Center(

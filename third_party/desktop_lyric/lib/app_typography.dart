@@ -1,6 +1,19 @@
 import 'package:flutter/material.dart';
 
 abstract final class DesktopLyricTypography {
+  static const String fontFamily = "DanPingFangSC";
+  static const List<String> fontFamilyFallback = [
+    fontFamily,
+    ".PingFang SC Regular",
+    "PingFang SC Regular",
+    "PingFang SC",
+    "Noto Sans SC",
+    "Noto Sans CJK SC",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    "SimHei",
+  ];
+
   static ThemeData theme(Brightness brightness) {
     final scheme = ColorScheme.fromSeed(
       seedColor: Colors.blue,
@@ -10,6 +23,8 @@ abstract final class DesktopLyricTypography {
     return ThemeData(
       useMaterial3: true,
       brightness: brightness,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
       colorScheme: scheme,
       iconButtonTheme: IconButtonThemeData(
         style: ButtonStyle(

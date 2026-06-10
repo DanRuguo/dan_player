@@ -30,20 +30,22 @@ Future<void> initWindow() async {
 
 Future<void> loadPrefFont() async {
   final settings = AppSettings.instance;
-  if (settings.fontFamily != null) {
-    try {
-      final fontLoader = FontLoader(settings.fontFamily!);
+  if (settings.fontFamily == null || settings.fontPath == null) return;
 
-      fontLoader.addFont(
-        File(settings.fontPath!).readAsBytes().then((value) {
-          return ByteData.sublistView(value);
-        }),
-      );
-      await fontLoader.load();
-      ThemeProvider.instance.changeFontFamily(settings.fontFamily!);
-    } catch (err, trace) {
-      LOGGER.e(err, stackTrace: trace);
-    }
+  try {
+    final fontFile = File(settings.fontPath!);
+    if (!fontFile.existsSync()) return;
+
+    final fontLoader = FontLoader(settings.fontFamily!);
+    fontLoader.addFont(
+      fontFile.readAsBytes().then((value) {
+        return ByteData.sublistView(value);
+      }),
+    );
+    await fontLoader.load();
+    ThemeProvider.instance.changeFontFamily(settings.fontFamily!);
+  } catch (err, trace) {
+    LOGGER.e(err, stackTrace: trace);
   }
 }
 
