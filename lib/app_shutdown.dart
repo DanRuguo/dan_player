@@ -10,37 +10,48 @@ import 'package:window_manager/window_manager.dart';
 
 bool _shuttingDown = false;
 
+Future<void> _waitForCleanup(List<Future<void>> tasks) async {
+  await Future.wait(tasks);
+}
+
 Future<void> shutdownAndExit() async {
   if (_shuttingDown) return;
   _shuttingDown = true;
 
   try {
-    if (PlayService.isInitialized) {
-      await PlayService.instance.close().timeout(
-            const Duration(seconds: 3),
-            onTimeout: () =>
-                LOGGER.w("[shutdown] playback service close timed out"),
-          );
-    }
-    await Future.wait(
-      [
+    await windowManager.hide();
+  } catch (err, trace) {
+    LOGGER.e(err, stackTrace: trace);
+  }
+
+  try {
+    final cleanupTasks = <Future<void>>[
+      Future.wait([
         savePlaylists(),
         saveCustomAudioOrder(),
         saveCollections(),
         saveLyricSources(),
         AppSettings.instance.saveSettings(),
         AppPreference.instance.save(),
-      ],
-    ).timeout(const Duration(seconds: 5));
-    await HotkeysHelper.unregisterAll().timeout(
+      ]),
+      HotkeysHelper.unregisterAll(),
+    ];
+    if (PlayService.isInitialized) {
+      cleanupTasks.add(PlayService.instance.close());
+    }
+    await _waitForCleanup(cleanupTasks).timeout(
       const Duration(seconds: 2),
-      onTimeout: () => LOGGER.w("[shutdown] hotkey cleanup timed out"),
+      onTimeout: () => LOGGER.w("[shutdown] cleanup timed out"),
     );
   } catch (err, trace) {
     LOGGER.e(err, stackTrace: trace);
   }
-  await windowManager.setPreventClose(false);
-  await windowManager.close();
+  try {
+    await windowManager.setPreventClose(false);
+    await windowManager.close();
+  } catch (err, trace) {
+    LOGGER.e(err, stackTrace: trace);
+  }
 }
 
 class _AppCloseListener with WindowListener {

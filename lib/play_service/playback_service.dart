@@ -634,18 +634,40 @@ class PlaybackService extends ChangeNotifier {
     _stateSaveTimer = null;
     final snapshot = _snapshotState();
     cancelSleepTimer();
-    await Future.wait([
-      _playerStateStreamSub.cancel(),
-      _smtcEventStreamSub.cancel(),
-      _positionStreamSub.cancel(),
-    ]);
     if (snapshot != null) {
       _stateWrite = _stateWrite.then(
         (_) => PlaybackStateStore.save(snapshot),
         onError: (_) => PlaybackStateStore.save(snapshot),
       );
-      await _stateWrite;
     }
+
+    try {
+      await Future.wait([
+        _stateWrite,
+        _playerStateStreamSub.cancel(),
+        _positionStreamSub.cancel(),
+      ]).timeout(const Duration(seconds: 1));
+    } catch (err, trace) {
+      LOGGER.e("[shutdown] state or playback stream cleanup failed: $err",
+          stackTrace: trace);
+    }
+
+    // The native SMTC object owns the event sink. Close it before cancelling
+    // the Dart subscription so cancellation cannot wait forever for the sink.
+    try {
+      await _smtc.close().timeout(const Duration(milliseconds: 500));
+    } catch (err, trace) {
+      LOGGER.e("[shutdown] SMTC close failed: $err", stackTrace: trace);
+    }
+    try {
+      await _smtcEventStreamSub
+          .cancel()
+          .timeout(const Duration(milliseconds: 250));
+    } catch (err, trace) {
+      LOGGER.e("[shutdown] SMTC stream cleanup failed: $err",
+          stackTrace: trace);
+    }
+
     _player.free();
     _wasapiExclusive.dispose();
     _eqEnabled.dispose();
