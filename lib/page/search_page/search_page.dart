@@ -1,6 +1,7 @@
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/search/audio_search_index.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -16,29 +17,10 @@ class UnionSearchResult {
 
   static UnionSearchResult search(String query) {
     final result = UnionSearchResult(query);
-
-    final queryInLowerCase = query.toLowerCase();
-    final library = AudioLibrary.instance;
-
-    for (int i = 0; i < library.audioCollection.length; i++) {
-      final audio = library.audioCollection[i];
-      if (audio.displayTitle.toLowerCase().contains(queryInLowerCase) ||
-          audio.title.toLowerCase().contains(queryInLowerCase)) {
-        result.audios.add(audio);
-      }
-    }
-
-    for (Artist item in library.artistCollection.values) {
-      if (item.name.toLowerCase().contains(queryInLowerCase)) {
-        result.artists.add(item);
-      }
-    }
-
-    for (Album item in library.albumCollection.values) {
-      if (item.name.toLowerCase().contains(queryInLowerCase)) {
-        result.album.add(item);
-      }
-    }
+    final index = AudioSearchIndex.instance..ensureBuiltSync();
+    result.audios = index.searchAudios(query);
+    result.artists = index.searchArtists(query);
+    result.album = index.searchAlbums(query);
     return result;
   }
 }
@@ -90,6 +72,7 @@ class SearchPage extends StatelessWidget {
 
                         /// when 'enter' is pressed
                         onSubmitted: (String query) {
+                          if (query.trim().isEmpty) return;
                           context.push(
                             app_paths.SEARCH_RESULT_PAGE,
                             extra: UnionSearchResult.search(query),

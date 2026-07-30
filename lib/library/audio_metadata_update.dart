@@ -1,9 +1,12 @@
-﻿import 'dart:io';
+import 'dart:async';
+import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart';
+import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:path/path.dart' as path_util;
 
@@ -54,6 +57,11 @@ Future<Audio> applyAudioMetadataEdit(
   final stat = await File(newPath).stat();
   final modified = stat.modified.millisecondsSinceEpoch ~/ 1000;
 
+  await CoverCache.instance.invalidate(oldPath);
+  if (newPath != oldPath) {
+    await CoverCache.instance.invalidate(newPath);
+  }
+
   audio.applyEditedMetadata(
     newPath: newPath,
     newTitle: title,
@@ -88,6 +96,7 @@ Future<Audio> applyAudioMetadataEdit(
   if (playlistsChanged) {
     await savePlaylists();
   }
+  unawaited(AudioSearchIndex.instance.ensureBuilt());
 
   return audio;
 }

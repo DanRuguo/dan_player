@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:math';
 
 import 'package:dan_player/app_settings.dart';
@@ -18,24 +18,22 @@ class LyricService extends ChangeNotifier {
   LyricService(this.playService) {
     _positionStreamSubscription =
         playService.playbackService.positionStream.listen((pos) {
-      currLyricFuture.then((value) {
-        if (value == null) return;
-        if (_nextLyricLine >= value.lines.length) return;
+      final value = _resolvedLyric;
+      if (value == null || _nextLyricLine >= value.lines.length) return;
 
-        if ((pos * 1000) > value.lines[_nextLyricLine].start.inMilliseconds) {
-          _nextLyricLine += 1;
+      if ((pos * 1000) > value.lines[_nextLyricLine].start.inMilliseconds) {
+        _nextLyricLine += 1;
 
-          final currLineIndex = _nextLyricLine - 1;
-          _lyricLineStreamController.add(currLineIndex);
+        final currLineIndex = _nextLyricLine - 1;
+        _lyricLineStreamController.add(currLineIndex);
 
-          playService.desktopLyricService.canSendMessage.then((canSend) {
-            if (!canSend) return;
+        playService.desktopLyricService.canSendMessage.then((canSend) {
+          if (!canSend) return;
 
-            final currLine = value.lines[currLineIndex];
-            playService.desktopLyricService.sendLyricLineMessage(currLine);
-          });
-        }
-      });
+          final currLine = value.lines[currLineIndex];
+          playService.desktopLyricService.sendLyricLineMessage(currLine);
+        });
+      }
     });
   }
 
@@ -43,6 +41,19 @@ class LyricService extends ChangeNotifier {
 
   /// 供 widget 使用
   Future<Lyric?> currLyricFuture = Future.value(null);
+
+  Lyric? _resolvedLyric;
+  int _lyricToken = 0;
+
+  void _trackLyricFuture() {
+    final token = ++_lyricToken;
+    _resolvedLyric = null;
+    currLyricFuture.then((value) {
+      if (token == _lyricToken) {
+        _resolvedLyric = value;
+      }
+    });
+  }
 
   /// 下一行歌词
   int _nextLyricLine = 0;
@@ -104,6 +115,7 @@ class LyricService extends ChangeNotifier {
         );
       }
     }
+    _trackLyricFuture();
 
     currLyricFuture.then((value) {
       _nextLyricLine = 0;
@@ -119,6 +131,7 @@ class LyricService extends ChangeNotifier {
     currLyricFuture.ignore();
 
     currLyricFuture = Lrc.fromAudioPath(nowPlaying);
+    _trackLyricFuture();
     currLyricFuture.then((value) {
       findCurrLyricLine();
     });
@@ -133,6 +146,7 @@ class LyricService extends ChangeNotifier {
     currLyricFuture.ignore();
 
     currLyricFuture = getMostMatchedLyric(nowPlaying);
+    _trackLyricFuture();
     currLyricFuture.then((value) {
       findCurrLyricLine();
     });
@@ -144,6 +158,7 @@ class LyricService extends ChangeNotifier {
     currLyricFuture.ignore();
 
     currLyricFuture = Future.value(lyric);
+    _trackLyricFuture();
     currLyricFuture.then((value) {
       findCurrLyricLine();
     });

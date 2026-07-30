@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:math';
 
 import 'package:dan_player/lyric/lrc.dart';
@@ -130,8 +130,8 @@ class _SyncLineContent extends StatelessWidget {
                           colors: [
                             scheme.primary,
                             scheme.primary,
-                            scheme.primary.withOpacity(0.10),
-                            scheme.primary.withOpacity(0.10),
+                            scheme.primary.withValues(alpha: 0.10),
+                            scheme.primary.withValues(alpha: 0.10),
                           ],
                           stops: [0, progress, progress, 1],
                         ).createShader(bounds);
@@ -303,10 +303,29 @@ class _LrcLineContent extends StatelessWidget {
 
 /// 歌词间奏表示
 /// lrcLine 和 syncLine 必须有且只有一个不为空
-class LyricTransitionTile extends StatelessWidget {
+class LyricTransitionTile extends StatefulWidget {
   final LrcLine? lrcLine;
   final SyncLyricLine? syncLine;
   const LyricTransitionTile({super.key, this.lrcLine, this.syncLine});
+
+  @override
+  State<LyricTransitionTile> createState() => _LyricTransitionTileState();
+}
+
+class _LyricTransitionTileState extends State<LyricTransitionTile> {
+  late final LyricTransitionTileController controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = LyricTransitionTileController(widget.lrcLine, widget.syncLine);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -318,10 +337,7 @@ class LyricTransitionTile extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 18, 12, 6),
         child: CustomPaint(
-          painter: LyricTransitionPainter(
-            scheme,
-            LyricTransitionTileController(lrcLine, syncLine),
-          ),
+          painter: LyricTransitionPainter(scheme, controller),
         ),
       ),
     );
@@ -343,14 +359,14 @@ class LyricTransitionPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    circlePaint1.color = scheme.onSecondaryContainer.withOpacity(
-      0.05 + min(controller.progress * 3, 1) * 0.95,
+    circlePaint1.color = scheme.onSecondaryContainer.withValues(
+      alpha: 0.05 + min(controller.progress * 3, 1) * 0.95,
     );
-    circlePaint2.color = scheme.onSecondaryContainer.withOpacity(
-      0.05 + min(max(controller.progress - 1 / 3, 0) * 3, 1) * 0.95,
+    circlePaint2.color = scheme.onSecondaryContainer.withValues(
+      alpha: 0.05 + min(max(controller.progress - 1 / 3, 0) * 3, 1) * 0.95,
     );
-    circlePaint3.color = scheme.onSecondaryContainer.withOpacity(
-      0.05 + min(max(controller.progress - 2 / 3, 0) * 3, 1) * 0.95,
+    circlePaint3.color = scheme.onSecondaryContainer.withValues(
+      alpha: 0.05 + min(max(controller.progress - 2 / 3, 0) * 3, 1) * 0.95,
     );
 
     final rWithFactor = radius + controller.sizeFactor;
@@ -414,13 +430,22 @@ class LyricTransitionTileController extends ChangeNotifier {
     notifyListeners();
 
     if (progress >= 1) {
-      dispose();
+      _stopAnimating();
     }
+  }
+
+  bool _stopped = false;
+
+  void _stopAnimating() {
+    if (_stopped) return;
+    _stopped = true;
+    positionStreamSub.cancel();
+    factorTicker.stop();
   }
 
   @override
   void dispose() {
-    positionStreamSub.cancel();
+    _stopAnimating();
     factorTicker.dispose();
     super.dispose();
   }

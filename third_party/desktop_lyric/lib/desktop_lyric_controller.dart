@@ -13,9 +13,9 @@ class DesktopLyricController {
   ValueNotifier<bool> isDarkMode = ValueNotifier(false);
   ValueNotifier<ThemeChangedMessage> theme = ValueNotifier(
     ThemeChangedMessage(
-      Colors.blue.value,
-      Colors.white.value,
-      Colors.black.value,
+      Colors.blue.toARGB32(),
+      Colors.white.toARGB32(),
+      Colors.black.toARGB32(),
     ),
   );
   ValueNotifier<NowPlayingChangedMessage> nowPlaying = ValueNotifier(
@@ -57,7 +57,10 @@ class DesktopLyricController {
   }
 
   DesktopLyricController._() {
-    stdin.transform(utf8.decoder).listen((event) {
+    stdin
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((event) {
       try {
         final Map messageMap = json.decode(event);
         final String type = messageMap["type"];

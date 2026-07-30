@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/entry.dart';
 import 'package:dan_player/hotkeys_helper.dart';
@@ -14,6 +15,7 @@ import 'package:window_manager/window_manager.dart';
 
 Future<void> initWindow() async {
   await windowManager.ensureInitialized();
+  await registerAppCloseHandler();
   WindowOptions windowOptions = WindowOptions(
     minimumSize: const Size(507, 507),
     size: AppSettings.instance.windowSize,

@@ -55,7 +55,7 @@ Future<Directory> getAppDataDir() async {
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.1";
+  static const String version = "26.0.2";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";
@@ -87,6 +87,8 @@ class AppSettings {
 
   /// 用户自定义歌词接口；为空时使用内置 QQ / 酷狗 / 网易搜索。
   String? lyricApiUrl;
+
+  bool restoreLastSession = true;
 
   Size windowSize = const Size(1280, 756);
   bool isWindowMaximized = false;
@@ -164,6 +166,13 @@ class AppSettings {
             ? lyricApiUrl.trim()
             : null;
 
+    final restoreLastSession = settingsMap["RestoreLastSession"];
+    if (restoreLastSession != null) {
+      _instance.restoreLastSession = restoreLastSession is bool
+          ? restoreLastSession
+          : restoreLastSession == 1;
+    }
+
     final sizeStr = settingsMap["WindowSize"];
     if (sizeStr != null) {
       final sizeStrs = (sizeStr as String).split(",");
@@ -230,6 +239,13 @@ class AppSettings {
               ? lyricApiUrl.trim()
               : null;
 
+      final restoreLastSession = settingsMap["RestoreLastSession"];
+      if (restoreLastSession != null) {
+        _instance.restoreLastSession = restoreLastSession is bool
+            ? restoreLastSession
+            : restoreLastSession == 1;
+      }
+
       final sizeStr = settingsMap["WindowSize"];
       if (sizeStr != null) {
         final sizeStrs = (sizeStr as String).split(",");
@@ -267,6 +283,7 @@ class AppSettings {
         "ArtistSeparator": artistSeparator,
         "LocalLyricFirst": localLyricFirst,
         "LyricApiUrl": lyricApiUrl,
+        "RestoreLastSession": restoreLastSession,
         "IsWindowMaximized": isMaximized,
         "FontFamily": fontFamily,
         "FontPath": fontPath,

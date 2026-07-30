@@ -13,10 +13,10 @@ abstract class Message {
 
   Map<String, dynamic> _toJson();
 
-  String buildMessageJson() => json.encode({
-        "type": runtimeType.toString(),
-        "message": _toJson(),
-      });
+  String buildMessageJson() => "${json.encode({
+            "type": runtimeType.toString(),
+            "message": _toJson(),
+          })}\n";
 }
 
 @JsonEnum(valueField: "code")
@@ -234,9 +234,9 @@ class UnlockMessage extends Message {
 // }
 
 // /// 播放器行为。可以由播放器发送到桌面歌词，也可以反过来。
-// /// 
+// ///
 // /// 当播放器每一次暂停或者开始播放歌曲时，都应该发送此消息。
-// /// 
+// ///
 // /// 示例如下，如果这个消息由播放器发送给桌面歌词，就是更新桌面歌词的状态为暂停；
 // /// 如果是由桌面歌词发送给播放器，就是请求播放器暂停音乐。
 // /// ```json
@@ -265,9 +265,9 @@ class UnlockMessage extends Message {
 // }
 
 // /// 主题模式更新信息。只可以由播放器发送到桌面歌词。
-// /// 
+// ///
 // /// 可以在播放器启用夜间模式时通知桌面歌词切换到夜间模式。
-// /// 
+// ///
 // /// 示例如下，这样要求桌面歌词切换到夜间模式。
 // /// ```json
 // /// {
@@ -294,15 +294,15 @@ class UnlockMessage extends Message {
 // }
 
 // /// 主题更新信息。只可以由播放器发送到桌面歌词。
-// /// 
+// ///
 // /// primary: 用于歌曲信息和歌词文本
 // /// surfaceContainer: 用于鼠标悬停在桌面歌词上时的背景颜色
 // /// onSurface: 用于控件颜色（鼠标悬停在桌面歌词上时的控件）
-// /// 
+// ///
 // /// 如果播放器可以更改主题色，可以通过这个消息让桌面歌词的主题与之一致。
-// /// 
+// ///
 // /// 示例如下，这样要求桌面歌词使用指定主题。
-// /// 
+// ///
 // /// ```json
 // /// {
 // ///   "type": "ThemeChangedMessage",
@@ -313,7 +313,7 @@ class UnlockMessage extends Message {
 // /// ```
 // /// For example, to get a fully opaque orange, you would use const Color(0xFFFF9000)
 // /// (FF for the alpha, FF for the red, 90 for the green, and 00 for the blue)。
-// /// 
+// ///
 // /// 这里应该要把 0xFFFF9000 当作 int 来构造 json
 // class ThemeChangedMessage extends DesktopLyricMessage {
 //   final Color primary;
@@ -349,9 +349,9 @@ class UnlockMessage extends Message {
 // }
 
 // /// 正在播放曲目更新信息。只可以由播放器发送到桌面歌词。
-// /// 
+// ///
 // /// 在每次开始播放曲目时发送。
-// /// 
+// ///
 // /// 示例如下，这样要求桌面歌词显示指定的正在播放曲目信息。
 // /// ```json
 // /// {
@@ -387,13 +387,13 @@ class UnlockMessage extends Message {
 // }
 
 // /// 当前歌词行更新信息。只可以由播放器发送到桌面歌词。
-// /// 
+// ///
 // /// content: 歌词内容，String
 // /// translation: 翻译，String（也可为 null）
 // /// length: 当前行持续时间（以 millisecond 计）。如果指定，桌面歌词会在歌词长度超出区域时在 length 指定时间内滚动展示整句歌词。
-// /// 
+// ///
 // /// 在当前歌词行更新时发送。
-// /// 
+// ///
 // /// 示例如下，这样要求桌面歌词显示指定的歌词。
 // /// ```json
 // /// {

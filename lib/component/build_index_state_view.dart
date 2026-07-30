@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/src/rust/api/tag_reader.dart';
@@ -6,15 +6,18 @@ import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
 
 class BuildIndexStateView extends StatefulWidget {
-  const BuildIndexStateView(
-      {super.key,
-      required this.indexPath,
-      required this.folders,
-      required this.whenIndexBuilt});
+  const BuildIndexStateView({
+    super.key,
+    required this.indexPath,
+    required this.folders,
+    required this.whenIndexBuilt,
+    this.whenIndexFailed,
+  });
 
   final Directory indexPath;
   final List<String> folders;
-  final void Function() whenIndexBuilt;
+  final FutureOr<void> Function() whenIndexBuilt;
+  final void Function(Object error, StackTrace stackTrace)? whenIndexFailed;
 
   @override
   State<BuildIndexStateView> createState() => _BuildIndexStateViewState();
@@ -23,6 +26,7 @@ class BuildIndexStateView extends StatefulWidget {
 class _BuildIndexStateViewState extends State<BuildIndexStateView> {
   late final Stream<IndexActionState> buildIndexStream;
   StreamSubscription? _subscription;
+  bool _settled = false;
 
   @override
   void initState() {
@@ -36,11 +40,34 @@ class _BuildIndexStateViewState extends State<BuildIndexStateView> {
       (action) {
         LOGGER.i("[build index] ${action.progress}: ${action.message}");
       },
-      onDone: () {
-        widget.whenIndexBuilt();
+      onDone: () async {
+        if (_settled) return;
+        _settled = true;
+        try {
+          await widget.whenIndexBuilt();
+        } catch (error, stackTrace) {
+          LOGGER.e("[load refreshed index] $error", stackTrace: stackTrace);
+          widget.whenIndexFailed?.call(error, stackTrace);
+        } finally {
+          await _subscription?.cancel();
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (_settled) return;
+        _settled = true;
+        LOGGER.e("[build index] $error", stackTrace: stackTrace);
+        widget.whenIndexFailed?.call(error, stackTrace);
         _subscription?.cancel();
       },
+      cancelOnError: true,
     );
+  }
+
+  @override
+  void dispose() {
+    _settled = true;
+    _subscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -60,8 +87,12 @@ class _BuildIndexStateViewState extends State<BuildIndexStateView> {
             ),
             const SizedBox(height: 8.0),
             Text(
-              "${snapshot.data?.message}",
+              snapshot.hasError
+                  ? "刷新失败：${snapshot.error}"
+                  : snapshot.data?.message ?? "正在准备扫描",
               style: TextStyle(color: scheme.onSurface),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         );

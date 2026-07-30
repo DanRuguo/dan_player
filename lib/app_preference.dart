@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
@@ -6,6 +6,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.d
 import 'package:dan_player/page/now_playing_page/page.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/playback_service.dart';
+import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
 
 class PagePreference {
@@ -62,18 +63,37 @@ class NowPlayingPagePreference {
 class PlaybackPreference {
   PlayMode playMode;
   double volumeDsp;
+  bool eqEnabled;
+  List<double> eqGains;
 
-  PlaybackPreference(this.playMode, this.volumeDsp);
+  PlaybackPreference(
+    this.playMode,
+    this.volumeDsp, {
+    this.eqEnabled = false,
+    List<double>? eqGains,
+  }) : eqGains = eqGains ?? List.filled(BassPlayer.eqBandCenters.length, 0.0);
 
   Map toMap() => {
         "playMode": playMode.name,
         "volumeDsp": volumeDsp,
+        "eqEnabled": eqEnabled,
+        "eqGains": eqGains,
       };
 
-  factory PlaybackPreference.fromMap(Map map) => PlaybackPreference(
-        PlayMode.fromString(map["playMode"]) ?? PlayMode.forward,
-        map["volumeDsp"] ?? 1.0,
-      );
+  factory PlaybackPreference.fromMap(Map map) {
+    final rawGains = map["eqGains"];
+    final gains = rawGains is List
+        ? [
+            for (final value in rawGains) value is num ? value.toDouble() : 0.0,
+          ]
+        : null;
+    return PlaybackPreference(
+      PlayMode.fromString(map["playMode"]) ?? PlayMode.forward,
+      (map["volumeDsp"] as num?)?.toDouble() ?? 1.0,
+      eqEnabled: map["eqEnabled"] == true,
+      eqGains: gains,
+    );
+  }
 }
 
 class AppPreference {

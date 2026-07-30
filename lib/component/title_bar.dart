@@ -1,15 +1,10 @@
 // ignore_for_file: camel_case_types
 
-import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/horizontal_lyric_view.dart';
 import 'package:dan_player/component/responsive_builder.dart';
-import 'package:dan_player/hotkeys_helper.dart';
-import 'package:dan_player/library/collection.dart';
-import 'package:dan_player/library/playlist.dart';
-import 'package:dan_player/lyric/lyric_source.dart';
-import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -367,22 +362,10 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
             _isMaximized ? Symbols.fullscreen_exit : Symbols.fullscreen,
           ),
         ),
-        IconButton(
+        const IconButton(
           tooltip: "退出",
-          onPressed: () async {
-            PlayService.instance.close();
-
-            await savePlaylists();
-            await saveCustomAudioOrder();
-            await saveCollections();
-            await saveLyricSources();
-            await AppSettings.instance.saveSettings();
-            await AppPreference.instance.save();
-
-            await HotkeysHelper.unregisterAll();
-            windowManager.close();
-          },
-          icon: const Icon(Symbols.close),
+          onPressed: shutdownAndExit,
+          icon: Icon(Symbols.close),
         ),
       ],
     );

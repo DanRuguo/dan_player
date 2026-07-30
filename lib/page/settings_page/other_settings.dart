@@ -1,17 +1,47 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/build_index_state_view.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart';
+import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/music_matcher.dart';
+import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/utils.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
+
+class RestoreSessionSwitch extends StatefulWidget {
+  const RestoreSessionSwitch({super.key});
+
+  @override
+  State<RestoreSessionSwitch> createState() => _RestoreSessionSwitchState();
+}
+
+class _RestoreSessionSwitchState extends State<RestoreSessionSwitch> {
+  final settings = AppSettings.instance;
+
+  @override
+  Widget build(BuildContext context) {
+    return SettingsTile(
+      description: "恢复上次播放会话",
+      icon: Symbols.history,
+      action: Switch(
+        value: settings.restoreLastSession,
+        onChanged: (value) async {
+          setState(() => settings.restoreLastSession = value);
+          await settings.saveSettings();
+        },
+      ),
+    );
+  }
+}
 
 class DefaultLyricSourceControl extends StatefulWidget {
   const DefaultLyricSourceControl({super.key});
@@ -523,6 +553,106 @@ class AudioLibraryEditor extends StatelessWidget {
   }
 }
 
+class RefreshAudioLibraryTile extends StatelessWidget {
+  const RefreshAudioLibraryTile({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SettingsTile(
+      description: "刷新音乐库",
+      icon: Symbols.sync,
+      action: FilledButton.tonalIcon(
+        icon: const Icon(Symbols.refresh),
+        label: const Text("完整刷新"),
+        onPressed: () async {
+          final folders = AudioLibrary.instance.folders
+              .map((folder) => folder.path)
+              .where((folder) => Directory(folder).existsSync())
+              .toSet()
+              .toList();
+          if (folders.isEmpty) {
+            showTextOnSnackBar("当前没有可刷新的音乐文件夹");
+            return;
+          }
+          final indexPath = await getAppDataDir();
+          if (!context.mounted) return;
+
+          await showDialog<void>(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => _RefreshAudioLibraryDialog(
+              folders: folders,
+              indexPath: indexPath,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+Future<void> _reloadScannedLibrary() async {
+  await AudioLibrary.initFromIndex();
+  await Future.wait([
+    readCustomAudioOrder(),
+    readCollections(),
+    readPlaylists(),
+    readLyricSources(),
+  ]);
+  if (PlayService.isInitialized) {
+    PlayService.instance.playbackService.refreshAudioReferences(
+      AudioLibrary.instance.audioByPath,
+    );
+  }
+  await CoverCache.instance.clear();
+  await AudioSearchIndex.instance.ensureBuilt();
+}
+
+class _RefreshAudioLibraryDialog extends StatelessWidget {
+  const _RefreshAudioLibraryDialog({
+    required this.folders,
+    required this.indexPath,
+  });
+
+  final List<String> folders;
+  final Directory indexPath;
+
+  Future<void> _finish(BuildContext context) async {
+    await _reloadScannedLibrary();
+
+    if (context.mounted) Navigator.pop(context);
+    showTextOnSnackBar("音乐库已刷新");
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Symbols.sync),
+          SizedBox(width: 10.0),
+          Text("刷新音乐库"),
+        ],
+      ),
+      content: SizedBox(
+        width: 440.0,
+        height: 110.0,
+        child: Center(
+          child: BuildIndexStateView(
+            indexPath: indexPath,
+            folders: folders,
+            whenIndexBuilt: () => _finish(context),
+            whenIndexFailed: (error, _) {
+              if (context.mounted) Navigator.pop(context);
+              showTextOnSnackBar("刷新音乐库失败：$error");
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class AudioLibraryEditorDialog extends StatefulWidget {
   const AudioLibraryEditorDialog({super.key});
 
@@ -603,16 +733,17 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
                                 indexPath: snapshot.data!,
                                 folders: folders,
                                 whenIndexBuilt: () async {
-                                  await AudioLibrary.initFromIndex();
-                                  await Future.wait([
-                                    readCustomAudioOrder(),
-                                    readCollections(),
-                                    readPlaylists(),
-                                    readLyricSources(),
-                                  ]);
+                                  await _reloadScannedLibrary();
                                   if (context.mounted) {
                                     Navigator.pop(context);
                                   }
+                                },
+                                whenIndexFailed: (error, _) {
+                                  if (!mounted) return;
+                                  setState(() {
+                                    editing = true;
+                                  });
+                                  showTextOnSnackBar("更新音乐文件夹失败：$error");
                                 },
                               ),
                             );

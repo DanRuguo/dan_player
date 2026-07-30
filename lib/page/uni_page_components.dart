@@ -1,4 +1,4 @@
-﻿import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -68,7 +68,7 @@ class SortMethodComboBox<T> extends StatelessWidget {
             borderRadius: borderRadius,
             color: scheme.secondaryContainer,
             child: InkWell(
-              hoverColor: scheme.onSecondaryContainer.withOpacity(0.08),
+              hoverColor: scheme.onSecondaryContainer.withValues(alpha: 0.08),
               borderRadius: borderRadius,
               onTap: () {
                 if (menuController.isOpen) {

@@ -22,10 +22,15 @@ class DesktopLyricService extends ChangeNotifier {
 
   Future<Process?> desktopLyric = Future.value(null);
   StreamSubscription? _desktopLyricSubscription;
+  Process? _desktopLyricProcess;
+  bool _starting = false;
 
   bool isLocked = false;
 
   Future<void> startDesktopLyric() async {
+    if (_starting || _desktopLyricProcess != null) return;
+    _starting = true;
+
     final desktopLyricPath = path.join(
       path.dirname(Platform.resolvedExecutable),
       "desktop_lyric",
@@ -35,69 +40,96 @@ class DesktopLyricService extends ChangeNotifier {
     final nowPlaying = _playbackService.nowPlaying;
     final currScheme = ThemeProvider.instance.currScheme;
     final isDarkMode = ThemeProvider.instance.themeMode == ThemeMode.dark;
-    desktopLyric = Process.start(desktopLyricPath, [
-      json.encode(msg.InitArgsMessage(
-        _playbackService.playerState == PlayerState.playing,
-        nowPlaying?.displayTitle ?? "无",
-        nowPlaying?.artist ?? "无",
-        nowPlaying?.album ?? "无",
-        isDarkMode,
-        currScheme.primary.value,
-        currScheme.surfaceContainer.value,
-        currScheme.onSurface.value,
-      ).toJson())
-    ]);
+    try {
+      desktopLyric = Process.start(desktopLyricPath, [
+        json.encode(msg.InitArgsMessage(
+          _playbackService.playerState == PlayerState.playing,
+          nowPlaying?.displayTitle ?? "无",
+          nowPlaying?.artist ?? "无",
+          nowPlaying?.album ?? "无",
+          isDarkMode,
+          currScheme.primary.toARGB32(),
+          currScheme.surfaceContainer.toARGB32(),
+          currScheme.onSurface.toARGB32(),
+        ).toJson())
+      ]);
 
-    final process = await desktopLyric;
+      final process = await desktopLyric;
+      if (process == null) return;
+      _desktopLyricProcess = process;
 
-    process?.stderr.transform(utf8.decoder).listen((event) {
-      LOGGER.e("[desktop lyric] $event");
-    });
+      process.stderr.transform(utf8.decoder).listen((event) {
+        LOGGER.e("[desktop lyric] $event");
+      });
 
-    _desktopLyricSubscription = process?.stdout.transform(utf8.decoder).listen(
-      (event) {
-        try {
-          final Map messageMap = json.decode(event);
-          final String messageType = messageMap["type"];
-          final messageContent = messageMap["message"] as Map<String, dynamic>;
-          if (messageType ==
-              msg.getMessageTypeName<msg.ControlEventMessage>()) {
-            final controlEvent =
-                msg.ControlEventMessage.fromJson(messageContent);
-            switch (controlEvent.event) {
-              case msg.ControlEvent.pause:
-                _playbackService.pause();
-                break;
-              case msg.ControlEvent.start:
-                _playbackService.start();
-                break;
-              case msg.ControlEvent.previousAudio:
-                _playbackService.lastAudio();
-                break;
-              case msg.ControlEvent.nextAudio:
-                _playbackService.nextAudio();
-                break;
-              case msg.ControlEvent.lock:
-                isLocked = true;
-                notifyListeners();
-                break;
-              case msg.ControlEvent.close:
-                killDesktopLyric();
-                break;
+      _desktopLyricSubscription = process.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen(
+        (event) {
+          try {
+            final Map messageMap = json.decode(event);
+            final String messageType = messageMap["type"];
+            final messageContent =
+                messageMap["message"] as Map<String, dynamic>;
+            if (messageType ==
+                msg.getMessageTypeName<msg.ControlEventMessage>()) {
+              final controlEvent =
+                  msg.ControlEventMessage.fromJson(messageContent);
+              switch (controlEvent.event) {
+                case msg.ControlEvent.pause:
+                  _playbackService.pause();
+                  break;
+                case msg.ControlEvent.start:
+                  _playbackService.start();
+                  break;
+                case msg.ControlEvent.previousAudio:
+                  _playbackService.lastAudio();
+                  break;
+                case msg.ControlEvent.nextAudio:
+                  _playbackService.nextAudio();
+                  break;
+                case msg.ControlEvent.lock:
+                  isLocked = true;
+                  notifyListeners();
+                  break;
+                case msg.ControlEvent.close:
+                  killDesktopLyric();
+                  break;
+              }
             }
+          } catch (err) {
+            LOGGER.e("[desktop lyric] $err");
           }
-        } catch (err) {
-          LOGGER.e("[desktop lyric] $err");
-        }
-      },
-    );
+        },
+      );
 
-    notifyListeners();
+      unawaited(process.exitCode.then((_) {
+        if (!identical(_desktopLyricProcess, process)) return;
+        _desktopLyricProcess = null;
+        desktopLyric = Future.value(null);
+        _desktopLyricSubscription?.cancel();
+        _desktopLyricSubscription = null;
+        isLocked = false;
+        notifyListeners();
+      }));
+      notifyListeners();
+    } catch (err, trace) {
+      desktopLyric = Future.value(null);
+      LOGGER.e("[desktop lyric start] $err", stackTrace: trace);
+      showTextOnSnackBar("桌面歌词启动失败：$err");
+    } finally {
+      _starting = false;
+    }
   }
 
-  Future<bool> get canSendMessage => desktopLyric.then(
-        (value) => value != null,
-      );
+  Future<bool> get canSendMessage async {
+    try {
+      return await desktopLyric != null;
+    } catch (_) {
+      return false;
+    }
+  }
 
   void sendMessage(msg.Message message) {
     desktopLyric.then((value) {
@@ -108,12 +140,15 @@ class DesktopLyricService extends ChangeNotifier {
   }
 
   void killDesktopLyric() {
-    desktopLyric.then((value) {
+    final processFuture = desktopLyric;
+    desktopLyric = Future.value(null);
+    _desktopLyricProcess = null;
+    processFuture.then((value) {
       value?.kill();
-      desktopLyric = Future.value(null);
 
       _desktopLyricSubscription?.cancel();
       _desktopLyricSubscription = null;
+      isLocked = false;
 
       notifyListeners();
     }).catchError((err, trace) {
@@ -133,9 +168,9 @@ class DesktopLyricService extends ChangeNotifier {
 
   void sendThemeMessage(ColorScheme scheme) {
     sendMessage(msg.ThemeChangedMessage(
-      scheme.primary.value,
-      scheme.surfaceContainer.value,
-      scheme.onSurface.value,
+      scheme.primary.toARGB32(),
+      scheme.surfaceContainer.toARGB32(),
+      scheme.onSurface.toARGB32(),
     ));
   }
 

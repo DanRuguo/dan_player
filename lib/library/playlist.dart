@@ -1,4 +1,4 @@
-﻿// ignore_for_file: non_constant_identifier_names
+// ignore_for_file: non_constant_identifier_names
 
 import 'dart:convert';
 import 'dart:io';
@@ -13,13 +13,22 @@ Future<void> readPlaylists() async {
   try {
     final supportPath = (await getAppDataDir()).path;
     final playlistsPath = "$supportPath\\playlists.json";
+    final playlistsFile = File(playlistsPath);
+    if (!await playlistsFile.exists()) {
+      PLAYLISTS.clear();
+      return;
+    }
 
-    final playlistsStr = File(playlistsPath).readAsStringSync();
+    final playlistsStr = await playlistsFile.readAsString();
     final List playlistsJson = json.decode(playlistsStr);
+    final loaded = <Playlist>[];
 
     for (Map item in playlistsJson) {
-      PLAYLISTS.add(Playlist.fromMap(item));
+      loaded.add(Playlist.fromMap(item));
     }
+    PLAYLISTS
+      ..clear()
+      ..addAll(loaded);
   } catch (err, trace) {
     LOGGER.e(err, stackTrace: trace);
   }
@@ -63,7 +72,9 @@ class Playlist {
     final Map<String, Audio> audios = {};
     final List audioMaps = map["audios"];
     for (var item in audioMaps) {
-      final audio = Audio.fromMap(item);
+      final path = item["path"] as String;
+      final audio =
+          AudioLibrary.instance.audioByPath[path] ?? Audio.fromMap(item);
       audios[audio.path] = audio;
     }
     return Playlist(map["name"], audios);

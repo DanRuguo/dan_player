@@ -1,4 +1,4 @@
-﻿import 'package:dan_player/play_service/desktop_lyric_service.dart';
+import 'package:dan_player/play_service/desktop_lyric_service.dart';
 import 'package:dan_player/play_service/lyric_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 
@@ -10,13 +10,15 @@ class PlayService {
   PlayService._();
 
   static PlayService? _instance;
+  static bool get isInitialized => _instance != null;
+
   static PlayService get instance {
     _instance ??= PlayService._();
     return _instance!;
   }
 
-  void close() {
+  Future<void> close() async {
     desktopLyricService.killDesktopLyric();
-    playbackService.close();
+    await playbackService.close();
   }
 }

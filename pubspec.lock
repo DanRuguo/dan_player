@@ -111,7 +111,7 @@ packages:
       path: "third_party/desktop_lyric"
       relative: true
     source: path
-    version: "0.1.0"
+    version: "26.0.2"
   encrypt:
     dependency: transitive
     description:

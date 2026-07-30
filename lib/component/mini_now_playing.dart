@@ -1,8 +1,9 @@
-﻿import 'package:dan_player/app_paths.dart' as app_paths;
+import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/frosted_surface.dart';
 import 'package:dan_player/component/rectangle_progress_indicator.dart';
 import 'package:dan_player/component/responsive_builder.dart';
+import 'package:dan_player/component/seven_tone_spectrum.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
@@ -106,17 +107,27 @@ class _NowPlayingForeground extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(
-                            nowPlaying != null
-                                ? nowPlaying.displayTitle
-                                : "Dan Player",
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: scheme.onSurface,
-                              fontSize: 15.5,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  nowPlaying != null
+                                      ? nowPlaying.displayTitle
+                                      : "Dan Player",
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: scheme.onSurface,
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              if (nowPlaying != null) ...[
+                                const SizedBox(width: 8.0),
+                                _NowPlayingSpectrum(color: scheme.primary),
+                              ],
+                            ],
                           ),
                           Text(
                             nowPlaying != null
@@ -185,6 +196,34 @@ class _NowPlayingForeground extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _NowPlayingSpectrum extends StatelessWidget {
+  const _NowPlayingSpectrum({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final playbackService = PlayService.instance.playbackService;
+    return StreamBuilder<PlayerState>(
+      stream: playbackService.playerStateStream,
+      initialData: playbackService.playerState,
+      builder: (context, stateSnapshot) {
+        final isPlaying = stateSnapshot.data == PlayerState.playing;
+        return StreamBuilder<List<double>>(
+          stream: playbackService.spectrumStream,
+          initialData: playbackService.spectrumLevels,
+          builder: (context, spectrumSnapshot) => SevenToneSpectrum(
+            levels: isPlaying
+                ? spectrumSnapshot.data ?? playbackService.spectrumLevels
+                : const [0, 0, 0, 0, 0, 0, 0],
+            color: color,
+          ),
+        );
+      },
     );
   }
 }

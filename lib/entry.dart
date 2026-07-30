@@ -97,7 +97,7 @@ class Entry extends StatelessWidget {
       scaffoldBackgroundColor: colorScheme.surface,
       cardColor: colorScheme.surface,
       dividerColor: colorScheme.onSurface.withValues(alpha: 0.12),
-      indicatorColor: onPrimarySurfaceColor,
+      tabBarTheme: TabBarThemeData(indicatorColor: onPrimarySurfaceColor),
       applyElevationOverlayColor: isDark,
       useMaterial3: true,
       iconButtonTheme: IconButtonThemeData(

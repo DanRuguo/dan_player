@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
@@ -10,10 +10,7 @@ const String albumCollectionId = "__albums__";
 final CustomAudioOrder customAudioOrder = CustomAudioOrder();
 final List<UserCollection> userCollections = [];
 
-Map<String, Audio> get _audioByPath => {
-      for (final audio in AudioLibrary.instance.audioCollection)
-        audio.path: audio,
-    };
+Map<String, Audio> get _audioByPath => AudioLibrary.instance.audioByPath;
 
 List<Audio> _defaultTimeSortedAudios() {
   final audios = List<Audio>.from(AudioLibrary.instance.audioCollection);

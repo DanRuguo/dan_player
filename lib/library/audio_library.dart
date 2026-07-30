@@ -1,7 +1,8 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/painting.dart';
@@ -20,13 +21,68 @@ class AudioLibrary {
 
   Map<String, Album> albumCollection = {};
 
+  Map<String, Audio>? _audioByPath;
+
+  Map<String, Audio> get audioByPath =>
+      _audioByPath ??= {for (final audio in audioCollection) audio.path: audio};
+
+  static int revision = 0;
+
   /// must call [initFromIndex]
   static AudioLibrary get instance {
-    _instance ?? AudioLibrary._([]);
+    _instance ??= AudioLibrary._([]);
     return _instance!;
   }
 
   static AudioLibrary? _instance;
+
+  static Future<Map> _readIndexMap(File indexFile) async {
+    Object? targetError;
+    final backupFile = File("${indexFile.path}.bak");
+    for (final candidate in [indexFile, backupFile]) {
+      try {
+        if (!await candidate.exists()) continue;
+        final decoded = json.decode(await candidate.readAsString());
+        if (decoded is! Map) {
+          throw const FormatException("Audio index root must be an object");
+        }
+        if (candidate.path == backupFile.path) {
+          LOGGER.w("[audio library] loaded backup index");
+        }
+        return decoded;
+      } catch (error) {
+        targetError ??= error;
+      }
+    }
+    throw targetError ?? const FormatException("Audio index is unavailable");
+  }
+
+  static Future<void> _writeIndexAtomically(
+    File target,
+    String contents,
+  ) async {
+    await target.parent.create(recursive: true);
+    final temporary = File("${target.path}.tmp");
+    final backup = File("${target.path}.bak");
+    await temporary.writeAsString(contents, flush: true);
+
+    try {
+      if (await backup.exists()) await backup.delete();
+      if (await target.exists()) await target.rename(backup.path);
+      await temporary.rename(target.path);
+    } catch (_) {
+      if (!await target.exists() && await backup.exists()) {
+        await backup.rename(target.path);
+      }
+      rethrow;
+    } finally {
+      if (await temporary.exists()) {
+        try {
+          await temporary.delete();
+        } catch (_) {}
+      }
+    }
+  }
 
   /// 目前 index 结构：
   /// ```json
@@ -41,26 +97,44 @@ class AudioLibrary {
   ///         },
   ///         ...
   ///     ],
-  ///     "version": 110
+  ///     "version": 112
   /// }
   /// ```
   static Future<void> initFromIndex() async {
     try {
       final supportPath = (await getAppDataDir()).path;
       final indexPath = "$supportPath\\index.json";
+      final indexFile = File(indexPath);
+      if (!await indexFile.exists() && !await File("$indexPath.bak").exists()) {
+        _instance ??= AudioLibrary._([]);
+        return;
+      }
 
-      final indexStr = File(indexPath).readAsStringSync();
-      final Map indexJson = json.decode(indexStr);
-      final List foldersJson = indexJson["folders"];
+      final indexJson = await _readIndexMap(indexFile);
+      final foldersValue = indexJson["folders"];
+      if (foldersValue is! List) {
+        throw const FormatException("Audio index folders must be a list");
+      }
       final List<AudioFolder> folders = [];
 
-      for (Map folderMap in foldersJson) {
-        final List audiosJson = folderMap["audios"];
+      for (final folderValue in foldersValue) {
+        if (folderValue is! Map) continue;
+        final audiosValue = folderValue["audios"];
+        if (audiosValue is! List) continue;
         final List<Audio> audios = [];
-        for (Map audioMap in audiosJson) {
-          audios.add(Audio.fromMap(audioMap));
+        for (final audioValue in audiosValue) {
+          if (audioValue is! Map) continue;
+          try {
+            audios.add(Audio.fromMap(audioValue));
+          } catch (error) {
+            LOGGER.w("[audio library] skipped invalid audio entry: $error");
+          }
         }
-        folders.add(AudioFolder.fromMap(folderMap, audios));
+        try {
+          folders.add(AudioFolder.fromMap(folderValue, audios));
+        } catch (error) {
+          LOGGER.w("[audio library] skipped invalid folder entry: $error");
+        }
       }
 
       _instance = AudioLibrary._(folders);
@@ -70,10 +144,14 @@ class AudioLibrary {
       instance._buildCollections();
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
+      _instance = AudioLibrary._([]);
+      rethrow;
     }
   }
 
   void _buildCollections() {
+    _audioByPath = null;
+    revision++;
     for (var f in folders) {
       audioCollection.addAll(f.audios);
     }
@@ -136,13 +214,16 @@ class AudioLibrary {
     try {
       final supportPath = (await getAppDataDir()).path;
       final indexPath = "$supportPath\\index.json";
-      final output = await File(indexPath).create(recursive: true);
-      await output.writeAsString(json.encode({
-        "version": 110,
-        "folders": folders.map((item) => item.toMap()).toList(),
-      }));
+      await _writeIndexAtomically(
+        File(indexPath),
+        json.encode({
+          "version": 112,
+          "folders": folders.map((item) => item.toMap()).toList(),
+        }),
+      );
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
+      rethrow;
     }
   }
 
@@ -166,8 +247,18 @@ class AudioFolder {
 
   AudioFolder(this.audios, this.path, this.modified, this.latest);
 
-  factory AudioFolder.fromMap(Map map, List<Audio> audios) =>
-      AudioFolder(audios, map["path"], map["modified"], map["latest"]);
+  factory AudioFolder.fromMap(Map map, List<Audio> audios) {
+    final folderPath = map["path"];
+    if (folderPath is! String || folderPath.isEmpty) {
+      throw const FormatException("Invalid audio folder path");
+    }
+    return AudioFolder(
+      audios,
+      folderPath,
+      (map["modified"] as num?)?.toInt() ?? 0,
+      (map["latest"] as num?)?.toInt() ?? 0,
+    );
+  }
 
   Map toMap() => {
         "audios": audios.map((audio) => audio.toMap()).toList(),
@@ -266,19 +357,25 @@ class Audio {
     _cover = null;
   }
 
-  factory Audio.fromMap(Map map) => Audio(
-        map["title"],
-        map["artist"],
-        map["album"],
-        map["track"] ?? 0,
-        map["duration"] ?? 0,
-        map["bitrate"],
-        map["sample_rate"],
-        map["path"],
-        map["modified"],
-        map["created"],
-        map["by"],
-      );
+  factory Audio.fromMap(Map map) {
+    final audioPath = map["path"];
+    if (audioPath is! String || audioPath.isEmpty) {
+      throw const FormatException("Invalid audio path");
+    }
+    return Audio(
+      map["title"] is String ? map["title"] : path_util.basename(audioPath),
+      map["artist"] is String ? map["artist"] : "UNKNOWN",
+      map["album"] is String ? map["album"] : "UNKNOWN",
+      (map["track"] as num?)?.toInt() ?? 0,
+      (map["duration"] as num?)?.toInt() ?? 0,
+      (map["bitrate"] as num?)?.toInt(),
+      (map["sample_rate"] as num?)?.toInt(),
+      audioPath,
+      (map["modified"] as num?)?.toInt() ?? 0,
+      (map["created"] as num?)?.toInt() ?? 0,
+      map["by"]?.toString(),
+    );
+  }
 
   Map toMap() => {
         "title": title,
@@ -300,15 +397,19 @@ class Audio {
     required int height,
   }) async {
     final ratio = PlatformDispatcher.instance.views.first.devicePixelRatio;
-    return getPictureFromPath(
-      path: path,
-      width: (width * ratio).round(),
-      height: (height * ratio).round(),
-    ).then((pic) {
-      if (pic == null) return null;
-
-      return MemoryImage(pic);
-    });
+    final pixelWidth = (width * ratio).round();
+    final pixelHeight = (height * ratio).round();
+    return CoverCache.instance.imageFor(
+      audioPath: path,
+      modified: modified,
+      width: pixelWidth,
+      height: pixelHeight,
+      produce: () => getPictureFromPath(
+        path: path,
+        width: pixelWidth,
+        height: pixelHeight,
+      ),
+    );
   }
 
   /// 缓存ImageProvider而不是Uint8List（bytes）
@@ -317,11 +418,15 @@ class Audio {
   /// 48*48
   Future<ImageProvider?> get cover {
     if (_cover == null) {
+      final requestedPath = path;
+      final requestedModified = modified;
       return _getResizedPic(width: 48, height: 48).then((value) {
         if (value == null) return null;
 
-        _cover = value;
-        return _cover;
+        if (path == requestedPath && modified == requestedModified) {
+          _cover = value;
+        }
+        return value;
       });
     }
     return Future.value(_cover);

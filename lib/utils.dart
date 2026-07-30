@@ -24,9 +24,10 @@ String _toHexString(int dec) {
 
 extension RGBHexString on Color {
   String toRGBHexString() {
-    final redHex = _toHexString(red);
-    final greenHex = _toHexString(green);
-    final blueHex = _toHexString(blue);
+    final argb = toARGB32();
+    final redHex = _toHexString((argb >> 16) & 0xff);
+    final greenHex = _toHexString((argb >> 8) & 0xff);
+    final blueHex = _toHexString(argb & 0xff);
 
     return "#$redHex$greenHex$blueHex";
   }

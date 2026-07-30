@@ -1,4 +1,4 @@
-﻿import 'package:dan_player/component/album_tile.dart';
+import 'package:dan_player/component/album_tile.dart';
 import 'package:dan_player/component/artist_tile.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/hotkeys_helper.dart';
@@ -22,6 +22,13 @@ class _SearchResultPageState extends State<SearchResultPage> {
   late final searchBarController = TextEditingController(
     text: widget.searchResult.query,
   );
+
+  @override
+  void dispose() {
+    searchResult.dispose();
+    searchBarController.dispose();
+    super.dispose();
+  }
 
   List<_SearchResultPageBody> buildContent(UnionSearchResult result) {
     return [
@@ -60,6 +67,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
 
                     /// when 'enter' is pressed
                     onSubmitted: (String query) {
+                      if (query.trim().isEmpty) return;
                       searchResult.value = UnionSearchResult.search(query);
                     },
                   ),

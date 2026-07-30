@@ -19,6 +19,10 @@ class SettingsPage extends StatelessWidget {
         children: const [
           AudioLibraryEditor(),
           SizedBox(height: 16.0),
+          RefreshAudioLibraryTile(),
+          SizedBox(height: 16.0),
+          RestoreSessionSwitch(),
+          SizedBox(height: 16.0),
           DefaultLyricSourceControl(),
           SizedBox(height: 16.0),
           LyricApiEditor(),

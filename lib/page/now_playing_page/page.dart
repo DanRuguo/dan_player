@@ -8,6 +8,7 @@ import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/page/now_playing_page/component/current_playlist_view.dart';
+import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/filled_icon_button_style.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
@@ -166,52 +167,60 @@ class _NowPlayingMoreAction extends StatelessWidget {
     final nowPlaying = playbackService.nowPlaying;
     final scheme = Theme.of(context).colorScheme;
 
-    if (nowPlaying == null) {
-      return IconButton(
-        tooltip: "更多",
-        onPressed: null,
-        icon: const Icon(Symbols.more_vert),
-        color: scheme.onSecondaryContainer,
-      );
-    }
-
     return MenuAnchor(
       menuChildren: [
-        SubmenuButton(
-          menuChildren: List.generate(
-            nowPlaying.splitedArtists.length,
-            (i) => MenuItemButton(
-              onPressed: () {
-                final Artist artist = AudioLibrary
-                    .instance.artistCollection[nowPlaying.splitedArtists[i]]!;
-                context.pushReplacement(
-                  app_paths.ARTIST_DETAIL_PAGE,
-                  extra: artist,
-                );
-              },
-              leadingIcon: const Icon(Symbols.people),
-              child: Text(nowPlaying.splitedArtists[i]),
+        MenuItemButton(
+          onPressed: () => showEqualizerDialog(context),
+          leadingIcon: const Icon(Symbols.equalizer),
+          child: const Text("均衡器"),
+        ),
+        const _SleepTimerSubmenu(),
+        if (nowPlaying != null) const Divider(),
+        if (nowPlaying != null)
+          SubmenuButton(
+            menuChildren: List.generate(
+              nowPlaying.splitedArtists.length,
+              (i) => MenuItemButton(
+                onPressed: () {
+                  final Artist? artist = AudioLibrary
+                      .instance.artistCollection[nowPlaying.splitedArtists[i]];
+                  if (artist == null) return;
+                  context.pushReplacement(
+                    app_paths.ARTIST_DETAIL_PAGE,
+                    extra: artist,
+                  );
+                },
+                leadingIcon: const Icon(Symbols.people),
+                child: Text(nowPlaying.splitedArtists[i]),
+              ),
             ),
+            child: const Text("艺术家"),
           ),
-          child: const Text("艺术家"),
-        ),
-        MenuItemButton(
-          onPressed: () {
-            final Album album =
-                AudioLibrary.instance.albumCollection[nowPlaying.album]!;
-            context.pushReplacement(app_paths.ALBUM_DETAIL_PAGE, extra: album);
-          },
-          leadingIcon: const Icon(Symbols.album),
-          child: Text(nowPlaying.album),
-        ),
-        MenuItemButton(
-          onPressed: () {
-            context.pushReplacement(app_paths.AUDIO_DETAIL_PAGE,
-                extra: nowPlaying);
-          },
-          leadingIcon: const Icon(Symbols.info),
-          child: const Text("详细信息"),
-        ),
+        if (nowPlaying != null)
+          MenuItemButton(
+            onPressed: () {
+              final album =
+                  AudioLibrary.instance.albumCollection[nowPlaying.album];
+              if (album == null) return;
+              context.pushReplacement(
+                app_paths.ALBUM_DETAIL_PAGE,
+                extra: album,
+              );
+            },
+            leadingIcon: const Icon(Symbols.album),
+            child: Text(nowPlaying.album),
+          ),
+        if (nowPlaying != null)
+          MenuItemButton(
+            onPressed: () {
+              context.pushReplacement(
+                app_paths.AUDIO_DETAIL_PAGE,
+                extra: nowPlaying,
+              );
+            },
+            leadingIcon: const Icon(Symbols.info),
+            child: const Text("详细信息"),
+          ),
       ],
       builder: (context, controller, _) => IconButton(
         tooltip: "更多",
@@ -225,6 +234,75 @@ class _NowPlayingMoreAction extends StatelessWidget {
         icon: const Icon(Symbols.more_vert),
         color: scheme.onSecondaryContainer,
       ),
+    );
+  }
+}
+
+class _SleepTimerSubmenu extends StatelessWidget {
+  const _SleepTimerSubmenu();
+
+  static const presets = [10, 20, 30, 60, 90];
+
+  String _format(Duration duration) {
+    final totalSeconds = duration.inSeconds.clamp(0, 24 * 60 * 60);
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return "${hours.toString().padLeft(2, "0")}:"
+          "${minutes.toString().padLeft(2, "0")}:"
+          "${seconds.toString().padLeft(2, "0")}";
+    }
+    return "${minutes.toString().padLeft(2, "0")}:"
+        "${seconds.toString().padLeft(2, "0")}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final service = PlayService.instance.playbackService;
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        service.sleepTimerRemaining,
+        service.stopAfterCurrent,
+      ]),
+      builder: (context, _) {
+        final remaining = service.sleepTimerRemaining.value;
+        final stopAfter = service.stopAfterCurrent.value;
+        return SubmenuButton(
+          leadingIcon: Icon(
+            remaining != null || stopAfter
+                ? Symbols.bedtime
+                : Symbols.bedtime_off,
+          ),
+          menuChildren: [
+            for (final minutes in presets)
+              MenuItemButton(
+                onPressed: () => service.startSleepTimer(
+                  Duration(minutes: minutes),
+                ),
+                child: Text("$minutes 分钟后"),
+              ),
+            const Divider(),
+            CheckboxMenuButton(
+              value: stopAfter,
+              onChanged: (value) {
+                service.stopAfterCurrent.value = value ?? false;
+              },
+              child: const Text("播完当前歌曲后停止"),
+            ),
+            if (remaining != null) const Divider(),
+            if (remaining != null)
+              MenuItemButton(
+                onPressed: service.cancelSleepTimer,
+                leadingIcon: const Icon(Symbols.timer_off),
+                child: Text("取消倒计时（${_format(remaining)}）"),
+              ),
+          ],
+          child: Text(
+            remaining == null ? "睡眠定时" : "睡眠定时 ${_format(remaining)}",
+          ),
+        );
+      },
     );
   }
 }
@@ -294,7 +372,7 @@ class _NowPlayingVolDspSliderState extends State<_NowPlayingVolDspSlider> {
       menuChildren: [
         SliderTheme(
           data: const SliderThemeData(
-            showValueIndicator: ShowValueIndicator.always,
+            showValueIndicator: ShowValueIndicator.onDrag,
           ),
           child: ValueListenableBuilder(
             valueListenable: dragVolDsp,
@@ -483,7 +561,7 @@ class _NowPlayingSliderState extends State<_NowPlayingSlider> {
       children: [
         SliderTheme(
           data: const SliderThemeData(
-            showValueIndicator: ShowValueIndicator.always,
+            showValueIndicator: ShowValueIndicator.onDrag,
           ),
           child: StreamBuilder(
             stream: playbackService.playerStateStream,

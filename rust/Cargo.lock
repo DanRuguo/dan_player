@@ -1276,6 +1276,7 @@ dependencies = [
  "image",
  "lofty",
  "phf",
+ "rayon",
  "serde_json",
  "ttf-parser",
  "windows",

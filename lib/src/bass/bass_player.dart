@@ -1,7 +1,8 @@
-﻿// ignore_for_file: constant_identifier_names
+// ignore_for_file: constant_identifier_names
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/src/bass/bass_wasapi.dart' as BASS;
 import 'package:dan_player/utils.dart';
@@ -43,7 +44,28 @@ const BASS_PLUGINS = [
   "BASS\\basswv.dll"
 ];
 
+const int BASS_FX_DX8_PARAMEQ = 7;
+
+final class BassDx8ParamEq extends ffi.Struct {
+  @ffi.Float()
+  external double fCenter;
+
+  @ffi.Float()
+  external double fBandwidth;
+
+  @ffi.Float()
+  external double fGain;
+}
+
 class BassPlayer {
+  static const int _bassAttribFreq = 1;
+  static const int _bassDataFft4096 = 0x80000004;
+  static const int _bassDataFftRemoveDc = 0x40;
+  static const int _bassWasapiBuffer = 4;
+  static const int _fftSize = 4096;
+  static const int _fftValueCount = _fftSize ~/ 2;
+  static const int _bassErrorValue = 0xFFFFFFFF;
+
   late final ffi.DynamicLibrary _bassLib;
   late final ffi.DynamicLibrary _bassWasapiLib;
   late final BASS.Bass _bass;
@@ -59,6 +81,13 @@ class BassPlayer {
   final _positionStreamController = StreamController<double>.broadcast();
   final _playerStateStreamController =
       StreamController<PlayerState>.broadcast();
+  final _spectrumStreamController = StreamController<List<double>>.broadcast();
+  final List<double> _spectrumLevels = List.filled(7, 0.0);
+  final ffi.Pointer<ffi.Float> _fftBuffer =
+      ffi.malloc.allocate<ffi.Float>(_fftValueCount * ffi.sizeOf<ffi.Float>());
+  final ffi.Pointer<ffi.Float> _frequencyBuffer =
+      ffi.malloc.allocate<ffi.Float>(ffi.sizeOf<ffi.Float>());
+  bool _freed = false;
 
   /// audio's length in seconds
   double get length => _fstream == null
@@ -106,8 +135,16 @@ class BassPlayer {
     if (_fstream == null) return 0;
 
     final volDsp = ffi.malloc.allocate<ffi.Float>(ffi.sizeOf<ffi.Float>());
-    _bass.BASS_ChannelGetAttribute(_fstream!, BASS.BASS_ATTRIB_VOLDSP, volDsp);
-    return volDsp.value;
+    try {
+      _bass.BASS_ChannelGetAttribute(
+        _fstream!,
+        BASS.BASS_ATTRIB_VOLDSP,
+        volDsp,
+      );
+      return volDsp.value;
+    } finally {
+      ffi.malloc.free(volDsp);
+    }
   }
 
   /// update every 33ms
@@ -115,6 +152,10 @@ class BassPlayer {
 
   Stream<PlayerState> get playerStateStream =>
       _playerStateStreamController.stream;
+
+  Stream<List<double>> get spectrumStream => _spectrumStreamController.stream;
+
+  List<double> get spectrumLevels => List.unmodifiable(_spectrumLevels);
 
   Timer _getPositionUpdater() {
     return Timer.periodic(
@@ -124,25 +165,266 @@ class BassPlayer {
 
         /// check if the channel has completed
         if (playerState == PlayerState.stopped) {
+          _resetSpectrum();
+          timer.cancel();
+          if (identical(_positionUpdater, timer)) {
+            _positionUpdater = null;
+          }
           _playerStateStreamController.add(PlayerState.completed);
+          return;
+        }
+
+        if (_spectrumStreamController.hasListener) {
+          _spectrumStreamController.add(_updateSpectrum());
         }
       },
     );
   }
 
+  /// BASS_SetConfig is outside the generated binding subset.
+  late final int Function(int option, int value) _bassSetConfig =
+      _bassLib.lookupFunction<ffi.Uint32 Function(ffi.Uint32, ffi.Uint32),
+          int Function(int, int)>('BASS_SetConfig');
+
+  /// bass.h: BASS_CONFIG_DEV_DEFAULT
+  static const int _bassConfigDevDefault = 36;
+
+  late final int Function(int handle, int type, int priority)
+      _bassChannelSetFX = _bassLib.lookupFunction<
+          ffi.Uint32 Function(ffi.Uint32, ffi.Uint32, ffi.Int32),
+          int Function(int, int, int)>('BASS_ChannelSetFX');
+
+  late final int Function(int handle, int fx) _bassChannelRemoveFX =
+      _bassLib.lookupFunction<ffi.Int32 Function(ffi.Uint32, ffi.Uint32),
+          int Function(int, int)>('BASS_ChannelRemoveFX');
+
+  late final int Function(int fx, ffi.Pointer<ffi.Void> params)
+      _bassFXSetParameters = _bassLib.lookupFunction<
+          ffi.Int32 Function(ffi.Uint32, ffi.Pointer<ffi.Void>),
+          int Function(int, ffi.Pointer<ffi.Void>)>('BASS_FXSetParameters');
+
+  late final int Function(
+    int handle,
+    ffi.Pointer<ffi.Void> buffer,
+    int length,
+  ) _bassChannelGetData = _bassLib.lookupFunction<
+      ffi.Uint32 Function(
+        ffi.Uint32,
+        ffi.Pointer<ffi.Void>,
+        ffi.Uint32,
+      ),
+      int Function(
+        int,
+        ffi.Pointer<ffi.Void>,
+        int,
+      )>('BASS_ChannelGetData');
+
+  late final int Function(
+    ffi.Pointer<ffi.Void> buffer,
+    int length,
+  ) _bassWasapiGetData = _bassWasapiLib.lookupFunction<
+      ffi.Uint32 Function(ffi.Pointer<ffi.Void>, ffi.Uint32),
+      int Function(ffi.Pointer<ffi.Void>, int)>('BASS_WASAPI_GetData');
+
+  List<double> _updateSpectrum() {
+    if (_fstream == null || playerState != PlayerState.playing) {
+      return _resetSpectrum(emit: false);
+    }
+
+    const flags = _bassDataFft4096 | _bassDataFftRemoveDc;
+    final result = wasapiExclusive
+        ? _bassWasapiGetData(_fftBuffer.cast(), flags)
+        : _bassChannelGetData(_fstream!, _fftBuffer.cast(), flags);
+    if (result == _bassErrorValue) {
+      return _decaySpectrum();
+    }
+
+    var sampleRate = 48000.0;
+    if (_bass.BASS_ChannelGetAttribute(
+          _fstream!,
+          _bassAttribFreq,
+          _frequencyBuffer,
+        ) ==
+        BASS.TRUE) {
+      sampleRate = _frequencyBuffer.value;
+    }
+    if (!sampleRate.isFinite || sampleRate <= 0) sampleRate = 48000.0;
+
+    final fft = _fftBuffer.asTypedList(_fftValueCount);
+    final chroma = List.filled(12, 0.0);
+    final counts = List.filled(12, 0);
+    for (var midi = 33; midi <= 119; midi++) {
+      final frequency = 440.0 * math.pow(2.0, (midi - 69) / 12.0);
+      final center = (frequency * _fftSize / sampleRate).round();
+      if (center < 1 || center >= _fftValueCount) continue;
+
+      var magnitude = 0.0;
+      final start = math.max(1, center - 2);
+      final end = math.min(_fftValueCount - 1, center + 2);
+      for (var bin = start; bin <= end; bin++) {
+        magnitude = math.max(magnitude, fft[bin].toDouble());
+      }
+      final pitchClass = midi % 12;
+      chroma[pitchClass] += math.sqrt(math.max(0.0, magnitude));
+      counts[pitchClass]++;
+    }
+    for (var i = 0; i < chroma.length; i++) {
+      if (counts[i] > 0) chroma[i] /= counts[i];
+    }
+
+    final tones = <double>[
+      chroma[0] + chroma[1] * 0.5,
+      chroma[2] + (chroma[1] + chroma[3]) * 0.5,
+      chroma[4] + chroma[3] * 0.5,
+      chroma[5] + chroma[6] * 0.5,
+      chroma[7] + (chroma[6] + chroma[8]) * 0.5,
+      chroma[9] + (chroma[8] + chroma[10]) * 0.5,
+      chroma[11] + chroma[10] * 0.5,
+    ];
+
+    for (var i = 0; i < _spectrumLevels.length; i++) {
+      var target = (tones[i] * 3.2).clamp(0.0, 1.0).toDouble();
+      if (target < 0.025) target = 0.0;
+      final smoothing = target > _spectrumLevels[i] ? 0.58 : 0.14;
+      _spectrumLevels[i] += (target - _spectrumLevels[i]) * smoothing;
+    }
+    return List.unmodifiable(_spectrumLevels);
+  }
+
+  List<double> _decaySpectrum() {
+    for (var i = 0; i < _spectrumLevels.length; i++) {
+      _spectrumLevels[i] *= 0.82;
+    }
+    return List.unmodifiable(_spectrumLevels);
+  }
+
+  List<double> _resetSpectrum({bool emit = true}) {
+    for (var i = 0; i < _spectrumLevels.length; i++) {
+      _spectrumLevels[i] = 0.0;
+    }
+    final result = List<double>.unmodifiable(_spectrumLevels);
+    if (emit && !_spectrumStreamController.isClosed) {
+      _spectrumStreamController.add(result);
+    }
+    return result;
+  }
+
+  static const List<double> eqBandCenters = [
+    80,
+    125,
+    250,
+    500,
+    1000,
+    2000,
+    4000,
+    8000,
+    12000,
+    16000,
+  ];
+  static const double eqMaxGainDb = 15.0;
+  static const double _eqBandwidthSemitones = 12.0;
+
+  bool _eqEnabled = false;
+  bool get eqEnabled => _eqEnabled;
+
+  final List<double> _eqGains = List.filled(eqBandCenters.length, 0.0);
+  List<double> get eqGains => List.unmodifiable(_eqGains);
+
+  final List<int> _eqFxHandles = [];
+  bool get eqActive => _eqFxHandles.isNotEmpty;
+
+  void _setEqFxParams(int fx, int band) {
+    final parameters =
+        ffi.malloc.allocate<BassDx8ParamEq>(ffi.sizeOf<BassDx8ParamEq>());
+    try {
+      parameters.ref.fCenter = eqBandCenters[band];
+      parameters.ref.fBandwidth = _eqBandwidthSemitones;
+      parameters.ref.fGain = _eqGains[band];
+      if (_bassFXSetParameters(fx, parameters.cast()) == BASS.FALSE) {
+        LOGGER.w(
+          "[eq] set parameters failed for band $band: "
+          "${_bass.BASS_ErrorGetCode()}",
+        );
+      }
+    } finally {
+      ffi.malloc.free(parameters);
+    }
+  }
+
+  bool _applyEqToStream() {
+    _eqFxHandles.clear();
+    if (!_eqEnabled || _fstream == null) return true;
+
+    for (var band = 0; band < eqBandCenters.length; band++) {
+      final fx = _bassChannelSetFX(_fstream!, BASS_FX_DX8_PARAMEQ, 0);
+      if (fx == 0) {
+        LOGGER.w("[eq] attach failed: ${_bass.BASS_ErrorGetCode()}");
+        _removeEqFromStream();
+        return false;
+      }
+      _eqFxHandles.add(fx);
+      _setEqFxParams(fx, band);
+    }
+    return true;
+  }
+
+  void _removeEqFromStream() {
+    if (_fstream != null) {
+      for (final fx in _eqFxHandles) {
+        _bassChannelRemoveFX(_fstream!, fx);
+      }
+    }
+    _eqFxHandles.clear();
+  }
+
+  bool setEqEnabled(bool enabled) {
+    if (enabled == _eqEnabled) return true;
+    if (enabled) {
+      _eqEnabled = true;
+      if (_fstream != null && !_applyEqToStream()) {
+        _eqEnabled = false;
+        return false;
+      }
+      return true;
+    }
+
+    _removeEqFromStream();
+    _eqEnabled = false;
+    return true;
+  }
+
+  void setEqBandGain(int band, double gain) {
+    if (band < 0 || band >= eqBandCenters.length) return;
+    _eqGains[band] = gain.clamp(-eqMaxGainDb, eqMaxGainDb).toDouble();
+    if (_eqEnabled && band < _eqFxHandles.length) {
+      _setEqFxParams(_eqFxHandles[band], band);
+    }
+  }
+
+  void setEqGains(List<double> gains) {
+    for (var band = 0; band < eqBandCenters.length; band++) {
+      final gain = band < gains.length ? gains[band] : 0.0;
+      _eqGains[band] = gain.clamp(-eqMaxGainDb, eqMaxGainDb).toDouble();
+    }
+    if (!_eqEnabled) return;
+
+    final count = _eqFxHandles.length < eqBandCenters.length
+        ? _eqFxHandles.length
+        : eqBandCenters.length;
+    for (var band = 0; band < count; band++) {
+      _setEqFxParams(_eqFxHandles[band], band);
+    }
+  }
+
   void _bassInit() {
-    if (_bass.BASS_Init(
-            1, 48000, BASS.BASS_DEVICE_REINIT, ffi.nullptr, ffi.nullptr) ==
-        0) {
+    _bassSetConfig(_bassConfigDevDefault, BASS.TRUE);
+
+    if (_bass.BASS_Init(-1, 48000, 0, ffi.nullptr, ffi.nullptr) == 0) {
       switch (_bass.BASS_ErrorGetCode()) {
+        case BASS.BASS_ERROR_ALREADY:
+          return;
         case BASS.BASS_ERROR_DEVICE:
           throw const FormatException("device is invalid.");
-        case BASS.BASS_ERROR_NOTAVAIL:
-          throw const FormatException(
-              "The BASS_DEVICE_REINIT flag cannot be used when device is -1. Use the real device number instead.");
-        case BASS.BASS_ERROR_ALREADY:
-          throw const FormatException(
-              "The device has already been initialized. The BASS_DEVICE_REINIT flag can be used to request reinitialization.");
         case BASS.BASS_ERROR_ILLPARAM:
           throw const FormatException("win is not a valid window handle.");
         case BASS.BASS_ERROR_DRIVER:
@@ -204,8 +486,17 @@ class BassPlayer {
 
     // load add-ons to avoid using os codec or support more format
     for (final plugin in BASS_PLUGINS) {
-      final pluginPathP = plugin.toNativeUtf16() as ffi.Pointer<ffi.Char>;
-      final hplugin = _bass.BASS_PluginLoad(pluginPathP, BASS.BASS_UNICODE);
+      final pluginPath = path.join(
+        path.dirname(Platform.resolvedExecutable),
+        plugin,
+      );
+      final pluginPathP = pluginPath.toNativeUtf16() as ffi.Pointer<ffi.Char>;
+      late final int hplugin;
+      try {
+        hplugin = _bass.BASS_PluginLoad(pluginPathP, BASS.BASS_UNICODE);
+      } finally {
+        ffi.malloc.free(pluginPathP);
+      }
 
       if (hplugin == 0) {
         switch (_bass.BASS_ErrorGetCode()) {
@@ -231,26 +522,47 @@ class BassPlayer {
 
   /// true: 操作成功；false: 操作失败
   bool useExclusiveMode(bool exclusive) {
+    if (exclusive == wasapiExclusive) return true;
+
     final prevState = wasapiExclusive;
+    final sourcePath = _fPath;
+    final lastPos = position;
+    final wasPlaying = playerState == PlayerState.playing;
     try {
-      final lastPos = position;
-      if (prevState) {
-        _bassWasapi.BASS_WASAPI_Free();
-        _bassInit();
-      }
+      _positionUpdater?.cancel();
+      freeFStream();
       wasapiExclusive = exclusive;
-      if (_fstream != null && _fPath != null) {
-        setSource(_fPath!);
+      if (sourcePath != null) {
+        setSource(sourcePath);
         setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
         seek(lastPos);
-        start();
+        if (wasPlaying) {
+          start();
+        } else {
+          _playerStateStreamController.add(playerState);
+        }
       }
       return true;
     } catch (err) {
       LOGGER.e("[use exclusive mode] $err");
       showTextOnSnackBar(err.toString());
     }
-    wasapiExclusive = prevState;
+
+    try {
+      freeFStream();
+      wasapiExclusive = prevState;
+      if (sourcePath != null) {
+        setSource(sourcePath);
+        setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
+        seek(lastPos);
+        if (wasPlaying) start();
+      }
+    } catch (rollbackError, trace) {
+      LOGGER.e(
+        "[use exclusive mode rollback] $rollbackError",
+        stackTrace: trace,
+      );
+    }
     return false;
   }
 
@@ -259,6 +571,7 @@ class BassPlayer {
   void setSource(String path) {
     if (_fstream != null) {
       _positionUpdater?.cancel();
+      _resetSpectrum();
       freeFStream();
     }
     final pathPointer = path.toNativeUtf16() as ffi.Pointer<ffi.Void>;
@@ -267,17 +580,23 @@ class BassPlayer {
     const flags =
         BASS.BASS_UNICODE | BASS.BASS_SAMPLE_FLOAT | BASS.BASS_ASYNCFILE;
     const exclusiveFlags = flags | BASS.BASS_STREAM_DECODE;
-    final handle = _bass.BASS_StreamCreateFile(
-      BASS.FALSE,
-      pathPointer,
-      0,
-      0,
-      wasapiExclusive ? exclusiveFlags : flags,
-    );
+    late final int handle;
+    try {
+      handle = _bass.BASS_StreamCreateFile(
+        BASS.FALSE,
+        pathPointer,
+        0,
+        0,
+        wasapiExclusive ? exclusiveFlags : flags,
+      );
+    } finally {
+      ffi.malloc.free(pathPointer);
+    }
 
     if (handle != 0) {
       _fstream = handle;
       _fPath = path;
+      if (_eqEnabled) _applyEqToStream();
     } else {
       _fstream = null;
       _fPath = null;
@@ -344,7 +663,9 @@ class BassPlayer {
           -1,
           0,
           0,
-          BASS.BASS_WASAPI_EXCLUSIVE | BASS.BASS_WASAPI_EVENT,
+          BASS.BASS_WASAPI_EXCLUSIVE |
+              BASS.BASS_WASAPI_EVENT |
+              _bassWasapiBuffer,
           0.05,
           0,
           ffi.Pointer<BASS.WASAPIPROC>.fromAddress(-1),
@@ -416,6 +737,8 @@ class BassPlayer {
   void start() {
     if (_fstream == null) return;
 
+    _positionUpdater?.cancel();
+
     if (wasapiExclusive) {
       return _start_wasapiExclusive();
     }
@@ -451,7 +774,9 @@ class BassPlayer {
     if (_fstream == null) return;
 
     if (wasapiExclusive) {
-      return _pause_wasapiExclusive();
+      _pause_wasapiExclusive();
+      _resetSpectrum();
+      return;
     }
 
     if (_bass.BASS_ChannelPause(_fstream!) == 0) {
@@ -468,6 +793,7 @@ class BassPlayer {
 
     _playerStateStreamController.add(playerState);
     _positionUpdater?.cancel();
+    _resetSpectrum();
   }
 
   /// set channel's position to given [position]
@@ -507,7 +833,20 @@ class BassPlayer {
   void freeFStream() {
     if (_fstream == null) return;
 
-    if (_bass.BASS_StreamFree(_fstream!) == 0) {
+    _positionUpdater?.cancel();
+    _positionUpdater = null;
+    if (wasapiExclusive) {
+      _bassWasapi.BASS_WASAPI_Stop(BASS.TRUE);
+      _bassWasapi.BASS_WASAPI_Free();
+    }
+
+    _eqFxHandles.clear();
+    final handle = _fstream!;
+    _fstream = null;
+    _fPath = null;
+    _resetSpectrum();
+
+    if (_bass.BASS_StreamFree(handle) == 0) {
       switch (_bass.BASS_ErrorGetCode()) {
         case BASS.BASS_ERROR_HANDLE:
           LOGGER.w("StreamFree is called on a invalid handle.");
@@ -524,10 +863,12 @@ class BassPlayer {
   ///
   /// Also free the bass.dll.
   void free() {
-    if (wasapiExclusive) {
-      _bassWasapi.BASS_WASAPI_Free();
-    }
+    if (_freed) return;
+    _freed = true;
 
+    _positionUpdater?.cancel();
+    _positionUpdater = null;
+    freeFStream();
     if (_bass.BASS_Free() == 0) {
       switch (_bass.BASS_ErrorGetCode()) {
         case BASS.BASS_ERROR_INIT:
@@ -542,8 +883,11 @@ class BassPlayer {
     _bassWasapiLib.close();
     _bassLib.close();
 
-    _positionUpdater?.cancel();
+    _resetSpectrum();
     _playerStateStreamController.close();
     _positionStreamController.close();
+    _spectrumStreamController.close();
+    ffi.malloc.free(_fftBuffer);
+    ffi.malloc.free(_frequencyBuffer);
   }
 }
