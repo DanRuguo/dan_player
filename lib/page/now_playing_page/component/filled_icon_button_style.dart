@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:dan_player/component/app_shape.dart';
+
 class LargeFilledIconButtonStyle extends ButtonStyle {
   const LargeFilledIconButtonStyle(
       {required this.primary, required this.scheme})
@@ -83,7 +85,7 @@ class LargeFilledIconButtonStyle extends ButtonStyle {
 
   @override
   WidgetStateProperty<OutlinedBorder>? get shape =>
-      const WidgetStatePropertyAll<OutlinedBorder>(StadiumBorder());
+      const WidgetStatePropertyAll<OutlinedBorder>(AppShape.control);
 
   @override
   WidgetStateProperty<MouseCursor?>? get mouseCursor =>

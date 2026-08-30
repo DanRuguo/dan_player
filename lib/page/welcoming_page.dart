@@ -1,20 +1,25 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/build_index_state_view.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart';
+import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class WelcomingPage extends StatelessWidget {
   const WelcomingPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -29,17 +34,24 @@ class WelcomingPage extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                "你的音乐放在哪些文件夹呢？",
-                style: TextStyle(
-                  color: scheme.onSurface,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 22,
+              AppEntrance(
+                identity: 'welcome-heading',
+                child: Column(
+                  children: [
+                    Text(
+                      ui("你的音乐放在哪些文件夹呢？"),
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                      ),
+                    ),
+                    Text(
+                      ui("软件会扫描这些文件夹（包括所有子文件夹）下的音乐并建立索引。"),
+                      style: TextStyle(color: scheme.onSurface),
+                    ),
+                  ],
                 ),
-              ),
-              Text(
-                "软件会扫描这些文件夹（包括所有子文件夹）下的音乐并建立索引。",
-                style: TextStyle(color: scheme.onSurface),
               ),
               const SizedBox(height: 16),
               const FolderSelectorView(),
@@ -65,6 +77,7 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
     return SizedBox(
@@ -91,9 +104,10 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
                         AppSettings.instance.saveSettings(),
                         AudioLibrary.initFromIndex(),
                       ]);
+                      await OnlineLibrary.instance.initialize();
                       await Future.wait([
                         readCustomAudioOrder(),
-                        readCollections(),
+                        readPlaylists(),
                       ]);
                       if (context.mounted) {
                         context.go(app_paths.AUDIOS_PAGE);
@@ -109,50 +123,59 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
   Widget folderSelector(ColorScheme scheme) {
     return Column(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            FilledButton(
-              onPressed: () async {
-                // final path = await pickSingleFolder();
-                // if (path == null) return;
-                final dirPicker = DirectoryPicker();
-                dirPicker.title = "选择文件夹";
+        AppEntrance(
+          identity: 'welcome-folder-actions',
+          order: 1,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              FilledButton(
+                onPressed: () async {
+                  // final path = await pickSingleFolder();
+                  // if (path == null) return;
+                  final dirPicker = DirectoryPicker();
+                  dirPicker.title = ui("选择文件夹");
 
-                final dir = dirPicker.getDirectory();
-                if (dir == null) return;
+                  final dir = dirPicker.getDirectory();
+                  if (dir == null) return;
 
-                setState(() {
-                  folders.add(dir.path);
-                });
-              },
-              child: const Text("添加文件夹"),
-            ),
-            FilledButton(
-              onPressed: () {
-                setState(() {
-                  selecting = false;
-                });
-              },
-              child: const Text("扫描"),
-            ),
-          ],
+                  setState(() {
+                    folders.add(dir.path);
+                  });
+                },
+                child: Text(ui("添加文件夹")),
+              ),
+              FilledButton(
+                onPressed: () {
+                  setState(() {
+                    selecting = false;
+                  });
+                },
+                child: Text(ui("扫描")),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 16.0),
         Expanded(
           child: ListView.builder(
             itemCount: folders.length,
-            itemBuilder: (context, i) => ListTile(
-              title: Text(folders[i]),
-              trailing: IconButton(
-                tooltip: "移除",
-                onPressed: () {
-                  setState(() {
-                    folders.removeAt(i);
-                  });
-                },
-                color: scheme.error,
-                icon: const Icon(Symbols.delete),
+            itemBuilder: (context, i) => AppEntrance(
+              key: ValueKey((folders[i], i)),
+              identity: ('welcome-folder', folders[i]),
+              order: i,
+              child: ListTile(
+                title: Text(folders[i]),
+                trailing: IconButton(
+                  tooltip: ui("移除"),
+                  onPressed: () {
+                    setState(() {
+                      folders.removeAt(i);
+                    });
+                  },
+                  color: scheme.error,
+                  icon: const Icon(Symbols.delete),
+                ),
               ),
             ),
           ),
@@ -167,6 +190,7 @@ class _TitleBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     return DragToMoveArea(
       child: Padding(
@@ -236,11 +260,12 @@ class __WindowControllsState extends State<_WindowControlls>
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     return Wrap(
       spacing: 8.0,
       children: [
         IconButton(
-          tooltip: "最小化",
+          tooltip: ui("最小化"),
           onPressed: windowManager.minimize,
           icon: const Icon(Symbols.remove),
         ),
@@ -249,7 +274,7 @@ class __WindowControllsState extends State<_WindowControlls>
           builder: (context, snapshot) {
             final isMaximized = snapshot.data ?? false;
             return IconButton(
-              tooltip: isMaximized ? "还原" : "最大化",
+              tooltip: isMaximized ? ui("还原") : ui("最大化"),
               onPressed: isMaximized
                   ? windowManager.unmaximize
                   : windowManager.maximize,
@@ -260,7 +285,7 @@ class __WindowControllsState extends State<_WindowControlls>
           },
         ),
         IconButton(
-          tooltip: "退出",
+          tooltip: ui("退出"),
           onPressed: windowManager.close,
           icon: const Icon(Symbols.close),
         ),

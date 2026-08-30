@@ -1,14 +1,45 @@
-﻿import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_action_icon.dart';
+import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/audio_artwork.dart';
+import 'package:dan_player/component/audio_columns.dart';
+import 'package:dan_player/statistics/library_statistics.dart'
+    show classifySongComposer;
 import 'package:dan_player/component/audio_metadata_dialog.dart';
-import 'package:dan_player/component/scroll_aware_future_builder.dart';
+import 'package:dan_player/component/lyric_editor_dialog.dart';
+import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/music_categories.dart';
+import 'package:dan_player/online/online_library.dart';
+import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/app_shape.dart';
+import 'package:flutter/services.dart';
+import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
+
+/// A playlist can contain the same Audio more than once. Its selection belongs
+/// to a relationship ID, not to the shared song object used by library views.
+class AudioTileSelection {
+  const AudioTileSelection({
+    required this.enabled,
+    required this.selected,
+    required this.onToggle,
+    required this.onStart,
+  });
+
+  final bool enabled;
+  final bool selected;
+  final VoidCallback onToggle;
+  final VoidCallback onStart;
+}
 
 /// 由[playlist]和[audioIndex]确定audio，而不是直接传入audio，
 /// 这是为了实现点击列表项播放乐曲时指定该列表为播放列表。
@@ -22,6 +53,9 @@ class AudioTile extends StatefulWidget {
     this.leading,
     this.action,
     this.multiSelectController,
+    this.additionalMenuItems = const [],
+    this.selection,
+    this.columns = false,
   });
 
   final int audioIndex;
@@ -31,233 +65,548 @@ class AudioTile extends StatefulWidget {
   final Widget? action;
   final MultiSelectController? multiSelectController;
 
+  /// Relationship actions supplied by a playlist view. Source-specific music
+  /// actions remain available for both local and online songs.
+  final List<Widget> additionalMenuItems;
+  final AudioTileSelection? selection;
+
+  /// Keep the layout on the row when a reorder proxy moves to the root overlay.
+  final bool columns;
+
   @override
   State<AudioTile> createState() => _AudioTileState();
 }
 
 class _AudioTileState extends State<AudioTile> {
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final audio = widget.playlist[widget.audioIndex];
+  Future<void> _toggleOnlineLibrary(Audio audio) async {
+    try {
+      final library = OnlineLibrary.instance;
+      if (library.contains(audio)) {
+        await library.remove(audio);
+        showTextOnSnackBar("已从总乐库移除");
+      } else {
+        await library.add(audio);
+        showTextOnSnackBar("已加入总乐库");
+      }
+      if (mounted) setState(() {});
+    } catch (error, trace) {
+      LOGGER.e("[online library] $error", stackTrace: trace);
+      showTextOnSnackBar("更新总乐库失败：{0}", arguments: [error]);
+    }
+  }
 
-    return MenuAnchor(
-      consumeOutsideTap: true,
-      menuChildren: [
-        /// artists
-        SubmenuButton(
-          menuChildren: List.generate(
-            audio.splitedArtists.length,
-            (i) => MenuItemButton(
-              onPressed: () {
-                final Artist artist = AudioLibrary
-                    .instance.artistCollection[audio.splitedArtists[i]]!;
-                context.push(
-                  app_paths.ARTIST_DETAIL_PAGE,
-                  extra: artist,
-                );
-              },
-              leadingIcon: const Icon(Symbols.artist),
-              child: Text(audio.splitedArtists[i]),
-            ),
-          ),
-          child: const Text("艺术家"),
-        ),
+  Future<void> _downloadOnlineAudio(Audio audio) async {
+    final service = OnlineMusicService.instance;
+    if (!service.canDownload(audio)) {
+      showTextOnSnackBar(
+          service.downloadUnavailableReason(audio) ?? ui("当前来源不支持下载"));
+      return;
+    }
+    final picker = SaveFilePicker()
+      ..title = ui("下载联网音乐")
+      ..fileName = OnlineMusicService.suggestedFileName(audio)
+      ..defaultExtension = "mp3"
+      ..filterSpecification = {
+        ui("音频文件"): "*.mp3;*.m4a;*.flac;*.ogg",
+        ui("所有文件"): "*.*",
+      };
+    final file = picker.getFile();
+    if (file == null) return;
 
-        /// album
+    showTextOnSnackBar("正在下载 {0}…", arguments: [audio.title]);
+    try {
+      await OnlineMusicService.instance.download(audio, file);
+      showTextOnSnackBar("下载完成：{0}", arguments: [file.path]);
+    } on OnlineMusicException catch (error) {
+      showTextOnSnackBar(error.message);
+    } catch (error, trace) {
+      LOGGER.e("[online download] $error", stackTrace: trace);
+      showTextOnSnackBar("下载失败：{0}", arguments: [error]);
+    }
+  }
+
+  List<Widget> _buildMenuItems(BuildContext context, Audio audio) {
+    final common = <Widget>[
+      MenuItemButton(
+        onPressed: () {
+          PlayService.instance.playbackService.addToNext(audio);
+        },
+        leadingIcon: const Icon(Symbols.plus_one),
+        child: Text(ui("下一首播放")),
+      ),
+      MenuItemButton(
+        onPressed: () => showAddAudiosToPlaylistDialog(context, [audio]),
+        leadingIcon: const Icon(Symbols.playlist_add),
+        child: Text(ui("加入歌单…")),
+      ),
+      if (widget.multiSelectController != null || widget.selection != null)
         MenuItemButton(
           onPressed: () {
-            final Album album =
-                AudioLibrary.instance.albumCollection[audio.album]!;
-            context.push(app_paths.ALBUM_DETAIL_PAGE, extra: album);
-          },
-          leadingIcon: const Icon(Symbols.album),
-          child: Text(audio.album),
-        ),
-
-        /// 下一首播放
-        MenuItemButton(
-          onPressed: () {
-            PlayService.instance.playbackService.addToNext(audio);
-          },
-          leadingIcon: const Icon(Symbols.plus_one),
-          child: const Text("下一首播放"),
-        ),
-
-        /// 多选
-        if (widget.multiSelectController != null)
-          MenuItemButton(
-            onPressed: () {
-              widget.multiSelectController!.useMultiSelectView(true);
-              widget.multiSelectController!.select(audio);
-            },
-            leadingIcon: const Icon(Symbols.select),
-            child: const Text("多选"),
-          ),
-
-        MenuItemButton(
-          onPressed: () async {
-            final updated = await showEditAudioMetadataDialog(context, audio);
-            if (updated && mounted) {
-              setState(() {});
+            if (widget.selection != null) {
+              widget.selection!.onStart();
+              return;
             }
+            widget.multiSelectController!.useMultiSelectView(true);
+            widget.multiSelectController!.select(audio);
           },
-          leadingIcon: const Icon(Symbols.edit_note),
-          child: const Text("编辑歌曲信息"),
+          leadingIcon: const Icon(Symbols.select),
+          child: Text(ui("多选")),
         ),
+      if (widget.additionalMenuItems.isNotEmpty) const Divider(),
+      ...widget.additionalMenuItems,
+    ];
 
-        /// to detail page
+    if (audio.isOnline) {
+      final inLibrary = OnlineLibrary.instance.contains(audio);
+      final canDownload = OnlineMusicService.instance.canDownload(audio);
+      final downloadReason =
+          OnlineMusicService.instance.downloadUnavailableReason(audio);
+      return [
+        MenuItemButton(
+          onPressed: null,
+          leadingIcon: const Icon(Symbols.cloud),
+          child: Text(ui("来源：{0}", [audio.sourceLabel])),
+        ),
+        ...common,
+        MenuItemButton(
+          onPressed: () => _toggleOnlineLibrary(audio),
+          leadingIcon: Icon(
+            inLibrary ? Symbols.library_add_check : Symbols.library_add,
+          ),
+          child: Text(inLibrary ? ui("从总乐库移除") : ui("加入总乐库")),
+        ),
+        MenuItemButton(
+          onPressed: canDownload ? () => _downloadOnlineAudio(audio) : null,
+          leadingIcon: const Icon(Symbols.download),
+          child: Text(canDownload
+              ? ui("下载")
+              : ui("下载不可用：{0}", [downloadReason ?? '来源未授权'])),
+        ),
         MenuItemButton(
           onPressed: () {
             context.push(app_paths.AUDIO_DETAIL_PAGE, extra: audio);
           },
           leadingIcon: const Icon(Symbols.info),
-          child: const Text("详细信息"),
+          child: Text(ui("联网歌曲详情")),
         ),
-      ],
-      builder: (context, controller, _) {
-        final selected =
-            widget.multiSelectController?.selected.contains(audio) == true;
-        final textColor = widget.focus ? scheme.primary : scheme.onSurface;
-        final metadataColor =
-            widget.focus ? scheme.primary : scheme.onSurfaceVariant;
-        final tileColor = selected
-            ? scheme.secondaryContainer.withValues(alpha: 0.78)
-            : widget.focus
-                ? scheme.primaryContainer.withValues(alpha: 0.30)
-                : Colors.transparent;
-        final outlineColor = selected || widget.focus
-            ? scheme.primary.withValues(alpha: selected ? 0.22 : 0.18)
-            : Colors.transparent;
-        final placeholder = Icon(
-          Symbols.broken_image,
-          size: 48.0,
-          color: scheme.onSurfaceVariant,
-        );
+      ];
+    }
 
-        return TweenAnimationBuilder<Color?>(
-          tween: ColorTween(begin: Colors.transparent, end: tileColor),
-          duration: AppMotion.quick,
-          curve: AppMotion.standardCurve,
-          builder: (context, color, child) => Ink(
-            height: 64.0,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(10.0),
-              border: Border.all(color: outlineColor),
-            ),
-            child: child,
+    return [
+      SubmenuButton(
+        menuChildren: List.generate(
+          audio.splitedArtists.length,
+          (i) => MenuItemButton(
+            onPressed: () {
+              final artist = AudioLibrary
+                  .instance.artistCollection[audio.splitedArtists[i]];
+              if (artist != null) {
+                context.push(app_paths.ARTIST_DETAIL_PAGE, extra: artist);
+              }
+            },
+            leadingIcon: const Icon(Symbols.artist),
+            child: Text(audio.splitedArtists[i]),
           ),
-          child: InkWell(
-            focusColor: Colors.transparent,
-            borderRadius: BorderRadius.circular(10.0),
-            overlayColor: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.pressed)) {
-                return scheme.primary.withValues(alpha: 0.12);
-              }
-              if (states.contains(WidgetState.hovered)) {
-                return scheme.primary.withValues(alpha: 0.06);
-              }
-              if (states.contains(WidgetState.focused)) {
-                return scheme.primary.withValues(alpha: 0.08);
-              }
-              return null;
-            }),
-            onTap: () {
-              if (controller.isOpen) {
-                controller.close();
-                return;
-              }
+        ),
+        child: Text(ui("艺术家")),
+      ),
+      MenuItemButton(
+        onPressed: () {
+          final album = MusicCategories.albumGroupFor(
+              audio, AudioLibrary.instance.audioCollection);
+          context.push(album.location, extra: album);
+        },
+        leadingIcon: const Icon(Symbols.album),
+        child: Text(audio.album),
+      ),
+      ...common,
+      MenuItemButton(
+        onPressed: () async {
+          final updated = await showEditAudioMetadataDialog(context, audio);
+          if (updated && mounted) setState(() {});
+        },
+        leadingIcon: const Icon(Symbols.edit_note),
+        child: Text(ui("编辑歌曲信息")),
+      ),
+      MenuItemButton(
+        onPressed: () => showLyricEditorDialog(context, audio),
+        leadingIcon: const Icon(Symbols.lyrics),
+        child: Text(ui("编辑歌词")),
+      ),
+      MenuItemButton(
+        onPressed: () {
+          context.push(app_paths.AUDIO_DETAIL_PAGE, extra: audio);
+        },
+        leadingIcon: const Icon(Symbols.info),
+        child: Text(ui("详细信息")),
+      ),
+    ];
+  }
 
-              if (widget.multiSelectController == null ||
-                  !widget.multiSelectController!.enableMultiSelectView) {
-                PlayService.instance.playbackService
-                    .play(widget.audioIndex, widget.playlist);
-              } else {
-                if (widget.multiSelectController!.selected.contains(audio)) {
-                  widget.multiSelectController!.unselect(audio);
-                } else {
-                  widget.multiSelectController!.select(audio);
-                }
-              }
-            },
-            onSecondaryTapDown: (details) {
-              if (widget.multiSelectController?.enableMultiSelectView == true) {
-                return;
-              }
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final scheme = Theme.of(context).colorScheme;
+    final audio = widget.playlist[widget.audioIndex];
+    final compactGrid = MusicGridScope.of(context);
 
-              controller.open(
-                  position: details.localPosition.translate(0, -240));
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Row(children: [
-                if (widget.leading != null)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 16.0),
-                    child: widget.leading!,
-                  ),
-
-                /// cover
-                ScrollAwareFutureBuilder(
-                  future: () => audio.cover,
-                  builder: (context, snapshot) {
-                    if (snapshot.data == null) {
-                      return placeholder;
-                    }
-
-                    return ClipRRect(
-                      borderRadius: BorderRadius.circular(8.0),
-                      child: Image(
-                        image: snapshot.data!,
-                        width: 48.0,
-                        height: 48.0,
-                        errorBuilder: (_, __, ___) => placeholder,
+    return AppEntrance(
+      key: ValueKey(audio.path),
+      identity: ('audio', audio.path),
+      order: widget.audioIndex,
+      child: MenuAnchor(
+        // Song pages live in a nested Navigator below the persistent mini
+        // player. The root Overlay keeps the mini player from painting over
+        // editing/actions; this inset also makes a long menu scroll above the
+        // player's full footprint instead of hiding its final actions.
+        useRootOverlay: true,
+        reservedPadding: const EdgeInsets.fromLTRB(8, 8, 8, 116),
+        consumeOutsideTap: true,
+        menuChildren: _buildMenuItems(context, audio),
+        builder: (context, controller, _) {
+          final selected = widget.selection?.selected ??
+              (widget.multiSelectController?.selected.contains(audio) == true);
+          final selecting = widget.selection?.enabled ??
+              (widget.multiSelectController?.enableMultiSelectView == true);
+          final textColor = widget.focus ? scheme.primary : scheme.onSurface;
+          final metadataColor =
+              widget.focus ? scheme.primary : scheme.onSurfaceVariant;
+          final tileColor = selected
+              ? scheme.secondaryContainer.withValues(alpha: 0.78)
+              : widget.focus
+                  ? scheme.primaryContainer.withValues(alpha: 0.30)
+                  : Colors.transparent;
+          final outlineColor = selected || widget.focus
+              ? scheme.primary.withValues(alpha: selected ? 0.22 : 0.18)
+              : Colors.transparent;
+          final placeholder = Icon(
+            Symbols.broken_image,
+            size: 48.0,
+            color: scheme.onSurfaceVariant,
+          );
+          final durationText =
+              Duration(seconds: audio.duration).toStringHMMSS();
+          final durationLabel = Text(
+            durationText,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: metadataColor),
+          );
+          final sourceStatus = !audio.isOnline
+              ? null
+              : !PlayService.isInitialized
+                  ? Tooltip(
+                      message: ui("联网音乐 · {0}", [audio.sourceLabel]),
+                      child:
+                          Icon(Symbols.cloud, size: 18.0, color: metadataColor),
+                    )
+                  : ValueListenableBuilder<String?>(
+                      valueListenable: PlayService
+                          .instance.playbackService.resolvingAudioPath,
+                      builder: (context, resolvingPath, _) => Tooltip(
+                        message: resolvingPath == audio.path
+                            ? ui("正在获取播放地址")
+                            : ui("联网音乐 · {0}", [audio.sourceLabel]),
+                        child: resolvingPath == audio.path
+                            ? const SizedBox.square(
+                                dimension: 18.0,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(Symbols.cloud,
+                                size: 18.0, color: metadataColor),
                       ),
                     );
-                  },
-                ),
-                const SizedBox(width: 16.0),
 
-                /// title, artist and album
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        audio.displayTitle,
-                        style: TextStyle(color: textColor, fontSize: 16),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(width: 4.0),
-                      Text(
-                        "${audio.artist} - ${audio.album}",
-                        style: TextStyle(color: metadataColor),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
+          return TweenAnimationBuilder<Color?>(
+            tween: ColorTween(begin: Colors.transparent, end: tileColor),
+            duration: AppMotion.quick,
+            curve: AppMotion.standardCurve,
+            builder: (context, color, child) => ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 64),
+              child: Ink(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: AppShape.controlRadius,
+                  border: Border.all(color: outlineColor),
                 ),
-                const SizedBox(width: 8.0),
-                Text(
-                  Duration(seconds: audio.duration).toStringHMMSS(),
-                  style: TextStyle(
-                    color: metadataColor,
-                  ),
-                ),
-                if (widget.action != null)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8.0),
-                    child: widget.action!,
-                  ),
-              ]),
+                child: child,
+              ),
             ),
-          ),
-        );
-      },
+            child: InkWell(
+              focusColor: Colors.transparent,
+              borderRadius: AppShape.controlRadius,
+              overlayColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.pressed)) {
+                  return scheme.primary.withValues(alpha: 0.12);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return scheme.primary.withValues(alpha: 0.06);
+                }
+                if (states.contains(WidgetState.focused)) {
+                  return scheme.primary.withValues(alpha: 0.08);
+                }
+                return null;
+              }),
+              onTap: () {
+                if (controller.isOpen) {
+                  controller.close();
+                  return;
+                }
+
+                if (!selecting) {
+                  if (PlayService
+                          .instance.playbackService.resolvingAudioPath.value ==
+                      audio.path) {
+                    return;
+                  }
+                  PlayService.instance.playbackService
+                      .play(widget.audioIndex, widget.playlist);
+                } else {
+                  if (widget.selection != null) {
+                    widget.selection!.onToggle();
+                    return;
+                  }
+                  if (widget.multiSelectController!.selected.contains(audio)) {
+                    widget.multiSelectController!.unselect(audio);
+                  } else {
+                    widget.multiSelectController!.select(audio);
+                  }
+                }
+              },
+              onLongPress: () {
+                if (selecting) {
+                  return;
+                }
+                HapticFeedback.mediumImpact();
+                controller.open();
+              },
+              onSecondaryTapDown: (details) {
+                if (selecting) {
+                  return;
+                }
+
+                controller.open(position: details.localPosition);
+              },
+              child: compactGrid
+                  ? MusicGridTileBody(
+                      key: const ValueKey('audio-grid-content'),
+                      title: audio.displayTitle,
+                      tooltip:
+                          '${audio.displayTitle}\n${audio.isOnline ? '联网音乐 · ${audio.sourceLabel}' : '本地音乐'}',
+                      color: textColor,
+                      leading: widget.leading,
+                      // Ink's 1px border is part of its layout padding.
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 7),
+                      artwork: ClipRRect(
+                        borderRadius: AppShape.smallRadius,
+                        child: AudioArtwork(
+                          audio: audio,
+                          size: 48,
+                          placeholder: placeholder,
+                        ),
+                      ),
+                      action: widget.action ??
+                          AppIconActionButton(
+                            key: ValueKey('audio-grid-menu-${audio.path}'),
+                            tooltip: ui("歌曲操作"),
+                            onPressed: selecting
+                                ? null
+                                : () => controller.isOpen
+                                    ? controller.close()
+                                    : controller.open(),
+                            selected: controller.isOpen,
+                            glyph: AppActionGlyph.moreVertical,
+                          ),
+                    )
+                  : Padding(
+                      // Ink adds its 1px border to the padding: 48 + 2*(7+1) = 64.
+                      // Larger accessibility text can grow the real row instead of
+                      // overflowing a fixed-height box or being silently scaled down.
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 7),
+                      child: LayoutBuilder(builder: (context, constraints) {
+                        if (widget.columns) {
+                          final composer = classifySongComposer(
+                              composerTag: audio.composer,
+                              artist: audio.artist);
+                          return Row(
+                            key: const ValueKey('audio-columns-row'),
+                            children: [
+                              if (widget.leading != null) widget.leading!,
+                              ClipRRect(
+                                  borderRadius: AppShape.smallRadius,
+                                  child: AudioArtwork(
+                                      audio: audio,
+                                      size: 48,
+                                      placeholder: placeholder)),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                  child: AudioColumnFields(
+                                      title: audio.displayTitle,
+                                      composer: composer.value ?? ui("未知作曲家"),
+                                      album: audio.album,
+                                      titleColor: textColor,
+                                      metadataColor: metadataColor)),
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                  width: 64,
+                                  child: Tooltip(
+                                      message: audio.isOnline
+                                          ? ui("{0} · 联网音乐 · {1}",
+                                              [durationText, audio.sourceLabel])
+                                          : durationText,
+                                      child: Align(
+                                          alignment:
+                                              AlignmentDirectional.centerEnd,
+                                          child: durationLabel))),
+                              const SizedBox(width: 8),
+                              widget.action ??
+                                  AppIconActionButton(
+                                      key: ValueKey(
+                                          'audio-columns-menu-${audio.path}'),
+                                      tooltip: ui("歌曲操作"),
+                                      onPressed: selecting
+                                          ? null
+                                          : () => controller.isOpen
+                                              ? controller.close()
+                                              : controller.open(),
+                                      selected: controller.isOpen,
+                                      glyph: AppActionGlyph.moreVertical),
+                            ],
+                          );
+                        }
+                        // Measure only the short, static duration, not every title.
+                        // The colour tween reuses this child; no playback/frame-time
+                        // text measurement or extra artwork request is introduced.
+                        final durationMetrics = TextPainter(
+                          text: TextSpan(
+                            text: durationText,
+                            style: DefaultTextStyle.of(context)
+                                .style
+                                .merge(TextStyle(color: metadataColor)),
+                          ),
+                          textDirection: Directionality.of(context),
+                          textScaler: MediaQuery.textScalerOf(context),
+                          maxLines: 1,
+                        )..layout();
+                        final trailingWidth = durationMetrics.width +
+                            (sourceStatus == null ? 0 : 26);
+                        durationMetrics.dispose();
+                        final needsSeparateDetails = constraints.maxWidth <
+                            48 +
+                                16 +
+                                64 +
+                                8 +
+                                trailingWidth +
+                                (widget.action == null ? 0 : 56) +
+                                (widget.leading == null ? 0 : 64);
+                        // Old fixed-extent hosts still own their row height. Do not
+                        // add another line inside a host that cannot grow at all.
+                        final separateDetails = needsSeparateDetails &&
+                            (!constraints.hasBoundedHeight ||
+                                constraints.maxHeight > 64);
+                        return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                  key: const ValueKey('audio-tile-main-row'),
+                                  children: [
+                                    if (widget.leading != null)
+                                      Padding(
+                                        padding:
+                                            const EdgeInsets.only(right: 16.0),
+                                        child: widget.leading!,
+                                      ),
+
+                                    /// cover
+                                    ClipRRect(
+                                      borderRadius: AppShape.smallRadius,
+                                      child: AudioArtwork(
+                                        audio: audio,
+                                        size: 48,
+                                        placeholder: placeholder,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 16.0),
+
+                                    /// title, artist and album
+                                    Expanded(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            audio.displayTitle,
+                                            style: TextStyle(
+                                                color: textColor, fontSize: 16),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(width: 4.0),
+                                          Text(
+                                            "${audio.artist} - ${audio.album}",
+                                            style:
+                                                TextStyle(color: metadataColor),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8.0),
+                                    if (!separateDetails) ...[
+                                      if (sourceStatus != null) ...[
+                                        sourceStatus,
+                                        const SizedBox(width: 8),
+                                      ],
+                                      if (needsSeparateDetails)
+                                        Flexible(
+                                          child: Tooltip(
+                                              message: durationText,
+                                              child: durationLabel),
+                                        )
+                                      else
+                                        durationLabel,
+                                    ],
+                                    if (widget.action != null)
+                                      Padding(
+                                        padding:
+                                            const EdgeInsets.only(left: 8.0),
+                                        child: widget.action!,
+                                      ),
+                                  ]),
+                              if (separateDetails)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Row(
+                                    key: const ValueKey(
+                                        'audio-tile-secondary-row'),
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      if (sourceStatus != null) ...[
+                                        sourceStatus,
+                                        const SizedBox(width: 8),
+                                      ],
+                                      Flexible(
+                                        child: Tooltip(
+                                            message: durationText,
+                                            child: durationLabel),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ]);
+                      }),
+                    ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

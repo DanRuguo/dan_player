@@ -17,17 +17,19 @@ class ResponsiveBuilder extends StatelessWidget {
   final Widget Function(BuildContext context, ScreenType screenType) builder;
 
   @override
-  Widget build(BuildContext context) {
-    final screenSize = MediaQuery.sizeOf(context);
-
-    if (screenSize.width <= 640) {
-      return builder(context, ScreenType.small);
-    } else if (screenSize.width > 640 && screenSize.width < 1100) {
-      return builder(context, ScreenType.medium);
-    } else {
-      return builder(context, ScreenType.large);
-    }
-  }
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          // Nested pages must respond to their actual content allocation, not
+          // the full native window. This keeps a dragged desktop sidebar from
+          // forcing wide layouts into a clipped main pane.
+          final width = constraints.hasBoundedWidth
+              ? constraints.maxWidth
+              : MediaQuery.sizeOf(context).width;
+          if (width <= 640) return builder(context, ScreenType.small);
+          if (width < 1100) return builder(context, ScreenType.medium);
+          return builder(context, ScreenType.large);
+        },
+      );
 }
 
 class ResponsiveBuilder2 extends StatelessWidget {
@@ -36,13 +38,15 @@ class ResponsiveBuilder2 extends StatelessWidget {
   final Widget Function(BuildContext context, ScreenType screenType) builder;
 
   @override
-  Widget build(BuildContext context) {
-    final screenSize = MediaQuery.sizeOf(context);
-
-    if (screenSize.width <= 928) {
-      return builder(context, ScreenType.small);
-    } else {
-      return builder(context, ScreenType.large);
-    }
-  }
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.hasBoundedWidth
+              ? constraints.maxWidth
+              : MediaQuery.sizeOf(context).width;
+          return builder(
+            context,
+            width <= 928 ? ScreenType.small : ScreenType.large,
+          );
+        },
+      );
 }

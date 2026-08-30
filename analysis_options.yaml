@@ -1,1 +1,17 @@
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+    # This is an independent package with its own pubspec and analyzer run.
+    - rust_builder/cargokit/build_tool/**
+    # One-time AST maintenance tools use the Flutter SDK's analyzer package
+    # configuration, not the application's runtime dependencies.
+    - scripts/inventory_ui_strings.dart
+    - scripts/localize_ui_sources.dart
+    - scripts/localize_notice_calls.dart
 include: package:flutter_lints/flutter.yaml

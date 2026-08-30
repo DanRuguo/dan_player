@@ -1,14 +1,17 @@
-﻿import 'package:dan_player/app_preference.dart';
-import 'package:dan_player/utils.dart';
+import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/page/audio_sort_methods.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/page/uni_detail_page.dart';
+import 'package:dan_player/page/categories_page.dart';
+import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/page/uni_page_components.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
-import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class AlbumDetailPage extends StatelessWidget {
   const AlbumDetailPage({super.key, required this.album});
@@ -17,17 +20,29 @@ class AlbumDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    // Legacy album extras used a title-only map. Ask the user to choose the
+    // release when that snapshot contains different album artists.
+    if (album.works.isEmpty ||
+        MusicCategories(album.works).groups(MusicCategoryKind.album).length >
+            1) {
+      return CategoriesPage(
+        initialCategory: MusicCategoryKind.album,
+        audios: album.works,
+      );
+    }
     final secondaryContent = List<Audio>.from(album.works);
     final multiSelectController = MultiSelectController<Audio>();
 
     return UniDetailPage<Album, Audio, Artist>(
       pref: AppPreference.instance.albumDetailPagePref,
       primaryContent: album,
-      primaryPic: album.cover,
+      primaryPic: album.works.first.coverForDisplay(
+          size: 200, devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
       backgroundPic: album.works.first.cover,
       picShape: PicShape.rrect,
       title: album.name,
-      subtitle: "${album.works.length} 首作品",
+      subtitle: ui("{0} 首作品", [album.works.length]),
       secondaryContent: secondaryContent,
       secondaryContentBuilder: (context, audio, i, multiSelectController) =>
           AudioTile(
@@ -36,13 +51,13 @@ class AlbumDetailPage extends StatelessWidget {
         playlist: secondaryContent,
         multiSelectController: multiSelectController,
       ),
-      tertiaryContentTitle: "艺术家",
+      tertiaryContentTitle: ui("艺术家"),
       tertiaryContent: album.artistsMap.values.toList(),
       tertiaryContentBuilder: (context, artist, i, multiSelectController) =>
           ListTile(
         onTap: () => context.push(app_paths.ARTIST_DETAIL_PAGE, extra: artist),
         title: Text(artist.name),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+        shape: AppShape.control,
       ),
       enableShufflePlay: true,
       enableSortMethod: true,
@@ -56,80 +71,7 @@ class AlbumDetailPage extends StatelessWidget {
         ),
         MultiSelectExit(multiSelectController: multiSelectController),
       ],
-      sortMethods: [
-        SortMethodDesc(
-          icon: Symbols.title,
-          name: "标题",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort(
-                    (a, b) => a.displayTitle.localeCompareTo(b.displayTitle));
-                break;
-              case SortOrder.decending:
-                list.sort(
-                    (a, b) => b.displayTitle.localeCompareTo(a.displayTitle));
-                break;
-            }
-          },
-        ),
-        SortMethodDesc(
-          icon: Symbols.artist,
-          name: "艺术家",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort((a, b) => a.artist.localeCompareTo(b.artist));
-                break;
-              case SortOrder.decending:
-                list.sort((a, b) => b.artist.localeCompareTo(a.artist));
-                break;
-            }
-          },
-        ),
-        SortMethodDesc(
-          icon: Symbols.art_track,
-          name: "音轨",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort((a, b) => a.track.compareTo(b.track));
-                break;
-              case SortOrder.decending:
-                list.sort((a, b) => b.track.compareTo(a.track));
-                break;
-            }
-          },
-        ),
-        SortMethodDesc(
-          icon: Symbols.add,
-          name: "创建时间",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort((a, b) => a.created.compareTo(b.created));
-                break;
-              case SortOrder.decending:
-                list.sort((a, b) => b.created.compareTo(a.created));
-                break;
-            }
-          },
-        ),
-        SortMethodDesc(
-          icon: Symbols.edit,
-          name: "修改时间",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort((a, b) => a.modified.compareTo(b.modified));
-                break;
-              case SortOrder.decending:
-                list.sort((a, b) => b.modified.compareTo(a.modified));
-                break;
-            }
-          },
-        ),
-      ],
+      sortMethods: audioSortMethods(AudioSortProfile.album),
     );
   }
 }

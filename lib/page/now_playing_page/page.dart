@@ -1,25 +1,37 @@
 // ignore_for_file: camel_case_types
 
-import 'dart:ui';
-
 import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/background_preferences.dart';
+import 'package:dan_player/component/scene_background.dart';
+import 'package:dan_player/component/song_comments_dialog.dart';
+import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/title_bar.dart';
+import 'package:dan_player/component/touch_gestures.dart';
+import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/online/online_library.dart';
+import 'package:dan_player/online/online_music_service.dart';
+import 'package:dan_player/online/song_comments.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/page/now_playing_page/component/current_playlist_view.dart';
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/filled_icon_button_style.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
+import 'package:dan_player/page/settings_page/playback_settings.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
+import 'package:dan_player/play_service/desktop_lyric_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 part 'small_page.dart';
 part 'large_page.dart';
@@ -49,73 +61,33 @@ class NowPlayingPage extends StatefulWidget {
 }
 
 class _NowPlayingPageState extends State<NowPlayingPage> {
-  final playbackService = PlayService.instance.playbackService;
-  ImageProvider<Object>? nowPlayingCover;
-
-  void updateCover() {
-    playbackService.nowPlaying?.cover.then((cover) {
-      if (mounted) {
-        setState(() {
-          nowPlayingCover = cover;
-        });
-      }
-    });
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    playbackService.addListener(updateCover);
-    updateCover();
-  }
-
-  @override
-  void dispose() {
-    playbackService.removeListener(updateCover);
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final brightness = theme.brightness;
-    final scheme = theme.colorScheme;
-
-    return Scaffold(
-      appBar: const PreferredSize(
-        preferredSize: Size.fromHeight(56.0),
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8.0),
-          child: Row(
-            children: [
-              NavBackBtn(),
-              Expanded(child: DragToMoveArea(child: SizedBox.expand())),
-              WindowControlls(),
-            ],
+    UiLanguageScope.watch(context);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // One cached, configurable layer covers both title bar and body.
+        // Cover changes repaint this layer, not the complete lyric/player UI.
+        const SceneBackground(scene: BackgroundScene.nowPlaying),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: const PreferredSize(
+            preferredSize: Size.fromHeight(56.0),
+            child: TitleBarSurface(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8.0),
+                child: Row(
+                  children: [
+                    NavBackBtn(),
+                    Expanded(child: DragToMoveArea(child: SizedBox.expand())),
+                    WindowControlls(),
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
-      backgroundColor: scheme.secondaryContainer,
-      body: Stack(
-        fit: StackFit.expand,
-        alignment: AlignmentDirectional.center,
-        children: [
-          if (nowPlayingCover != null) ...[
-            Image(
-              image: nowPlayingCover!,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-            ),
-            switch (brightness) {
-              Brightness.dark => const ColoredBox(color: Colors.black45),
-              Brightness.light => const ColoredBox(color: Colors.white54),
-            },
-            BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 250, sigmaY: 250),
-              child: const ColoredBox(color: Colors.transparent),
-            ),
-          ],
-          ChangeNotifierProvider.value(
+          body: ChangeNotifierProvider.value(
             value: PlayService.instance.playbackService,
             builder: (context, _) {
               return ResponsiveBuilder2(builder: (context, screenType) {
@@ -129,31 +101,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
               });
             },
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ExclusiveModeSwitch extends StatelessWidget {
-  const _ExclusiveModeSwitch();
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: PlayService.instance.playbackService.wasapiExclusive,
-      builder: (context, exclusive, _) => IconButton(
-        tooltip: "独占模式；现在：${exclusive ? "启用" : "禁用"}",
-        onPressed: () {
-          PlayService.instance.playbackService.useExclusiveMode(!exclusive);
-        },
-        icon: Center(
-          child: Text(
-            exclusive ? "Excl" : "Shrd",
-            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -163,77 +112,150 @@ class _NowPlayingMoreAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final playbackService = context.watch<PlaybackService>();
     final nowPlaying = playbackService.nowPlaying;
+    final onlinePlaying = nowPlaying?.isOnline == true ? nowPlaying : null;
+    final localPlaying = nowPlaying?.isLocal == true ? nowPlaying : null;
     final scheme = Theme.of(context).colorScheme;
 
-    return MenuAnchor(
-      menuChildren: [
-        MenuItemButton(
-          onPressed: () => showEqualizerDialog(context),
-          leadingIcon: const Icon(Symbols.equalizer),
-          child: const Text("均衡器"),
-        ),
-        const _SleepTimerSubmenu(),
-        if (nowPlaying != null) const Divider(),
-        if (nowPlaying != null)
-          SubmenuButton(
-            menuChildren: List.generate(
-              nowPlaying.splitedArtists.length,
-              (i) => MenuItemButton(
+    return ListenableBuilder(
+      listenable: OnlineLibrary.instance,
+      builder: (context, _) => MenuAnchor(
+          menuChildren: [
+            MenuItemButton(
+              onPressed: () => showEqualizerDialog(context),
+              leadingIcon: const Icon(Symbols.equalizer),
+              child: Text(ui("均衡器")),
+            ),
+            const _SleepTimerSubmenu(),
+            if (nowPlaying != null) const Divider(),
+            if (onlinePlaying != null)
+              MenuItemButton(
+                onPressed: null,
+                leadingIcon: const Icon(Symbols.cloud),
+                child: Text(ui("来源：{0}", [ui(onlinePlaying.sourceLabel)])),
+              ),
+            if (nowPlaying != null)
+              MenuItemButton(
+                onPressed: () => showSongCommentsDialog(context, nowPlaying),
+                leadingIcon: const Icon(Symbols.chat_bubble_outline),
+                child: Text(ui("歌曲评论")),
+              ),
+            if (onlinePlaying != null)
+              MenuItemButton(
+                onPressed: () async {
+                  try {
+                    if (OnlineLibrary.instance.contains(onlinePlaying)) {
+                      await OnlineLibrary.instance.remove(onlinePlaying);
+                      showTextOnSnackBar("已从总乐库移除");
+                    } else {
+                      await OnlineLibrary.instance.add(onlinePlaying);
+                      showTextOnSnackBar("已加入总乐库");
+                    }
+                  } catch (error, stackTrace) {
+                    LOGGER.e("[online library] $error", stackTrace: stackTrace);
+                    showTextOnSnackBar("更新总乐库失败：{0}", arguments: [error]);
+                  }
+                },
+                leadingIcon: const Icon(Symbols.library_add),
+                child: Text(
+                  OnlineLibrary.instance.contains(onlinePlaying)
+                      ? ui("从总乐库移除")
+                      : ui("加入总乐库"),
+                ),
+              ),
+            if (onlinePlaying != null &&
+                !OnlineMusicService.instance.canDownload(onlinePlaying))
+              MenuItemButton(
+                onPressed: null,
+                leadingIcon: const Icon(Symbols.download),
+                child: Text(
+                  ui("下载不可用：{0}", [
+                    OnlineMusicService.instance
+                        .downloadUnavailableReason(onlinePlaying)
+                  ]),
+                ),
+              ),
+            if (localPlaying != null)
+              SubmenuButton(
+                menuChildren: List.generate(
+                  localPlaying.splitedArtists.length,
+                  (i) => MenuItemButton(
+                    onPressed: () {
+                      final Artist? artist = AudioLibrary.instance
+                          .artistCollection[localPlaying.splitedArtists[i]];
+                      if (artist == null) return;
+                      context.pushReplacement(
+                        app_paths.ARTIST_DETAIL_PAGE,
+                        extra: artist,
+                      );
+                    },
+                    leadingIcon: const Icon(Symbols.people),
+                    child: Text(localPlaying.splitedArtists[i]),
+                  ),
+                ),
+                child: Text(ui("艺术家")),
+              ),
+            if (localPlaying != null)
+              MenuItemButton(
                 onPressed: () {
-                  final Artist? artist = AudioLibrary
-                      .instance.artistCollection[nowPlaying.splitedArtists[i]];
-                  if (artist == null) return;
+                  final album =
+                      AudioLibrary.instance.albumCollection[localPlaying.album];
+                  if (album == null) return;
                   context.pushReplacement(
-                    app_paths.ARTIST_DETAIL_PAGE,
-                    extra: artist,
+                    app_paths.ALBUM_DETAIL_PAGE,
+                    extra: album,
                   );
                 },
-                leadingIcon: const Icon(Symbols.people),
-                child: Text(nowPlaying.splitedArtists[i]),
+                leadingIcon: const Icon(Symbols.album),
+                child: Text(localPlaying.album),
               ),
-            ),
-            child: const Text("艺术家"),
-          ),
-        if (nowPlaying != null)
-          MenuItemButton(
-            onPressed: () {
-              final album =
-                  AudioLibrary.instance.albumCollection[nowPlaying.album];
-              if (album == null) return;
-              context.pushReplacement(
-                app_paths.ALBUM_DETAIL_PAGE,
-                extra: album,
-              );
-            },
-            leadingIcon: const Icon(Symbols.album),
-            child: Text(nowPlaying.album),
-          ),
-        if (nowPlaying != null)
-          MenuItemButton(
-            onPressed: () {
-              context.pushReplacement(
-                app_paths.AUDIO_DETAIL_PAGE,
-                extra: nowPlaying,
-              );
-            },
-            leadingIcon: const Icon(Symbols.info),
-            child: const Text("详细信息"),
-          ),
-      ],
-      builder: (context, controller, _) => IconButton(
-        tooltip: "更多",
-        onPressed: () {
-          if (controller.isOpen) {
-            controller.close();
-          } else {
-            controller.open();
-          }
-        },
-        icon: const Icon(Symbols.more_vert),
-        color: scheme.onSecondaryContainer,
-      ),
+            if (nowPlaying != null)
+              MenuItemButton(
+                onPressed: () {
+                  context.pushReplacement(
+                    app_paths.AUDIO_DETAIL_PAGE,
+                    extra: nowPlaying,
+                  );
+                },
+                leadingIcon: const Icon(Symbols.info),
+                child: Text(ui("详细信息")),
+              ),
+          ],
+          builder: (context, controller, _) => IconButton(
+                tooltip: ui("更多"),
+                onPressed: () {
+                  if (controller.isOpen) {
+                    controller.close();
+                  } else {
+                    controller.open();
+                  }
+                },
+                icon: const Icon(Symbols.more_vert),
+                color: scheme.onSecondaryContainer,
+              )),
+    );
+  }
+}
+
+class _NowPlayingCommentsAction extends StatelessWidget {
+  const _NowPlayingCommentsAction();
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final audio = context.watch<PlaybackService>().nowPlaying;
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      key: const ValueKey('now-playing-comments'),
+      tooltip: audio?.isLocal == true && !SongCommentsService.canRead(audio!)
+          ? ui("歌曲评论 · 需要先关联平台歌曲")
+          : ui("歌曲评论"),
+      onPressed:
+          audio == null ? null : () => showSongCommentsDialog(context, audio),
+      color: scheme.onSecondaryContainer,
+      icon: const Icon(Symbols.chat_bubble_outline),
     );
   }
 }
@@ -259,6 +281,7 @@ class _SleepTimerSubmenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final service = PlayService.instance.playbackService;
     return ListenableBuilder(
       listenable: Listenable.merge([
@@ -280,7 +303,7 @@ class _SleepTimerSubmenu extends StatelessWidget {
                 onPressed: () => service.startSleepTimer(
                   Duration(minutes: minutes),
                 ),
-                child: Text("$minutes 分钟后"),
+                child: Text(ui("{0} 分钟后", [minutes])),
               ),
             const Divider(),
             CheckboxMenuButton(
@@ -288,18 +311,20 @@ class _SleepTimerSubmenu extends StatelessWidget {
               onChanged: (value) {
                 service.stopAfterCurrent.value = value ?? false;
               },
-              child: const Text("播完当前歌曲后停止"),
+              child: Text(ui("播完当前歌曲后停止")),
             ),
             if (remaining != null) const Divider(),
             if (remaining != null)
               MenuItemButton(
                 onPressed: service.cancelSleepTimer,
                 leadingIcon: const Icon(Symbols.timer_off),
-                child: Text("取消倒计时（${_format(remaining)}）"),
+                child: Text(ui("取消倒计时（{0}）", [_format(remaining)])),
               ),
           ],
           child: Text(
-            remaining == null ? "睡眠定时" : "睡眠定时 ${_format(remaining)}",
+            remaining == null
+                ? ui("睡眠定时")
+                : ui("睡眠定时 {0}", [_format(remaining)]),
           ),
         );
       },
@@ -312,32 +337,49 @@ class _DesktopLyricSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     return ListenableBuilder(
       listenable: PlayService.instance.desktopLyricService,
       builder: (context, _) {
         final desktopLyricService = PlayService.instance.desktopLyricService;
-        return FutureBuilder(
-          future: desktopLyricService.desktopLyric,
-          builder: (context, snapshot) => IconButton(
-            tooltip: "桌面歌词；现在：${snapshot.data == null ? "禁用" : "启用"}",
-            onPressed: snapshot.data == null
-                ? desktopLyricService.startDesktopLyric
-                : desktopLyricService.isLocked
-                    ? desktopLyricService.sendUnlockMessage
-                    : desktopLyricService.killDesktopLyric,
-            icon: snapshot.connectionState == ConnectionState.done
-                ? Icon(
-                    desktopLyricService.isLocked ? Symbols.lock : Symbols.toast,
-                    fill: snapshot.data == null ? 0 : 1,
-                  )
-                : const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(),
-                  ),
-            color: scheme.onSecondaryContainer,
-          ),
+        final tooltip = switch (desktopLyricService.state) {
+          DesktopLyricState.stopped => ui("开启桌面歌词"),
+          DesktopLyricState.starting => ui("正在启动桌面歌词"),
+          DesktopLyricState.running when desktopLyricService.isLocked =>
+            ui("桌面歌词已锁定；点击解锁"),
+          DesktopLyricState.running => ui("关闭桌面歌词"),
+          DesktopLyricState.recovering => ui("桌面歌词异常，正在恢复"),
+          DesktopLyricState.failed => ui("桌面歌词启动失败；点击重试"),
+        };
+        final onPressed = switch (desktopLyricService.state) {
+          DesktopLyricState.starting || DesktopLyricState.recovering => null,
+          DesktopLyricState.running when desktopLyricService.isLocked =>
+            desktopLyricService.sendUnlockMessage,
+          DesktopLyricState.running => desktopLyricService.killDesktopLyric,
+          DesktopLyricState.stopped ||
+          DesktopLyricState.failed =>
+            desktopLyricService.startDesktopLyric,
+        };
+
+        return IconButton(
+          tooltip: tooltip,
+          onPressed: onPressed,
+          icon: desktopLyricService.isStarting
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2.2),
+                )
+              : Icon(
+                  desktopLyricService.state == DesktopLyricState.failed
+                      ? Symbols.error
+                      : desktopLyricService.isLocked
+                          ? Symbols.lock
+                          : Symbols.toast,
+                  fill: desktopLyricService.isRunning ? 1 : 0,
+                ),
+          color: scheme.onSecondaryContainer,
         );
       },
     );
@@ -361,12 +403,13 @@ class _NowPlayingVolDspSliderState extends State<_NowPlayingVolDspSlider> {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
     return MenuAnchor(
-      style: MenuStyle(
+      style: const MenuStyle(
         shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          AppShape.control,
         ),
       ),
       menuChildren: [
@@ -403,7 +446,7 @@ class _NowPlayingVolDspSliderState extends State<_NowPlayingVolDspSlider> {
         ),
       ],
       builder: (context, controller, _) => IconButton(
-        tooltip: "音量",
+        tooltip: ui("音量"),
         onPressed: () {
           if (controller.isOpen) {
             controller.close();
@@ -423,6 +466,7 @@ class _NowPlayingPlayModeSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final playbackService = PlayService.instance.playbackService;
 
@@ -439,11 +483,13 @@ class _NowPlayingPlayModeSwitch extends StatelessWidget {
         }
 
         return IconButton(
-          tooltip: "播放模式；现在：${switch (playMode) {
-            PlayMode.forward => "顺序播放",
-            PlayMode.loop => "列表循环",
-            PlayMode.singleLoop => "单曲循环",
-          }}",
+          tooltip: ui("播放模式；现在：{0}", [
+            switch (playMode) {
+              PlayMode.forward => ui("顺序播放"),
+              PlayMode.loop => ui("列表循环"),
+              PlayMode.singleLoop => ui("单曲循环")
+            }
+          ]),
           onPressed: () {
             if (playMode == PlayMode.forward) {
               playbackService.setPlayMode(PlayMode.loop);
@@ -466,13 +512,14 @@ class _NowPlayingShuffleSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final playbackService = PlayService.instance.playbackService;
 
     return ValueListenableBuilder(
       valueListenable: playbackService.shuffle,
       builder: (context, shuffle, _) => IconButton(
-        tooltip: "随机；现在：${shuffle ? "启用" : "禁用"}",
+        tooltip: ui("随机；现在：{0}", [shuffle ? ui("启用") : ui("禁用")]),
         onPressed: () {
           playbackService.useShuffle(!shuffle);
         },
@@ -489,6 +536,7 @@ class _NowPlayingMainControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final playbackService = PlayService.instance.playbackService;
 
@@ -496,41 +544,54 @@ class _NowPlayingMainControls extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
-          tooltip: "上一曲",
+          tooltip: ui("上一曲"),
           onPressed: playbackService.lastAudio,
           icon: const Icon(Symbols.skip_previous),
           style: LargeFilledIconButtonStyle(primary: false, scheme: scheme),
         ),
         const SizedBox(width: 16),
-        StreamBuilder(
-          stream: playbackService.playerStateStream,
-          initialData: playbackService.playerState,
-          builder: (context, snapshot) {
-            final playerState = snapshot.data!;
-            late void Function() onTap;
-            if (playerState == PlayerState.playing) {
-              onTap = playbackService.pause;
-            } else if (playerState == PlayerState.completed) {
-              onTap = playbackService.playAgain;
-            } else {
-              onTap = playbackService.start;
-            }
+        ValueListenableBuilder<bool>(
+          valueListenable: playbackService.isBuffering,
+          builder: (context, isBuffering, _) => StreamBuilder(
+            stream: playbackService.playerStateStream,
+            initialData: playbackService.playerState,
+            builder: (context, snapshot) {
+              final playerState = snapshot.data!;
+              late void Function() onTap;
+              if (playerState == PlayerState.playing) {
+                onTap = playbackService.pause;
+              } else if (playerState == PlayerState.completed) {
+                onTap = playbackService.playAgain;
+              } else {
+                onTap = playbackService.start;
+              }
 
-            return IconButton(
-              tooltip: playerState == PlayerState.playing ? "暂停" : "播放",
-              onPressed: onTap,
-              icon: Icon(
-                playerState == PlayerState.playing
-                    ? Symbols.pause
-                    : Symbols.play_arrow,
-              ),
-              style: LargeFilledIconButtonStyle(primary: true, scheme: scheme),
-            );
-          },
+              return IconButton(
+                tooltip: isBuffering
+                    ? ui("正在获取播放地址")
+                    : playerState == PlayerState.playing
+                        ? ui("暂停")
+                        : ui("播放"),
+                onPressed: isBuffering ? null : onTap,
+                icon: isBuffering
+                    ? const SizedBox.square(
+                        dimension: 22.0,
+                        child: CircularProgressIndicator(strokeWidth: 2.2),
+                      )
+                    : Icon(
+                        playerState == PlayerState.playing
+                            ? Symbols.pause
+                            : Symbols.play_arrow,
+                      ),
+                style:
+                    LargeFilledIconButtonStyle(primary: true, scheme: scheme),
+              );
+            },
+          ),
         ),
         const SizedBox(width: 16),
         IconButton(
-          tooltip: "下一曲",
+          tooltip: ui("下一曲"),
           onPressed: playbackService.nextAudio,
           icon: const Icon(Symbols.skip_next),
           style: LargeFilledIconButtonStyle(primary: false, scheme: scheme),
@@ -551,8 +612,17 @@ class _NowPlayingSlider extends StatefulWidget {
 class _NowPlayingSliderState extends State<_NowPlayingSlider> {
   final dragPosition = ValueNotifier(0.0);
   bool isDragging = false;
+  String? _dragAudioPath;
+
+  @override
+  void dispose() {
+    dragPosition.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final playbackService = context.watch<PlaybackService>();
     final nowPlayingLength = playbackService.length;
@@ -577,16 +647,16 @@ class _NowPlayingSliderState extends State<_NowPlayingSlider> {
                   inactiveColor: scheme.outline,
                   min: 0.0,
                   max: nowPlayingLength,
-                  value: isDragging
-                      ? dragPosition.value
-                      : positionSnapshot.data! > nowPlayingLength
-                          ? nowPlayingLength
-                          : positionSnapshot.data!,
+                  value:
+                      (isDragging ? dragPosition.value : positionSnapshot.data!)
+                          .clamp(0.0, nowPlayingLength)
+                          .toDouble(),
                   label: Duration(
                     milliseconds: (dragPosition.value * 1000).toInt(),
                   ).toStringHMMSS(),
                   onChangeStart: (value) {
                     isDragging = true;
+                    _dragAudioPath = playbackService.nowPlaying?.path;
                     dragPosition.value = value;
                   },
                   onChanged: (value) {
@@ -594,7 +664,10 @@ class _NowPlayingSliderState extends State<_NowPlayingSlider> {
                   },
                   onChangeEnd: (value) {
                     isDragging = false;
-                    playbackService.seek(value);
+                    if (_dragAudioPath == playbackService.nowPlaying?.path) {
+                      playbackService.seek(value);
+                    }
+                    _dragAudioPath = null;
                   },
                 ),
                 // builder: (context, positionSnapshot) => SquigglySlider(
@@ -634,8 +707,11 @@ class _NowPlayingSliderState extends State<_NowPlayingSlider> {
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: OverflowBar(
+            alignment: MainAxisAlignment.spaceBetween,
+            spacing: 8,
+            overflowSpacing: 2,
+            overflowAlignment: OverflowBarAlignment.end,
             children: [
               StreamBuilder(
                 stream: playbackService.positionStream,
@@ -674,23 +750,20 @@ class _NowPlayingInfo extends StatefulWidget {
 
 class __NowPlayingInfoState extends State<_NowPlayingInfo> {
   final playbackService = PlayService.instance.playbackService;
-  Future<ImageProvider<Object>?>? nowPlayingCover;
 
   void updateCover() {
-    setState(() {
-      nowPlayingCover = playbackService.nowPlaying?.largeCover;
-    });
+    if (mounted) setState(() {});
   }
 
   @override
   void initState() {
     super.initState();
     playbackService.addListener(updateCover);
-    nowPlayingCover = playbackService.nowPlaying?.largeCover;
   }
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final nowPlaying = playbackService.nowPlaying;
 
@@ -736,30 +809,32 @@ class __NowPlayingInfoState extends State<_NowPlayingInfo> {
             const SizedBox(height: 16),
             Expanded(
               child: Center(
-                child: RepaintBoundary(
-                  child: nowPlayingCover == null
-                      ? placeholder
-                      : FutureBuilder(
-                          future: nowPlayingCover,
-                          builder: (context, snapshot) =>
-                              switch (snapshot.connectionState) {
-                            ConnectionState.done => snapshot.data == null
-                                ? placeholder
-                                : FittedBox(
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8.0),
-                                      child: Image(
-                                        image: snapshot.data!,
-                                        width: 400.0,
-                                        height: 400.0,
-                                        errorBuilder: (_, __, ___) =>
-                                            placeholder,
-                                      ),
-                                    ),
-                                  ),
-                            _ => loadingWidget,
-                          },
-                        ),
+                child: TouchTrackSwipe(
+                  onPrevious: playbackService.lastAudio,
+                  onNext: playbackService.nextAudio,
+                  child: RepaintBoundary(
+                    child: nowPlaying == null
+                        ? placeholder
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              final available =
+                                  constraints.biggest.shortestSide;
+                              final size = available.isFinite && available > 0
+                                  ? available.clamp(1.0, 400.0)
+                                  : 400.0;
+                              return Center(
+                                  child: ClipRRect(
+                                borderRadius: AppShape.surfaceRadius,
+                                child: AudioArtwork(
+                                  audio: nowPlaying,
+                                  size: size,
+                                  placeholder: placeholder,
+                                  loading: loadingWidget,
+                                ),
+                              ));
+                            },
+                          ),
+                  ),
                 ),
               ),
             )

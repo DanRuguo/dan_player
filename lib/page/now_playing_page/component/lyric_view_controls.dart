@@ -1,8 +1,11 @@
-﻿import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_source_view.dart';
+import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 enum LyricTextAlign {
   left,
@@ -61,6 +64,7 @@ class LyricViewControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     return const Padding(
       padding: EdgeInsets.all(8.0),
       child: Column(
@@ -68,6 +72,8 @@ class LyricViewControls extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           SetLyricSourceBtn(),
+          SizedBox(height: 8.0),
+          _LyricEditBtn(),
           SizedBox(height: 8.0),
           _LyricAlignSwitchBtn(),
           SizedBox(height: 8.0),
@@ -85,17 +91,37 @@ class LyricViewControls extends StatelessWidget {
   }
 }
 
+class _LyricEditBtn extends StatelessWidget {
+  const _LyricEditBtn();
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final audio = PlayService.instance.playbackService.nowPlaying;
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      onPressed: audio == null || audio.isOnline
+          ? null
+          : () => showLyricEditorDialog(context, audio),
+      tooltip: audio?.isOnline == true ? ui("联网歌词为只读") : ui("编辑本地歌词"),
+      color: scheme.onSecondaryContainer,
+      icon: const Icon(Symbols.edit_document),
+    );
+  }
+}
+
 class _LyricAlignSwitchBtn extends StatelessWidget {
   const _LyricAlignSwitchBtn();
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final lyricViewController = context.watch<LyricViewController>();
 
     return IconButton(
       onPressed: lyricViewController.switchLyricTextAlign,
-      tooltip: "切换歌词对齐方向",
+      tooltip: ui("切换歌词对齐方向"),
       color: scheme.onSecondaryContainer,
       icon: Icon(switch (lyricViewController.lyricTextAlign) {
         LyricTextAlign.left => Symbols.format_align_left,
@@ -111,12 +137,13 @@ class _IncreaseFontSizeBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final lyricViewController = context.watch<LyricViewController>();
 
     return IconButton(
       onPressed: lyricViewController.increaseFontSize,
-      tooltip: "增大歌词字体",
+      tooltip: ui("增大歌词字体"),
       color: scheme.onSecondaryContainer,
       icon: const Icon(Symbols.text_increase),
     );
@@ -128,12 +155,13 @@ class _DecreaseFontSizeBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final lyricViewController = context.watch<LyricViewController>();
 
     return IconButton(
       onPressed: lyricViewController.decreaseFontSize,
-      tooltip: "减小歌词字体",
+      tooltip: ui("减小歌词字体"),
       color: scheme.onSecondaryContainer,
       icon: const Icon(Symbols.text_decrease),
     );

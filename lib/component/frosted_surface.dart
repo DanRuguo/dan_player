@@ -2,15 +2,18 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import 'package:dan_player/component/app_shape.dart';
+
 class FrostedSurface extends StatelessWidget {
   const FrostedSurface({
     super.key,
     required this.child,
-    this.borderRadius = const BorderRadius.all(Radius.circular(16.0)),
+    this.borderRadius = AppShape.surfaceRadius,
     this.padding = EdgeInsets.zero,
     this.blur = 20.0,
     this.tintColor,
     this.borderColor,
+    this.showBorder = true,
     this.boxShadow,
     this.clipBehavior = Clip.antiAlias,
   });
@@ -21,6 +24,7 @@ class FrostedSurface extends StatelessWidget {
   final double blur;
   final Color? tintColor;
   final Color? borderColor;
+  final bool showBorder;
   final List<BoxShadow>? boxShadow;
   final Clip clipBehavior;
 
@@ -31,8 +35,8 @@ class FrostedSurface extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final tint = tintColor ??
         (isDark
-            ? scheme.surfaceContainerHighest.withValues(alpha: 0.58)
-            : scheme.surface.withValues(alpha: 0.74));
+            ? scheme.surfaceContainerHighest.withValues(alpha: 0.44)
+            : scheme.surface.withValues(alpha: 0.60));
     final outline = borderColor ??
         scheme.outlineVariant.withValues(alpha: isDark ? 0.36 : 0.56);
     final shadows = boxShadow ??
@@ -58,7 +62,7 @@ class FrostedSurface extends StatelessWidget {
             decoration: BoxDecoration(
               color: tint,
               borderRadius: borderRadius,
-              border: Border.all(color: outline),
+              border: showBorder ? Border.all(color: outline) : null,
             ),
             child: Padding(
               padding: padding,

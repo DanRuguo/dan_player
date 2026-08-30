@@ -1,6 +1,9 @@
-﻿import 'package:dan_player/component/responsive_builder.dart';
+import 'package:dan_player/component/responsive_builder.dart';
+import 'package:dan_player/component/app_entrance.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 /// title, actions, body
 ///
@@ -14,16 +17,31 @@ class PageScaffold extends StatelessWidget {
     required this.title,
     this.subtitle,
     required this.actions,
+    this.responsiveActions,
+    this.header,
+    this.headerPadding = const EdgeInsets.all(16),
     required this.body,
   });
 
   final String title;
   final String? subtitle;
   final List<Widget> actions;
+
+  /// A compact, self-wrapping toolbar. Unlike the legacy actions list, it is
+  /// never nested in another overflow menu and gains its own row on narrow
+  /// windows or with large accessibility text.
+  final Widget? responsiveActions;
+
+  /// Optional identity layout for richer pages such as playlist artwork. Its
+  /// own vertical viewport only scrolls when large text/short windows need it;
+  /// the content list always retains space and an independent scroll position.
+  final Widget? header;
+  final EdgeInsetsGeometry headerPadding;
   final Widget body;
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
     return ResponsiveBuilder(builder: (context, screenType) {
@@ -60,11 +78,9 @@ class PageScaffold extends StatelessWidget {
                 }
               }
 
-              final menuStyle = MenuStyle(
+              const menuStyle = MenuStyle(
                 shape: WidgetStatePropertyAll(
-                  RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                  AppShape.control,
                 ),
               );
 
@@ -79,7 +95,7 @@ class PageScaffold extends StatelessWidget {
                       style: menuStyle,
                       menuChildren: foldedColumn,
                       builder: (_, controller, __) => IconButton.filledTonal(
-                        tooltip: "更多",
+                        tooltip: ui("更多"),
                         onPressed: () {
                           controller.isOpen
                               ? controller.close()
@@ -104,25 +120,83 @@ class PageScaffold extends StatelessWidget {
         }
       }
 
-      return ColoredBox(
-        color: scheme.surface,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 16.0,
-            vertical: 8.0,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: rowChildren,
+      return AppEntranceScope(
+        child: ColoredBox(
+          color: scheme.surface,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16.0,
+              vertical: 8.0,
+            ),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final titleArea = Padding(
+                padding: headerPadding,
+                child: AppEntrance(
+                  identity: ('page-header', title),
+                  child: header ??
+                      (responsiveActions == null
+                          ? Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: rowChildren,
+                            )
+                          : LayoutBuilder(builder: (context, constraints) {
+                              final titleWidget = subtitle == null
+                                  ? onlyTitle(scheme)
+                                  : withSubtitle(scheme);
+                              final largeText =
+                                  MediaQuery.textScalerOf(context).scale(14) >
+                                      19;
+                              if (constraints.maxWidth < 880 || largeText) {
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Row(children: [titleWidget]),
+                                    const SizedBox(height: 12),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: responsiveActions,
+                                    ),
+                                  ],
+                                );
+                              }
+                              return Row(
+                                children: [
+                                  titleWidget,
+                                  const SizedBox(width: 20),
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                        maxWidth: constraints.maxWidth * .65),
+                                    child: responsiveActions,
+                                  ),
+                                ],
+                              );
+                            })),
                 ),
-              ),
-              Expanded(child: body),
-            ],
+              );
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Keep the same viewport tree at every window width. A
+                  // wrapped standard toolbar needs the same short-window
+                  // budget as artwork headers, without remounting entrances
+                  // or borrowing the content list's scroll controller.
+                  if (constraints.hasBoundedHeight)
+                    ConstrainedBox(
+                      constraints:
+                          BoxConstraints(maxHeight: constraints.maxHeight * .6),
+                      child: SingleChildScrollView(
+                        key: const ValueKey('page-custom-header-scroll'),
+                        primary: false,
+                        child: titleArea,
+                      ),
+                    )
+                  else
+                    titleArea,
+                  Expanded(child: body),
+                ],
+              );
+            }),
           ),
         ),
       );

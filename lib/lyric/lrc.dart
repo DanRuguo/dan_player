@@ -1,8 +1,12 @@
-﻿import 'dart:math';
+import 'dart:math';
+import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_text_codec.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
+import 'package:dan_player/utils.dart';
+import 'package:path/path.dart' as path;
 
 class LrcLine extends UnsyncLyricLine {
   bool isBlank;
@@ -32,7 +36,7 @@ class LrcLine extends UnsyncLyricLine {
     final left = line.indexOf("[");
     final right = line.indexOf("]");
 
-    if (left == -1 || right == -1) {
+    if (left == -1 || right <= left) {
       return null;
     }
 
@@ -52,7 +56,11 @@ class LrcLine extends UnsyncLyricLine {
       second = double.tryParse(timeList[1]);
     }
 
-    if (minute == null || second == null) {
+    if (minute == null ||
+        second == null ||
+        minute < 0 ||
+        !second.isFinite ||
+        second < 0) {
       return null;
     }
 
@@ -161,21 +169,17 @@ class Lrc extends Lyric {
       return null;
     }
 
-    for (var i = 0; i < lines.length - 1; i++) {
-      lines[i].length = lines[i + 1].start - lines[i].start;
-    }
-    if (lines.isNotEmpty) {
-      lines.last.length = Duration.zero;
-    }
-
-    final result = Lrc(lines, source);
+    var result = Lrc(lines, source);
     result._sort();
-
-    if (separator == null) {
-      return result;
+    if (separator != null) result = result._combineLrcLine(separator);
+    // Editing timestamps can reorder lines. Compute animation lengths only
+    // after stable sorting and combining translations at the same timestamp.
+    for (var i = 0; i < result.lines.length - 1; i++) {
+      (result.lines[i] as LrcLine).length =
+          result.lines[i + 1].start - result.lines[i].start;
     }
-
-    return result._combineLrcLine(separator);
+    (result.lines.last as LrcLine).length = Duration.zero;
+    return result;
   }
 
   /// 只支持读取 ID3V2, VorbisComment, Mp4Ilst 存储的内嵌歌词
@@ -184,6 +188,22 @@ class Lrc extends Lyric {
     Audio belongTo, {
     String? separator = "┃",
   }) async {
+    if (belongTo.isOnline) return null;
+    // A user-edited sidecar is an explicit local override. Embedded tags must
+    // not hide it immediately after the editor has saved it.
+    final sidecar = File(path.setExtension(belongTo.path, '.lrc'));
+    try {
+      if (await sidecar.exists()) {
+        final local = Lrc.fromLrcText(
+          decodeLyricText(await sidecar.readAsBytes()),
+          LrcSource.local,
+          separator: separator,
+        );
+        if (local != null) return local;
+      }
+    } catch (error) {
+      LOGGER.w('[lyric] sidecar could not be read: $error');
+    }
     Lrc? lyric = await getLyricFromPath(path: belongTo.path).then((value) {
       if (value == null) {
         return null;

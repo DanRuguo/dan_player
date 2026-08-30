@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/playlist_view.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/page.dart';
 import 'package:dan_player/page/uni_page.dart';
@@ -129,6 +130,19 @@ class AppPreference {
   var playlistDetailPagePref =
       PagePreference(0, SortOrder.ascending, ContentView.list);
 
+  // Old preference records remain intact. The unified view inherits the
+  // collection layout once and then stores its own explicit user choice.
+  ContentView? unifiedPlaylistsView;
+  ContentView? unifiedPlaylistDetailsView;
+  // Three-way playlist layouts are separate from the old library/list enum.
+  // Keep old fields intact so older versions retain their last known layout.
+  PlaylistViewMode? unifiedPlaylistsLayout;
+  PlaylistViewMode? unifiedPlaylistDetailsLayout;
+  // Display sorting never rewrites a playlist's drag-defined custom order.
+  // Separate per-level preferences also retain a child's chosen default when
+  // a parent queue is expanded depth-first.
+  final Map<String, String> unifiedPlaylistSortModes = {};
+
   int startPage = 0;
 
   var playbackPref = PlaybackPreference(PlayMode.forward, 1.0);
@@ -153,6 +167,11 @@ class AppPreference {
         "folderDetailPagePref": folderDetailPagePref.toMap(),
         "playlistsPagePref": playlistsPagePref.toMap(),
         "playlistDetailPagePref": playlistDetailPagePref.toMap(),
+        "unifiedPlaylistsView": unifiedPlaylistsView?.name,
+        "unifiedPlaylistDetailsView": unifiedPlaylistDetailsView?.name,
+        "unifiedPlaylistsLayout": unifiedPlaylistsLayout?.name,
+        "unifiedPlaylistDetailsLayout": unifiedPlaylistDetailsLayout?.name,
+        "unifiedPlaylistSortModes": unifiedPlaylistSortModes,
         "startPage": startPage,
         "playbackPref": playbackPref.toMap(),
         "nowPlayingPagePref": nowPlayingPagePref.toMap(),
@@ -201,12 +220,35 @@ class AppPreference {
       instance.folderDetailPagePref = PagePreference.fromMap(
         prefMap["folderDetailPagePref"],
       );
-      instance.playlistsPagePref = PagePreference.fromMap(
-        prefMap["playlistsPagePref"],
-      );
-      instance.playlistDetailPagePref = PagePreference.fromMap(
-        prefMap["playlistDetailPagePref"],
-      );
+      if (prefMap['playlistsPagePref'] is Map) {
+        instance.playlistsPagePref =
+            PagePreference.fromMap(prefMap['playlistsPagePref']);
+      }
+      if (prefMap['playlistDetailPagePref'] is Map) {
+        instance.playlistDetailPagePref =
+            PagePreference.fromMap(prefMap['playlistDetailPagePref']);
+      }
+      if (prefMap['unifiedPlaylistsView'] is String) {
+        instance.unifiedPlaylistsView =
+            ContentView.fromString(prefMap['unifiedPlaylistsView']);
+      }
+      if (prefMap['unifiedPlaylistDetailsView'] is String) {
+        instance.unifiedPlaylistDetailsView =
+            ContentView.fromString(prefMap['unifiedPlaylistDetailsView']);
+      }
+      instance.unifiedPlaylistsLayout =
+          PlaylistViewMode.parse(prefMap['unifiedPlaylistsLayout']);
+      instance.unifiedPlaylistDetailsLayout =
+          PlaylistViewMode.parse(prefMap['unifiedPlaylistDetailsLayout']);
+      instance.unifiedPlaylistSortModes.clear();
+      final savedPlaylistSorts = prefMap['unifiedPlaylistSortModes'];
+      if (savedPlaylistSorts is Map) {
+        for (final entry in savedPlaylistSorts.entries) {
+          if (entry.key is String && entry.value is String) {
+            instance.unifiedPlaylistSortModes[entry.key] = entry.value;
+          }
+        }
+      }
       instance.startPage = prefMap["startPage"] ?? 0;
       if (instance.startPage < 0 || instance.startPage >= 5) {
         instance.startPage = 0;

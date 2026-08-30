@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 class NowPlayingInfo extends StatelessWidget {
-  const NowPlayingInfo({super.key});
+  const NowPlayingInfo({super.key, this.controller});
+
+  final DesktopLyricController? controller;
 
   @override
   Widget build(BuildContext context) {
@@ -22,10 +24,14 @@ class NowPlayingInfo extends StatelessWidget {
     );
 
     return ValueListenableBuilder(
-      valueListenable: DesktopLyricController.instance.nowPlaying,
+      valueListenable:
+          (controller ?? DesktopLyricController.instance).nowPlaying,
       builder: (context, nowPlaying, _) {
         return AnimatedSwitcher(
-          duration: AppMotion.standard,
+          duration: MediaQuery.disableAnimationsOf(context) ||
+                  !TickerMode.valuesOf(context).enabled
+              ? Duration.zero
+              : AppMotion.standard,
           switchInCurve: AppMotion.standardCurve,
           switchOutCurve: Curves.easeInCubic,
           child: Column(

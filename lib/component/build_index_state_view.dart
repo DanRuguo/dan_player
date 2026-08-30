@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class BuildIndexStateView extends StatefulWidget {
   const BuildIndexStateView({
@@ -72,6 +73,7 @@ class _BuildIndexStateViewState extends State<BuildIndexStateView> {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
     return StreamBuilder(
@@ -88,8 +90,8 @@ class _BuildIndexStateViewState extends State<BuildIndexStateView> {
             const SizedBox(height: 8.0),
             Text(
               snapshot.hasError
-                  ? "刷新失败：${snapshot.error}"
-                  : snapshot.data?.message ?? "正在准备扫描",
+                  ? ui("刷新失败：{0}", [snapshot.error])
+                  : snapshot.data?.message ?? ui("正在准备扫描"),
               style: TextStyle(color: scheme.onSurface),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,

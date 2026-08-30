@@ -53,22 +53,6 @@ void EnableFullDpiSupportIfAvailable(HWND hwnd) {
   FreeLibrary(user32_module);
 }
 
-bool IsSystemAppThemeDark() {
-  DWORD light_mode;
-  DWORD light_mode_size = sizeof(light_mode);
-  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
-                               kGetPreferredBrightnessRegValue,
-                               RRF_RT_REG_DWORD, nullptr, &light_mode,
-                               &light_mode_size);
-  return result == ERROR_SUCCESS && light_mode == 0;
-}
-
-HBRUSH GetStartupBackgroundBrush() {
-  static HBRUSH light_brush = CreateSolidBrush(RGB(247, 244, 237));
-  static HBRUSH dark_brush = CreateSolidBrush(RGB(16, 16, 14));
-  return IsSystemAppThemeDark() ? dark_brush : light_brush;
-}
-
 }  // namespace
 
 // Manages the Win32Window's window class registration.
@@ -113,7 +97,12 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.hInstance = GetModuleHandle(nullptr);
     window_class.hIcon =
         LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    window_class.hbrBackground = GetStartupBackgroundBrush();
+    // DWM glass requires RGB/alpha zero under transparent Flutter pixels.
+    // A themed solid class brush masks the real desktop backdrop. The startup
+    // Flutter splash is opaque; WindowBackdropController paints an explicit
+    // system/theme fallback whenever native transparency is unavailable.
+    window_class.hbrBackground =
+        static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
     RegisterClass(&window_class);
@@ -151,7 +140,10 @@ bool Win32Window::Create(const std::wstring& title,
   double scale_factor = dpi / 96.0;
 
   HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+      // The Flutter view owns its pixels. Parent background erasure must not
+      // paint over that child while DWM/Flutter are presenting different frames.
+      // This only changes GDI clipping, not native resize/snap/fullscreen styles.
+      window_class, title.c_str(), WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);

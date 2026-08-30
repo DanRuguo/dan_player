@@ -3,12 +3,30 @@ import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/utils.dart';
 
 const String albumCollectionId = "__albums__";
 
 final CustomAudioOrder customAudioOrder = CustomAudioOrder();
-final List<UserCollection> userCollections = [];
+
+/// Read-only legacy projections for old route payloads. The Playlist tree is
+/// the only editable/persisted source; collection files remain untouched.
+List<UserCollection> get userCollections => List.unmodifiable([
+      for (final playlist in playlistTree.allPlaylists)
+        if (playlist.legacyCollectionKey != null)
+          UserCollection(
+            id: playlist.legacyCollectionId ?? playlist.id,
+            name: playlist.name,
+            audioPaths: List.unmodifiable([
+              for (final entry in playlist.entries)
+                if (entry.audio != null) entry.audio!.path,
+            ]),
+            imagePath: playlist.imagePath,
+            createdAt: playlist.createdAt,
+            modifiedAt: playlist.modifiedAt,
+          ),
+    ]);
 
 Map<String, Audio> get _audioByPath => AudioLibrary.instance.audioByPath;
 
@@ -273,53 +291,12 @@ Future<void> saveCustomAudioOrder() async {
   }
 }
 
-Future<void> readCollections() async {
-  try {
-    final supportPath = (await getAppDataDir()).path;
-    final file = File("$supportPath\\collections.json");
-    if (!file.existsSync()) {
-      userCollections.clear();
-      await saveCollections();
-      return;
-    }
+/// Compatibility entry point. It shares an in-flight read with readPlaylists
+/// and never sanitizes or rewrites the legacy collections.json source.
+Future<void> readCollections() => readPlaylists();
 
-    final decoded = json.decode(await file.readAsString());
-    final collectionMaps = decoded is Map ? decoded["collections"] : null;
-    if (collectionMaps is! List) {
-      userCollections.clear();
-      await saveCollections();
-      return;
-    }
-
-    userCollections
-      ..clear()
-      ..addAll(collectionMaps.map((item) => UserCollection.fromMap(item)));
-
-    bool changed = false;
-    for (final collection in userCollections) {
-      if (collection.sanitize()) changed = true;
-    }
-
-    if (changed) await saveCollections();
-  } catch (err, trace) {
-    LOGGER.e(err, stackTrace: trace);
-    userCollections.clear();
-    await saveCollections();
-  }
-}
-
-Future<void> saveCollections() async {
-  try {
-    final supportPath = (await getAppDataDir()).path;
-    final file =
-        await File("$supportPath\\collections.json").create(recursive: true);
-    await file.writeAsString(json.encode({
-      "version": 1,
-      "collections": userCollections.map((item) => item.toMap()).toList(),
-    }));
-  } catch (err, trace) {
-    LOGGER.e(err, stackTrace: trace);
-  }
-}
+/// Compatibility save for callers already editing the canonical Playlist tree.
+/// Changes to legacy DTOs are not a second editable database.
+Future<void> saveCollections() => savePlaylists();
 
 String createCollectionId() => DateTime.now().microsecondsSinceEpoch.toString();

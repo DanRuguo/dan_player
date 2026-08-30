@@ -1,54 +1,176 @@
-﻿name: CI
+name: Windows CI
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    name: Windows CI
-    runs-on: windows-latest
-    
+    name: Test and package Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PUB_CACHE: ${{ github.workspace }}\tool\pub-cache
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.22.0'
-        
-    - name: Get dependencies
-      run: flutter pub get
+      - name: Set up Flutter 3.47.1
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.1'
+          channel: stable
+          architecture: x64
+          cache: true
+          pub-cache-path: ${{ github.workspace }}/tool/pub-cache
 
-    - name: Build Windows
-      run: flutter build windows
+      # The vendored Cargokit invokes `rustup run stable` explicitly. Install
+      # that channel rather than an unused version-named toolchain. The local
+      # Windows validation used stable rustc 1.98.0 with Flutter 3.47.1.
+      - name: Set up Rust stable (MSVC x64)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
 
-    - name: Download dll
-      run: |
-        mkdir -p build\tmp
-        mkdir -p build\windows\x64\runner\Release\BASS
-        
-        # download BASS add-ons from UN4SEEN
-        curl -o bass.zip https://www.un4seen.com/files/bass24.zip
-        curl -o bassape24.zip https://www.un4seen.com/files/bassape24.zip
-        curl -o bassdsd24.zip https://www.un4seen.com/files/bassdsd24.zip
-        curl -o bassflac24.zip https://www.un4seen.com/files/bassflac24.zip
-        curl -o bassmidi24.zip https://www.un4seen.com/files/bassmidi24.zip
-        curl -o bassopus24.zip https://www.un4seen.com/files/bassopus24.zip
-        curl -o basswv24.zip https://www.un4seen.com/files/basswv24.zip
-        
-        Expand-Archive -Path bass.zip -DestinationPath build\tmp -Force
-        Expand-Archive -Path bassape24.zip -DestinationPath build\tmp -Force
-        Expand-Archive -Path bassdsd24.zip -DestinationPath build\tmp -Force
-        Expand-Archive -Path bassflac24.zip -DestinationPath build\tmp -Force
-        Expand-Archive -Path bassmidi24.zip -DestinationPath build\tmp -Force
-        Expand-Archive -Path bassopus24.zip -DestinationPath build\tmp -Force
-        Expand-Archive -Path basswv24.zip -DestinationPath build\tmp -Force
-        
-        # mv build\tmp\x64\* build\windows\x64\runner\Release\
-        mv build\tmp\x64\* build\windows\x64\runner\Release\BASS\
+      - name: Record toolchain and prepare both Flutter projects
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $flutter = (Get-Command flutter.bat).Source
+          $env:FLUTTER_ROOT = Split-Path -Parent (Split-Path -Parent $flutter)
+          "FLUTTER_ROOT=$env:FLUTTER_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $flutter --version
+          if ($LASTEXITCODE -ne 0) { throw 'Flutter version check failed.' }
+          rustup run stable rustc --version
+          if ($LASTEXITCODE -ne 0) { throw 'Rust stable is unavailable.' }
+          & .\scripts\prepare_windows_dependencies.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -Flutter $flutter
+          & .\scripts\prepare_windows_dependencies.ps1 -ProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'third_party\desktop_lyric') -Flutter $flutter
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: "Dan Player Test Version"
-        path: build\windows\x64\runner\Release\*
+      - name: Analyze and test Dan Player
+        run: |
+          flutter analyze --no-pub --no-fatal-infos lib test
+          if ($LASTEXITCODE -ne 0) { throw 'Dan Player analysis failed.' }
+          flutter test --no-pub
+          if ($LASTEXITCODE -ne 0) { throw 'Dan Player tests failed.' }
+          rustup run stable cargo test --manifest-path rust/Cargo.toml --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
+          python -B -m unittest discover -s scripts -p test_audit_classification_metadata.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Metadata audit privacy tests failed.' }
+
+      - name: Analyze and test desktop lyrics
+        working-directory: third_party/desktop_lyric
+        run: |
+          flutter analyze --no-pub --no-fatal-infos lib
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop lyrics analysis failed.' }
+          if (Test-Path -LiteralPath test -PathType Container) {
+            flutter test --no-pub
+            if ($LASTEXITCODE -ne 0) { throw 'Desktop lyrics tests failed.' }
+          } else {
+            Write-Host 'The desktop lyrics package currently has no standalone test directory.'
+          }
+
+      - name: Build Dan Player release
+        run: |
+          & .\scripts\invalidate_windows_icon_assets.ps1 -ProjectRoot $env:GITHUB_WORKSPACE
+          flutter build windows --release --no-pub
+          if ($LASTEXITCODE -ne 0) { throw 'Dan Player release build failed.' }
+          & .\scripts\verify_windows_release_fonts.ps1 -ProjectRoot $env:GITHUB_WORKSPACE
+
+      - name: Test native backdrop and desktop integration policies
+        run: |
+          cmake --build build/windows/x64 --config Release --target window_resize_policy_test window_backdrop_policy_test window_backdrop_updates_test desktop_integration_policy_test taskbar_thumbnail_policy_test taskbar_peek_bitmap_test taskbar_peek_geometry_test desktop_integration_fonts_test desktop_integration_blur_test desktop_integration_paint_test
+          if ($LASTEXITCODE -ne 0) { throw 'Native backdrop tests did not compile.' }
+          & .\build\windows\x64\window_tests\Release\window_resize_policy_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native window resize policy tests failed.' }
+          & .\build\windows\x64\backdrop_tests\Release\window_backdrop_policy_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native backdrop compatibility tests failed.' }
+          & .\build\windows\x64\backdrop_tests\Release\window_backdrop_updates_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native backdrop drag/lifecycle tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\desktop_integration_policy_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native tray/taskbar policy tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\taskbar_thumbnail_policy_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar thumbnail tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\taskbar_peek_bitmap_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar Peek size/pixel/lifetime tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\taskbar_peek_geometry_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Hidden minimized-window Peek geometry tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\desktop_integration_fonts_test.exe .\assets\fonts\PingFangSC-Regular.ttf
+          if ($LASTEXITCODE -ne 0) { throw 'Native tray font lifetime tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\desktop_integration_blur_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native tray Gaussian blur/lifetime tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\desktop_integration_paint_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native tray atomic-paint/clipping/lifetime tests failed.' }
+
+      - name: Build desktop lyrics release
+        working-directory: third_party/desktop_lyric
+        run: |
+          & ..\..\scripts\invalidate_windows_icon_assets.ps1 -ProjectRoot (Get-Location).Path
+          flutter build windows --release --no-pub
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop lyrics release build failed.' }
+          & ..\..\scripts\verify_windows_release_fonts.ps1 -ProjectRoot (Get-Location).Path
+
+      - name: Test owned lyric window geometry and focus
+        working-directory: third_party/desktop_lyric
+        run: |
+          cmake --build build/windows/x64 --config Release --target desktop_lyric_owned_window_test desktop_lyric_palette_engine_test
+          if ($LASTEXITCODE -ne 0) { throw 'Owned lyric window regression did not compile.' }
+          $palettePreviousPath = $env:Path
+          try {
+            $env:Path = "$(Join-Path (Get-Location).Path 'windows\flutter\ephemeral');$env:Path"
+            & .\build\windows\x64\palette_tests\Release\desktop_lyric_owned_window_test.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Owned lyric HWND geometry/focus regression failed.' }
+            & .\build\windows\x64\palette_tests\Release\desktop_lyric_palette_engine_test.exe (Join-Path (Get-Location).Path 'build\windows\x64\runner\Release\data')
+            if ($LASTEXITCODE -ne 0) { throw 'Hidden lyric palette AOT startup/reuse regression failed.' }
+          } finally {
+            $env:Path = $palettePreviousPath
+          }
+
+      - name: Cache pinned BASS and tempo packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ github.workspace }}/tool/bass
+            ${{ github.workspace }}/tool/bass-fx
+          key: bass-tempo-windows-x64-${{ hashFiles('scripts/prepare_bass_runtime.ps1', 'scripts/prepare_bass_fx_runtime.ps1') }}
+
+      - name: Download and verify all eight BASS packages
+        run: |
+          $runtime = & .\scripts\prepare_bass_runtime.ps1 -CacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass')
+          Write-Host "Verified runtime: $($runtime.RuntimeDirectory)"
+          $tempoRuntime = & .\scripts\prepare_bass_fx_runtime.ps1 -CacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass-fx')
+          Write-Host "Verified tempo runtime: $($tempoRuntime.RuntimeDirectory)"
+
+      # This path never invokes the local signing script and has no private
+      # certificate/secret configuration. It produces an unsigned CI artifact,
+      # not a GitHub Release or an automatic update publication.
+      - name: Assemble portable ZIP and SHA256SUMS
+        id: package
+        run: |
+          $package = & .\scripts\assemble_windows_release.ps1 -BassCacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass') -BassFxCacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass-fx') -OutputRoot (Join-Path $env:GITHUB_WORKSPACE 'dist')
+          "zip=$($package.ZipPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "checksums=$($package.ChecksumPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload portable package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: DanPlayer-windows-x64-${{ github.sha }}
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.checksums }}
+          if-no-files-found: error
+          retention-days: 14

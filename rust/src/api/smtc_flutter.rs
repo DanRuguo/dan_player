@@ -220,8 +220,13 @@ impl SMTCFlutter {
         music_properties.SetArtist(&artist)?;
         music_properties.SetAlbumTitle(&album)?;
 
-        let pic_stream_ref =
-            if let Some(pic_data) = tag_reader::get_picture_from_path(path.to_string(), 256, 256) {
+        // Remote tracks use a stable online:// identity rather than a local
+        // file. Text metadata should still reach SMTC even when no local
+        // thumbnail can be extracted.
+        if std::path::Path::new(&path.to_string()).exists() {
+            let pic_stream_ref = if let Some(pic_data) =
+                tag_reader::get_picture_from_path(path.to_string(), 256, 256)
+            {
                 Self::_ras_ref_from_pic_data(&pic_data)?
             } else {
                 log_to_dart(format!("no embedded picture found for file: {}", path));
@@ -231,8 +236,8 @@ impl SMTCFlutter {
                     .get()?;
                 RandomAccessStreamReference::CreateFromStream(&thumbnail)?
             };
-
-        updater.SetThumbnail(&pic_stream_ref)?;
+            updater.SetThumbnail(&pic_stream_ref)?;
+        }
 
         updater.Update()?;
 

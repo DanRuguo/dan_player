@@ -1,6 +1,7 @@
 // ignore_for_file: constant_identifier_names
 
 import 'dart:convert';
+import 'package:desktop_lyric/desktop_lyric_appearance.dart';
 
 import 'package:json_annotation/json_annotation.dart';
 
@@ -56,21 +57,31 @@ class InitArgsMessage {
   /// theme
   final int onSurface;
 
-  const InitArgsMessage(
-    this.isPlaying,
-    this.title,
-    this.artist,
-    this.album,
-    this.darkMode,
-    this.primary,
-    this.surfaceContainer,
-    this.onSurface,
-  );
+  final bool vertical;
+  final double playbackRate;
+  final String language;
+  @JsonKey(fromJson: DesktopLyricAppearance.fromJson)
+  final DesktopLyricAppearance appearance;
+
+  const InitArgsMessage(this.isPlaying, this.title, this.artist, this.album,
+      this.darkMode, this.primary, this.surfaceContainer, this.onSurface,
+      {this.vertical = false,
+      this.playbackRate = 1.0,
+      this.language = 'zh',
+      this.appearance = DesktopLyricAppearance.defaults});
 
   factory InitArgsMessage.fromJson(Map<String, dynamic> json) =>
       _$InitArgsMessageFromJson(json);
 
   Map<String, dynamic> toJson() => _$InitArgsMessageToJson(this);
+}
+
+/// Main player -> helper; old helpers safely ignore this additive message.
+class UiLanguageMessage extends Message {
+  const UiLanguageMessage(this.language);
+  final String language;
+  @override
+  Map<String, dynamic> _toJson() => {'language': language};
 }
 
 /// desktop lyric -> player
@@ -155,6 +166,206 @@ class LyricLineChangedMessage extends Message {
 
   @override
   Map<String, dynamic> _toJson() => _$LyricLineChangedMessageToJson(this);
+}
+
+/// A word and its absolute playback timing used by the richer desktop lyric
+/// renderer. Keeping this as a plain value object preserves compatibility with
+/// older desktop lyric binaries, which simply ignore the newer message type.
+class DesktopLyricWord {
+  final int startMilliseconds;
+  final int lengthMilliseconds;
+  final String content;
+
+  const DesktopLyricWord(
+    this.startMilliseconds,
+    this.lengthMilliseconds,
+    this.content,
+  );
+
+  factory DesktopLyricWord.fromJson(Map<String, dynamic> json) {
+    return DesktopLyricWord(
+      (json['startMilliseconds'] as num?)?.toInt() ?? 0,
+      (json['lengthMilliseconds'] as num?)?.toInt() ?? 0,
+      json['content'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'startMilliseconds': startMilliseconds,
+        'lengthMilliseconds': lengthMilliseconds,
+        'content': content,
+      };
+}
+
+/// Periodic playback clock correction for desktop lyrics.
+///
+/// [sequence] identifies the current song. The desktop process discards an
+/// older sequence so a late lyric lookup can never overwrite a newer song.
+class PlaybackTimelineMessage extends Message {
+  final int sequence;
+  final int positionMilliseconds;
+  final bool playing;
+  final double playbackRate;
+
+  const PlaybackTimelineMessage(
+      this.sequence, this.positionMilliseconds, this.playing,
+      {this.playbackRate = 1.0});
+
+  factory PlaybackTimelineMessage.fromJson(Map<String, dynamic> json) {
+    return PlaybackTimelineMessage(
+      (json['sequence'] as num?)?.toInt() ?? 0,
+      (json['positionMilliseconds'] as num?)?.toInt() ?? 0,
+      json['playing'] as bool? ?? false,
+      playbackRate: safeDesktopPlaybackRate(json['playbackRate']),
+    );
+  }
+
+  @override
+  Map<String, dynamic> _toJson() => <String, dynamic>{
+        'sequence': sequence,
+        'positionMilliseconds': positionMilliseconds,
+        'playing': playing,
+        'playbackRate': safeDesktopPlaybackRate(playbackRate),
+      };
+}
+
+/// Old senders omit the multiplier. Reject invalid values rather than allowing
+/// NaN, negative clocks or unbounded elapsed-time extrapolation.
+double safeDesktopPlaybackRate(Object? value) =>
+    value is num && value.isFinite ? value.toDouble().clamp(.5, 2.0) : 1.0;
+
+/// Direction is independent of song/position so changing it never resets the
+/// lyric clock. New messages are ignored by older desktop lyric components.
+class DesktopLyricDisplayMessage extends Message {
+  const DesktopLyricDisplayMessage({this.vertical = false});
+
+  final bool vertical;
+
+  factory DesktopLyricDisplayMessage.fromJson(Map<String, dynamic> json) =>
+      DesktopLyricDisplayMessage(vertical: json['vertical'] == true);
+
+  @override
+  Map<String, dynamic> _toJson() => {'vertical': vertical};
+}
+
+/// desktop lyric -> player. The player persists the chosen orientation and
+/// sends its canonical setting back, without touching playback or lyric data.
+class DesktopLyricDisplayChangedMessage extends Message {
+  const DesktopLyricDisplayChangedMessage({required this.vertical});
+
+  final bool vertical;
+
+  factory DesktopLyricDisplayChangedMessage.fromJson(
+          Map<String, dynamic> json) =>
+      DesktopLyricDisplayChangedMessage(vertical: json['vertical'] == true);
+
+  @override
+  Map<String, dynamic> _toJson() => {'vertical': vertical};
+}
+
+/// Canonical player snapshot; revision prevents a slow pipe echo from undoing
+/// newer slider edits in the same helper process.
+class DesktopLyricAppearanceMessage extends Message {
+  const DesktopLyricAppearanceMessage(this.appearance, {this.revision = 0});
+  final DesktopLyricAppearance appearance;
+  final int revision;
+  factory DesktopLyricAppearanceMessage.fromJson(Map<String, dynamic> json) {
+    final value = DesktopLyricAppearance.tryFromJson(json['appearance']);
+    final revision = json['revision'];
+    if (value == null || revision is! int || revision < 0) {
+      throw const FormatException('Invalid desktop lyric appearance snapshot');
+    }
+    return DesktopLyricAppearanceMessage(value, revision: revision);
+  }
+  @override
+  Map<String, dynamic> _toJson() =>
+      {'appearance': appearance.toJson(), 'revision': revision};
+}
+
+/// Helper -> player. The player alone persists the snapshot.
+class DesktopLyricAppearanceChangedMessage
+    extends DesktopLyricAppearanceMessage {
+  const DesktopLyricAppearanceChangedMessage(super.appearance,
+      {required super.revision});
+  factory DesktopLyricAppearanceChangedMessage.fromJson(
+      Map<String, dynamic> json) {
+    final value = DesktopLyricAppearanceMessage.fromJson(json);
+    return DesktopLyricAppearanceChangedMessage(value.appearance,
+        revision: value.revision);
+  }
+}
+
+class DesktopLyricAppearanceSavedMessage extends Message {
+  const DesktopLyricAppearanceSavedMessage(
+      {required this.revision, required this.saved});
+  final int revision;
+  final bool saved;
+  factory DesktopLyricAppearanceSavedMessage.fromJson(
+      Map<String, dynamic> json) {
+    if (json['revision'] is! int ||
+        (json['revision'] as int) < 0 ||
+        json['saved'] is! bool) {
+      throw const FormatException('Invalid appearance save result');
+    }
+    return DesktopLyricAppearanceSavedMessage(
+        revision: json['revision'] as int, saved: json['saved'] as bool);
+  }
+  @override
+  Map<String, dynamic> _toJson() => {'revision': revision, 'saved': saved};
+}
+
+/// Full current-line snapshot for line transitions and word-level highlighting.
+class LyricLineTimelineMessage extends Message {
+  final int sequence;
+  final int lineIndex;
+  final int startMilliseconds;
+  final int lengthMilliseconds;
+  final String content;
+  final String? translation;
+  final List<DesktopLyricWord> words;
+
+  const LyricLineTimelineMessage({
+    required this.sequence,
+    required this.lineIndex,
+    required this.startMilliseconds,
+    required this.lengthMilliseconds,
+    required this.content,
+    required this.translation,
+    required this.words,
+  });
+
+  factory LyricLineTimelineMessage.fromJson(Map<String, dynamic> json) {
+    final rawWords = json['words'];
+    return LyricLineTimelineMessage(
+      sequence: (json['sequence'] as num?)?.toInt() ?? 0,
+      lineIndex: (json['lineIndex'] as num?)?.toInt() ?? -1,
+      startMilliseconds: (json['startMilliseconds'] as num?)?.toInt() ?? 0,
+      lengthMilliseconds: (json['lengthMilliseconds'] as num?)?.toInt() ?? 0,
+      content: json['content'] as String? ?? '',
+      translation: json['translation'] as String?,
+      words: rawWords is List
+          ? rawWords
+              .whereType<Map>()
+              .map(
+                (word) => DesktopLyricWord.fromJson(
+                  Map<String, dynamic>.from(word),
+                ),
+              )
+              .toList(growable: false)
+          : const <DesktopLyricWord>[],
+    );
+  }
+
+  @override
+  Map<String, dynamic> _toJson() => <String, dynamic>{
+        'sequence': sequence,
+        'lineIndex': lineIndex,
+        'startMilliseconds': startMilliseconds,
+        'lengthMilliseconds': lengthMilliseconds,
+        'content': content,
+        'translation': translation,
+        'words': words.map((word) => word.toJson()).toList(growable: false),
+      };
 }
 
 /// player -> desktop lyric

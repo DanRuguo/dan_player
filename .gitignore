@@ -31,6 +31,10 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+# Local toolchains, QA captures, generated render outputs and release packages.
+# Public, synthetic UI renders are explicitly stored under docs instead.
+/tool/
+/dist/
 
 # Symbolication related
 app.*.symbols

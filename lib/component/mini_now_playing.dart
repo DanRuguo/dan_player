@@ -1,5 +1,6 @@
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/frosted_surface.dart';
 import 'package:dan_player/component/rectangle_progress_indicator.dart';
 import 'package:dan_player/component/responsive_builder.dart';
@@ -8,8 +9,10 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class MiniNowPlaying extends StatelessWidget {
   const MiniNowPlaying({
@@ -18,6 +21,7 @@ class MiniNowPlaying extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     return ResponsiveBuilder(builder: (context, screenType) {
       return Align(
         alignment: Alignment.bottomCenter,
@@ -41,7 +45,7 @@ class MiniNowPlaying extends StatelessWidget {
               height: 72.0,
               width: width,
               child: FrostedSurface(
-                borderRadius: BorderRadius.circular(16.0),
+                borderRadius: AppShape.surfaceRadius,
                 blur: 22.0,
                 child: LayoutBuilder(builder: (context, constraints) {
                   return RectangleProgressIndicator(
@@ -63,8 +67,9 @@ class _NowPlayingForeground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    const borderRadius = BorderRadius.all(Radius.circular(16.0));
+    const borderRadius = AppShape.surfaceRadius;
 
     return Material(
       type: MaterialType.transparency,
@@ -117,7 +122,7 @@ class _NowPlayingForeground extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: scheme.onSurface,
+                                    color: scheme.primary,
                                     fontSize: 15.5,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -145,50 +150,66 @@ class _NowPlayingForeground extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8.0),
-                  StreamBuilder(
-                    stream: playbackService.playerStateStream,
-                    initialData: playbackService.playerState,
-                    builder: (context, snapshot) {
-                      late void Function() onPressed;
-                      if (snapshot.data! == PlayerState.playing) {
-                        onPressed = playbackService.pause;
-                      } else if (snapshot.data! == PlayerState.completed) {
-                        onPressed = playbackService.playAgain;
-                      } else {
-                        onPressed = playbackService.start;
-                      }
+                  ValueListenableBuilder<bool>(
+                    valueListenable: playbackService.isBuffering,
+                    builder: (context, isBuffering, _) => StreamBuilder(
+                      stream: playbackService.playerStateStream,
+                      initialData: playbackService.playerState,
+                      builder: (context, snapshot) {
+                        late void Function() onPressed;
+                        if (snapshot.data! == PlayerState.playing) {
+                          onPressed = playbackService.pause;
+                        } else if (snapshot.data! == PlayerState.completed) {
+                          onPressed = playbackService.playAgain;
+                        } else {
+                          onPressed = playbackService.start;
+                        }
 
-                      final isPlaying = snapshot.data! == PlayerState.playing;
+                        final isPlaying = snapshot.data! == PlayerState.playing;
 
-                      return IconButton.filled(
-                        tooltip: isPlaying ? "Pause" : "Play",
-                        onPressed: onPressed,
-                        style: IconButton.styleFrom(
-                          backgroundColor:
-                              scheme.primaryContainer.withValues(alpha: 0.86),
-                          foregroundColor: scheme.onPrimaryContainer,
-                          hoverColor: scheme.primary.withValues(alpha: 0.08),
-                          focusColor: scheme.primary.withValues(alpha: 0.10),
-                        ),
-                        icon: AnimatedSwitcher(
-                          duration: AppMotion.quick,
-                          switchInCurve: AppMotion.standardCurve,
-                          switchOutCurve: Curves.easeInCubic,
-                          transitionBuilder: (child, animation) =>
-                              FadeTransition(
-                            opacity: animation,
-                            child: ScaleTransition(
-                              scale: animation,
-                              child: child,
+                        return IconButton.filled(
+                          tooltip: isBuffering
+                              ? ui("正在获取播放地址")
+                              : isPlaying
+                                  ? "Pause"
+                                  : "Play",
+                          onPressed: isBuffering ? null : onPressed,
+                          style: IconButton.styleFrom(
+                            backgroundColor:
+                                scheme.primaryContainer.withValues(alpha: 0.86),
+                            foregroundColor: scheme.onPrimaryContainer,
+                            hoverColor: scheme.primary.withValues(alpha: 0.08),
+                            focusColor: scheme.primary.withValues(alpha: 0.10),
+                          ),
+                          icon: AnimatedSwitcher(
+                            duration: AppMotion.quick,
+                            switchInCurve: AppMotion.standardCurve,
+                            switchOutCurve: Curves.easeInCubic,
+                            transitionBuilder: (child, animation) =>
+                                FadeTransition(
+                              opacity: animation,
+                              child: ScaleTransition(
+                                scale: animation,
+                                child: child,
+                              ),
                             ),
+                            child: isBuffering
+                                ? const SizedBox.square(
+                                    key: ValueKey("buffering"),
+                                    dimension: 20.0,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2.0),
+                                  )
+                                : Icon(
+                                    isPlaying
+                                        ? Symbols.pause
+                                        : Symbols.play_arrow,
+                                    key: ValueKey(isPlaying),
+                                  ),
                           ),
-                          child: Icon(
-                            isPlaying ? Symbols.pause : Symbols.play_arrow,
-                            key: ValueKey(isPlaying),
-                          ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
                 ],
               );
@@ -207,6 +228,7 @@ class _NowPlayingSpectrum extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final playbackService = PlayService.instance.playbackService;
     return StreamBuilder<PlayerState>(
       stream: playbackService.playerStateStream,
@@ -235,6 +257,7 @@ class _NowPlayingCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     if (nowPlaying == null) {
       return const AnimatedSwitcher(
         duration: AppMotion.standard,
@@ -242,57 +265,28 @@ class _NowPlayingCover extends StatelessWidget {
       );
     }
 
-    return FutureBuilder<ImageProvider?>(
-      future: nowPlaying!.cover,
-      builder: (context, snapshot) {
-        final Widget child = switch (snapshot.connectionState) {
-          ConnectionState.done => snapshot.data == null
-              ? _CoverPlaceholder(key: ValueKey("missing-${nowPlaying!.path}"))
-              : _CoverImage(
-                  key: ValueKey("cover-${nowPlaying!.path}"),
-                  image: snapshot.data!,
-                ),
-          _ => _CoverLoading(key: ValueKey("loading-${nowPlaying!.path}")),
-        };
-
-        return AnimatedSwitcher(
-          duration: AppMotion.standard,
-          switchInCurve: AppMotion.standardCurve,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: animation.drive(
-                Tween<double>(begin: 0.96, end: 1.0),
-              ),
-              child: child,
-            ),
+    return AnimatedSwitcher(
+      duration: AppMotion.standard,
+      switchInCurve: AppMotion.standardCurve,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: ScaleTransition(
+          scale: animation.drive(
+            Tween<double>(begin: 0.96, end: 1.0),
           ),
           child: child,
-        );
-      },
-    );
-  }
-}
-
-class _CoverImage extends StatelessWidget {
-  const _CoverImage({
-    super.key,
-    required this.image,
-  });
-
-  final ImageProvider image;
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12.0),
-      child: Image(
-        image: image,
-        width: 52.0,
-        height: 52.0,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const _CoverPlaceholder(),
+        ),
+      ),
+      child: ClipRRect(
+        key: ValueKey('cover-${nowPlaying!.path}'),
+        borderRadius: AppShape.smallRadius,
+        child: AudioArtwork(
+          audio: nowPlaying!,
+          size: 52,
+          placeholder: const _CoverPlaceholder(),
+          loading: const _CoverLoading(),
+        ),
       ),
     );
   }
@@ -303,6 +297,7 @@ class _CoverPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     return _CoverFrame(
       child: Icon(
@@ -315,10 +310,11 @@ class _CoverPlaceholder extends StatelessWidget {
 }
 
 class _CoverLoading extends StatelessWidget {
-  const _CoverLoading({super.key});
+  const _CoverLoading();
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     return const _CoverFrame(
       child: SizedBox(
         width: 20.0,
@@ -336,6 +332,7 @@ class _CoverFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: 52.0,
@@ -343,7 +340,7 @@ class _CoverFrame extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.42),
-          borderRadius: BorderRadius.circular(12.0),
+          borderRadius: AppShape.smallRadius,
           border: Border.all(
             color: scheme.outlineVariant.withValues(alpha: 0.42),
           ),

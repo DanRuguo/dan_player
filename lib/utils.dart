@@ -1,9 +1,12 @@
 // ignore_for_file: unnecessary_this
 
 import 'package:flutter/foundation.dart';
+import 'package:dan_player/component/app_presentation.dart';
+export 'package:dan_player/component/app_presentation.dart' show AppNoticeKind;
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:pinyin/pinyin.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 extension StringHMMSS on Duration {
   /// Returns a string with hours, minutes, seconds,
@@ -86,8 +89,149 @@ extension PinyinCompare on String {
 final GlobalKey<NavigatorState> ROUTER_KEY = GlobalKey();
 
 final SCAFFOLD_MESSAGER = GlobalKey<ScaffoldMessengerState>();
-void showTextOnSnackBar(String text) {
-  SCAFFOLD_MESSAGER.currentState?.showSnackBar(SnackBar(content: Text(text)));
+
+/// Shows one current result message. A newer result clears both the visible
+/// message and any queued messages before it is presented, so stale feedback
+/// can never appear after the operation that superseded it.
+void showAppNotice(
+  String text, {
+  BuildContext? context,
+  AppNoticeKind kind = AppNoticeKind.info,
+  Duration duration = const Duration(seconds: 4),
+  String? actionLabel,
+  VoidCallback? onAction,
+}) {
+  final presentation = AppPresentationHost.maybeOf(context);
+  if (presentation != null) {
+    SCAFFOLD_MESSAGER.currentState?.clearSnackBars();
+    SCAFFOLD_MESSAGER.currentState?.removeCurrentSnackBar();
+    presentation.showNotice(text,
+        kind: kind,
+        duration: duration,
+        actionLabel: actionLabel,
+        onAction: onAction);
+    return;
+  }
+  // Mini mode owns a nested messenger while the normal router is offstage.
+  // Prefer the caller's visible route, then fall back to the app-wide key for
+  // service-layer messages that have no BuildContext.
+  final localMessenger =
+      context == null ? null : ScaffoldMessenger.maybeOf(context);
+  final appMessenger = SCAFFOLD_MESSAGER.currentState;
+  final messenger = localMessenger ?? appMessenger;
+  if (messenger == null) return;
+  final themeContext = context ?? SCAFFOLD_MESSAGER.currentContext;
+  if (themeContext == null) return;
+  final scheme = Theme.of(themeContext).colorScheme;
+  final viewportHeight = MediaQuery.maybeOf(themeContext)?.size.height;
+  final bottomMargin =
+      viewportHeight != null && viewportHeight < 360 ? 16.0 : 88.0;
+  final (background, foreground, icon, semantics) = switch (kind) {
+    AppNoticeKind.info => (
+        scheme.secondaryContainer,
+        scheme.onSecondaryContainer,
+        Icons.info_outline,
+        '提示'
+      ),
+    AppNoticeKind.success => (
+        scheme.primaryContainer,
+        scheme.onPrimaryContainer,
+        Icons.check_circle_outline,
+        '成功'
+      ),
+    AppNoticeKind.warning => (
+        scheme.tertiaryContainer,
+        scheme.onTertiaryContainer,
+        Icons.warning_amber_rounded,
+        '注意'
+      ),
+    AppNoticeKind.error => (
+        scheme.errorContainer,
+        scheme.onErrorContainer,
+        Icons.error_outline,
+        '错误'
+      ),
+  };
+
+  // A hidden normal route can still own a notice while Mini mode presents a
+  // nested messenger. Clear both so returning from Mini never resurrects stale
+  // feedback behind the latest operation result.
+  appMessenger?.clearSnackBars();
+  appMessenger?.removeCurrentSnackBar();
+  if (!identical(localMessenger, appMessenger)) {
+    localMessenger?.clearSnackBars();
+    localMessenger?.removeCurrentSnackBar();
+  }
+  messenger.showSnackBar(SnackBar(
+    behavior: SnackBarBehavior.floating,
+    margin: EdgeInsetsDirectional.fromSTEB(16, 0, 16, bottomMargin),
+    elevation: 8,
+    backgroundColor: background,
+    dismissDirection: DismissDirection.down,
+    duration: duration,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    content: Semantics(
+      container: true,
+      liveRegion: true,
+      label: '${ui(semantics)}：$text',
+      excludeSemantics: true,
+      child: Row(children: [
+        Icon(icon, color: foreground),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(text, style: TextStyle(color: foreground)),
+        ),
+      ]),
+    ),
+    action: actionLabel == null || onAction == null
+        ? null
+        : SnackBarAction(
+            label: actionLabel,
+            textColor: foreground,
+            onPressed: onAction,
+          ),
+  ));
+}
+
+/// Compatibility entry for existing call sites. New code should provide an
+/// explicit [AppNoticeKind]; conservative wording inference keeps old success
+/// and error feedback visually distinct until each feature is migrated.
+void showTextOnSnackBar(
+  String text, {
+  AppNoticeKind? kind,
+  BuildContext? context,
+  List<Object?> arguments = const [],
+}) {
+  showAppNotice(
+    ui(text, arguments),
+    context: context,
+    kind: kind ?? _noticeKindForText(text),
+  );
+}
+
+AppNoticeKind _noticeKindForText(String text) {
+  final normalized = text.toLowerCase();
+  if (text.contains('失败') ||
+      text.contains('错误') ||
+      text.contains('无法') ||
+      text.contains('未能') ||
+      text.contains('异常') ||
+      normalized.contains('exception') ||
+      normalized.contains('error')) {
+    return AppNoticeKind.error;
+  }
+  if (text.contains('不可用') ||
+      text.contains('请等待') ||
+      text.contains('已阻止') ||
+      text.contains('不能') ||
+      text.contains('不支持') ||
+      text.contains('只读')) {
+    return AppNoticeKind.warning;
+  }
+  if (text.startsWith('已') || text.contains('成功') || text.contains('完成')) {
+    return AppNoticeKind.success;
+  }
+  return AppNoticeKind.info;
 }
 
 final LOGGER_MEMORY = MemoryOutput(

@@ -1,11 +1,13 @@
-﻿import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/audio_tile.dart';
-import 'package:dan_player/utils.dart';
+import 'package:dan_player/component/audio_columns.dart';
+import 'package:dan_player/page/audio_sort_methods.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/page/uni_page_components.dart';
+import 'package:dan_player/page/folders_page.dart' show folderDisplayName;
 import 'package:flutter/material.dart';
-import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class FolderDetailPage extends StatelessWidget {
   final AudioFolder folder;
@@ -13,22 +15,25 @@ class FolderDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final contentList = List<Audio>.from(folder.audios);
     final multiSelectController = MultiSelectController<Audio>();
     return UniPage<Audio>(
       pref: AppPreference.instance.folderDetailPagePref,
-      title: folder.path,
-      subtitle: "${contentList.length} 首乐曲",
+      title: folderDisplayName(folder.path),
+      subtitle: ui("{0} 首乐曲 · {1}", [contentList.length, folder.path]),
       contentList: contentList,
       contentBuilder: (context, item, i, multiSelectController) => AudioTile(
         audioIndex: i,
         playlist: contentList,
         multiSelectController: multiSelectController,
+        columns: AudioColumnsScope.of(context),
       ),
       enableShufflePlay: true,
       enableSortMethod: true,
       enableSortOrder: true,
       enableContentViewSwitch: true,
+      enableAudioColumns: true,
       multiSelectController: multiSelectController,
       multiSelectViewActions: [
         MultiSelectSelectOrClearAll(
@@ -37,80 +42,7 @@ class FolderDetailPage extends StatelessWidget {
         ),
         MultiSelectExit(multiSelectController: multiSelectController),
       ],
-      sortMethods: [
-        SortMethodDesc(
-          icon: Symbols.title,
-          name: "标题",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort(
-                    (a, b) => a.displayTitle.localeCompareTo(b.displayTitle));
-                break;
-              case SortOrder.decending:
-                list.sort(
-                    (a, b) => b.displayTitle.localeCompareTo(a.displayTitle));
-                break;
-            }
-          },
-        ),
-        SortMethodDesc(
-          icon: Symbols.artist,
-          name: "艺术家",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort((a, b) => a.artist.localeCompareTo(b.artist));
-                break;
-              case SortOrder.decending:
-                list.sort((a, b) => b.artist.localeCompareTo(a.artist));
-                break;
-            }
-          },
-        ),
-        SortMethodDesc(
-          icon: Symbols.album,
-          name: "专辑",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort((a, b) => a.album.localeCompareTo(b.album));
-                break;
-              case SortOrder.decending:
-                list.sort((a, b) => b.album.localeCompareTo(a.album));
-                break;
-            }
-          },
-        ),
-        SortMethodDesc(
-          icon: Symbols.add,
-          name: "创建时间",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort((a, b) => a.created.compareTo(b.created));
-                break;
-              case SortOrder.decending:
-                list.sort((a, b) => b.created.compareTo(a.created));
-                break;
-            }
-          },
-        ),
-        SortMethodDesc(
-          icon: Symbols.edit,
-          name: "修改时间",
-          method: (list, order) {
-            switch (order) {
-              case SortOrder.ascending:
-                list.sort((a, b) => a.modified.compareTo(b.modified));
-                break;
-              case SortOrder.decending:
-                list.sort((a, b) => b.modified.compareTo(a.modified));
-                break;
-            }
-          },
-        ),
-      ],
+      sortMethods: audioSortMethods(AudioSortProfile.folder),
     );
   }
 }

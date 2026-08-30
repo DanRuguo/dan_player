@@ -12,6 +12,10 @@ abstract final class DesktopLyricTypography {
     "Microsoft YaHei UI",
     "Microsoft YaHei",
     "SimHei",
+    "Yu Gothic UI",
+    "Malgun Gothic",
+    "Segoe UI Symbol",
+    "Segoe UI Emoji",
   ];
 
   static ThemeData theme(Brightness brightness) {

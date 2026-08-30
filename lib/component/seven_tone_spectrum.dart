@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class SevenToneSpectrum extends StatelessWidget {
   const SevenToneSpectrum({
@@ -16,13 +17,14 @@ class SevenToneSpectrum extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final disableAnimations = MediaQuery.disableAnimationsOf(context);
     final visibleLevels =
         disableAnimations ? const <double>[0, 0, 0, 0, 0, 0, 0] : levels;
     return Tooltip(
-      message: "Do Re Mi Fa Sol La Si 实时频谱",
+      message: ui("Do Re Mi Fa Sol La Si 实时频谱"),
       child: Semantics(
-        label: "歌曲实时七音频谱",
+        label: ui("歌曲实时七音频谱"),
         child: RepaintBoundary(
           child: SizedBox.fromSize(
             size: size,

@@ -8,6 +8,9 @@
 
 #include "win32_window.h"
 
+class WindowBackdropController;
+class DesktopIntegrationController;
+
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
  public:
@@ -28,6 +31,18 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // Declared after the engine so the MethodChannel is destroyed before its
+  // messenger, including on partially initialized window teardown.
+  std::unique_ptr<WindowBackdropController> backdrop_controller_;
+  std::unique_ptr<DesktopIntegrationController> desktop_controller_;
+
+  // Windows 10 paints the non-client resize insets kept by window_manager's
+  // hidden title-bar implementation with the user's accent color. These flags
+  // let the runner replace those insets with client area while keeping native
+  // resize hit testing. Windows 11 never enables this compatibility path.
+  bool uses_legacy_dwm_frame_ = false;
+  bool legacy_custom_frame_active_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

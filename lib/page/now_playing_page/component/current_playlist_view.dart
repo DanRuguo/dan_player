@@ -1,5 +1,13 @@
+import 'package:dan_player/app_paths.dart' as app_paths;
+import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/utils.dart';
+import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class CurrentPlaylistView extends StatefulWidget {
   const CurrentPlaylistView({super.key});
@@ -11,11 +19,15 @@ class CurrentPlaylistView extends StatefulWidget {
 class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   final playbackService = PlayService.instance.playbackService;
   late final ScrollController scrollController;
+  int? _lastIndex;
 
   void _toNowPlaying() {
+    if (_lastIndex == playbackService.playlistIndex) return;
+    _lastIndex = playbackService.playlistIndex;
     if (scrollController.hasClients) {
       scrollController.animateTo(
-        playbackService.playlistIndex * 56.0,
+        (playbackService.playlistIndex * 56.0)
+            .clamp(0.0, scrollController.position.maxScrollExtent),
         duration: const Duration(milliseconds: 300),
         curve: Curves.fastOutSlowIn,
       );
@@ -25,6 +37,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   @override
   void initState() {
     super.initState();
+    _lastIndex = playbackService.playlistIndex;
     scrollController = ScrollController(
       initialScrollOffset: playbackService.playlistIndex * 56.0,
     );
@@ -33,6 +46,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
     return Material(
@@ -43,7 +57,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Text(
-              "播放列表",
+              ui("播放列表"),
               style: TextStyle(
                 color: scheme.onSecondaryContainer,
                 fontSize: 22,
@@ -53,15 +67,22 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
           ),
           Expanded(
             child: ListenableBuilder(
-              listenable: playbackService.shuffle,
+              listenable: Listenable.merge([
+                playbackService,
+                playbackService.playlist,
+                OnlineLibrary.instance,
+              ]),
               builder: (context, _) {
-                return ListView.builder(
+                return AppContentScrollbar(
                   controller: scrollController,
-                  itemCount: playbackService.playlist.value.length,
-                  itemExtent: 56.0,
-                  itemBuilder: (context, index) {
-                    return _PlaylistViewItem(index: index);
-                  },
+                  builder: (context, controller) => ListView.builder(
+                    controller: controller,
+                    itemCount: playbackService.playlist.value.length,
+                    itemExtent: 56.0,
+                    itemBuilder: (context, index) {
+                      return _PlaylistViewItem(index: index);
+                    },
+                  ),
                 );
               },
             ),
@@ -73,9 +94,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
 
   @override
   void dispose() {
-    super.dispose();
     playbackService.removeListener(_toNowPlaying);
     scrollController.dispose();
+    super.dispose();
   }
 }
 
@@ -86,27 +107,78 @@ class _PlaylistViewItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     var playbackService = PlayService.instance.playbackService;
     final item = playbackService.playlist.value[index];
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      borderRadius: BorderRadius.circular(8.0),
-      onTap: () {
-        playbackService.playIndexOfPlaylist(index);
-      },
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: DefaultTextStyle(
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: scheme.onSecondaryContainer, fontSize: 14),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(item.displayTitle),
-              Text("${item.artist} - ${item.album}"),
-            ],
+    final current = playbackService.nowPlaying?.path == item.path;
+    return MenuAnchor(
+      consumeOutsideTap: true,
+      menuChildren: [
+        MenuItemButton(
+          onPressed: () => playbackService.playIndexOfPlaylist(index),
+          leadingIcon: const Icon(Symbols.play_arrow),
+          child: Text(ui("播放")),
+        ),
+        if (item.isOnline && !OnlineLibrary.instance.contains(item))
+          MenuItemButton(
+            onPressed: () async {
+              try {
+                await OnlineLibrary.instance.add(item);
+                showTextOnSnackBar("已加入总乐库");
+              } catch (error, trace) {
+                LOGGER.e('[queue] add online track failed: $error',
+                    stackTrace: trace);
+                showTextOnSnackBar("加入总乐库失败，请重试");
+              }
+            },
+            leadingIcon: const Icon(Symbols.library_add),
+            child: Text(ui("加入总乐库")),
+          ),
+        MenuItemButton(
+          onPressed: () =>
+              context.push(app_paths.AUDIO_DETAIL_PAGE, extra: item),
+          leadingIcon: const Icon(Symbols.info),
+          child: Text(item.isOnline ? ui("联网歌曲详情") : ui("本地歌曲详情")),
+        ),
+      ],
+      builder: (context, controller, _) => InkWell(
+        borderRadius: AppShape.controlRadius,
+        onTap: () => playbackService.playIndexOfPlaylist(index),
+        onSecondaryTapDown: (details) =>
+            controller.open(position: details.localPosition),
+        onLongPress: () => controller.open(position: const Offset(16, 28)),
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: DefaultTextStyle(
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: scheme.onSecondaryContainer, fontSize: 14),
+            child: Row(
+              children: [
+                Icon(
+                  current
+                      ? Symbols.equalizer
+                      : item.isOnline
+                          ? Symbols.cloud
+                          : Symbols.audio_file,
+                  size: 20,
+                  color: current ? scheme.primary : scheme.onSecondaryContainer,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.displayTitle,
+                        style: TextStyle(
+                            fontWeight: current ? FontWeight.w700 : null)),
+                    Text("${item.artist} - ${item.album}"),
+                  ],
+                )),
+              ],
+            ),
           ),
         ),
       ),

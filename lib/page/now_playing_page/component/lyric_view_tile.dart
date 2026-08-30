@@ -1,452 +1,504 @@
-import 'dart:async';
-import 'dart:math';
+import 'dart:math' as math;
 
+import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
-import 'package:dan_player/play_service/play_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class LyricViewTile extends StatelessWidget {
-  const LyricViewTile(
-      {super.key, required this.line, required this.opacity, this.onTap});
+  const LyricViewTile({
+    super.key,
+    required this.line,
+    required this.position,
+    required this.opacity,
+    required this.reducedMotion,
+    this.distance = 1,
+    this.onTap,
+  });
 
   final LyricLine line;
+  final ValueListenable<Duration> position;
   final double opacity;
-  final void Function()? onTap;
+  final int distance;
+  final bool reducedMotion;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final lyricViewController = context.watch<LyricViewController>();
-    return Align(
-      alignment: switch (lyricViewController.lyricTextAlign) {
-        LyricTextAlign.left => Alignment.centerLeft,
-        LyricTextAlign.center => Alignment.center,
-        LyricTextAlign.right => Alignment.centerRight,
-      },
-      child: Opacity(
-        opacity: opacity,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12.0),
-          child: line is SyncLyricLine
-              ? _SyncLineContent(
-                  syncLine: line as SyncLyricLine,
-                  isMainLine: opacity == 1.0,
-                )
-              : _LrcLineContent(
-                  lrcLine: line as LrcLine,
-                  isMainLine: opacity == 1.0,
-                ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SyncLineContent extends StatelessWidget {
-  const _SyncLineContent({required this.syncLine, required this.isMainLine});
-
-  final SyncLyricLine syncLine;
-  final bool isMainLine;
-
-  @override
-  Widget build(BuildContext context) {
-    if (syncLine.words.isEmpty) {
-      if (syncLine.length > const Duration(seconds: 5) && isMainLine) {
-        return LyricTransitionTile(syncLine: syncLine);
-      } else {
-        return const SizedBox.shrink();
-      }
-    }
-
+    UiLanguageScope.watch(context);
+    final controller = context.watch<LyricViewController>();
     final scheme = Theme.of(context).colorScheme;
-    final lyricViewController = context.watch<LyricViewController>();
+    final isMainLine = distance == 0;
+    final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
+    final alignment = switch (controller.lyricTextAlign) {
+      LyricTextAlign.left => Alignment.centerLeft,
+      LyricTextAlign.center => Alignment.center,
+      LyricTextAlign.right => Alignment.centerRight,
+    };
+    final textAlign = switch (controller.lyricTextAlign) {
+      LyricTextAlign.left => TextAlign.left,
+      LyricTextAlign.center => TextAlign.center,
+      LyricTextAlign.right => TextAlign.right,
+    };
+    final crossAxisAlignment = switch (controller.lyricTextAlign) {
+      LyricTextAlign.left => CrossAxisAlignment.start,
+      LyricTextAlign.center => CrossAxisAlignment.center,
+      LyricTextAlign.right => CrossAxisAlignment.end,
+    };
+    final syncLine = line is SyncLyricLine ? line as SyncLyricLine : null;
+    final text = syncLine?.content ??
+        (line is UnsyncLyricLine ? (line as UnsyncLyricLine).content : '');
+    final parts = text.split('┃');
+    final translations = syncLine == null
+        ? parts.skip(1).where((text) => text.trim().isNotEmpty).toList()
+        : [
+            if (syncLine.translation?.trim().isNotEmpty ?? false)
+              syncLine.translation!,
+          ];
+    final blank = text.trim().isEmpty;
+    final duration = switch (line) {
+      LrcLine value => value.length,
+      SyncLyricLine value => value.length,
+      _ => Duration.zero,
+    };
+    final primaryStyle = DefaultTextStyle.of(context).style.copyWith(
+          // Reserve the focused paragraph once. Context rows use a paint-only
+          // scale, so increasing emphasis never changes line breaks mid-tween.
+          fontSize: controller.lyricFontSize * LyricMotion.focusedFontScale,
+          fontWeight: LyricMotion.focusedFontWeight,
+          height: 1.3,
+        );
+    final label = blank
+        ? ui("间奏")
+        : [syncLine == null ? parts.first : text, ...translations].join('\n');
 
-    final lyricFontSize = lyricViewController.lyricFontSize;
-    final translationFontSize = lyricViewController.translationFontSize;
-    final alignment = lyricViewController.lyricTextAlign;
-
-    if (!isMainLine) {
-      if (syncLine.words.isEmpty) {
-        return const SizedBox.shrink();
-      }
-
-      final List<Text> contents = [
-        buildPrimaryText(syncLine.content, scheme, alignment, lyricFontSize),
-      ];
-      if (syncLine.translation != null) {
-        contents.add(buildSecondaryText(
-          syncLine.translation!,
-          scheme,
-          alignment,
-          translationFontSize,
-        ));
-      }
-
-      return Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: switch (alignment) {
-            LyricTextAlign.left => CrossAxisAlignment.start,
-            LyricTextAlign.center => CrossAxisAlignment.center,
-            LyricTextAlign.right => CrossAxisAlignment.end,
-          },
-          children: contents,
-        ),
-      );
-    }
-
-    final List<Widget> contents = [
-      StreamBuilder(
-        stream: PlayService.instance.playbackService.positionStream,
-        builder: (context, snapshot) {
-          final posInMs = (snapshot.data ?? 0) * 1000;
-          return RichText(
-            textAlign: switch (alignment) {
-              LyricTextAlign.left => TextAlign.left,
-              LyricTextAlign.center => TextAlign.center,
-              LyricTextAlign.right => TextAlign.right,
-            },
-            text: TextSpan(
-              children: List.generate(
-                syncLine.words.length,
-                (i) {
-                  final posFromWordStart = max(
-                    posInMs - syncLine.words[i].start.inMilliseconds,
-                    0,
-                  );
-                  final progress = min(
-                    posFromWordStart / syncLine.words[i].length.inMilliseconds,
-                    1.0,
-                  );
-                  return WidgetSpan(
-                    child: ShaderMask(
-                      blendMode: BlendMode.dstIn,
-                      shaderCallback: (bounds) {
-                        return LinearGradient(
-                          colors: [
-                            scheme.primary,
-                            scheme.primary,
-                            scheme.primary.withValues(alpha: 0.10),
-                            scheme.primary.withValues(alpha: 0.10),
-                          ],
-                          stops: [0, progress, progress, 1],
-                        ).createShader(bounds);
-                      },
-                      child: Text(
-                        syncLine.words[i].content,
-                        style: TextStyle(
-                          color: scheme.primary,
-                          fontSize: lyricFontSize,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+    // The hit region and semantics remain outside the smaller context-row
+    // transform. Even a blank/distant line keeps its complete 48px touch area.
+    return Semantics(
+      label: label,
+      selected: isMainLine,
+      button: onTap != null,
+      onTap: onTap,
+      child: ExcludeSemantics(
+        child: RepaintBoundary(
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: AppShape.controlRadius,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: LyricLineMotion(
+                opacity: highContrast ? 1 : opacity,
+                scale:
+                    reducedMotion ? 1 : LyricMotion.scaleForDistance(distance),
+                activation: isMainLine ? 1 : 0,
+                alignment: alignment,
+                reducedMotion: reducedMotion,
+                builder: (context, activation) {
+                  final foreground = scheme.onSecondaryContainer;
+                  final primaryColor = Color.lerp(
+                    foreground,
+                    scheme.primary,
+                    activation,
+                  )!;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    child: Align(
+                      alignment: alignment,
+                      child: blank
+                          ? SizedBox(
+                              height: 24,
+                              child: duration > const Duration(seconds: 5)
+                                  ? Opacity(
+                                      opacity: activation,
+                                      child: LyricTransitionTile(
+                                        line: line,
+                                        length: duration,
+                                        position: position,
+                                        active: isMainLine,
+                                        reducedMotion: reducedMotion,
+                                      ),
+                                    )
+                                  : null,
+                            )
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: crossAxisAlignment,
+                              children: [
+                                if (syncLine != null)
+                                  _TimedLyricText(
+                                    line: syncLine,
+                                    position: position,
+                                    active: isMainLine,
+                                    activation: activation,
+                                    reducedMotion: reducedMotion,
+                                    style: primaryStyle,
+                                    textAlign: textAlign,
+                                    baseColor: foreground,
+                                    playedColor: primaryColor,
+                                  )
+                                else
+                                  // LRC has line times only. A uniform focus
+                                  // transition does not invent word timing.
+                                  Text(
+                                    parts.first,
+                                    textAlign: textAlign,
+                                    style: primaryStyle.copyWith(
+                                      color: primaryColor,
+                                    ),
+                                  ),
+                                for (final translation in translations)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      translation,
+                                      textAlign: textAlign,
+                                      style: TextStyle(
+                                        color: foreground.withValues(
+                                          alpha: highContrast
+                                              ? 1
+                                              : .78 + .12 * activation,
+                                        ),
+                                        fontSize:
+                                            controller.translationFontSize,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                     ),
                   );
                 },
               ),
             ),
-          );
-        },
-      )
-    ];
-    if (syncLine.translation != null) {
-      contents.add(buildSecondaryText(
-        syncLine.translation!,
-        scheme,
-        alignment,
-        translationFontSize,
-      ));
-    }
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(
-        crossAxisAlignment: switch (alignment) {
-          LyricTextAlign.left => CrossAxisAlignment.start,
-          LyricTextAlign.center => CrossAxisAlignment.center,
-          LyricTextAlign.right => CrossAxisAlignment.end,
-        },
-        children: contents,
-      ),
-    );
-  }
-
-  Text buildPrimaryText(
-    String text,
-    ColorScheme scheme,
-    LyricTextAlign align,
-    double fontSize,
-  ) {
-    return Text(
-      text,
-      textAlign: switch (align) {
-        LyricTextAlign.left => TextAlign.left,
-        LyricTextAlign.center => TextAlign.center,
-        LyricTextAlign.right => TextAlign.right,
-      },
-      style: TextStyle(
-        color: scheme.onSecondaryContainer,
-        fontSize: fontSize,
-        fontWeight: FontWeight.bold,
-      ),
-    );
-  }
-
-  Text buildSecondaryText(
-    String text,
-    ColorScheme scheme,
-    LyricTextAlign align,
-    double fontSize,
-  ) {
-    return Text(
-      text,
-      textAlign: switch (align) {
-        LyricTextAlign.left => TextAlign.left,
-        LyricTextAlign.center => TextAlign.center,
-        LyricTextAlign.right => TextAlign.right,
-      },
-      style: TextStyle(color: scheme.onSecondaryContainer, fontSize: fontSize),
-    );
-  }
-}
-
-class _LrcLineContent extends StatelessWidget {
-  const _LrcLineContent({required this.lrcLine, required this.isMainLine});
-
-  final LrcLine lrcLine;
-  final bool isMainLine;
-
-  @override
-  Widget build(BuildContext context) {
-    if (lrcLine.isBlank) {
-      if (lrcLine.length > const Duration(seconds: 5) && isMainLine) {
-        return LyricTransitionTile(lrcLine: lrcLine);
-      } else {
-        return const SizedBox.shrink();
-      }
-    }
-
-    final scheme = Theme.of(context).colorScheme;
-    final lyricViewController = context.watch<LyricViewController>();
-
-    final lyricFontSize = lyricViewController.lyricFontSize;
-    final translationFontSize = lyricViewController.translationFontSize;
-    final alignment = lyricViewController.lyricTextAlign;
-
-    final splited = lrcLine.content.split("┃");
-    final List<Text> contents = [
-      buildPrimaryText(splited.first, scheme, alignment, lyricFontSize),
-    ];
-    for (var i = 1; i < splited.length; i++) {
-      contents.add(buildSecondaryText(
-        splited[i],
-        scheme,
-        alignment,
-        translationFontSize,
-      ));
-    }
-
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(
-        crossAxisAlignment: switch (alignment) {
-          LyricTextAlign.left => CrossAxisAlignment.start,
-          LyricTextAlign.center => CrossAxisAlignment.center,
-          LyricTextAlign.right => CrossAxisAlignment.end,
-        },
-        children: contents,
-      ),
-    );
-  }
-
-  Text buildPrimaryText(
-    String text,
-    ColorScheme scheme,
-    LyricTextAlign align,
-    double fontSize,
-  ) {
-    return Text(
-      text,
-      textAlign: switch (align) {
-        LyricTextAlign.left => TextAlign.left,
-        LyricTextAlign.center => TextAlign.center,
-        LyricTextAlign.right => TextAlign.right,
-      },
-      style: TextStyle(
-        color: scheme.onSecondaryContainer,
-        fontSize: fontSize,
-        fontWeight: FontWeight.bold,
-      ),
-    );
-  }
-
-  Text buildSecondaryText(
-    String text,
-    ColorScheme scheme,
-    LyricTextAlign align,
-    double fontSize,
-  ) {
-    return Text(
-      text,
-      textAlign: switch (align) {
-        LyricTextAlign.left => TextAlign.left,
-        LyricTextAlign.center => TextAlign.center,
-        LyricTextAlign.right => TextAlign.right,
-      },
-      style: TextStyle(color: scheme.onSecondaryContainer, fontSize: fontSize),
-    );
-  }
-}
-
-/// 歌词间奏表示
-/// lrcLine 和 syncLine 必须有且只有一个不为空
-class LyricTransitionTile extends StatefulWidget {
-  final LrcLine? lrcLine;
-  final SyncLyricLine? syncLine;
-  const LyricTransitionTile({super.key, this.lrcLine, this.syncLine});
-
-  @override
-  State<LyricTransitionTile> createState() => _LyricTransitionTileState();
-}
-
-class _LyricTransitionTileState extends State<LyricTransitionTile> {
-  late final LyricTransitionTileController controller;
-
-  @override
-  void initState() {
-    super.initState();
-    controller = LyricTransitionTileController(widget.lrcLine, widget.syncLine);
-  }
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return SizedBox(
-      height: 40.0,
-      width: 80.0,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 18, 12, 6),
-        child: CustomPaint(
-          painter: LyricTransitionPainter(scheme, controller),
+          ),
         ),
       ),
     );
   }
 }
 
-class LyricTransitionPainter extends CustomPainter {
-  final ColorScheme scheme;
-  final LyricTransitionTileController controller;
+/// Both inactive and active timed lines use this exact paragraph layout.
+/// Highlighting is painted over the original shaping, so a word changing color
+/// cannot replace Text with WidgetSpan or move a long/translated line.
+class _TimedLyricText extends StatefulWidget {
+  const _TimedLyricText({
+    required this.line,
+    required this.position,
+    required this.active,
+    required this.activation,
+    required this.reducedMotion,
+    required this.style,
+    required this.textAlign,
+    required this.baseColor,
+    required this.playedColor,
+  });
 
-  final Paint circlePaint1 = Paint();
-  final Paint circlePaint2 = Paint();
-  final Paint circlePaint3 = Paint();
-
-  final double radius = 6;
-
-  LyricTransitionPainter(this.scheme, this.controller)
-      : super(repaint: controller);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    circlePaint1.color = scheme.onSecondaryContainer.withValues(
-      alpha: 0.05 + min(controller.progress * 3, 1) * 0.95,
-    );
-    circlePaint2.color = scheme.onSecondaryContainer.withValues(
-      alpha: 0.05 + min(max(controller.progress - 1 / 3, 0) * 3, 1) * 0.95,
-    );
-    circlePaint3.color = scheme.onSecondaryContainer.withValues(
-      alpha: 0.05 + min(max(controller.progress - 2 / 3, 0) * 3, 1) * 0.95,
-    );
-
-    final rWithFactor = radius + controller.sizeFactor;
-    final c1 = Offset(rWithFactor, 8);
-    final c2 = Offset(4 * rWithFactor, 8);
-    final c3 = Offset(7 * rWithFactor, 8);
-
-    canvas.drawCircle(c1, rWithFactor, circlePaint1);
-    canvas.drawCircle(c2, rWithFactor, circlePaint2);
-    canvas.drawCircle(c3, rWithFactor, circlePaint3);
-  }
+  final SyncLyricLine line;
+  final ValueListenable<Duration> position;
+  final bool active;
+  final double activation;
+  final bool reducedMotion;
+  final TextStyle style;
+  final TextAlign textAlign;
+  final Color baseColor;
+  final Color playedColor;
 
   @override
-  bool shouldRepaint(LyricTransitionPainter oldDelegate) => false;
-
-  @override
-  bool shouldRebuildSemantics(LyricTransitionPainter oldDelegate) => false;
+  State<_TimedLyricText> createState() => _TimedLyricTextState();
 }
 
-class LyricTransitionTileController extends ChangeNotifier {
-  final LrcLine? lrcLine;
-  final SyncLyricLine? syncLine;
+class _TimedLyricTextState extends State<_TimedLyricText> {
+  Object? _layoutIdentity;
+  _TimedLyricLayout? _layout;
 
-  final playbackService = PlayService.instance.playbackService;
-
-  double progress = 0;
-  late final StreamSubscription positionStreamSub;
-
-  double sizeFactor = 0;
-  double k = 1;
-  late final Ticker factorTicker;
-
-  LyricTransitionTileController([this.lrcLine, this.syncLine]) {
-    positionStreamSub = playbackService.positionStream.listen(_updateProgress);
-    factorTicker = Ticker((elapsed) {
-      sizeFactor += k * 1 / 180;
-      if (sizeFactor > 1) {
-        k = -1;
-        sizeFactor = 1;
-      } else if (sizeFactor < 0) {
-        k = 1;
-        sizeFactor = 0;
-      }
-      notifyListeners();
-    });
-    factorTicker.start();
-  }
-
-  void _updateProgress(double position) {
-    late int startInMs;
-    late int lengthInMs;
-    if (lrcLine != null) {
-      startInMs = lrcLine!.start.inMilliseconds;
-      lengthInMs = lrcLine!.length.inMilliseconds;
-    } else {
-      startInMs = syncLine!.start.inMilliseconds;
-      lengthInMs = syncLine!.length.inMilliseconds;
-    }
-    final sinceStart = position * 1000 - startInMs;
-    progress = max(sinceStart, 0) / lengthInMs;
-    notifyListeners();
-
-    if (progress >= 1) {
-      _stopAnimating();
-    }
-  }
-
-  bool _stopped = false;
-
-  void _stopAnimating() {
-    if (_stopped) return;
-    _stopped = true;
-    positionStreamSub.cancel();
-    factorTicker.stop();
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final direction = Directionality.of(context);
+        final scaler = MediaQuery.textScalerOf(context);
+        final width = constraints.hasBoundedWidth
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final identity = (
+          widget.line,
+          widget.line.content,
+          widget.style,
+          widget.textAlign,
+          direction,
+          scaler,
+          width,
+        );
+        if (_layoutIdentity != identity) {
+          _layout?.dispose();
+          _layout = _TimedLyricLayout(
+            line: widget.line,
+            style: widget.style,
+            textAlign: widget.textAlign,
+            direction: direction,
+            scaler: scaler,
+            maxWidth: width,
+          );
+          _layoutIdentity = identity;
+        }
+        final layout = _layout!;
+        layout.setColors(widget.baseColor, widget.playedColor);
+        return SizedBox(
+          width: layout.base.width,
+          height: layout.base.height,
+          child: CustomPaint(
+            painter: LyricWordHighlightPainter._(
+              layout: layout,
+              line: widget.line,
+              position: widget.position,
+              active: widget.active,
+              activation: widget.activation,
+              reducedMotion: widget.reducedMotion,
+              baseColor: widget.baseColor,
+              playedColor: widget.playedColor,
+            ),
+            isComplex: true,
+            willChange: widget.active && !widget.reducedMotion,
+          ),
+        );
+      },
+    );
   }
 
   @override
   void dispose() {
-    _stopAnimating();
-    factorTicker.dispose();
+    _layout?.dispose();
     super.dispose();
   }
+}
+
+class _TimedLyricLayout {
+  _TimedLyricLayout({
+    required this.line,
+    required this.style,
+    required TextAlign textAlign,
+    required TextDirection direction,
+    required TextScaler scaler,
+    required this.maxWidth,
+  })  : base = TextPainter(
+          textDirection: direction,
+          textAlign: textAlign,
+          textScaler: scaler,
+        ),
+        highlight = TextPainter(
+          textDirection: direction,
+          textAlign: textAlign,
+          textScaler: scaler,
+        ) {
+    setColors(Colors.white, Colors.white);
+    var offset = 0;
+    wordBoxes = [
+      for (final word in line.words)
+        base.getBoxesForSelection(TextSelection(
+          baseOffset: offset,
+          extentOffset: offset += word.content.length,
+        )),
+    ];
+  }
+
+  final SyncLyricLine line;
+  final TextStyle style;
+  final double maxWidth;
+  final TextPainter base;
+  final TextPainter highlight;
+  late final List<List<TextBox>> wordBoxes;
+  Color? _baseColor;
+  Color? _playedColor;
+
+  void setColors(Color baseColor, Color playedColor) {
+    if (_baseColor != baseColor) {
+      base.text = TextSpan(
+        text: line.content,
+        style: style.copyWith(color: baseColor),
+      );
+      base.layout(maxWidth: maxWidth);
+      _baseColor = baseColor;
+    }
+    if (_playedColor != playedColor) {
+      highlight.text = TextSpan(
+        text: line.content,
+        style: style.copyWith(color: playedColor),
+      );
+      highlight.layout(maxWidth: maxWidth);
+      _playedColor = playedColor;
+    }
+  }
+
+  void dispose() {
+    base.dispose();
+    highlight.dispose();
+  }
+}
+
+/// Paints only the actual timed words; updates repaint the active paragraph,
+/// rather than rebuilding every lyric row at the 33ms playback sampling rate.
+class LyricWordHighlightPainter extends CustomPainter {
+  LyricWordHighlightPainter._({
+    required _TimedLyricLayout layout,
+    required this.line,
+    required ValueListenable<Duration> position,
+    required this.active,
+    required this.activation,
+    required this.reducedMotion,
+    required this.baseColor,
+    required this.playedColor,
+  })  : _layout = layout,
+        _position = position,
+        super(repaint: active && !reducedMotion ? position : null);
+
+  final _TimedLyricLayout _layout;
+  final ValueListenable<Duration> _position;
+  final SyncLyricLine line;
+  final bool active;
+  final double activation;
+  final bool reducedMotion;
+  final Color baseColor;
+  final Color playedColor;
+
+  Duration get position => _position.value;
+
+  double progressForWord(int index) {
+    final word = line.words[index];
+    return LyricMotion.progress(position, word.start, word.length);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    _layout.base.paint(canvas, Offset.zero);
+    if (activation <= 0) return;
+    if (reducedMotion) {
+      _layout.highlight.paint(canvas, Offset.zero);
+      return;
+    }
+    final clips = Path();
+    var hasHighlight = false;
+    for (var index = 0; index < line.words.length; index++) {
+      final progress = progressForWord(index);
+      if (progress <= 0) continue;
+      final boxes = _layout.wordBoxes[index];
+      final width =
+          boxes.fold<double>(0, (sum, box) => sum + box.right - box.left);
+      var remaining = width * progress;
+      for (final box in boxes) {
+        if (remaining <= 0) break;
+        final filled = math.min(remaining, box.right - box.left);
+        if (filled > 0) {
+          clips.addRect(box.direction == TextDirection.rtl
+              ? Rect.fromLTRB(
+                  box.right - filled, box.top, box.right, box.bottom)
+              : Rect.fromLTRB(
+                  box.left, box.top, box.left + filled, box.bottom));
+          hasHighlight = true;
+        }
+        remaining -= filled;
+      }
+    }
+    if (!hasHighlight) return;
+    canvas.save();
+    canvas.clipPath(clips);
+    _layout.highlight.paint(canvas, Offset.zero);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(LyricWordHighlightPainter oldDelegate) =>
+      !identical(_layout, oldDelegate._layout) ||
+      !identical(_position, oldDelegate._position) ||
+      active != oldDelegate.active ||
+      activation != oldDelegate.activation ||
+      reducedMotion != oldDelegate.reducedMotion ||
+      baseColor != oldDelegate.baseColor ||
+      playedColor != oldDelegate.playedColor;
+}
+
+/// The interlude occupies the same space before, during and after activation.
+/// Its subtle breathing is derived from playback time, not a free-running
+/// ticker, so pause/seek and reduced motion cannot leave an orphaned animation.
+class LyricTransitionTile extends StatelessWidget {
+  const LyricTransitionTile({
+    super.key,
+    required this.line,
+    required this.length,
+    required this.position,
+    required this.active,
+    required this.reducedMotion,
+  });
+
+  final LyricLine line;
+  final Duration length;
+  final ValueListenable<Duration> position;
+  final bool active;
+  final bool reducedMotion;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return CustomPaint(
+      size: const Size(72, 24),
+      painter: _LyricInterludePainter(
+        start: line.start,
+        length: length,
+        position: position,
+        active: active,
+        reducedMotion: reducedMotion,
+        color: Theme.of(context).colorScheme.onSecondaryContainer,
+      ),
+    );
+  }
+}
+
+class _LyricInterludePainter extends CustomPainter {
+  _LyricInterludePainter({
+    required this.start,
+    required this.length,
+    required this.position,
+    required this.active,
+    required this.reducedMotion,
+    required this.color,
+  }) : super(repaint: active && !reducedMotion ? position : null);
+
+  final Duration start;
+  final Duration length;
+  final ValueListenable<Duration> position;
+  final bool active;
+  final bool reducedMotion;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final elapsed = math.max(0, (position.value - start).inMilliseconds) / 1000;
+    final progress = LyricMotion.progress(position.value, start, length);
+    final radius = reducedMotion ? 4.0 : 4 + .45 * math.sin(elapsed * math.pi);
+    final paint = Paint();
+    for (var index = 0; index < 3; index++) {
+      final amount =
+          reducedMotion ? 1.0 : (progress * 3 - index).clamp(0.0, 1.0);
+      paint.color = color.withValues(alpha: .28 + .72 * amount);
+      canvas.drawCircle(Offset(12 + 24.0 * index, 12), radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LyricInterludePainter oldDelegate) =>
+      start != oldDelegate.start ||
+      length != oldDelegate.length ||
+      !identical(position, oldDelegate.position) ||
+      active != oldDelegate.active ||
+      reducedMotion != oldDelegate.reducedMotion ||
+      color != oldDelegate.color;
 }

@@ -153,6 +153,20 @@ bool Win32Window::Show() {
   return ShowWindow(window_handle_, SW_SHOWNORMAL);
 }
 
+bool Win32Window::CreateOwned(const std::wstring& title, HWND owner,
+                            const RECT& bounds) {
+  Destroy();
+  if (!IsWindow(owner)) return false;
+  const wchar_t* window_class =
+      WindowClassRegistrar::GetInstance()->GetWindowClass();
+  HWND window = CreateWindowEx(
+      WS_EX_TOOLWINDOW | WS_EX_TOPMOST, window_class, title.c_str(),
+      WS_POPUP | WS_CLIPCHILDREN, bounds.left, bounds.top,
+      bounds.right - bounds.left, bounds.bottom - bounds.top,
+      owner, nullptr, GetModuleHandle(nullptr), this);
+  return window && OnCreate();
+}
+
 // static
 LRESULT CALLBACK Win32Window::WndProc(HWND const window,
                                       UINT const message,
@@ -208,7 +222,9 @@ Win32Window::MessageHandler(HWND hwnd,
     }
 
     case WM_ACTIVATE:
-      if (child_content_ != nullptr) {
+      // An owned palette activates while its lyric owner receives WA_INACTIVE.
+      // Restoring focus there would steal it back and oscillate the two HWNDs.
+      if (LOWORD(wparam) != WA_INACTIVE && IsWindow(child_content_)) {
         SetFocus(child_content_);
       }
       return 0;
@@ -238,7 +254,7 @@ Win32Window* Win32Window::GetThisFromHandle(HWND const window) noexcept {
       GetWindowLongPtr(window, GWLP_USERDATA));
 }
 
-void Win32Window::SetChildContent(HWND content) {
+void Win32Window::SetChildContent(HWND content, bool focus) {
   child_content_ = content;
   SetParent(content, window_handle_);
   RECT frame = GetClientArea();
@@ -246,7 +262,7 @@ void Win32Window::SetChildContent(HWND content) {
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,
              frame.bottom - frame.top, true);
 
-  SetFocus(child_content_);
+  if (focus) SetFocus(child_content_);
 }
 
 RECT Win32Window::GetClientArea() {

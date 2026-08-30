@@ -14,6 +14,10 @@ const List<String> danFontFamilyFallback = [
   "Microsoft YaHei UI",
   "Microsoft YaHei",
   "SimHei",
+  "Yu Gothic UI",
+  "Malgun Gothic",
+  "Segoe UI Symbol",
+  "Segoe UI Emoji",
 ];
 
 String danFontDisplayName(String? fontFamily) {

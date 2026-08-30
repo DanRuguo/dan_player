@@ -16,6 +16,10 @@ InitArgsMessage _$InitArgsMessageFromJson(Map<String, dynamic> json) =>
       (json['primary'] as num).toInt(),
       (json['surfaceContainer'] as num).toInt(),
       (json['onSurface'] as num).toInt(),
+      vertical: json['vertical'] as bool? ?? false,
+      playbackRate: safeDesktopPlaybackRate(json['playbackRate']),
+      language: json['language'] is String ? json['language'] as String : 'zh',
+      appearance: DesktopLyricAppearance.fromJson(json['appearance']),
     );
 
 Map<String, dynamic> _$InitArgsMessageToJson(InitArgsMessage instance) =>
@@ -28,6 +32,10 @@ Map<String, dynamic> _$InitArgsMessageToJson(InitArgsMessage instance) =>
       'primary': instance.primary,
       'surfaceContainer': instance.surfaceContainer,
       'onSurface': instance.onSurface,
+      'vertical': instance.vertical,
+      'playbackRate': safeDesktopPlaybackRate(instance.playbackRate),
+      'language': instance.language,
+      'appearance': instance.appearance.toJson(),
     };
 
 ControlEventMessage _$ControlEventMessageFromJson(Map<String, dynamic> json) =>

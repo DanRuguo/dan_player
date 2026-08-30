@@ -1,7 +1,17 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:dan_player/background_preferences.dart';
+import 'package:dan_player/online/online_source_preferences.dart';
+import 'package:dan_player/player_experience_preferences.dart';
+import 'package:dan_player/player_shortcut_preferences.dart';
 import 'package:dan_player/src/rust/api/system_theme.dart';
 import 'package:dan_player/utils.dart';
+import 'package:dan_player/window_geometry.dart';
+import 'package:dan_player/window_mode_controller.dart';
+import 'package:desktop_lyric/desktop_lyric_appearance.dart';
+import 'package:desktop_lyric/ui_language.dart';
+import 'package:dan_player/ui_layout_preferences.dart';
+import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:github/github.dart';
 import 'package:path/path.dart' as path;
@@ -12,6 +22,10 @@ import 'package:window_manager/window_manager.dart';
 /// 只在新 app data 目录没有数据时进行
 /// 兼容旧的 Documents\dan_player 和 AppData\Roaming\Dan_Ruguo.Inc\dan_player。
 Future<void> migrateAppData() async {
+  // An explicitly isolated data directory must not import the user's library.
+  if (Platform.environment['DAN_PLAYER_DATA_DIR']?.trim().isNotEmpty == true) {
+    return;
+  }
   try {
     final newAppDataDir = await getAppDataDir();
     if (newAppDataDir.listSync().isNotEmpty) return;
@@ -48,6 +62,14 @@ void _copyDirectoryContents(Directory source, Directory target) {
 }
 
 Future<Directory> getAppDataDir() async {
+  final override = Platform.environment['DAN_PLAYER_DATA_DIR']?.trim();
+  if (override != null && override.isNotEmpty) {
+    if (!path.isAbsolute(override)) {
+      throw const FormatException(
+          'DAN_PLAYER_DATA_DIR must be an absolute path');
+    }
+    return Directory(path.normalize(override)).create(recursive: true);
+  }
   final dir = await getApplicationDocumentsDirectory();
   return Directory(path.join(dir.path, AppSettings.appDataDirectoryName))
       .create(recursive: true);
@@ -55,7 +77,7 @@ Future<Directory> getAppDataDir() async {
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.2";
+  static const String version = "26.0.3";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";
@@ -74,6 +96,24 @@ class AppSettings {
   /// 跟随歌曲封面的动态主题
   bool dynamicTheme = true;
 
+  /// Independent, live appearance preferences; old settings use safe defaults.
+  final backgrounds = ValueNotifier(const BackgroundPreferences());
+
+  /// Controls new search requests only; saved online tracks remain usable.
+  final onlineSources = ValueNotifier(const OnlineSourcePreferences());
+
+  /// Desktop controls and playback/lyric presentation; independent of data.
+  final experience = ValueNotifier(const PlayerExperiencePreferences());
+
+  /// Shared with the lyric helper over its pipe; only this process saves it.
+  final desktopLyricAppearance = ValueNotifier(DesktopLyricAppearance.defaults);
+
+  final uiLayout = ValueNotifier(const UiLayoutPreferences());
+  final rendering = ValueNotifier(const RenderingPreferences());
+
+  /// App-local keyboard bindings. Older settings keep the documented defaults.
+  final shortcuts = ValueNotifier(ShortcutPreferences.defaults());
+
   /// 跟随系统主题色
   bool useSystemTheme = true;
 
@@ -89,6 +129,14 @@ class AppSettings {
   String? lyricApiUrl;
 
   bool restoreLastSession = true;
+
+  /// 每 24 小时最多自动检查一次稳定版更新。
+  bool autoCheckUpdates = true;
+
+  /// 用户在自动提示中选择忽略的版本；手动检查仍会显示该版本。
+  String? ignoredUpdateVersion;
+
+  DateTime? lastUpdateCheckAt;
 
   Size windowSize = const Size(1280, 756);
   bool isWindowMaximized = false;
@@ -132,6 +180,14 @@ class AppSettings {
 
   AppSettings._();
 
+  int _saveRevision = 0;
+
+  static void _readWindowGeometry(Map settingsMap) {
+    final restored = WindowGeometryPolicy.restore(settingsMap);
+    _instance.windowSize = Size(restored.size.width, restored.size.height);
+    _instance.isWindowMaximized = restored.isMaximized;
+  }
+
   static Future<void> _readFromJson_old(Map settingsMap) async {
     final ust = settingsMap["UseSystemTheme"];
     if (ust != null) {
@@ -173,17 +229,42 @@ class AppSettings {
           : restoreLastSession == 1;
     }
 
-    final sizeStr = settingsMap["WindowSize"];
-    if (sizeStr != null) {
-      final sizeStrs = (sizeStr as String).split(",");
-      _instance.windowSize = Size(double.tryParse(sizeStrs[0]) ?? 1280,
-          double.tryParse(sizeStrs[1]) ?? 756);
+    _readWindowGeometry(settingsMap);
+
+    _readUpdatePreferences(settingsMap);
+  }
+
+  static void _readUpdatePreferences(Map settingsMap) {
+    _instance.backgrounds.value =
+        BackgroundPreferences.fromMap(settingsMap['Backgrounds']);
+    _instance.onlineSources.value =
+        OnlineSourcePreferences.fromJson(settingsMap['OnlineSources']);
+    _instance.experience.value =
+        PlayerExperiencePreferences.fromMap(settingsMap['PlayerExperience']);
+    _instance.desktopLyricAppearance.value =
+        DesktopLyricAppearance.fromJson(settingsMap['DesktopLyricAppearance']);
+    uiLanguage.value = UiLanguage.parse(settingsMap['UiLanguage']);
+    _instance.uiLayout.value =
+        UiLayoutPreferences.fromMap(settingsMap['UiLayout']);
+    _instance.rendering.value =
+        RenderingPreferences.fromMap(settingsMap['Rendering']);
+    _instance.shortcuts.value =
+        ShortcutPreferences.fromMap(settingsMap['PlayerShortcuts']);
+    final autoCheck = settingsMap["AutoCheckUpdates"];
+    if (autoCheck != null) {
+      _instance.autoCheckUpdates =
+          autoCheck is bool ? autoCheck : autoCheck == 1;
     }
 
-    final isMaximized = settingsMap["IsWindowMaximized"];
-    if (isMaximized != null) {
-      _instance.isWindowMaximized = isMaximized == 1;
-    }
+    final ignoredVersion = settingsMap["IgnoredUpdateVersion"];
+    _instance.ignoredUpdateVersion =
+        ignoredVersion is String && ignoredVersion.trim().isNotEmpty
+            ? ignoredVersion.trim()
+            : null;
+
+    final lastCheck = settingsMap["LastUpdateCheckAt"];
+    _instance.lastUpdateCheckAt =
+        lastCheck is String ? DateTime.tryParse(lastCheck) : null;
   }
 
   static Future<void> readFromJson() async {
@@ -195,7 +276,8 @@ class AppSettings {
       Map settingsMap = json.decode(settingsStr);
 
       if (settingsMap["Version"] == null) {
-        return _readFromJson_old(settingsMap);
+        await _readFromJson_old(settingsMap);
+        return;
       }
 
       final ust = settingsMap["UseSystemTheme"];
@@ -246,17 +328,7 @@ class AppSettings {
             : restoreLastSession == 1;
       }
 
-      final sizeStr = settingsMap["WindowSize"];
-      if (sizeStr != null) {
-        final sizeStrs = (sizeStr as String).split(",");
-        _instance.windowSize = Size(double.tryParse(sizeStrs[0]) ?? 1280,
-            double.tryParse(sizeStrs[1]) ?? 756);
-      }
-
-      final isMaximized = settingsMap["IsWindowMaximized"];
-      if (isMaximized != null) {
-        _instance.isWindowMaximized = isMaximized;
-      }
+      _readWindowGeometry(settingsMap);
 
       final ff = settingsMap["FontFamily"];
       final fp = settingsMap["FontPath"];
@@ -264,19 +336,47 @@ class AppSettings {
         _instance.fontFamily = ff;
         _instance.fontPath = fp;
       }
+
+      _readUpdatePreferences(settingsMap);
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
     }
   }
 
-  Future<void> saveSettings() async {
+  Future<void> saveSettings({
+    bool throwOnError = false,
+    bool captureWindowSize = true,
+  }) async {
     try {
-      final isMaximized = await windowManager.isMaximized();
-      final isFullScreen = await windowManager.isFullScreen();
+      final mode = WindowModeController.instance;
+      // Native maximize/fullscreen notifications also arrive during compact
+      // transitions. They must not persist an intermediate/mini window size.
+      if (captureWindowSize && mode.isBusy) return;
+      final saveRevision = ++_saveRevision;
+      final normalSnapshot = mode.isMini ? mode.normalWindowSnapshot : null;
+      final isMaximized = normalSnapshot?.maximized ??
+          (captureWindowSize
+              ? await windowManager.isMaximized()
+              : isWindowMaximized);
+      final isFullScreen = normalSnapshot?.fullScreen ??
+          (captureWindowSize ? await windowManager.isFullScreen() : false);
+      if (saveRevision != _saveRevision ||
+          (captureWindowSize &&
+              (mode.isBusy || mode.isMini != (normalSnapshot != null)))) {
+        return;
+      }
       final settingsMap = {
         "Version": version,
         "ThemeMode": themeMode == ThemeMode.dark,
         "DynamicTheme": dynamicTheme,
+        "Backgrounds": backgrounds.value.toMap(),
+        "PlayerExperience": experience.value.toMap(),
+        "DesktopLyricAppearance": desktopLyricAppearance.value.toJson(),
+        "UiLanguage": uiLanguage.value.code,
+        "UiLayout": uiLayout.value.toMap(),
+        "Rendering": rendering.value.toMap(),
+        "PlayerShortcuts": shortcuts.value.toMap(),
+        "OnlineSources": onlineSources.value.toJson(),
         "UseSystemTheme": useSystemTheme,
         "UseSystemThemeMode": useSystemThemeMode,
         "DefaultTheme": defaultTheme,
@@ -284,27 +384,52 @@ class AppSettings {
         "LocalLyricFirst": localLyricFirst,
         "LyricApiUrl": lyricApiUrl,
         "RestoreLastSession": restoreLastSession,
-        "IsWindowMaximized": isMaximized,
+        "AutoCheckUpdates": autoCheckUpdates,
+        "IgnoredUpdateVersion": ignoredUpdateVersion,
+        "LastUpdateCheckAt": lastUpdateCheckAt?.toIso8601String(),
         "FontFamily": fontFamily,
         "FontPath": fontPath,
       };
 
       // 只有在窗口不是最大化且不是全屏时才保存窗口尺寸
       // 这样windowSize始终保存的是窗口化时的尺寸
-      Size sizeToSave = windowSize;
-      if (!isMaximized && !isFullScreen) {
+      Size sizeToSave = normalSnapshot?.bounds.size ?? windowSize;
+      if (captureWindowSize &&
+          normalSnapshot == null &&
+          !isMaximized &&
+          !isFullScreen) {
         sizeToSave = await windowManager.getSize();
       }
-      settingsMap["WindowSize"] =
-          "${sizeToSave.width.toStringAsFixed(1)},${sizeToSave.height.toStringAsFixed(1)}";
+      if (saveRevision != _saveRevision ||
+          (captureWindowSize &&
+              (mode.isBusy || mode.isMini != (normalSnapshot != null)))) {
+        return;
+      }
+      final safeSize = WindowGeometryPolicy.constrain(
+        WindowGeometrySize(sizeToSave.width, sizeToSave.height),
+      );
+      sizeToSave = Size(safeSize.width, safeSize.height);
+      windowSize = sizeToSave;
+      isWindowMaximized = isMaximized;
+      settingsMap.addAll(WindowGeometryPolicy.encode(
+        size: safeSize,
+        isMaximized: isMaximized,
+      ));
 
       final settingsStr = json.encode(settingsMap);
       final supportPath = (await getAppDataDir()).path;
       final settingsPath = "$supportPath\\settings.json";
+      if (saveRevision != _saveRevision) return;
       final output = await File(settingsPath).create(recursive: true);
+      // Sliders and mode/appearance switches may save concurrently. A delayed
+      // old window/path reply must never overwrite a newer preference snapshot.
+      if (saveRevision != _saveRevision) return;
       output.writeAsStringSync(settingsStr);
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
+      // Existing fire-and-forget callers keep their non-throwing behavior.
+      // Interactive settings can opt in and show a failed write to the user.
+      if (throwOnError) rethrow;
     }
   }
 }

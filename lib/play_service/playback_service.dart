@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_state_store.dart';
+import 'package:dan_player/play_service/playback_rate.dart';
+import 'package:dan_player/play_service/queue_navigation.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/src/rust/api/smtc_flutter.dart';
+import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart';
@@ -42,8 +46,12 @@ class PlaybackService extends ChangeNotifier {
 
   PlaybackService(this.playService) {
     _playerStateStreamSub = playerStateStream.listen((event) {
+      if (_closed) return;
       if (event == PlayerState.completed) {
-        _autoNextAudio();
+        PlaybackStatistics.instance.finish(markCompleted: true);
+        // An old track may finish while a user-selected online track is still
+        // opening. Do not let auto-next replace that newer explicit request.
+        if (!isBuffering.value) _autoNextAudio();
       }
     });
 
@@ -66,6 +74,9 @@ class PlaybackService extends ChangeNotifier {
     });
 
     _positionStreamSub = positionStream.listen((progress) {
+      if (_closed) return;
+      PlaybackStatistics.instance
+          .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
       final progressMs = (progress * 1000).floor();
       if ((progressMs - _lastSmtcProgressMs).abs() >= 1000) {
         _lastSmtcProgressMs = progressMs;
@@ -78,19 +89,102 @@ class PlaybackService extends ChangeNotifier {
     });
   }
 
-  late final BassPlayer _player = BassPlayer()
-    ..setEqGains(AppPreference.instance.playbackPref.eqGains)
-    ..setEqEnabled(AppPreference.instance.playbackPref.eqEnabled);
+  late final BassPlayer _player = _createPlayer();
+
+  BassPlayer _createPlayer() {
+    final features = AppSettings.instance.experience.value;
+    final player = BassPlayer()
+      ..wasapiExclusive = features.exclusiveOutput
+      ..setEqGains(AppPreference.instance.playbackPref.eqGains)
+      ..setEqEnabled(AppPreference.instance.playbackPref.eqEnabled);
+    if (player.supportsPlaybackRate) {
+      player.setPlaybackRate(features.playbackRate);
+    }
+    return player;
+  }
+
   final _smtc = SmtcFlutter();
   final _pref = AppPreference.instance.playbackPref;
 
   late final _wasapiExclusive = ValueNotifier(_player.wasapiExclusive);
   ValueNotifier<bool> get wasapiExclusive => _wasapiExclusive;
+  final isChangingOutput = ValueNotifier(false);
+  late final _playbackRate = ValueNotifier(_player.playbackRate);
+  ValueNotifier<double> get playbackRate => _playbackRate;
+  bool get supportsPlaybackRate => _player.supportsPlaybackRate;
+  String? get tempoUnavailableReason => _player.tempoUnavailableReason;
+
+  /// Apply immediately; the calling settings/menu surface persists the choice
+  /// and can report a write failure without hiding a successful audio change.
+  bool setPlaybackRate(double rate) {
+    if (_closed) return false;
+    try {
+      PlaybackRate.validate(rate);
+      PlaybackStatistics.instance
+          .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
+      if (!_player.setPlaybackRate(rate)) return false;
+      _playbackRate.value = _player.playbackRate;
+      AppSettings.instance.experience.value = AppSettings
+          .instance.experience.value
+          .copyWith(playbackRate: _player.playbackRate);
+      PlaybackStatistics.instance
+          .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
+      playService.desktopLyricService.sendPlaybackTimelineMessage();
+      return true;
+    } catch (error, trace) {
+      LOGGER.w('[playback rate] $error', stackTrace: trace);
+      showTextOnSnackBar('调整播放速度失败：$error');
+      return false;
+    }
+  }
 
   /// 独占模式
   void useExclusiveMode(bool exclusive) {
-    if (_player.useExclusiveMode(exclusive)) {
-      _wasapiExclusive.value = exclusive;
+    if (_closed) return;
+    if (exclusive == _player.wasapiExclusive) return;
+    if (isBuffering.value || isChangingOutput.value) {
+      showTextOnSnackBar('请等待当前音乐加载完成后再切换输出模式');
+      return;
+    }
+    final token = ++_sourceRequestToken;
+    isChangingOutput.value = true;
+    _player.cancelPendingSource();
+    final current = nowPlaying;
+    _loadingPlaylistIndex = _playlistIndex;
+    isBuffering.value = current?.isOnline == true;
+    resolvingAudioPath.value = current?.isOnline == true ? current!.path : null;
+    unawaited(_useExclusiveModeResolved(token, exclusive));
+  }
+
+  Future<void> _useExclusiveModeResolved(int token, bool exclusive) async {
+    try {
+      final applied = await _player.useExclusiveMode(exclusive);
+      if (!_closed) _wasapiExclusive.value = _player.wasapiExclusive;
+      if (applied && _isCurrentSourceRequest(token)) {
+        AppSettings.instance.experience.value = AppSettings
+            .instance.experience.value
+            .copyWith(exclusiveOutput: _player.wasapiExclusive);
+        try {
+          await AppSettings.instance.saveSettings(throwOnError: true);
+        } catch (error, trace) {
+          LOGGER.w('[save output preference] $error', stackTrace: trace);
+          if (_isCurrentSourceRequest(token)) {
+            showTextOnSnackBar('音频输出已切换，但设置保存失败：$error');
+          }
+        }
+      }
+    } catch (err, trace) {
+      if (_isCurrentSourceRequest(token)) {
+        LOGGER.e('[change output mode] $err', stackTrace: trace);
+        showTextOnSnackBar('切换音频输出失败：$err');
+      }
+    } finally {
+      if (!_closed) isChangingOutput.value = false;
+      if (_isCurrentSourceRequest(token)) {
+        isBuffering.value = false;
+        resolvingAudioPath.value = null;
+        _loadingPlaylistIndex = null;
+      }
     }
   }
 
@@ -117,9 +211,29 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Audio? nowPlaying;
+  final ValueNotifier<bool> isBuffering = ValueNotifier(false);
+  final ValueNotifier<String?> resolvingAudioPath = ValueNotifier(null);
+  int _sourceRequestToken = 0;
+  bool _closed = false;
+  Future<void>? _closeFuture;
+
+  bool _isCurrentSourceRequest(int token) =>
+      !_closed && token == _sourceRequestToken;
 
   int? _playlistIndex;
-  int get playlistIndex => _playlistIndex ?? 0;
+  int? _loadingPlaylistIndex;
+  int get playlistIndex {
+    final index = queueIndexForTrack(playlist.value, nowPlaying?.path,
+        preferredIndex: _playlistIndex);
+    return index < 0 ? 0 : index;
+  }
+
+  int get _navigationIndex {
+    final pending = resolvingAudioPath.value;
+    return queueIndexForTrack(playlist.value, pending ?? nowPlaying?.path,
+        preferredIndex:
+            pending == null ? _playlistIndex : _loadingPlaylistIndex);
+  }
 
   final ValueNotifier<List<Audio>> playlist = ValueNotifier([]);
   List<Audio> _playlistBackup = [];
@@ -153,8 +267,11 @@ class PlaybackService extends ChangeNotifier {
     playlist.value = refresh(playlist.value);
     _playlistBackup = refresh(_playlistBackup);
     if (nowPlayingPath != null) {
-      final refreshedIndex =
-          playlist.value.indexWhere((audio) => audio.path == nowPlayingPath);
+      final refreshedIndex = queueIndexForTrack(
+        playlist.value,
+        nowPlayingPath,
+        preferredIndex: _playlistIndex,
+      );
       if (refreshedIndex >= 0) {
         _playlistIndex = refreshedIndex;
       }
@@ -209,7 +326,12 @@ class PlaybackService extends ChangeNotifier {
     sleepTimerRemaining.value = null;
   }
 
-  double get length => _player.length;
+  double get length {
+    final value = _player.length;
+    return value.isFinite && value >= 0
+        ? value
+        : (nowPlaying?.duration ?? 0).toDouble();
+  }
 
   double get position => _player.position;
 
@@ -229,28 +351,53 @@ class PlaybackService extends ChangeNotifier {
 
   Stream<List<double>> get spectrumStream => _player.spectrumStream;
 
+  Stream<List<double>> get frequencySpectrumStream =>
+      _player.frequencySpectrumStream;
+
   List<double> get spectrumLevels => _player.spectrumLevels;
 
-  /// 1. 更新 [_playlistIndex] 为 [audioIndex]
-  /// 2. 更新 [nowPlaying] 为 playlist[_nowPlayingIndex]
-  /// 3. _bassPlayer.setSource
-  /// 4. 设置解码音量
-  /// 4. 获取歌词 **将 [_nextLyricLine] 置为0**
-  /// 5. 播放
-  /// 6. 通知并更新主题色
+  List<double> get frequencySpectrumLevels => _player.frequencySpectrumLevels;
+
+  /// Resolve/open first; only a successful native source becomes nowPlaying.
   void _loadAndPlay(int audioIndex, List<Audio> playlist) {
+    if (_closed) return;
+    final token = ++_sourceRequestToken;
+    _player.cancelPendingSource();
+    unawaited(_loadAndPlayResolved(token, audioIndex, playlist));
+  }
+
+  Future<void> _loadAndPlayResolved(
+    int token,
+    int audioIndex,
+    List<Audio> playlist,
+  ) async {
     try {
       if (audioIndex < 0 || audioIndex >= playlist.length) {
         throw RangeError.index(audioIndex, playlist, "audioIndex");
       }
+      final target = playlist[audioIndex];
+      _loadingPlaylistIndex = audioIndex;
+      isBuffering.value = target.isOnline;
+      resolvingAudioPath.value = target.isOnline ? target.path : null;
+      final source = target.isOnline
+          ? (await OnlineMusicService.instance.resolveStreamUrl(target))
+              .toString()
+          : target.path;
+      if (!_isCurrentSourceRequest(token)) return;
+      final applied = await _player.setSource(source, isUrl: target.isOnline);
+      if (!applied || !_isCurrentSourceRequest(token)) return;
+      if (nowPlaying != null) {
+        PlaybackStatistics.instance.finish(markCompleted: false);
+      }
       _playlistIndex = audioIndex;
-      nowPlaying = playlist[audioIndex];
-      _player.setSource(nowPlaying!.path);
+      nowPlaying = target;
       setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
 
       playService.lyricService.updateLyric();
 
       _player.start();
+      PlaybackStatistics.instance
+          .start(nowPlaying!, playbackRate: _player.playbackRate);
       notifyListeners();
       ThemeProvider.instance.applyThemeFromAudio(nowPlaying!);
 
@@ -265,7 +412,7 @@ class PlaybackService extends ChangeNotifier {
       );
 
       playService.desktopLyricService.canSendMessage.then((canSend) {
-        if (!canSend) return;
+        if (!canSend || !_isCurrentSourceRequest(token)) return;
 
         playService.desktopLyricService
             .sendPlayerStateMessage(playerState == PlayerState.playing);
@@ -274,18 +421,34 @@ class PlaybackService extends ChangeNotifier {
 
       _lastSessionProgressMs = 0;
       _schedulePlaybackStateSave(positionOverride: 0);
-    } catch (err) {
+    } catch (err, trace) {
       LOGGER.e("[load and play] $err");
-      showTextOnSnackBar(err.toString());
+      LOGGER.d("[load and play] trace", stackTrace: trace);
+      if (_isCurrentSourceRequest(token)) {
+        showTextOnSnackBar(
+          err is OnlineMusicException ? err.message : "播放失败：$err",
+        );
+      }
+    } finally {
+      if (_isCurrentSourceRequest(token)) {
+        isBuffering.value = false;
+        resolvingAudioPath.value = null;
+        _loadingPlaylistIndex = null;
+      }
     }
   }
 
   SavedPlaybackState? _snapshotState({double? positionOverride}) {
     if (nowPlaying == null || playlist.value.isEmpty) return null;
+    final currentIndex = queueIndexForTrack(playlist.value, nowPlaying?.path,
+        preferredIndex: _playlistIndex);
+    // A newly selected queue may be visible while its first track is opening.
+    // Never persist the old track's position against an unrelated queue entry.
+    if (currentIndex < 0) return null;
     return SavedPlaybackState(
       queuePaths: [for (final audio in playlist.value) audio.path],
       backupPaths: [for (final audio in _playlistBackup) audio.path],
-      index: playlistIndex,
+      index: currentIndex,
       position: positionOverride ?? position,
       shuffle: shuffle.value,
     );
@@ -302,6 +465,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _schedulePlaybackStateSave({double? positionOverride}) {
+    if (_closed) return;
     _stateSaveTimer?.cancel();
     _stateSaveTimer = Timer(const Duration(milliseconds: 250), () {
       _stateSaveTimer = null;
@@ -314,10 +478,19 @@ class PlaybackService extends ChangeNotifier {
   Future<void> restoreLastSessionOnce() async {
     if (_sessionRestoreAttempted) return;
     _sessionRestoreAttempted = true;
-    if (!AppSettings.instance.restoreLastSession || nowPlaying != null) return;
+    if (_closed ||
+        !AppSettings.instance.restoreLastSession ||
+        nowPlaying != null) {
+      return;
+    }
 
+    final restoreToken = _sourceRequestToken;
     final saved = await PlaybackStateStore.load();
-    if (saved == null || nowPlaying != null) return;
+    if (!_isCurrentSourceRequest(restoreToken) ||
+        saved == null ||
+        nowPlaying != null) {
+      return;
+    }
 
     final byPath = AudioLibrary.instance.audioByPath;
     List<Audio> resolve(List<String> paths) => [
@@ -329,18 +502,20 @@ class PlaybackService extends ChangeNotifier {
     if (queue.isEmpty) return;
     final backup = resolve(saved.backupPaths);
 
-    var index = -1;
-    if (saved.index >= 0 && saved.index < saved.queuePaths.length) {
-      final currentPath = saved.queuePaths[saved.index];
-      index = queue.indexWhere((audio) => audio.path == currentPath);
-    }
-    if (index < 0) index = 0;
+    final restoredIndex = queueIndexAfterFiltering(
+      saved.queuePaths,
+      saved.index,
+      keepPath: byPath.containsKey,
+    );
+    final hasSavedOccurrence = restoredIndex >= 0;
+    // If that occurrence disappeared, start the first surviving item from the
+    // beginning, never apply another song's saved progress to it.
+    final index = hasSavedOccurrence ? restoredIndex : 0;
 
     playlist.value = queue;
     _playlistBackup = backup.isEmpty ? List.from(queue) : backup;
     shuffle.value = saved.shuffle;
-    _loadPaused(index, queue, saved.position);
-    _schedulePlaybackStateSave(positionOverride: saved.position);
+    _loadPaused(index, queue, hasSavedOccurrence ? saved.position : 0.0);
   }
 
   void _loadPaused(
@@ -348,16 +523,51 @@ class PlaybackService extends ChangeNotifier {
     List<Audio> playlist,
     double savedPosition,
   ) {
+    if (_closed) return;
+    final token = ++_sourceRequestToken;
+    _player.cancelPendingSource();
+    unawaited(
+      _loadPausedResolved(token, audioIndex, playlist, savedPosition),
+    );
+  }
+
+  Future<void> _loadPausedResolved(
+    int token,
+    int audioIndex,
+    List<Audio> playlist,
+    double savedPosition,
+  ) async {
     try {
+      if (audioIndex < 0 || audioIndex >= playlist.length) {
+        throw RangeError.index(audioIndex, playlist, 'audioIndex');
+      }
+      final target = playlist[audioIndex];
+      _loadingPlaylistIndex = audioIndex;
+      isBuffering.value = target.isOnline;
+      resolvingAudioPath.value = target.isOnline ? target.path : null;
+      final source = target.isOnline
+          ? (await OnlineMusicService.instance.resolveStreamUrl(target))
+              .toString()
+          : target.path;
+      if (!_isCurrentSourceRequest(token)) return;
+      final applied = await _player.setSource(source, isUrl: target.isOnline);
+      if (!applied || !_isCurrentSourceRequest(token)) return;
       _playlistIndex = audioIndex;
-      nowPlaying = playlist[audioIndex];
-      _player.setSource(nowPlaying!.path);
+      nowPlaying = target;
       setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
       playService.lyricService.updateLyric();
 
-      final restoredPosition =
+      var restoredPosition =
           savedPosition > 0 && savedPosition < length ? savedPosition : 0.0;
-      if (restoredPosition > 0) _player.seek(restoredPosition);
+      if (restoredPosition > 0) {
+        try {
+          _player.seek(restoredPosition);
+        } catch (err, trace) {
+          restoredPosition = 0;
+          LOGGER.w('[restore session] 无法恢复播放位置：$err', stackTrace: trace);
+          showTextOnSnackBar('已恢复歌曲，但原播放位置暂不可用');
+        }
+      }
 
       notifyListeners();
       ThemeProvider.instance.applyThemeFromAudio(nowPlaying!);
@@ -372,17 +582,26 @@ class PlaybackService extends ChangeNotifier {
         path: nowPlaying!.path,
       );
       _smtc.updateTimeProperties(progress: _lastSmtcProgressMs);
+      _schedulePlaybackStateSave(positionOverride: restoredPosition);
 
       playService.desktopLyricService.canSendMessage.then((canSend) {
-        if (!canSend) return;
+        if (!canSend || !_isCurrentSourceRequest(token)) return;
         playService.desktopLyricService.sendPlayerStateMessage(false);
         playService.desktopLyricService.sendNowPlayingMessage(nowPlaying!);
       });
     } catch (err, trace) {
-      nowPlaying = null;
-      _playlistIndex = null;
-      notifyListeners();
+      if (!_isCurrentSourceRequest(token)) return;
+      // A failed/stale restore must never clear a successfully opened newer
+      // song. Native source replacement itself is transactional as well.
       LOGGER.e("[restore session] $err", stackTrace: trace);
+      showTextOnSnackBar(
+          err is OnlineMusicException ? err.message : '恢复播放失败：$err');
+    } finally {
+      if (_isCurrentSourceRequest(token)) {
+        isBuffering.value = false;
+        resolvingAudioPath.value = null;
+        _loadingPlaylistIndex = null;
+      }
     }
   }
 
@@ -429,9 +648,9 @@ class PlaybackService extends ChangeNotifier {
 
   /// 下一首播放
   void addToNext(Audio audio) {
-    if (_playlistIndex != null) {
+    if (playlist.value.isNotEmpty) {
       final nextPlaylist = List<Audio>.from(playlist.value)
-        ..insert(_playlistIndex! + 1, audio);
+        ..insert(_navigationIndex + 1, audio);
       playlist.value = nextPlaylist;
       if (shuffle.value) {
         if (_findAudioByPath(_playlistBackup, audio) < 0) {
@@ -492,14 +711,15 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _nextShuffleAudio() {
-    if (_playlistIndex == null || playlist.value.isEmpty) return;
+    if (playlist.value.isEmpty) return;
+    final currentIndex = _navigationIndex;
 
-    if (_playlistIndex! < playlist.value.length - 1) {
-      _loadAndPlay(_playlistIndex! + 1, playlist.value);
+    if (currentIndex < playlist.value.length - 1) {
+      _loadAndPlay(currentIndex + 1, playlist.value);
       return;
     }
 
-    final currentAudio = nowPlaying ?? playlist.value[_playlistIndex!];
+    final currentAudio = playlist.value[currentIndex];
     final source = _playlistBackup.isEmpty ? playlist.value : _playlistBackup;
     _buildShuffleCycle(source, currentAudio);
 
@@ -511,23 +731,24 @@ class PlaybackService extends ChangeNotifier {
   }
 
   bool _nextAudio_forward() {
-    if (_playlistIndex == null) return false;
+    if (playlist.value.isEmpty) return false;
+    final currentIndex = _navigationIndex;
 
-    if (_playlistIndex! < playlist.value.length - 1) {
-      _loadAndPlay(_playlistIndex! + 1, playlist.value);
+    if (currentIndex < playlist.value.length - 1) {
+      _loadAndPlay(currentIndex + 1, playlist.value);
       return true;
     }
     return false;
   }
 
   void _nextAudio_loop() {
-    if (_playlistIndex == null) return;
+    if (playlist.value.isEmpty) return;
     if (shuffle.value) {
       _nextShuffleAudio();
       return;
     }
 
-    int newIndex = _playlistIndex! + 1;
+    int newIndex = _navigationIndex + 1;
     if (newIndex >= playlist.value.length) {
       newIndex = 0;
     }
@@ -536,9 +757,10 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _nextAudio_singleLoop() {
-    if (_playlistIndex == null) return;
+    if (playlist.value.isEmpty) return;
 
-    _loadAndPlay(_playlistIndex!, playlist.value);
+    final index = _navigationIndex;
+    _loadAndPlay(index < 0 ? 0 : index, playlist.value);
   }
 
   void _syncPausedToSystem() {
@@ -580,9 +802,9 @@ class PlaybackService extends ChangeNotifier {
 
   /// 手动上一曲时默认循环播放列表
   void lastAudio() {
-    if (_playlistIndex == null || playlist.value.isEmpty) return;
+    if (playlist.value.isEmpty) return;
 
-    int newIndex = _playlistIndex! - 1;
+    int newIndex = _navigationIndex - 1;
     if (newIndex < 0) {
       newIndex = playlist.value.length - 1;
     }
@@ -592,8 +814,12 @@ class PlaybackService extends ChangeNotifier {
 
   /// 暂停
   void pause() {
+    if (_closed) return;
     try {
+      PlaybackStatistics.instance
+          .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
       _player.pause();
+      PlaybackStatistics.instance.pause();
       _syncPausedToSystem();
       unawaited(_savePlaybackState());
     } catch (err) {
@@ -604,8 +830,14 @@ class PlaybackService extends ChangeNotifier {
 
   /// 恢复播放
   void start() {
+    if (_closed) return;
     try {
       _player.start();
+      final current = nowPlaying;
+      if (current != null) {
+        PlaybackStatistics.instance
+            .start(current, playbackRate: _player.playbackRate);
+      }
       _smtc.updateState(state: SMTCState.playing);
       playService.desktopLyricService.canSendMessage.then((canSend) {
         if (!canSend) return;
@@ -623,13 +855,28 @@ class PlaybackService extends ChangeNotifier {
   void playAgain() => _nextAudio_singleLoop();
 
   void seek(double position) {
-    _player.seek(position);
-    _lastSmtcProgressMs = -1000;
-    playService.lyricService.findCurrLyricLine();
-    _schedulePlaybackStateSave(positionOverride: position);
+    if (_closed) return;
+    try {
+      _player.seek(position);
+      _lastSmtcProgressMs = -1000;
+      playService.lyricService.findCurrLyricLine();
+      _schedulePlaybackStateSave(positionOverride: position);
+    } catch (error, trace) {
+      LOGGER.w('[seek] $error', stackTrace: trace);
+      showTextOnSnackBar(nowPlaying?.isOnline == true
+          ? '暂时无法跳到此位置，在线音频可能尚未缓冲完成'
+          : '调整播放位置失败，请重新打开歌曲后重试');
+    }
   }
 
-  Future<void> close() async {
+  Future<void> close() => _closeFuture ??= _close();
+
+  Future<void> _close() async {
+    _closed = true;
+    _sourceRequestToken += 1;
+    _player.cancelPendingSource();
+    isBuffering.value = false;
+    resolvingAudioPath.value = null;
     _stateSaveTimer?.cancel();
     _stateSaveTimer = null;
     final snapshot = _snapshotState();
@@ -644,6 +891,7 @@ class PlaybackService extends ChangeNotifier {
     try {
       await Future.wait([
         _stateWrite,
+        PlaybackStatistics.instance.flush(finishSession: true),
         _playerStateStreamSub.cancel(),
         _positionStreamSub.cancel(),
       ]).timeout(const Duration(seconds: 1));
@@ -668,12 +916,16 @@ class PlaybackService extends ChangeNotifier {
           stackTrace: trace);
     }
 
-    _player.free();
+    await _player.free();
     _wasapiExclusive.dispose();
+    isChangingOutput.dispose();
+    _playbackRate.dispose();
     _eqEnabled.dispose();
     _playMode.dispose();
     _shuffle.dispose();
     sleepTimerRemaining.dispose();
     stopAfterCurrent.dispose();
+    isBuffering.dispose();
+    resolvingAudioPath.dispose();
   }
 }

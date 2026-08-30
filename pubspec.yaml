@@ -1,7 +1,7 @@
-﻿name: dan_player
+name: dan_player
 description: Dan Player.
 publish_to: 'none'
-version: 26.0.2
+version: 26.0.3
 
 environment:
   sdk: '>=3.1.4 <4.0.0'
@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  go_router: ^14.0.1 
+  go_router: ^14.0.1
   material_color_utilities: ^0.13.0
   window_manager: ^0.5.1
   provider: ^6.1.1
@@ -23,6 +23,7 @@ dependencies:
   path: ^1.8.3
   material_symbols_icons: ^4.2928.1
   github: ^9.24.0
+  crypto: ^3.0.7
   flutter_markdown: ^0.7.1
   flex_color_picker: ^3.5.0
   filepicker_windows: ^2.1.4
@@ -53,6 +54,8 @@ flutter:
     - app_icon.ico
     - assets/images/RCE_logo_transparent.png
     - assets/images/RCE_logo_white.png
+    - assets/branding/danruguo_light.png
+    - assets/branding/danruguo_dark.png
   fonts:
     - family: DanPingFangSC
       fonts:

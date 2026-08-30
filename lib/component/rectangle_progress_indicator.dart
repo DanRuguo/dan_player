@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
 
@@ -7,10 +7,17 @@ class RectangleProgressIndicator extends StatefulWidget {
     super.key,
     required this.size,
     required this.child,
+    this.positionStream,
+    this.lengthProvider,
   });
 
   final Size size;
   final Widget child;
+
+  /// Test seams also make this component reusable without creating another
+  /// player. Production callers leave both null and use the single PlayService.
+  final Stream<double>? positionStream;
+  final double Function()? lengthProvider;
 
   @override
   State<RectangleProgressIndicator> createState() =>
@@ -24,13 +31,18 @@ class _RectangleProgressIndicatorState
 
   /// position / length, [0, 1]
   final progress = ValueNotifier<double>(0);
+  bool _disposed = false;
 
   @override
   void initState() {
     super.initState();
-    subscription =
-        PlayService.instance.playbackService.positionStream.listen((event) {
-      progress.value = event / PlayService.instance.playbackService.length;
+    subscription = (widget.positionStream ??
+            PlayService.instance.playbackService.positionStream)
+        .listen((event) {
+      if (_disposed) return;
+      final length = widget.lengthProvider?.call() ??
+          PlayService.instance.playbackService.length;
+      progress.value = length <= 0 ? 0 : (event / length).clamp(0.0, 1.0);
     });
   }
 
@@ -46,8 +58,10 @@ class _RectangleProgressIndicatorState
 
   @override
   void dispose() {
-    super.dispose();
+    _disposed = true;
     subscription.cancel();
+    progress.dispose();
+    super.dispose();
   }
 }
 

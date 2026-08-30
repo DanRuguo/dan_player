@@ -65,50 +65,69 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
       child: Column(
         children: [
           Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _NowPlayingSmallViewSwitch(
-                  onTap: () => changeView(views[0]),
-                  icon: viewSwitchIcon(views[0]),
-                ),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 150),
-                    child: switch (views[1]) {
-                      NowPlayingViewMode.onlyMain => const _NowPlayingInfo(),
-                      NowPlayingViewMode.withLyric => const VerticalLyricView(),
-                      NowPlayingViewMode.withPlaylist =>
-                        const CurrentPlaylistView(),
-                    },
+            child: AppEntrance(
+              identity: 'now-playing-display',
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _NowPlayingSmallViewSwitch(
+                    onTap: () => changeView(views[0]),
+                    icon: viewSwitchIcon(views[0]),
                   ),
-                ),
-                _NowPlayingSmallViewSwitch(
-                  onTap: () => changeView(views[2]),
-                  icon: viewSwitchIcon(views[2]),
-                ),
-              ],
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 150),
+                      child: switch (views[1]) {
+                        NowPlayingViewMode.onlyMain => const _NowPlayingInfo(),
+                        NowPlayingViewMode.withLyric =>
+                          const VerticalLyricView(),
+                        NowPlayingViewMode.withPlaylist =>
+                          const CurrentPlaylistView(),
+                      },
+                    ),
+                  ),
+                  _NowPlayingSmallViewSwitch(
+                    onTap: () => changeView(views[2]),
+                    icon: viewSwitchIcon(views[2]),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8.0),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _NowPlayingSlider(),
+            child: AppEntrance(
+              identity: 'now-playing-slider',
+              order: 1,
+              child: SpectrumProgressSection(
+                spectrum: FullWidthSpectrum(height: 24),
+                progress: _NowPlayingSlider(),
+              ),
+            ),
           ),
           const SizedBox(height: 8.0),
-          const _NowPlayingMainControls(),
+          const AppEntrance(
+            identity: 'now-playing-controls',
+            order: 2,
+            child: _NowPlayingMainControls(),
+          ),
           const SizedBox(height: 8.0),
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _NowPlayingShuffleSwitch(),
-              _NowPlayingPlayModeSwitch(),
-              _NowPlayingVolDspSlider(),
-              _ExclusiveModeSwitch(),
-              _DesktopLyricSwitch(),
-              _NowPlayingMoreAction(),
-            ],
-          )
+          const AppEntrance(
+            identity: 'now-playing-secondary-controls',
+            order: 3,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _NowPlayingShuffleSwitch(),
+                _NowPlayingPlayModeSwitch(),
+                _NowPlayingVolDspSlider(),
+                PlaybackRateButton(),
+                _DesktopLyricSwitch(),
+                _NowPlayingMoreAction(),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -137,14 +156,16 @@ class _NowPlayingSmallViewSwitchState
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0),
       child: SizedBox(
-        width: 32,
+        width: 44,
         child: Material(
-          borderRadius: BorderRadius.circular(16.0),
+          borderRadius: AppShape.controlRadius,
           type: MaterialType.transparency,
-          child: Opacity(
-            opacity: visible ? 1.0 : 0.0,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 120),
+            // Keep view navigation discoverable without a mouse hover.
+            opacity: visible ? 1.0 : 0.7,
             child: InkWell(
-              borderRadius: BorderRadius.circular(16.0),
+              borderRadius: AppShape.controlRadius,
               hoverColor: scheme.onSecondaryContainer.withValues(alpha: 0.08),
               highlightColor:
                   scheme.onSecondaryContainer.withValues(alpha: 0.12),

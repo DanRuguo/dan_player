@@ -36,6 +36,10 @@ class Win32Window {
   // |Show| is called. Returns true if the window was created successfully.
   bool Create(const std::wstring& title, const Point& origin, const Size& size);
 
+  // Physical-pixel bounds on the owner's monitor. The owner is never resized,
+  // hidden or restyled when creating this opaque, non-taskbar tool window.
+  bool CreateOwned(const std::wstring& title, HWND owner, const RECT& bounds);
+
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
 
@@ -43,7 +47,7 @@ class Win32Window {
   void Destroy();
 
   // Inserts |content| into the window tree.
-  void SetChildContent(HWND content);
+  void SetChildContent(HWND content, bool focus = true);
 
   // Returns the backing Window handle to enable clients to set icon and other
   // window properties. Returns nullptr if the window has been destroyed.

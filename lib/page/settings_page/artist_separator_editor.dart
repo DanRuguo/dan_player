@@ -1,23 +1,27 @@
-﻿import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 class ArtistSeparatorEditor extends StatelessWidget {
   const ArtistSeparatorEditor({super.key});
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     return SettingsTile(
-      description: "自定义艺术家分隔符",
+      description: ui("自定义艺术家分隔符"),
       icon: Symbols.artist,
       action: FilledButton.icon(
         icon: const Icon(Symbols.edit),
-        label: const Text("管理艺术家分隔符"),
+        label: Text(ui("管理艺术家分隔符")),
         onPressed: () {
-          showDialog(
+          showAppDialog(
             context: context,
             builder: (context) => const _ArtistSeparatorEditDialog(),
           );
@@ -86,12 +90,10 @@ class __ArtistSeparatorEditDialogState
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     return Dialog(
       insetPadding: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12.0),
-      ),
       child: SizedBox(
         width: 350.0,
         height: 350.0,
@@ -101,8 +103,8 @@ class __ArtistSeparatorEditDialogState
             children: [
               Padding(
                 padding: const EdgeInsets.only(bottom: 16.0),
-                child: Text(
-                  "管理艺术家分隔符",
+                child: AppDialogTitle(
+                  ui("管理艺术家分隔符"),
                   style: TextStyle(
                     color: scheme.onSurface,
                     fontSize: 18.0,
@@ -141,12 +143,12 @@ class __ArtistSeparatorEditDialogState
                         );
                       });
                     },
-                    child: const Text("新增"),
+                    child: Text(ui("新增")),
                   ),
                   const SizedBox(width: 8.0),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text("取消"),
+                    child: Text(ui("取消")),
                   ),
                   const SizedBox(width: 8.0),
                   TextButton(
@@ -163,7 +165,7 @@ class __ArtistSeparatorEditDialogState
                               Navigator.pop(context);
                             }
                           },
-                    child: const Text("确定"),
+                    child: Text(ui("确定")),
                   ),
                 ],
               ),

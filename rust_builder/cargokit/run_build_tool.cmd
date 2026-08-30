@@ -5,10 +5,32 @@ setlocal ENABLEDELAYEDEXPANSION
 
 SET BASEDIR=%~dp0
 
+REM Refuse to write a runner package unless CMake supplied an isolated directory.
+REM An unset variable or failed cd would otherwise overwrite the app pubspec.
+if not defined CARGOKIT_TOOL_TEMP_DIR (
+    echo CARGOKIT_TOOL_TEMP_DIR must be set by the build system. 1>&2
+    exit /b 1
+)
+if not defined FLUTTER_ROOT (
+    echo FLUTTER_ROOT must point to the Flutter SDK. 1>&2
+    exit /b 1
+)
+
 if not exist "%CARGOKIT_TOOL_TEMP_DIR%" (
     mkdir "%CARGOKIT_TOOL_TEMP_DIR%"
+    if errorlevel 1 exit /b 1
 )
 cd /D "%CARGOKIT_TOOL_TEMP_DIR%"
+if errorlevel 1 exit /b 1
+
+REM Never replace a real application/package manifest on a misconfigured run.
+if exist pubspec.yaml (
+    findstr /X /C:"name: build_tool_runner" pubspec.yaml >nul
+    if errorlevel 1 (
+        echo Refusing to overwrite an existing package in the build tool directory. 1>&2
+        exit /b 1
+    )
+)
 
 SET BUILD_TOOL_PKG_DIR=%BASEDIR%build_tool
 SET DART=%FLUTTER_ROOT%\bin\cache\dart-sdk\bin\dart
@@ -78,7 +100,9 @@ REM which means  we need to do pub get and precompile
 if not exist "%PRECOMPILED%" (
     echo Running pub get in "%cd%"
     "%DART%" pub get --no-precompile
+    if errorlevel 1 exit /b 1
     "%DART%" compile kernel bin/build_tool_runner.dart
+    if errorlevel 1 exit /b 1
 )
 
 "%DART%" "%PRECOMPILED%" %*
@@ -86,6 +110,8 @@ if not exist "%PRECOMPILED%" (
 REM 253 means invalid snapshot version.
 If %ERRORLEVEL% equ 253 (
     "%DART%" pub get --no-precompile
+    if errorlevel 1 exit /b 1
     "%DART%" compile kernel bin/build_tool_runner.dart
+    if errorlevel 1 exit /b 1
     "%DART%" "%PRECOMPILED%" %*
 )

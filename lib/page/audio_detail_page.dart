@@ -1,158 +1,484 @@
-import 'package:dan_player/utils.dart';
-import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/album_tile.dart';
 import 'package:dan_player/component/artist_tile.dart';
+import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/artwork_backdrop.dart';
+import 'package:dan_player/component/audio_artwork.dart';
+import 'package:dan_player/component/audio_metadata_dialog.dart';
+import 'package:dan_player/component/full_width_spectrum.dart';
+import 'package:dan_player/component/lyric_editor_dialog.dart';
+import 'package:dan_player/component/song_comments_dialog.dart';
+import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/online/online_library.dart';
+import 'package:dan_player/online/online_music_service.dart';
+import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/src/rust/api/utils.dart';
+import 'package:dan_player/statistics/playback_statistics.dart';
+import 'package:dan_player/utils.dart';
+import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
-class AudioDetailPage extends StatelessWidget {
+class AudioDetailPage extends StatefulWidget {
   const AudioDetailPage({super.key, required this.audio});
 
   final Audio audio;
 
   @override
+  State<AudioDetailPage> createState() => _AudioDetailPageState();
+}
+
+class _AudioDetailPageState extends State<AudioDetailPage> {
+  Audio get audio => widget.audio;
+  int _metadataRevision = 0;
+
+  Future<void> _toggleLibrary() async {
+    try {
+      if (OnlineLibrary.instance.contains(audio)) {
+        await OnlineLibrary.instance.remove(audio);
+        showTextOnSnackBar("已从总乐库移除");
+      } else {
+        await OnlineLibrary.instance.add(audio);
+        showTextOnSnackBar("已加入总乐库");
+      }
+      if (mounted) setState(() {});
+    } catch (error) {
+      showTextOnSnackBar("更新总乐库失败：{0}", arguments: [error]);
+    }
+  }
+
+  Future<void> _download() async {
+    final service = OnlineMusicService.instance;
+    if (!service.canDownload(audio)) {
+      showTextOnSnackBar(
+          service.downloadUnavailableReason(audio) ?? ui("当前来源不支持下载"));
+      return;
+    }
+    final picker = SaveFilePicker()
+      ..title = ui("下载联网音乐")
+      ..fileName = OnlineMusicService.suggestedFileName(audio)
+      ..defaultExtension = "mp3"
+      ..filterSpecification = {
+        ui("音频文件"): "*.mp3;*.m4a;*.flac;*.ogg",
+        ui("所有文件"): "*.*",
+      };
+    final file = picker.getFile();
+    if (file == null) return;
+    showTextOnSnackBar("正在下载 {0}…", arguments: [audio.title]);
+    try {
+      await OnlineMusicService.instance.download(audio, file);
+      showTextOnSnackBar("下载完成：{0}", arguments: [file.path]);
+    } on OnlineMusicException catch (error) {
+      showTextOnSnackBar(error.message);
+    }
+  }
+
+  Future<void> _editMetadata() async {
+    if (await showEditAudioMetadataDialog(context, audio) && mounted) {
+      setState(() => _metadataRevision++);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    // Capture mutable metadata values in the key so an edit to the same Audio
+    // object still refreshes both images, including same-second cover changes.
+    final artworkKey = (
+      audio,
+      audio.path,
+      audio.modified,
+      audio.artworkUrl,
+      AudioLibrary.revision,
+      _metadataRevision,
+    );
+    final artists = [
+      for (final name in audio.splitedArtists)
+        if (AudioLibrary.instance.artistCollection[name] != null)
+          AudioLibrary.instance.artistCollection[name]!,
+    ];
+    final album = AudioLibrary.instance.albumCollection[audio.album];
+    final trackStats = PlaybackStatistics
+        .instance.tracks[PlaybackStatistics.instance.identityFor(audio)];
+
+    return AppEntranceScope(
+      child: ArtworkBackdrop(
+        artworkKey: artworkKey,
+        loadArtwork: () => audio.mediumCover,
+        child: Material(
+          type: MaterialType.transparency,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 112.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 700;
+                    final cover = AppEntrance(
+                      identity: 'audio-detail-cover',
+                      child: _DetailCover(
+                        key: ValueKey(artworkKey),
+                        audio: audio,
+                        size: compact ? 180 : 240,
+                      ),
+                    );
+                    final info = AppEntrance(
+                      identity: 'audio-detail-info',
+                      order: 1,
+                      child: _HeroInfo(
+                        audio: audio,
+                        onEditMetadata: _editMetadata,
+                        onEditLyric: () =>
+                            showLyricEditorDialog(context, audio),
+                        onToggleLibrary: _toggleLibrary,
+                        onDownload: _download,
+                      ),
+                    );
+                    return compact
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Center(child: cover),
+                              const SizedBox(height: 20.0),
+                              info,
+                            ],
+                          )
+                        : Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              cover,
+                              const SizedBox(width: 28.0),
+                              Expanded(child: info),
+                            ],
+                          );
+                  },
+                ),
+                const SizedBox(height: 20.0),
+                AppEntrance(
+                  identity: 'audio-detail-spectrum',
+                  order: 2,
+                  child: _TrackSpectrum(audio: audio),
+                ),
+                const SizedBox(height: 20.0),
+                Wrap(
+                  spacing: 12.0,
+                  runSpacing: 12.0,
+                  children: [
+                    _SpecCard(
+                      icon: Symbols.schedule,
+                      label: ui("时长"),
+                      value: Duration(seconds: audio.duration).toStringHMMSS(),
+                    ),
+                    _SpecCard(
+                      icon: Symbols.cloud,
+                      label: ui("来源"),
+                      value: audio.isOnline ? audio.sourceLabel : "本地文件",
+                    ),
+                    if (audio.track > 0)
+                      _SpecCard(
+                        icon: Symbols.format_list_numbered,
+                        label: ui("音轨"),
+                        value: "${audio.track}",
+                      ),
+                    if (audio.bitrate != null)
+                      _SpecCard(
+                        icon: Symbols.speed,
+                        label: ui("码率"),
+                        value: "${audio.bitrate} kbps",
+                      ),
+                    if (audio.sampleRate != null)
+                      _SpecCard(
+                        icon: Symbols.graphic_eq,
+                        label: ui("采样率"),
+                        value: "${audio.sampleRate} Hz",
+                      ),
+                    if (trackStats != null)
+                      _SpecCard(
+                        icon: Symbols.play_circle,
+                        label: ui("播放统计"),
+                        value: "${trackStats.playCount} 次 · "
+                            "${Duration(milliseconds: trackStats.listenMilliseconds).toStringHMMSS()}",
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 24.0),
+                if (artists.isNotEmpty)
+                  _DetailSection(
+                    title: ui("艺术家"),
+                    child: Wrap(
+                      spacing: 8.0,
+                      runSpacing: 8.0,
+                      children: [
+                        for (final artist in artists)
+                          SizedBox(
+                              width: 320, child: ArtistTile(artist: artist)),
+                      ],
+                    ),
+                  )
+                else
+                  _DetailSection(title: ui("艺术家"), child: Text(audio.artist)),
+                if (album != null)
+                  _DetailSection(
+                      title: ui("专辑"), child: AlbumTile(album: album))
+                else
+                  _DetailSection(title: ui("专辑"), child: Text(audio.album)),
+                if (audio.isOnline)
+                  _DetailSection(
+                    title: ui("联网标识"),
+                    child: SelectableText(
+                      "${audio.onlineProvider} · ${audio.onlineId}",
+                    ),
+                  )
+                else ...[
+                  _DetailSection(
+                    title: ui("文件位置"),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SelectableText(audio.path),
+                        const SizedBox(height: 8.0),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final result =
+                                await showInExplorer(path: audio.path);
+                            if (!result) showTextOnSnackBar("打开失败");
+                          },
+                          icon: const Icon(Symbols.folder_open),
+                          label: Text(ui("在文件资源管理器中显示")),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _DetailSection(
+                    title: ui("文件时间"),
+                    child: Text(
+                      ui("创建：{0}\n修改：{1}", [
+                        DateTime.fromMillisecondsSinceEpoch(
+                            audio.created * 1000),
+                        DateTime.fromMillisecondsSinceEpoch(
+                            audio.modified * 1000)
+                      ]),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailCover extends StatelessWidget {
+  const _DetailCover({super.key, required this.audio, required this.size});
+  final Audio audio;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    final artists = List.generate(
-      audio.splitedArtists.length,
-      (i) {
-        return AudioLibrary.instance.artistCollection[audio.splitedArtists[i]]!;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: AppShape.surfaceRadius,
+        color: scheme.surfaceContainerHighest,
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: 0.22),
+            blurRadius: 28.0,
+            offset: const Offset(0, 14.0),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: AudioArtwork(
+        audio: audio,
+        size: size,
+        placeholder: Icon(Symbols.music_note, size: size * 0.45),
+        loading: const Center(child: CircularProgressIndicator()),
+      ),
+    );
+  }
+}
+
+class _HeroInfo extends StatelessWidget {
+  const _HeroInfo({
+    required this.audio,
+    required this.onEditMetadata,
+    required this.onEditLyric,
+    required this.onToggleLibrary,
+    required this.onDownload,
+  });
+
+  final Audio audio;
+  final VoidCallback onEditMetadata;
+  final VoidCallback onEditLyric;
+  final VoidCallback onToggleLibrary;
+  final VoidCallback onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final inLibrary = audio.isOnline && OnlineLibrary.instance.contains(audio);
+    final canDownload = OnlineMusicService.instance.canDownload(audio);
+    final downloadReason =
+        OnlineMusicService.instance.downloadUnavailableReason(audio);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Chip(
+          avatar: Icon(audio.isOnline ? Symbols.cloud : Symbols.hard_drive,
+              size: 18),
+          label: Text(audio.isOnline
+              ? ui("联网音乐 · {0}", [audio.sourceLabel])
+              : ui("本地音乐")),
+        ),
+        const SizedBox(height: 10.0),
+        Text(
+          audio.displayTitle,
+          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+        const SizedBox(height: 6.0),
+        Text(
+          "${audio.artist} · ${audio.album}",
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 18.0),
+        Wrap(
+          spacing: 10.0,
+          runSpacing: 10.0,
+          children: [
+            FilledButton.icon(
+              onPressed: () =>
+                  PlayService.instance.playbackService.play(0, [audio]),
+              icon: const Icon(Symbols.play_arrow),
+              label: Text(ui("播放")),
+            ),
+            if (audio.isLocal) ...[
+              OutlinedButton.icon(
+                onPressed: onEditMetadata,
+                icon: const Icon(Symbols.edit_note),
+                label: Text(ui("编辑信息")),
+              ),
+              OutlinedButton.icon(
+                onPressed: onEditLyric,
+                icon: const Icon(Symbols.lyrics),
+                label: Text(ui("编辑歌词")),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => showSongCommentsDialog(context, audio),
+                icon: const Icon(Symbols.chat_bubble_outline),
+                label: Text(ui("歌曲评论")),
+              ),
+            ] else ...[
+              OutlinedButton.icon(
+                onPressed: () => showSongCommentsDialog(context, audio),
+                icon: const Icon(Symbols.chat_bubble_outline),
+                label: Text(ui("歌曲评论")),
+              ),
+              OutlinedButton.icon(
+                onPressed: onToggleLibrary,
+                icon: Icon(inLibrary
+                    ? Symbols.library_add_check
+                    : Symbols.library_add),
+                label: Text(inLibrary ? ui("移出总乐库") : ui("加入总乐库")),
+              ),
+              Tooltip(
+                message: canDownload
+                    ? ui("保存到本地")
+                    : downloadReason ?? ui("当前来源不支持下载"),
+                child: OutlinedButton.icon(
+                  onPressed: canDownload ? onDownload : null,
+                  icon: const Icon(Symbols.download),
+                  label: Text(canDownload ? ui("下载") : ui("当前来源不可下载")),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _TrackSpectrum extends StatelessWidget {
+  const _TrackSpectrum({required this.audio});
+  final Audio audio;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final playback = PlayService.instance.playbackService;
+    return ListenableBuilder(
+      listenable: playback,
+      builder: (context, _) {
+        final active = playback.nowPlaying?.path == audio.path;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 240),
+          padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 10.0),
+          decoration: BoxDecoration(
+            color: Theme.of(context)
+                .colorScheme
+                .primaryContainer
+                .withValues(alpha: active ? 0.45 : 0.20),
+            borderRadius: AppShape.surfaceRadius,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(active ? ui("实时频谱") : ui("播放这首歌以显示实时频谱")),
+              const SizedBox(height: 6.0),
+              if (active)
+                const FullWidthSpectrum(height: 64.0)
+              else
+                const SizedBox(height: 64.0),
+            ],
+          ),
+        );
       },
     );
-    final album = AudioLibrary.instance.albumCollection[audio.album]!;
-    const space = SizedBox(height: 12.0);
+  }
+}
 
-    final styleTitle = TextStyle(fontSize: 22, color: scheme.onSurface);
-    final styleContent = TextStyle(fontSize: 16, color: scheme.onSurface);
-    final placeholder = Icon(
-      Symbols.broken_image,
-      color: scheme.onSurface,
-      size: 200,
-    );
+class _SpecCard extends StatelessWidget {
+  const _SpecCard(
+      {required this.icon, required this.label, required this.value});
+  final IconData icon;
+  final String label;
+  final String value;
 
-    return Material(
-      color: scheme.surface,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 96.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return AppEntrance(
+      identity: ('audio-spec', label),
+      order: 3,
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 160),
+        padding: const EdgeInsets.all(14.0),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: AppShape.surfaceRadius,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Wrap(
-              spacing: 16.0,
-              runSpacing: 16.0,
-              crossAxisAlignment: WrapCrossAlignment.end,
+            Icon(icon),
+            const SizedBox(width: 10.0),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                FutureBuilder(
-                  future: audio.mediumCover,
-                  builder: (context, snapshot) =>
-                      switch (snapshot.connectionState) {
-                    ConnectionState.done => snapshot.data == null
-                        ? placeholder
-                        : ClipRRect(
-                            borderRadius: BorderRadius.circular(8.0),
-                            child: Image(
-                              image: snapshot.data!,
-                              width: 200,
-                              height: 200,
-                              errorBuilder: (_, __, ___) => placeholder,
-                            ),
-                          ),
-                    _ => const SizedBox(
-                        width: 200,
-                        height: 200,
-                        child: Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                      ),
-                  },
-                ),
-                Text(audio.displayTitle, style: styleTitle),
+                Text(label, style: Theme.of(context).textTheme.bodySmall),
+                Text(value,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
               ],
-            ),
-            space,
-
-            /// artists
-            _AudioDetailTile(
-              title: "艺术家",
-              detail: Wrap(
-                spacing: 8.0,
-                runSpacing: 8.0,
-                children: List.generate(
-                  artists.length,
-                  (i) {
-                    return SizedBox(
-                      width: 300,
-                      child: ArtistTile(artist: artists[i]),
-                    );
-                  },
-                ),
-              ),
-            ),
-
-            /// album
-            _AudioDetailTile(
-              title: "专辑",
-              detail: AlbumTile(album: album),
-            ),
-            _AudioDetailTile(
-              title: "音轨",
-              detail: Text(audio.track.toString()),
-            ),
-            _AudioDetailTile(
-              title: "时长",
-              detail: Text(Duration(
-                milliseconds: (audio.duration * 1000).toInt(),
-              ).toStringHMMSS()),
-            ),
-            _AudioDetailTile(
-              title: "码率",
-              detail: Text("${audio.bitrate} kbps"),
-            ),
-            _AudioDetailTile(
-              title: "采样率",
-              detail: Text("${audio.sampleRate} hz"),
-            ),
-
-            /// path
-            Wrap(
-              spacing: 8.0,
-              children: [
-                Text("路径", style: styleTitle),
-                TextButton(
-                  onPressed: () async {
-                    final result = await showInExplorer(path: audio.path);
-
-                    if (!result && context.mounted) {
-                      showTextOnSnackBar("打开失败");
-                    }
-                  },
-                  child: const Text("在文件资源管理器中显示"),
-                )
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(audio.path, style: styleContent),
-            space,
-
-            /// modified
-            _AudioDetailTile(
-              title: "修改时间",
-              detail: Text(
-                DateTime.fromMillisecondsSinceEpoch(
-                  audio.modified * 1000,
-                ).toString(),
-              ),
-            ),
-
-            /// created
-            _AudioDetailTile(
-              title: "创建时间",
-              detail: Text(
-                DateTime.fromMillisecondsSinceEpoch(
-                  audio.created * 1000,
-                ).toString(),
-              ),
             ),
           ],
         ),
@@ -161,28 +487,32 @@ class AudioDetailPage extends StatelessWidget {
   }
 }
 
-class _AudioDetailTile extends StatelessWidget {
-  const _AudioDetailTile({
-    required this.title,
-    required this.detail,
-  });
-
+class _DetailSection extends StatelessWidget {
+  const _DetailSection({required this.title, required this.child});
   final String title;
-  final Widget detail;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: TextStyle(fontSize: 22, color: scheme.onSurface)),
-          const SizedBox(height: 4.0),
-          detail,
-        ],
+    UiLanguageScope.watch(context);
+    return AppEntrance(
+      identity: ('audio-section', title),
+      order: 4,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8.0),
+            child,
+          ],
+        ),
       ),
     );
   }

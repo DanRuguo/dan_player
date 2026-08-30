@@ -3,40 +3,48 @@ import 'dart:io';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
+import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/search/audio_search_index.dart';
+import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
+import 'package:desktop_lyric/ui_language.dart';
 
 class UpdatingPage extends StatelessWidget {
   const UpdatingPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       backgroundColor: scheme.surface,
       body: Center(
-        child: FutureBuilder(
-          future: getAppDataDir(),
-          builder: (context, snapshot) {
-            if (snapshot.data == null) {
-              return const Center(
-                child: Text("Fail to get app data dir."),
-              );
-            }
+        child: AppEntrance(
+          identity: 'library-startup-progress',
+          child: FutureBuilder(
+            future: getAppDataDir(),
+            builder: (context, snapshot) {
+              if (snapshot.data == null) {
+                return const Center(
+                  child: Text("Fail to get app data dir."),
+                );
+              }
 
-            return UpdatingStateView(indexPath: snapshot.data!);
-          },
+              return UpdatingStateView(indexPath: snapshot.data!);
+            },
+          ),
         ),
       ),
     );
@@ -63,9 +71,12 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
     _settled = true;
     try {
       await AudioLibrary.initFromIndex();
+      // 联网曲目必须先并入总乐库，随后统一迁移的歌单和播放会话才能正确解析
+      // online:// 稳定标识，不会把它们误判为失效条目。
+      await OnlineLibrary.instance.initialize();
+      await PlaybackStatistics.instance.initialize();
       await Future.wait([
         readCustomAudioOrder(),
-        readCollections(),
         readPlaylists(),
         readLyricSources(),
       ]);
@@ -126,6 +137,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final error = _error;
 
@@ -138,7 +150,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
                 Icon(Icons.error_outline, color: scheme.error, size: 36.0),
                 const SizedBox(height: 12.0),
                 Text(
-                  "音乐索引无法读取",
+                  ui("音乐索引无法读取"),
                   style: TextStyle(
                     color: scheme.onSurface,
                     fontSize: 18.0,
@@ -157,7 +169,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
                 FilledButton.icon(
                   onPressed: () => context.go(app_paths.WELCOMING_PAGE),
                   icon: const Icon(Icons.folder_open),
-                  label: const Text("重新选择音乐文件夹"),
+                  label: Text(ui("重新选择音乐文件夹")),
                 ),
               ],
             )
@@ -174,7 +186,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
                     ),
                     const SizedBox(height: 8.0),
                     Text(
-                      snapshot.data?.message ?? "正在检查音乐索引",
+                      snapshot.data?.message ?? ui("正在检查音乐索引"),
                       style: TextStyle(color: scheme.onSurface),
                     ),
                   ],

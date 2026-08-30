@@ -6,6 +6,9 @@ const String AUDIO_DETAIL_PAGE = "/audios/detail";
 const String ARTISTS_PAGE = "/artists";
 const String ARTIST_DETAIL_PAGE = "/artists/detail";
 
+const String CATEGORIES_PAGE = "/categories";
+const String CATEGORY_DETAIL_PAGE = "/categories/detail";
+
 const String ALBUMS_PAGE = "/albums";
 const String ALBUM_DETAIL_PAGE = "/albums/detail";
 
@@ -21,6 +24,8 @@ const String PLAYLIST_DETAIL_PAGE = "/playlists/detail";
 const String SEARCH_PAGE = "/search";
 const String SEARCH_RESULT_PAGE = "/search/result";
 
+const String STATISTICS_PAGE = "/statistics";
+
 const String NOW_PLAYING_PAGE = "/nowplaying";
 
 const String SETTINGS_PAGE = "/settings";
@@ -31,9 +36,11 @@ const String WELCOMING_PAGE = "/welcoming";
 const String UPDATING_DIALOG = "/updating";
 
 /// 可以作为 start page 的 pages
+// Keep the existing saved indexes stable; new destinations append here.
 const List<String> START_PAGES = [
   AUDIOS_PAGE,
   ARTISTS_PAGE,
   COLLECTIONS_PAGE,
-  FOLDERS_PAGE
+  FOLDERS_PAGE,
+  PLAYLISTS_PAGE,
 ];

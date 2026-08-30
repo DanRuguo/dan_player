@@ -1,9 +1,13 @@
-﻿import 'dart:ui';
+import 'dart:ui';
 
 import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_content_scrollbar.dart';
+import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/page/uni_page_components.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 /// `ArtistDetailPage`, `AlbumDetailPage` 页面的主要组件。
@@ -75,10 +79,16 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
 }
 
 class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
-  late SortMethodDesc<S>? currSortMethod =
-      widget.sortMethods?[widget.pref.sortMethod];
+  late SortMethodDesc<S>? currSortMethod = _preferredSortMethod();
   late SortOrder currSortOrder = widget.pref.sortOrder;
   late ContentView currContentView = widget.pref.contentView;
+
+  SortMethodDesc<S>? _preferredSortMethod() {
+    final methods = widget.sortMethods;
+    if (methods == null || methods.isEmpty) return null;
+    final index = widget.pref.sortMethod;
+    return methods[index >= 0 && index < methods.length ? index : 0];
+  }
 
   @override
   void initState() {
@@ -89,13 +99,16 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
   @override
   void didUpdateWidget(covariant UniDetailPage<P, S, T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    currSortMethod = _preferredSortMethod();
     currSortMethod?.method(widget.secondaryContent, currSortOrder);
   }
 
   void setSortMethod(SortMethodDesc<S> sortMethod) {
+    final index = widget.sortMethods?.indexOf(sortMethod) ?? -1;
+    if (index < 0) return;
     setState(() {
       currSortMethod = sortMethod;
-      widget.pref.sortMethod = widget.sortMethods?.indexOf(sortMethod) ?? 0;
+      widget.pref.sortMethod = index;
       currSortMethod?.method(widget.secondaryContent, currSortOrder);
     });
   }
@@ -123,15 +136,19 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
     if (widget.enableShufflePlay) {
       actions.add(ShufflePlay<S>(contentList: widget.secondaryContent));
     }
-    if (widget.enableSortMethod) {
+    if (widget.enableSortMethod && currSortMethod != null) {
       actions.add(SortMethodComboBox<S>(
         sortMethods: widget.sortMethods!,
         contentList: widget.secondaryContent,
         currSortMethod: currSortMethod!,
         setSortMethod: setSortMethod,
+        sortOrder: widget.enableSortOrder && currSortMethod!.usesSortOrder
+            ? currSortOrder
+            : null,
+        setSortOrder: setSortOrder,
+        scopeId: ('detail', widget.primaryContent),
       ));
-    }
-    if (widget.enableSortOrder) {
+    } else if (widget.enableSortOrder) {
       actions.add(SortOrderSwitch<S>(
         sortOrder: currSortOrder,
         setSortOrder: setSortOrder,
@@ -158,88 +175,145 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
 
   Widget result(MultiSelectController<S>? multiSelectController,
       List<Widget> actions, ColorScheme scheme) {
-    return ColoredBox(
-      color: scheme.surface,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            // head
-            _UniDetailPageHeader(
-              pic: widget.primaryPic,
-              backgroundPic: widget.backgroundPic,
-              picShape: widget.picShape,
-              title: widget.title,
-              subtitle: widget.subtitle,
-              actions: actions,
-              multiSelectController: multiSelectController,
-              multiSelectViewActions: widget.multiSelectViewActions,
-            ),
-            const SizedBox(height: 16.0),
-            Expanded(
-              child: Material(
-                borderRadius: BorderRadius.circular(8.0),
-                type: MaterialType.transparency,
-                child: CustomScrollView(
-                  slivers: [
-                    // secondary content
-                    switch (currContentView) {
-                      ContentView.list => SliverFixedExtentList.builder(
-                          itemExtent: 64,
-                          itemCount: widget.secondaryContent.length,
-                          itemBuilder: (context, i) =>
-                              widget.secondaryContentBuilder(
-                            context,
-                            widget.secondaryContent[i],
-                            i,
-                            multiSelectController,
-                          ),
-                        ),
-                      ContentView.table => SliverGrid.builder(
-                          gridDelegate: gridDelegate,
-                          itemCount: widget.secondaryContent.length,
-                          itemBuilder: (context, i) =>
-                              widget.secondaryContentBuilder(
-                            context,
-                            widget.secondaryContent[i],
-                            i,
-                            multiSelectController,
-                          ),
-                        ),
-                    },
+    final gridIndices = currContentView == ContentView.table
+        ? <Key, int>{
+            for (var i = 0; i < widget.secondaryContent.length; i++)
+              ValueKey(widget.secondaryContent[i]): i,
+          }
+        : const <Key, int>{};
+    return AppEntranceScope(
+      child: ColoredBox(
+        color: scheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: LayoutBuilder(
+              builder: (context, constraints) => Column(
+                    children: [
+                      // head
+                      // The identity area may scroll independently, but can never
+                      // consume the song viewport in a short/large-text window.
+                      ConstrainedBox(
+                          constraints: BoxConstraints(
+                              maxHeight: (constraints.maxHeight - 16)
+                                      .clamp(0.0, double.infinity) *
+                                  .6),
+                          child: SingleChildScrollView(
+                              key: const ValueKey('uni-detail-header-scroll'),
+                              primary: false,
+                              child: _UniDetailPageHeader(
+                                pic: widget.primaryPic,
+                                backgroundPic: widget.backgroundPic,
+                                picShape: widget.picShape,
+                                title: widget.title,
+                                subtitle: widget.subtitle,
+                                actions: actions,
+                                multiSelectController: multiSelectController,
+                                multiSelectViewActions:
+                                    widget.multiSelectViewActions,
+                              ))),
+                      const SizedBox(height: 16.0),
+                      Expanded(
+                        child: Material(
+                          borderRadius: AppShape.surfaceRadius,
+                          type: MaterialType.transparency,
+                          child: AppContentScrollbar(
+                            builder: (context, controller) => CustomScrollView(
+                              key: const ValueKey('uni-detail-content-scroll'),
+                              controller: controller,
+                              slivers: [
+                                // secondary content
+                                switch (currContentView) {
+                                  ContentView.list =>
+                                    MediaQuery.textScalerOf(context).scale(14) >
+                                            14
+                                        ? SliverList.builder(
+                                            itemCount:
+                                                widget.secondaryContent.length,
+                                            itemBuilder: (context, i) =>
+                                                _secondaryItem(context, i,
+                                                    multiSelectController),
+                                          )
+                                        : SliverFixedExtentList.builder(
+                                            itemExtent: 64,
+                                            itemCount:
+                                                widget.secondaryContent.length,
+                                            itemBuilder: (context, i) =>
+                                                _secondaryItem(context, i,
+                                                    multiSelectController),
+                                          ),
+                                  ContentView.table => MusicGridScope(
+                                      child: SliverGrid.builder(
+                                        gridDelegate:
+                                            CompactMusicGridDelegate.of(
+                                                context),
+                                        itemCount:
+                                            widget.secondaryContent.length,
+                                        findChildIndexCallback: (key) =>
+                                            gridIndices[key],
+                                        itemBuilder: (context, i) =>
+                                            _secondaryItem(context, i,
+                                                multiSelectController),
+                                      ),
+                                    ),
+                                },
 
-                    // tertiary content
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text(
-                          widget.tertiaryContentTitle,
-                          style: TextStyle(
-                            color: scheme.onSurface,
-                            fontSize: 18.0,
-                            fontWeight: FontWeight.bold,
+                                // tertiary content
+                                SliverToBoxAdapter(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: AppEntrance(
+                                      identity: 'detail-tertiary-title',
+                                      order: 2,
+                                      child: Text(
+                                        widget.tertiaryContentTitle,
+                                        style: TextStyle(
+                                          color: scheme.onSurface,
+                                          fontSize: 18.0,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SliverList.builder(
+                                  itemCount: widget.tertiaryContent.length,
+                                  itemBuilder: (context, i) => AppEntrance(
+                                    key: ValueKey(widget.tertiaryContent[i]),
+                                    identity: (
+                                      'detail-tertiary',
+                                      widget.tertiaryContent[i]
+                                    ),
+                                    order: i,
+                                    child: widget.tertiaryContentBuilder(
+                                      context,
+                                      widget.tertiaryContent[i],
+                                      i,
+                                      null,
+                                    ),
+                                  ),
+                                ),
+                                const SliverPadding(
+                                    padding: EdgeInsets.only(bottom: 96.0)),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    SliverList.builder(
-                      itemCount: widget.tertiaryContent.length,
-                      itemBuilder: (context, i) =>
-                          widget.tertiaryContentBuilder(
-                        context,
-                        widget.tertiaryContent[i],
-                        i,
-                        null,
-                      ),
-                    ),
-                    const SliverPadding(padding: EdgeInsets.only(bottom: 96.0)),
-                  ],
-                ),
-              ),
-            ),
-          ],
+                    ],
+                  )),
         ),
       ),
+    );
+  }
+
+  Widget _secondaryItem(
+      BuildContext context, int index, MultiSelectController<S>? controller) {
+    final item = widget.secondaryContent[index];
+    return AppEntrance(
+      key: ValueKey(item),
+      identity: ('detail-secondary', item),
+      order: index,
+      child: widget.secondaryContentBuilder(context, item, index, controller),
     );
   }
 }
@@ -272,115 +346,130 @@ class _UniDetailPageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final brightness = theme.brightness;
-    return SizedBox(
-      height: 200,
-      child: Stack(
-        fit: StackFit.expand,
+    return LayoutBuilder(builder: (context, constraints) {
+      final wide = constraints.maxWidth >= 760 &&
+          MediaQuery.textScalerOf(context).scale(14) < 20;
+      final coverSize = wide
+          ? 200.0
+          : constraints.maxWidth >= 400
+              ? 96.0
+              : 72.0;
+      final controls = Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 8,
+        children: multiSelectController?.enableMultiSelectView == true
+            ? multiSelectViewActions!
+            : actions,
+      );
+      final text = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          FutureBuilder(
-            future: backgroundPic,
-            builder: (context, snapshot) {
-              if (snapshot.data == null) return const SizedBox.shrink();
-
-              return Image(
-                image: snapshot.data!,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-              );
-            },
+          Tooltip(
+            message: title,
+            child: Text(
+              title,
+              key: const ValueKey('uni-detail-title'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 22,
+                  color: scheme.onSurface,
+                  fontWeight: FontWeight.bold),
+            ),
           ),
-          switch (brightness) {
-            Brightness.dark => const ColoredBox(color: Colors.black38),
-            Brightness.light => const ColoredBox(color: Colors.white30),
-          },
-          BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 100, sigmaY: 100),
-            child: const ColoredBox(color: Colors.transparent),
-          ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              FutureBuilder(
-                future: pic,
-                builder: (context, snapshot) {
-                  final placeholder = Icon(
-                    Symbols.broken_image,
-                    size: 200.0,
-                    color: scheme.onSurface,
-                  );
-                  return switch (snapshot.connectionState) {
-                    ConnectionState.done => snapshot.data == null
-                        ? placeholder
-                        : switch (picShape) {
-                            PicShape.oval => ClipOval(
-                                child: Image(
-                                  image: snapshot.data!,
-                                  width: 200.0,
-                                  height: 200.0,
-                                  errorBuilder: (_, __, ___) => placeholder,
-                                ),
-                              ),
-                            PicShape.rrect => ClipRRect(
-                                borderRadius: BorderRadius.circular(8.0),
-                                child: Image(
-                                  image: snapshot.data!,
-                                  width: 200.0,
-                                  height: 200.0,
-                                  errorBuilder: (_, __, ___) => placeholder,
-                                ),
-                              ),
-                          },
-                    _ => const SizedBox(
-                        width: 200,
-                        height: 200,
-                        child: Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                      ),
-                  };
-                },
-              ),
-              const SizedBox(width: 16.0),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 22.0,
-                          color: scheme.onSurface,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 14.0,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 8.0),
-                    Wrap(
-                      spacing: 8.0,
-                      runSpacing: 8.0,
-                      children: multiSelectController == null
-                          ? actions
-                          : multiSelectController!.enableMultiSelectView
-                              ? multiSelectViewActions!
-                              : actions,
-                    )
-                  ],
-                ),
-              ),
-            ],
+          Tooltip(
+            message: subtitle,
+            child: Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, color: scheme.onSurface),
+            ),
           ),
         ],
-      ),
-    );
+      );
+      final cover = SizedBox.square(
+        key: const ValueKey('uni-detail-cover'),
+        dimension: coverSize,
+        child: FutureBuilder<ImageProvider?>(
+          future: pic,
+          builder: (context, snapshot) {
+            final placeholder = Icon(Symbols.broken_image,
+                size: coverSize, color: scheme.onSurface);
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.data == null) return placeholder;
+            final image = Image(
+                image: snapshot.data!,
+                width: coverSize,
+                height: coverSize,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (_, __, ___) => placeholder);
+            return picShape == PicShape.oval
+                ? ClipOval(child: image)
+                : ClipRRect(borderRadius: AppShape.surfaceRadius, child: image);
+          },
+        ),
+      );
+      return ClipRRect(
+        borderRadius: AppShape.surfaceRadius,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: FutureBuilder<ImageProvider?>(
+                future: backgroundPic,
+                builder: (context, snapshot) => snapshot.data == null
+                    ? const SizedBox.shrink()
+                    : Image(
+                        image: snapshot.data!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+              ),
+            ),
+            Positioned.fill(
+                child: ColoredBox(
+                    color: theme.brightness == Brightness.dark
+                        ? Colors.black38
+                        : Colors.white30)),
+            Positioned.fill(
+                child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 100, sigmaY: 100),
+              child: const ColoredBox(color: Colors.transparent),
+            )),
+            AppEntrance(
+              identity: 'detail-header',
+              child: wide
+                  ? Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      cover,
+                      const SizedBox(width: 16),
+                      Expanded(
+                          child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [text, const SizedBox(height: 8), controls],
+                      )),
+                    ])
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(children: [
+                          cover,
+                          const SizedBox(width: 12),
+                          Expanded(child: text),
+                        ]),
+                        const SizedBox(height: 12),
+                        controls,
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 }

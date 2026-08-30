@@ -1,6 +1,9 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <utility>
+#include <shellapi.h>
+#include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -25,6 +28,56 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  palette_manager_ = std::make_shared<PaletteWindowManager>(GetHandle(),
+      flutter_controller_->engine()->messenger(), project_);
+  geometry_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(),
+      "dan_player/desktop_lyric_geometry",
+      &flutter::StandardMethodCodec::GetInstance());
+  geometry_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() != "autoHideInsets") {
+          result->NotImplemented();
+          return;
+        }
+        const auto* args = call.arguments()
+            ? std::get_if<flutter::EncodableList>(call.arguments()) : nullptr;
+        if (!args || args->size() != 4) {
+          result->Error("invalid_monitor", "Expected four monitor coordinates");
+          return;
+        }
+        LONG coordinates[4];
+        for (size_t i = 0; i < 4; ++i) {
+          const auto* value = std::get_if<int32_t>(&(*args)[i]);
+          if (!value || *value < -10000000 || *value > 10000000) {
+            result->Error("invalid_monitor", "Coordinates must be int32");
+            return;
+          }
+          coordinates[i] = *value;
+        }
+        if (coordinates[2] <= coordinates[0] || coordinates[3] <= coordinates[1]) {
+          result->Error("invalid_monitor", "Monitor must have positive area");
+          return;
+        }
+        APPBARDATA data{};
+        data.cbSize = sizeof(data);
+        data.rc = {coordinates[0], coordinates[1], coordinates[2], coordinates[3]};
+        flutter::EncodableList insets;
+        for (const UINT edge : {ABE_LEFT, ABE_TOP, ABE_RIGHT, ABE_BOTTOM}) {
+          data.uEdge = edge;
+          const HWND bar = reinterpret_cast<HWND>(SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &data));
+          RECT rect{};
+          const bool vertical = edge == ABE_LEFT || edge == ABE_RIGHT;
+          const LONG extent = vertical ? data.rc.right - data.rc.left : data.rc.bottom - data.rc.top;
+          const LONG size = bar && GetWindowRect(bar, &rect)
+              ? (vertical ? rect.right - rect.left : rect.bottom - rect.top) : 0;
+          // Ignore malformed/third-party appbar dimensions; no shell mutation.
+          const LONG safe_size = size > 0 && size < extent / 2 ? size : 0;
+          insets.emplace_back(static_cast<int32_t>(safe_size));
+        }
+        result->Success(flutter::EncodableValue(insets));
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,6 +93,10 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  auto palette_manager = std::exchange(palette_manager_, nullptr);
+  if (palette_manager) palette_manager->Shutdown();
+  if (geometry_channel_) geometry_channel_->SetMethodCallHandler(nullptr);
+  geometry_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -51,6 +108,28 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (palette_manager_ && message == WM_TIMER && wparam == kPaletteCacheTimer) {
+    auto manager = palette_manager_;
+    manager->EvictCache();
+    return 0;
+  }
+  if (palette_manager_ && message == kPaletteCloseMessage) {
+    auto manager = palette_manager_;
+    manager->Close(static_cast<int64_t>(wparam));
+    return 0;
+  }
+  if (palette_manager_ && message == kPaletteShownMessage) {
+    auto manager = palette_manager_;
+    manager->ShowFirstFrame(static_cast<int64_t>(wparam));
+    return 0;
+  }
+  // Work-area changes need not resize the HWND. Forward events rather than
+  // polling or touching Explorer/taskbar ownership; Dart coalesces relayouts.
+  if (geometry_channel_ &&
+      (message == WM_DISPLAYCHANGE || message == WM_SETTINGCHANGE ||
+       message == WM_DPICHANGED || message == WM_EXITSIZEMOVE)) {
+    geometry_channel_->InvokeMethod("workAreaChanged", nullptr);
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

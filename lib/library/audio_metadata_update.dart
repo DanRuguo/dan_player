@@ -5,6 +5,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/online/song_comment_association.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
@@ -24,6 +25,38 @@ class AudioMetadataEdit {
   final String artist;
   final String album;
   final String? picturePath;
+}
+
+class AudioMetadataEditException implements Exception {
+  const AudioMetadataEditException(this.code, this.message);
+
+  factory AudioMetadataEditException.fromNative(Object error) {
+    var raw = error.toString().trim();
+    if (raw.startsWith('AnyhowException(') && raw.endsWith(')')) {
+      raw = raw.substring('AnyhowException('.length, raw.length - 1);
+    }
+    final separator = raw.indexOf('|');
+    if (separator > 0) {
+      final code = raw.substring(0, separator).trim();
+      if (RegExp(r'^[A-Z][A-Z0-9_]+$').hasMatch(code)) {
+        final message = raw.substring(separator + 1).trim();
+        return AudioMetadataEditException(
+          code,
+          message.isEmpty ? '写入歌曲信息失败，原文件未被替换' : message,
+        );
+      }
+    }
+    return AudioMetadataEditException(
+      'TAG_UNKNOWN',
+      raw.isEmpty ? '写入歌曲信息失败，原文件未被替换' : raw,
+    );
+  }
+
+  final String code;
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 Future<Audio> applyAudioMetadataEdit(
@@ -46,14 +79,19 @@ Future<Audio> applyAudioMetadataEdit(
     return audio;
   }
 
-  final newPath = await updateAudioMetadata(
-    path: oldPath,
-    fileName: fileName,
-    title: title,
-    artist: artist,
-    album: album,
-    picturePath: changesPicture ? picturePath : null,
-  );
+  final String newPath;
+  try {
+    newPath = await updateAudioMetadata(
+      path: oldPath,
+      fileName: fileName,
+      title: title,
+      artist: artist,
+      album: album,
+      picturePath: changesPicture ? picturePath : null,
+    );
+  } catch (error) {
+    throw AudioMetadataEditException.fromNative(error);
+  }
   final stat = await File(newPath).stat();
   final modified = stat.modified.millisecondsSinceEpoch ~/ 1000;
 
@@ -74,24 +112,15 @@ Future<Audio> applyAudioMetadataEdit(
 
   final customOrderChanged =
       oldPath != newPath && customAudioOrder.replacePath(oldPath, newPath);
-  bool collectionsChanged = false;
-  if (oldPath != newPath) {
-    for (final collection in userCollections) {
-      if (collection.replacePath(oldPath, newPath)) {
-        collectionsChanged = true;
-      }
-    }
-  }
-
   final playlistsChanged = replaceAudioInPlaylists(oldPath, newPath, audio);
   PlayService.instance.playbackService.replaceAudioReference(oldPath, audio);
 
   await AudioLibrary.instance.saveIndex();
+  if (newPath != oldPath) {
+    await SongCommentAssociationStore.instance.movePath(oldPath, newPath);
+  }
   if (customOrderChanged) {
     await saveCustomAudioOrder();
-  }
-  if (collectionsChanged) {
-    await saveCollections();
   }
   if (playlistsChanged) {
     await savePlaylists();
@@ -103,21 +132,10 @@ Future<Audio> applyAudioMetadataEdit(
 
 bool replaceAudioInPlaylists(String oldPath, String newPath, Audio audio) {
   bool changed = false;
-  for (final playlist in PLAYLISTS) {
-    bool playlistChanged = false;
-    final updated = <String, Audio>{};
-    for (final entry in playlist.audios.entries) {
-      if (entry.key == oldPath || entry.value.path == oldPath) {
-        updated[newPath] = audio;
-        playlistChanged = true;
-      } else {
-        updated[entry.key] = entry.value;
-      }
-    }
-    if (playlistChanged) {
-      playlist.audios = updated;
-      changed = true;
-    }
+  for (final playlist in playlistTree.allPlaylists) {
+    // The Audio may already have been mutated in place. The tree retains the
+    // old path key until this update and keeps each mixed entry's ID/order.
+    if (playlist.replaceAudio(oldPath, audio)) changed = true;
   }
   return changed;
 }

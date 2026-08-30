@@ -2,9 +2,12 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/artwork_image_provider.dart';
+import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as path_util;
 
@@ -17,6 +20,10 @@ class AudioLibrary {
   /// 所有音乐
   List<Audio> audioCollection = [];
 
+  /// 用户加入总乐库的联网音乐。它们独立于本地文件夹索引持久化，避免本地
+  /// 扫描器把没有实体文件的条目当作失效文件删除。
+  List<Audio> onlineAudioCollection = [];
+
   Map<String, Artist> artistCollection = {};
 
   Map<String, Album> albumCollection = {};
@@ -27,6 +34,9 @@ class AudioLibrary {
       _audioByPath ??= {for (final audio in audioCollection) audio.path: audio};
 
   static int revision = 0;
+
+  /// Published only after all local/online derived collections are complete.
+  static final changes = ValueNotifier<int>(0);
 
   /// must call [initFromIndex]
   static AudioLibrary get instance {
@@ -137,14 +147,14 @@ class AudioLibrary {
         }
       }
 
-      _instance = AudioLibrary._(folders);
+      final onlineAudios = List<Audio>.from(instance.onlineAudioCollection);
+      _instance = AudioLibrary._(folders)..onlineAudioCollection = onlineAudios;
 
       instance.artistCollection.clear();
       instance.albumCollection.clear();
       instance._buildCollections();
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
-      _instance = AudioLibrary._([]);
       rethrow;
     }
   }
@@ -155,6 +165,7 @@ class AudioLibrary {
     for (var f in folders) {
       audioCollection.addAll(f.audios);
     }
+    audioCollection.addAll(onlineAudioCollection);
 
     for (Audio audio in audioCollection) {
       for (String artistName in audio.splitedArtists) {
@@ -201,13 +212,20 @@ class AudioLibrary {
         }
       }
     }
+    changes.value = revision;
   }
 
   void rebuildDerivedCollections() {
     audioCollection.clear();
     artistCollection.clear();
     albumCollection.clear();
+    _audioByPath = null;
     _buildCollections();
+  }
+
+  void replaceOnlineAudios(Iterable<Audio> audios) {
+    onlineAudioCollection = List<Audio>.from(audios);
+    rebuildDerivedCollections();
   }
 
   Future<void> saveIndex() async {
@@ -217,7 +235,7 @@ class AudioLibrary {
       await _writeIndexAtomically(
         File(indexPath),
         json.encode({
-          "version": 112,
+          "version": 113,
           "folders": folders.map((item) => item.toMap()).toList(),
         }),
       );
@@ -289,6 +307,13 @@ class Audio {
 
   String album;
 
+  /// Explicit source tags; never inferred from the performer or file name.
+  String? composer;
+  String? albumArtist;
+
+  /// Old indexes without these tags remain pending for incremental backfill.
+  int classificationVersion;
+
   /// 0: 没有track
   int track;
 
@@ -299,6 +324,12 @@ class Audio {
   int? bitrate;
 
   int? sampleRate;
+
+  /// 原始语言标签；没有标签时不根据文件名填充。
+  String? language;
+
+  /// 扫描索引时的字节数快照。统计页会重新核实文件，不能当作现存占用。
+  int? fileSizeBytes;
 
   /// absolute path
   String path;
@@ -312,7 +343,12 @@ class Audio {
   /// 标签来源（Lofty、Windows、null）
   String? by;
 
-  ImageProvider? _cover;
+  /// 联网曲目的来源与服务端标识。本地曲目这些字段都为空。
+  final String? onlineProvider;
+  final String? onlineId;
+  final String? onlineMediaId;
+  final int? onlineNumericId;
+  final String? artworkUrl;
 
   /// 以“、”和“/”分割艺术家，会把名称中带有这些符号的艺术家分割。
   /// 暂时想不到别的方法。
@@ -327,14 +363,105 @@ class Audio {
     this.path,
     this.modified,
     this.created,
-    this.by,
-  ) : splitedArtists = artist.split(
+    this.by, {
+    this.composer,
+    this.albumArtist,
+    this.classificationVersion = 1,
+    this.language,
+    this.fileSizeBytes,
+    this.onlineProvider,
+    this.onlineId,
+    this.onlineMediaId,
+    this.onlineNumericId,
+    this.artworkUrl,
+  }) : splitedArtists = artist.split(
           RegExp(AppSettings.instance.artistSplitPattern),
         );
 
-  String get fileNameTitle => path_util.basenameWithoutExtension(path);
+  factory Audio.online({
+    required String provider,
+    required String id,
+    required String title,
+    required String artist,
+    required String album,
+    required int duration,
+    String? mediaId,
+    int? numericId,
+    String? artworkUrl,
+    int? bitrate,
+    int? created,
+    String? language,
+    String? composer,
+    String? albumArtist,
+    int classificationVersion = 1,
+  }) {
+    final safeProvider = Uri.encodeComponent(provider);
+    final safeId = Uri.encodeComponent(id);
+    return Audio(
+      title,
+      artist.trim().isEmpty ? "UNKNOWN" : artist,
+      album.trim().isEmpty ? "UNKNOWN" : album,
+      0,
+      duration,
+      bitrate,
+      null,
+      "online://$safeProvider/$safeId",
+      0,
+      created ?? DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      "Online/$provider",
+      composer: composer,
+      albumArtist: albumArtist,
+      classificationVersion: classificationVersion,
+      language: language,
+      onlineProvider: provider,
+      onlineId: id,
+      onlineMediaId: mediaId,
+      onlineNumericId: numericId,
+      artworkUrl: artworkUrl,
+    );
+  }
+
+  factory Audio.fromOnlineMap(Map map) {
+    final provider = map["provider"]?.toString();
+    final id = map["id"]?.toString();
+    if (provider == null || provider.isEmpty || id == null || id.isEmpty) {
+      throw const FormatException("Invalid online audio identity");
+    }
+    return Audio.online(
+      provider: provider,
+      id: id,
+      title: map["title"]?.toString() ?? "UNKNOWN",
+      artist: map["artist"]?.toString() ?? "UNKNOWN",
+      album: map["album"]?.toString() ?? "UNKNOWN",
+      duration: (map["duration"] as num?)?.toInt() ?? 0,
+      mediaId: map["mediaId"]?.toString(),
+      numericId: (map["numericId"] as num?)?.toInt(),
+      artworkUrl: map["artworkUrl"]?.toString(),
+      bitrate: (map["bitrate"] as num?)?.toInt(),
+      created: (map["created"] as num?)?.toInt(),
+      language: map["language"] is String ? map["language"] : null,
+      composer: _optionalTag(map["composer"]),
+      albumArtist: _optionalTag(map["albumArtist"] ?? map["album_artist"]),
+      classificationVersion: _readClassificationVersion(
+          map["classificationVersion"] ?? map["classification_version"]),
+    );
+  }
+
+  bool get isOnline => onlineProvider != null && onlineId != null;
+  bool get classificationTagsRead => classificationVersion >= 1;
+  bool get isLocal => !isOnline;
+  String get sourceLabel => switch (onlineProvider) {
+        "qq" => "QQ音乐",
+        "netease" => "网易云音乐",
+        final String provider => provider,
+        null => "本地",
+      };
+
+  String get fileNameTitle =>
+      isOnline ? title : path_util.basenameWithoutExtension(path);
 
   String get displayTitle {
+    if (isOnline) return title;
     final name = fileNameTitle.trim();
     return name.isEmpty ? title : name;
   }
@@ -354,7 +481,6 @@ class Audio {
     splitedArtists = artist.split(
       RegExp(AppSettings.instance.artistSplitPattern),
     );
-    _cover = null;
   }
 
   factory Audio.fromMap(Map map) {
@@ -374,6 +500,13 @@ class Audio {
       (map["modified"] as num?)?.toInt() ?? 0,
       (map["created"] as num?)?.toInt() ?? 0,
       map["by"]?.toString(),
+      composer: _optionalTag(map["composer"]),
+      albumArtist: _optionalTag(map["album_artist"]),
+      classificationVersion:
+          _readClassificationVersion(map["classification_version"]),
+      language: map["language"] is String ? map["language"] : null,
+      fileSizeBytes:
+          map["file_size"] is num ? (map["file_size"] as num).toInt() : null,
     );
   }
 
@@ -381,66 +514,96 @@ class Audio {
         "title": title,
         "artist": artist,
         "album": album,
+        "composer": composer,
+        "album_artist": albumArtist,
+        "classification_version": classificationVersion,
         "track": track,
         "duration": duration,
         "bitrate": bitrate,
         "sample_rate": sampleRate,
+        "language": language,
+        "file_size": fileSizeBytes,
         "path": path,
         "modified": modified,
         "created": created,
         "by": by
       };
 
-  /// 读取音乐文件的图片，自动适应缩放
-  Future<ImageProvider?> _getResizedPic({
-    required int width,
-    required int height,
-  }) async {
-    final ratio = PlatformDispatcher.instance.views.first.devicePixelRatio;
-    final pixelWidth = (width * ratio).round();
-    final pixelHeight = (height * ratio).round();
+  Map<String, Object?> toOnlineMap() => {
+        "provider": onlineProvider,
+        "id": onlineId,
+        "mediaId": onlineMediaId,
+        "numericId": onlineNumericId,
+        "title": title,
+        "artist": artist,
+        "album": album,
+        "composer": composer,
+        "albumArtist": albumArtist,
+        "classificationVersion": classificationVersion,
+        "duration": duration,
+        "bitrate": bitrate,
+        "artworkUrl": artworkUrl,
+        "created": created,
+        "language": language,
+      };
+
+  static String? _optionalTag(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value.trim() : null;
+
+  static int _readClassificationVersion(Object? value) =>
+      value is int && value >= 1 ? value : 0;
+
+  /// Load a bounded thumbnail for a physical-pixel request. UI callers should
+  /// use AudioArtwork or pass their own View DPR to [coverForDisplay].
+  Future<ImageProvider?> artworkForSize(ArtworkSize size) async {
+    final remoteArtwork = artworkUrl;
+    if (isOnline && remoteArtwork != null && remoteArtwork.isNotEmpty) {
+      final uri = Uri.tryParse(remoteArtwork);
+      if (uri != null && (uri.scheme == "http" || uri.scheme == "https")) {
+        final sizedUri = artworkUriForSize(uri, size, provider: onlineProvider);
+        return ArtworkImageProvider(NetworkImage(sizedUri.toString()), size);
+      }
+    }
+    if (isOnline) return null;
+    // Capture mutable metadata now: an edit must not make a queued request
+    // read a different file and cache it under the previous file's identity.
+    final requestedPath = path;
+    final requestedModified = modified;
     return CoverCache.instance.imageFor(
-      audioPath: path,
-      modified: modified,
-      width: pixelWidth,
-      height: pixelHeight,
+      audioPath: requestedPath,
+      modified: requestedModified,
+      width: size.width,
+      height: size.height,
       produce: () => getPictureFromPath(
-        path: path,
-        width: pixelWidth,
-        height: pixelHeight,
+        path: requestedPath,
+        width: size.width,
+        height: size.height,
       ),
     );
   }
 
-  /// 缓存ImageProvider而不是Uint8List（bytes）
-  /// 缓存bytes时，每次加载图片都要重新解码，内存占用很大。快速滚动时能到700mb
-  /// 缓存ImageProvider不用重新解码。快速滚动时最多250mb
-  /// 48*48
-  Future<ImageProvider?> get cover {
-    if (_cover == null) {
-      final requestedPath = path;
-      final requestedModified = modified;
-      return _getResizedPic(width: 48, height: 48).then((value) {
-        if (value == null) return null;
+  Future<ImageProvider?> coverForDisplay({
+    required double size,
+    required double devicePixelRatio,
+  }) =>
+      artworkForSize(ArtworkSize.forDisplay(
+        logicalWidth: size,
+        logicalHeight: size,
+        devicePixelRatio: devicePixelRatio,
+      ));
 
-        if (path == requestedPath && modified == requestedModified) {
-          _cover = value;
-        }
-        return value;
-      });
-    }
-    return Future.value(_cover);
-  }
+  // Compatibility for non-widget/background consumers. Crisp foreground
+  // artwork always passes the current View's DPR explicitly. No single cached
+  // 48px provider can survive a transition to a higher-density monitor.
+  double get _defaultDpr =>
+      PlatformDispatcher.instance.implicitView?.devicePixelRatio ?? 1.0;
 
-  /// audio detail page 不需要频繁调用，所以不缓存图片
-  /// 200 * 200
+  Future<ImageProvider?> get cover =>
+      coverForDisplay(size: 48, devicePixelRatio: _defaultDpr);
   Future<ImageProvider?> get mediumCover =>
-      _getResizedPic(width: 200, height: 200);
-
-  /// now playing 不需要频繁调用，所以不缓存图片
-  /// size: 400 * devicePixelRatio（屏幕缩放大小）
+      coverForDisplay(size: 200, devicePixelRatio: _defaultDpr);
   Future<ImageProvider?> get largeCover =>
-      _getResizedPic(width: 400, height: 400);
+      coverForDisplay(size: 400, devicePixelRatio: _defaultDpr);
 
   @override
   String toString() {
@@ -467,8 +630,7 @@ class Artist {
 
   /// 只能用在artist detail page
   /// 200*200
-  Future<ImageProvider?> get picture =>
-      works.first._getResizedPic(width: 200, height: 200);
+  Future<ImageProvider?> get picture => works.first.mediumCover;
 
   Artist({required this.name});
 }
@@ -484,8 +646,7 @@ class Album {
 
   /// 只能用在album detail page
   /// 200*200
-  Future<ImageProvider?> get cover =>
-      works.first._getResizedPic(width: 200, height: 200);
+  Future<ImageProvider?> get cover => works.first.mediumCover;
 
   Album({required this.name});
 }

@@ -1,25 +1,34 @@
+import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
+import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/ui_language.dart';
 
 Future<void> showEqualizerDialog(BuildContext context) {
-  return showDialog(
+  return showAppDialog(
     context: context,
     builder: (context) => const EqualizerDialog(),
   );
 }
 
 class EqualizerDialog extends StatefulWidget {
-  const EqualizerDialog({super.key});
+  const EqualizerDialog({super.key, this.playbackService});
+
+  /// The normal app uses its existing playback service. Injection keeps layout
+  /// and interaction tests independent of native audio/device initialization.
+  final PlaybackService? playbackService;
 
   @override
   State<EqualizerDialog> createState() => _EqualizerDialogState();
 }
 
 class _EqualizerDialogState extends State<EqualizerDialog> {
-  final playbackService = PlayService.instance.playbackService;
+  late final playbackService =
+      widget.playbackService ?? PlayService.instance.playbackService;
 
   static const customPresetName = "自定义";
   static const Map<String, List<double>> presets = {
@@ -75,13 +84,16 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: Row(
-        children: [
-          const Expanded(child: Text("均衡器")),
-          Switch(value: enabled, onChanged: _toggleEnabled),
-        ],
+      // Title and controls scroll together; the completion action stays above
+      // any notification even in the smallest supported window at 200% text.
+      scrollable: true,
+      title: AppDialogTitle(
+        ui("均衡器"),
+        sideExtent: 64,
+        trailing: Switch(value: enabled, onChanged: _toggleEnabled),
       ),
       content: SizedBox(
         width: 520,
@@ -93,8 +105,10 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
               children: [
                 Expanded(
                   child: DropdownMenu<String>(
-                    key: ValueKey(preset),
-                    label: const Text("预设"),
+                    // DropdownMenu caches its text controller. Recreate only
+                    // this display control when language changes, not the EQ.
+                    key: ValueKey((preset, uiLanguage.value)),
+                    label: Text(ui("预设")),
                     initialSelection: preset,
                     requestFocusOnTap: false,
                     expandedInsets: EdgeInsets.zero,
@@ -105,17 +119,18 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
                     },
                     dropdownMenuEntries: [
                       for (final name in presets.keys)
-                        DropdownMenuEntry(value: name, label: name),
-                      const DropdownMenuEntry(
+                        DropdownMenuEntry(value: name, label: ui(name)),
+                      DropdownMenuEntry(
                         value: customPresetName,
-                        label: customPresetName,
+                        label: ui(customPresetName),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: "重置为平坦",
+                  tooltip: ui("重置为平坦"),
+                  // Preset lookup IDs remain stable in every UI language.
                   onPressed: () => _applyPreset("平坦"),
                   icon: const Icon(Symbols.restart_alt),
                 ),
@@ -146,7 +161,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
             ),
             const SizedBox(height: 4),
             Text(
-              "调节范围 ±15 dB，换歌后继续保持。",
+              ui("调节范围 ±15 dB，换歌后继续保持。"),
               style: TextStyle(
                 fontSize: 12,
                 color: scheme.onSurfaceVariant,
@@ -158,7 +173,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text("完成"),
+          child: Text(ui("完成")),
         ),
       ],
     );
@@ -180,6 +195,7 @@ class _BandSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: 48,
