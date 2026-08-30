@@ -127,6 +127,11 @@ jobs:
       - name: Test owned lyric window geometry and focus
         working-directory: third_party/desktop_lyric
         run: |
+          # A clean Flutter build creates SDK wrapper sources after CMake's
+          # first configure. Discover the opt-in real-AOT test now that they
+          # exist, without running flutter_assemble again.
+          cmake -S windows -B build/windows/x64
+          if ($LASTEXITCODE -ne 0) { throw 'Post-build lyric test configuration failed.' }
           cmake --build build/windows/x64 --config Release --target desktop_lyric_owned_window_test desktop_lyric_palette_engine_test
           if ($LASTEXITCODE -ne 0) { throw 'Owned lyric window regression did not compile.' }
           $palettePreviousPath = $env:Path

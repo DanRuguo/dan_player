@@ -113,9 +113,14 @@ or replace real-machine visual acceptance; no installed player was opened.
   owner destruction also destroys its child. Z-order-only activation messages
   are deliberately not misreported as moves/resizes.
 
-The native regression can be built explicitly from an already configured
-helper build with `cmake --build <helper-build> --config Release --target
-desktop_lyric_owned_window_test`. Its binary is isolated in
+After the helper's first Release build, run `cmake -S windows -B
+build/windows/x64` from `third_party/desktop_lyric` to refresh test discovery.
+On a clean checkout, Flutter generates its SDK wrapper sources after CMake's
+initial configure; the opt-in real-AOT target is therefore not present until
+this post-build configure. This step does not build Flutter or change its AOT.
+Then run `cmake --build build/windows/x64 --config Release --target
+desktop_lyric_owned_window_test desktop_lyric_palette_engine_test`.
+Test binaries are isolated in
 `<helper-build>/palette_tests/Release` rather than the packaged runner directory.
 The test links the already-generated Flutter import library through a separate
 imported target, without the production `flutter_assemble` dependency. Running
