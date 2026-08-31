@@ -326,7 +326,6 @@ try {
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\lyric-emphasis-spectrum-notes.md') (Join-Path $payloadDirectory 'lyric-emphasis-spectrum-notes.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\online-sources.md') (Join-Path $payloadDirectory 'online-sources.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\song-comments-notes.md') (Join-Path $payloadDirectory 'song-comments-notes.md')
-    Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\application-updates.md') (Join-Path $payloadDirectory 'APPLICATION-UPDATES.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\desktop-experience-26.0.3.md') (Join-Path $payloadDirectory 'DESKTOP-EXPERIENCE.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\settings-backgrounds.md') (Join-Path $payloadDirectory 'SETTINGS-BACKGROUNDS.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\lyric-experience-26.0.3.md') (Join-Path $payloadDirectory 'LYRIC-EXPERIENCE.md')

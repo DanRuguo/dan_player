@@ -37,7 +37,6 @@ $sourcePairs = @{
     'lyric-emphasis-spectrum-notes.md' = 'docs\lyric-emphasis-spectrum-notes.md'
     'online-sources.md' = 'docs\online-sources.md'
     'song-comments-notes.md' = 'docs\song-comments-notes.md'
-    'APPLICATION-UPDATES.md' = 'docs\application-updates.md'
 }
 foreach ($relative in $sourcePairs.Keys) {
     if ((Get-FileHash -LiteralPath (Join-Path $payload $relative) -Algorithm SHA256).Hash -ne
