@@ -7,8 +7,10 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "desktop_integration.h"
+#include "installer_launcher.h"
 #include "window_backdrop.h"
 #include "window_resize_policy.h"
+#include "window_teardown.h"
 
 namespace {
 
@@ -115,6 +117,8 @@ bool FlutterWindow::OnCreate() {
       GetHandle(), flutter_controller_->engine());
   desktop_controller_ = std::make_unique<DesktopIntegrationController>(
       GetHandle(), flutter_controller_->engine());
+  installer_launcher_ = std::make_unique<InstallerLauncherController>(
+      flutter_controller_->engine());
 
   // Dart applies restored bounds, resize policy and the backdrop before it
   // explicitly shows the HWND. Showing here on the first Flutter frame races
@@ -126,6 +130,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  window_teardown::HideBeforeResources(GetHandle());
+  installer_launcher_.reset();
   desktop_controller_.reset();
   backdrop_controller_.reset();
   if (flutter_controller_) {
@@ -204,7 +210,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 
   switch (message) {
     case WM_FONTCHANGE:
-      flutter_controller_->engine()->ReloadSystemFonts();
+      if (flutter_controller_) flutter_controller_->engine()->ReloadSystemFonts();
       break;
   }
 

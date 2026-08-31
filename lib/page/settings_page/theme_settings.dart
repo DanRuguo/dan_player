@@ -66,6 +66,11 @@ class _ThemeModeControlState extends State<ThemeModeControl> {
         semanticLabel: ui('主题模式'),
         options: [
           AppSegmentOption<ThemeMode>(
+            value: ThemeMode.system,
+            icon: Symbols.brightness_auto,
+            label: ui('跟随系统'),
+          ),
+          AppSegmentOption<ThemeMode>(
             value: ThemeMode.light,
             icon: Symbols.light_mode,
             label: ui('明亮'),
@@ -83,7 +88,14 @@ class _ThemeModeControlState extends State<ThemeModeControl> {
             settings.themeMode = newSelection;
           });
           ThemeProvider.instance.applyThemeMode(settings.themeMode);
-          await settings.saveSettings();
+          try {
+            await settings.saveSettings(
+                captureWindowSize: false, throwOnError: true);
+          } catch (_) {
+            if (mounted) {
+              showTextOnSnackBar(ui('主题模式保存失败，当前选择仅在本次运行生效。'));
+            }
+          }
         },
       ),
     );
@@ -148,34 +160,6 @@ class _UseSystemThemeSwitchState extends State<UseSystemThemeSwitch> {
       onChanged: (_) async {
         setState(() {
           settings.useSystemTheme = !settings.useSystemTheme;
-        });
-        await settings.saveSettings();
-      },
-    );
-  }
-}
-
-class UseSystemThemeModeSwitch extends StatefulWidget {
-  const UseSystemThemeModeSwitch({super.key});
-
-  @override
-  State<UseSystemThemeModeSwitch> createState() =>
-      _UseSystemThemeModeSwitchState();
-}
-
-class _UseSystemThemeModeSwitchState extends State<UseSystemThemeModeSwitch> {
-  final settings = AppSettings.instance;
-
-  @override
-  Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    return SettingsSwitchTile(
-      title: Text(ui("启动时使用系统主题模式")),
-      icon: Symbols.brightness_auto,
-      value: settings.useSystemThemeMode,
-      onChanged: (_) async {
-        setState(() {
-          settings.useSystemThemeMode = !settings.useSystemThemeMode;
         });
         await settings.saveSettings();
       },

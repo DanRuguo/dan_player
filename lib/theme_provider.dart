@@ -7,7 +7,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
 
-class ThemeProvider extends ChangeNotifier {
+class ThemeProvider extends ChangeNotifier with WidgetsBindingObserver {
   ThemeProvider._({
     required Color seedColor,
     required this.themeMode,
@@ -28,7 +28,11 @@ class ThemeProvider extends ChangeNotifier {
         darkScheme = ColorScheme.fromSeed(
           seedColor: seedColor,
           brightness: Brightness.dark,
-        );
+        ) {
+    _platformBrightness =
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   /// Keeps artwork race/failure tests independent of native playback and IO.
   @visibleForTesting
@@ -64,6 +68,7 @@ class ThemeProvider extends ChangeNotifier {
   (String, int, String?, int?)? _artworkIdentity;
   Future<void>? _artworkTask;
   ImageProvider? _backdropImage;
+  late Brightness _platformBrightness;
 
   ImageProvider? get backdropImage => _backdropImage;
 
@@ -141,8 +146,22 @@ class ThemeProvider extends ChangeNotifier {
 
   void applyThemeMode(ThemeMode themeMode) {
     if (_disposed) return;
+    if (this.themeMode == themeMode) return;
     this.themeMode = themeMode;
     _publishTheme(includeMode: true);
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    final brightness =
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    if (_disposed || brightness == _platformBrightness) return;
+    _platformBrightness = brightness;
+    if (themeMode == ThemeMode.system) {
+      // MaterialApp follows the OS itself; notify non-widget consumers too
+      // (tray, Peek and the desktop lyric process) using the same palette.
+      _publishTheme(includeMode: true);
+    }
   }
 
   /// Called after the settings switch changes its stored value. Disabling is
@@ -265,6 +284,7 @@ class ThemeProvider extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     _invalidateArtwork();
     if (_followingPlayback) {
       PlayService.instance.playbackService.removeListener(_onPlaybackChanged);

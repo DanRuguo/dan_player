@@ -280,7 +280,7 @@ Future<void> readCustomAudioOrder() async {
   }
 }
 
-Future<void> saveCustomAudioOrder() async {
+Future<void> saveCustomAudioOrder({bool rethrowOnError = false}) async {
   try {
     final supportPath = (await getAppDataDir()).path;
     final file = await File("$supportPath\\custom_audio_order.json")
@@ -288,6 +288,7 @@ Future<void> saveCustomAudioOrder() async {
     await file.writeAsString(json.encode(customAudioOrder.toMap()));
   } catch (err, trace) {
     LOGGER.e(err, stackTrace: trace);
+    if (rethrowOnError) rethrow;
   }
 }
 

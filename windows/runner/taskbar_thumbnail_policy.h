@@ -16,6 +16,8 @@
 namespace taskbar_thumbnail {
 constexpr int kMaximumAxis = 512;
 constexpr std::size_t kMaximumBytes = 1024 * 1024;
+constexpr int kMaximumPeekSourceAxis = 2048;
+constexpr std::size_t kMaximumPeekSourceBytes = 4 * 1024 * 1024;
 constexpr int kMaximumPeekAxis = 4096;
 constexpr std::size_t kMaximumPeekPixels = 4 * 1024 * 1024;
 
@@ -116,6 +118,13 @@ inline bool ValidPayload(std::int64_t width, std::int64_t height,
          bytes == static_cast<std::size_t>(width * height * 4);
 }
 
+inline bool ValidPeekPayload(std::int64_t width, std::int64_t height,
+                             std::size_t bytes) {
+  return width >= 1 && width <= kMaximumPeekSourceAxis && height >= 1 &&
+         height <= kMaximumPeekSourceAxis && bytes <= kMaximumPeekSourceBytes &&
+         bytes == static_cast<std::size_t>(width * height * 4);
+}
+
 inline Size RequestedSize(std::uintptr_t packed) {
   // WM_DWMSENDICONICTHUMBNAIL: HIWORD is x/width, LOWORD is y/height.
   return {static_cast<int>((packed >> 16) & 0xffff),
@@ -148,9 +157,11 @@ inline bool ValidPeekCanvas(Size canvas, std::size_t bytes) {
          bytes == static_cast<std::size_t>(canvas.width) * canvas.height * 4;
 }
 
-inline PeekLayout FitPeekLayout(Size source, Size client) {
-  if (!source.valid() || source.width > kMaximumAxis ||
-      source.height > kMaximumAxis || !client.valid()) return {};
+inline PeekLayout FitPeekLayout(Size source, Size client, unsigned dpi = 96) {
+  if (!source.valid() || source.width > kMaximumPeekSourceAxis ||
+      source.height > kMaximumPeekSourceAxis ||
+      static_cast<std::size_t>(source.width) * source.height * 4 > kMaximumPeekSourceBytes ||
+      !client.valid()) return {};
   // GetClientRect is physical pixels. Keep ordinary windows full scale; only
   // very large windows are uniformly reduced to the temporary DIB budget.
   const double pixels = static_cast<double>(client.width) * client.height;
@@ -160,9 +171,15 @@ inline PeekLayout FitPeekLayout(Size source, Size client) {
       std::sqrt(kMaximumPeekPixels / pixels)});
   const Size canvas{std::max(1, static_cast<int>(client.width * scale)),
                     std::max(1, static_cast<int>(client.height * scale))};
-  const double content_scale = std::min(
+  // A 640x320 logical card is clearly readable without filling the entire
+  // desktop. The separately rasterized high-resolution source sets the hard
+  // clarity ceiling: never invent glyph pixels by upscaling it. Old peers'
+  // thumbnail-only payloads remain supported at their native resolution.
+  const double density = std::clamp(dpi, 48u, 768u) / 96.0;
+  const double content_scale = std::min({1.0,
+      640.0 * density / source.width, 320.0 * density / source.height,
       static_cast<double>(canvas.width) / source.width,
-      static_cast<double>(canvas.height) / source.height);
+      static_cast<double>(canvas.height) / source.height});
   const Size content{
       std::min(canvas.width, std::max(1, static_cast<int>(source.width * content_scale))),
       std::min(canvas.height, std::max(1, static_cast<int>(source.height * content_scale)))};
@@ -177,11 +194,24 @@ class Image {
   Update Set(std::int64_t width, std::int64_t height,
              const std::vector<std::uint8_t>& pixels) {
     if (!ValidPayload(width, height, pixels.size())) return Update::kInvalid;
-    if (size_.width == width && size_.height == height &&
+    return Store(width, height, pixels);
+  }
+  Update SetPeek(std::int64_t width, std::int64_t height,
+                 const std::vector<std::uint8_t>& pixels) {
+    if (!ValidPeekPayload(width, height, pixels.size())) return Update::kInvalid;
+    return Store(width, height, pixels);
+  }
+  bool Matches(std::int64_t width, std::int64_t height,
+               const std::vector<std::uint8_t>& pixels) const {
+    return size_.width == width && size_.height == height &&
         bytes_ == pixels.size() &&
-        std::equal(pixels.begin(), pixels.end(), rgba_.get())) {
-      return Update::kUnchanged;
-    }
+        std::equal(pixels.begin(), pixels.end(), rgba_.get());
+  }
+
+ private:
+  Update Store(std::int64_t width, std::int64_t height,
+                const std::vector<std::uint8_t>& pixels) {
+    if (Matches(width, height, pixels)) return Update::kUnchanged;
     auto replacement = std::unique_ptr<std::uint8_t[]>(
         new (std::nothrow) std::uint8_t[pixels.size()]);
     if (!replacement) return Update::kOutOfMemory;
@@ -192,6 +222,7 @@ class Image {
     return Update::kChanged;
   }
 
+ public:
   bool Clear() {
     const bool had_image = size_.valid();
     rgba_.reset();
@@ -319,6 +350,39 @@ class Image {
   std::size_t bytes_ = 0;
   std::unique_ptr<std::uint8_t[]> rgba_;
 };
+
+struct RawImage {
+  std::int64_t width;
+  std::int64_t height;
+  const std::vector<std::uint8_t>* pixels;
+};
+
+// Validate and allocate both replacements before committing either source.
+// No DWM call is made between swaps. A stale/invalid/OOM pair cannot combine
+// one song's small thumbnail with another song's large Peek.
+inline Update ReplacePreviewImages(Image& thumbnail, Image& peek,
+                                    RawImage thumbnail_input, const RawImage* large) {
+  if (!thumbnail_input.pixels || !ValidPayload(thumbnail_input.width, thumbnail_input.height, thumbnail_input.pixels->size()) ||
+      (large && (!large->pixels ||
+          !ValidPeekPayload(large->width, large->height, large->pixels->size())))) {
+    return Update::kInvalid;
+  }
+  const bool small_changed = !thumbnail.Matches(thumbnail_input.width, thumbnail_input.height, *thumbnail_input.pixels);
+  const bool large_changed = large
+      ? !peek.Matches(large->width, large->height, *large->pixels) : peek.size().valid();
+  if (!small_changed && !large_changed) return Update::kUnchanged;
+  Image next_small, next_large;
+  if (small_changed && next_small.Set(thumbnail_input.width, thumbnail_input.height, *thumbnail_input.pixels) != Update::kChanged) {
+    return Update::kOutOfMemory;
+  }
+  if (large_changed && large &&
+      next_large.SetPeek(large->width, large->height, *large->pixels) != Update::kChanged) {
+    return Update::kOutOfMemory;
+  }
+  if (small_changed) thumbnail = std::move(next_small);
+  if (large_changed) peek = std::move(next_large);
+  return Update::kChanged;
+}
 }  // namespace taskbar_thumbnail
 
 #endif  // RUNNER_TASKBAR_THUMBNAIL_POLICY_H_

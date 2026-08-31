@@ -281,14 +281,19 @@ Future<T?> showAppDialog<T>({
           .dependOnInheritedWidgetOfExactType<_DialogRegionScope>()
           ?.region ??
       host?._activeRegion;
-  return showDialog<T>(
+  final navigator = Navigator.of(context, rootNavigator: useRootNavigator);
+  return navigator.push<T>(_CompletingDialogRoute<T>(
     context: context,
     useSafeArea: host == null,
-    useRootNavigator: useRootNavigator,
+    themes: InheritedTheme.capture(from: context, to: navigator.context),
     barrierDismissible: barrierDismissible,
-    barrierColor: barrierColor,
+    barrierColor: barrierColor ??
+        DialogTheme.of(context).barrierColor ??
+        Theme.of(context).dialogTheme.barrierColor ??
+        Colors.black54,
     barrierLabel: barrierLabel,
-    routeSettings: routeSettings,
+    settings: routeSettings,
+    traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
     builder: (dialogContext) => host == null
         ? builder(dialogContext)
         : _DialogRegionScope(
@@ -296,7 +301,38 @@ Future<T?> showAppDialog<T>({
             child:
                 _AppDialogFrame(host: host, region: region, builder: builder),
           ),
-  );
+  ));
+}
+
+/// Navigator teardown does not necessarily pop its routes. A mini-mode dialog
+/// can disappear this way, leaving its caller's await and busy guard stuck.
+/// Complete only that abandoned result; normal pops retain their actual value.
+class _CompletingDialogRoute<T> extends DialogRoute<T> {
+  _CompletingDialogRoute({
+    required super.context,
+    required super.builder,
+    super.themes,
+    super.barrierDismissible,
+    super.barrierColor,
+    super.barrierLabel,
+    super.useSafeArea,
+    super.settings,
+    super.traversalEdgeBehavior,
+  });
+
+  bool _completed = false;
+
+  @override
+  void didComplete(T? result) {
+    _completed = true;
+    super.didComplete(result);
+  }
+
+  @override
+  void dispose() {
+    if (!_completed) didComplete(null);
+    super.dispose();
+  }
 }
 
 class _AppDialogFrame extends StatelessWidget {

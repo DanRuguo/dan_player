@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:dan_player/desktop_tray_appearance.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
@@ -281,6 +283,7 @@ class DesktopIntegration implements Listenable {
   DesktopPlaybackSnapshot? _sentPlayback;
   bool? _sentTaskbar;
   double? _sentTrayBlurRadius;
+  bool? _sentRoundedCorners;
   (bool, int, String, String)? _sentAppearance;
   UiLanguage? _sentLanguage;
 
@@ -336,13 +339,17 @@ class DesktopIntegration implements Listenable {
     _native.setEventHandler(_onNativeEvent);
     try {
       final initialTaskbar = _preferences.value.taskbarControls;
+      final initialRoundedCorners = _preferences.value.roundedWindowCorners;
       final initialBlur = PlayerExperiencePreferences.safeTrayMenuBlurRadius(
           _preferences.value.trayMenuBlurRadius);
       final language = uiLanguage.value;
       final appearance = _syncAppearance ? _appearance() : null;
       _applyState(await _invoke('configure', {
+        ...desktopTrayIconConfiguration(),
         'taskbarControls': initialTaskbar,
         'trayMenuBlurRadius': initialBlur,
+        'roundedWindowCorners': initialRoundedCorners,
+        'windowCornerRadius': AppShape.surfaceRadius.topLeft.x,
         'labels': _menuLabels(),
         if (appearance != null) 'dark': appearance.$1,
         if (appearance != null) 'accent': appearance.$2,
@@ -352,6 +359,7 @@ class DesktopIntegration implements Listenable {
       if (_closed) return;
       _sentTaskbar = initialTaskbar;
       _sentTrayBlurRadius = initialBlur;
+      _sentRoundedCorners = initialRoundedCorners;
       _sentAppearance = appearance;
       _sentLanguage = language;
       _started = true;
@@ -458,17 +466,22 @@ class DesktopIntegration implements Listenable {
       _nativeTail = _nativeTail.then((_) async {
         if (_closed) return;
         final taskbar = _preferences.value.taskbarControls;
+        final roundedCorners = _preferences.value.roundedWindowCorners;
         final blurRadius = PlayerExperiencePreferences.safeTrayMenuBlurRadius(
             _preferences.value.trayMenuBlurRadius);
         final appearance = _syncAppearance ? _appearance() : null;
         final language = uiLanguage.value;
         if (_sentTaskbar != taskbar ||
             _sentTrayBlurRadius != blurRadius ||
+            _sentRoundedCorners != roundedCorners ||
             _sentAppearance != appearance ||
             _sentLanguage != language) {
           _applyState(await _invoke('configure', {
+            ...desktopTrayIconConfiguration(),
             'taskbarControls': taskbar,
             'trayMenuBlurRadius': blurRadius,
+            'roundedWindowCorners': roundedCorners,
+            'windowCornerRadius': AppShape.surfaceRadius.topLeft.x,
             if (_sentLanguage != language) 'labels': _menuLabels(),
             if (appearance != null) 'dark': appearance.$1,
             if (appearance != null) 'accent': appearance.$2,
@@ -477,6 +490,7 @@ class DesktopIntegration implements Listenable {
           }));
           _sentTaskbar = taskbar;
           _sentTrayBlurRadius = blurRadius;
+          _sentRoundedCorners = roundedCorners;
           _sentAppearance = appearance;
           _sentLanguage = language;
         }
@@ -587,6 +601,15 @@ class DesktopIntegration implements Listenable {
       });
 
   Future<void> dispose() => _disposal ??= _dispose();
+
+  /// A failed final window close can leave the already-disposed player visible.
+  /// Restore only its retry/error UI: never re-register native callbacks, tray
+  /// resources, playback observers, or audio. Ordinary hidden windows cannot
+  /// bypass the normal tray restore checks through this shutdown-only entry.
+  void restorePresentationAfterFailedShutdown() {
+    if (!_closed) return;
+    _hidden.value = false;
+  }
 
   Future<void> _dispose() async {
     if (_closed) return;

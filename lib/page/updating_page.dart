@@ -84,7 +84,8 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
       unawaited(
         CoverCache.instance.prune(
           AudioLibrary.instance.audioCollection.map(
-            (audio) => CoverCacheEntry(audio.path, audio.modified),
+            (audio) => CoverCacheEntry(audio.path, audio.modified,
+                fingerprint: audio.coverFingerprint),
           ),
         ),
       );

@@ -9,10 +9,11 @@ import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as path_util;
 
 class CoverCacheEntry {
-  const CoverCacheEntry(this.path, this.modified);
+  const CoverCacheEntry(this.path, this.modified, {this.fingerprint});
 
   final String path;
   final int modified;
+  final String? fingerprint;
 }
 
 /// Stores resized cover images so Rust does not repeatedly decode embedded art.
@@ -116,20 +117,26 @@ class CoverCache {
     int modified,
     int width,
     int height,
+    String? fingerprint,
   ) {
     final generation = _generations[audioPath] ?? 0;
-    return "v${_schemaVersion}_${stableHash(audioPath)}_${modified}_"
+    return "v${_schemaVersion}_${stableHash(audioPath)}_${_stamp(modified, fingerprint)}_"
         "e${_epoch}g${generation}_${width}x$height.png";
   }
+
+  static String _stamp(int modified, String? fingerprint) => fingerprint == null
+      ? '$modified'
+      : '${modified}f${stableHash(fingerprint)}';
 
   Future<ImageProvider?> imageFor({
     required String audioPath,
     required int modified,
+    String? fingerprint,
     required int width,
     required int height,
     required Future<Uint8List?> Function() produce,
   }) {
-    final key = _fileName(audioPath, modified, width, height);
+    final key = _fileName(audioPath, modified, width, height, fingerprint);
     final retryAt = _negativeUntil.remove(key);
     if (retryAt != null && retryAt.isAfter(_clock())) {
       _negativeUntil[key] = retryAt;
@@ -214,7 +221,7 @@ class CoverCache {
     try {
       final validPrefixes = <String>{
         for (final entry in validEntries)
-          "v${_schemaVersion}_${stableHash(entry.path)}_${entry.modified}_",
+          "v${_schemaVersion}_${stableHash(entry.path)}_${_stamp(entry.modified, entry.fingerprint)}_",
       };
       final dir = await _cacheDir();
       var removed = 0;

@@ -1,10 +1,139 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:dan_player/component/rectangle_progress_indicator.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final ratio in [1.0, 1.25, 1.5, 2.0]) {
+    testWidgets('centered handle stays crisp at half-pixel origin ${ratio}x',
+        (tester) async {
+      tester.view.devicePixelRatio = ratio;
+      tester.view.physicalSize = Size(400 * ratio + 1, 100 * ratio);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final scheme = ColorScheme.fromSeed(seedColor: Colors.purple);
+      final positions = StreamController<double>.broadcast(sync: true);
+      addTearDown(positions.close);
+      final capture = GlobalKey();
+      await tester.pumpWidget(MaterialApp(
+          theme: ThemeData(colorScheme: scheme),
+          home: RepaintBoundary(
+              key: capture,
+              child: ColoredBox(
+                  color: scheme.surface,
+                  child: Center(
+                      child: SizedBox(
+                          width: 400,
+                          height: 80,
+                          child: RectangleProgressIndicator(
+                              size: const Size(400, 80),
+                              positionStream: positions.stream,
+                              lengthProvider: () => 100,
+                              initialPosition: 41.3,
+                              onSeek: (_) {},
+                              child: const SizedBox.expand())))))));
+      final bar = tester.getRect(find.byType(RectangleProgressIndicator));
+      expect(bar.left * ratio, closeTo(.5, .001));
+      final mouse =
+          await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+      await mouse.addPointer(location: bar.topLeft + const Offset(165.2, 40));
+      await mouse.moveTo(bar.topLeft + const Offset(165.3, 40));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.runAsync(() async {
+        final render =
+            capture.currentContext!.findRenderObject() as RenderRepaintBoundary;
+        final image = await render.toImage(pixelRatio: ratio);
+        try {
+          final pixels =
+              (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+          final row = (bar.center.dy * ratio).round();
+          var solidPixels = 0;
+          for (var x = 0; x < image.width; x++) {
+            final offset = (row * image.width + x) * 4;
+            final rgb = pixels.getUint8(offset) << 16 |
+                pixels.getUint8(offset + 1) << 8 |
+                pixels.getUint8(offset + 2);
+            if (rgb == (scheme.primary.toARGB32() & 0xffffff)) solidPixels++;
+          }
+          expect(solidPixels, (2 * ratio).round(),
+              reason: 'global placement must not soften the solid core');
+        } finally {
+          image.dispose();
+        }
+      });
+      await mouse.removePointer();
+    });
+  }
+
+  for (final ratio in [1.0, 1.25, 1.5, 2.0]) {
+    testWidgets('solid handle is pixel aligned at ${ratio}x', (tester) async {
+      final scheme = ColorScheme.fromSeed(seedColor: Colors.purple);
+      final progress = ValueNotifier<double>(0);
+      final hint = ValueNotifier<double>(1);
+      addTearDown(progress.dispose);
+      addTearDown(hint.dispose);
+      final painter = RectangleProgressPainter(
+          progress: progress,
+          scheme: scheme,
+          highlightBoundary: hint,
+          devicePixelRatio: ratio);
+      for (final fraction in [0.0, .413, .5345, 1.0]) {
+        progress.value = fraction;
+        await tester.runAsync(() async {
+          final recorder = ui.PictureRecorder();
+          painter.paint(Canvas(recorder)..scale(ratio), const Size(400, 80));
+          final picture = recorder.endRecording();
+          final image = await picture.toImage(
+              (400 * ratio).round(), (80 * ratio).round());
+          try {
+            final pixels =
+                (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+            final row = (40 * ratio).round();
+            final core = <int>[];
+            for (var x = 0; x < image.width; x++) {
+              final offset = (row * image.width + x) * 4;
+              final alpha = pixels.getUint8(offset + 3);
+              if (alpha == 255) {
+                core.add(x);
+                final rgb = pixels.getUint8(offset) << 16 |
+                    pixels.getUint8(offset + 1) << 8 |
+                    pixels.getUint8(offset + 2);
+                expect(rgb, scheme.primary.toARGB32() & 0xffffff);
+              } else {
+                expect(alpha, lessThan(140),
+                    reason: 'no partly covered fuzzy edge beside the core');
+              }
+            }
+            expect(core.length, (2 * ratio).round());
+            expect(core.last - core.first + 1, core.length);
+            if (fraction == 0) {
+              expect(core.first, 0);
+            } else if (fraction == 1) {
+              expect(core.last, image.width - 1);
+            } else {
+              expect((core.first + core.last + 1) / 2,
+                  closeTo(400 * ratio * fraction, .51));
+            }
+          } finally {
+            image.dispose();
+            picture.dispose();
+          }
+        });
+      }
+      expect(
+          painter.shouldRepaint(RectangleProgressPainter(
+              progress: progress,
+              scheme: scheme,
+              highlightBoundary: hint,
+              devicePixelRatio: ratio + .25)),
+          isTrue);
+    });
+  }
+
   testWidgets('progress is finite, clamped and releases its subscription',
       (tester) async {
     var cancelled = false;

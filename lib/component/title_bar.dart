@@ -9,6 +9,7 @@ import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/window_mode_controller.dart';
+import 'package:dan_player/utils.dart' show LOGGER;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -327,6 +328,7 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
   bool _isFullScreen = false;
   bool _isMaximized = false;
   bool _isProcessing = false;
+  int _windowStateRevision = 0;
 
   @override
   void initState() {
@@ -336,14 +338,22 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
   }
 
   Future<void> _updateWindowStates() async {
-    final isFullScreen = await windowManager.isFullScreen();
-    final isMaximized = await windowManager.isMaximized();
-    if (mounted) {
-      setState(() {
-        _isFullScreen = isFullScreen;
-        _isMaximized = isMaximized;
-        _isProcessing = false;
-      });
+    final revision = ++_windowStateRevision;
+    try {
+      final states = await Future.wait([
+        windowManager.isFullScreen(),
+        windowManager.isMaximized(),
+      ]).timeout(const Duration(seconds: 2));
+      if (mounted && revision == _windowStateRevision) {
+        setState(() {
+          _isFullScreen = states[0];
+          _isMaximized = states[1];
+        });
+      }
+    } catch (error, trace) {
+      // A failed native status read must not disable all window controls or
+      // escape an unawaited WindowListener callback. Keep the last known state.
+      LOGGER.w('读取窗口状态失败：$error', stackTrace: trace);
     }
   }
 
@@ -359,11 +369,7 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
     } catch (error) {
       HotkeysHelper.showError(ui("切换全屏失败：{0}", [error]));
     } finally {
-      // 无论成功还是失败，最终都重置处理状态
-      // 调用_updateWindowStates()确保状态同步，即使监听器没有触发
-      if (mounted) {
-        await _updateWindowStates();
-      }
+      await _finishWindowOperation();
     }
   }
 
@@ -387,11 +393,17 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
     } catch (error) {
       HotkeysHelper.showError(ui("切换窗口大小失败：{0}", [error]));
     } finally {
-      // 无论成功还是失败，最终都重置处理状态
-      // 调用_updateWindowStates()确保状态同步，即使监听器没有触发
-      if (mounted) {
-        await _updateWindowStates();
-      }
+      await _finishWindowOperation();
+    }
+  }
+
+  Future<void> _finishWindowOperation() async {
+    try {
+      if (mounted) await _updateWindowStates();
+    } finally {
+      // Only the operation owner releases this guard. Native resize events
+      // may refresh state while the operation is still in flight.
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 

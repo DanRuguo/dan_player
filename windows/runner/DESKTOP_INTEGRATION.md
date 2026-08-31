@@ -10,11 +10,11 @@
   隐藏前必须再次得到原生托盘注册成功的明确回复；失败、超时、异常或无效回复均正常退出，
   不会只凭缓存的“曾经可用”状态把播放窗口藏起来。
 - 托盘菜单提供显示主窗口、迷你播放器、上一首、播放/暂停、下一首、桌面歌词、退出。
-  默认使用 Dan Player 自有的非阻塞圆角 Material 风格弹层：命令图标统一取自 Windows 10/11 自带的 Segoe MDL2 Assets（窗口、还原、媒体、字幕和电源语义），按 DPI 排版且颜色跟随应用明暗与主题色，支持悬停、键盘方向键、Enter/Space 和 Esc。创建自绘窗口失败或系统处于高对比度时自动回退原生 `HMENU`，不会因此失去退出或播放控制。
+  默认使用 Dan Player 自有的非阻塞圆角 Material 风格弹层：命令图标统一取自应用打包的 Material Symbols Outlined，按 DPI 排版且颜色跟随应用明暗与主题色，支持悬停、键盘方向键、Enter/Space 和 Esc。创建自绘窗口失败或系统处于高对比度时自动回退原生 `HMENU`，不会因此失去退出或播放控制。
   单击或键盘激活托盘图标恢复当前窗口模式。Windows 可能将图标放在通知区域折叠区。
 - 菜单“退出”始终真正退出，不再应用后台播放偏好。重复关闭不会取消正在进行的清理。
 - 任务栏悬停预览保留上一首、播放/暂停、下一首三个原生按钮；可独立关闭。
-  可选自定义歌曲卡片通过公开 DWM 缩略图接口显示，悬停后的 Peek 使用完整大卡片；关闭时恢复系统窗口预览。
+  可选自定义歌曲卡片通过公开 DWM 缩略图接口显示，悬停后的 Peek 使用独立高分辨率卡片，并按 DPI 控制清晰可读尺寸；关闭时恢复系统窗口预览。
   这不是任务栏空白区域常驻歌词，也不创建另一个播放进程。
 - 音频服务尚未就绪、无歌曲或正在缓冲时，相应播放按钮禁用。显示窗口和退出始终可用。
 
@@ -45,22 +45,47 @@
 
 | 调用 | 参数/结果 |
 | --- | --- |
-| `configure` | `{taskbarControls: bool, dark?: bool, accent?: COLORREF, fontFamily?: string, fontPath?: string, labels?: map, trayMenuBlurRadius?: double}` → 状态；半径有限且在 0..24 逻辑像素内，否则拒绝 |
+| `configure` | `{taskbarControls: bool, dark?: bool, accent?: COLORREF, fontFamily?: string, fontPath?: string, trayIconFontPath?: string, trayIconCodepoints?: List<int>, labels?: map, trayMenuBlurRadius?: double, roundedWindowCorners?: bool, windowCornerRadius?: double}` → 状态；模糊半径 0..24、窗口半径 0..64 逻辑像素，均要求有限 |
 | `updatePlayback` | `ready/hasTrack/hasQueue/playing/buffering/desktopLyrics` 布尔值和 `title` |
-| `setThumbnail` | `{width: int, height: int, pixels: Uint8List}`；Flutter 预乘 alpha 的 `rawRgba`，每轴 1..512，字节数精确等于 `width*height*4` 且不超过 1 MiB；成功 null 表示接收有效源，非法参数/分配失败显式错误，DWM 展示能力另由状态报告 |
+| `setThumbnail` | `{width: int, height: int, pixels: Uint8List, peek?: {width: int, height: int, pixels: Uint8List}}`；Flutter 预乘 alpha 的 `rawRgba`。原缩略图每轴 1..512、最多 1 MiB；可选 Peek 源每轴 1..2048、最多 4 MiB；两者字节数均须精确等于 `width*height*4`。同次校验/原子替换；成功 null 表示接收有效源，非法参数/分配失败显式错误，DWM 展示能力另由状态报告 |
 | `clearThumbnail` | 无参数；释放像素并恢复两个 DWM iconic 属性，成功 null，失败显式错误，可重复清理 |
 | `prepareHide` | 重新注册/验证托盘 → 状态 |
 | `getState` | 当前状态 |
 | `showMenu` | 显示本窗口的托盘菜单 |
 | `dispose` | 幂等释放托盘、缩略图按钮、预览像素/DWM iconic 属性、COM 和 HICON |
 
-状态含单调 `revision`、`trayAvailable`、`taskbarAvailable`、`thumbnailAvailable`、`windowVisible`、`minimized`
+状态含单调 `revision`、`trayAvailable`、`taskbarAvailable`、`thumbnailAvailable`、`roundedWindowCornersAvailable`、`windowVisible`、`minimized`
 及可选 `reason`；Dart 拒绝晚到的旧 revision。原生事件为 `stateChanged` 和 `action`。
 播放状态只在实际变化后合并发送，不传位置、歌词或每帧消息。歌曲卡片独立发送、独立降级；
 `thumbnailAvailable` 只表示当前自定义卡片已成功启用，不参与托盘隐藏安全判断，
 `taskbarControls` 开关也不隐式清除自定义预览。
 
 ## 自定义预览的资源与恢复策略
+
+### 托盘字体与图标
+
+- 隐藏内存 DC 诊断用 `GetFontData` 对照完整字体字节：原托盘确实选中了应用的
+  `PingFangSC-Regular.ttf`（原生 family 为 `.萍方-简`），不是仅字体名字错误。
+  原行文字请求 14dp/400，现在为 15dp/700，标题 16dp/700；单一 Regular 字体的粗体由 GDI 合成。
+  `fontFamily/fontPath` 仍跟随应用选择，私有注册仅在本进程有效，不安装系统字体。
+- 内置字体不含 Hangul。对不超过 255 UTF-16 单元的菜单标签显式检查缺字，按应用所用系统字体
+  家族顺序选择能覆盖整条标签的字体，最多缓存 16 个选择；缓存的 HFONT 在 DPI/字体变化或关闭时释放。
+  系统字体可用性、复杂脚本及 emoji 字体链接仍有平台差异；不宣称 GDI 和 Flutter/Skia 逐像素一致。
+- 九个命令/状态图标由 Dart 的 `const Symbols` 唯一列表声明，保留到 release tree-shaken
+  `MaterialSymbolsOutlined.ttf`，native 私有加载此字体与对应码点。图标统一 20dp，置于
+  36×30dp 主题色圆角胶囊；禁用状态保持低强调度，高对比模式仍使用系统菜单。
+  老 Dart peer 或图标字体不可用时才用 Segoe MDL2 兼容图标，不把 Outlined 错认作 Rounded。
+- 胶囊、行底与分隔线使用 stock DC brush/pen，字体和缺字选择缓存复用；悬停不创建字体或画刷。
+  原子双缓冲及只重画旧/新 hover 行的策略保持不变。版本文字直接使用 runner 的生成版本宏，
+  独立 native test 无版本宏时只显示发布者名称，不再另维护一个版本常量。
+
+### 主窗口外框
+
+- 自定义外窗圆角已暂停：生产 `desktop_integration` 不再创建、更新或移除窗口区域，
+  外框走 26.0.3 原有路径；没有改动原生标题栏隐藏、非客户区或 resize hit-test。
+- 旧 `roundedWindowCorners` 偏好兼容读取，原生端忽略，设置入口隐藏；内部控件圆角不变。
+- 退出先隐藏窗口再清理 Shell/引擎资源，原生销毁也有隐藏保护，避免拆卸期间露出系统标题栏。
+- 保留的区域策略测试是停用功能的历史回归，不代表此快照提供了外窗圆角，也不替代实际 GUI 验收。
 
 ### 托盘菜单可调高斯模糊（与歌曲卡片独立）
 
@@ -92,19 +117,23 @@
 
 ### 任务栏歌曲卡片
 
-- 原生只缓存一张不超过 1 MiB 的 raw RGBA 卡片，无 PNG 解码、文件、联网或屏幕截图。
-  相同尺寸/字节内容不重复使 DWM 缓存失效；替换、首次启用及 Shell/DWM 重建时才请求失效。
+- Flutter 从同一录制的矢量 Picture 生成原 480×240 缩略图和独立 3×栅格化的 1440×720 Peek 源；
+  后者重新栅格化字体，不是将前者的像素插值放大。同一次方法调用发送，两份都校验/分配成功后才提交。
+  原生长期缓存 raw RGBA 最多 1+4 MiB，无 PNG 解码、文件、联网或屏幕截图；原位替换时旧、新源
+  可暂时同时存在，因此 5 MiB 不是进程总内存上限。相同两份内容不重复使 DWM 缓存失效。
+  旧的三字段 payload 继续可用，未带 Peek 源时清除上一代的高分辨率图，避免混用曲目。
 - `WM_DWMSENDICONICTHUMBNAIL` 严格按 **HIWORD=最大宽、LOWORD=最大高** 解码，
   保留源宽高比、只缩小不放大，双线性采样并转换成 top-down 32bpp BGRA DIB。
   图像与请求尺寸均先验证，零尺寸请求不分配，不会按系统大尺寸创建巨型位图。
 - `WM_DWMSENDICONICLIVEPREVIEWBITMAP` 与缩略图分开布局：普通窗口按 `GetClientRect`
-  输出完整客户区大小，同一源卡片等比例放大、居中留边、不裁文字。1280×800 客户区对应
-  1280×640 卡片，1920×1080 对应 1920×960；不是复用 480×240 小位图，也不是播放器截图。
+  输出客户区画布，卡片以 640×320 逻辑像素为基准，按当前 DPI 等比居中，且永不超过源分辨率。
+  96/144/192 DPI 分别为 640×320、960×480、1280×640；极高 DPI 上限为 1440×720。
+  小屏/窄窗口优先缩小到可用客户区，不变形、不裁文字。旧 payload 只有 480×240 时不再模糊放大。
+  此路径仍是元数据卡片，不是播放器截图，也不冒称原生整窗 Peek。
   每轴最多 4096、总像素最多 4,194,304（临时 DIB 16 MiB），超大窗口按相同比例缩小画布。
   Peek 用固定点双线性插值，只复用两行与横向采样表（最多额外 176 KiB 临时工作区），
-  小缩略图保持原有下采样/舍入语义。放大改善显示尺寸但不凭空增加源字体细节。
-  每次临时 `HBITMAP` 在 DWM 复制后立即释放，
-  仅长期保留同一份 <=1 MiB 原始卡片，不缓存第二张大图，不读取屏幕。
+  小缩略图保持原有下采样/舍入语义。每次临时 `HBITMAP` 在 DWM 复制后立即释放，
+  不长期缓存客户区尺寸的 DIB，不读取屏幕。
 - 最小化时不使用当前的零尺寸/图标尺寸客户区：在正常、最大化及调整大小时保存最后一个
   **非最小化**的有效客户区，`SIZE_MINIMIZED` 和 `IsIconic` 均禁止覆盖它。
   如果控制器首次接入时窗口已经最小化，则仅取 `WINDOWPLACEMENT.rcNormalPosition` 的宽高，
@@ -156,9 +185,13 @@
 `tests/desktop_integration_policy_test.cpp` 是不创建 HWND/Shell/音频的纯策略断言。
 其中颜色网格断言覆盖明暗系统任务栏、极浅/极深封面色、主题切换、相同配置去重与系统高对比优先级。
 `tests/taskbar_thumbnail_policy_test.cpp` 覆盖像素限制、int64 越界、非方形请求宽高顺序、
-缩略图禁止放大、Peek 客户区适配/等比放大/预算、BGRA/预乘 alpha、相同内容去重与有限重试预算。
+缩略图禁止放大、Peek DPI/清晰度上限/客户区适配/预算、双源原子替换、BGRA/预乘 alpha、相同内容去重与有限重试预算。
 `tests/taskbar_peek_bitmap_test.cpp` 在 1280×800、1920×1080、2560×1440、竖窗和 4K 客户区上
-生成合成卡片临时 DIB，检查整卡边缘、大小、16 MiB 上限、每轮 GDI 句柄释放及无第二份长期缓存。
+生成合成卡片临时 DIB，检查整卡边缘、大小、16 MiB 上限及每轮 GDI 句柄释放。
+`test/taskbar_peek_quality_test.dart` 使用真实内置字体及虚构曲目，比较高分辨率字形与小图的
+最近邻/双线性放大像素，验证新的 Peek 是独立栅格化，并覆盖 payload 预算及切歌代际成对提交。
+`desktop_integration_fonts_test` 检查实际 GDI 字体字节、字重、韩文回退、九个 release 图标字形、
+五档 DPI/两主题胶囊像素与 5000 次 hover 绘制的 GDI 句柄稳定性。CI 传入真正 tree-shaken 的字体。
 `tests/taskbar_peek_geometry_test.cpp` 使用 36 个始终隐藏的 HWND，分别提供真实普通窗口与
 初始最小化窗口的几何输入，验证标准边框、自定义标题栏及全客户区边框、正常/tool-window 样式，
 以及对应 96/144/192 fixture 比例的边框输入（不是切换真实系统 DPI）。在本机 1280×800 初始
@@ -197,3 +230,6 @@ frame 下，三种 iconic client 分别为 0×0、183×26、199×34，解析结�
 - [BitBlt：矩形块传输](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-bitblt)
 - [高级视觉效果设置与纯色回退](https://learn.microsoft.com/en-us/windows/apps/develop/composition/composition-tailoring)
 - [节能状态与通知](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-system_power_status)
+- [AddFontResourceExW：进程私有字体注册](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-addfontresourceexw)
+- [SetWindowRgn：区域坐标、所有权与窗口消息](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowrgn)
+- [Windows 11 圆角策略与窗口区域限制](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-rounded-corners)

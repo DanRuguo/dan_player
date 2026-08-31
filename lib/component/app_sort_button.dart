@@ -259,33 +259,37 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
     final size = MediaQuery.sizeOf(context);
     final reduced = appToolbarReduceMotion(context);
     setState(() => _open = true);
-    final result = await showMenu<_SortChoice<T>>(
-      context: _anchor.currentContext ?? context,
-      semanticLabel: _needsScrollHint ? ui("排序方式，可滚动查看更多字段") : ui("排序方式"),
-      positionBuilder: _position,
-      shape: AppShape.control,
-      color: scheme.surfaceContainer,
-      surfaceTintColor: Colors.transparent,
-      shadowColor: scheme.shadow.withValues(alpha: .18),
-      elevation: 4,
-      requestFocus: true,
-      constraints: BoxConstraints(
-        maxWidth: math.max(44, math.min(360, size.width - 32)),
-        maxHeight: math.max(48, math.min(480, size.height - 48)),
-      ),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
-      popUpAnimationStyle: reduced
-          ? AnimationStyle.noAnimation
-          : const AnimationStyle(
-              duration: AppMotion.quick,
-              reverseDuration: AppMotion.quick,
-              curve: AppMotion.standardCurve,
-              reverseCurve: Curves.easeInCubic,
-            ),
-      items: _menuItems(),
-    );
+    _SortChoice<T>? result;
+    try {
+      result = await showMenu<_SortChoice<T>>(
+        context: _anchor.currentContext ?? context,
+        semanticLabel: _needsScrollHint ? ui("排序方式，可滚动查看更多字段") : ui("排序方式"),
+        positionBuilder: _position,
+        shape: AppShape.control,
+        color: scheme.surfaceContainer,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: scheme.shadow.withValues(alpha: .18),
+        elevation: 4,
+        requestFocus: true,
+        constraints: BoxConstraints(
+          maxWidth: math.max(44, math.min(360, size.width - 32)),
+          maxHeight: math.max(48, math.min(480, size.height - 48)),
+        ),
+        menuPadding: const EdgeInsets.symmetric(vertical: 6),
+        popUpAnimationStyle: reduced
+            ? AnimationStyle.noAnimation
+            : const AnimationStyle(
+                duration: AppMotion.quick,
+                reverseDuration: AppMotion.quick,
+                curve: AppMotion.standardCurve,
+                reverseCurve: Curves.easeInCubic,
+              ),
+        items: _menuItems(),
+      );
+    } finally {
+      if (mounted) setState(() => _open = false);
+    }
     if (!mounted) return;
-    setState(() => _open = false);
     if (result == null || epoch != _epoch || !_enabled || !_current) return;
     switch (result) {
       case _MethodChoice<T>():

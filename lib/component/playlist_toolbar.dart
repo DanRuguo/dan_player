@@ -379,6 +379,7 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
         AppSegmentedControl<PlaylistViewMode>(
           key: const ValueKey('playlist-view-selector'),
           semanticLabel: ui('歌单视图'),
+          showLabels: widget.isRoot,
           value: widget.view ?? PlaylistViewMode.list,
           maxWidth: maxWidth,
           options: [
@@ -682,60 +683,66 @@ class _ToolbarMenuState<T> extends State<_ToolbarMenu<T>> {
     final menuWidth =
         math.max(44.0, math.min(340.0, MediaQuery.sizeOf(context).width - 32));
     setState(() => _open = true);
-    final result = await showMenu<T>(
-      context: context,
-      positionBuilder: _position,
-      shape: AppShape.control,
-      color: scheme.surfaceContainer,
-      surfaceTintColor: Colors.transparent,
-      shadowColor: scheme.shadow.withValues(alpha: .18),
-      elevation: 4,
-      requestFocus: true,
-      constraints: BoxConstraints(maxWidth: menuWidth),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
-      popUpAnimationStyle: widget.reduced
-          ? AnimationStyle.noAnimation
-          : const AnimationStyle(
-              duration: AppMotion.quick,
-              reverseDuration: AppMotion.quick,
-              curve: AppMotion.standardCurve,
-              reverseCurve: Curves.easeInCubic,
-            ),
-      items: [
-        for (final item in widget.items)
-          if (item == null)
-            const PopupMenuDivider(height: 10)
-          else
-            PopupMenuItem<T>(
-              key: item.key,
-              value: item.value,
-              enabled: item.onSelected != null,
-              height: 48,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(item.icon,
-                      size: 20,
-                      color: item.onSelected == null
-                          ? scheme.onSurface.withValues(alpha: .38)
-                          : scheme.onSurfaceVariant),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: Text(item.label,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          semanticsLabel: item.label)),
-                  if (item.checked) ...[
-                    const SizedBox(width: 8),
-                    Icon(Icons.check, size: 18, color: scheme.primary),
-                  ],
-                ],
+    T? result;
+    try {
+      result = await showMenu<T>(
+        context: context,
+        positionBuilder: _position,
+        shape: AppShape.control,
+        color: scheme.surfaceContainer,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: scheme.shadow.withValues(alpha: .18),
+        elevation: 4,
+        requestFocus: true,
+        constraints: BoxConstraints(maxWidth: menuWidth),
+        menuPadding: const EdgeInsets.symmetric(vertical: 6),
+        popUpAnimationStyle: widget.reduced
+            ? AnimationStyle.noAnimation
+            : const AnimationStyle(
+                duration: AppMotion.quick,
+                reverseDuration: AppMotion.quick,
+                curve: AppMotion.standardCurve,
+                reverseCurve: Curves.easeInCubic,
               ),
-            ),
-      ],
-    );
+        items: [
+          for (final item in widget.items)
+            if (item == null)
+              const PopupMenuDivider(height: 10)
+            else
+              PopupMenuItem<T>(
+                key: item.key,
+                value: item.value,
+                enabled: item.onSelected != null,
+                height: 48,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(item.icon,
+                        size: 20,
+                        color: item.onSelected == null
+                            ? scheme.onSurface.withValues(alpha: .38)
+                            : scheme.onSurfaceVariant),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: Text(item.label,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            semanticsLabel: item.label)),
+                    if (item.checked) ...[
+                      const SizedBox(width: 8),
+                      Icon(Icons.check, size: 18, color: scheme.primary),
+                    ],
+                  ],
+                ),
+              ),
+        ],
+      );
+    } finally {
+      // Native focus/navigation failures must not permanently lock this menu.
+      if (mounted) setState(() => _open = false);
+    }
     if (!mounted) return;
-    setState(() => _open = false);
     if (result == null || !widget.enabled || !widget.isCurrentMode()) return;
     // Read the current items, not the opening snapshot: a read-only/busy policy
     // change while the menu is open must not dispatch an obsolete action.

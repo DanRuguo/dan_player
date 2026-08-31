@@ -282,8 +282,10 @@ void main() {
           rig.preferences.value.copyWith(taskbarControls: false);
       await flushDesktopEvents();
       expect(rig.native.calls.map((call) => call.$1), ['configure']);
-      expect(rig.native.calls.single.$2,
-          {'taskbarControls': false, 'trayMenuBlurRadius': 0.0});
+      expect(
+          rig.native.calls.single.$2, containsPair('taskbarControls', false));
+      expect(
+          rig.native.calls.single.$2, containsPair('trayMenuBlurRadius', 0.0));
     });
 
     test('same-turn playback changes are coalesced to latest metadata',

@@ -85,7 +85,10 @@ class PlayerShortcuts extends StatelessWidget {
 
 class HotkeysHelper {
   static bool enabled = true;
-  static bool _helpOpen = false;
+  // Normal and mini modes own separate navigators. A retained offstage dialog
+  // must not prevent help in the visible navigator; repeated commands within
+  // that same navigator are still deduplicated. Weak keys do not retain routes.
+  static final _helpOpen = Expando<bool>('shortcut-help-open');
   static bool _fullScreenBusy = false;
 
   // Lifecycle compatibility: one widget dispatcher, no repeated native
@@ -193,8 +196,9 @@ class HotkeysHelper {
   }
 
   static Future<void> showShortcuts(BuildContext context) async {
-    if (_helpOpen) return;
-    _helpOpen = true;
+    final navigator = Navigator.of(context, rootNavigator: true);
+    if (_helpOpen[navigator] == true) return;
+    _helpOpen[navigator] = true;
     try {
       await showAppDialog<void>(
         context: context,
@@ -246,7 +250,7 @@ class HotkeysHelper {
         ),
       );
     } finally {
-      _helpOpen = false;
+      _helpOpen[navigator] = null;
     }
   }
 }

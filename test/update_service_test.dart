@@ -46,14 +46,14 @@ void main() {
             browserDownloadUrl: 'https://github.com/example/portable.zip',
           ),
           ReleaseAsset(
-            name: 'dan-player-windows-x64.exe',
+            name: 'DanPlayer-26.0.4-Setup-x64.exe',
             browserDownloadUrl: 'https://github.com/example/setup.exe',
           ),
         ],
         architecture: 'x64',
       );
 
-      expect(selected?.name, 'dan-player-windows-x64.exe');
+      expect(selected?.name, 'DanPlayer-26.0.4-Setup-x64.exe');
     });
 
     test('rejects non-Windows archives and the wrong architecture', () {

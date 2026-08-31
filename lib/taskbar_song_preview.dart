@@ -8,7 +8,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:flutter/material.dart';
 
 /// Frozen metadata, separate from playback position and mutable library rows.
-/// Only a small rendered card crosses the channel; no file path reaches Shell.
+/// Only bounded rendered cards cross the channel; no file path reaches Shell.
 @immutable
 class TaskbarPreviewTrack {
   const TaskbarPreviewTrack({
@@ -41,8 +41,25 @@ class TaskbarPreviewTrack {
   int get hashCode => Object.hash(identity, title, artist, album);
 }
 
+class TaskbarPeekImage {
+  TaskbarPeekImage(this.width, this.height, this.pixels) {
+    if (width < 1 ||
+        height < 1 ||
+        width > 2048 ||
+        height > 2048 ||
+        pixels.length > 4 * 1024 * 1024 ||
+        pixels.length != width * height * 4) {
+      throw ArgumentError('Peek must be bounded to 2048px axes and 4MiB RGBA');
+    }
+  }
+  final int width, height;
+  final Uint8List pixels;
+  Map<String, Object> toMap() =>
+      {'width': width, 'height': height, 'pixels': pixels};
+}
+
 class TaskbarThumbnail {
-  TaskbarThumbnail(this.width, this.height, this.pixels) {
+  TaskbarThumbnail(this.width, this.height, this.pixels, {this.peek}) {
     if (width < 1 ||
         height < 1 ||
         width > 512 ||
@@ -53,8 +70,13 @@ class TaskbarThumbnail {
   }
   final int width, height;
   final Uint8List pixels;
-  Map<String, Object> toMap() =>
-      {'width': width, 'height': height, 'pixels': pixels};
+  final TaskbarPeekImage? peek;
+  Map<String, Object> toMap() => {
+        'width': width,
+        'height': height,
+        'pixels': pixels,
+        if (peek != null) 'peek': peek!.toMap()
+      };
 }
 
 typedef TaskbarPreviewRenderer = Future<TaskbarThumbnail> Function(
@@ -243,6 +265,8 @@ Future<TaskbarThumbnail> renderTaskbarSongPreview(
   final painters = <TextPainter>[];
   ui.Picture? picture;
   ui.Image? image;
+  ui.Picture? peekPicture;
+  ui.Image? peekImage;
   try {
     canvas.drawColor(scheme.surface.withValues(alpha: 1), BlendMode.src);
     final cover = RRect.fromRectAndRadius(
@@ -300,8 +324,27 @@ Future<TaskbarThumbnail> renderTaskbarSongPreview(
     image = await picture.toImage(width, height);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     if (bytes == null) throw StateError('Unable to render taskbar thumbnail');
+    // Re-rasterize the vector text/paths at 3x; do not resize the already
+    // rendered 480x240 bitmap. One metadata/artwork read and paragraph layout
+    // feeds both sources, which native commits together in the same RPC.
+    final peekRecorder = ui.PictureRecorder();
+    Canvas(peekRecorder)
+      ..scale(3)
+      ..drawPicture(picture);
+    peekPicture = peekRecorder.endRecording();
+    peekImage = await peekPicture.toImage(width * 3, height * 3);
+    final peekBytes =
+        await peekImage.toByteData(format: ui.ImageByteFormat.rawRgba);
+    if (peekBytes == null) {
+      throw StateError('Unable to render sharp desktop Peek');
+    }
     return TaskbarThumbnail(width, height,
-        bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes));
+        bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes),
+        peek: TaskbarPeekImage(
+            width * 3,
+            height * 3,
+            peekBytes.buffer.asUint8List(
+                peekBytes.offsetInBytes, peekBytes.lengthInBytes)));
   } finally {
     for (final painter in painters) {
       painter.dispose();
@@ -309,6 +352,8 @@ Future<TaskbarThumbnail> renderTaskbarSongPreview(
     artwork?.dispose();
     image?.dispose();
     picture?.dispose();
+    peekImage?.dispose();
+    peekPicture?.dispose();
     if (recorder.isRecording) recorder.endRecording().dispose();
   }
 }

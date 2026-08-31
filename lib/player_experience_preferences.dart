@@ -19,6 +19,7 @@ class PlayerExperiencePreferences {
     this.windowSizeLocked = false,
     this.windowAspectRatioLocked = false,
     this.windowAspectRatio = 0,
+    this.roundedWindowCorners = true,
   });
 
   final bool closeToTray;
@@ -35,6 +36,7 @@ class PlayerExperiencePreferences {
   final bool sidebarLocked;
   final bool windowSizeLocked;
   final bool windowAspectRatioLocked;
+  final bool roundedWindowCorners;
 
   /// The normal-window client ratio captured when ratio locking is enabled.
   /// Zero means that the next live application should capture the current
@@ -91,6 +93,7 @@ class PlayerExperiencePreferences {
     bool? windowSizeLocked,
     bool? windowAspectRatioLocked,
     double? windowAspectRatio,
+    bool? roundedWindowCorners,
   }) =>
       PlayerExperiencePreferences(
         closeToTray: closeToTray ?? this.closeToTray,
@@ -109,6 +112,7 @@ class PlayerExperiencePreferences {
         windowSizeLocked: windowSizeLocked ?? this.windowSizeLocked,
         windowAspectRatioLocked:
             windowAspectRatioLocked ?? this.windowAspectRatioLocked,
+        roundedWindowCorners: roundedWindowCorners ?? this.roundedWindowCorners,
         windowAspectRatio: safeWindowAspectRatio(
           windowAspectRatio,
           fallback: this.windowAspectRatio,
@@ -128,6 +132,7 @@ class PlayerExperiencePreferences {
         'sidebarLocked': sidebarLocked,
         'windowSizeLocked': windowSizeLocked,
         'windowAspectRatioLocked': windowAspectRatioLocked,
+        'roundedWindowCorners': roundedWindowCorners,
         'windowAspectRatio': safeWindowAspectRatio(windowAspectRatio),
       };
 
@@ -152,6 +157,8 @@ class PlayerExperiencePreferences {
       windowSizeLocked: flag('windowSizeLocked', defaults.windowSizeLocked),
       windowAspectRatioLocked:
           flag('windowAspectRatioLocked', defaults.windowAspectRatioLocked),
+      roundedWindowCorners:
+          flag('roundedWindowCorners', defaults.roundedWindowCorners),
       windowAspectRatio: safeWindowAspectRatio(value['windowAspectRatio']),
     );
   }
@@ -171,6 +178,7 @@ class PlayerExperiencePreferences {
       sidebarLocked == other.sidebarLocked &&
       windowSizeLocked == other.windowSizeLocked &&
       windowAspectRatioLocked == other.windowAspectRatioLocked &&
+      roundedWindowCorners == other.roundedWindowCorners &&
       windowAspectRatio == other.windowAspectRatio;
 
   @override
@@ -187,5 +195,6 @@ class PlayerExperiencePreferences {
       sidebarLocked,
       windowSizeLocked,
       windowAspectRatioLocked,
+      roundedWindowCorners,
       windowAspectRatio);
 }

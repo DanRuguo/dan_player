@@ -82,7 +82,7 @@ void main() {
     expect(saved[WindowGeometryPolicy.schemaKey],
         WindowGeometryPolicy.currentSchemaVersion);
     expect(saved['IsWindowMaximized'], isFalse);
-    expect(saved['Version'], '26.0.3');
+    expect(saved['Version'], AppSettings.version);
     expect(AppSettings.instance.windowSize, const Size(900, 700));
     expect(PlayService.isInitialized, isFalse);
   });

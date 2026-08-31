@@ -9,6 +9,10 @@ import 'catalog_controls.dart';
 import 'catalog_tray.dart';
 import 'catalog_palette_window.dart';
 import 'catalog_rendering.dart';
+import 'catalog_snapshot1.dart';
+import 'catalog_metadata_editor.dart';
+import 'catalog_incremental_library.dart';
+import 'catalog_updates.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...uiCatalogA,
@@ -21,4 +25,8 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...uiCatalogTray,
   ...catalogPaletteWindow,
   ...catalogRendering,
+  ...catalogSnapshot1,
+  ...catalogMetadataEditor,
+  ...catalogIncrementalLibrary,
+  ...catalogUpdates,
 });

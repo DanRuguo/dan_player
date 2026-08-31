@@ -1,0 +1,23 @@
+#include <windows.h>
+
+// Synthetic test executable metadata. This fixture is never trusted or used to
+// start any installer; it only exercises the real Windows resource reader.
+1 VERSIONINFO
+FILEVERSION 26,0,4,0
+PRODUCTVERSION 26,0,4,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "ProductName", "Dan Player Installer\0"
+      VALUE "ProductVersion", "26.0.4-snapshot.1\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

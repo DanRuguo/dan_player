@@ -1,4 +1,7 @@
-param([Parameter(Mandatory=$true)][string] $ReceiptPath)
+param(
+    [Parameter(Mandatory=$true)][string] $ReceiptPath,
+    [switch] $UnsignedCandidate
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -24,7 +27,7 @@ $sourcePairs = @{
     'DESKTOP-EXPERIENCE.md' = 'docs\desktop-experience-26.0.3.md'
     'SETTINGS-BACKGROUNDS.md' = 'docs\settings-backgrounds.md'
     'LYRIC-EXPERIENCE.md' = 'docs\lyric-experience-26.0.3.md'
-    'VALIDATION.md' = 'docs\26.0.3-validation.md'
+    'VALIDATION.md' = ('docs\' + $receipt.Version + '-validation.md')
     'CLASSIFICATION.md' = 'docs\library-categories.md'
     'classification-readonly-qa.md' = 'docs\classification-readonly-qa.md'
     'TASKBAR-LYRICS.md' = 'docs\taskbar-lyrics-feasibility.md'
@@ -34,6 +37,7 @@ $sourcePairs = @{
     'lyric-emphasis-spectrum-notes.md' = 'docs\lyric-emphasis-spectrum-notes.md'
     'online-sources.md' = 'docs\online-sources.md'
     'song-comments-notes.md' = 'docs\song-comments-notes.md'
+    'APPLICATION-UPDATES.md' = 'docs\application-updates.md'
 }
 foreach ($relative in $sourcePairs.Keys) {
     if ((Get-FileHash -LiteralPath (Join-Path $payload $relative) -Algorithm SHA256).Hash -ne
@@ -96,6 +100,13 @@ try {
 } finally { $zip.Dispose() }
 $signatures = foreach ($relative in @('Dan Player.exe', 'rust_lib_dan_player.dll', 'desktop_lyric\desktop_lyric.exe')) {
     $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $payload $relative)
+    if ($UnsignedCandidate) {
+        if ($signature.Status.ToString() -ne 'NotSigned' -or $null -ne $signature.SignerCertificate) {
+            throw "Local unsigned candidate contains a signed/stale/invalid own binary: $relative"
+        }
+        [pscustomobject]@{ File = $relative; Status = 'NotSigned'; Subject = $null }
+        continue
+    }
     if ($null -eq $signature.SignerCertificate -or
         $signature.SignerCertificate.Thumbprint -ne 'E11D145A3C0D7298F4D3E96BADC497E360CAF510' -or
         $signature.Status.ToString() -in @('NotSigned', 'HashMismatch', 'NotSupported')) {
@@ -112,6 +123,7 @@ $signatures = foreach ($relative in @('Dan Player.exe', 'rust_lib_dan_player.dll
 [pscustomobject]@{
     Passed = $true
     Version = $receipt.Version
+    UnsignedCandidate = [bool]$UnsignedCandidate
     ZipPath = $zipPath
     ZipBytes = (Get-Item -LiteralPath $zipPath).Length
     ZipSha256 = $receipt.ZipSha256

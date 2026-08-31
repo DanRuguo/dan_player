@@ -2,7 +2,7 @@
 
 Dan Player 是一个面向 Windows x64 的本地与联网音乐播放器，基于 Flutter、Rust 和 BASS 构建。这个分支从 Coriander Player 修改而来，重点优化了曲库管理、文件名优先显示、中文排序、联网检索、歌词体验、桌面歌词和整体界面观感。
 
-> 当前版本：26.0.3
+> 预览版：26.0.4 snapshot1 · 稳定版：26.0.3
 > 支持平台：Windows x64
 
 [特色功能导览](docs/feature-tour.md) · [全部 18 张安全界面示例](docs/images/README.md) · [最新 Release](https://github.com/DanRuguo/dan_player/releases/latest)
@@ -11,7 +11,9 @@ Dan Player 是一个面向 Windows x64 的本地与联网音乐播放器，基�
 
 前往 [Releases](https://github.com/DanRuguo/dan_player/releases/latest) 下载最新 Windows 包。
 
-解压后运行 `Dan Player.exe` 即可。发布包内已经包含播放器本体、BASS 运行库和编译后的 `desktop_lyric` 桌面歌词组件。
+[26.0.4 snapshot1 预览版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.1) 提供安装器和便携 ZIP。安装器可选择位置、桌面和开始菜单快捷方式，检测到旧版时支持原位升级；用户直接编辑的最终路径不会再被自动追加目录。历史版本保留，快照不会取代最新稳定版。
+
+使用 ZIP 时，完整解压后运行 `Dan Player.exe`。发布包内已经包含播放器本体、BASS 运行库和编译后的 `desktop_lyric` 桌面歌词组件。本次自有程序使用 RCEIT.Inc 自签名证书，未获得公共 CA 信任，Windows 仍可能提示未知发布者；不会自动安装信任证书。
 
 ## 界面预览
 
@@ -48,6 +50,17 @@ Dan Player 是一个面向 Windows x64 的本地与联网音乐播放器，基�
 ![迷你播放器，虚构歌曲与原创演示歌词的暂停帧](docs/images/feature-mini-lyrics-dark.png)
 
 迷你窗口保留当前歌词、译文／下一句和播放控制。还有可持久保存的桌面歌词外观、主题选择器、托盘与歌曲预览，以及分组搜索——见 [图文功能导览](docs/feature-tour.md)。图库全部使用生产控件和虚构数据，不是用户音乐或桌面截图。项目基于 Coriander Player 修改，完整上游与依赖署名保留在下方“致谢”。
+
+## 26.0.4 snapshot1 主要变化
+
+- 新增极简安装器，支持自选路径、快捷方式及覆盖升级。
+- 播放条支持拖动进度，新增上一首、下一首与播放队列。
+- 主题可选择跟随系统、明亮或深色，记住选择并实时同步。
+- 简化歌单详情按钮，优化托盘字体、图标及桌面歌曲预览。
+- 新增曲库增量刷新，改善歌曲标签编辑兼容性。
+- 更新前询问是否下载，提供预览版开关及完整安装器升级。
+
+这是预览版本；测试与已知边界见 [验证说明](docs/26.0.4-snapshot.1-validation.md)，更新行为见 [更新说明](docs/application-updates.md)。
 
 ## 26.0.3 主要变化
 
@@ -182,7 +195,7 @@ flutter build windows --release
 
 便携包包含两个程序各自的 Flutter 资源、BASS、原始签名的 Microsoft x64 CRT 和许可证说明，并生成包内文件清单及 ZIP 的 `SHA256SUMS`。联网播放要求 BASS 2.4.18 或更新版；准备脚本固定官方版本与哈希，下载内容变化会报错，不会默默接受更新。BASS 的商业使用及公开分发需另行核对其许可，DLL 不会被改签成 RCEIT.Inc。
 
-Windows CI 执行分析、测试、两个程序的构建及未签名便携包组装，只上传构建 artifact，不会发布 GitHub Release。公开发行前还需提供与二进制对应的源代码及适用许可证；要让更新检查发现新版，需要在本仓库发布包含 Windows 包及其 `SHA256SUMS` 的稳定 Release。
+Windows CI 执行分析、测试、两个程序的构建及未签名便携包组装，只上传构建 artifact，不会发布 GitHub Release。发行时提供对应源代码与许可证，并上传 Windows 安装器、便携 ZIP 和校验文件。预览 Release 仅在启用预览更新时参与检查，不更改最新稳定版。安装器的同名 `.exe.sha256` 文件必须在签名之后生成，记录上传资产的文件名，而非本地子目录。
 
 开发测试可在启动进程前设置绝对路径环境变量 `DAN_PLAYER_DATA_DIR`，将索引、设置和缓存隔离到工作区。指定此变量时不会迁移或导入用户原有文档目录曲库；正常启动不设置该变量即可沿用原来的数据。
 
@@ -201,6 +214,14 @@ Windows 版本资源中的公司名为 `RCEIT.Inc`。本地开发证书主题为
 ```powershell
 .\scripts\sign_windows_release.ps1
 ```
+
+从已审计的便携目录生成签名安装器：
+
+```powershell
+.\scripts\build_windows_installer.ps1 -PayloadDirectory 'D:\path\to\portable' -Sign
+```
+
+该步骤先签安装器自有辅助文件，再生成载荷清单，最后签 Setup 并输出其 `.exe.sha256`；不修改便携目录或历史发布包。
 
 该证书是本地自签名代码签名证书，可验证文件签名和发布者主题，但默认不在其他 Windows 设备的可信根中。正式公开发行若要获得 SmartScreen/系统级公共信任，请改用颁发给 RCEIT.Inc 的 CA 代码签名证书，并通过 `RCEIT_SIGNING_THUMBPRINT` 指定其指纹；不要提交 PFX 或私钥。
 

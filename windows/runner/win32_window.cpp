@@ -4,6 +4,7 @@
 #include <flutter_windows.h>
 
 #include "resource.h"
+#include "window_teardown.h"
 
 namespace {
 
@@ -230,6 +231,7 @@ Win32Window::MessageHandler(HWND hwnd,
 }
 
 void Win32Window::Destroy() {
+  window_teardown::HideBeforeResources(window_handle_);
   OnDestroy();
 
   if (window_handle_) {

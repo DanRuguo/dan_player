@@ -149,7 +149,9 @@ class PlaylistHeader extends StatelessWidget {
             if (inlineActions) ...[
               const SizedBox(width: 16),
               ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: width * .52),
+                  // Reserve a useful identity width without permanently
+                  // assigning half the header to empty title space.
+                  constraints: BoxConstraints(maxWidth: width - 280),
                   child: actions),
             ],
           ]),

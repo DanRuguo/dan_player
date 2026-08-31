@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dan_player/component/now_playing_bar_metrics.dart';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
@@ -1461,7 +1462,10 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                     controller: controller,
                                     key: PageStorageKey(
                                         'playlist-${_view.name}-${current?.id ?? 'root'}'),
-                                    padding: const EdgeInsets.only(bottom: 96),
+                                    padding: EdgeInsets.only(
+                                        bottom:
+                                            NowPlayingBarMetrics.reservedSpace(
+                                                context)),
                                     gridDelegate: _view ==
                                             PlaylistViewMode.circular
                                         ? CompactMusicGridDelegate(
@@ -1515,7 +1519,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                     !_selecting &&
                                     _sortMode(current) ==
                                         PlaylistSortMode.custom,
-                                padding: const EdgeInsets.only(bottom: 96),
+                                padding: EdgeInsets.only(
+                                    bottom: NowPlayingBarMetrics.reservedSpace(
+                                        context)),
                                 items: [
                                   for (final row in rows)
                                     PlaylistDragData(

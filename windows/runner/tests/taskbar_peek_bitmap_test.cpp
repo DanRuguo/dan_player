@@ -21,15 +21,16 @@ int main() {
   namespace peek = taskbar_thumbnail;
   const auto started = std::chrono::steady_clock::now();
   const DWORD baseline = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
-  std::vector<std::uint8_t> source(480 * 240 * 4);
+  std::vector<std::uint8_t> source(1440 * 720 * 4);
   for (std::size_t index = 0; index < source.size(); index += 4) {
-    source[index] = static_cast<std::uint8_t>((index / 4) % 251);
+    const auto x = (index / 4) % 1440;
+    source[index] = x < 4 ? 10 : x >= 1436 ? 240 : 120;
     source[index + 1] = 60;
     source[index + 2] = 130;
     source[index + 3] = 255;
   }
   peek::Image image;
-  CHECK(image.Set(480, 240, source) == peek::Update::kChanged);
+  CHECK(image.SetPeek(1440, 720, source) == peek::Update::kChanged);
   const std::array<peek::Size, 5> clients{
       peek::Size{1280, 800}, peek::Size{1920, 1080}, peek::Size{2560, 1440},
       peek::Size{1080, 1920}, peek::Size{3840, 2160}};

@@ -19,8 +19,10 @@ import 'package:desktop_lyric/ui_language.dart';
 
 Future<bool> showEditAudioMetadataDialog(
   BuildContext context,
-  Audio audio,
-) async {
+  Audio audio, {
+  Future<Audio> Function(Audio, AudioMetadataEdit) saveMetadata =
+      applyAudioMetadataEdit,
+}) async {
   if (audio.isOnline) {
     showTextOnSnackBar("联网歌曲信息由来源提供，不能修改其标签");
     return false;
@@ -28,15 +30,17 @@ Future<bool> showEditAudioMetadataDialog(
   final result = await showAppDialog<bool>(
     context: context,
     barrierDismissible: false,
-    builder: (context) => _AudioMetadataDialog(audio: audio),
+    builder: (context) =>
+        _AudioMetadataDialog(audio: audio, saveMetadata: saveMetadata),
   );
   return result == true;
 }
 
 class _AudioMetadataDialog extends StatefulWidget {
-  const _AudioMetadataDialog({required this.audio});
+  const _AudioMetadataDialog({required this.audio, required this.saveMetadata});
 
   final Audio audio;
+  final Future<Audio> Function(Audio, AudioMetadataEdit) saveMetadata;
 
   @override
   State<_AudioMetadataDialog> createState() => _AudioMetadataDialogState();
@@ -64,7 +68,9 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
     titleController.dispose();
     artistController.dispose();
     albumController.dispose();
-    unawaited(_removeStagedArtwork(_stagedArtwork));
+    // A native worker can still be reading the staged cover if the whole
+    // presentation host is disposed. Keep it until that operation completes.
+    if (!saving) unawaited(_removeStagedArtwork(_stagedArtwork));
     super.dispose();
   }
 
@@ -176,7 +182,7 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
       saving = true;
     });
     try {
-      await applyAudioMetadataEdit(
+      await widget.saveMetadata(
         widget.audio,
         AudioMetadataEdit(
           fileName: fileName,
@@ -194,7 +200,18 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
       setState(() {
         saving = false;
       });
-      showTextOnSnackBar("更新歌曲信息失败：{0}", arguments: [err]);
+      if (err is AudioMetadataEditException) {
+        if (err.fileWasUpdated) {
+          showTextOnSnackBar(err.userMessage, context: context);
+        } else {
+          showTextOnSnackBar("更新歌曲信息失败：{0}",
+              arguments: [ui(err.userMessage)], context: context);
+        }
+      } else {
+        showTextOnSnackBar("更新歌曲信息失败：{0}", arguments: [err], context: context);
+      }
+    } finally {
+      if (!mounted) await _removeStagedArtwork(_stagedArtwork);
     }
   }
 

@@ -135,7 +135,7 @@ int main() {
         peek::PeekClientGeometry initially_minimized;
         initially_minimized.Observe(window, true);
         QueryPreservesWindow(window, initially_minimized, expected);
-        const auto layout = peek::FitPeekLayout({480, 240}, initially_minimized.Resolve(window));
+        const auto layout = peek::FitPeekLayout({1440, 720}, initially_minimized.Resolve(window));
         CHECK(layout.content.width > 480 && layout.content.height > 240);
         CHECK(peek::ValidPeekCanvas(layout.canvas,
             static_cast<std::size_t>(layout.canvas.width) * layout.canvas.height * 4));

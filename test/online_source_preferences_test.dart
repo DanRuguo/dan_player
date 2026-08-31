@@ -151,7 +151,7 @@ void main() {
         await AppSettings.instance.saveSettings();
         final saved = jsonDecode(await file.readAsString()) as Map;
         expect(saved['OnlineSources'], sources);
-        expect(saved['Version'], '26.0.3');
+        expect(saved['Version'], AppSettings.version);
         expect(saved['Backgrounds'], background.toMap());
         AppSettings.instance.onlineSources.value =
             const OnlineSourcePreferences();

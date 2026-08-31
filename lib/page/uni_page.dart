@@ -1,4 +1,5 @@
 import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/now_playing_bar_metrics.dart';
 import 'dart:async';
 
 import 'package:dan_player/app_preference.dart';
@@ -418,8 +419,9 @@ class _UniPageState<T> extends State<UniPage<T>> {
                                     ContentView.list => enableReorder
                                         ? ReorderableListView.builder(
                                             scrollController: scrollController,
-                                            padding: const EdgeInsets.only(
-                                                bottom: 96.0),
+                                            padding: EdgeInsets.only(
+                                                bottom: NowPlayingBarMetrics
+                                                    .reservedSpace(context)),
                                             itemCount:
                                                 widget.contentList.length,
                                             itemExtent:
@@ -450,8 +452,9 @@ class _UniPageState<T> extends State<UniPage<T>> {
                                           )
                                         : ListView.builder(
                                             controller: scrollController,
-                                            padding: const EdgeInsets.only(
-                                                bottom: 96.0),
+                                            padding: EdgeInsets.only(
+                                                bottom: NowPlayingBarMetrics
+                                                    .reservedSpace(context)),
                                             itemCount:
                                                 widget.contentList.length,
                                             itemExtent:
@@ -464,8 +467,9 @@ class _UniPageState<T> extends State<UniPage<T>> {
                                         child: GridView.builder(
                                           key: _gridKey,
                                           controller: scrollController,
-                                          padding: const EdgeInsets.only(
-                                              bottom: 96.0),
+                                          padding: EdgeInsets.only(
+                                              bottom: NowPlayingBarMetrics
+                                                  .reservedSpace(context)),
                                           gridDelegate: widget.gridDelegate ??
                                               CompactMusicGridDelegate.of(
                                                   context),

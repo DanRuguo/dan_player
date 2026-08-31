@@ -59,7 +59,6 @@ class SettingsPage extends StatelessWidget {
             const DynamicThemeSwitch(),
             const UseSystemThemeSwitch(),
             const ThemeSelector(),
-            const UseSystemThemeModeSwitch(),
             const ThemeModeControl(),
             const SelectFontCombobox(),
             const LyricExperienceSettings(),

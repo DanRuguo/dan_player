@@ -22,6 +22,7 @@
 #include "desktop_integration_policy.h"
 #include "desktop_integration_paint.h"
 #include "desktop_integration_fonts.h"
+#include "desktop_integration_tray_style.h"
 #include "resource.h"
 #include "taskbar_peek_geometry.h"
 #include "taskbar_thumbnail_policy.h"
@@ -35,6 +36,18 @@ namespace thumbnail = taskbar_thumbnail;
 constexpr UINT kTrayId = 1;
 constexpr UINT kTrayCallback = WM_APP + 0x541;
 constexpr UINT kTrayEffectsChanged = WM_APP + 0x542;
+
+// Use the runner's generated version, never a second manually updated release
+// string. Standalone native checks do not define FLUTTER_VERSION.
+#ifdef FLUTTER_VERSION
+#define DAN_WIDE_LITERAL_IMPL(value) L##value
+#define DAN_WIDE_LITERAL(value) DAN_WIDE_LITERAL_IMPL(value)
+constexpr wchar_t kPublisherCaption[] = L"RCEIT.Inc \u00b7 " DAN_WIDE_LITERAL(FLUTTER_VERSION);
+#undef DAN_WIDE_LITERAL
+#undef DAN_WIDE_LITERAL_IMPL
+#else
+constexpr wchar_t kPublisherCaption[] = L"RCEIT.Inc";
+#endif
 
 bool ReadTrayBlurRadius(const EncodableMap& map, double* output) {
   const auto found = map.find(EncodableValue("trayMenuBlurRadius"));
@@ -256,6 +269,7 @@ struct DesktopIntegrationController::Impl
   bool taskbar_available = false;
   bool taskbar_connecting = false;
   thumbnail::Image thumbnail_image;
+  thumbnail::Image peek_image;
   thumbnail::PeekClientGeometry peek_client_geometry;
   bool thumbnail_attributes = false;
   bool thumbnail_reset_pending = false;
@@ -276,6 +290,7 @@ struct DesktopIntegrationController::Impl
   policy::PopupPaintBuffer popup_paint;
   UINT menu_dpi = 96;
   policy::PopupFonts popup_fonts;
+  std::array<wchar_t, 9> material_glyphs{};
   policy::PopupBlurImage popup_blur;
   policy::PopupEffectsPreference popup_effects;
   double tray_blur_radius = 0;
@@ -340,6 +355,23 @@ struct DesktopIntegrationController::Impl
           ReadWideString(*args, "fontFamily", 1024, &font_family) &&
           ReadWideString(*args, "fontPath", 32768, &font_path) &&
           popup_fonts.Configure(std::move(font_family), std::move(font_path));
+      std::wstring icon_font_path;
+      bool icons_changed = ReadWideString(*args, "trayIconFontPath", 32768, &icon_font_path) &&
+                            popup_fonts.ConfigureIcons(std::move(icon_font_path));
+      const auto icon_values = args->find(EncodableValue("trayIconCodepoints"));
+      if (icon_values != args->end()) {
+        const auto* values = std::get_if<flutter::EncodableList>(&icon_values->second);
+        std::array<wchar_t, 9> next{};
+        bool valid = values && values->size() == next.size();
+        for (std::size_t index = 0; valid && index < next.size(); ++index) {
+          std::int64_t point = 0;
+          if (const auto* integer = std::get_if<std::int32_t>(&(*values)[index])) point = *integer;
+          if (const auto* large = std::get_if<std::int64_t>(&(*values)[index])) point = *large;
+          valid = point >= 0xe000 && point <= 0xf8ff;
+          if (valid) next[index] = static_cast<wchar_t>(point);
+        }
+        if (valid && next != material_glyphs) { material_glyphs = next; icons_changed = true; }
+      }
       bool labels_changed = false;
       const auto labels_arg = args->find(EncodableValue("labels"));
       if (labels_arg != args->end()) {
@@ -361,12 +393,14 @@ struct DesktopIntegrationController::Impl
       dark_mode = next_dark;
       accent = next_color;
       active = true;
+      // Use the 26.0.3 external-frame path: no custom region controller is
+      // created/configured/removed. Legacy preference fields are ignored.
       taskbar_controls = controls;
       EnsureIcons(theme_changed);
       EnsureTray();
       EnsureTaskbar();
       UpdateButtons();
-      if (theme_changed || font_changed || labels_changed || blur_changed) RefreshMenuAppearance();
+      if (theme_changed || font_changed || icons_changed || labels_changed || blur_changed) RefreshMenuAppearance();
       result->Success(Status());
     } else if (method == "setThumbnail") {
       std::int64_t width = 0;
@@ -388,7 +422,25 @@ struct DesktopIntegrationController::Impl
         result->Error("NOT_READY", "Configure desktop integration before a thumbnail");
         return;
       }
-      const auto update = thumbnail_image.Set(width, height, *pixels);
+      thumbnail::RawImage large{};
+      const thumbnail::RawImage* large_pointer = nullptr;
+      const auto large_entry = args->find(EncodableValue("peek"));
+      if (large_entry != args->end()) {
+        const auto* map = std::get_if<EncodableMap>(&large_entry->second);
+        if (map) {
+          const auto entry = map->find(EncodableValue("pixels"));
+          if (entry != map->end()) large.pixels = std::get_if<std::vector<std::uint8_t>>(&entry->second);
+        }
+        if (!map || !ReadThumbnailDimension(*map, "width", &large.width) ||
+            !ReadThumbnailDimension(*map, "height", &large.height) || !large.pixels ||
+            !thumbnail::ValidPeekPayload(large.width, large.height, large.pixels->size())) {
+          result->Error("INVALID_ARGUMENT", "Peek must be exact raw RGBA, 1..2048 per axis and <=4MiB");
+          return;
+        }
+        large_pointer = &large;
+      }
+      const auto update = thumbnail::ReplacePreviewImages(thumbnail_image, peek_image,
+          {width, height, pixels}, large_pointer);
       if (update == thumbnail::Update::kOutOfMemory ||
           update == thumbnail::Update::kInvalid) {
         result->Error("THUMBNAIL_UNAVAILABLE", "Unable to cache thumbnail pixels");
@@ -464,6 +516,7 @@ struct DesktopIntegrationController::Impl
         {EncodableValue("trayAvailable"), EncodableValue(tray_available)},
         {EncodableValue("taskbarAvailable"), EncodableValue(taskbar_available)},
         {EncodableValue("thumbnailAvailable"), EncodableValue(thumbnail_available)},
+        {EncodableValue("roundedWindowCornersAvailable"), EncodableValue(false)},
         {EncodableValue("windowVisible"),
          EncodableValue(IsWindowVisible(window) != FALSE)},
         {EncodableValue("minimized"), EncodableValue(IsIconic(window) != FALSE)},
@@ -542,6 +595,7 @@ struct DesktopIntegrationController::Impl
     thumbnail_available = false;
     thumbnail_dirty = false;
     thumbnail_image.Clear();
+    peek_image.Clear();
     QueueState();
     const HRESULT status = ResetThumbnailAttributes(generation);
     if (generation == thumbnail_generation && FAILED(status)) ScheduleThumbnailRetry();
@@ -608,8 +662,9 @@ struct DesktopIntegrationController::Impl
 
   bool DrawThumbnail(thumbnail::Size requested, bool live_preview) {
     if (!thumbnail_attributes || !thumbnail_image.size().valid()) return false;
+    const auto& source = live_preview && peek_image.size().valid() ? peek_image : thumbnail_image;
     const auto peek = live_preview
-        ? thumbnail::FitPeekLayout(thumbnail_image.size(), requested)
+        ? thumbnail::FitPeekLayout(source.size(), requested, GetDpiForWindow(window))
         : thumbnail::PeekLayout{};
     const auto target = live_preview ? peek.canvas
         : thumbnail::FitWithin(thumbnail_image.size(), requested);
@@ -628,14 +683,15 @@ struct DesktopIntegrationController::Impl
     const std::size_t bytes = static_cast<std::size_t>(target.width) * target.height * 4;
     HRESULT status = E_OUTOFMEMORY;
     const bool written = bitmap && pixels && (live_preview
-        ? thumbnail_image.WritePeekBgra(peek, static_cast<std::uint8_t*>(pixels), bytes)
+        ? source.WritePeekBgra(peek, static_cast<std::uint8_t*>(pixels), bytes)
         : thumbnail_image.WriteBgra(target, static_cast<std::uint8_t*>(pixels), bytes));
     if (written) {
       status = live_preview
                    ? DwmSetIconicLivePreviewBitmap(window, bitmap, nullptr, 0)
                    : DwmSetIconicThumbnail(window, bitmap, 0);
     }
-    // DWM copies it. Never retain an HBITMAP, HDC or a second decoded image.
+    // DWM copies it. Never retain an HBITMAP/HDC; only the two bounded raw
+    // sources survive this request.
     if (bitmap) DeleteObject(bitmap);
     if (!ThumbnailCallCurrent(generation)) return false;
     if (FAILED(status)) RecoverThumbnail(generation);
@@ -875,35 +931,32 @@ struct DesktopIntegrationController::Impl
         dark_mode ? RGB(198, 194, 201) : RGB(91, 86, 94), 40), background);
     const COLORREF disabled =
         dark_mode ? RGB(112, 109, 114) : RGB(160, 156, 162);
-    HBRUSH background_brush = CreateSolidBrush(background);
-    FillRect(dc, &client, background_brush);
-    DeleteObject(background_brush);
+    SetDCBrushColor(dc, background);
+    FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
     popup_blur.Draw(dc, client, background);
     SetBkMode(dc, TRANSPARENT);
     popup_fonts.Ensure(menu_dpi);
-    const auto old_font = SelectObject(dc, popup_fonts.title());
+    const auto old_font = SelectObject(dc, popup_fonts.ForText(dc, tooltip.c_str(), true));
     SetTextColor(dc, foreground);
     RECT title{Scale(18), Scale(11), client.right - Scale(18), Scale(38)};
     DrawTextW(dc, tooltip.c_str(), -1, &title,
               DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
-    SelectObject(dc, popup_fonts.row());
+    SelectObject(dc, popup_fonts.ForText(dc, kPublisherCaption));
     SetTextColor(dc, secondary);
     RECT caption{Scale(18), Scale(36), client.right - Scale(18), Scale(56)};
-    DrawTextW(dc, L"RCEIT.Inc \u00b7 26.0.3", -1, &caption,
-              DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    DrawTextW(dc, kPublisherCaption, -1, &caption,
+              DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
 
     const auto items = PopupItems();
     for (int index = 0; index < static_cast<int>(items.size()); ++index) {
       RECT row = PopupItemRect(index, client.right);
       if (items[index].separator) {
-        HPEN pen = CreatePen(PS_SOLID, 1,
-                             BlendColor(foreground, background, 30));
-        const auto old_pen = SelectObject(dc, pen);
+        const auto old_pen = SelectObject(dc, GetStockObject(DC_PEN));
+        SetDCPenColor(dc, BlendColor(foreground, background, 30));
         const int y = (row.top + row.bottom) / 2;
         MoveToEx(dc, Scale(16), y, nullptr);
         LineTo(dc, client.right - Scale(16), y);
         SelectObject(dc, old_pen);
-        DeleteObject(pen);
         continue;
       }
       const bool enabled = PopupAllows(index);
@@ -912,29 +965,29 @@ struct DesktopIntegrationController::Impl
       const COLORREF row_background = highlighted
           ? BlendColor(accent, background, dark_mode ? 58 : 38) : background;
       if (highlighted) {
-        HBRUSH highlight = CreateSolidBrush(row_background);
         const auto old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-        const auto old_brush = SelectObject(dc, highlight);
+        const auto old_brush = SelectObject(dc, GetStockObject(DC_BRUSH));
+        SetDCBrushColor(dc, row_background);
         RoundRect(dc, row.left, row.top + Scale(2), row.right,
                   row.bottom - Scale(2), Scale(12), Scale(12));
         SelectObject(dc, old_brush);
         SelectObject(dc, old_pen);
-        DeleteObject(highlight);
       }
       const COLORREF item_color = enabled
           ? policy::ContrastAdjustedAccent(foreground, row_background) : disabled;
+      const COLORREF capsule_color = policy::TrayIconCapsuleColor(accent, row_background, dark_mode, enabled);
       const COLORREF icon_color = !enabled ? disabled
-          : items[index].id == policy::kExit ? item_color
-          : policy::ContrastAdjustedAccent(accent, row_background);
-      RECT icon{row.left + Scale(9), row.top,
-                row.left + Scale(39), row.bottom};
-      const wchar_t glyph =
-          policy::PopupGlyph(items[index].icon, playback.playing);
-      SelectObject(dc, popup_fonts.icons());
-      SetTextColor(dc, icon_color);
-      DrawTextW(dc, &glyph, 1, &icon,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-      SelectObject(dc, popup_fonts.row());
+          : items[index].id == policy::kExit ? policy::ContrastAdjustedAccent(item_color, capsule_color)
+          : policy::ContrastAdjustedAccent(accent, capsule_color);
+      const int material_index = policy::PopupMaterialIndex(items[index].icon, playback.playing);
+      const bool material = popup_fonts.material_icons_loaded() && material_index >= 0 &&
+                               material_glyphs[material_index] != 0;
+      const wchar_t glyph = material
+          ? material_glyphs[material_index] : policy::PopupGlyph(items[index].icon, playback.playing);
+      const auto capsule = policy::TrayIconCapsuleRect(row, menu_dpi);
+      policy::PaintTrayIconCapsule(dc, capsule, popup_fonts.icons(material), glyph,
+                                    capsule_color, icon_color);
+      SelectObject(dc, popup_fonts.ForText(dc, items[index].label));
       SetTextColor(dc, item_color);
       RECT label{row.left + Scale(48), row.top,
                  row.right - Scale(34), row.bottom};
@@ -942,13 +995,20 @@ struct DesktopIntegrationController::Impl
                 DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
       if (items[index].id == policy::kDesktopLyrics &&
           playback.desktop_lyrics) {
-        HPEN check_pen = CreatePen(PS_SOLID, Scale(2), icon_color);
-        const auto old_pen = SelectObject(dc, check_pen);
+        if (popup_fonts.material_icons_loaded() && material_glyphs[8]) {
+          SelectObject(dc, popup_fonts.icons());
+          RECT checked{row.right - Scale(30), row.top, row.right - Scale(8), row.bottom};
+          SetTextColor(dc, icon_color);
+          DrawTextW(dc, &material_glyphs[8], 1, &checked,
+                      DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+        } else {
+        const auto old_pen = SelectObject(dc, GetStockObject(DC_PEN));
+        SetDCPenColor(dc, icon_color);
         MoveToEx(dc, row.right - Scale(25), row.top + Scale(22), nullptr);
         LineTo(dc, row.right - Scale(20), row.top + Scale(27));
         LineTo(dc, row.right - Scale(12), row.top + Scale(17));
         SelectObject(dc, old_pen);
-        DeleteObject(check_pen);
+        }
       }
       if (index == menu_focused && GetFocus() == menu_window) {
         RECT focus = row;

@@ -21,7 +21,7 @@ void main() {
     expect(value.needsNativeGlass, isTrue);
     expect(BackgroundPreferences.fromMap(null), value);
     expect(BackgroundPreferences.fromMap('old-settings'), value);
-    expect(AppSettings.version, '26.0.3');
+    expect(AppSettings.version, '26.0.4-snapshot.1');
   });
 
   for (final scene in BackgroundScene.values) {
@@ -139,7 +139,7 @@ void main() {
       expect(AppSettings.instance.dynamicTheme, isFalse);
       await AppSettings.instance.saveSettings();
       final saved = jsonDecode(await file.readAsString()) as Map;
-      expect(saved['Version'], '26.0.3');
+      expect(saved['Version'], AppSettings.version);
       expect(saved['DynamicTheme'], isFalse);
       expect(saved['Backgrounds'], const BackgroundPreferences().toMap());
     });

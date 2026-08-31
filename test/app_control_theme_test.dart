@@ -205,8 +205,9 @@ void main() {
     final lyric = tester.widget<AppSegmentedControl<bool>>(
         find.byType(AppSegmentedControl<bool>));
     expect(theme.options.map((option) => option.value),
-        [ThemeMode.light, ThemeMode.dark]);
-    expect(theme.options.map((option) => option.label), ['Light', 'Dark']);
+        [ThemeMode.system, ThemeMode.light, ThemeMode.dark]);
+    expect(theme.options.map((option) => option.label),
+        ['System', 'Light', 'Dark']);
     expect(lyric.options.map((option) => option.value), [true, false]);
     expect(lyric.options.map((option) => option.label), ['Local', 'Online']);
     // Do not invoke settings persistence: these are read-only UI checks.

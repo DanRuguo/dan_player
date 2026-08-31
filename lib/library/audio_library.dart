@@ -17,6 +17,13 @@ class AudioLibrary {
 
   AudioLibrary._(this.folders);
 
+  List<String>? _scanRoots;
+
+  /// Selected roots, including empty roots. Legacy indexes retain their
+  /// recorded folders until a full scan records the explicitly selected roots.
+  List<String> get scanRoots => List.unmodifiable(
+      _scanRoots ?? folders.map((folder) => folder.path).toSet());
+
   /// 所有音乐
   List<Audio> audioCollection = [];
 
@@ -148,7 +155,14 @@ class AudioLibrary {
       }
 
       final onlineAudios = List<Audio>.from(instance.onlineAudioCollection);
-      _instance = AudioLibrary._(folders)..onlineAudioCollection = onlineAudios;
+      final roots = indexJson['roots'];
+      if (roots != null &&
+          (roots is! List || roots.any((root) => root is! String))) {
+        throw const FormatException('Audio index roots must be strings');
+      }
+      _instance = AudioLibrary._(folders)
+        .._scanRoots = roots == null ? null : List<String>.from(roots)
+        ..onlineAudioCollection = onlineAudios;
 
       instance.artistCollection.clear();
       instance.albumCollection.clear();
@@ -236,6 +250,7 @@ class AudioLibrary {
         File(indexPath),
         json.encode({
           "version": 113,
+          "roots": scanRoots,
           "folders": folders.map((item) => item.toMap()).toList(),
         }),
       );
@@ -331,6 +346,13 @@ class Audio {
   /// 扫描索引时的字节数快照。统计页会重新核实文件，不能当作现存占用。
   int? fileSizeBytes;
 
+  /// Native nanosecond mtime is a decimal string to avoid JSON precision loss.
+  String? modifiedNanos;
+  bool metadataReadPending;
+
+  String? get coverFingerprint =>
+      modifiedNanos == null ? null : '${modifiedNanos}_s${fileSizeBytes ?? 0}';
+
   /// absolute path
   String path;
 
@@ -369,6 +391,8 @@ class Audio {
     this.classificationVersion = 1,
     this.language,
     this.fileSizeBytes,
+    this.modifiedNanos,
+    this.metadataReadPending = false,
     this.onlineProvider,
     this.onlineId,
     this.onlineMediaId,
@@ -478,6 +502,9 @@ class Audio {
     artist = newArtist;
     album = newAlbum;
     modified = newModified;
+    // The edit result provides seconds only. Re-establish the exact native
+    // fingerprint on the next refresh instead of trusting the previous stamp.
+    modifiedNanos = null;
     splitedArtists = artist.split(
       RegExp(AppSettings.instance.artistSplitPattern),
     );
@@ -507,6 +534,8 @@ class Audio {
       language: map["language"] is String ? map["language"] : null,
       fileSizeBytes:
           map["file_size"] is num ? (map["file_size"] as num).toInt() : null,
+      modifiedNanos: map['modified_ns'] is String ? map['modified_ns'] : null,
+      metadataReadPending: map['metadata_pending'] == true,
     );
   }
 
@@ -523,6 +552,8 @@ class Audio {
         "sample_rate": sampleRate,
         "language": language,
         "file_size": fileSizeBytes,
+        "modified_ns": modifiedNanos,
+        "metadata_pending": metadataReadPending,
         "path": path,
         "modified": modified,
         "created": created,
@@ -569,9 +600,11 @@ class Audio {
     // read a different file and cache it under the previous file's identity.
     final requestedPath = path;
     final requestedModified = modified;
+    final requestedFingerprint = coverFingerprint;
     return CoverCache.instance.imageFor(
       audioPath: requestedPath,
       modified: requestedModified,
+      fingerprint: requestedFingerprint,
       width: size.width,
       height: size.height,
       produce: () => getPictureFromPath(

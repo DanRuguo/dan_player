@@ -12,6 +12,8 @@ import 'package:desktop_lyric/desktop_lyric_appearance.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:dan_player/ui_layout_preferences.dart';
 import 'package:dan_player/rendering_preferences.dart';
+import 'package:dan_player/theme_mode_preference.dart';
+import 'package:dan_player/update/update_channel_preference.dart';
 import 'package:flutter/material.dart';
 import 'package:github/github.dart';
 import 'package:path/path.dart' as path;
@@ -77,7 +79,7 @@ Future<Directory> getAppDataDir() async {
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.3";
+  static const String version = "26.0.4-snapshot.1";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";
@@ -87,8 +89,8 @@ class AppSettings {
         githubRepository,
       );
 
-  /// 主题模式：亮 / 暗
-  ThemeMode themeMode = getWindowsThemeMode();
+  /// A single explicit light/dark/system preference; not a startup snapshot.
+  ThemeMode themeMode = ThemeMode.system;
 
   /// 启动时 / 封面主题色不适合当主题时的主题
   int defaultTheme = getWindowsTheme();
@@ -117,9 +119,6 @@ class AppSettings {
   /// 跟随系统主题色
   bool useSystemTheme = true;
 
-  /// 跟随系统主题模式
-  bool useSystemThemeMode = true;
-
   List artistSeparator = ["/", "、"];
 
   /// 歌词来源：true，本地优先；false，在线优先
@@ -130,8 +129,14 @@ class AppSettings {
 
   bool restoreLastSession = true;
 
-  /// 每 24 小时最多自动检查一次稳定版更新。
+  /// 每 24 小时最多自动检查一次所选通道；不自动下载。
   bool autoCheckUpdates = true;
+
+  UpdateChannelPreference updateChannel = const UpdateChannelPreference();
+  bool get receivePreviewUpdates => updateChannel.includesPreviewsFor(version);
+  set receivePreviewUpdates(bool value) {
+    updateChannel = UpdateChannelPreference(receivePreviews: value);
+  }
 
   /// 用户在自动提示中选择忽略的版本；手动检查仍会显示该版本。
   String? ignoredUpdateVersion;
@@ -149,20 +154,6 @@ class AppSettings {
   static final AppSettings _instance = AppSettings._();
 
   static AppSettings get instance => _instance;
-
-  static ThemeMode getWindowsThemeMode() {
-    try {
-      final systemTheme = SystemTheme.getSystemTheme();
-
-      final isDarkMode = (((5 * systemTheme.fore.$3) +
-              (2 * systemTheme.fore.$2) +
-              systemTheme.fore.$4) >
-          (8 * 128));
-      return isDarkMode ? ThemeMode.dark : ThemeMode.light;
-    } catch (_) {
-      return ThemeMode.system;
-    }
-  }
 
   static int getWindowsTheme() {
     try {
@@ -194,17 +185,10 @@ class AppSettings {
       _instance.useSystemTheme = ust == 1 ? true : false;
     }
 
-    final ustm = settingsMap["UseSystemThemeMode"];
-    if (ustm != null) {
-      _instance.useSystemThemeMode = ustm == 1 ? true : false;
-    }
+    _instance.themeMode = ThemeModePreference.decode(settingsMap);
 
     if (!_instance.useSystemTheme) {
       _instance.defaultTheme = settingsMap["DefaultTheme"];
-    }
-    if (!_instance.useSystemThemeMode) {
-      _instance.themeMode =
-          settingsMap["ThemeMode"] == 0 ? ThemeMode.light : ThemeMode.dark;
     }
 
     _instance.dynamicTheme = settingsMap["DynamicTheme"] == 1 ? true : false;
@@ -257,6 +241,7 @@ class AppSettings {
     }
 
     final ignoredVersion = settingsMap["IgnoredUpdateVersion"];
+    _instance.updateChannel = UpdateChannelPreference.fromMap(settingsMap);
     _instance.ignoredUpdateVersion =
         ignoredVersion is String && ignoredVersion.trim().isNotEmpty
             ? ignoredVersion.trim()
@@ -285,18 +270,10 @@ class AppSettings {
         _instance.useSystemTheme = ust;
       }
 
-      final ustm = settingsMap["UseSystemThemeMode"];
-      if (ustm != null) {
-        _instance.useSystemThemeMode = ustm;
-      }
+      _instance.themeMode = ThemeModePreference.decode(settingsMap);
 
       if (!_instance.useSystemTheme) {
         _instance.defaultTheme = settingsMap["DefaultTheme"];
-      }
-      if (!_instance.useSystemThemeMode) {
-        _instance.themeMode = (settingsMap["ThemeMode"] ?? false)
-            ? ThemeMode.dark
-            : ThemeMode.light;
       }
 
       final dt = settingsMap["DynamicTheme"];
@@ -367,7 +344,7 @@ class AppSettings {
       }
       final settingsMap = {
         "Version": version,
-        "ThemeMode": themeMode == ThemeMode.dark,
+        ...ThemeModePreference.encode(themeMode),
         "DynamicTheme": dynamicTheme,
         "Backgrounds": backgrounds.value.toMap(),
         "PlayerExperience": experience.value.toMap(),
@@ -378,13 +355,13 @@ class AppSettings {
         "PlayerShortcuts": shortcuts.value.toMap(),
         "OnlineSources": onlineSources.value.toJson(),
         "UseSystemTheme": useSystemTheme,
-        "UseSystemThemeMode": useSystemThemeMode,
         "DefaultTheme": defaultTheme,
         "ArtistSeparator": artistSeparator,
         "LocalLyricFirst": localLyricFirst,
         "LyricApiUrl": lyricApiUrl,
         "RestoreLastSession": restoreLastSession,
         "AutoCheckUpdates": autoCheckUpdates,
+        ...updateChannel.toMap(),
         "IgnoredUpdateVersion": ignoredUpdateVersion,
         "LastUpdateCheckAt": lastUpdateCheckAt?.toIso8601String(),
         "FontFamily": fontFamily,

@@ -40,16 +40,16 @@ int main() {
   check(!p::FitWithin({512, 512}, {0, 20}).valid(), "zero-width requests ignored");
   check(!p::FitWithin({0, 512}, {20, 20}).valid(), "missing source ignored");
   for (const auto client : {p::Size{1280, 800}, p::Size{1920, 1080}}) {
-    const auto peek = p::FitPeekLayout({480, 240}, client);
+    const auto peek = p::FitPeekLayout({1440, 720}, client);
     check(peek.canvas.width == client.width && peek.canvas.height == client.height,
           "ordinary Peek canvas matches the full client, not thumbnail size");
-    check(peek.content.width == client.width && peek.content.height == client.width / 2 &&
-              peek.content.width > 480 && peek.content.height > 240,
-          "Peek card scales up clearly while preserving its 2:1 aspect ratio");
-    check(peek.left == 0 && peek.top == (client.height - peek.content.height) / 2,
+    check(peek.content.width == 640 && peek.content.height == 320,
+          "high-resolution Peek is a readable 640x320 logical card, not desktop-stretched text");
+    check(peek.left == (client.width - peek.content.width) / 2 &&
+              peek.top == (client.height - peek.content.height) / 2,
           "whole card is centered, never cropped to the client aspect ratio");
   }
-  for (const auto source : {p::Size{480, 240}, p::Size{240, 480}, p::Size{512, 512}}) {
+  for (const auto source : {p::Size{1440, 720}, p::Size{720, 1440}, p::Size{1024, 1024}}) {
     for (const auto client : {p::Size{320, 200}, p::Size{507, 320},
                               p::Size{1280, 800}, p::Size{1920, 1080},
                               p::Size{3840, 2160}, p::Size{7680, 4320},
@@ -71,15 +71,35 @@ int main() {
                        static_cast<double>(peek.content.height) * source.width) <=
                 std::max(source.width, source.height),
             "Peek preserves source aspect ratio within one output pixel");
-      if (client.width >= 1280 && client.height >= 800) {
-        check(peek.content.width > source.width && peek.content.height > source.height,
-              "large-window budget fallback remains larger than the source card");
-      }
+      check(peek.content.width <= source.width && peek.content.height <= source.height,
+            "Peek never invents glyph pixels beyond the high-resolution source");
     }
   }
   check(!p::FitPeekLayout({480, 240}, {0, 800}).valid(), "zero-width Peek ignored");
   check(!p::FitPeekLayout({480, 240}, {1280, -1}).valid(), "negative Peek ignored");
-  check(!p::FitPeekLayout({513, 240}, {1280, 800}).valid(), "unbounded Peek source rejected");
+  check(!p::FitPeekLayout({2049, 240}, {1280, 800}).valid(), "unbounded Peek source rejected");
+  check(!p::FitPeekLayout({2048, 1024}, {1280, 800}).valid(), "oversized source pixel budget rejected");
+  for (const auto dpi : {96u, 120u, 144u, 192u, 216u, 288u, 768u}) {
+    const auto large = p::FitPeekLayout({1440, 720}, {3840, 2160}, dpi);
+    const int expected_width = std::min(1440, static_cast<int>(640 * dpi / 96));
+    check(large.content.width == expected_width && large.content.height == expected_width / 2,
+          "DPI-based readability grows only up to the genuinely rasterized source density");
+    const auto narrow = p::FitPeekLayout({1440, 720}, {507, 320}, dpi);
+    check(narrow.content.width == 507 && narrow.content.height == 253,
+          "small high-DPI clients remain contained and preserve whole-card aspect");
+  }
+  const auto legacy_peek = p::FitPeekLayout({480, 240}, {1280, 800}, 192);
+  check(legacy_peek.content.width == 480 && legacy_peek.content.height == 240,
+        "older thumbnail-only callers remain compatible without blurry bitmap enlargement");
+  check(p::ValidPeekPayload(1440, 720, 1440U * 720 * 4), "3x Peek payload accepted");
+  check(p::ValidPeekPayload(2048, 512, 4U * 1024 * 1024), "exact Peek source budget accepted");
+  for (const auto dimension : {std::int64_t(0), std::int64_t(-1), std::int64_t(2049),
+                               std::numeric_limits<std::int64_t>::max()}) {
+    check(!p::ValidPeekPayload(dimension, 1, 4), "Peek width rejected before multiplication");
+    check(!p::ValidPeekPayload(1, dimension, 4), "Peek height rejected before multiplication");
+  }
+  check(!p::ValidPeekPayload(2048, 513, 2048U * 513 * 4), "Peek payload bounded to 4MiB");
+  check(!p::ValidPeekPayload(1440, 720, 1440U * 720 * 4 - 1), "Peek exact byte count enforced");
   check(!p::ValidPeekCanvas({4096, 4096}, 4096U * 4096 * 4), "Peek pixel budget enforced");
   check(!p::ValidPeekCanvas({1280, 800}, 1), "Peek exact output byte count enforced");
 
@@ -118,7 +138,7 @@ int main() {
     check(standard.width == normal.width - inset.width &&
               standard.height == normal.height - inset.height,
           "empty system iconic client falls back to DPI-aware non-client metrics");
-    const auto layout = p::FitPeekLayout({480, 240}, custom);
+    const auto layout = p::FitPeekLayout({1440, 720}, custom, dpi);
     const auto bytes = static_cast<std::size_t>(layout.canvas.width) * layout.canvas.height * 4;
     check(p::ValidPeekCanvas(layout.canvas, bytes) && layout.content.width > 480 &&
               layout.content.height > 240,
@@ -173,6 +193,23 @@ int main() {
   }
 
   p::Image image;
+  p::Image paired_small, paired_large;
+  const std::vector<std::uint8_t> first_pair{20, 30, 40, 255};
+  const std::vector<std::uint8_t> second_pair{80, 90, 100, 255};
+  const p::RawImage valid_pair{1, 1, &first_pair};
+  const p::RawImage invalid_pair{2049, 1, &second_pair};
+  check(p::ReplacePreviewImages(paired_small, paired_large, valid_pair, &valid_pair) == p::Update::kChanged,
+        "thumbnail and high-resolution Peek commit as one generation");
+  check(p::ReplacePreviewImages(paired_small, paired_large, valid_pair, &valid_pair) == p::Update::kUnchanged,
+        "identical image pairs avoid duplicate allocations and invalidations");
+  check(p::ReplacePreviewImages(paired_small, paired_large, {1, 1, &second_pair}, &invalid_pair) == p::Update::kInvalid &&
+            paired_small.Matches(1, 1, first_pair) && paired_large.Matches(1, 1, first_pair),
+        "invalid Peek cannot partly replace the matching thumbnail");
+  check(p::ReplacePreviewImages(paired_small, paired_large, valid_pair, nullptr) == p::Update::kChanged &&
+            !paired_large.size().valid() && paired_small.Matches(1, 1, first_pair),
+        "older payload intentionally clears obsolete high-resolution source, never mixing tracks");
+  check(p::ReplacePreviewImages(paired_small, paired_large, valid_pair, nullptr) == p::Update::kUnchanged,
+        "old payload deduplication retained");
   const std::vector<std::uint8_t> red_blue{255, 0, 0, 255, 0, 0, 255, 255};
   check(image.Set(2, 1, red_blue) == p::Update::kChanged, "first image invalidates");
   check(image.Set(2, 1, red_blue) == p::Update::kUnchanged, "equal pixels do not invalidate");

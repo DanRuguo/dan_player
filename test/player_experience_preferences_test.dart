@@ -20,6 +20,7 @@ void main() {
       expect(value.windowSizeLocked, isFalse);
       expect(value.windowAspectRatioLocked, isFalse);
       expect(value.windowAspectRatio, 0);
+      expect(value.roundedWindowCorners, isTrue);
     }
   });
 
@@ -36,6 +37,7 @@ void main() {
       windowSizeLocked: true,
       windowAspectRatioLocked: true,
       windowAspectRatio: 16 / 9,
+      roundedWindowCorners: false,
     );
     final encoded = jsonEncode(value.toMap());
     final source = jsonDecode(encoded);
@@ -60,6 +62,8 @@ void main() {
       windowAspectRatio: 1.6,
     );
     expect(value.copyWith(), value);
+    expect(value.copyWith(roundedWindowCorners: false).toMap(),
+        {...value.toMap(), 'roundedWindowCorners': false});
     expect(value.copyWith(playbackRate: .75).toMap(),
         {...value.toMap(), 'playbackRate': .75});
     expect(value.copyWith(closeToTray: false).toMap(),

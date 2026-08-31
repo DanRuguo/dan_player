@@ -106,6 +106,28 @@ enum class PopupIcon {
   kExit,
 };
 
+constexpr int PopupMaterialIndex(PopupIcon icon, bool playing) {
+  switch (icon) {
+    case PopupIcon::kShowMain: return 0;
+    case PopupIcon::kShowMini: return 1;
+    case PopupIcon::kPrevious: return 2;
+    case PopupIcon::kToggle: return playing ? 4 : 3;
+    case PopupIcon::kNext: return 5;
+    case PopupIcon::kDesktopLyrics: return 6;
+    case PopupIcon::kExit: return 7;
+    default: return -1;
+  }
+}
+
+inline Rgb TrayIconCapsuleColor(Rgb accent, Rgb background, bool dark, bool enabled) {
+  const unsigned amount = enabled ? (dark ? 58 : 32) : (dark ? 18 : 12);
+  const auto channel = [&](unsigned shift) {
+    return ((((accent >> shift) & 0xff) * amount +
+             ((background >> shift) & 0xff) * (255 - amount) + 127) / 255) << shift;
+  };
+  return channel(0) | channel(8) | channel(16);
+}
+
 struct Playback {
   bool ready = false;
   bool has_track = false;

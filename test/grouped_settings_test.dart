@@ -222,7 +222,6 @@ void main() {
           'WindowBackdropInfo',
           'UseSystemThemeSwitch',
           'ThemeSelector',
-          'UseSystemThemeModeSwitch',
           'ThemeModeControl',
           'SelectFontCombobox',
           'ArtistSeparatorEditor',

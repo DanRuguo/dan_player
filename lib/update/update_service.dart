@@ -32,17 +32,28 @@ class AppVersion implements Comparable<AppVersion> {
   static AppVersion? tryParse(String? value) {
     if (value == null) return null;
     final normalized = value.trim().replaceFirst(RegExp(r'^[vV]'), '');
+    if (normalized.length > 96) return null;
     final match = RegExp(
       r'^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$',
     ).firstMatch(normalized);
     if (match == null) return null;
+    final numbers = [
+      for (var i = 1; i <= 3; i++) int.tryParse(match.group(i)!)
+    ];
+    final revision = int.tryParse(match.group(4) ?? '0');
+    final prerelease = match.group(5)?.split('.') ?? const <String>[];
+    if (numbers.any((value) => value == null) ||
+        revision == null ||
+        prerelease.any((part) => part.isEmpty)) {
+      return null;
+    }
 
     return AppVersion(
-      int.parse(match.group(1)!),
-      int.parse(match.group(2)!),
-      int.parse(match.group(3)!),
-      revision: int.tryParse(match.group(4) ?? '') ?? 0,
-      preRelease: match.group(5)?.split('.') ?? const [],
+      numbers[0]!,
+      numbers[1]!,
+      numbers[2]!,
+      revision: revision,
+      preRelease: prerelease,
     );
   }
 
@@ -107,6 +118,9 @@ class AvailableUpdate {
   final AppVersion version;
   final ReleaseAsset? asset;
   final ReleaseAsset? checksumAsset;
+
+  bool get isPreview =>
+      release.isPrerelease == true || version.preRelease.isNotEmpty;
 }
 
 class UpdateDownloadProgress {
@@ -135,6 +149,13 @@ class UpdateDownloadResult {
   final File file;
   final String sha256Digest;
   final bool checksumVerified;
+
+  bool canInstall(AvailableUpdate update) =>
+      checksumVerified &&
+      RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(sha256Digest) &&
+      path.basename(file.path) == update.asset?.name &&
+      UpdateService.isProjectInstaller(update.asset?.name,
+          version: update.version.toString());
 }
 
 class UpdateDownloadCancellation {
@@ -158,10 +179,12 @@ class UpdateDownloadCancellation {
 }
 
 class UpdateException implements Exception {
-  const UpdateException(this.message, [this.cause]);
+  const UpdateException(this.message, [this.cause]) : arguments = const [];
+  const UpdateException.formatted(this.message, this.arguments) : cause = null;
 
   final String message;
   final Object? cause;
+  final List<Object?> arguments;
 
   @override
   String toString() => message;
@@ -170,16 +193,26 @@ class UpdateException implements Exception {
 class UpdateService {
   UpdateService._()
       : _appDataDirectory = getAppDataDir,
-        _httpClientFactory = (() => HttpClient());
+        _httpClientFactory = (() => HttpClient()),
+        _releaseLoader = _loadReleases,
+        _currentVersion = AppSettings.version,
+        _savePreferences = _saveSettings;
 
   @visibleForTesting
   UpdateService.forTesting({
     required Future<Directory> Function() appDataDirectory,
     required HttpClient Function() httpClientFactory,
+    Future<List<Release>> Function()? releaseLoader,
+    String currentVersion = AppSettings.version,
+    Future<void> Function()? savePreferences,
   })  : _appDataDirectory = appDataDirectory,
-        _httpClientFactory = httpClientFactory;
+        _httpClientFactory = httpClientFactory,
+        _releaseLoader = releaseLoader ?? (() async => const []),
+        _currentVersion = currentVersion,
+        _savePreferences = savePreferences ?? (() async {});
 
   static final instance = UpdateService._();
+  static int _ignoreRevision = 0;
 
   static const _requestTimeout = Duration(seconds: 15);
   static const _downloadIdleTimeout = Duration(seconds: 30);
@@ -187,7 +220,19 @@ class UpdateService {
 
   final Future<Directory> Function() _appDataDirectory;
   final HttpClient Function() _httpClientFactory;
-  Future<AvailableUpdate?>? _checkInFlight;
+  final Future<List<Release>> Function() _releaseLoader;
+  final String _currentVersion;
+  final Future<void> Function() _savePreferences;
+  Future<List<Release>>? _checkInFlight;
+
+  static Future<void> _saveSettings() => AppSettings.instance
+      .saveSettings(captureWindowSize: false, throwOnError: true);
+
+  static Future<List<Release>> _loadReleases() =>
+      AppSettings.github.repositories
+          .listReleases(AppSettings.githubRepositorySlug)
+          .take(100)
+          .toList();
 
   bool get shouldCheckAutomatically {
     final settings = AppSettings.instance;
@@ -197,10 +242,22 @@ class UpdateService {
         DateTime.now().difference(lastCheck) >= _automaticCheckInterval;
   }
 
-  Future<AvailableUpdate?> checkLatest({bool includeIgnored = false}) async {
-    final task = _checkInFlight ??= _fetchLatestAvailable();
+  Future<AvailableUpdate?> checkLatest({
+    bool includeIgnored = false,
+    bool? includePreviews,
+  }) async {
+    final previews =
+        includePreviews ?? AppSettings.instance.receivePreviewUpdates;
+    // Share only the HTTP operation, never another caller's channel decision.
+    final task = _checkInFlight ??= _fetchReleases();
     try {
-      final update = await task;
+      final releases = await task;
+      final current = AppVersion.tryParse(_currentVersion);
+      if (current == null) {
+        throw const UpdateException('当前版本号格式无效，无法安全比较更新。');
+      }
+      final update = selectLatestRelease(releases,
+          current: current, includePreviews: previews);
       if (!includeIgnored &&
           update?.version.toString() ==
               AppSettings.instance.ignoredUpdateVersion) {
@@ -214,53 +271,28 @@ class UpdateService {
 
   Future<void> recordSuccessfulCheck() async {
     AppSettings.instance.lastUpdateCheckAt = DateTime.now();
-    await AppSettings.instance.saveSettings();
+    await _savePreferences();
   }
 
   Future<void> ignoreVersion(AppVersion version) async {
-    AppSettings.instance.ignoredUpdateVersion = version.toString();
-    await AppSettings.instance.saveSettings();
+    final settings = AppSettings.instance;
+    final previous = settings.ignoredUpdateVersion;
+    final revision = ++_ignoreRevision;
+    settings.ignoredUpdateVersion = version.toString();
+    try {
+      await _savePreferences();
+    } catch (_) {
+      if (revision == _ignoreRevision &&
+          settings.ignoredUpdateVersion == version.toString()) {
+        settings.ignoredUpdateVersion = previous;
+      }
+      rethrow;
+    }
   }
 
-  Future<AvailableUpdate?> _fetchLatestAvailable() async {
+  Future<List<Release>> _fetchReleases() async {
     try {
-      final releases = await AppSettings.github.repositories
-          .listReleases(AppSettings.githubRepositorySlug)
-          .take(20)
-          .toList()
-          .timeout(_requestTimeout);
-      final current = AppVersion.tryParse(AppSettings.version);
-      if (current == null) {
-        throw const UpdateException('当前版本号格式无效，无法安全比较更新。');
-      }
-
-      Release? newestRelease;
-      AppVersion? newestVersion;
-      for (final release in releases) {
-        if (release.isDraft == true || release.isPrerelease == true) continue;
-        final version = AppVersion.tryParse(release.tagName);
-        if (version == null ||
-            version.preRelease.isNotEmpty ||
-            version.compareTo(current) <= 0) {
-          continue;
-        }
-        if (newestVersion == null || version.compareTo(newestVersion) > 0) {
-          newestRelease = release;
-          newestVersion = version;
-        }
-      }
-      if (newestRelease == null || newestVersion == null) return null;
-
-      final asset = selectWindowsAsset(newestRelease.assets ?? const []);
-      return AvailableUpdate(
-        release: newestRelease,
-        version: newestVersion,
-        asset: asset,
-        checksumAsset: asset == null
-            ? null
-            : selectChecksumAsset(
-                newestRelease.assets ?? const [], asset.name ?? ''),
-      );
+      return await _releaseLoader().timeout(_requestTimeout);
     } on TimeoutException catch (error) {
       throw UpdateException('检查更新超时，请检查网络连接后重试。', error);
     } on SocketException catch (error) {
@@ -272,67 +304,67 @@ class UpdateService {
     }
   }
 
+  AvailableUpdate? selectLatestRelease(
+    Iterable<Release> releases, {
+    required AppVersion current,
+    required bool includePreviews,
+    String? architecture,
+  }) {
+    Release? newest;
+    AppVersion? newestVersion;
+    for (final release in releases) {
+      if (release.isDraft == true) continue;
+      final version = AppVersion.tryParse(release.tagName);
+      if (version == null || version.compareTo(current) <= 0) continue;
+      final preview =
+          release.isPrerelease == true || version.preRelease.isNotEmpty;
+      if (preview && !includePreviews) continue;
+      final comparison =
+          newestVersion == null ? 1 : version.compareTo(newestVersion);
+      if (comparison > 0 ||
+          (comparison == 0 && newest?.isPrerelease == true && !preview)) {
+        newest = release;
+        newestVersion = version;
+      }
+    }
+    if (newest == null || newestVersion == null) return null;
+    final asset = selectWindowsAsset(newest.assets ?? const [],
+        architecture: architecture, version: newestVersion.toString());
+    return AvailableUpdate(
+      release: newest,
+      version: newestVersion,
+      asset: asset,
+      checksumAsset: asset == null
+          ? null
+          : selectChecksumAsset(newest.assets ?? const [], asset.name!),
+    );
+  }
+
+  static bool isProjectInstaller(String? name, {String? version}) {
+    if (name == null) return false;
+    final match = RegExp(r'^DanPlayer-(.+)-Setup-(x64|arm64|x86)\.exe$',
+            caseSensitive: false)
+        .firstMatch(name);
+    if (match == null) return false;
+    final parsed = AppVersion.tryParse(match.group(1));
+    return parsed != null && (version == null || parsed.toString() == version);
+  }
+
   ReleaseAsset? selectWindowsAsset(
     List<ReleaseAsset> assets, {
     String? architecture,
+    String? version,
   }) {
     final currentArchitecture = architecture ?? _windowsArchitecture();
-    ReleaseAsset? best;
-    var bestScore = -1;
     for (final asset in assets) {
       final name = asset.name?.toLowerCase() ?? '';
       if (asset.browserDownloadUrl == null || name.isEmpty) continue;
-      if (name.contains('source') ||
-          name.contains('symbols') ||
-          name.contains('debug') ||
-          name.endsWith('.sha256') ||
-          name.endsWith('.sha256sum')) {
-        continue;
-      }
-      if (name.contains('linux') ||
-          name.contains('macos') ||
-          name.contains('darwin') ||
-          name.contains('android')) {
-        continue;
-      }
-
-      var score = switch (path.extension(name)) {
-        '.msixbundle' => 100,
-        '.msix' => 95,
-        '.exe' => 90,
-        '.zip' => 70,
-        _ => -1,
-      };
-      if (score < 0) continue;
-      final explicitlyWindows = name.contains('windows') ||
-          RegExp(r'(^|[-_.])win(?:32|64)?([-_.]|$)').hasMatch(name);
-      if (path.extension(name) == '.zip' && !explicitlyWindows) continue;
-
-      final hasX64 = name.contains('x64') ||
-          name.contains('amd64') ||
-          name.contains('x86_64');
-      final hasArm64 = name.contains('arm64') || name.contains('aarch64');
-      final hasX86 =
-          !hasX64 && RegExp(r'(^|[-_.])(?:x86|win32)([-_.]|$)').hasMatch(name);
-      final hasArchitecture = hasX64 || hasArm64 || hasX86;
-      final architectureMatches = switch (currentArchitecture) {
-        'x64' => hasX64,
-        'arm64' => hasArm64,
-        'x86' => hasX86,
-        _ => false,
-      };
-      if (hasArchitecture && !architectureMatches) continue;
-      if (currentArchitecture == 'unknown' && hasArchitecture) continue;
-
-      if (explicitlyWindows) score += 12;
-      if (architectureMatches) score += 6;
-      if (name.contains('portable')) score -= 2;
-      if (score > bestScore) {
-        best = asset;
-        bestScore = score;
-      }
+      // This updater launches only our versioned Setup package. Portable ZIPs,
+      // arbitrary EXEs and MSIX require the explicit release-page fallback.
+      if (!isProjectInstaller(asset.name, version: version)) continue;
+      if (name.endsWith('-setup-$currentArchitecture.exe')) return asset;
     }
-    return best;
+    return null;
   }
 
   String _windowsArchitecture() {
@@ -541,7 +573,8 @@ class UpdateService {
       _throwIfCancelled(cancellation);
       final response = await _getSecureResponse(client, uri, cancellation);
       if (response.statusCode != HttpStatus.ok) {
-        throw UpdateException('更新服务器返回 HTTP ${response.statusCode}。');
+        throw UpdateException.formatted(
+            '更新服务器返回 HTTP {0}。', [response.statusCode]);
       }
 
       final total =
@@ -592,7 +625,8 @@ class UpdateService {
       _throwIfCancelled(cancellation);
       final response = await _getSecureResponse(client, uri, cancellation);
       if (response.statusCode != HttpStatus.ok) {
-        throw UpdateException('校验服务器返回 HTTP ${response.statusCode}。');
+        throw UpdateException.formatted(
+            '校验服务器返回 HTTP {0}。', [response.statusCode]);
       }
       final bytes = BytesBuilder(copy: false);
       await for (final chunk in response.timeout(_downloadIdleTimeout)) {

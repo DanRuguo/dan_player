@@ -5,6 +5,7 @@
 #include <gdiplus.h>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 
@@ -47,9 +48,26 @@ class PopupFonts {
     return true;
   }
 
+  bool ConfigureIcons(std::wstring path) {
+    if (path == icon_requested_path_) return false;
+    ResetHandles();
+    if (!icon_registered_path_.empty()) {
+      RemoveFontResourceExW(icon_registered_path_.c_str(), FR_PRIVATE, nullptr);
+    }
+    icon_requested_path_ = std::move(path);
+    icon_registered_path_.clear();
+    icon_face_.clear();
+    if (!icon_requested_path_.empty() &&
+        AddFontResourceExW(icon_requested_path_.c_str(), FR_PRIVATE, nullptr) > 0) {
+      icon_registered_path_ = icon_requested_path_;
+      icon_face_ = PrivateFamily(icon_registered_path_, L"Material Symbols Outlined");
+    }
+    return true;
+  }
+
   void Ensure(UINT dpi) {
     dpi = std::clamp(dpi, 48u, 768u);
-    if (dpi_ == dpi && title_ && row_ && icons_) return;
+    if (dpi_ == dpi && title_ && row_ && icons_ && legacy_icons_) return;
     ResetHandles();
     dpi_ = dpi;
     NONCLIENTMETRICSW metrics{};
@@ -62,22 +80,71 @@ class PopupFonts {
     font.lfCharSet = DEFAULT_CHARSET;
     font.lfQuality = CLEARTYPE_QUALITY;
     if (!face_.empty()) wcsncpy_s(font.lfFaceName, face_.c_str(), _TRUNCATE);
-    font.lfHeight = -MulDiv(15, static_cast<int>(dpi), 96);
-    font.lfWeight = FW_SEMIBOLD;
+    font.lfHeight = -MulDiv(16, static_cast<int>(dpi), 96);
+    font.lfWeight = FW_BOLD;
     title_ = CreateFontIndirectW(&font);
-    font.lfHeight = -MulDiv(14, static_cast<int>(dpi), 96);
-    font.lfWeight = FW_NORMAL;
+    font.lfHeight = -MulDiv(15, static_cast<int>(dpi), 96);
     row_ = CreateFontIndirectW(&font);
-    font.lfHeight = -MulDiv(19, static_cast<int>(dpi), 96);
-    wcsncpy_s(font.lfFaceName, L"Segoe MDL2 Assets", _TRUNCATE);
+    // Explicit per-label fallback for scripts missing from the main face.
+    // Cache every handle at the current DPI: hover paints allocate no fonts.
+    constexpr std::array<const wchar_t*, 6> fallback{
+        L"Microsoft YaHei UI", L"Microsoft YaHei", L"Yu Gothic UI",
+        L"Malgun Gothic", L"Segoe UI Symbol", L"Segoe UI Emoji"};
+    for (std::size_t index = 0; index < fallback.size(); ++index) {
+      wcsncpy_s(font.lfFaceName, fallback[index], _TRUNCATE);
+      fallback_row_[index] = CreateFontIndirectW(&font);
+      font.lfHeight = -MulDiv(16, static_cast<int>(dpi), 96);
+      fallback_title_[index] = CreateFontIndirectW(&font);
+      font.lfHeight = -MulDiv(15, static_cast<int>(dpi), 96);
+    }
+    font.lfHeight = -MulDiv(20, static_cast<int>(dpi), 96);
+    font.lfWeight = FW_NORMAL;
+    wcsncpy_s(font.lfFaceName,
+               icon_face_.empty() ? L"Segoe MDL2 Assets" : icon_face_.c_str(), _TRUNCATE);
     icons_ = CreateFontIndirectW(&font);
+    wcsncpy_s(font.lfFaceName, L"Segoe MDL2 Assets", _TRUNCATE);
+    legacy_icons_ = CreateFontIndirectW(&font);
+  }
+
+  HFONT ForText(HDC dc, const wchar_t* text, bool title = false) {
+    const auto primary = title ? this->title() : row();
+    if (!dc || !text || !*text) return primary;
+    for (const auto& choice : choices_) {
+      if (choice.font && choice.title == title && choice.text == text) return choice.font;
+    }
+    const std::size_t length = wcsnlen_s(text, 256);
+    if (length == 256) return primary;
+    const auto supports = [&](HFONT candidate) {
+      if (!candidate) return false;
+      std::array<WORD, 256> glyphs{};
+      const auto old = SelectObject(dc, candidate);
+      const DWORD status = GetGlyphIndicesW(dc, text, static_cast<int>(length),
+                                             glyphs.data(), GGI_MARK_NONEXISTING_GLYPHS);
+      SelectObject(dc, old);
+      return status != GDI_ERROR && std::none_of(glyphs.begin(), glyphs.begin() + length,
+          [](WORD glyph) { return glyph == 0xffff; });
+    };
+    HFONT selected = primary;
+    if (!supports(primary)) {
+      for (HFONT fallback : title ? fallback_title_ : fallback_row_) {
+        if (supports(fallback)) { selected = fallback; break; }
+      }
+    }
+    auto& choice = choices_[next_choice_++ % choices_.size()];
+    choice = {text, title, selected};
+    return selected;
   }
 
   void ResetHandles() {
     if (title_) DeleteObject(title_);
     if (row_) DeleteObject(row_);
     if (icons_) DeleteObject(icons_);
-    title_ = row_ = icons_ = nullptr;
+    if (legacy_icons_) DeleteObject(legacy_icons_);
+    title_ = row_ = icons_ = legacy_icons_ = nullptr;
+    for (auto& font : fallback_row_) { if (font) DeleteObject(font); font = nullptr; }
+    for (auto& font : fallback_title_) { if (font) DeleteObject(font); font = nullptr; }
+    for (auto& choice : choices_) choice = {};
+    next_choice_ = 0;
     dpi_ = 0;
   }
 
@@ -88,6 +155,12 @@ class PopupFonts {
       RemoveFontResourceExW(registered_path_.c_str(), FR_PRIVATE, nullptr);
     }
     registered_path_.clear();
+    if (!icon_registered_path_.empty()) {
+      RemoveFontResourceExW(icon_registered_path_.c_str(), FR_PRIVATE, nullptr);
+    }
+    icon_registered_path_.clear();
+    icon_requested_path_.clear();
+    icon_face_.clear();
     requested_path_.clear();
     requested_family_.clear();
     face_.clear();
@@ -95,9 +168,11 @@ class PopupFonts {
 
   HFONT title() const { return OrSystem(title_); }
   HFONT row() const { return OrSystem(row_); }
-  HFONT icons() const { return OrSystem(icons_); }
+  HFONT icons(bool material = true) const { return OrSystem(material ? icons_ : legacy_icons_); }
   const std::wstring& face() const { return face_; }
   bool private_font_loaded() const { return !registered_path_.empty(); }
+  bool material_icons_loaded() const { return !icon_face_.empty(); }
+  const std::wstring& icon_face() const { return icon_face_; }
 
  private:
   static HFONT OrSystem(HFONT font) {
@@ -136,10 +211,16 @@ class PopupFonts {
   std::wstring requested_path_;
   std::wstring registered_path_;
   std::wstring face_;
+  std::wstring icon_requested_path_, icon_registered_path_, icon_face_;
+  struct FontChoice { std::wstring text; bool title = false; HFONT font = nullptr; };
+  std::array<FontChoice, 16> choices_{};
+  std::size_t next_choice_ = 0;
+  std::array<HFONT, 6> fallback_row_{}, fallback_title_{};
   UINT dpi_ = 0;
   HFONT title_ = nullptr;
   HFONT row_ = nullptr;
   HFONT icons_ = nullptr;
+  HFONT legacy_icons_ = nullptr;
 };
 
 }  // namespace desktop_integration

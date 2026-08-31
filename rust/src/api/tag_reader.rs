@@ -2,16 +2,20 @@ use std::{
     any::Any,
     collections::HashSet,
     fs::{self, OpenOptions},
-    io::{self, BufReader, Cursor, Write},
+    io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write},
     panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::{Duration, UNIX_EPOCH},
 };
 
 use image::imageops;
 use lofty::config::WriteOptions;
 use lofty::file::{FileType, TaggedFile};
+use lofty::id3::v2::{BinaryFrame, Frame, FrameId, Id3v2Tag};
 use lofty::picture::{Picture, PictureType};
 use lofty::prelude::{Accessor, AudioFile, ItemKey, TagExt, TaggedFileExt};
 use lofty::probe::Probe;
@@ -31,6 +35,11 @@ use windows::{
 use crate::frb_generated::StreamSink;
 
 use super::logger::log_to_dart;
+
+#[path = "metadata_id3_compat.rs"]
+mod id3_compat;
+#[path = "incremental_index.rs"]
+mod incremental_index;
 
 struct ComApartment(bool);
 
@@ -73,6 +82,8 @@ static SUPPORT_FORMAT: phf::Map<&'static str, bool> = phf::phf_map! {
 const INDEX_VERSION: u64 = 113;
 const CLASSIFICATION_VERSION: u64 = 1;
 static METADATA_TRANSACTION_ID: AtomicU64 = AtomicU64::new(0);
+static METADATA_EDIT_LOCK: Mutex<()> = Mutex::new(());
+static INDEX_REFRESH_LOCK: Mutex<()> = Mutex::new(());
 
 fn sibling_path(path: &Path, suffix: &str) -> PathBuf {
     let mut value = path.as_os_str().to_os_string();
@@ -165,12 +176,18 @@ pub fn update_audio_metadata(
     album: String,
     picture_path: Option<String>,
 ) -> anyhow::Result<String> {
+    let _edit_guard = METADATA_EDIT_LOCK.lock().map_err(|_| {
+        metadata_message(
+            "TAG_EDIT_UNAVAILABLE",
+            "歌曲信息编辑器尚未恢复，请重新启动播放器后重试",
+        )
+    })?;
     let old_path = PathBuf::from(&path);
     let source_metadata = fs::metadata(&old_path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
-            metadata_error("TAG_SOURCE_MISSING", "音频文件不存在", error)
+            metadata_io_error("TAG_SOURCE_MISSING", "音频文件不存在", error)
         } else {
-            metadata_error("TAG_SOURCE_UNREADABLE", "无法访问音频文件", error)
+            metadata_io_error("TAG_SOURCE_UNREADABLE", "无法访问音频文件", error)
         }
     })?;
     if !source_metadata.is_file() {
@@ -214,7 +231,7 @@ pub fn update_audio_metadata(
         .ok_or_else(|| metadata_message("TAG_SOURCE_INVALID", "音频文件没有父文件夹"))?;
     let new_path = parent.join(target_name);
 
-    if new_path != old_path && new_path.exists() {
+    if new_path != old_path && new_path.exists() && !same_existing_file(&old_path, &new_path) {
         return Err(metadata_message(
             "TAG_TARGET_EXISTS",
             "目标文件名已存在，请换一个名称",
@@ -241,6 +258,89 @@ fn metadata_error(code: &str, message: &str, error: impl std::fmt::Display) -> a
     metadata_message(code, format!("{}：{}", message, error))
 }
 
+fn metadata_io_error(code: &str, message: &str, error: io::Error) -> anyhow::Error {
+    // Windows sharing violations differ from permissions and cloud-provider
+    // availability. Never remove attributes or stop playback automatically.
+    match error.raw_os_error() {
+        Some(32 | 33) if cfg!(windows) => metadata_error(
+            "TAG_FILE_BUSY",
+            &format!("{message}；文件正在被占用，请先切换当前歌曲并关闭其他占用程序后重试"),
+            error,
+        ),
+        Some(112) if cfg!(windows) => metadata_error(
+            "TAG_NO_SPACE",
+            &format!("{message}；磁盘空间不足，无法完成安全副本写入"),
+            error,
+        ),
+        _ if error.kind() == io::ErrorKind::PermissionDenied => metadata_error(
+            "TAG_ACCESS_DENIED",
+            &format!("{message}；没有文件或所在文件夹的写入权限，播放器不会修改权限或只读属性"),
+            error,
+        ),
+        _ => metadata_error(code, message, error),
+    }
+}
+
+fn same_existing_file(source: &Path, target: &Path) -> bool {
+    // Windows is normally case-insensitive; a case-only rename must not be
+    // mistaken for a collision. Canonical paths avoid accepting merely similar
+    // names in a case-sensitive directory or replacing a different file.
+    if !source
+        .file_name()
+        .zip(target.file_name())
+        .is_some_and(|(a, b)| {
+            a.to_string_lossy()
+                .eq_ignore_ascii_case(&b.to_string_lossy())
+        })
+    {
+        return false;
+    }
+    match (source.canonicalize(), target.canonicalize()) {
+        (Ok(source), Ok(target)) => source == target,
+        _ => false,
+    }
+}
+
+fn move_file_without_replacing(source: &Path, target: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
+        // canonicalize the existing parents, not the absent target. This keeps
+        // Rust's extended-length Windows paths for long Unicode filenames.
+        let absolute = |path: &Path| -> io::Result<PathBuf> {
+            let parent = path
+                .parent()
+                .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+            let name = path
+                .file_name()
+                .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+            Ok(parent.canonicalize()?.join(name))
+        };
+        let source = absolute(source)?;
+        let target = absolute(target)?;
+        let from: Vec<_> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+        let to: Vec<_> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+        // Deliberately omit MOVEFILE_REPLACE_EXISTING. A target created by
+        // another program while tags are being verified must never be erased.
+        unsafe {
+            MoveFileExW(
+                windows::core::PCWSTR(from.as_ptr()),
+                windows::core::PCWSTR(to.as_ptr()),
+                MOVEFILE_WRITE_THROUGH,
+            )
+        }
+        .map_err(|error| io::Error::from_raw_os_error((error.code().0 as u32 & 0xffff) as i32))
+    }
+    #[cfg(not(windows))]
+    {
+        // Transaction files are in the same directory/filesystem. Linking has
+        // no-overwrite semantics, unlike rename on Unix.
+        fs::hard_link(source, target)?;
+        fs::remove_file(source)
+    }
+}
+
 fn ensure_tag(tagged_file: &mut lofty::file::TaggedFile, tag_type: TagType) -> anyhow::Result<()> {
     if tagged_file.contains_tag_type(tag_type) {
         return Ok(());
@@ -264,7 +364,40 @@ fn write_metadata_safely(
 ) -> anyhow::Result<()> {
     // Probe from bytes rather than the extension. This prevents a transcoded or
     // misnamed file from being handed to a writer for an unrelated container.
-    let mut tagged_file = probe_tagged_audio(source_path, "TAG_FORMAT_UNKNOWN")?;
+    if id3_compat::has_empty_text_frame(source_path)
+        && id3_compat::try_write(source_path, target_path, title, artist, album, picture_path)?
+    {
+        return Ok(());
+    }
+    let mut tagged_file = match probe_tagged_audio(source_path, "TAG_FORMAT_UNKNOWN") {
+        Ok(file) => file,
+        Err(error) => {
+            if error.to_string().starts_with("TAG_PARSE_UNSUPPORTED|")
+                && id3_compat::try_write(
+                    source_path,
+                    target_path,
+                    title,
+                    artist,
+                    album,
+                    picture_path,
+                )
+                .map_err(|failure| {
+                    if failure.to_string().starts_with("TAG_") {
+                        failure
+                    } else {
+                        metadata_error(
+                            "TAG_COMPAT_FAILED",
+                            "兼容编辑未能完成，已保留原文件",
+                            failure,
+                        )
+                    }
+                })?
+            {
+                return Ok(());
+            }
+            return Err(error);
+        }
+    };
     let original_file_type = tagged_file.file_type();
     let original_properties = AudioPropertiesSnapshot::from(&tagged_file);
     let tag_type = tagged_file.primary_tag_type();
@@ -303,11 +436,16 @@ fn write_metadata_safely(
         // offset falls inside a Unicode scalar. The copied file already holds
         // all untouched tags byte-for-byte; writing only the primary tag keeps
         // them intact and removes that unsafe legacy rewrite path entirely.
-        tagged_file
+        let tag = tagged_file
             .primary_tag()
-            .ok_or_else(|| metadata_message("TAG_FORMAT_UNSUPPORTED", "无法创建可写的主标签"))?
-            .save_to_path(temporary.path(), WriteOptions::default())
-            .map_err(|error| metadata_error("TAG_WRITE_FAILED", "写入临时副本失败", error))
+            .ok_or_else(|| metadata_message("TAG_FORMAT_UNSUPPORTED", "无法创建可写的主标签"))?;
+        save_edited_primary_tag(
+            tag,
+            source_path,
+            temporary.path(),
+            original_file_type,
+            picture_path.is_some(),
+        )
     }));
     match write_result {
         Ok(result) => result?,
@@ -327,9 +465,24 @@ fn write_metadata_safely(
         .write(true)
         .open(temporary.path())
         .and_then(|file| file.sync_all())
-        .map_err(|error| metadata_error("TAG_WRITE_FAILED", "无法同步临时副本", error))?;
+        .map_err(|error| metadata_io_error("TAG_WRITE_FAILED", "无法同步临时副本", error))?;
 
-    let verified = probe_tagged_audio(temporary.path(), "TAG_VERIFY_FORMAT")?;
+    let verified = match probe_tagged_audio(temporary.path(), "TAG_VERIFY_FORMAT") {
+        Ok(file) => file,
+        Err(error) if error.to_string().starts_with("TAG_PARSE_UNSUPPORTED|") => {
+            // A readable source can expose a writer-only encoding limitation
+            // (for example an empty UTF-16 APIC description). No commit has
+            // occurred: discard the invalid temporary output before trying the
+            // exact same bounded, plain-ID3 path used for parser limitations.
+            drop(temporary);
+            if id3_compat::try_write(source_path, target_path, title, artist, album, picture_path)?
+            {
+                return Ok(());
+            }
+            return Err(error);
+        }
+        Err(error) => return Err(error),
+    };
     verify_metadata_edit(
         &verified,
         original_file_type,
@@ -349,8 +502,42 @@ fn write_metadata_safely(
 }
 
 fn probe_tagged_audio(path: &Path, error_code: &str) -> anyhow::Result<TaggedFile> {
-    let file = fs::File::open(path)
-        .map_err(|error| metadata_error("TAG_SOURCE_UNREADABLE", "无法读取音频文件", error))?;
+    let mut file = fs::File::open(path)
+        .map_err(|error| metadata_io_error("TAG_SOURCE_UNREADABLE", "无法读取音频文件", error))?;
+    // Lofty's MPEG sync search may misidentify an ASF header as MPEG even
+    // though the filename is .mp3. Windows playback support is not evidence
+    // that our transactional tag writer supports this actual container.
+    let mut signature = [0; 16];
+    if file.read_exact(&mut signature).is_ok()
+        && signature
+            == [
+                0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62,
+                0xce, 0x6c,
+            ]
+    {
+        return Err(metadata_message("TAG_FORMAT_UNSUPPORTED",
+            "实际音频容器为 ASF/WMA；播放器支持播放，但暂不支持安全编辑该容器的标签。原文件未被修改"));
+    }
+    if &signature[..3] == b"ID3" && signature[6..10].iter().all(|byte| byte & 0x80 == 0) {
+        let tag_size = signature[6..10]
+            .iter()
+            .fold(0u64, |size, byte| (size << 7) | *byte as u64);
+        let footer = if signature[3] == 4 && signature[5] & 0x10 != 0 {
+            10
+        } else {
+            0
+        };
+        let mut atom = [0; 8];
+        if file.seek(SeekFrom::Start(10 + tag_size + footer)).is_ok()
+            && file.read_exact(&mut atom).is_ok()
+            && &atom[4..8] == b"ftyp"
+        {
+            return Err(metadata_message("TAG_LAYOUT_UNSUPPORTED",
+                "实际内容为带前置 ID3 标签的 MP4 容器；此混合布局暂不支持安全编辑，原文件和扩展名均未修改"));
+        }
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| metadata_io_error("TAG_SOURCE_UNREADABLE", "无法读取音频文件", error))?;
     let probe = Probe::new(BufReader::new(file))
         .guess_file_type()
         .map_err(|error| metadata_error(error_code, "探测音频内容失败", error))?;
@@ -369,13 +556,187 @@ fn probe_tagged_audio(path: &Path, error_code: &str) -> anyhow::Result<TaggedFil
             if declared_unsupported {
                 "该音频格式目前仅支持读取或播放，不支持安全写入标签"
             } else {
-                "无法根据文件内容识别音频格式；文件可能损坏或扩展名与实际格式不符"
+                "当前标签编辑器无法识别此音频容器或标签组合；这不代表文件无法播放。原文件未被修改"
             },
         ));
     }
-    probe
-        .read()
-        .map_err(|error| metadata_error(error_code, "无法解析音频容器或标签", error))
+    probe.read().map_err(|error| {
+        metadata_error(
+            "TAG_PARSE_UNSUPPORTED",
+            "当前标签编辑器无法完整解析此容器或标签组合，已保留原文件",
+            error,
+        )
+    })
+}
+
+fn save_edited_primary_tag(
+    tag: &Tag,
+    source: &Path,
+    destination: &Path,
+    file_type: FileType,
+    replaces_front: bool,
+) -> anyhow::Result<()> {
+    let result = if tag.tag_type() == TagType::Id3v2 {
+        // Lofty 0.21's generic Tag::save uses borrowed FrameRefs that replace
+        // COMM/USLT language+description with defaults. Even its owned generic
+        // conversion may normalize unrelated multi-value frames. Keep the
+        // format-specific tag and edit only the explicitly requested fields.
+        let mut file = BufReader::new(fs::File::open(source).map_err(|error| {
+            metadata_io_error("TAG_SOURCE_UNREADABLE", "无法读取音频文件", error)
+        })?);
+        let options = lofty::config::ParseOptions::default().read_properties(false);
+        let parsed = match file_type {
+            FileType::Mpeg => lofty::mpeg::MpegFile::read_from(&mut file, options)
+                .map(|file| file.id3v2().cloned()),
+            FileType::Aac => {
+                lofty::aac::AacFile::read_from(&mut file, options).map(|file| file.id3v2().cloned())
+            }
+            FileType::Aiff => lofty::iff::aiff::AiffFile::read_from(&mut file, options)
+                .map(|file| file.id3v2().cloned()),
+            FileType::Wav => lofty::iff::wav::WavFile::read_from(&mut file, options)
+                .map(|file| file.id3v2().cloned()),
+            _ => {
+                return Err(metadata_message(
+                    "TAG_FORMAT_UNSUPPORTED",
+                    "该音频容器暂不支持安全编辑 ID3 标签",
+                ))
+            }
+        };
+        let mut native = parsed
+            .map_err(|error| {
+                metadata_error(
+                    "TAG_PARSE_UNSUPPORTED",
+                    "无法完整读取原生 ID3 标签，已保留原文件",
+                    error,
+                )
+            })?
+            .unwrap_or_default();
+        native.set_title(tag.title().unwrap_or_default().into_owned());
+        native.set_artist(tag.artist().unwrap_or_default().into_owned());
+        native.set_album(tag.album().unwrap_or_default().into_owned());
+        // The parser has already decoded whole-tag unsynchronisation. Lofty
+        // 0.21 writes decoded frame payloads without escaping them again, but
+        // otherwise copies this flag and creates an unreadable tag. Correct
+        // only this known representation flag; retain every other tag flag.
+        normalize_decoded_id3_flags(&mut native)?;
+        if replaces_front {
+            native.remove_picture_type(PictureType::CoverFront);
+            if let Some(picture) = tag.get_picture_type(PictureType::CoverFront) {
+                native.insert_picture(picture.clone());
+            }
+        }
+        preserve_legacy_language_frames(&mut native);
+        native.save_to_path(destination, WriteOptions::default())
+    } else {
+        tag.save_to_path(destination, WriteOptions::default())
+    };
+    result.map_err(|error| {
+        metadata_error(
+            "TAG_WRITE_FAILED",
+            "写入临时副本失败，原文件未被修改",
+            error,
+        )
+    })
+}
+
+fn normalize_decoded_id3_flags(tag: &mut Id3v2Tag) -> anyhow::Result<()> {
+    // The writer also emits plain decoded frame bytes, without the original
+    // frame-level escape bytes or consumed data-length indicator. Never apply
+    // this normalization to compression/encryption, which need their own
+    // encoding implementation and must remain a safe refusal here.
+    if (&*tag).into_iter().any(|frame| {
+        let flags = frame.flags();
+        flags.compression || flags.encryption.is_some()
+    }) {
+        return Err(metadata_message(
+            "TAG_LAYOUT_UNSUPPORTED",
+            "当前写入器无法安全重编码压缩或加密 ID3 帧，已保留原文件及全部标签",
+        ));
+    }
+    let mut flags = *tag.flags();
+    flags.unsynchronisation = false;
+    tag.set_flags(flags);
+    let decoded: Vec<_> = (&*tag)
+        .into_iter()
+        .filter(|frame| {
+            let flags = frame.flags();
+            flags.unsynchronisation || flags.data_length_indicator.is_some()
+        })
+        .cloned()
+        .collect();
+    // Binary/opaque frame equality includes flags. Inserting a normalized
+    // clone alone would append it beside the stale encoded-flags version.
+    tag.retain(|frame| !decoded.contains(frame));
+    for mut frame in decoded {
+        let mut flags = frame.flags();
+        flags.unsynchronisation = false;
+        flags.data_length_indicator = None;
+        frame.set_flags(flags);
+        if tag.insert(frame).is_some() {
+            return Err(metadata_message(
+                "TAG_LAYOUT_UNSUPPORTED",
+                "ID3 帧表示转换出现重复标识，已保留原文件及全部标签",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn preserve_legacy_language_frames(tag: &mut Id3v2Tag) {
+    // Some readable legacy files use spaces/NUL in the three language bytes.
+    // Preserve those bytes, descriptor and text, rather than invent a language
+    // or discard the untouched lyric. Binary frames bypass only Lofty's
+    // language validator; the normal post-write semantic check still applies.
+    for id in ["COMM", "USLT"] {
+        let frame_id = FrameId::Valid(std::borrow::Cow::Borrowed(id));
+        let needs_preservation = (&*tag).into_iter().any(|frame| match frame {
+            Frame::Comment(value) if id == "COMM" => {
+                value.language.iter().any(|c| !c.is_ascii_alphabetic())
+            }
+            Frame::UnsynchronizedText(value) if id == "USLT" => {
+                value.language.iter().any(|c| !c.is_ascii_alphabetic())
+            }
+            _ => false,
+        });
+        if !needs_preservation {
+            continue;
+        }
+        let frames: Vec<_> = tag.remove(&frame_id).collect();
+        for frame in frames {
+            let legacy = match &frame {
+                Frame::Comment(value)
+                    if value.language.iter().any(|c| !c.is_ascii_alphabetic()) =>
+                {
+                    Some((
+                        value.language,
+                        value.description.as_str(),
+                        value.content.as_str(),
+                    ))
+                }
+                Frame::UnsynchronizedText(value)
+                    if value.language.iter().any(|c| !c.is_ascii_alphabetic()) =>
+                {
+                    Some((
+                        value.language,
+                        value.description.as_str(),
+                        value.content.as_str(),
+                    ))
+                }
+                _ => None,
+            };
+            if let Some((language, description, content)) = legacy {
+                // The writer above emits ID3v2.4, whose UTF-8 text encoding is 3.
+                let mut bytes = vec![3];
+                bytes.extend_from_slice(&language);
+                bytes.extend_from_slice(description.as_bytes());
+                bytes.push(0);
+                bytes.extend_from_slice(content.as_bytes());
+                tag.insert(Frame::Binary(BinaryFrame::new(frame_id.clone(), bytes)));
+            } else {
+                tag.insert(frame);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -556,8 +917,9 @@ impl TransactionPath {
             path,
             remove_on_drop: true,
         };
-        fs::copy(source, guard.path())
-            .map_err(|error| metadata_error("TAG_COPY_FAILED", "无法创建同目录安全副本", error))?;
+        fs::copy(source, guard.path()).map_err(|error| {
+            metadata_io_error("TAG_COPY_FAILED", "无法创建同目录安全副本", error)
+        })?;
         Ok(guard)
     }
 
@@ -582,10 +944,6 @@ fn reserve_transaction_path(source: &Path, purpose: &str) -> anyhow::Result<Path
     let parent = source.parent().ok_or_else(|| {
         metadata_message("TAG_SOURCE_INVALID", "音频文件没有可用于事务写入的父目录")
     })?;
-    let stem = source
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("audio");
     let extension = source
         .extension()
         .and_then(|value| value.to_str())
@@ -593,17 +951,10 @@ fn reserve_transaction_path(source: &Path, purpose: &str) -> anyhow::Result<Path
     for _ in 0..128 {
         let id = METADATA_TRANSACTION_ID.fetch_add(1, Ordering::Relaxed);
         let name = if extension.is_empty() {
-            format!(
-                ".{}.dan-player-{}-{}-{}",
-                stem,
-                purpose,
-                std::process::id(),
-                id
-            )
+            format!(".dan-player-{}-{}-{}", purpose, std::process::id(), id)
         } else {
             format!(
-                ".{}.dan-player-{}-{}-{}.{}",
-                stem,
+                ".dan-player-{}-{}-{}.{}",
                 purpose,
                 std::process::id(),
                 id,
@@ -619,7 +970,7 @@ fn reserve_transaction_path(source: &Path, purpose: &str) -> anyhow::Result<Path
             Ok(_) => return Ok(candidate),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
-                return Err(metadata_error(
+                return Err(metadata_io_error(
                     "TAG_COPY_FAILED",
                     "无法在音频所在目录创建安全副本",
                     error,
@@ -636,7 +987,7 @@ fn reserve_transaction_path(source: &Path, purpose: &str) -> anyhow::Result<Path
 fn unused_transaction_path(source: &Path, purpose: &str) -> anyhow::Result<PathBuf> {
     let reserved = reserve_transaction_path(source, purpose)?;
     fs::remove_file(&reserved)
-        .map_err(|error| metadata_error("TAG_REPLACE_FAILED", "无法准备回滚文件路径", error))?;
+        .map_err(|error| metadata_io_error("TAG_REPLACE_FAILED", "无法准备回滚文件路径", error))?;
     Ok(reserved)
 }
 
@@ -646,15 +997,15 @@ fn replace_with_rollback(
     temporary: &mut TransactionPath,
 ) -> anyhow::Result<()> {
     let backup_path = unused_transaction_path(source_path, "backup")?;
-    fs::rename(source_path, &backup_path).map_err(|error| {
-        metadata_error(
+    move_file_without_replacing(source_path, &backup_path).map_err(|error| {
+        metadata_io_error(
             "TAG_REPLACE_FAILED",
             "无法暂存原文件；原文件未被修改",
             error,
         )
     })?;
 
-    match fs::rename(temporary.path(), target_path) {
+    match move_file_without_replacing(temporary.path(), target_path) {
         Ok(()) => {
             temporary.disarm();
             if let Err(error) = fs::remove_file(&backup_path) {
@@ -666,22 +1017,24 @@ fn replace_with_rollback(
             Ok(())
         }
         Err(replace_error) => {
-            let rollback = fs::rename(&backup_path, source_path).or_else(|rename_error| {
-                if source_path.exists() {
-                    return Err(rename_error);
-                }
-                fs::copy(&backup_path, source_path)
-                    .and_then(|_| {
-                        OpenOptions::new()
-                            .read(true)
-                            .write(true)
-                            .open(source_path)
-                            .and_then(|file| file.sync_all())
-                    })
-                    .map_err(|_| rename_error)
-            });
+            let rollback =
+                move_file_without_replacing(&backup_path, source_path).or_else(|rename_error| {
+                    if source_path.exists() {
+                        return Err(rename_error);
+                    }
+                    fs::File::open(&backup_path)
+                        .and_then(|mut backup| {
+                            let mut restored = OpenOptions::new()
+                                .write(true)
+                                .create_new(true)
+                                .open(source_path)?;
+                            io::copy(&mut backup, &mut restored)?;
+                            restored.sync_all()
+                        })
+                        .map_err(|_| rename_error)
+                });
             match rollback {
-                Ok(()) => Err(metadata_error(
+                Ok(()) => Err(metadata_io_error(
                     "TAG_REPLACE_FAILED",
                     "替换文件失败，已恢复原文件",
                     replace_error,
@@ -1134,180 +1487,6 @@ impl Audio {
     }
 }
 
-#[derive(Debug)]
-struct AudioFolder {
-    path: String,
-    /// secs since UNIX_EPOCH
-    modified: u64,
-    /// biggest created in audios. secs since UNIX_EPOCH
-    latest: u64,
-    audios: Vec<Audio>,
-}
-
-impl AudioFolder {
-    fn to_json_value(&self) -> serde_json::Value {
-        let mut audios_json: Vec<serde_json::Value> = vec![];
-        for audio in &self.audios {
-            audios_json.push(audio.to_json_value());
-        }
-
-        serde_json::json!({
-            "path": self.path,
-            "modified": self.modified,
-            "latest": self.latest,
-            "audios": audios_json,
-        })
-    }
-
-    /// 扫描路径为 path 的文件夹
-    fn read_from_folder(path: impl AsRef<Path>) -> Result<Option<AudioFolder>, io::Error> {
-        let path = path.as_ref();
-
-        let dir = fs::read_dir(path)?;
-        let mut paths = Vec::new();
-        for item in dir {
-            let entry = item?;
-            if entry.file_type()?.is_file() {
-                let entry_path = entry.path();
-                if is_supported_audio_path(&entry_path) {
-                    // A supported path that cannot even be opened is not a
-                    // safely skippable "bad song". Treat it as an incomplete
-                    // scan so the previous index remains untouched.
-                    fs::File::open(&entry_path)?;
-                }
-                paths.push(entry_path);
-            }
-        }
-        let audios: Vec<Audio> = paths.par_iter().filter_map(Audio::read_from_path).collect();
-        let latest = audios.iter().map(|audio| audio.created).max().unwrap_or(0);
-
-        if !audios.is_empty() {
-            return Ok(Some(AudioFolder {
-                path: path.to_string_lossy().to_string(),
-                modified: fs::metadata(path)?
-                    .modified()?
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or(Duration::ZERO)
-                    .as_secs(),
-                latest,
-                audios,
-            }));
-        }
-
-        Ok(None)
-    }
-
-    /// 扫描路径为 path 的文件夹及其所有子文件夹。
-    fn read_from_folder_recursively(
-        folder: impl AsRef<Path>,
-        result: &mut Vec<Self>,
-        scaned_count: &mut u64,
-        total_count: &mut u64,
-        scaned_folders: &mut HashSet<String>,
-        sink: &StreamSink<IndexActionState>,
-    ) -> Result<(), io::Error> {
-        let folder = folder.as_ref();
-        if scaned_folders.contains(&folder.to_string_lossy().to_string()) {
-            return Ok(());
-        }
-
-        let dir = fs::read_dir(folder).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!(
-                    "INDEX_SCAN_INCOMPLETE|无法读取文件夹 {:?}；旧乐库未被覆盖：{}",
-                    folder, error
-                ),
-            )
-        })?;
-
-        let _ = sink.add(IndexActionState {
-            progress: *scaned_count as f64 / *total_count as f64,
-            message: String::from("正在扫描 ") + &folder.to_string_lossy(),
-        });
-
-        scaned_folders.insert(folder.to_string_lossy().to_string());
-        let mut subdirectories = Vec::new();
-        let mut files = Vec::new();
-        for item in dir {
-            let entry = item.map_err(|error| {
-                io::Error::new(
-                    error.kind(),
-                    format!(
-                        "INDEX_SCAN_INCOMPLETE|枚举文件夹 {:?} 时发生错误；旧乐库未被覆盖：{}",
-                        folder, error
-                    ),
-                )
-            })?;
-            let kind = entry.file_type().map_err(|error| {
-                io::Error::new(
-                    error.kind(),
-                    format!(
-                        "INDEX_SCAN_INCOMPLETE|无法读取项目类型 {:?}；旧乐库未被覆盖：{}",
-                        entry.path(),
-                        error
-                    ),
-                )
-            })?;
-            if kind.is_dir() {
-                subdirectories.push(entry.path());
-            } else if kind.is_file() {
-                files.push(entry.path());
-            }
-        }
-
-        for path in &files {
-            if is_supported_audio_path(path) {
-                fs::File::open(path).map_err(|error| {
-                    io::Error::new(
-                        error.kind(),
-                        format!(
-                            "INDEX_SCAN_INCOMPLETE|无法读取音频 {:?}；旧乐库未被覆盖：{}",
-                            path, error
-                        ),
-                    )
-                })?;
-            }
-        }
-
-        let audios: Vec<Audio> = files.par_iter().filter_map(Audio::read_from_path).collect();
-        let latest = audios.iter().map(|audio| audio.created).max().unwrap_or(0);
-
-        for subdirectory in subdirectories {
-            *total_count += 1;
-            Self::read_from_folder_recursively(
-                subdirectory,
-                result,
-                scaned_count,
-                total_count,
-                scaned_folders,
-                sink,
-            )?;
-        }
-
-        if !audios.is_empty() {
-            let modified = fs::metadata(folder)?.modified()?;
-            result.push(AudioFolder {
-                path: folder.to_string_lossy().to_string(),
-                modified: modified
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or(Duration::ZERO)
-                    .as_secs(),
-                latest,
-                audios,
-            });
-        }
-
-        *scaned_count += 1;
-        let _ = sink.add(IndexActionState {
-            progress: *scaned_count as f64 / *total_count as f64,
-            message: String::new(),
-        });
-
-        Ok(())
-    }
-}
-
 fn is_supported_audio_path(path: &Path) -> bool {
     if is_metadata_transaction_path(path) {
         return false;
@@ -1536,130 +1715,32 @@ pub fn build_index_from_folders_recursively(
     index_path: String,
     sink: StreamSink<IndexActionState>,
 ) -> Result<(), io::Error> {
-    let mut audio_folders: Vec<AudioFolder> = vec![];
-    let mut scaned: u64 = 0;
-    let mut total: u64 = folders.len() as u64;
-    let mut scaned_folders: HashSet<String> = HashSet::new();
-
-    for item in &folders {
-        AudioFolder::read_from_folder_recursively(
-            Path::new(item),
-            &mut audio_folders,
-            &mut scaned,
-            &mut total,
-            &mut scaned_folders,
-            &sink,
-        )?;
-    }
-
-    let mut audio_folders_json: Vec<serde_json::Value> = vec![];
-    for item in &audio_folders {
-        audio_folders_json.push(item.to_json_value());
-    }
-    let json_value = serde_json::json!({
-        "version": INDEX_VERSION,
-        "folders": audio_folders_json,
-    });
-
-    let mut index_path = PathBuf::from(index_path);
-    index_path.push("index.json");
-    write_index_json(&index_path, &json_value, false)?;
-
-    Ok(())
-}
-
-fn _update_index_below_1_1_0(
-    index: &serde_json::Value,
-    index_path: &Path,
-    sink: &StreamSink<IndexActionState>,
-) -> Result<(), io::Error> {
-    let mut audio_folders_json: Vec<serde_json::Value> = vec![];
-    let folders = index.as_array().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "legacy index must be an array")
-    })?;
-    let total = folders.len().max(1);
-    for item in folders {
-        let Some(path) = item["path"].as_str() else {
-            continue;
-        };
-        let _ = sink.add(IndexActionState {
-            progress: audio_folders_json.len() as f64 / total as f64,
-            message: String::from("正在扫描 ") + path,
-        });
-        let folder_path = Path::new(path);
-        if let Some(audio_folder) = AudioFolder::read_from_folder(folder_path).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!(
-                    "INDEX_SCAN_INCOMPLETE|迁移乐库时无法读取 {:?}；旧索引未被覆盖：{}",
-                    folder_path, error
-                ),
-            )
-        })? {
-            audio_folders_json.push(audio_folder.to_json_value());
+    let _guard = INDEX_REFRESH_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let path = PathBuf::from(index_path).join("index.json");
+    let previous = read_index_json(&path).ok();
+    let index = incremental_index::refresh(
+        previous
+            .as_ref()
+            .map(|(index, _)| index)
+            .filter(|index| index["folders"].is_array()),
+        &folders,
+        true,
+        &|path| Audio::read_from_path(path).map(|audio| audio.to_json_value()),
+        |progress| {
             let _ = sink.add(IndexActionState {
-                progress: audio_folders_json.len() as f64 / total as f64,
+                progress,
                 message: String::new(),
             });
-        }
-    }
+        },
+    )
+    .map_err(io::Error::other)?;
     write_index_json(
-        index_path,
-        &serde_json::json!({
-            "version": INDEX_VERSION,
-            "folders": audio_folders_json,
-        }),
-        false,
-    )?;
-
-    Ok(())
-}
-
-fn _rebuild_versioned_index(
-    index: &serde_json::Value,
-    index_path: &Path,
-    sink: &StreamSink<IndexActionState>,
-) -> Result<(), io::Error> {
-    let folders = index["folders"].as_array().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "index folders must be an array")
-    })?;
-    let mut audio_folders_json = Vec::with_capacity(folders.len());
-    let total = folders.len().max(1);
-
-    for item in folders {
-        let Some(path) = item["path"].as_str() else {
-            continue;
-        };
-        let _ = sink.add(IndexActionState {
-            progress: audio_folders_json.len() as f64 / total as f64,
-            message: String::from("正在重新读取歌曲信息 ") + path,
-        });
-        if let Some(audio_folder) = AudioFolder::read_from_folder(path).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!(
-                    "INDEX_SCAN_INCOMPLETE|重建乐库时无法读取 {:?}；旧索引未被覆盖：{}",
-                    path, error
-                ),
-            )
-        })? {
-            audio_folders_json.push(audio_folder.to_json_value());
-        }
-    }
-
-    write_index_json(
-        index_path,
-        &serde_json::json!({
-            "version": INDEX_VERSION,
-            "folders": audio_folders_json,
-        }),
-        false,
-    )?;
-    let _ = sink.add(IndexActionState {
-        progress: 1.0,
-        message: String::new(),
-    });
-    Ok(())
+        &path,
+        &index,
+        previous.is_some_and(|(_, recovered)| recovered),
+    )
 }
 
 fn needs_classification_backfill(audio: &serde_json::Value) -> bool {
@@ -1668,6 +1749,7 @@ fn needs_classification_backfill(audio: &serde_json::Value) -> bool {
 
 /// Backfill only newly supported tags. Keep old paths, order, timestamps and
 /// extension fields intact. A failed read remains pending for a later refresh.
+#[cfg(test)]
 fn apply_audio_index_update(
     previous: &mut serde_json::Value,
     audio: Option<Audio>,
@@ -1698,6 +1780,7 @@ fn apply_audio_index_update(
     true
 }
 
+#[cfg(test)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum IndexedPathState {
     Present,
@@ -1707,6 +1790,7 @@ enum IndexedPathState {
 /// `Path::exists` collapses access failures into `false`, which can erase a
 /// library on an offline drive. A path is considered missing only after its
 /// parent directory was enumerated successfully and the entry was absent.
+#[cfg(test)]
 fn indexed_path_state(path: &Path) -> io::Result<IndexedPathState> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(IndexedPathState::Present),
@@ -1738,6 +1822,7 @@ fn indexed_path_state(path: &Path) -> io::Result<IndexedPathState> {
     }
 }
 
+#[cfg(test)]
 fn retain_confirmed_index_paths(
     entries: &mut Vec<serde_json::Value>,
     description: &str,
@@ -1765,236 +1850,268 @@ fn retain_confirmed_index_paths(
     Ok(())
 }
 
-/// for Flutter   
-/// 读取 index_path/index.json，检查更新。不可能重新读取被修改的文件夹下所有的音乐标签，这样太耗时。  
-///
-/// [LOWEST_VERSION] 指定可以继承的 index 的最低版本。
-/// 如果 index version < [LOWEST_VERSION] 或者是 index 根本没有 version 再或者格式不符合要求，就转到
-/// [_update_index_below_1_1_0] 更新 index；
-/// 如果 index version >= [LOWEST_VERSION] 则进行更新。
-///
-/// 如果文件夹不存在，删除记录。  
-/// 如果文件夹被修改（再次读取到的 modified > 记录的 modified），就更新它。没有则跳过它
-/// 1. 遍历该文件夹索引，判断文件是否存在，不存在则删除记录
-/// 2. 遍历该文件夹索引，如果文件被修改（再次读取到的 modified > 记录的 modified），重新读取标签；没有则跳过它
-/// 3. 遍历该文件夹，添加新增（读取到的 created > 记录的 latest）的音乐文件
+/// Read-only recursive discovery plus size/nanosecond-time change detection.
+/// The complete result is committed atomically; failed enumeration leaves the
+/// old index intact. Full rebuilding is available through the separate API.
 pub fn update_index(index_path: String, sink: StreamSink<IndexActionState>) -> anyhow::Result<()> {
-    let mut index_path = PathBuf::from(index_path);
-    index_path.push("index.json");
-    let (mut index, recovered_from_backup) = read_index_json(&index_path)?;
-
-    let Some(version) = index["version"].as_u64() else {
-        if index.is_array() {
-            return Ok(_update_index_below_1_1_0(&index, &index_path, &sink)?);
-        }
-        return Ok(_rebuild_versioned_index(&index, &index_path, &sink)?);
+    let _guard = INDEX_REFRESH_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let path = PathBuf::from(index_path).join("index.json");
+    let (previous, recovered) = read_index_json(&path)?;
+    let legacy;
+    let previous = if previous.is_array() {
+        legacy = serde_json::json!({"folders": previous.as_array().unwrap().iter().map(|folder|
+            serde_json::json!({"path": folder["path"], "audios": []})).collect::<Vec<_>>()});
+        &legacy
+    } else {
+        &previous
     };
-    if version < INDEX_VERSION {
-        return Ok(_rebuild_versioned_index(&index, &index_path, &sink)?);
-    }
-
-    let schema_is_valid = index["folders"].as_array().is_some_and(|folders| {
-        folders.iter().all(|folder| {
-            folder["path"].as_str().is_some()
-                && folder["latest"].as_u64().is_some()
-                && folder["modified"].as_u64().is_some()
-                && folder["audios"].as_array().is_some_and(|audios| {
-                    audios.iter().all(|audio| {
-                        audio["path"].as_str().is_some() && audio["modified"].as_u64().is_some()
-                    })
-                })
-        })
-    });
-    if !schema_is_valid {
-        return Ok(_rebuild_versioned_index(&index, &index_path, &sink)?);
-    }
-
-    let folders = index["folders"]
-        .as_array_mut()
-        .ok_or_else(|| anyhow::anyhow!("index folders must be an array"))?;
-    // Only delete a folder whose absence was confirmed from an accessible
-    // parent. Permission/offline errors abort before write_index_json.
-    retain_confirmed_index_paths(folders, "音乐文件夹")?;
-
-    let mut updated = 0;
-    let total = folders.len().max(1);
-
-    for folder_item in folders.iter_mut() {
-        let Some(folder_path) = folder_item["path"].as_str().map(str::to_string) else {
-            continue;
-        };
-        let Some(latest) = folder_item["latest"].as_u64() else {
-            continue;
-        };
-        let Some(old_folder_modified) = folder_item["modified"].as_u64() else {
-            continue;
-        };
-
-        let new_folder_modified = fs::metadata(&folder_path)
-            .and_then(|value| value.modified())
-            .map(|value| {
-                value
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or(Duration::ZERO)
-                    .as_secs()
-            })
-            .map_err(|error| {
-                anyhow::anyhow!(
-                    "INDEX_SCAN_INCOMPLETE|无法读取音乐文件夹 {:?}；本轮索引未保存：{}",
-                    folder_path,
-                    error
-                )
-            })?;
-
-        let _ = sink.add(IndexActionState {
-            progress: updated as f64 / total as f64,
-            message: String::from("正在更新 ") + &folder_path,
-        });
-
-        folder_item["modified"] = serde_json::json!(new_folder_modified.max(old_folder_modified));
-
-        // A transient lock/access failure must keep every existing song.
-        let Some(audios) = folder_item["audios"].as_array_mut() else {
-            continue;
-        };
-        retain_confirmed_index_paths(audios, "歌曲文件")?;
-
-        let changed_paths: Vec<(usize, PathBuf, bool)> = audios
-            .iter()
-            .enumerate()
-            .map(|(index, audio_item)| -> anyhow::Result<Option<_>> {
-                let old_modified = audio_item["modified"]
-                    .as_u64()
-                    .ok_or_else(|| anyhow::anyhow!("INDEX_SCHEMA_INVALID|歌曲记录缺少修改时间"))?;
-                let audio_path = PathBuf::from(
-                    audio_item["path"]
-                        .as_str()
-                        .ok_or_else(|| anyhow::anyhow!("INDEX_SCHEMA_INVALID|歌曲记录缺少路径"))?,
-                );
-                let new_modified = fs::metadata(&audio_path)
-                    .and_then(|metadata| metadata.modified())
-                    .map_err(|error| {
-                        anyhow::anyhow!(
-                            "INDEX_SCAN_INCOMPLETE|无法读取歌曲属性 {:?}；本轮索引未保存：{}",
-                            audio_path,
-                            error
-                        )
-                    })?
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or(Duration::ZERO)
-                    .as_secs();
-                if new_modified > old_modified {
-                    Ok(Some((index, audio_path, false)))
-                } else if needs_classification_backfill(audio_item) {
-                    Ok(Some((index, audio_path, true)))
-                } else {
-                    Ok(None)
-                }
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-        let changed: Vec<(usize, Option<Audio>, bool)> = changed_paths
-            .par_iter()
-            .map(|(index, path, classification_only)| {
-                (*index, Audio::read_from_path(path), *classification_only)
-            })
-            .collect();
-        for (index, audio, classification_only) in changed {
-            apply_audio_index_update(&mut audios[index], audio, classification_only);
-        }
-
-        // 添加新增的音乐文件
-        let mut new_latest: u64 = latest;
-        let known_paths: HashSet<PathBuf> = audios
-            .iter()
-            .filter_map(|audio| audio["path"].as_str().map(PathBuf::from))
-            .collect();
-        let dir = fs::read_dir(&folder_path).map_err(|error| {
-            anyhow::anyhow!(
-                "INDEX_SCAN_INCOMPLETE|无法枚举音乐文件夹 {:?}；本轮索引未保存：{}",
-                folder_path,
-                error
-            )
-        })?;
-        let mut candidates = Vec::new();
-        for item in dir {
-            let entry = item.map_err(|error| {
-                anyhow::anyhow!(
-                    "INDEX_SCAN_INCOMPLETE|枚举音乐文件夹 {:?} 时发生错误；本轮索引未保存：{}",
-                    folder_path,
-                    error
-                )
-            })?;
-            let kind = entry.file_type().map_err(|error| {
-                anyhow::anyhow!(
-                    "INDEX_SCAN_INCOMPLETE|无法读取项目类型 {:?}；本轮索引未保存：{}",
-                    entry.path(),
-                    error
-                )
-            })?;
-            if !kind.is_file() {
-                continue;
-            }
-            let path = entry.path();
-            if known_paths.contains(&path) {
-                continue;
-            }
-            let metadata = entry.metadata().map_err(|error| {
-                anyhow::anyhow!(
-                    "INDEX_SCAN_INCOMPLETE|无法读取新文件属性 {:?}；本轮索引未保存：{}",
-                    path,
-                    error
-                )
-            })?;
-            let created = metadata
-                .created()
-                .or_else(|_| metadata.modified())
-                .map_err(|error| {
-                    anyhow::anyhow!(
-                        "INDEX_SCAN_INCOMPLETE|无法读取新文件时间 {:?}；本轮索引未保存：{}",
-                        path,
-                        error
-                    )
-                })?
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_secs();
-            candidates.push((path, created));
-        }
-        let new_audios: Vec<(u64, Option<Audio>)> = candidates
-            .par_iter()
-            .map(|(path, created)| (*created, Audio::read_from_path(path)))
-            .collect();
-        for (created, audio) in new_audios {
-            if let Some(audio) = audio {
-                new_latest = new_latest.max(created);
-                audios.push(audio.to_json_value());
-            }
-        }
-
-        folder_item["latest"] = serde_json::json!(new_latest);
-
-        updated += 1;
-        let _ = sink.add(IndexActionState {
-            progress: updated as f64 / total as f64,
-            message: String::new(),
-        });
-    }
-
-    folders.retain(|folder| {
-        folder["audios"]
-            .as_array()
-            .is_some_and(|audios| !audios.is_empty())
-    });
-    write_index_json(&index_path, &index, recovered_from_backup)?;
-
+    let roots = incremental_index::roots(previous)?;
+    let index = incremental_index::refresh(
+        Some(previous),
+        &roots,
+        previous["version"].as_u64() != Some(INDEX_VERSION),
+        &|path| Audio::read_from_path(path).map(|audio| audio.to_json_value()),
+        |progress| {
+            let _ = sink.add(IndexActionState {
+                progress,
+                message: String::new(),
+            });
+        },
+    )?;
+    write_index_json(&path, &index, recovered)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    // Explicitly opt-in: only a marker-bearing, workspace-local copy folder is
+    // accepted. No production music path is ever passed to a writer here.
+    #[test]
+    #[ignore = "isolated copy-only metadata compatibility probe"]
+    fn metadata_isolated_copies_probe() {
+        use std::collections::BTreeMap;
+        let allowed = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("tool")
+            .canonicalize()
+            .unwrap();
+        let root = PathBuf::from(
+            std::env::var_os("DAN_PLAYER_METADATA_COPY_DIR")
+                .expect("Set the explicit anonymous-copy directory under workspace tool"),
+        )
+        .canonicalize()
+        .unwrap();
+        assert!(root.starts_with(&allowed) && root != allowed);
+        assert_eq!(
+            std::fs::read_to_string(root.join(".qa-metadata-copies"))
+                .unwrap()
+                .trim_start_matches('\u{feff}')
+                .trim(),
+            "isolated-metadata-copies-v1"
+        );
+        let mut totals = BTreeMap::<String, usize>::new();
+        let mut payloads_verified = 0usize;
+        let mut windows_fields_match = 0usize;
+        let mut windows_fields_unavailable = 0usize;
+        let mut container_totals = BTreeMap::<String, usize>::new();
+        let mut windows_mismatches = BTreeMap::<String, usize>::new();
+        let mut entries: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let source = entry.path();
+            let name = entry.file_name().into_string().unwrap();
+            if !matches!(
+                source.extension().and_then(|ext| ext.to_str()),
+                Some("mp3" | "flac")
+            ) {
+                continue;
+            }
+            assert!(source
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .chars()
+                .all(|ch| ch.is_ascii_digit()));
+            assert!(!entry.file_type().unwrap().is_symlink());
+            assert_eq!(
+                source.canonicalize().unwrap().parent(),
+                Some(root.as_path())
+            );
+            let before_bytes = std::fs::read(&source).unwrap();
+            let container = if before_bytes.get(4..8) == Some(b"ftyp") {
+                "MP4"
+            } else if before_bytes.starts_with(b"fLaC") {
+                "FLAC"
+            } else {
+                "other"
+            };
+            *container_totals.entry(container.into()).or_default() += 1;
+            let result = super::update_audio_metadata(
+                source.to_string_lossy().into_owned(),
+                name.clone(),
+                "QA 独立副本测试".into(),
+                "QA Artist".into(),
+                "QA Album".into(),
+                None,
+            );
+            let code = result
+                .as_ref()
+                .err()
+                .map(|e| {
+                    e.to_string()
+                        .split('|')
+                        .next()
+                        .unwrap_or("UNKNOWN")
+                        .to_owned()
+                })
+                .unwrap_or_else(|| "OK".into());
+            *totals.entry(code.clone()).or_default() += 1;
+            if result.is_err() {
+                assert!(
+                    std::fs::read(&source).unwrap() == before_bytes,
+                    "failed edit changed copy id={name}"
+                );
+                println!("FAILED id={name} code={code}");
+            } else {
+                let after_bytes = std::fs::read(&source).unwrap();
+                assert!(
+                    copy_probe_audio_payloads(&before_bytes).expect("known copy audio layout")
+                        == copy_probe_audio_payloads(&after_bytes)
+                            .expect("known output audio layout"),
+                    "audio payload changed id={name}"
+                );
+                payloads_verified += 1;
+                let dos_path = source.to_string_lossy();
+                let dos_path = dos_path.strip_prefix(r"\\?\").unwrap_or(&dos_path);
+                match Audio::read_by_win_music_properties(dos_path, 0, 0) {
+                    Ok(properties)
+                        if properties.title == "QA 独立副本测试"
+                            && properties.artist == "QA Artist"
+                            && properties.album == "QA Album" =>
+                    {
+                        windows_fields_match += 1
+                    }
+                    Ok(properties) => {
+                        windows_fields_unavailable += 1;
+                        println!("WINDOWS_FIELDS_MISMATCH id={name}");
+                        let actual_type = probe_tagged_audio(&source, "test")
+                            .map(|file| format!("{:?}", file.file_type()))
+                            .unwrap_or_else(|_| "opaque-id3".into());
+                        let key = format!(
+                            "{actual_type}: title={} artist={} album={} artist_is_album_artist={}",
+                            properties.title == "QA 独立副本测试",
+                            properties.artist == "QA Artist",
+                            properties.album == "QA Album",
+                            properties.album_artist.as_deref() == Some(properties.artist.as_str())
+                        );
+                        *windows_mismatches.entry(key).or_default() += 1;
+                    }
+                    Err(error) => {
+                        windows_fields_unavailable += 1;
+                        if windows_fields_unavailable == 1 {
+                            println!("WINDOWS_PROPERTIES_UNAVAILABLE hresult={}", error.code().0);
+                        }
+                    }
+                }
+            }
+        }
+        println!(
+            "COPY_PROBE_SUMMARY {}",
+            serde_json::to_string(&totals).unwrap()
+        );
+        println!("AUDIO_PAYLOAD_BYTES_UNCHANGED {payloads_verified}");
+        println!("WINDOWS_FIELDS matched={windows_fields_match} unavailable_or_different={windows_fields_unavailable}");
+        println!(
+            "COPY_CONTAINERS {}",
+            serde_json::to_string(&container_totals).unwrap()
+        );
+        println!(
+            "WINDOWS_MISMATCH_DETAILS {}",
+            serde_json::to_string(&windows_mismatches).unwrap()
+        );
+    }
+
+    fn copy_probe_audio_payloads(bytes: &[u8]) -> Option<Vec<&[u8]>> {
+        if bytes.get(4..8) == Some(b"ftyp") {
+            let mut offset = 0usize;
+            let mut payloads = Vec::new();
+            while offset < bytes.len() {
+                let header = bytes.get(offset..offset.checked_add(8)?)?;
+                let length = u32::from_be_bytes(header[..4].try_into().ok()?);
+                let (length, header_length) = match length {
+                    0 => (bytes.len().checked_sub(offset)?, 8usize),
+                    1 => {
+                        let wide = bytes.get(offset.checked_add(8)?..offset.checked_add(16)?)?;
+                        (
+                            usize::try_from(u64::from_be_bytes(wide.try_into().ok()?)).ok()?,
+                            16,
+                        )
+                    }
+                    value => (value as usize, 8),
+                };
+                if length < header_length {
+                    return None;
+                }
+                let end = offset.checked_add(length)?;
+                if end > bytes.len() {
+                    return None;
+                }
+                if &header[4..8] == b"mdat" {
+                    payloads.push(bytes.get(offset.checked_add(header_length)?..end)?);
+                }
+                offset = end;
+            }
+            return (!payloads.is_empty()).then_some(payloads);
+        }
+        let offset = copy_probe_payload_offset(bytes)?;
+        Some(vec![&bytes[offset..]])
+    }
+
+    fn copy_probe_payload_offset(bytes: &[u8]) -> Option<usize> {
+        let mut offset = 0usize;
+        if bytes.get(..3)? == b"ID3" {
+            let size = bytes.get(6..10)?.iter().try_fold(0usize, |size, byte| {
+                if byte & 0x80 != 0 {
+                    None
+                } else {
+                    Some((size << 7) | *byte as usize)
+                }
+            })?;
+            offset = 10usize.checked_add(size)?;
+            if bytes[3] == 4 && bytes[5] & 0x10 != 0 {
+                offset = offset.checked_add(10)?;
+            }
+        }
+        if bytes.get(offset..offset.checked_add(4)?)? == b"fLaC" {
+            offset += 4;
+            loop {
+                let header = bytes.get(offset..offset.checked_add(4)?)?;
+                let size =
+                    (header[1] as usize) << 16 | (header[2] as usize) << 8 | header[3] as usize;
+                let last = header[0] & 0x80 != 0;
+                offset = offset.checked_add(4)?.checked_add(size)?;
+                if offset > bytes.len() {
+                    return None;
+                }
+                if last {
+                    return Some(offset);
+                }
+            }
+        }
+        // Preserve any tolerated bytes between ID3 and the first MPEG frame
+        // as part of the payload too; they need not themselves be a sync word.
+        (offset < bytes.len()).then_some(offset)
+    }
+
     use super::*;
 
     fn test_directory(name: &str) -> PathBuf {
@@ -2052,7 +2169,7 @@ mod tests {
         fs::write(path, bytes).unwrap();
     }
 
-    fn test_picture(picture_type: PictureType, red: u8) -> Picture {
+    pub(super) fn test_picture(picture_type: PictureType, red: u8) -> Picture {
         let source = image::ImageBuffer::from_pixel(2, 2, image::Rgb([red, 20u8, 30u8]));
         let mut encoded = Cursor::new(Vec::new());
         image::DynamicImage::ImageRgb8(source)
@@ -2062,6 +2179,393 @@ mod tests {
         let mut picture = Picture::from_reader(&mut encoded).unwrap();
         picture.set_pic_type(picture_type);
         picture
+    }
+
+    #[test]
+    fn metadata_writer_parse_failure_uses_bounded_raw_without_changing_picture() {
+        let directory = test_directory("metadata_utf16_picture");
+        let source = directory.join("source.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        let audio = fs::read(&source).unwrap();
+        let picture = test_picture(PictureType::CoverFront, 50);
+        let mut payload = vec![1];
+        payload.extend_from_slice(b"image/png\0\x03\xff\xfe\0\0");
+        payload.extend_from_slice(picture.data());
+        let syncsafe = |size: usize| {
+            [
+                ((size >> 21) & 127) as u8,
+                ((size >> 14) & 127) as u8,
+                ((size >> 7) & 127) as u8,
+                (size & 127) as u8,
+            ]
+        };
+        let mut original_frame = b"APIC".to_vec();
+        original_frame.extend_from_slice(&syncsafe(payload.len()));
+        original_frame.extend_from_slice(&[0, 0]);
+        original_frame.extend_from_slice(&payload);
+        let mut source_bytes = b"ID3\x04\0\0".to_vec();
+        source_bytes.extend_from_slice(&syncsafe(original_frame.len()));
+        source_bytes.extend_from_slice(&original_frame);
+        source_bytes.extend_from_slice(&audio);
+        fs::write(&source, &source_bytes).unwrap();
+        let before = probe_tagged_audio(&source, "test").unwrap();
+        let temporary = TransactionPath::copy_of(&source, "edit").unwrap();
+        let mut edit = before.primary_tag().unwrap().clone();
+        apply_tag_values(&mut edit, "Title", "Artist", "Album", None).unwrap();
+        save_edited_primary_tag(&edit, &source, temporary.path(), FileType::Mpeg, false).unwrap();
+        assert!(probe_tagged_audio(temporary.path(), "test")
+            .err()
+            .unwrap()
+            .to_string()
+            .starts_with("TAG_PARSE_UNSUPPORTED|"));
+        drop(temporary);
+        write_metadata_safely(&source, &source, "Title", "Artist", "Album", None).unwrap();
+        let after = fs::read(&source).unwrap();
+        assert_eq!(&after[10..10 + original_frame.len()], &original_frame);
+        assert_eq!(&after[copy_probe_payload_offset(&after).unwrap()..], &audio);
+        assert_eq!(
+            probe_tagged_audio(&source, "test")
+                .unwrap()
+                .primary_tag()
+                .unwrap()
+                .title()
+                .as_deref(),
+            Some("Title")
+        );
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn metadata_native_id3_decoded_frame_flags_keep_payload_and_other_flags() {
+        let directory = test_directory("metadata_frame_unsync");
+        let source = directory.join("source.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        let audio = fs::read(&source).unwrap();
+        let original = vec![0x31, 0xff, 0xe0, 0x32, 0xff, 0x00, 0xff];
+        let stored = vec![0x31, 0xff, 0x00, 0xe0, 0x32, 0xff, 0x00, 0x00, 0xff, 0x00];
+        let frame_size = stored.len() + 4;
+        let tag_size = frame_size + 10;
+        let mut bytes = vec![b'I', b'D', b'3', 4, 0, 0, 0, 0, 0, tag_size as u8];
+        bytes.extend_from_slice(b"XQA1");
+        bytes.extend_from_slice(&[0, 0, 0, frame_size as u8, 0x10, 0x03]);
+        bytes.extend_from_slice(&[0, 0, 0, original.len() as u8]);
+        bytes.extend_from_slice(&stored);
+        bytes.extend_from_slice(&audio);
+        fs::write(&source, &bytes).unwrap();
+        let before = probe_tagged_audio(&source, "test").unwrap();
+        let preserved = PreservedMetadata::capture(&before, TagType::Id3v2, false);
+        write_metadata_safely(&source, &source, "Title", "Artist", "Album", None).unwrap();
+        let after = probe_tagged_audio(&source, "test").unwrap();
+        assert!(preserved.verify(&after, TagType::Id3v2, false));
+        let result = fs::read(&source).unwrap();
+        let read = lofty::mpeg::MpegFile::read_from(&mut Cursor::new(&result), Default::default())
+            .unwrap();
+        let Frame::Binary(frame) = read
+            .id3v2()
+            .unwrap()
+            .get(&FrameId::Valid(std::borrow::Cow::Borrowed("XQA1")))
+            .unwrap()
+        else {
+            panic!("binary frame must remain binary")
+        };
+        assert_eq!(frame.data, original);
+        assert!(frame.flags().read_only);
+        assert!(!frame.flags().unsynchronisation);
+        assert!(frame.flags().data_length_indicator.is_none());
+        assert_eq!(
+            &result[copy_probe_payload_offset(&result).unwrap()..],
+            &audio
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn metadata_native_id3_rejects_compression_encryption_without_dropping_flags() {
+        for encrypted in [false, true] {
+            let mut tag = Id3v2Tag::new();
+            let mut frame = Frame::Binary(BinaryFrame::new(
+                FrameId::Valid(std::borrow::Cow::Borrowed("XQA1")),
+                vec![1, 2, 3],
+            ));
+            let mut flags = frame.flags();
+            flags.compression = !encrypted;
+            flags.encryption = encrypted.then_some(0x80);
+            flags.unsynchronisation = true;
+            flags.data_length_indicator = Some(3);
+            frame.set_flags(flags);
+            tag.insert(frame);
+            let before = tag.clone();
+            assert!(normalize_decoded_id3_flags(&mut tag)
+                .unwrap_err()
+                .to_string()
+                .starts_with("TAG_LAYOUT_UNSUPPORTED|"));
+            assert_eq!(tag, before);
+        }
+    }
+
+    #[test]
+    fn metadata_native_id3_decoded_global_unsync_keeps_binary_and_audio() {
+        for version in [3, 4] {
+            let directory = test_directory("metadata_global_unsync");
+            let source = directory.join("source.mp3");
+            write_minimal_mpeg_with_legacy_id3v1(&source);
+            let audio = fs::read(&source).unwrap();
+            let id = FrameId::Valid(std::borrow::Cow::Borrowed("XQA1"));
+            let binary = Frame::Binary(BinaryFrame::new(
+                id.clone(),
+                vec![0x31, 0xff, 0xe0, 0x32, 0xff, 0x00, 0xff],
+            ));
+            let mut tag = Id3v2Tag::new();
+            tag.set_title("Synthetic".into());
+            tag.insert(binary.clone());
+            let mut plain = Vec::new();
+            tag.dump_to(&mut plain, WriteOptions::default().use_id3v23(version == 3))
+                .unwrap();
+            let mut escaped = Vec::new();
+            for (index, byte) in plain[10..].iter().copied().enumerate() {
+                escaped.push(byte);
+                if byte == 0xff
+                    && plain
+                        .get(11 + index)
+                        .is_none_or(|next| *next == 0 || *next >= 0xe0)
+                {
+                    escaped.push(0);
+                }
+            }
+            let length = escaped.len();
+            let mut bytes = vec![
+                b'I',
+                b'D',
+                b'3',
+                version,
+                0,
+                0xa0,
+                ((length >> 21) & 127) as u8,
+                ((length >> 14) & 127) as u8,
+                ((length >> 7) & 127) as u8,
+                (length & 127) as u8,
+            ];
+            bytes.extend_from_slice(&escaped);
+            bytes.extend_from_slice(&audio);
+            fs::write(&source, &bytes).unwrap();
+            let before = probe_tagged_audio(&source, "test").unwrap();
+            let preserved = PreservedMetadata::capture(&before, TagType::Id3v2, false);
+            write_metadata_safely(&source, &source, "New title", "Artist", "Album", None).unwrap();
+            let after = probe_tagged_audio(&source, "test").unwrap();
+            assert!(preserved.verify(&after, TagType::Id3v2, false));
+            let result_bytes = fs::read(&source).unwrap();
+            let mut reader = Cursor::new(&result_bytes);
+            let read = lofty::mpeg::MpegFile::read_from(&mut reader, Default::default()).unwrap();
+            let read_tag = read.id3v2().unwrap();
+            assert!(!read_tag.flags().unsynchronisation);
+            assert!(read_tag.flags().experimental);
+            assert_eq!(read_tag.get(&id), Some(&binary));
+            assert_eq!(
+                &result_bytes[copy_probe_payload_offset(&result_bytes).unwrap()..],
+                &audio
+            );
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn metadata_native_id3_keeps_language_descriptors_and_legacy_lyrics() {
+        use lofty::id3::v2::{CommentFrame, UnsynchronizedTextFrame};
+        use lofty::TextEncoding;
+        for legacy_language in [false, true] {
+            let directory = test_directory("metadata_id3_language");
+            let source = directory.join("source.mp3");
+            write_minimal_mpeg_with_legacy_id3v1(&source);
+            let mut native = Id3v2Tag::new();
+            native.set_title("Synthetic title".into());
+            native.insert(Frame::Comment(CommentFrame::new(
+                TextEncoding::UTF8,
+                *b"zho",
+                "description".into(),
+                "First\0Second".into(),
+            )));
+            native.insert(Frame::UnsynchronizedText(UnsynchronizedTextFrame::new(
+                TextEncoding::UTF8,
+                *b"jpn",
+                "original".into(),
+                "Synthetic lyric".into(),
+            )));
+            native.insert_picture(test_picture(PictureType::CoverBack, 120));
+            if legacy_language {
+                native.insert(Frame::Binary(BinaryFrame::new(
+                    FrameId::Valid(std::borrow::Cow::Borrowed("USLT")),
+                    b"\x03   \0Legacy synthetic lyric".to_vec(),
+                )));
+            }
+            native
+                .save_to_path(&source, WriteOptions::default())
+                .unwrap();
+            let before = probe_tagged_audio(&source, "test").unwrap();
+            let preserved = PreservedMetadata::capture(&before, TagType::Id3v2, false);
+            write_metadata_safely(&source, &source, "New title", "Artist", "Album", None).unwrap();
+            let after = probe_tagged_audio(&source, "test").unwrap();
+            assert!(preserved.verify(&after, TagType::Id3v2, false));
+            assert_eq!(
+                after
+                    .primary_tag()
+                    .unwrap()
+                    .get(&ItemKey::Comment)
+                    .unwrap()
+                    .lang(),
+                b"zho"
+            );
+            assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn metadata_cover_edit_keeps_back_cover_and_untouched_lyrics() {
+        let directory = test_directory("metadata_native_cover");
+        let source = directory.join("source.mp3");
+        let cover = directory.join("cover.png");
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        let mut tag = Id3v2Tag::new();
+        tag.set_title("Fixture".into());
+        let old_front = test_picture(PictureType::CoverFront, 40);
+        let back = test_picture(PictureType::CoverBack, 80);
+        tag.insert_picture(old_front);
+        tag.insert_picture(back.clone());
+        tag.insert(Frame::UnsynchronizedText(
+            lofty::id3::v2::UnsynchronizedTextFrame::new(
+                lofty::TextEncoding::UTF8,
+                *b"kor",
+                "original".into(),
+                "Only synthetic lyric".into(),
+            ),
+        ));
+        tag.save_to_path(&source, WriteOptions::default()).unwrap();
+        let replacement = test_picture(PictureType::CoverFront, 180);
+        fs::write(&cover, replacement.data()).unwrap();
+        write_metadata_safely(&source, &source, "New", "Artist", "Album", cover.to_str()).unwrap();
+        let after = probe_tagged_audio(&source, "test").unwrap();
+        let primary = after.primary_tag().unwrap();
+        assert_eq!(
+            primary
+                .get_picture_type(PictureType::CoverBack)
+                .unwrap()
+                .data(),
+            back.data()
+        );
+        assert_eq!(
+            primary
+                .get_picture_type(PictureType::CoverFront)
+                .unwrap()
+                .data(),
+            replacement.data()
+        );
+        assert_eq!(primary.get(&ItemKey::Lyrics).unwrap().lang(), b"kor");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn metadata_actual_asf_container_is_not_reported_as_damaged_mp3() {
+        let directory = test_directory("metadata_asf");
+        let source = directory.join("mislabeled.mp3");
+        let signature = [
+            0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62,
+            0xce, 0x6c,
+        ];
+        fs::write(&source, signature).unwrap();
+        let error =
+            write_metadata_safely(&source, &source, "New", "Artist", "Album", None).unwrap_err();
+        assert!(error.to_string().starts_with("TAG_FORMAT_UNSUPPORTED|"));
+        assert!(!error.to_string().contains("损坏"));
+        assert_eq!(fs::read(&source).unwrap(), signature);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn metadata_case_only_rename_is_not_an_existing_target_collision() {
+        let directory = test_directory("metadata_case_rename");
+        let source = directory.join("source.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        let result = update_audio_metadata(
+            source.to_string_lossy().into_owned(),
+            "SOURCE.MP3".into(),
+            "Title".into(),
+            "Artist".into(),
+            "Album".into(),
+            None,
+        )
+        .unwrap();
+        assert!(result.ends_with("SOURCE.MP3"));
+        assert_eq!(
+            fs::read_dir(&directory)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .file_name(),
+            "SOURCE.MP3"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn metadata_sharing_violation_keeps_source_and_reports_busy() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = test_directory("metadata_busy");
+        let source = directory.join("source.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        let before = fs::read(&source).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&source)
+            .unwrap();
+        let error =
+            write_metadata_safely(&source, &source, "New", "Artist", "Album", None).unwrap_err();
+        assert!(error.to_string().starts_with("TAG_FILE_BUSY|"));
+        assert_eq!(fs::read(&source).unwrap(), before);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        drop(held);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn metadata_transaction_does_not_overwrite_a_late_target() {
+        let directory = test_directory("metadata_late_target");
+        let source = directory.join("source.mp3");
+        let target = directory.join("late.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        let before = fs::read(&source).unwrap();
+        fs::write(&target, b"unrelated late target").unwrap();
+        let error =
+            write_metadata_safely(&source, &target, "New", "Artist", "Album", None).unwrap_err();
+        assert!(error.to_string().contains("已恢复原文件"));
+        assert_eq!(fs::read(&source).unwrap(), before);
+        assert_eq!(fs::read(&target).unwrap(), b"unrelated late target");
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 2);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn metadata_long_unicode_filename_does_not_overflow_transaction_basename() {
+        let directory = test_directory("metadata_long_name");
+        let source = directory.join(format!("{}.mp3", "字".repeat(220)));
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        write_metadata_safely(&source, &source, "New", "Artist", "Album", None).unwrap();
+        assert_eq!(
+            probe_tagged_audio(&source, "test")
+                .unwrap()
+                .primary_tag()
+                .unwrap()
+                .title()
+                .as_deref(),
+            Some("New")
+        );
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

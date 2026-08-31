@@ -9,6 +9,8 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "desktop_integration.cpp"
   "flutter_window.cpp"
+  "installer_launch_core.cpp"
+  "installer_launcher.cpp"
   "main.cpp"
   "utils.cpp"
   "window_backdrop.cpp"
@@ -46,11 +48,27 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib" "uuid.lib"
-  "gdi32.lib" "advapi32.lib")
+  "gdi32.lib" "advapi32.lib" "bcrypt.lib" "crypt32.lib" "wintrust.lib" "version.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+add_executable(installer_launch_test EXCLUDE_FROM_ALL
+  "tests/installer_launch_test.cpp"
+  "tests/installer_launch_fixture.rc"
+  "installer_launch_core.cpp"
+)
+target_compile_definitions(installer_launch_test PRIVATE "NOMINMAX")
+target_link_libraries(installer_launch_test PRIVATE
+  "bcrypt.lib" "crypt32.lib" "wintrust.lib" "version.lib" "shell32.lib")
+if(MSVC)
+  target_compile_options(installer_launch_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(installer_launch_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests"
+)
 
 # Capability/fallback tests have no Win32/Flutter dependencies. Keep their
 # executable outside runner/Release so it never enters the portable app package.
@@ -152,6 +170,20 @@ set_target_properties(desktop_integration_policy_test PROPERTIES
 
 add_executable(window_resize_policy_test EXCLUDE_FROM_ALL
   "tests/window_resize_policy_test.cpp"
+)
+
+add_executable(window_corner_region_test EXCLUDE_FROM_ALL
+  "tests/window_corner_region_test.cpp"
+)
+target_compile_definitions(window_corner_region_test PRIVATE "NOMINMAX")
+target_link_libraries(window_corner_region_test PRIVATE "user32.lib" "gdi32.lib")
+if(MSVC)
+  target_compile_options(window_corner_region_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(window_corner_region_test PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/window_tests"
 )
 target_compile_definitions(window_resize_policy_test PRIVATE "NOMINMAX")
 set_target_properties(window_resize_policy_test PROPERTIES

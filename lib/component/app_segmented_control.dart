@@ -31,6 +31,7 @@ class AppSegmentedControl<T> extends StatelessWidget {
     required this.onChanged,
     this.maxWidth,
     this.compact = false,
+    this.showLabels = true,
     this.semanticLabel,
   }) : assert(options.length >= 2);
 
@@ -39,6 +40,9 @@ class AppSegmentedControl<T> extends StatelessWidget {
   final ValueChanged<T>? onChanged;
   final double? maxWidth;
   final bool compact;
+
+  /// Icon-only segments retain translated tooltips and accessibility labels.
+  final bool showLabels;
   final String? semanticLabel;
 
   void _select(T next) {
@@ -64,11 +68,13 @@ class AppSegmentedControl<T> extends StatelessWidget {
       maxLines: 1,
     );
     var widestSegment = 44.0;
-    for (final option in options) {
-      painter.text = TextSpan(text: option.label, style: textStyle);
-      painter.layout();
-      widestSegment =
-          math.max(widestSegment, painter.width.ceilToDouble() + 56);
+    if (showLabels) {
+      for (final option in options) {
+        painter.text = TextSpan(text: option.label, style: textStyle);
+        painter.layout();
+        widestSegment =
+            math.max(widestSegment, painter.width.ceilToDouble() + 56);
+      }
     }
     painter.dispose();
     // Material gives each segment the widest child's intrinsic width.
@@ -113,15 +119,21 @@ class AppSegmentedControl<T> extends StatelessWidget {
               for (final option in options)
                 ButtonSegment<T>(
                   value: option.value,
+                  tooltip: showLabels ? null : option.label,
                   // The built-in icon path replaces our symmetric padding
                   // with TextButton.icon's asymmetric, scale-dependent one.
                   // A single label group retains the intended center/spacing.
                   label: ConstrainedBox(
                     constraints: BoxConstraints(minHeight: minimumLabelHeight),
-                    child: AppToolbarLabel(
-                        label: option.label,
-                        icon: option.icon,
-                        labelKey: option.key),
+                    child: showLabels
+                        ? AppToolbarLabel(
+                            label: option.label,
+                            icon: option.icon,
+                            labelKey: option.key)
+                        : Icon(option.icon,
+                            key: option.key,
+                            size: appToolbarIconSize,
+                            semanticLabel: option.label),
                   ),
                 ),
             ],

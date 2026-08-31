@@ -236,7 +236,7 @@ foreach ($inputDirectory in @($MainReleaseDirectory, $DesktopLyricReleaseDirecto
 
 $versionLine = Get-Content -LiteralPath (Join-Path $repositoryRoot 'pubspec.yaml') |
     Where-Object { $_ -match '^version:\s*' } | Select-Object -First 1
-if (-not $versionLine -or $versionLine -notmatch '^version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9]+)?)\s*$') {
+if (-not $versionLine -or $versionLine -notmatch '^version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9]+)?)\s*$') {
     throw 'A plain semantic version is required in pubspec.yaml for release packaging.'
 }
 $version = $Matches[1]
@@ -326,6 +326,7 @@ try {
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\lyric-emphasis-spectrum-notes.md') (Join-Path $payloadDirectory 'lyric-emphasis-spectrum-notes.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\online-sources.md') (Join-Path $payloadDirectory 'online-sources.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\song-comments-notes.md') (Join-Path $payloadDirectory 'song-comments-notes.md')
+    Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\application-updates.md') (Join-Path $payloadDirectory 'APPLICATION-UPDATES.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\desktop-experience-26.0.3.md') (Join-Path $payloadDirectory 'DESKTOP-EXPERIENCE.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\settings-backgrounds.md') (Join-Path $payloadDirectory 'SETTINGS-BACKGROUNDS.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\lyric-experience-26.0.3.md') (Join-Path $payloadDirectory 'LYRIC-EXPERIENCE.md')
