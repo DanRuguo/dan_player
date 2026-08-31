@@ -3,6 +3,8 @@
 #include <cmath>
 #include <iostream>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -176,11 +178,21 @@ int Run(int argc, wchar_t** argv) {
   HDC dc = CreateCompatibleDC(nullptr);
   if(!font||!dc)return Fail(9,"Cannot create font selection probe");
   const auto previous = SelectObject(dc,font);
-  wchar_t actual[128]{}; GetTextFaceW(dc,128,actual);
-  const bool exact = std::wstring(actual) == family && std::wstring(actual) == L".萍方-简";
+  wchar_t actual[128]{};
+  const bool exact = GetTextFaceW(dc,128,actual)>0 && _wcsicmp(actual,family)==0;
+  // The embedded family has localized names. Verify its realized font bytes,
+  // not a Chinese display name that an English Windows worker need not return.
+  std::ifstream input(fs::path(argv[1]),std::ios::binary);
+  const std::vector<unsigned char> expected((std::istreambuf_iterator<char>(input)),{});
+  const DWORD native_size=GetFontData(dc,0,0,nullptr,0);
+  if(expected.empty()||native_size!=expected.size())
+    return Fail(9,"Realized GDI font length differs from the embedded asset");
+  std::vector<unsigned char> native_bytes(native_size);
+  const bool bytes_match=GetFontData(dc,0,0,native_bytes.data(),native_size)==native_size &&
+      native_bytes==expected;
   SelectObject(dc,previous); DeleteObject(font); DeleteDC(dc);
-  if (!exact) return Fail(9,"Actual private font family is not .萍方-简");
-  ++passed; std::cout << "PASS actual private font family selected by GDI\n";
+  if (!exact||!bytes_match) return Fail(9,"Realized GDI font does not match the embedded asset");
+  ++passed; std::cout << "PASS actual GDI font family and bytes match the embedded asset\n";
   // VCL owns each button's bold font. Styling and teardown must borrow that
   // exact HFONT, including when a primary button is restyled as secondary.
   current_case="borrowed bold font";
