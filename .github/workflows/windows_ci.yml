@@ -30,6 +30,21 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test native installer transactions and update handoff
+        run: |
+          & .\scripts\verify_installer_native.ps1 -BuildDirectory (Join-Path $env:GITHUB_WORKSPACE 'tool\qa-installer\build')
+
+      - name: Preserve native installer failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: installer-native-diagnostics-${{ github.sha }}
+          path: |
+            tool/qa-installer/build/native-gate-*.log
+            tool/qa-installer/build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Set up Flutter 3.47.1
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -119,10 +134,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native tray atomic-paint/clipping/lifetime tests failed.' }
           & .\build\windows\x64\desktop_tests\Release\installer_launch_test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Installer verification/handshake tests failed.' }
-
-      - name: Test native installer transactions and update handoff
-        run: |
-          & .\scripts\verify_installer_native.ps1 -BuildDirectory (Join-Path $env:GITHUB_WORKSPACE 'tool\qa-installer\build')
 
       - name: Build desktop lyrics release
         working-directory: third_party/desktop_lyric
