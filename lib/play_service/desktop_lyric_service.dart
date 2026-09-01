@@ -463,7 +463,7 @@ class DesktopLyricService extends ChangeNotifier {
     lastError = error;
     isLocked = false;
     notifyListeners();
-    showTextOnSnackBar('桌面歌词启动失败：$error');
+    showTextOnSnackBar('桌面歌词启动失败：{0}', arguments: [error]);
   }
 
   Future<bool> get canSendMessage async => isRunning;

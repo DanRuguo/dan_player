@@ -102,22 +102,37 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
     try {
       final selected = await showAppDialog<Audio>(
           context: context,
-          builder: (context) => AlertDialog(
-                title: AppDialogTitle(ui('播放列表')),
-                content: SizedBox(
-                    width: 480,
-                    height:
-                        math.min(360, MediaQuery.sizeOf(context).height * .5),
-                    child: CurrentPlaylistView(
-                        showTitle: false,
-                        onOpenDetails: (audio) =>
-                            Navigator.pop(context, audio))),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text(ui('关闭')))
-                ],
-              ));
+          builder: (context) {
+            final size = MediaQuery.sizeOf(context);
+            final contentWidth =
+                math.min(520.0, math.max(160.0, size.width - 88));
+            final contentHeight =
+                math.min(440.0, math.max(160.0, size.height - 220));
+            return AlertDialog(
+              key: const ValueKey('current-playlist-dialog'),
+              insetPadding: const EdgeInsets.all(16),
+              titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+              contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              title: const _QueueDialogTitle(),
+              content: SizedBox(
+                width: contentWidth,
+                height: contentHeight,
+                child: CurrentPlaylistView(
+                  showTitle: false,
+                  onOpenDetails: (audio) => Navigator.pop(context, audio),
+                ),
+              ),
+              actions: [
+                TextButton.icon(
+                  key: const ValueKey('close-current-playlist'),
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Symbols.close),
+                  label: Text(ui('关闭')),
+                )
+              ],
+            );
+          });
       if (mounted && selected != null) {
         context.push(app_paths.AUDIO_DETAIL_PAGE, extra: selected);
       }
@@ -198,6 +213,55 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
               ),
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _QueueDialogTitle extends StatelessWidget {
+  const _QueueDialogTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    final playback = PlayService.instance.playbackService;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return ValueListenableBuilder<List<Audio>>(
+      valueListenable: playback.playlist,
+      builder: (context, queue, _) => AppDialogTitle(
+        ui('播放列表'),
+        style: theme.textTheme.titleLarge?.copyWith(
+          color: scheme.onSurface,
+          fontWeight: FontWeight.w700,
+        ),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer.withValues(alpha: .82),
+            borderRadius: AppShape.controlRadius,
+          ),
+          child: Icon(Symbols.queue_music,
+              size: 22, color: scheme.onPrimaryContainer),
+        ),
+        trailing: Container(
+          constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: scheme.secondaryContainer.withValues(alpha: .72),
+            borderRadius: AppShape.controlRadius,
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            '${queue.length}',
+            maxLines: 1,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: scheme.onSecondaryContainer,
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
         ),
       ),
     );

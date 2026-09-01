@@ -95,6 +95,30 @@ class _CompactLyricViewState extends State<CompactLyricView>
       future: widget.trackIdentity == null ? null : widget.lyricFuture,
       builder: (context, snapshot) {
         final frame = _resolve(snapshot);
+        // Only application-owned status text is translated. Actual lyric
+        // content stays byte-for-byte unchanged even when it happens to equal
+        // a catalog key such as “播放”.
+        final primary = frame.status == CompactLyricStatus.active
+            ? frame.primary
+            : ui(frame.primary);
+        final secondary =
+            frame.secondaryKind == CompactLyricSecondary.information
+                ? ui(frame.secondary)
+                : frame.secondary;
+        final displaySecondary = frame.secondary.isEmpty
+            ? ''
+            : frame.secondaryKind == CompactLyricSecondary.nextLine
+                ? ui('下一句 · {0}', [frame.secondary])
+                : secondary;
+        final secondaryLabel = switch (frame.secondaryKind) {
+          CompactLyricSecondary.translation => ui('译文'),
+          CompactLyricSecondary.nextLine => ui('下一句'),
+          CompactLyricSecondary.firstLine => ui('首句'),
+          _ => '',
+        };
+        final fullText = secondary.isEmpty
+            ? primary
+            : '$primary\n${secondaryLabel.isEmpty ? '' : '$secondaryLabel：'}$secondary';
         final scheme = Theme.of(context).colorScheme;
         final highContrast =
             (MediaQuery.maybeHighContrastOf(context) ?? false) ||
@@ -108,11 +132,11 @@ class _CompactLyricViewState extends State<CompactLyricView>
         final content = Semantics(
           key: ValueKey(frame.identity),
           label: frame.status == CompactLyricStatus.active
-              ? ui("当前歌词：{0}", [frame.fullText])
-              : frame.fullText,
+              ? ui("当前歌词：{0}", [fullText])
+              : fullText,
           child: ExcludeSemantics(
             child: Tooltip(
-              message: frame.fullText,
+              message: fullText,
               excludeFromSemantics: true,
               child: SizedBox(
                 width: double.infinity,
@@ -123,7 +147,7 @@ class _CompactLyricViewState extends State<CompactLyricView>
                       height: primaryHeight,
                       child: Text(
                         key: const ValueKey('compact-lyric-primary'),
-                        frame.primary,
+                        primary,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -142,7 +166,7 @@ class _CompactLyricViewState extends State<CompactLyricView>
                       height: secondaryHeight,
                       child: Text(
                         key: const ValueKey('compact-lyric-secondary'),
-                        frame.displaySecondary,
+                        displaySecondary,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,

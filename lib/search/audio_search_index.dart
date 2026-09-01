@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math';
 
 import 'package:dan_player/library/audio_library.dart';
@@ -58,7 +59,14 @@ class AudioSearchIndex {
       ..clear()
       ..addAll([for (final item in albums) _NameEntry(item, item.name)]);
     _builtRevision = revision;
+    // Entries retain the shared keys they need. The interning map exists only
+    // to avoid repeating pinyin work while a snapshot is being assembled.
+    _SearchKeys.clearCache();
   }
+
+  int get debugCachedSearchKeyCount => _SearchKeys.cachedCount;
+
+  int get debugSearchKeyCacheLimit => _SearchKeys.cacheLimit;
 
   void _buildSync() {
     final library = AudioLibrary.instance;
@@ -200,19 +208,37 @@ class _SearchKeys {
   final String fullPinyin;
   final String initials;
 
-  static final Map<String, _SearchKeys> _cache = {};
+  static const int cacheLimit = 8192;
+  static final LinkedHashMap<String, _SearchKeys> _cache = LinkedHashMap();
   static final RegExp _nonAlphanumeric = RegExp(r"[^a-z0-9]");
 
-  factory _SearchKeys.of(String text) => _cache.putIfAbsent(text, () {
-        final raw = text.toLowerCase();
-        final compact = raw.replaceAll(RegExp(r"\s+"), "");
-        return _SearchKeys._(
-          raw,
-          compact,
-          _toFullPinyin(text, compact),
-          _toInitials(text),
-        );
-      });
+  factory _SearchKeys.of(String text) {
+    final cached = _cache.remove(text);
+    if (cached != null) {
+      _cache[text] = cached;
+      return cached;
+    }
+
+    final created = _SearchKeys._fromText(text);
+    _cache[text] = created;
+    if (_cache.length > cacheLimit) _cache.remove(_cache.keys.first);
+    return created;
+  }
+
+  factory _SearchKeys._fromText(String text) {
+    final raw = text.toLowerCase();
+    final compact = raw.replaceAll(RegExp(r"\s+"), "");
+    return _SearchKeys._(
+      raw,
+      compact,
+      _toFullPinyin(text, compact),
+      _toInitials(text),
+    );
+  }
+
+  static int get cachedCount => _cache.length;
+
+  static void clearCache() => _cache.clear();
 
   static String _toFullPinyin(String text, String compact) {
     if (text.isEmpty || !ChineseHelper.containsChinese(text)) return "";

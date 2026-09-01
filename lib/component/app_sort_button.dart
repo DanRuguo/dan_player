@@ -112,6 +112,16 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
 
   bool get _enabled => widget.enabled && widget.options.isNotEmpty;
   bool get _current => widget.isCurrent?.call() ?? true;
+
+  String _localizedHelpText(String text) {
+    final complete = ui(text);
+    if (complete != text || !text.contains('\n')) return complete;
+    // Callers compose the footer from independently catalogued notes. Looking
+    // up the joined string would otherwise fall back to Chinese in non-Chinese
+    // interfaces even though every individual line has a translation.
+    return text.split('\n').map(ui).join('\n');
+  }
+
   bool get _needsScrollHint {
     final rowCount = widget.options.length +
         widget.options
@@ -246,7 +256,8 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
         enabled: false,
         height: 48,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Text(ui(text), style: Theme.of(context).textTheme.bodySmall),
+        child: Text(_localizedHelpText(text),
+            style: Theme.of(context).textTheme.bodySmall),
       ));
     }
     return items;

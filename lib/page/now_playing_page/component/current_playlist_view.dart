@@ -1,10 +1,13 @@
 import 'package:dan_player/app_paths.dart' as app_paths;
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
+import 'package:dan_player/component/audio_artwork.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -12,60 +15,107 @@ import 'package:desktop_lyric/ui_language.dart';
 
 class CurrentPlaylistView extends StatefulWidget {
   const CurrentPlaylistView(
-      {super.key, this.showTitle = true, this.onOpenDetails});
+      {super.key,
+      this.showTitle = true,
+      this.onOpenDetails,
+      this.playbackService});
 
   final bool showTitle;
   final ValueChanged<Audio>? onOpenDetails;
+
+  /// Keeps the production view on the singleton while allowing its shared
+  /// presentation to be exercised without creating a native audio device.
+  @visibleForTesting
+  final PlaybackService? playbackService;
 
   @override
   State<CurrentPlaylistView> createState() => _CurrentPlaylistViewState();
 }
 
 class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
-  final playbackService = PlayService.instance.playbackService;
+  late PlaybackService playbackService;
   late final ScrollController scrollController;
   int? _lastIndex;
   double _rowHeight = 0;
   bool _alignQueued = false;
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final measured = MediaQuery.textScalerOf(context).scale(14) * 2.8 + 16;
-    final next = measured < 56 ? 56.0 : measured;
-    if (_rowHeight == next) return;
-    _rowHeight = next;
+  PlaybackService _resolvePlaybackService() =>
+      widget.playbackService ?? PlayService.instance.playbackService;
+
+  double _alignmentOffset(int index) {
+    if (!scrollController.hasClients || index < 0) return 0;
+    final position = scrollController.position;
+    final centered = index * _rowHeight -
+        (position.viewportDimension - _rowHeight).clamp(0.0, double.infinity) /
+            2;
+    return centered.clamp(0.0, position.maxScrollExtent);
+  }
+
+  void _scheduleAlignment({bool animate = true, bool force = false}) {
+    final queue = playbackService.playlist.value;
+    final index = queue.isEmpty ? -1 : playbackService.playlistIndex;
+    if (!force && _lastIndex == index) return;
+    _lastIndex = index;
     if (_alignQueued) return;
     _alignQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _alignQueued = false;
       if (!mounted || !scrollController.hasClients) return;
-      scrollController.jumpTo((playbackService.playlistIndex * _rowHeight)
-          .clamp(0.0, scrollController.position.maxScrollExtent));
+      final latestQueue = playbackService.playlist.value;
+      if (latestQueue.isEmpty) return;
+      final target = _alignmentOffset(playbackService.playlistIndex);
+      final reduced = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+      if (animate && !reduced) {
+        scrollController.animateTo(
+          target,
+          duration: AppMotion.standard,
+          curve: AppMotion.standardCurve,
+        );
+      } else {
+        scrollController.jumpTo(target);
+      }
     });
   }
 
-  void _toNowPlaying() {
-    if (_lastIndex == playbackService.playlistIndex) return;
-    _lastIndex = playbackService.playlistIndex;
-    if (scrollController.hasClients) {
-      scrollController.animateTo(
-        (playbackService.playlistIndex * _rowHeight)
-            .clamp(0.0, scrollController.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.fastOutSlowIn,
-      );
-    }
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final textTheme = Theme.of(context).textTheme;
+    final scaler = MediaQuery.textScalerOf(context);
+    final measured = scaler.scale(textTheme.bodyLarge?.fontSize ?? 16) * 1.35 +
+        scaler.scale(textTheme.bodyMedium?.fontSize ?? 14) * 1.35 +
+        34;
+    final next = measured < 72 ? 72.0 : measured;
+    if (_rowHeight == next) return;
+    _rowHeight = next;
+    _scheduleAlignment(animate: false, force: true);
   }
+
+  void _toNowPlaying() => _scheduleAlignment();
 
   @override
   void initState() {
     super.initState();
-    _lastIndex = playbackService.playlistIndex;
-    scrollController = ScrollController(
-      initialScrollOffset: playbackService.playlistIndex * 56.0,
-    );
+    playbackService = _resolvePlaybackService();
+    _lastIndex = playbackService.playlist.value.isEmpty
+        ? -1
+        : playbackService.playlistIndex;
+    scrollController = ScrollController();
     playbackService.addListener(_toNowPlaying);
+    playbackService.playlist.addListener(_toNowPlaying);
+  }
+
+  @override
+  void didUpdateWidget(covariant CurrentPlaylistView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final next = _resolvePlaybackService();
+    if (identical(next, playbackService)) return;
+    playbackService.removeListener(_toNowPlaying);
+    playbackService.playlist.removeListener(_toNowPlaying);
+    playbackService = next;
+    playbackService.addListener(_toNowPlaying);
+    playbackService.playlist.addListener(_toNowPlaying);
+    _scheduleAlignment(animate: false, force: true);
   }
 
   @override
@@ -75,45 +125,67 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
 
     return Material(
       type: MaterialType.transparency,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (widget.showTitle)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Text(
-                ui("播放列表"),
-                style: TextStyle(
-                  color: scheme.onSecondaryContainer,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
+      child: ListenableBuilder(
+        listenable: Listenable.merge([
+          playbackService,
+          playbackService.playlist,
+          OnlineLibrary.instance,
+        ]),
+        builder: (context, _) {
+          final queue = playbackService.playlist.value;
+          final nowPlaying = playbackService.nowPlaying;
+          final candidateIndex = playbackService.playlistIndex;
+          final currentIndex = nowPlaying != null &&
+                  candidateIndex >= 0 &&
+                  candidateIndex < queue.length &&
+                  queue[candidateIndex].path == nowPlaying.path
+              ? candidateIndex
+              : -1;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (widget.showTitle)
+                _PlaylistHeader(
+                  count: queue.length,
+                  currentIndex: currentIndex,
+                ),
+              Expanded(
+                child: Container(
+                  margin: EdgeInsets.fromLTRB(
+                      widget.showTitle ? 8 : 0, 4, widget.showTitle ? 8 : 0, 0),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerLow.withValues(alpha: .78),
+                    borderRadius: AppShape.surfaceRadius,
+                    border: Border.all(
+                      color: scheme.outlineVariant.withValues(alpha: .52),
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: queue.isEmpty
+                      ? const _EmptyPlaylistView()
+                      : AppContentScrollbar(
+                          controller: scrollController,
+                          builder: (context, controller) => ListView.builder(
+                            key: const ValueKey('current-playlist-list'),
+                            controller: controller,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 6),
+                            itemCount: queue.length,
+                            itemExtent: _rowHeight,
+                            itemBuilder: (context, index) => _PlaylistViewItem(
+                              item: queue[index],
+                              index: index,
+                              current: index == currentIndex,
+                              playbackService: playbackService,
+                              onOpenDetails: widget.onOpenDetails,
+                            ),
+                          ),
+                        ),
                 ),
               ),
-            ),
-          Expanded(
-            child: ListenableBuilder(
-              listenable: Listenable.merge([
-                playbackService,
-                playbackService.playlist,
-                OnlineLibrary.instance,
-              ]),
-              builder: (context, _) {
-                return AppContentScrollbar(
-                  controller: scrollController,
-                  builder: (context, controller) => ListView.builder(
-                    controller: controller,
-                    itemCount: playbackService.playlist.value.length,
-                    itemExtent: _rowHeight,
-                    itemBuilder: (context, index) {
-                      return _PlaylistViewItem(
-                          index: index, onOpenDetails: widget.onOpenDetails);
-                    },
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -121,24 +193,164 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   @override
   void dispose() {
     playbackService.removeListener(_toNowPlaying);
+    playbackService.playlist.removeListener(_toNowPlaying);
     scrollController.dispose();
     super.dispose();
   }
 }
 
-class _PlaylistViewItem extends StatelessWidget {
-  const _PlaylistViewItem({required this.index, this.onOpenDetails});
+class _PlaylistHeader extends StatelessWidget {
+  const _PlaylistHeader({required this.count, required this.currentIndex});
 
+  final int count;
+  final int currentIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final status = count == 0
+        ? ui('尚未选择歌曲')
+        : currentIndex < 0
+            ? '$count'
+            : '${currentIndex + 1} / $count';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer.withValues(alpha: .78),
+              borderRadius: AppShape.controlRadius,
+            ),
+            child: Icon(Symbols.queue_music,
+                size: 22, color: scheme.onPrimaryContainer),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  ui('播放列表'),
+                  key: const ValueKey('current-playlist-heading'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyPlaylistView extends StatelessWidget {
+  const _EmptyPlaylistView();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: scheme.secondaryContainer.withValues(alpha: .68),
+                borderRadius: AppShape.surfaceRadius,
+              ),
+              child: Icon(Symbols.queue_music,
+                  size: 28, color: scheme.onSecondaryContainer),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              ui('尚未选择歌曲'),
+              key: const ValueKey('current-playlist-empty'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaylistViewItem extends StatelessWidget {
+  const _PlaylistViewItem({
+    required this.item,
+    required this.index,
+    required this.current,
+    required this.playbackService,
+    this.onOpenDetails,
+  });
+
+  final Audio item;
   final int index;
+  final bool current;
+  final PlaybackService playbackService;
   final ValueChanged<Audio>? onOpenDetails;
+
+  void _openDetails(BuildContext context) {
+    if (onOpenDetails != null) {
+      onOpenDetails!(item);
+    } else {
+      context.push(app_paths.AUDIO_DETAIL_PAGE, extra: item);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    var playbackService = PlayService.instance.playbackService;
-    final item = playbackService.playlist.value[index];
-    final scheme = Theme.of(context).colorScheme;
-    final current = playbackService.nowPlaying?.path == item.path;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final titleStyle = theme.textTheme.bodyLarge?.copyWith(
+      color: current ? scheme.onPrimaryContainer : scheme.onSurface,
+      fontWeight: current ? FontWeight.w700 : FontWeight.w600,
+    );
+    final metadataStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: current
+          ? scheme.onPrimaryContainer.withValues(alpha: .78)
+          : scheme.onSurfaceVariant,
+    );
+    final durationText = Duration(seconds: item.duration).toStringHMMSS();
+    final reduced = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final placeholder = ColoredBox(
+      color: current
+          ? scheme.primary.withValues(alpha: .08)
+          : scheme.surfaceContainerHighest,
+      child: Icon(
+        item.isOnline ? Symbols.cloud : Symbols.audio_file,
+        size: 22,
+        color: current ? scheme.primary : scheme.onSurfaceVariant,
+      ),
+    );
     return MenuAnchor(
       consumeOutsideTap: true,
       menuChildren: [
@@ -163,53 +375,133 @@ class _PlaylistViewItem extends StatelessWidget {
             child: Text(ui("加入总乐库")),
           ),
         MenuItemButton(
-          onPressed: () {
-            if (onOpenDetails != null) {
-              onOpenDetails!(item);
-            } else {
-              context.push(app_paths.AUDIO_DETAIL_PAGE, extra: item);
-            }
-          },
+          onPressed: () => _openDetails(context),
           leadingIcon: const Icon(Symbols.info),
           child: Text(item.isOnline ? ui("联网歌曲详情") : ui("本地歌曲详情")),
         ),
       ],
-      builder: (context, controller, _) => InkWell(
-        borderRadius: AppShape.controlRadius,
-        onTap: () => playbackService.playIndexOfPlaylist(index),
-        onSecondaryTapDown: (details) =>
-            controller.open(position: details.localPosition),
-        onLongPress: () => controller.open(position: const Offset(16, 28)),
-        child: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: DefaultTextStyle(
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: scheme.onSecondaryContainer, fontSize: 14),
-            child: Row(
-              children: [
-                Icon(
-                  current
-                      ? Symbols.equalizer
-                      : item.isOnline
-                          ? Symbols.cloud
-                          : Symbols.audio_file,
-                  size: 20,
-                  color: current ? scheme.primary : scheme.onSecondaryContainer,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item.displayTitle,
-                        style: TextStyle(
-                            fontWeight: current ? FontWeight.w700 : null)),
-                    Text("${item.artist} - ${item.album}"),
-                  ],
-                )),
-              ],
+      builder: (context, controller, _) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: TweenAnimationBuilder<Color?>(
+          tween: ColorTween(
+            end: current
+                ? scheme.primaryContainer.withValues(alpha: .82)
+                : Colors.transparent,
+          ),
+          duration: reduced ? Duration.zero : AppMotion.quick,
+          curve: AppMotion.standardCurve,
+          builder: (context, color, child) => Material(
+            color: color,
+            borderRadius: AppShape.controlRadius,
+            child: child,
+          ),
+          child: InkWell(
+            key: ValueKey('current-playlist-item-$index'),
+            borderRadius: AppShape.controlRadius,
+            onTap: () => playbackService.playIndexOfPlaylist(index),
+            onSecondaryTapDown: (details) =>
+                controller.open(position: details.localPosition),
+            onLongPress: () => controller.open(position: const Offset(16, 28)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final showDetails = constraints.maxWidth >= 300;
+                  final showDuration = constraints.maxWidth >= 380;
+                  return Row(
+                    children: [
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ClipRRect(
+                            borderRadius: AppShape.smallRadius,
+                            child: AudioArtwork(
+                              audio: item,
+                              size: 44,
+                              placeholder: placeholder,
+                              loading: placeholder,
+                            ),
+                          ),
+                          if (current)
+                            PositionedDirectional(
+                              end: -4,
+                              bottom: -4,
+                              child: Container(
+                                width: 20,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  color: scheme.primary,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: scheme.primaryContainer, width: 2),
+                                ),
+                                child: Icon(Symbols.equalizer,
+                                    size: 12, color: scheme.onPrimary),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.displayTitle,
+                              key: ValueKey('current-playlist-title-$index'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: titleStyle,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              "${item.artist} - ${item.album}",
+                              key: ValueKey('current-playlist-metadata-$index'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: metadataStyle,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (showDuration) ...[
+                        const SizedBox(width: 10),
+                        Text(
+                          durationText,
+                          maxLines: 1,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: current
+                                ? scheme.onPrimaryContainer
+                                    .withValues(alpha: .72)
+                                : scheme.onSurfaceVariant,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                      if (showDetails) ...[
+                        const SizedBox(width: 2),
+                        IconButton(
+                          tooltip: item.isOnline ? ui("联网歌曲详情") : ui("本地歌曲详情"),
+                          onPressed: () => _openDetails(context),
+                          visualDensity: VisualDensity.compact,
+                          iconSize: 19,
+                          style: IconButton.styleFrom(
+                            minimumSize: const Size.square(36),
+                            fixedSize: const Size.square(36),
+                            padding: EdgeInsets.zero,
+                            foregroundColor: current
+                                ? scheme.onPrimaryContainer
+                                : scheme.onSurfaceVariant,
+                            shape: AppShape.control,
+                          ),
+                          icon: const Icon(Symbols.info),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ),

@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+
+import 'package:dan_player/data/app_data_location.dart';
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/player_experience_preferences.dart';
@@ -63,6 +65,21 @@ void _copyDirectoryContents(Directory source, Directory target) {
   }
 }
 
+Future<Directory>? _processAppDataDirectory;
+
+Future<File> _appDataLocationFile() async {
+  final support = await getApplicationSupportDirectory();
+  return File(path.join(support.path, 'data_location.json'));
+}
+
+Future<Directory> _resolveDefaultAppDataDir() async {
+  final documents = await getApplicationDocumentsDirectory();
+  final fallback = path.join(documents.path, AppSettings.appDataDirectoryName);
+  final selected = await AppDataLocationStore(await _appDataLocationFile())
+      .activatePendingOrReadActive();
+  return Directory(selected ?? fallback).create(recursive: true);
+}
+
 Future<Directory> getAppDataDir() async {
   final override = Platform.environment['DAN_PLAYER_DATA_DIR']?.trim();
   if (override != null && override.isNotEmpty) {
@@ -72,14 +89,40 @@ Future<Directory> getAppDataDir() async {
     }
     return Directory(path.normalize(override)).create(recursive: true);
   }
-  final dir = await getApplicationDocumentsDirectory();
-  return Directory(path.join(dir.path, AppSettings.appDataDirectoryName))
-      .create(recursive: true);
+  // `flutter test` changes the mocked path-provider directory between test
+  // cases in the same process. Do not let one fixture pin every later case to
+  // a directory that its tear-down has already removed. Packaged builds never
+  // set this runner-only environment variable and retain the process freeze.
+  if (Platform.environment['FLUTTER_TEST'] == 'true') {
+    return _resolveDefaultAppDataDir();
+  }
+  // Freeze the chosen path for this process. A restored backup can safely
+  // schedule another path without live stores starting to split their writes.
+  return _processAppDataDirectory ??= _resolveDefaultAppDataDir();
+}
+
+/// Makes [directory] the data root on the next launch. Existing services keep
+/// using their boot-time path until then, which prevents late shutdown saves
+/// from overwriting newly restored data.
+Future<void> scheduleAppDataDirectorySwitch(
+  Directory directory, {
+  required Directory stagedDirectory,
+}) async {
+  final next = path.normalize(directory.absolute.path);
+  if (!path.isAbsolute(next)) {
+    throw const FormatException('App data directory must be absolute');
+  }
+  final current = await getAppDataDir();
+  await AppDataLocationStore(await _appDataLocationFile()).schedule(
+    nextPath: next,
+    currentPath: current.absolute.path,
+    stagedPath: stagedDirectory.absolute.path,
+  );
 }
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.4-snapshot.1";
+  static const String version = "26.0.4-snapshot.2";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";

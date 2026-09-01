@@ -108,7 +108,7 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
       );
       setState(() {
         _imageFailed = false;
-        _imageMessage = ui("已为{0}保存背景副本，原图片未修改。", [scene.label]);
+        _imageMessage = ui("已为{0}保存背景副本，原图片未修改。", [ui(scene.label)]);
       });
       await _save();
     } catch (error) {
@@ -116,7 +116,7 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
       setState(() {
         _imageFailed = true;
         _imageMessage = error is BackgroundImageException
-            ? error.message
+            ? ui(error.message)
             : ui("无法读取或保存图片，请检查文件与目录权限。原背景未改变。");
       });
     } finally {
@@ -199,7 +199,7 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                   for (final scene in BackgroundScene.values)
                     ChoiceChip(
                       key: ValueKey('background-scene-${scene.name}'),
-                      label: Text(scene.label),
+                      label: Text(ui(scene.label)),
                       selected: _scene == scene,
                       onSelected: (_) => setState(() => _scene = scene),
                     ),
@@ -220,7 +220,7 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                               Icons.image_outlined,
                           },
                           size: 20),
-                      label: Text(source.label),
+                      label: Text(ui(source.label)),
                       selected: value.source == source,
                       onSelected: (_) => _selectSource(source),
                     ),
@@ -306,7 +306,7 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                       widget.status ?? WindowBackdropService.instance,
                   builder: (_, status, __) => Text(
                     value.source == BackgroundSource.desktop
-                        ? ui("{0}。高对比度或系统不支持时自动使用实色。", [status.description])
+                        ? ui("{0}。高对比度或系统不支持时自动使用实色。", [ui(status.description)])
                         : ui("背景来源与“专辑封面动态配色”分别控制。高对比度模式会关闭模糊。"),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
@@ -329,7 +329,7 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                       _update(const BackgroundPreferences().forScene(_scene));
                     },
                     icon: const Icon(Icons.restore_rounded, size: 20),
-                    label: Text(ui("还原{0}默认背景", [_scene.label])),
+                    label: Text(ui("还原{0}默认背景", [ui(_scene.label)])),
                   ),
                 ),
               ],

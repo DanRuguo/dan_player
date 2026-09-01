@@ -1,5 +1,7 @@
 // ignore_for_file: unnecessary_this
 
+import 'dart:collection';
+
 import 'package:flutter/foundation.dart';
 import 'package:dan_player/component/app_presentation.dart';
 export 'package:dan_player/component/app_presentation.dart' show AppNoticeKind;
@@ -45,7 +47,14 @@ Color? fromRGBHexString(String rgbHexStr) {
   return null;
 }
 
-Map<String, String> _sortKeyCache = {};
+const int _sortKeyCacheLimit = 4096;
+final LinkedHashMap<String, String> _sortKeyCache = LinkedHashMap();
+
+@visibleForTesting
+int get debugSortKeyCacheSize => _sortKeyCache.length;
+
+@visibleForTesting
+int get debugSortKeyCacheLimit => _sortKeyCacheLimit;
 
 extension PinyinCompare on String {
   String _normalizeForSort() {
@@ -58,8 +67,12 @@ extension PinyinCompare on String {
   /// convert str to pinyin sort key, cache it when it hasn't been converted;
   String _getSortKey() {
     final normalized = _normalizeForSort();
-    final cachedSortKey = _sortKeyCache[normalized];
-    if (cachedSortKey != null) return cachedSortKey;
+    final cachedSortKey = _sortKeyCache.remove(normalized);
+    if (cachedSortKey != null) {
+      // Refresh recency so frequently visible names survive bounded eviction.
+      _sortKeyCache[normalized] = cachedSortKey;
+      return cachedSortKey;
+    }
 
     final sortKey = ChineseHelper.containsChinese(normalized)
         ? PinyinHelper.getPinyin(
@@ -70,6 +83,9 @@ extension PinyinCompare on String {
         : normalized;
 
     _sortKeyCache[normalized] = sortKey;
+    if (_sortKeyCache.length > _sortKeyCacheLimit) {
+      _sortKeyCache.remove(_sortKeyCache.keys.first);
+    }
     return sortKey;
   }
 

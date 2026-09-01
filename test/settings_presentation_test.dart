@@ -177,7 +177,7 @@ void main() {
     for (final width in [320.0, 1000.0]) {
       for (final scale in [1.0, 2.0]) {
         testWidgets(
-            'all five settings groups fit ${language.code} / $width / $scale',
+            'all six settings groups fit ${language.code} / $width / $scale',
             (tester) async {
           final original = uiLanguage.value;
           uiLanguage.value = language;
@@ -199,8 +199,14 @@ void main() {
           await tester.pumpAndSettle();
           final groups =
               tester.widget<GroupedSettings>(find.byType(GroupedSettings));
-          expect(groups.sections.map((group) => group.id),
-              ['library', 'lyrics', 'appearance', 'desktop', 'about']);
+          expect(groups.sections.map((group) => group.id), [
+            'library',
+            'lyrics',
+            'appearance',
+            'desktop',
+            'backup',
+            'about'
+          ]);
           for (final group in groups.sections) {
             await _selectCategory(tester, group.id);
             expect(tester.takeException(), isNull, reason: group.id);

@@ -69,8 +69,11 @@ class DesktopLyricPaletteHost {
       'language': uiLanguage.value.code,
       'fontFamily': DesktopLyricTypography.fontFamily,
       'fontFamilyFallback': DesktopLyricTypography.fontFamilyFallback,
-      'saveError': controller.appearanceSaveError.value,
-      'layoutError': layout.lastError.value,
+      'saveError': controller.appearanceSaveError.value == null
+          ? null
+          : ui(controller.appearanceSaveError.value!),
+      'layoutError':
+          layout.lastError.value == null ? null : ui(layout.lastError.value!),
     };
   }
 

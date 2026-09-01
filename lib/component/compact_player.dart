@@ -43,8 +43,16 @@ class _CompactPlayerState extends State<CompactPlayer> {
     } catch (error, trace) {
       LOGGER.w('[compact window] $error', stackTrace: trace);
       if (!mounted) return;
+      final message = error is WindowModeException
+          ? ui(
+              error.rollbackErrors.isEmpty
+                  ? '{0}失败，已保留原窗口状态，请重试。'
+                  : '{0}失败，部分窗口状态未能恢复，请重试还原窗口。',
+              [ui(error.operation)],
+            )
+          : ui("窗口操作失败，请重试");
       showAppNotice(
-        error is WindowModeException ? error.toString() : ui("窗口操作失败，请重试"),
+        message,
         context: context,
         kind: AppNoticeKind.error,
       );

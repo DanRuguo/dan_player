@@ -383,8 +383,8 @@ class DesktopIntegration implements Listenable {
       _scheduleSync();
     } catch (error, trace) {
       if (_closed) return;
-      _lastError = '桌面集成初始化失败：$error';
-      LOGGER.w(_lastError, stackTrace: trace);
+      _lastError = '桌面集成初始化失败，请重试。';
+      LOGGER.w('桌面集成初始化失败：$error', stackTrace: trace);
       _available = false;
       _notify();
     }
@@ -428,7 +428,7 @@ class DesktopIntegration implements Listenable {
     }
     _lastError = switch (raw['reason']) {
       'tray_unavailable' => '系统托盘暂不可用；关闭窗口将正常退出。',
-      final String reason => reason,
+      final String _ => '桌面集成暂不可用，请重试。',
       _ => null,
     };
     _notify();
@@ -443,7 +443,7 @@ class DesktopIntegration implements Listenable {
     if (_recoveringWindow || _closed) return;
     _recoveringWindow = true;
     unawaited(showWindow().catchError((Object error) {
-      _lastError = '恢复播放器窗口失败：$error';
+      _lastError = '恢复播放器窗口失败，请重试。';
       _notify();
     }).whenComplete(() => _recoveringWindow = false));
   }
@@ -501,8 +501,8 @@ class DesktopIntegration implements Listenable {
         }
       }).catchError((Object error, StackTrace trace) {
         if (_closed) return;
-        _lastError = '更新桌面播放控制失败：$error';
-        LOGGER.w(_lastError, stackTrace: trace);
+        _lastError = '更新桌面播放控制失败，请重试。';
+        LOGGER.w('更新桌面播放控制失败：$error', stackTrace: trace);
         _notify();
       });
     });
@@ -543,8 +543,8 @@ class DesktopIntegration implements Listenable {
       // retryable; a successfully started shutdown keeps the one-way gate.
       if (action == 'exit') _exitRequested = false;
       final message = '桌面操作失败：$error';
-      _lastError = message;
-      LOGGER.w(_lastError, stackTrace: trace);
+      _lastError = '桌面操作失败，请重试。';
+      LOGGER.w(message, stackTrace: trace);
       _notify();
       if (_hidden.value) {
         try {

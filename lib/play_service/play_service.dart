@@ -143,6 +143,10 @@ class PlayService {
     return _instance!;
   }
 
+  /// Flush an already-created player without constructing native playback.
+  static Future<void> flushExistingPlaybackState() =>
+      _instance?._playbackService?.flushPlaybackState() ?? Future<void>.value();
+
   Future<void> close() => _closeFuture ??= _close();
 
   Future<void> _close() async {

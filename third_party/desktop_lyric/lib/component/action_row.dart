@@ -160,7 +160,7 @@ class _DesktopLyricAppearanceButtonState
         valueListenable: widget.windowLayout.lastError,
         builder: (context, error, _) => IconButton(
           key: const ValueKey('desktop-appearance-open'),
-          tooltip: error == null ? ui('歌词外观') : ui('歌词外观\n{0}', [error]),
+          tooltip: error == null ? ui('歌词外观') : ui('歌词外观\n{0}', [ui(error)]),
           onPressed: _opening ? null : _open,
           color: Color(theme.primary),
           style: IconButton.styleFrom(

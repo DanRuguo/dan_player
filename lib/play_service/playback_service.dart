@@ -178,7 +178,7 @@ class PlaybackService extends ChangeNotifier {
       return true;
     } catch (error, trace) {
       LOGGER.w('[playback rate] $error', stackTrace: trace);
-      showTextOnSnackBar('调整播放速度失败：$error');
+      showTextOnSnackBar('调整播放速度失败：{0}', arguments: [error]);
       return false;
     }
   }
@@ -214,14 +214,14 @@ class PlaybackService extends ChangeNotifier {
         } catch (error, trace) {
           LOGGER.w('[save output preference] $error', stackTrace: trace);
           if (_isCurrentSourceRequest(token)) {
-            showTextOnSnackBar('音频输出已切换，但设置保存失败：$error');
+            showTextOnSnackBar('音频输出已切换，但设置保存失败：{0}', arguments: [error]);
           }
         }
       }
     } catch (err, trace) {
       if (_isCurrentSourceRequest(token)) {
         LOGGER.e('[change output mode] $err', stackTrace: trace);
-        showTextOnSnackBar('切换音频输出失败：$err');
+        showTextOnSnackBar('切换音频输出失败：{0}', arguments: [err]);
       }
     } finally {
       if (!_closed) isChangingOutput.value = false;
@@ -617,6 +617,17 @@ class PlaybackService extends ChangeNotifier {
       onError: (_) => PlaybackStateStore.save(state),
     );
     return _stateWrite;
+  }
+
+  /// Commit the latest in-memory queue and position without stopping playback.
+  ///
+  /// Backup creation uses this to take a complete persisted snapshot instead
+  /// of racing the normal 250 ms debounce.
+  Future<void> flushPlaybackState() async {
+    _stateSaveTimer?.cancel();
+    _stateSaveTimer = null;
+    if (!_closed) await _savePlaybackState();
+    await _stateWrite;
   }
 
   void _schedulePlaybackStateSave({double? positionOverride}) {

@@ -147,11 +147,13 @@ class _DesktopIntegrationSettingsState
             builder: (context, _) => Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
-                integration.previewError ??
-                    integration.lastError ??
-                    (integration.isAvailable
-                        ? ui("系统托盘已就绪；隐藏或最小化时停止非必要界面动画，音乐继续播放。")
-                        : ui("系统托盘尚未就绪；不会将播放器隐藏到无法恢复的状态。")),
+                integration.previewError != null
+                    ? ui(integration.previewError!)
+                    : integration.lastError != null
+                        ? ui(integration.lastError!)
+                        : integration.isAvailable
+                            ? ui("系统托盘已就绪；隐藏或最小化时停止非必要界面动画，音乐继续播放。")
+                            : ui("系统托盘尚未就绪；不会将播放器隐藏到无法恢复的状态。"),
                 key: const ValueKey('desktop-integration-status'),
                 style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant),

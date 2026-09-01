@@ -810,7 +810,7 @@ class BassPlayer {
           if (lastPos > 0) seek(lastPos);
           if (wasPlaying) start();
           _playerStateStreamController.add(playerState);
-          showTextOnSnackBar('输出模式切换失败，已恢复原模式：$err');
+          showTextOnSnackBar('输出模式切换失败，已恢复原模式：{0}', arguments: [err]);
         } catch (restoreError, restoreTrace) {
           if (!_isCurrentSource(generation)) return false;
           LOGGER.e('[restore output mode] $restoreError',
@@ -819,7 +819,7 @@ class BassPlayer {
           _playerStateStreamController.add(playerState);
         }
       } else {
-        showTextOnSnackBar('切换音频输出失败，原模式保持不变：$err');
+        showTextOnSnackBar('切换音频输出失败，原模式保持不变：{0}', arguments: [err]);
       }
       return false;
     }

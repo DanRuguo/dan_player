@@ -5,9 +5,9 @@
 面向 Windows x64 的本地与联网音乐播放器<br>
 基于 Flutter、Rust 与 BASS，专注曲库管理、歌词体验和流畅的桌面交互。
 
-**预览版 26.0.4 snapshot1** · **稳定版 26.0.3**
+**预览版 26.0.4 snapshot2** · **稳定版 26.0.3**
 
-[下载预览版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.1) · [查看稳定版](https://github.com/DanRuguo/dan_player/releases/latest) · [功能导览](docs/feature-tour.md) · [28 张安全界面示例](docs/images/README.md)
+[下载预览版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.2) · [查看稳定版](https://github.com/DanRuguo/dan_player/releases/latest) · [功能导览](docs/feature-tour.md) · [28 张安全界面示例](docs/images/README.md)
 
 </div>
 
@@ -19,7 +19,7 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 
 | 版本 | 适合 | 获取 |
 | --- | --- | --- |
-| **26.0.4 snapshot1** | 提前体验本次新功能 | [安装器与便携 ZIP](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.1) |
+| **26.0.4 snapshot2** | 提前体验本次新功能 | [安装器与便携 ZIP](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.2) |
 | **26.0.3** | 日常稳定使用 | [最新稳定 Release](https://github.com/DanRuguo/dan_player/releases/latest) |
 
 安装器可选择位置、桌面和开始菜单快捷方式；检测到旧版时支持原位升级，手动编辑后的最终路径不会再被自动追加目录。使用便携 ZIP 时，请完整解压后运行 `Dan Player.exe`。包内已包含 BASS 运行库和编译后的 `desktop_lyric` 桌面歌词组件。
@@ -57,16 +57,17 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 
 安装器支持直接编辑最终路径、创建桌面／开始菜单快捷方式和旧版本原位升级。安装器源码、原生安全校验与自动化测试均随项目保存在 [`installer/`](installer/)；Release 额外提供已编译安装包。
 
-## 26.0.4 snapshot1 更新
+## 26.0.4 snapshot2 更新
 
 - 新增极简安装器，支持自选路径、快捷方式及覆盖升级。
-- 播放条支持拖动进度，新增上一首、下一首与播放队列。
-- 主题可选择跟随系统、明亮或深色，记住选择并实时同步。
+- 播放条支持拖动进度和切歌，美化共享播放队列并统一字体。
+- 主题可跟随系统或记住明暗选择，补全中／英／日／韩界面翻译。
 - 分类增加码率和时长，收紧顶部布局，不再显示作曲家分类。
 - 通用歌曲列表可确认后删除本地歌曲，并刷新曲库、队列和歌单引用。
-- 曲库支持增量刷新，优化搜索索引、时长校正、标签兼容性及更新确认。
+- 曲库支持增量刷新，优化搜索、时长校正、标签兼容性及长期运行表现。
+- 新增本地缓存备份与恢复，可迁移歌单、设置、统计和缓存资源。
 
-这是预览版本；测试与已知边界见 [验证说明](docs/26.0.4-snapshot.1-validation.md)，更新行为见 [更新说明](docs/application-updates.md)。
+这是预览版本；测试与已知边界见 [验证说明](docs/26.0.4-snapshot.2-validation.md)，更新行为见 [更新说明](docs/application-updates.md)。
 
 ## 历史更新
 
@@ -227,10 +228,10 @@ Windows 版本资源中的公司名为 `RCEIT.Inc`。本地开发证书主题为
 从已审计的便携目录生成签名安装器：
 
 ```powershell
-.\scripts\build_windows_installer.ps1 -PayloadDirectory 'D:\path\to\portable' -Sign
+.\scripts\build_windows_installer.ps1 -PayloadDirectory 'D:\path\to\portable' -OutputRoot '..\dist' -Sign
 ```
 
-该步骤先签安装器自有辅助文件，再生成载荷清单，最后签 Setup 并输出其 `.exe.sha256`；不修改便携目录或历史发布包。
+该步骤先签安装器自有辅助文件，再生成载荷清单，最后签 Setup 并输出其 `.exe.sha256`；示例将新产物写入工作区 `dist/` 的独立目录，不修改便携目录或历史发布包。
 
 该证书是本地自签名代码签名证书，可验证文件签名和发布者主题，但默认不在其他 Windows 设备的可信根中。正式公开发行若要获得 SmartScreen/系统级公共信任，请改用颁发给 RCEIT.Inc 的 CA 代码签名证书，并通过 `RCEIT_SIGNING_THUMBPRINT` 指定其指纹；不要提交 PFX 或私钥。
 
