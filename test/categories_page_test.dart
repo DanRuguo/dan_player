@@ -126,16 +126,22 @@ void main() {
   });
 
   for (final width in [1000.0, 1440.0]) {
-    testWidgets('desktop page exposes six single-row chips at width $width',
+    testWidgets('desktop page exposes seven single-row chips at width $width',
         (tester) async {
       _viewport(tester, width: width);
       await tester.pumpWidget(_host(const CategoriesPage(audios: [])));
       await tester.pumpAndSettle();
-      expect(find.byType(ChoiceChip), findsNWidgets(6));
+      expect(find.byType(ChoiceChip), findsNWidgets(7));
+      expect(
+          find.byKey(const ValueKey('category-kind-composer')), findsNothing);
+      expect(
+          find.byKey(const ValueKey('category-kind-bitrate')), findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('category-kind-duration')), findsOneWidget);
       expect(find.byKey(const ValueKey('category-kind-menu')), findsNothing);
       final artist = find.byKey(const ValueKey('category-kind-artist'));
       final top = tester.getTopLeft(artist).dy;
-      for (final kind in MusicCategoryKind.values) {
+      for (final kind in MusicCategoryKind.browsableValues) {
         final chip = find.byKey(ValueKey('category-kind-${kind.name}'));
         expect(chip, findsOneWidget);
         expect(tester.getTopLeft(chip).dy, closeTo(top, .01));
@@ -171,7 +177,7 @@ void main() {
         matching: find.text('艺术家'));
     Focus.of(tester.element(artistLabel)).requestFocus();
     await tester.pump();
-    for (var i = 0; i < MusicCategoryKind.values.length - 1; i++) {
+    for (var i = 0; i < MusicCategoryKind.browsableValues.length - 1; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pumpAndSettle();
     }
@@ -207,8 +213,8 @@ void main() {
     await tester.tap(find.descendant(
         of: find.byType(CustomScrollView), matching: find.text('Owner B')));
     expect(opened!.audios, [same(b)]);
-    await _choose(tester, MusicCategoryKind.composer);
-    expect(find.text('Writer'), findsOneWidget);
+    await _choose(tester, MusicCategoryKind.bitrate);
+    expect(find.text('257–320 kbps'), findsOneWidget);
     expect(
         tester
             .widget<TextField>(find.byKey(const ValueKey('category-search')))
@@ -224,7 +230,8 @@ void main() {
     _viewport(tester);
     final local = CategoryTestAudio('さくら',
         language: 'zh', path: 'D:/category-test-fixtures/song.flac');
-    final online = CategoryTestAudio('English title', online: true);
+    final online = CategoryTestAudio('English title',
+        online: true, bitrate: null, duration: 0);
     await tester.pumpWidget(_host(CategoriesPage(
       audios: [local, online],
       classificationScanner:
@@ -238,6 +245,14 @@ void main() {
     expect(find.textContaining('语言优先使用标签'), findsOneWidget);
     expect(find.text('标签 1'), findsOneWidget);
     expect(find.text('推断 1'), findsOneWidget);
+    await _choose(tester, MusicCategoryKind.bitrate);
+    expect(find.text('257–320 kbps'), findsOneWidget);
+    expect(find.text('未知码率'), findsOneWidget);
+    expect(find.textContaining('码率按音频索引'), findsOneWidget);
+    await _choose(tester, MusicCategoryKind.duration);
+    expect(find.text('2–4 分钟'), findsOneWidget);
+    expect(find.text('未知时长'), findsOneWidget);
+    expect(find.textContaining('时长按歌曲总时长'), findsOneWidget);
     await _choose(tester, MusicCategoryKind.format);
     expect(find.text('FLAC'), findsOneWidget);
     expect(find.text('未知格式'), findsOneWidget);
@@ -248,7 +263,7 @@ void main() {
   });
 
   testWidgets(
-      'shared lyric evidence updates language and composer without editing songs',
+      'language evidence is retained when switching to a simple category',
       (tester) async {
     _viewport(tester);
     final audio = CategoryTestAudio('Unclassified');
@@ -267,16 +282,102 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('日文'), findsOneWidget);
     expect(find.text('歌词 1'), findsOneWidget);
-    await _choose(tester, MusicCategoryKind.composer);
-    expect(find.text('Lyric Writer'), findsOneWidget);
-    expect(find.text('歌词 1'), findsOneWidget);
-    await tester.tap(find.text('Lyric Writer'));
+    await _choose(tester, MusicCategoryKind.bitrate);
+    expect(find.text('257–320 kbps'), findsOneWidget);
+    await tester.tap(find.text('257–320 kbps'));
     expect(opened!.audios.single, same(audio));
-    expect(opened!.evidenceCounts[ClassificationEvidence.lyrics], 1);
+    expect(opened!.evidenceCounts, isEmpty);
     expect(reads, 1,
         reason: 'switching kinds reuses the same read-only snapshot');
     expect(audio.language, isNull);
     expect(audio.composer, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'duration notification retains language evidence without a rescan',
+      (tester) async {
+    _viewport(tester);
+    final audio = CategoryTestAudio('Duration update');
+    var reads = 0;
+    final scanner = MusicClassificationScanner(readLyrics: (_) async {
+      reads++;
+      return '[language:ja]\n[00:00]さくらさくら';
+    });
+    await tester.pumpWidget(_host(CategoriesPage(
+      initialCategory: MusicCategoryKind.language,
+      audios: [audio],
+      classificationScanner: scanner,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('日文'), findsOneWidget);
+    expect(reads, 1);
+
+    audio.duration++;
+    AudioLibrary.instance.publishDurationChanges();
+    await tester.pumpAndSettle();
+
+    expect(find.text('日文'), findsOneWidget);
+    expect(reads, 1,
+        reason: 'duration-only changes reuse the classification snapshot');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('equivalent category page rebuild retains classification scan',
+      (tester) async {
+    _viewport(tester);
+    final audios = [CategoryTestAudio('Stable category rebuild')];
+    var reads = 0;
+    final scanner = MusicClassificationScanner(readLyrics: (_) async {
+      reads++;
+      return '[language:ja]\n[00:00]さくらさくら';
+    });
+    Widget page() => _host(CategoriesPage(
+          initialCategory: MusicCategoryKind.language,
+          audios: audios,
+          classificationScanner: scanner,
+        ));
+
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    expect(find.text('日文'), findsOneWidget);
+    expect(reads, 1);
+
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    expect(find.text('日文'), findsOneWidget);
+    expect(reads, 1,
+        reason: 'an equivalent parent rebuild must not restart lyric I/O');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('equivalent category detail rebuild retains classification scan',
+      (tester) async {
+    _viewport(tester);
+    final audios = [CategoryTestAudio('Stable detail rebuild')];
+    var reads = 0;
+    final scanner = MusicClassificationScanner(readLyrics: (_) async {
+      reads++;
+      return '[language:ja]\n[00:00]さくらさくら';
+    });
+    Widget page() => _host(CategoryDetailPage(
+          kind: MusicCategoryKind.language,
+          groupId: '["language","japanese"]',
+          audios: audios,
+          classificationScanner: scanner,
+          trackBuilder: _track,
+        ));
+
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    expect(find.text('日文'), findsOneWidget);
+    expect(reads, 1);
+
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    expect(find.text('日文'), findsOneWidget);
+    expect(reads, 1,
+        reason: 'an equivalent parent rebuild must not restart lyric I/O');
     expect(tester.takeException(), isNull);
   });
 
@@ -416,11 +517,11 @@ void main() {
           'single-row chips retain a scrolling list at $width/507, 200% text, $brightness',
           (tester) async {
         _viewport(tester, width: width, height: 507);
-        final pending =
-            CategoryTestAudio('未读', artist: '', classificationVersion: 0);
+        final pending = CategoryTestAudio('未读',
+            artist: '', duration: 0, classificationVersion: 0);
         await tester.pumpWidget(_host(
             CategoriesPage(
-              initialCategory: MusicCategoryKind.composer,
+              initialCategory: MusicCategoryKind.duration,
               audios: [pending],
               classificationScanner:
                   MusicClassificationScanner(readLyrics: (_) async => null),
@@ -428,35 +529,34 @@ void main() {
             scale: 2,
             brightness: brightness));
         await tester.pumpAndSettle();
-        expect(find.byType(ChoiceChip), findsNWidgets(6));
+        expect(find.byType(ChoiceChip), findsNWidgets(7));
         expect(find.byKey(const ValueKey('category-kind-menu')), findsNothing);
         final selector = find.byKey(const ValueKey('category-kind-scroll'));
         expect(tester.getSize(selector).height, greaterThanOrEqualTo(44));
-        final composer = find.byKey(const ValueKey('category-kind-composer'));
-        expect(tester.getRect(composer).overlaps(tester.getRect(selector)),
+        final duration = find.byKey(const ValueKey('category-kind-duration'));
+        expect(tester.getRect(duration).overlaps(tester.getRect(selector)),
             isTrue);
-        final top = tester.getTopLeft(composer).dy;
-        for (final kind in MusicCategoryKind.values) {
+        final top = tester.getTopLeft(duration).dy;
+        for (final kind in MusicCategoryKind.browsableValues) {
           final chip = find.byKey(ValueKey('category-kind-${kind.name}'));
           expect(tester.getTopLeft(chip).dy, closeTo(top, .01));
         }
         final list = find.byType(CustomScrollView);
         expect(tester.getSize(list).height, greaterThanOrEqualTo(96));
-        expect(find.textContaining('部分本地分类标签尚未读取'), findsOneWidget);
+        expect(find.textContaining('缺失或无效值'), findsOneWidget);
         // Large text can place the first group beyond lazy-list cache extent.
         // Scroll the real viewport until it is built, then assert visibility.
-        await tester.scrollUntilVisible(find.text('未知作曲家'), 120,
+        await tester.scrollUntilVisible(find.text('未知时长'), 120,
             scrollable: find
                 .descendant(of: list, matching: find.byType(Scrollable))
                 .first);
         await tester.pumpAndSettle();
-        expect(
-            tester.getRect(find.text('未知作曲家')).overlaps(tester.getRect(list)),
+        expect(tester.getRect(find.text('未知时长')).overlaps(tester.getRect(list)),
             isTrue);
         await _choose(tester, MusicCategoryKind.format);
         expect(find.text('MP3'), findsOneWidget);
         // Every category remains available without opening any overflow menu.
-        for (final kind in MusicCategoryKind.values) {
+        for (final kind in MusicCategoryKind.browsableValues) {
           await _choose(tester, kind);
           final chip = find.byKey(ValueKey('category-kind-${kind.name}'));
           expect(tester.widget<ChoiceChip>(chip).selected, isTrue);

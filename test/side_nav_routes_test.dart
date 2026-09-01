@@ -128,4 +128,36 @@ void main() {
         isNull);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('top-level sidebar switches replace instead of growing history',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 600);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final router = GoRouter(
+      initialLocation: app_paths.AUDIOS_PAGE,
+      routes: [
+        for (final destination in destinations)
+          GoRoute(
+            path: destination.desPath,
+            builder: (_, __) => const Scaffold(
+              body: Row(children: [SideNav(), Expanded(child: SizedBox())]),
+            ),
+          ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+
+    for (final label in ['分类', '歌单', '设置', '音乐']) {
+      await tester.ensureVisible(find.text(label));
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      expect(router.canPop(), isFalse, reason: '主导航不应把退出的页面及监听器保留在历史栈中');
+    }
+
+    expect(tester.takeException(), isNull);
+  });
 }

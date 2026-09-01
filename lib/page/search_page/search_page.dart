@@ -20,12 +20,21 @@ class UnionSearchResult {
 
   UnionSearchResult(this.query);
 
-  static UnionSearchResult search(String query) {
+  /// Build local pinyin projections without monopolising the UI isolate.
+  ///
+  /// Refresh and deletion normally warm the index in the background, but a
+  /// search submitted during that short window must not fall back to the
+  /// synchronous builder and make the field/button look stuck.
+  static Future<UnionSearchResult> search(String query) async {
     final result = UnionSearchResult(query);
-    final index = AudioSearchIndex.instance..ensureBuiltSync();
+    final index = AudioSearchIndex.instance;
+    await index.ensureBuilt();
     result.audios = index.searchAudios(query);
     result.artists = index.searchArtists(query);
     result.album = index.searchAlbums(query);
+    // Attach the provider future only when the result can immediately be
+    // presented by a FutureBuilder. Starting it before the chunked build can
+    // leave a fast provider failure temporarily unobserved.
     result.online = OnlineMusicService.instance.search(query);
     return result;
   }
@@ -80,11 +89,14 @@ class SearchPage extends StatelessWidget {
                           ),
 
                           /// when 'enter' is pressed
-                          onSubmitted: (String query) {
+                          onSubmitted: (String query) async {
                             if (query.trim().isEmpty) return;
+                            final result =
+                                await UnionSearchResult.search(query);
+                            if (!context.mounted) return;
                             context.push(
                               app_paths.SEARCH_RESULT_PAGE,
-                              extra: UnionSearchResult.search(query),
+                              extra: result,
                             );
                           },
                         ),

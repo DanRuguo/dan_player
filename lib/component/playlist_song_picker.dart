@@ -1,7 +1,10 @@
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_sort_button.dart';
+import 'package:dan_player/component/audio_sort_options.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -53,14 +56,43 @@ class _PlaylistSongPickerState extends State<PlaylistSongPicker> {
   }.values.toList(growable: false);
   late final Set<String> _knownPaths =
       widget.library.map((audio) => audio.path).toSet();
+  late final Set<String> _initiallySelectedPaths = {
+    ..._selected,
+    if (!widget.replaceSelection) ...widget.existingPaths,
+  };
   String _query = '';
+  AudioSortField _sort = AudioSortField.name;
+  SortDirection _direction = SortDirection.ascending;
 
-  List<Audio> get _matches => _library.where((audio) {
-        return _query.isEmpty ||
-            '${audio.displayTitle}\n${audio.artist}\n${audio.album}'
-                .toLowerCase()
-                .contains(_query);
-      }).toList(growable: false);
+  List<Audio> get _matches {
+    final filtered = _library.where((audio) {
+      return _query.isEmpty ||
+          '${audio.displayTitle}\n${audio.artist}\n${audio.album}'
+              .toLowerCase()
+              .contains(_query);
+    });
+    final sorted = sortedAudios(filtered, _sort, direction: _direction);
+    // Keep the two partitions stable while checkboxes change: choosing a row
+    // must not make it jump under the pointer. `sortedAudios` is stable for
+    // equal fields, and selected references start after available candidates.
+    return [
+      for (final audio in sorted)
+        if (!_initiallySelectedPaths.contains(audio.path)) audio,
+      for (final audio in sorted)
+        if (_initiallySelectedPaths.contains(audio.path)) audio,
+    ];
+  }
+
+  List<AppSortOption<AudioSortField>> get _sortOptions => [
+        for (final sort in AudioSortField.values)
+          AppSortOption(
+            key: ValueKey('playlist-picker-sort-${sort.name}'),
+            value: sort,
+            label: sort.label,
+            icon: audioSortIcon(sort),
+            group: sort.group,
+          ),
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -91,37 +123,67 @@ class _PlaylistSongPickerState extends State<PlaylistSongPicker> {
                               : ui("从总乐库添加歌曲"),
                           style: Theme.of(context).textTheme.headlineSmall),
                       const SizedBox(height: 16),
-                      Focus(
-                        onFocusChange: HotkeysHelper.onFocusChanges,
-                        child: TextField(
-                          key: const ValueKey('playlist-song-search'),
-                          autofocus: true,
-                          onChanged: (query) => setState(
-                              () => _query = query.trim().toLowerCase()),
-                          decoration: InputDecoration(
-                            prefixIcon: const Icon(Icons.search),
-                            hintText: ui("搜索标题、歌手或专辑"),
-                            border: AppShape.inputBorder,
-                          ),
-                        ),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final search = Focus(
+                            onFocusChange: HotkeysHelper.onFocusChanges,
+                            child: TextField(
+                              key: const ValueKey('playlist-song-search'),
+                              autofocus: true,
+                              onChanged: (query) => setState(
+                                  () => _query = query.trim().toLowerCase()),
+                              decoration: InputDecoration(
+                                prefixIcon: const Icon(Icons.search),
+                                hintText: ui("搜索标题、歌手或专辑"),
+                                border: AppShape.inputBorder,
+                              ),
+                            ),
+                          );
+                          final sort = AppSortButton<AudioSortField>(
+                            key: const ValueKey('playlist-song-sort'),
+                            value: _sort,
+                            // The State identity stays stable across theme,
+                            // language and parent rebuilds while this dialog is
+                            // open, so an already-open menu cannot be mistaken
+                            // for a newly reconstructed picker configuration.
+                            scopeId: this,
+                            direction: _sort == AudioSortField.original
+                                ? null
+                                : _direction,
+                            onChanged: (value) => setState(() => _sort = value),
+                            onDirectionChanged: (value) =>
+                                setState(() => _direction = value),
+                            options: _sortOptions,
+                            maxWidth: 220,
+                            helpText: _sort == AudioSortField.original
+                                ? _sort.note
+                                : [
+                                    audioSortMissingValueNote,
+                                    if (_sort.note != null) _sort.note!,
+                                  ].join('\n'),
+                          );
+                          if (constraints.maxWidth >= 500) {
+                            return Row(
+                              children: [
+                                Expanded(child: search),
+                                const SizedBox(width: 12),
+                                sort,
+                              ],
+                            );
+                          }
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              search,
+                              const SizedBox(height: 8),
+                              Align(
+                                  alignment: Alignment.centerRight,
+                                  child: sort),
+                            ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          onPressed: matches.isEmpty
-                              ? null
-                              : () => setState(() {
-                                    _selected.addAll(matches
-                                        .where((audio) =>
-                                            widget.replaceSelection ||
-                                            !widget.existingPaths
-                                                .contains(audio.path))
-                                        .map((audio) => audio.path));
-                                  }),
-                          child: Text(ui("选择当前搜索结果")),
-                        ),
-                      ),
                       if (widget.replaceSelection)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),

@@ -2,7 +2,7 @@
 
 整理自己的曲库，换一种方式浏览歌单，再把歌词放到合适的位置。Dan Player 面向 Windows x64，提供本地音乐管理、可选联网检索、歌词与桌面播放体验。
 
-[下载最新版本](https://github.com/DanRuguo/dan_player/releases/latest) · [全部 18 张界面示例](images/README.md) · [项目主页](../README.md)
+[下载最新版本](https://github.com/DanRuguo/dan_player/releases/latest) · [全部 28 张界面示例](images/README.md) · [项目主页](../README.md)
 
 本文所有画面都由实际生产 Flutter 组件离屏渲染。歌名、作曲家、演奏组、专辑、歌单、歌词和封面全部是专门创建的虚构示例；不是用户曲库或桌面截图，不包含第三方音乐封面。原生音频和联网服务未启动，具体渲染边界见 [示例说明](images/README.md)。
 
@@ -14,17 +14,43 @@
 
 ## 按创作者或音乐属性浏览
 
-分类页可按艺术家、专辑、作曲家、语言、文件格式与来源浏览。圆形封面和分组搜索帮助定位曲目，而不用改变磁盘上的文件组织。
+分类页可按艺术家、专辑、码率、时长、语言、文件格式与来源浏览。圆形封面和分组搜索帮助定位曲目，而不用改变磁盘上的文件组织。
 
-![作曲分类，使用虚构标签](images/feature-categories-light.png)
+![码率分类，使用虚构曲目](images/feature-categories-light.png)
 
-分类保留信息来源：作曲家缺失时可回退到参与创作的艺术家并单独标注；语言的标签、歌词线索、文字推断与未知相互区分。文字推断不是对音频演唱语言的识别，也不会写回音乐标签。参见 [分类说明](library-categories.md)。
+码率与时长使用稳定区间，缺失或无效值明确归入未知。语言的标签、歌词线索、文字推断与未知相互区分；文字推断不是对音频演唱语言的识别，也不会写回音乐标签。参见 [分类说明](library-categories.md)。
+
+## 从文件夹到曲库统计
+
+文件夹页按路径、修改日期或歌曲数量排序，并显示目录层级与最近修改信息。统计页汇总听歌时长、播放次数、活跃时段、语言、格式和空间占用，不改变曲库文件。
+
+![文件夹页，路径与内容均为虚构演示数据](images/feature-folders-light.png)
+
+![音乐统计页，记录与文件大小均由内存注入](images/feature-statistics-light.png)
+
+公开图中的 `Z:\公开演示` 路径并不存在；统计图也没有访问磁盘，文件大小和听歌记录是固定虚构数据。
+
+## 从安装到第一次打开
+
+安装器可编辑最终安装路径，选择桌面和开始菜单快捷方式；检测到受支持的旧版时会在原位置升级。RCE 与 DanRuguo 标识使用透明素材，并随明暗主题切换背景。
+
+![RCE 品牌开场，浅色安装器](images/installer-brand-rce-light.png)
+
+![选择最终安装位置，隔离 QA 路径](images/installer-directory-light.png)
+
+![安装进度页，深色安装器](images/installer-installing-dark.png)
+
+![安装完成页，RCE 与 DanRuguo 标识](images/installer-finished-light.png)
+
+这些画面由安装器自身生产控件在隔离 QA 桌面绘制，使用虚构载荷，不读取播放器或用户文件。完整安装器源码、原生校验与测试位于仓库的 [`installer/`](../installer/) 目录。
 
 ## 一个歌单入口，多种整理方式
 
 歌单支持列表、方形网格与圆形封面；可以选择歌曲、更换封面、改名和排序。子歌单与歌曲能够一起组织，旧合集会按迁移规则合并到统一入口。
 
 ![圆形歌单，使用虚构歌单和几何封面](images/playlists-dark-wide.png)
+
+![更改所选歌曲弹窗，全部为虚构曲目](images/feature-change-selected-songs-light.png)
 
 移除歌单引用不会删除音频文件。旧数据迁移、重复引用、读取失败保护与备份边界见 [歌单说明](playlist-unification.md)。
 
@@ -35,6 +61,16 @@
 ![迷你播放器，原创演示歌词与译文的暂停帧](images/feature-mini-lyrics-dark.png)
 
 上图是实际 `CompactPlayerView` 的静态暂停帧，文字为本图库新写的演示内容，不来自任何歌曲。它展示布局，不代表已在该画面中执行播放或 Windows 置顶操作。
+
+## 播放条与音乐频谱
+
+悬浮播放条支持拖动进度、上一首、播放／暂停、下一首和播放队列；歌曲标题旁的七音柱会随播放频谱变化。正在播放页还提供 48 频带全宽频谱。
+
+![播放条细节，使用虚构歌曲与固定七音柱](images/feature-player-bar-dark.png)
+
+![48 频带音乐频谱，固定虚构频谱帧](images/feature-spectrum-dark.png)
+
+两张图使用生产 `SevenToneSpectrum` 与 `FrequencySpectrumPainter`，但只注入固定虚构帧用于展示；渲染时没有启动音频服务，也不声称画面来自实时播放。
 
 ## 把歌词调成自己喜欢的样子
 

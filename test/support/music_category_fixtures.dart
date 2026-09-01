@@ -14,6 +14,8 @@ class CategoryTestAudio extends Audio {
     super.language,
     String? path,
     int track = 0,
+    int duration = 120,
+    int? bitrate = 320,
     bool online = false,
     super.classificationVersion = 1,
   }) : super(
@@ -21,8 +23,8 @@ class CategoryTestAudio extends Audio {
           artist,
           album,
           track,
-          120,
-          320,
+          duration,
+          bitrate,
           44100,
           path ??
               (online

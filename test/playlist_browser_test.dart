@@ -400,7 +400,9 @@ void main() {
     await tester.pumpAndSettle();
     await tapPlaylistAction(tester, 'playlist-add-songs');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('选择当前搜索结果'));
+    expect(find.text('选择当前搜索结果'), findsNothing);
+    await tester.tap(find.byKey(ValueKey('playlist-pick-${local.path}')));
+    await tester.tap(find.byKey(ValueKey('playlist-pick-${online.path}')));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '添加 2 首'));
     await tester.pumpAndSettle();

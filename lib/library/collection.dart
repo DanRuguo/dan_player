@@ -5,6 +5,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/utils.dart';
+import 'package:path/path.dart' as path_util;
 
 const String albumCollectionId = "__albums__";
 
@@ -113,6 +114,12 @@ class CustomAudioOrder {
       return path;
     }).toList();
     return changed;
+  }
+
+  bool removePath(String removedPath) {
+    final before = _paths.length;
+    _paths.removeWhere((path) => path_util.equals(path, removedPath));
+    return _paths.length != before;
   }
 
   Map toMap() => {

@@ -79,6 +79,7 @@ void main() {
       final painter = RectangleProgressPainter(
           progress: progress,
           scheme: scheme,
+          dragIndicatorColor: scheme.primary,
           highlightBoundary: hint,
           devicePixelRatio: ratio);
       for (final fraction in [0.0, .413, .5345, 1.0]) {
@@ -128,11 +129,88 @@ void main() {
           painter.shouldRepaint(RectangleProgressPainter(
               progress: progress,
               scheme: scheme,
+              dragIndicatorColor: scheme.primary,
               highlightBoundary: hint,
               devicePixelRatio: ratio + .25)),
           isTrue);
     });
   }
+
+  testWidgets('drag handle follows a runtime theme colour change',
+      (tester) async {
+    final positions = StreamController<double>.broadcast(sync: true);
+    addTearDown(positions.close);
+
+    Widget host(Color seed) => MaterialApp(
+          themeAnimationDuration: Duration.zero,
+          theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: seed)),
+          home: RectangleProgressIndicator(
+            size: const Size(200, 40),
+            positionStream: positions.stream,
+            lengthProvider: () => 100,
+            initialPosition: 50,
+            onSeek: (_) {},
+            child: const SizedBox(width: 200, height: 40),
+          ),
+        );
+
+    RectangleProgressPainter painter() => tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<RectangleProgressPainter>()
+        .single;
+
+    const firstSeed = Colors.teal;
+    await tester.pumpWidget(host(firstSeed));
+    final first = painter();
+    expect(first.dragIndicatorColor,
+        ColorScheme.fromSeed(seedColor: firstSeed).primary);
+
+    const secondSeed = Colors.deepOrange;
+    await tester.pumpWidget(host(secondSeed));
+    final second = painter();
+    expect(second.dragIndicatorColor,
+        ColorScheme.fromSeed(seedColor: secondSeed).primary);
+    expect(second.dragIndicatorColor, isNot(first.dragIndicatorColor));
+    expect(second.shouldRepaint(first), isTrue,
+        reason: 'an already visible handle must repaint with the new theme');
+  });
+
+  testWidgets('partly animated handle stays opaque theme primary',
+      (tester) async {
+    final scheme = ColorScheme.fromSeed(seedColor: Colors.deepPurple);
+    final progress = ValueNotifier<double>(.5);
+    final hint = ValueNotifier<double>(.5);
+    addTearDown(progress.dispose);
+    addTearDown(hint.dispose);
+    final painter = RectangleProgressPainter(
+      progress: progress,
+      scheme: scheme,
+      dragIndicatorColor: scheme.primary,
+      highlightBoundary: hint,
+    );
+
+    await tester.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      painter.paint(Canvas(recorder), const Size(100, 40));
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(100, 40);
+      try {
+        final pixels =
+            (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+        final offset = (20 * image.width + 50) * 4;
+        final rgb = pixels.getUint8(offset) << 16 |
+            pixels.getUint8(offset + 1) << 8 |
+            pixels.getUint8(offset + 2);
+        expect(rgb, scheme.primary.toARGB32() & 0xffffff);
+        expect(pixels.getUint8(offset + 3), 255,
+            reason: 'animation must not blend the theme colour into black');
+      } finally {
+        image.dispose();
+        picture.dispose();
+      }
+    });
+  });
 
   testWidgets('progress is finite, clamped and releases its subscription',
       (tester) async {

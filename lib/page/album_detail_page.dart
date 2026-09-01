@@ -21,28 +21,62 @@ class AlbumDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    return ValueListenableBuilder<int>(
+      valueListenable: AudioLibrary.changes,
+      builder: (context, _, __) => _buildPage(context),
+    );
+  }
+
+  Widget _buildPage(BuildContext context) {
     // Legacy album extras used a title-only map. Ask the user to choose the
     // release when that snapshot contains different album artists.
-    if (album.works.isEmpty ||
-        MusicCategories(album.works).groups(MusicCategoryKind.album).length >
-            1) {
+    if (album.works.isEmpty) {
+      return const CategoriesPage(initialCategory: MusicCategoryKind.album);
+    }
+    final originalGroups =
+        MusicCategories(album.works).groups(MusicCategoryKind.album);
+    if (originalGroups.length != 1) {
+      final originalIds = originalGroups.map((group) => group.id).toSet();
+      final currentCandidates =
+          MusicCategories(AudioLibrary.instance.audioCollection)
+              .groups(MusicCategoryKind.album)
+              .where((group) => originalIds.contains(group.id))
+              .expand((group) => group.audios)
+              .toList();
       return CategoriesPage(
         initialCategory: MusicCategoryKind.album,
-        audios: album.works,
+        // Old title-only route payloads may not belong to the current indexed
+        // library (migration/deep-link tests exercise this). Prefer live
+        // matches, but retain the legacy disambiguation candidates when none
+        // can be resolved.
+        audios: currentCandidates.isEmpty ? album.works : currentCandidates,
       );
     }
-    final secondaryContent = List<Audio>.from(album.works);
+    final currentGroup = MusicCategories(AudioLibrary.instance.audioCollection)
+        .find(MusicCategoryKind.album, originalGroups.single.id);
+    if (currentGroup == null || currentGroup.audios.isEmpty) {
+      return const CategoriesPage(initialCategory: MusicCategoryKind.album);
+    }
+    final current = Album(name: currentGroup.title)
+      ..works.addAll(currentGroup.audios);
+    for (final audio in current.works) {
+      for (final artistName in audio.splitedArtists) {
+        final artist = AudioLibrary.instance.artistCollection[artistName];
+        if (artist != null) current.artistsMap[artistName] = artist;
+      }
+    }
+    final secondaryContent = List<Audio>.from(current.works);
     final multiSelectController = MultiSelectController<Audio>();
 
     return UniDetailPage<Album, Audio, Artist>(
       pref: AppPreference.instance.albumDetailPagePref,
-      primaryContent: album,
-      primaryPic: album.works.first.coverForDisplay(
+      primaryContent: current,
+      primaryPic: current.works.first.coverForDisplay(
           size: 200, devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
-      backgroundPic: album.works.first.cover,
+      backgroundPic: current.works.first.cover,
       picShape: PicShape.rrect,
-      title: album.name,
-      subtitle: ui("{0} 首作品", [album.works.length]),
+      title: current.name,
+      subtitle: ui("{0} 首作品", [current.works.length]),
       secondaryContent: secondaryContent,
       secondaryContentBuilder: (context, audio, i, multiSelectController) =>
           AudioTile(
@@ -52,7 +86,7 @@ class AlbumDetailPage extends StatelessWidget {
         multiSelectController: multiSelectController,
       ),
       tertiaryContentTitle: ui("艺术家"),
-      tertiaryContent: album.artistsMap.values.toList(),
+      tertiaryContent: current.artistsMap.values.toList(),
       tertiaryContentBuilder: (context, artist, i, multiSelectController) =>
           ListTile(
         onTap: () => context.push(app_paths.ARTIST_DETAIL_PAGE, extra: artist),

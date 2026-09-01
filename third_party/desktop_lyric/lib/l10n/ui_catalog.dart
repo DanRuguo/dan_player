@@ -13,6 +13,7 @@ import 'catalog_snapshot1.dart';
 import 'catalog_metadata_editor.dart';
 import 'catalog_incremental_library.dart';
 import 'catalog_updates.dart';
+import 'catalog_song_deletion.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...uiCatalogA,
@@ -29,4 +30,5 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogMetadataEditor,
   ...catalogIncrementalLibrary,
   ...catalogUpdates,
+  ...uiCatalogSongDeletion,
 });

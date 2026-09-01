@@ -55,6 +55,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   MusicClassificationSnapshot _classifications =
       const MusicClassificationSnapshot.empty();
   int _scanGeneration = 0;
+  late int _classificationRevision;
   bool _classifying = false;
   bool _allowInitialGroup = true;
   String _query = '';
@@ -66,12 +67,19 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   @override
   void initState() {
     super.initState();
+    _classificationRevision = AudioLibrary.classificationRevision;
     AudioLibrary.changes.addListener(_refresh);
     _scanClassifications();
   }
 
   void _refresh() {
     if (!mounted) return;
+    final revision = AudioLibrary.classificationRevision;
+    if (revision == _classificationRevision) {
+      setState(() => _snapshot = null);
+      return;
+    }
+    _classificationRevision = revision;
     setState(() {
       _invalidateClassifications();
       _allowInitialGroup = false;
@@ -100,6 +108,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
         final classifications = await (widget.classificationScanner ??
                 MusicClassificationScanner.shared)
             .scan(audios,
+                includeComposer: widget.kind == MusicCategoryKind.composer,
                 isCancelled: () => !mounted || generation != _scanGeneration);
         if (!mounted || generation != _scanGeneration) return;
         setState(() {
@@ -119,8 +128,19 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   @override
   void didUpdateWidget(CategoryDetailPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final navigationChanged =
+        oldWidget.groupId != widget.groupId || oldWidget.kind != widget.kind;
+    final classificationInputsChanged = navigationChanged ||
+        !identical(oldWidget.audios, widget.audios) ||
+        !identical(
+            oldWidget.classificationScanner, widget.classificationScanner) ||
+        !identical(oldWidget.initialGroup, widget.initialGroup);
+    // A parent/theme rebuild must retain the completed classification scan.
+    // Otherwise the detail route rereads lyric evidence despite unchanged
+    // audio and can accumulate needless native/file work during UI updates.
+    if (!classificationInputsChanged) return;
     _invalidateClassifications();
-    if (oldWidget.groupId != widget.groupId || oldWidget.kind != widget.kind) {
+    if (navigationChanged) {
       _query = '';
       _search.clear();
       _selection.selected.clear();
@@ -353,16 +373,12 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                       ValueKey(('category-audio', group.id, audio, audioIndex)),
                   child: widget.trackBuilder?.call(
                           context, audio, () => _play(audioIndex, queue)) ??
-                      Tooltip(
-                        message:
-                            '${audio.isOnline ? '联网' : '本地'} · ${audio.sourceLabel}',
-                        child: Material(
-                          type: MaterialType.transparency,
-                          child: AudioTile(
-                            audioIndex: audioIndex,
-                            playlist: queue,
-                            multiSelectController: _selection,
-                          ),
+                      Material(
+                        type: MaterialType.transparency,
+                        child: AudioTile(
+                          audioIndex: audioIndex,
+                          playlist: queue,
+                          multiSelectController: _selection,
                         ),
                       ),
                 );

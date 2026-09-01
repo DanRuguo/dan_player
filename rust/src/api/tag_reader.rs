@@ -81,6 +81,7 @@ static SUPPORT_FORMAT: phf::Map<&'static str, bool> = phf::phf_map! {
 
 const INDEX_VERSION: u64 = 113;
 const CLASSIFICATION_VERSION: u64 = 1;
+const DURATION_VERSION: u64 = 1;
 static METADATA_TRANSACTION_ID: AtomicU64 = AtomicU64::new(0);
 static METADATA_EDIT_LOCK: Mutex<()> = Mutex::new(());
 static INDEX_REFRESH_LOCK: Mutex<()> = Mutex::new(());
@@ -1117,6 +1118,13 @@ fn ordered_tags(tagged_file: &lofty::file::TaggedFile) -> Vec<&Tag> {
     tags
 }
 
+/// Extensions are only a discovery allow-list. Playback also accepts files
+/// whose container does not match that extension, so metadata reads must
+/// verify the bytes before selecting a parser instead of trusting the suffix.
+fn read_tagged_file_by_content(path: impl AsRef<Path>) -> anyhow::Result<TaggedFile> {
+    Ok(Probe::open(path)?.guess_file_type()?.read()?)
+}
+
 fn text_from_tag(tag: &Tag, key: &ItemKey) -> Option<String> {
     let mut values = Vec::new();
     for value in tag.get_strings(key) {
@@ -1178,6 +1186,9 @@ struct Audio {
     track: Option<u32>,
     /// in secs
     duration: u64,
+    /// Successful duration-reader algorithm version. Missing old values are
+    /// re-read once by the next incremental refresh.
+    duration_version: u64,
     /// kbps
     bitrate: Option<u32>,
     sample_rate: Option<u32>,
@@ -1210,6 +1221,7 @@ impl Audio {
             classification_version: 0,
             track: None,
             duration: 0,
+            duration_version: 0,
             bitrate: None,
             sample_rate: None,
             language: None,
@@ -1232,6 +1244,7 @@ impl Audio {
             "classification_version": self.classification_version,
             "track": self.track,
             "duration": self.duration,
+            "duration_version": self.duration_version,
             "bitrate": self.bitrate,
             "sample_rate": self.sample_rate,
             "language": self.language,
@@ -1346,7 +1359,7 @@ impl Audio {
     /// 使用 lofty 获取音乐标签。只在文件名不正确、没有标签或包含不支持的编码时返回 None
     fn read_by_lofty(path: impl AsRef<Path>, modified: u64, created: u64) -> Option<Self> {
         let path = path.as_ref();
-        let tagged_file = match lofty::read_from_path(path) {
+        let tagged_file = match read_tagged_file_by_content(path) {
             Ok(val) => val,
             Err(err) => {
                 log_to_dart(format!("{:?}: {}", path, err));
@@ -1393,6 +1406,7 @@ impl Audio {
             classification_version: CLASSIFICATION_VERSION,
             track,
             duration: properties.duration().as_secs(),
+            duration_version: DURATION_VERSION,
             bitrate: properties.audio_bitrate(),
             sample_rate: properties.sample_rate(),
             language: first_tag_text_with_source(&tags, &ItemKey::Language).map(|(value, _)| value),
@@ -1474,6 +1488,7 @@ impl Audio {
             classification_version,
             track: Some(music_properties.TrackNumber()?),
             duration: duration.as_secs(),
+            duration_version: DURATION_VERSION,
             bitrate: Some(music_properties.Bitrate()? / 1000),
             sample_rate: None,
             language: None,
@@ -1615,7 +1630,7 @@ fn resize_picture(pic: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
 }
 
 fn _get_picture_by_lofty(path: &String, width: u32, height: u32) -> Option<Vec<u8>> {
-    if let Ok(tagged_file) = lofty::read_from_path(path) {
+    if let Ok(tagged_file) = read_tagged_file_by_content(path) {
         let tags = ordered_tags(&tagged_file);
         for front_cover_only in [true, false] {
             for tag in &tags {
@@ -1652,7 +1667,7 @@ pub fn get_picture_from_path(path: String, width: u32, height: u32) -> Option<Ve
 }
 
 fn _get_lyric_from_lofty(path: &String) -> Option<String> {
-    if let Ok(tagged_file) = lofty::read_from_path(path) {
+    if let Ok(tagged_file) = read_tagged_file_by_content(path) {
         for tag in ordered_tags(&tagged_file) {
             if let Some(lyric) = tag
                 .get(&ItemKey::Lyrics)
@@ -1745,6 +1760,10 @@ pub fn build_index_from_folders_recursively(
 
 fn needs_classification_backfill(audio: &serde_json::Value) -> bool {
     audio["classification_version"].as_u64().unwrap_or(0) < CLASSIFICATION_VERSION
+}
+
+fn needs_duration_backfill(audio: &serde_json::Value) -> bool {
+    audio["duration_version"].as_u64().unwrap_or(0) < DURATION_VERSION
 }
 
 /// Backfill only newly supported tags. Keep old paths, order, timestamps and
@@ -2129,9 +2148,9 @@ mod tests {
         directory
     }
 
-    fn write_minimal_wav(path: &Path) {
+    fn write_pcm_wav(path: &Path, sample_count: usize) {
         const SAMPLE_RATE: u32 = 8_000;
-        let samples = vec![128u8; 800];
+        let samples = vec![128u8; sample_count];
         let mut bytes = Vec::with_capacity(44 + samples.len());
         bytes.extend_from_slice(b"RIFF");
         bytes.extend_from_slice(&(36u32 + samples.len() as u32).to_le_bytes());
@@ -2147,6 +2166,10 @@ mod tests {
         bytes.extend_from_slice(&(samples.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&samples);
         fs::write(path, bytes).unwrap();
+    }
+
+    fn write_minimal_wav(path: &Path) {
+        write_pcm_wav(path, 800);
     }
 
     fn write_minimal_mpeg_with_legacy_id3v1(path: &Path) {
@@ -2783,6 +2806,43 @@ mod tests {
         assert_eq!(json["album_artist"], "Original Soundtrack");
         assert_eq!(json["classification_version"], 1);
         assert_eq!(INDEX_VERSION, 113);
+    }
+
+    #[test]
+    fn content_probe_reads_duration_when_supported_extension_is_misleading() {
+        let directory = test_directory("duration_content_probe");
+        let source = directory.join("wav-bytes-with-mp3-name.mp3");
+        write_pcm_wav(&source, 16_000);
+
+        let audio = Audio::read_by_lofty(&source, 0, 0).unwrap();
+
+        assert_eq!(audio.duration, 2);
+        assert_eq!(audio.duration_version, DURATION_VERSION);
+        assert_eq!(
+            read_tagged_file_by_content(&source).unwrap().file_type(),
+            FileType::Wav
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn duration_marker_distinguishes_old_index_from_verified_zero_duration() {
+        for marker in [
+            serde_json::Value::Null,
+            serde_json::json!(false),
+            serde_json::json!("1"),
+            serde_json::json!(0),
+        ] {
+            assert!(needs_duration_backfill(
+                &serde_json::json!({"duration_version": marker})
+            ));
+        }
+        assert!(needs_duration_backfill(
+            &serde_json::json!({"duration": 120})
+        ));
+        assert!(!needs_duration_backfill(
+            &serde_json::json!({"duration": 0, "duration_version": 1})
+        ));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:ui';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
@@ -41,6 +42,16 @@ class AudioLibrary {
       _audioByPath ??= {for (final audio in audioCollection) audio.path: audio};
 
   static int revision = 0;
+
+  /// Changes only when searchable library contents or metadata change.
+  /// Playback-side duration corrections deliberately do not invalidate the
+  /// text index.
+  static int searchRevision = 0;
+
+  /// Changes only when library contents or classification metadata change.
+  /// Duration-only updates can rebuild duration groups without rereading
+  /// language/composer evidence from lyrics.
+  static int classificationRevision = 0;
 
   /// Published only after all local/online derived collections are complete.
   static final changes = ValueNotifier<int>(0);
@@ -176,6 +187,8 @@ class AudioLibrary {
   void _buildCollections() {
     _audioByPath = null;
     revision++;
+    searchRevision++;
+    classificationRevision++;
     for (var f in folders) {
       audioCollection.addAll(f.audios);
     }
@@ -237,22 +250,50 @@ class AudioLibrary {
     _buildCollections();
   }
 
+  /// Duration does not affect artist/album membership. Publish a lightweight
+  /// revision so visible lists and duration sorts refresh without rebuilding
+  /// every derived collection after a player-side correction.
+  void publishDurationChanges() {
+    revision++;
+    changes.value = revision;
+  }
+
   void replaceOnlineAudios(Iterable<Audio> audios) {
     onlineAudioCollection = List<Audio>.from(audios);
     rebuildDerivedCollections();
   }
 
+  /// Remove a local file from its owning scan folder and publish a complete
+  /// derived-collection rebuild. Online library entries are never considered.
+  /// Returns the number of stale/index occurrences removed.
+  int removeLocalAudio(String audioPath) {
+    var removed = 0;
+    for (final folder in folders) {
+      final before = folder.audios.length;
+      folder.audios.removeWhere(
+          (audio) => audio.isLocal && path_util.equals(audio.path, audioPath));
+      removed += before - folder.audios.length;
+    }
+    if (removed > 0) rebuildDerivedCollections();
+    return removed;
+  }
+
   Future<void> saveIndex() async {
     try {
+      // Materialize an immutable, sendable snapshot before crossing an async
+      // boundary. JSON encoding a large library can then run without blocking
+      // Flutter's UI isolate or observing a half-mutated collection.
+      final snapshot = <String, Object?>{
+        "version": 113,
+        "roots": List<String>.of(scanRoots),
+        "folders": [for (final folder in folders) folder.toMap()],
+      };
       final supportPath = (await getAppDataDir()).path;
       final indexPath = "$supportPath\\index.json";
+      final contents = await Isolate.run(() => json.encode(snapshot));
       await _writeIndexAtomically(
         File(indexPath),
-        json.encode({
-          "version": 113,
-          "roots": scanRoots,
-          "folders": folders.map((item) => item.toMap()).toList(),
-        }),
+        contents,
       );
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
@@ -335,6 +376,10 @@ class Audio {
   /// audio's duration in secs
   int duration;
 
+  /// Version of the reader that verified [duration]. Legacy indexes use zero
+  /// so the next incremental refresh can backfill them once.
+  int durationVersion;
+
   /// kbps
   int? bitrate;
 
@@ -393,6 +438,7 @@ class Audio {
     this.fileSizeBytes,
     this.modifiedNanos,
     this.metadataReadPending = false,
+    this.durationVersion = 1,
     this.onlineProvider,
     this.onlineId,
     this.onlineMediaId,
@@ -536,6 +582,7 @@ class Audio {
           map["file_size"] is num ? (map["file_size"] as num).toInt() : null,
       modifiedNanos: map['modified_ns'] is String ? map['modified_ns'] : null,
       metadataReadPending: map['metadata_pending'] == true,
+      durationVersion: (map['duration_version'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -548,6 +595,7 @@ class Audio {
         "classification_version": classificationVersion,
         "track": track,
         "duration": duration,
+        "duration_version": durationVersion,
         "bitrate": bitrate,
         "sample_rate": sampleRate,
         "language": language,

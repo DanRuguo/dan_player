@@ -270,6 +270,37 @@ void main() {
     expect(reads, 1);
   });
 
+  test('language-only scan skips lyrics when the language tag is known',
+      () async {
+    var reads = 0;
+    final track = CategoryTestAudio('tagged language',
+        language: 'ja', artist: '', composer: null);
+    final snapshot = await MusicClassificationScanner(readLyrics: (_) async {
+      reads++;
+      return '[00:00]作曲：Should Not Be Read';
+    }).scan([track], includeComposer: false);
+
+    expect(reads, 0);
+    expect(snapshot.forAudio(track).language.language, SongLanguage.japanese);
+    expect(snapshot.forAudio(track).composer.value, isNull);
+  });
+
+  test('legacy composer scan still reads lyrics when its tag is missing',
+      () async {
+    var reads = 0;
+    final track = CategoryTestAudio('legacy composer',
+        language: 'ja', artist: '', composer: null);
+    final snapshot = await MusicClassificationScanner(readLyrics: (_) async {
+      reads++;
+      return '[00:00]作曲：Legacy Writer';
+    }).scan([track], includeComposer: true);
+
+    expect(reads, 1);
+    expect(snapshot.forAudio(track).composer.value, 'Legacy Writer');
+    expect(snapshot.forAudio(track).composer.evidence,
+        ClassificationEvidence.lyrics);
+  });
+
   group('bounded read-only lyric cache', () {
     late Directory scratch;
     late File audio;

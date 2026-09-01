@@ -468,7 +468,6 @@ const Map<String, List<String>> uiCatalogA = {
     'タイトル・アーティスト・アルバムを検索',
     '제목, 아티스트 또는 앨범 검색'
   ],
-  '选择当前搜索结果': ['Select current search results', '現在の検索結果を選択', '현재 검색 결과 선택'],
   '仅编辑本层歌曲；子歌单及仍选歌曲的混排位置会保留。': [
     'Edit only tracks at this level. Nested playlists and tracks that remain selected keep their interleaved positions.',
     'この階層の曲のみを編集します。サブプレイリストと選択を維持した曲の混在順序は保たれます。',

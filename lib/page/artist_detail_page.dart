@@ -20,19 +20,29 @@ class ArtistDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    if (artist.works.isEmpty) return const CategoriesPage();
-    final secondaryContent = List<Audio>.from(artist.works);
+    return ValueListenableBuilder<int>(
+      valueListenable: AudioLibrary.changes,
+      builder: (context, _, __) => _buildPage(context),
+    );
+  }
+
+  Widget _buildPage(BuildContext context) {
+    final current = AudioLibrary.instance.artistCollection[artist.name];
+    if (current == null || current.works.isEmpty) {
+      return const CategoriesPage();
+    }
+    final secondaryContent = List<Audio>.from(current.works);
     final multiSelectController = MultiSelectController<Audio>();
 
     return UniDetailPage<Artist, Audio, Album>(
       pref: AppPreference.instance.artistDetailPagePref,
-      primaryContent: artist,
-      primaryPic: artist.works.first.coverForDisplay(
+      primaryContent: current,
+      primaryPic: current.works.first.coverForDisplay(
           size: 200, devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
-      backgroundPic: artist.works.first.cover,
+      backgroundPic: current.works.first.cover,
       picShape: PicShape.oval,
-      title: artist.name,
-      subtitle: ui("{0} 首作品", [artist.works.length]),
+      title: current.name,
+      subtitle: ui("{0} 首作品", [current.works.length]),
       secondaryContent: secondaryContent,
       secondaryContentBuilder: (context, audio, i, multiSelectController) =>
           AudioTile(
@@ -41,7 +51,7 @@ class ArtistDetailPage extends StatelessWidget {
         multiSelectController: multiSelectController,
       ),
       tertiaryContentTitle: ui("专辑"),
-      tertiaryContent: artist.albumsMap.values.toList(),
+      tertiaryContent: current.albumsMap.values.toList(),
       tertiaryContentBuilder: (context, album, i, multiSelectController) =>
           ListTile(
         onTap: () => context.push(app_paths.ALBUM_DETAIL_PAGE, extra: album),

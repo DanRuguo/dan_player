@@ -1,18 +1,29 @@
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/category_labels.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/music_category_fixtures.dart';
 
 void main() {
-  test('empty libraries expose exactly six empty classification kinds', () {
+  test('empty libraries expose seven browsable classification kinds', () {
     final categories = MusicCategories([]);
-    expect(MusicCategoryKind.values, hasLength(6));
+    expect(MusicCategoryKind.browsableValues, hasLength(7));
+    expect(MusicCategoryKind.browsableValues,
+        isNot(contains(MusicCategoryKind.composer)));
     for (final kind in MusicCategoryKind.values) {
       expect(categories.groups(kind), isEmpty);
     }
+  });
+
+  test('legacy composer category names remain resolvable but are not browsable',
+      () {
+    expect(MusicCategoryKind.fromName('composer'), MusicCategoryKind.composer);
+    expect(MusicCategoryKind.browsableValues,
+        isNot(contains(MusicCategoryKind.fromName('composer'))));
   });
 
   test('artist and composer splitting uses the configured separator equally',
@@ -234,6 +245,120 @@ void main() {
     expect(group.audios, [same(remote), same(missing), same(invalid)]);
   });
 
+  test('bitrate ranges are ordered, mutually exclusive and cover boundaries',
+      () {
+    final values = <int?>[
+      null,
+      -1,
+      0,
+      1,
+      128,
+      129,
+      192,
+      193,
+      256,
+      257,
+      320,
+      321
+    ];
+    final songs = [
+      for (var index = 0; index < values.length; index++)
+        CategoryTestAudio('bitrate-$index', bitrate: values[index]),
+    ];
+    final groups = MusicCategories(songs).groups(MusicCategoryKind.bitrate);
+    expect(groups.map((group) => group.title), [
+      '128 kbps 及以下',
+      '129–192 kbps',
+      '193–256 kbps',
+      '257–320 kbps',
+      '高于 320 kbps',
+      '未知码率',
+    ]);
+    expect(groups.expand((group) => group.audios).toSet(), songs.toSet());
+    expect(groups.fold<int>(0, (sum, group) => sum + group.audios.length),
+        songs.length);
+    expect(groups.last.isUnknown, isTrue);
+    expect(
+        groups.last.audios, [same(songs[0]), same(songs[1]), same(songs[2])]);
+  });
+
+  test('duration ranges are ordered, mutually exclusive and cover boundaries',
+      () {
+    final values = [-1, 0, 1, 119, 120, 299, 300, 599, 600, 1799, 1800];
+    final songs = [
+      for (var index = 0; index < values.length; index++)
+        CategoryTestAudio('duration-$index', duration: values[index]),
+    ];
+    final groups = MusicCategories(songs).groups(MusicCategoryKind.duration);
+    expect(groups.map((group) => group.title), [
+      '少于 2 分钟',
+      '2–4 分钟',
+      '5–9 分钟',
+      '10–29 分钟',
+      '30 分钟及以上',
+      '未知时长',
+    ]);
+    expect(groups.expand((group) => group.audios).toSet(), songs.toSet());
+    expect(groups.fold<int>(0, (sum, group) => sum + group.audios.length),
+        songs.length);
+    expect(groups.last.isUnknown, isTrue);
+    expect(groups.last.audios, [same(songs[0]), same(songs[1])]);
+  });
+
+  test('bitrate and duration category identities survive index round trips',
+      () {
+    final original = CategoryTestAudio('indexed', duration: 601, bitrate: 193);
+    final restored = Audio.fromMap(original.toMap());
+    expect(restored.duration, 601);
+    expect(restored.bitrate, 193);
+    final before = MusicCategories([original]);
+    final after = MusicCategories([restored]);
+    for (final kind in [
+      MusicCategoryKind.bitrate,
+      MusicCategoryKind.duration
+    ]) {
+      final originalGroup = before.groups(kind).single;
+      final restoredGroup = after.groups(kind).single;
+      expect(restoredGroup.id, originalGroup.id);
+      expect(restoredGroup.title, originalGroup.title);
+    }
+  });
+
+  test('legacy indexes without bitrate or duration remain safely browsable',
+      () {
+    final map = CategoryTestAudio('legacy-quantitative').toMap()
+      ..remove('bitrate')
+      ..remove('duration');
+    final restored = Audio.fromMap(map);
+    expect(restored.bitrate, isNull);
+    expect(restored.duration, 0);
+    final categories = MusicCategories([restored]);
+    expect(categories.groups(MusicCategoryKind.bitrate).single.title, '未知码率');
+    expect(categories.groups(MusicCategoryKind.duration).single.title, '未知时长');
+  });
+
+  test('quantitative category labels are translated without changing IDs', () {
+    final audio = CategoryTestAudio('localized', duration: 60, bitrate: 128);
+    final categories = MusicCategories([audio]);
+    final bitrate = categories.groups(MusicCategoryKind.bitrate).single;
+    final duration = categories.groups(MusicCategoryKind.duration).single;
+    final bitrateId = bitrate.id;
+    final durationId = duration.id;
+    try {
+      for (final language in UiLanguage.values.skip(1)) {
+        uiLanguage.value = language;
+        expect(categoryDisplayTitle(bitrate), isNot(bitrate.title));
+        expect(categoryDisplayTitle(duration), isNot(duration.title));
+        expect(ui(MusicCategoryKind.bitrate.countLabel), isNotEmpty);
+        expect(ui(MusicCategoryKind.duration.countLabel), isNotEmpty);
+        expect(bitrate.id, bitrateId);
+        expect(duration.id, durationId);
+      }
+    } finally {
+      uiLanguage.value = UiLanguage.zh;
+    }
+  });
+
   test('source groups distinguish local and online without merging identities',
       () {
     final local = CategoryTestAudio('local');
@@ -332,12 +457,54 @@ void main() {
       ];
       library.onlineAudioCollection = [];
       final before = AudioLibrary.revision;
+      final searchBefore = AudioLibrary.searchRevision;
+      final classificationBefore = AudioLibrary.classificationRevision;
       AudioLibrary.changes.addListener(changed);
       library.rebuildDerivedCollections();
       expect(notifications, 1);
       expect(AudioLibrary.revision, before + 1);
+      expect(AudioLibrary.searchRevision, searchBefore + 1);
+      expect(AudioLibrary.classificationRevision, classificationBefore + 1);
     } finally {
       AudioLibrary.changes.removeListener(changed);
+      library.folders = folders;
+      library.onlineAudioCollection = online;
+      library.rebuildDerivedCollections();
+    }
+  });
+
+  test('duration publication does not invalidate search or classification', () {
+    final revisionBefore = AudioLibrary.revision;
+    final searchBefore = AudioLibrary.searchRevision;
+    final classificationBefore = AudioLibrary.classificationRevision;
+
+    AudioLibrary.instance.publishDurationChanges();
+
+    expect(AudioLibrary.revision, revisionBefore + 1);
+    expect(AudioLibrary.searchRevision, searchBefore);
+    expect(AudioLibrary.classificationRevision, classificationBefore);
+  });
+
+  test('removing an indexed song advances structural revisions', () {
+    final library = AudioLibrary.instance;
+    final folders = library.folders;
+    final online = library.onlineAudioCollection;
+    final audio = CategoryTestAudio('deleted');
+    try {
+      library.folders = [
+        AudioFolder([audio], 'D:/category-test-fixtures', 0, 0),
+      ];
+      library.onlineAudioCollection = [];
+      library.rebuildDerivedCollections();
+      final searchBefore = AudioLibrary.searchRevision;
+      final classificationBefore = AudioLibrary.classificationRevision;
+
+      expect(library.removeLocalAudio(audio.path), 1);
+
+      expect(AudioLibrary.searchRevision, searchBefore + 1);
+      expect(AudioLibrary.classificationRevision, classificationBefore + 1);
+      expect(library.audioCollection, isEmpty);
+    } finally {
       library.folders = folders;
       library.onlineAudioCollection = online;
       library.rebuildDerivedCollections();

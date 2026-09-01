@@ -77,7 +77,10 @@ class SideNav extends StatelessWidget {
               : desPath);
       if (index != -1) AppPreference.instance.startPage = index;
 
-      context.push(destinations[value].desPath);
+      // These are peer, top-level destinations. Replacing the location keeps
+      // repeated sidebar switches from retaining every previous page (and its
+      // listeners) on the Navigator stack. Detail-page links still use push.
+      context.go(destinations[value].desPath);
 
       var scaffold = Scaffold.of(context);
       if (scaffold.hasDrawer) scaffold.closeDrawer();

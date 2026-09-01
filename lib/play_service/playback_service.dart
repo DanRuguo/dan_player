@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/audio_duration_correction.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -14,6 +15,7 @@ import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as path_util;
 
 enum PlayMode {
   /// 顺序播放到播放列表结尾
@@ -33,9 +35,52 @@ enum PlayMode {
   }
 }
 
+/// A short-lived guard used while a local file is being removed from disk.
+/// The active BASS stream must be released before Windows can reliably delete
+/// it. If file deletion fails, [PlaybackService.cancelAudioDeletion] reopens
+/// the same queue occurrence instead of leaving playback silently detached.
+class PlaybackAudioDeletionTicket {
+  PlaybackAudioDeletionTicket._({
+    required this.path,
+    required this.requestToken,
+    required this.wasCurrent,
+    required this.wasPending,
+    required this.wasPlaying,
+    required this.index,
+    required this.position,
+  });
+
+  final String path;
+  final int requestToken;
+  final bool wasCurrent;
+  final bool wasPending;
+  final bool wasPlaying;
+  final int index;
+  final double position;
+  bool _resolved = false;
+}
+
 /// 只通知 now playing 变更
 class PlaybackService extends ChangeNotifier {
   final PlayService playService;
+
+  static bool _sameAudioPath(String? left, String right) =>
+      left != null && path_util.equals(left, right);
+
+  static int _deletionQueueIndex(
+    List<Audio> audios,
+    String audioPath,
+    int? preferred,
+  ) {
+    if (preferred != null &&
+        preferred >= 0 &&
+        preferred < audios.length &&
+        path_util.equals(audios[preferred].path, audioPath)) {
+      return preferred;
+    }
+    return audios
+        .indexWhere((audio) => path_util.equals(audio.path, audioPath));
+  }
 
   late StreamSubscription _playerStateStreamSub;
   late StreamSubscription _smtcEventStreamSub;
@@ -280,6 +325,111 @@ class PlaybackService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Release a matching active stream before the file-system deletion starts.
+  /// Queue removal is deferred until [commitAudioDeletion], so a failed delete
+  /// can restore the former track through [cancelAudioDeletion].
+  PlaybackAudioDeletionTicket prepareAudioDeletion(String audioPath) {
+    final wasCurrent = _sameAudioPath(nowPlaying?.path, audioPath);
+    final wasPending = _sameAudioPath(resolvingAudioPath.value, audioPath);
+    final index = _deletionQueueIndex(
+      playlist.value,
+      audioPath,
+      wasPending ? _loadingPlaylistIndex : _playlistIndex,
+    );
+    final state = playerState;
+    final wasPlaying = state == PlayerState.playing ||
+        state == PlayerState.stalled ||
+        state == PlayerState.pausedDevice;
+    final savedPosition = wasCurrent ? position : 0.0;
+
+    if (wasCurrent || wasPending) {
+      _sourceRequestToken += 1;
+      _player.cancelPendingSource();
+      isBuffering.value = false;
+      resolvingAudioPath.value = null;
+      _loadingPlaylistIndex = null;
+    }
+    if (wasCurrent) {
+      PlaybackStatistics.instance.finish(markCompleted: false);
+      _player.freeFStream();
+    }
+
+    return PlaybackAudioDeletionTicket._(
+      path: audioPath,
+      requestToken: _sourceRequestToken,
+      wasCurrent: wasCurrent,
+      wasPending: wasPending,
+      wasPlaying: wasPlaying,
+      index: index,
+      position: savedPosition,
+    );
+  }
+
+  /// Remove every queue occurrence after the physical file is gone. If the
+  /// deleted song was active, keep the queue moving at the same logical slot.
+  void commitAudioDeletion(PlaybackAudioDeletionTicket ticket) {
+    if (ticket._resolved) return;
+    ticket._resolved = true;
+
+    final filtered = [
+      for (final audio in playlist.value)
+        if (!path_util.equals(audio.path, ticket.path)) audio,
+    ];
+    _playlistBackup = [
+      for (final audio in _playlistBackup)
+        if (!path_util.equals(audio.path, ticket.path)) audio,
+    ];
+    playlist.value = filtered;
+
+    final stillOwnsDetachedSource = ticket.wasCurrent &&
+        ticket.requestToken == _sourceRequestToken &&
+        _sameAudioPath(nowPlaying?.path, ticket.path);
+    if (stillOwnsDetachedSource) {
+      nowPlaying = null;
+      _playlistIndex = null;
+      if (filtered.isNotEmpty) {
+        final nextIndex = ticket.index.clamp(0, filtered.length - 1);
+        if (ticket.wasPlaying) {
+          _loadAndPlay(nextIndex, filtered);
+        } else {
+          _loadPaused(nextIndex, filtered, 0);
+        }
+      } else {
+        _smtc.updateState(state: SMTCState.paused);
+      }
+    } else {
+      final currentPath = nowPlaying?.path;
+      final refreshed = queueIndexForTrack(
+        filtered,
+        currentPath,
+        preferredIndex: _playlistIndex,
+      );
+      _playlistIndex = refreshed < 0 ? null : refreshed;
+    }
+
+    _schedulePlaybackStateSave();
+    notifyListeners();
+  }
+
+  /// Restore playback when the operating system refuses to delete the file.
+  void cancelAudioDeletion(PlaybackAudioDeletionTicket ticket) {
+    if (ticket._resolved) return;
+    ticket._resolved = true;
+    if (!ticket.wasCurrent ||
+        ticket.requestToken != _sourceRequestToken ||
+        !_sameAudioPath(nowPlaying?.path, ticket.path) ||
+        ticket.index < 0 ||
+        ticket.index >= playlist.value.length) {
+      return;
+    }
+    _loadPaused(
+      ticket.index,
+      playlist.value,
+      ticket.position,
+      resumeAfterLoad: ticket.wasPlaying,
+    );
+  }
+
   late final _playMode = ValueNotifier(_pref.playMode);
   ValueNotifier<PlayMode> get playMode => _playMode;
 
@@ -391,6 +541,11 @@ class PlaybackService extends ChangeNotifier {
       }
       _playlistIndex = audioIndex;
       nowPlaying = target;
+      // BASS has successfully opened the real byte stream at this point. Its
+      // duration is authoritative when a misleading extension or damaged tag
+      // header made the library scanner report zero/a conflicting value. The
+      // correction is coalesced and persisted off the playback path.
+      _observeNativeDuration(target);
       setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
 
       playService.lyricService.updateLyric();
@@ -521,13 +676,20 @@ class PlaybackService extends ChangeNotifier {
   void _loadPaused(
     int audioIndex,
     List<Audio> playlist,
-    double savedPosition,
-  ) {
+    double savedPosition, {
+    bool resumeAfterLoad = false,
+  }) {
     if (_closed) return;
     final token = ++_sourceRequestToken;
     _player.cancelPendingSource();
     unawaited(
-      _loadPausedResolved(token, audioIndex, playlist, savedPosition),
+      _loadPausedResolved(
+        token,
+        audioIndex,
+        playlist,
+        savedPosition,
+        resumeAfterLoad: resumeAfterLoad,
+      ),
     );
   }
 
@@ -535,8 +697,9 @@ class PlaybackService extends ChangeNotifier {
     int token,
     int audioIndex,
     List<Audio> playlist,
-    double savedPosition,
-  ) async {
+    double savedPosition, {
+    required bool resumeAfterLoad,
+  }) async {
     try {
       if (audioIndex < 0 || audioIndex >= playlist.length) {
         throw RangeError.index(audioIndex, playlist, 'audioIndex');
@@ -554,6 +717,7 @@ class PlaybackService extends ChangeNotifier {
       if (!applied || !_isCurrentSourceRequest(token)) return;
       _playlistIndex = audioIndex;
       nowPlaying = target;
+      _observeNativeDuration(target);
       setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
       playService.lyricService.updateLyric();
 
@@ -568,12 +732,18 @@ class PlaybackService extends ChangeNotifier {
           showTextOnSnackBar('已恢复歌曲，但原播放位置暂不可用');
         }
       }
+      if (resumeAfterLoad) {
+        _player.start();
+        PlaybackStatistics.instance
+            .start(nowPlaying!, playbackRate: _player.playbackRate);
+      }
 
       notifyListeners();
       ThemeProvider.instance.applyThemeFromAudio(nowPlaying!);
       _lastSmtcProgressMs = (restoredPosition * 1000).floor();
       _lastSessionProgressMs = _lastSmtcProgressMs;
-      _smtc.updateState(state: SMTCState.paused);
+      _smtc.updateState(
+          state: resumeAfterLoad ? SMTCState.playing : SMTCState.paused);
       _smtc.updateDisplay(
         title: nowPlaying!.displayTitle,
         artist: nowPlaying!.artist,
@@ -586,7 +756,7 @@ class PlaybackService extends ChangeNotifier {
 
       playService.desktopLyricService.canSendMessage.then((canSend) {
         if (!canSend || !_isCurrentSourceRequest(token)) return;
-        playService.desktopLyricService.sendPlayerStateMessage(false);
+        playService.desktopLyricService.sendPlayerStateMessage(resumeAfterLoad);
         playService.desktopLyricService.sendNowPlayingMessage(nowPlaying!);
       });
     } catch (err, trace) {
@@ -602,6 +772,12 @@ class PlaybackService extends ChangeNotifier {
         resolvingAudioPath.value = null;
         _loadingPlaylistIndex = null;
       }
+    }
+  }
+
+  void _observeNativeDuration(Audio audio) {
+    if (audio.isLocal) {
+      audioDurationCorrections.observe(audio, _player.length);
     }
   }
 

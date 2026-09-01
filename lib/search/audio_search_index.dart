@@ -16,11 +16,25 @@ class AudioSearchIndex {
   int _builtRevision = -1;
   Future<void>? _building;
 
-  bool get _isStale => _builtRevision != AudioLibrary.revision;
+  bool get _isStale => _builtRevision != AudioLibrary.searchRevision;
 
-  Future<void> ensureBuilt() {
-    if (!_isStale) return Future.value();
-    return _building ??= _buildChunked().whenComplete(() => _building = null);
+  Future<void> ensureBuilt() async {
+    // A library mutation can supersede a chunked build. Keep concurrent callers
+    // on the same work, then retry against the latest structural revision.
+    while (_isStale) {
+      final active = _building;
+      if (active != null) {
+        await active;
+        continue;
+      }
+      final build = _buildChunked();
+      _building = build;
+      try {
+        await build;
+      } finally {
+        if (identical(_building, build)) _building = null;
+      }
+    }
   }
 
   void ensureBuiltSync() {
@@ -48,7 +62,7 @@ class AudioSearchIndex {
 
   void _buildSync() {
     final library = AudioLibrary.instance;
-    final revision = AudioLibrary.revision;
+    final revision = AudioLibrary.searchRevision;
     _commit(
       revision: revision,
       audios: [for (final audio in library.audioCollection) _AudioEntry(audio)],
@@ -58,8 +72,11 @@ class AudioSearchIndex {
   }
 
   Future<void> _buildChunked() async {
+    // A changes listener must return control to the current frame before even
+    // the first batch performs pinyin normalization.
+    await Future<void>.delayed(Duration.zero);
     final library = AudioLibrary.instance;
-    final revision = AudioLibrary.revision;
+    final revision = AudioLibrary.searchRevision;
     final audios = List<Audio>.of(library.audioCollection);
     final artists = List<Artist>.of(library.artistCollection.values);
     final albums = List<Album>.of(library.albumCollection.values);
@@ -71,11 +88,11 @@ class AudioSearchIndex {
       for (var j = i; j < end; j++) {
         entries.add(_AudioEntry(audios[j]));
       }
-      if (AudioLibrary.revision != revision) return;
+      if (AudioLibrary.searchRevision != revision) return;
       if (end < audios.length) await Future<void>.delayed(Duration.zero);
     }
 
-    if (AudioLibrary.revision == revision) {
+    if (AudioLibrary.searchRevision == revision) {
       _commit(
         revision: revision,
         audios: entries,

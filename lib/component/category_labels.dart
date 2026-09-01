@@ -4,6 +4,8 @@ import 'package:desktop_lyric/ui_language.dart';
 
 /// Translate category UI without changing stored group identities or tags.
 String categoryDisplayTitle(MusicCategoryGroup group) => group.isUnknown ||
+        group.kind == MusicCategoryKind.bitrate ||
+        group.kind == MusicCategoryKind.duration ||
         group.kind == MusicCategoryKind.language ||
         group.kind == MusicCategoryKind.source
     ? ui(group.title)

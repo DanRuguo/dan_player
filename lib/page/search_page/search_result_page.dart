@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/album_tile.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/artist_tile.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/hotkeys_helper.dart';
+import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/page/search_page/search_page.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/search/audio_search_index.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:go_router/go_router.dart';
@@ -27,15 +31,45 @@ class _SearchResultPageState extends State<SearchResultPage> {
   late final searchBarController = TextEditingController(
     text: widget.searchResult.query,
   );
+  int _libraryRefresh = 0;
+  late int _searchRevision;
 
-  void _search(String query) {
+  @override
+  void initState() {
+    super.initState();
+    _searchRevision = AudioLibrary.searchRevision;
+    AudioLibrary.changes.addListener(_refreshLocalResults);
+  }
+
+  void _refreshLocalResults() {
+    final revision = AudioLibrary.searchRevision;
+    if (revision == _searchRevision) return;
+    _searchRevision = revision;
+    final request = ++_libraryRefresh;
+    unawaited(AudioSearchIndex.instance.ensureBuilt().then((_) {
+      if (!mounted || request != _libraryRefresh) return;
+      final index = AudioSearchIndex.instance;
+      setState(() {
+        searchResult.audios = index.searchAudios(searchResult.query);
+        searchResult.artists = index.searchArtists(searchResult.query);
+        searchResult.album = index.searchAlbums(searchResult.query);
+      });
+    }));
+  }
+
+  Future<void> _search(String query) async {
     final value = query.trim();
     if (value.isEmpty) return;
-    setState(() => searchResult = UnionSearchResult.search(value));
+    final request = ++_libraryRefresh;
+    final result = await UnionSearchResult.search(value);
+    if (!mounted || request != _libraryRefresh) return;
+    setState(() => searchResult = result);
   }
 
   @override
   void dispose() {
+    _libraryRefresh++;
+    AudioLibrary.changes.removeListener(_refreshLocalResults);
     searchBarController.dispose();
     super.dispose();
   }
@@ -99,7 +133,9 @@ class _SearchResultPageState extends State<SearchResultPage> {
                           key: ValueKey("${searchResult.query}-${filter.name}"),
                           result: searchResult,
                           filter: filter,
-                          retryOnline: () => _search(searchResult.query),
+                          retryOnline: () {
+                            unawaited(_search(searchResult.query));
+                          },
                         ),
                     ],
                   ),

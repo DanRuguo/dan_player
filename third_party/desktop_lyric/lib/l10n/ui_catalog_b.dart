@@ -207,6 +207,16 @@ const Map<String, List<String>> uiCatalogB = {
     "作曲者は広い定義で分類します。作曲タグや歌詞のクレジットを優先し、不明な場合は参加アーティストで補完して、区別して表示します。",
     "작곡가는 넓은 기준으로 분류합니다. 작곡 태그와 가사 크레딧을 우선 사용하고, 없으면 참여 아티스트로 대체하며 별도로 표시합니다."
   ],
+  "码率按音频索引中的标称值分段；缺失或无效值归入“未知码率”。": [
+    "Bitrate is grouped by the nominal value in the audio index. Missing or invalid values are listed as “Unknown bitrate”.",
+    "ビットレートは音声インデックスの公称値で分類し、欠損または無効な値は「不明なビットレート」に分類します。",
+    "비트레이트는 오디오 인덱스의 명목값으로 구분하며, 누락되었거나 잘못된 값은 ‘알 수 없는 비트레이트’로 분류합니다."
+  ],
+  "时长按歌曲总时长分段；缺失或无效值归入“未知时长”。": [
+    "Tracks are grouped by total duration. Missing or invalid values are listed as “Unknown duration”.",
+    "楽曲を総再生時間で分類し、欠損または無効な値は「不明な再生時間」に分類します。",
+    "곡을 전체 재생 시간으로 구분하며, 누락되었거나 잘못된 값은 ‘알 수 없는 재생 시간’으로 분류합니다."
+  ],
   "仅按本地文件扩展名分类；联网歌曲或无扩展名文件归入“未知格式”。": [
     "Grouped only by local file extension. Online songs and files without an extension are listed as “Unknown format”.",
     "ローカルファイルの拡張子のみで分類します。オンラインの曲や拡張子のないファイルは「不明な形式」に分類します。",

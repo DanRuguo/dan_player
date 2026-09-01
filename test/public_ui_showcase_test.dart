@@ -8,8 +8,15 @@ import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shell.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/compact_player.dart';
+import 'package:dan_player/component/frosted_surface.dart';
+import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/component/horizontal_lyric_view.dart';
+import 'package:dan_player/component/now_playing_bar_controls.dart';
+import 'package:dan_player/component/now_playing_bar_row.dart';
 import 'package:dan_player/component/playlist_browser.dart';
+import 'package:dan_player/component/playlist_song_picker.dart';
+import 'package:dan_player/component/rectangle_progress_indicator.dart';
+import 'package:dan_player/component/seven_tone_spectrum.dart';
 import 'package:dan_player/component/side_nav.dart';
 import 'package:dan_player/component/title_bar.dart';
 import 'package:dan_player/entry.dart';
@@ -21,17 +28,20 @@ import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/page/audios_page.dart';
 import 'package:dan_player/page/categories_page.dart';
+import 'package:dan_player/page/folders_page.dart';
 import 'package:dan_player/page/search_page/search_page.dart';
 import 'package:dan_player/page/search_page/search_result_page.dart';
 import 'package:dan_player/page/settings_page/desktop_lyric_settings.dart';
 import 'package:dan_player/page/settings_page/page.dart';
 import 'package:dan_player/page/settings_page/theme_picker_dialog.dart';
 import 'package:dan_player/page/settings_page/theme_settings.dart';
+import 'package:dan_player/page/statistics_page.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/playlist_view.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
+import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:dan_player/ui_layout_preferences.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -93,6 +103,16 @@ final _showcaseCases = [
       'theme', 'feature-theme-picker-light', Brightness.light, Size(1366, 900)),
   const _ShowcaseCase(
       'search', 'feature-search-dark', Brightness.dark, Size(1366, 900)),
+  const _ShowcaseCase(
+      'folders', 'feature-folders-light', Brightness.light, Size(1366, 900)),
+  const _ShowcaseCase('statistics', 'feature-statistics-light',
+      Brightness.light, Size(1366, 900)),
+  const _ShowcaseCase(
+      'playerbar', 'feature-player-bar-dark', Brightness.dark, Size(1000, 360)),
+  const _ShowcaseCase('songpicker', 'feature-change-selected-songs-light',
+      Brightness.light, Size(1366, 900)),
+  const _ShowcaseCase(
+      'spectrum', 'feature-spectrum-dark', Brightness.dark, Size(1100, 500)),
 ];
 
 class _DemoLyric extends Lyric {
@@ -124,7 +144,7 @@ class _DemoAudio extends Audio {
           168 + index * 13,
           320,
           44100,
-          'demo://public-ui/track-${index + 1}.flac',
+          'Z:\\公开演示\\曲目-${index + 1}.flac',
           0,
           0,
           'Fictional presentation fixture',
@@ -178,6 +198,320 @@ Future<Uint8List> _coverBytes(int index) async {
   } finally {
     image.dispose();
     picture.dispose();
+  }
+}
+
+const _sevenToneLevels = <double>[.36, .72, .5, .92, .64, .8, .44];
+const _frequencyLevels = <double>[
+  .18,
+  .24,
+  .33,
+  .45,
+  .58,
+  .72,
+  .84,
+  .7,
+  .55,
+  .48,
+  .64,
+  .88,
+  .96,
+  .78,
+  .59,
+  .43,
+  .52,
+  .68,
+  .82,
+  .62,
+  .49,
+  .74,
+  .9,
+  .67,
+  .46,
+  .38,
+  .56,
+  .76,
+  .86,
+  .69,
+  .5,
+  .42,
+  .61,
+  .79,
+  .71,
+  .53,
+  .39,
+  .57,
+  .73,
+  .63,
+  .47,
+  .35,
+  .51,
+  .66,
+  .54,
+  .4,
+  .29,
+  .2,
+];
+
+PlaybackStatistics _demoPlaybackStatistics() {
+  final hours = <int>[
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    const Duration(minutes: 12).inMilliseconds,
+    const Duration(minutes: 28).inMilliseconds,
+    const Duration(minutes: 20).inMilliseconds,
+    const Duration(minutes: 8).inMilliseconds,
+    0,
+    0,
+    const Duration(minutes: 16).inMilliseconds,
+    const Duration(minutes: 34).inMilliseconds,
+    const Duration(minutes: 42).inMilliseconds,
+    const Duration(minutes: 25).inMilliseconds,
+    const Duration(minutes: 18).inMilliseconds,
+    const Duration(minutes: 30).inMilliseconds,
+    const Duration(minutes: 54).inMilliseconds,
+    const Duration(hours: 1, minutes: 8).inMilliseconds,
+    const Duration(minutes: 47).inMilliseconds,
+    const Duration(minutes: 31).inMilliseconds,
+    const Duration(minutes: 14).inMilliseconds,
+    0,
+  ];
+  return PlaybackStatistics.inMemory(initialData: {
+    'version': 1,
+    'tracks': [
+      TrackPlaybackStatistics(
+        id: 'demo:public-ui:track-1',
+        title: _titles[0],
+        artist: '虚构演奏组 A',
+        album: '虚构专辑 1 · 色彩习作',
+        online: false,
+        playCount: 18,
+        completedCount: 14,
+        skippedCount: 1,
+        listenMilliseconds:
+            const Duration(hours: 3, minutes: 26).inMilliseconds,
+      ).toMap(),
+      TrackPlaybackStatistics(
+        id: 'demo:public-ui:track-2',
+        title: _titles[1],
+        artist: '虚构演奏组 B',
+        album: '虚构专辑 2 · 色彩习作',
+        online: false,
+        playCount: 13,
+        completedCount: 10,
+        skippedCount: 2,
+        listenMilliseconds: const Duration(hours: 2, minutes: 8).inMilliseconds,
+      ).toMap(),
+      TrackPlaybackStatistics(
+        id: 'demo:public-ui:track-3',
+        title: _titles[2],
+        artist: '虚构演奏组 C',
+        album: '虚构专辑 3 · 色彩习作',
+        online: false,
+        playCount: 9,
+        completedCount: 7,
+        listenMilliseconds:
+            const Duration(hours: 1, minutes: 32).inMilliseconds,
+      ).toMap(),
+    ],
+    'days': {
+      '2026-08-25': const Duration(hours: 1, minutes: 22).inMilliseconds,
+      '2026-08-26': const Duration(minutes: 48).inMilliseconds,
+      '2026-08-27': const Duration(hours: 2, minutes: 16).inMilliseconds,
+      '2026-08-28': const Duration(hours: 1, minutes: 5).inMilliseconds,
+      '2026-08-29': const Duration(minutes: 57).inMilliseconds,
+      '2026-08-30': const Duration(minutes: 38).inMilliseconds,
+    },
+    'hours': hours,
+  });
+}
+
+class _PlayerBarShowcase extends StatelessWidget {
+  const _PlayerBarShowcase({required this.cover});
+
+  final ImageProvider cover;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppWindowSurface(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AppContentRegion(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('正在播放',
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineSmall
+                          ?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onSurface)),
+                  const SizedBox(height: 6),
+                  Text('可拖动进度 · 上一首 / 下一首 · 播放队列',
+                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: 840,
+                    height: 92,
+                    child: FrostedSurface(
+                      blur: 22,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) =>
+                            RectangleProgressIndicator(
+                          size: constraints.biggest,
+                          positionStream: const Stream<double>.empty(),
+                          lengthProvider: () => 248,
+                          initialPosition: 103,
+                          trackIdentity: 'demo:public-ui:player-bar',
+                          onSeek: (_) {},
+                          child: NowPlayingBarRow(
+                            leading: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: SizedBox.square(
+                                dimension: 62,
+                                child: Image(image: cover, fit: BoxFit.cover),
+                              ),
+                            ),
+                            title: _titles.first,
+                            subtitle: '虚构演奏组 A · 虚构专辑 1 · 色彩习作',
+                            identity: 'demo:public-ui:player-bar',
+                            spectrum: MediaQuery(
+                              data: MediaQuery.of(context)
+                                  .copyWith(disableAnimations: false),
+                              child: SevenToneSpectrum(
+                                levels: _sevenToneLevels,
+                                color: scheme.primary,
+                                size: const Size(54, 22),
+                              ),
+                            ),
+                            controlsBuilder: (showQueue) =>
+                                NowPlayingBarControls(
+                              isPlaying: true,
+                              showQueue: showQueue,
+                              onPrevious: () {},
+                              onPlayPause: () {},
+                              onNext: () {},
+                              onQueue: () {},
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SpectrumShowcase extends StatefulWidget {
+  const _SpectrumShowcase();
+
+  @override
+  State<_SpectrumShowcase> createState() => _SpectrumShowcaseState();
+}
+
+class _SpectrumShowcaseState extends State<_SpectrumShowcase> {
+  final _levels = ValueNotifier<List<double>>(_frequencyLevels);
+
+  @override
+  void dispose() {
+    _levels.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppWindowSurface(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AppContentRegion(
+          child: Center(
+            child: SizedBox(
+              width: 920,
+              child: FrostedSurface(
+                blur: 22,
+                padding: const EdgeInsets.fromLTRB(28, 24, 28, 22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('实时音乐频谱',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 4),
+                              Text('${_titles[3]} · 固定虚构频谱帧',
+                                  style: TextStyle(
+                                      color: scheme.onSurfaceVariant)),
+                            ],
+                          ),
+                        ),
+                        MediaQuery(
+                          data: MediaQuery.of(context)
+                              .copyWith(disableAnimations: false),
+                          child: SevenToneSpectrum(
+                            levels: _sevenToneLevels,
+                            color: scheme.primary,
+                            size: const Size(84, 34),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    SpectrumProgressSection(
+                      spectrum: SizedBox(
+                        height: 190,
+                        child: CustomPaint(
+                          painter: FrequencySpectrumPainter(
+                            levels: _levels,
+                            startColor: scheme.primary,
+                            endColor: scheme.tertiary,
+                          ),
+                        ),
+                      ),
+                      progress: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            minHeight: 5,
+                            value: .42,
+                            backgroundColor: scheme.surfaceContainerHighest,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -350,7 +684,9 @@ void main() {
 
       final library = AudioLibrary.instance;
       final previousLibrary = library.audioCollection;
+      final previousFolders = library.folders;
       final previousPref = AppPreference.instance.audiosPagePref;
+      final previousFoldersPref = AppPreference.instance.foldersPagePref;
       final previousLanguage = uiLanguage.value;
       final previousLayout = AppSettings.instance.uiLayout.value;
       final previousTheme = AppSettings.instance.themeMode;
@@ -363,8 +699,18 @@ void main() {
           _DemoAudio(index, covers[index % 3]),
       ];
       library.audioCollection = audios;
+      library.folders = [
+        AudioFolder(
+            audios.take(3).toList(), r'Z:\公开演示\晨光收藏', 1787961600, 1787961600),
+        AudioFolder(audios.skip(3).take(3).toList(), r'Z:\公开演示\色彩练习',
+            1787788800, 1787788800),
+        AudioFolder(
+            audios.skip(6).toList(), r'Z:\公开演示\留白片段', 1787529600, 1787529600),
+      ];
       AppPreference.instance.audiosPagePref =
           PagePreference(1, SortOrder.ascending, ContentView.list);
+      AppPreference.instance.foldersPagePref =
+          PagePreference(0, SortOrder.ascending, ContentView.list);
       uiLanguage.value = UiLanguage.zh;
       AppSettings.instance.uiLayout.value = _layout;
       AppSettings.instance.themeMode =
@@ -389,7 +735,9 @@ void main() {
       }
       addTearDown(() {
         library.audioCollection = previousLibrary;
+        library.folders = previousFolders;
         AppPreference.instance.audiosPagePref = previousPref;
+        AppPreference.instance.foldersPagePref = previousFoldersPref;
         uiLanguage.value = previousLanguage;
         AppSettings.instance.uiLayout.value = previousLayout;
         AppSettings.instance.themeMode = previousTheme;
@@ -415,8 +763,12 @@ void main() {
         'library' => '/audios',
         'settings' || 'desktop' || 'appearance' || 'theme' => '/settings',
         'categories' => '/categories',
+        'folders' => '/folders',
+        'statistics' => '/statistics',
         'search' => '/search/result',
         'mini' => '/mini',
+        'playerbar' => '/player-bar',
+        'spectrum' => '/spectrum',
         _ => '/playlists',
       };
       final demoLyric = SynchronousFuture<Lyric?>(_DemoLyric());
@@ -428,6 +780,28 @@ void main() {
       final classificationScanner = MusicClassificationScanner(
         readLyrics: (_) async {
           classificationReads++;
+          return null;
+        },
+      );
+      final playbackStatistics =
+          page == 'statistics' ? _demoPlaybackStatistics() : null;
+      if (playbackStatistics != null) {
+        addTearDown(playbackStatistics.dispose);
+      }
+      var statisticsFileInspections = 0;
+      var statisticsLyricReads = 0;
+      final statisticsScanner = LibraryStatisticsScanner(
+        windowsPaths: true,
+        inspectFile: (path) async {
+          statisticsFileInspections++;
+          final index = audios.indexWhere((audio) => audio.path == path);
+          return LocalAudioFileInfo.available(
+            (index + 3) * 4 * 1024 * 1024,
+            resolvedPath: path,
+          );
+        },
+        readLyrics: (_) async {
+          statisticsLyricReads++;
           return null;
         },
       );
@@ -458,32 +832,41 @@ void main() {
                     onDragStart: () {},
                   )),
                 )
-              : _ShowcaseShell(
-                  preferences: preferences,
-                  page: switch (page) {
-                    'library' => const AudiosPage(),
-                    'settings' ||
-                    'desktop' ||
-                    'appearance' ||
-                    'theme' =>
-                      const SettingsPage(),
-                    'categories' => CategoriesPage(
-                        audios: audios,
-                        initialCategory: MusicCategoryKind.composer,
-                        classificationScanner: classificationScanner,
-                        onOpenGroup: (_) {}),
-                    'search' => SearchResultPage(searchResult: searchResult),
-                    _ => PlaylistBrowser(
-                        tree: tree,
-                        library: audios,
-                        persist: () async {},
-                        onPlay: (_, __) {},
-                        onOpenAlbums: () {},
-                        albumCount: 3,
-                        initialView: PlaylistViewMode.circular,
-                      ),
-                  },
-                ),
+              : page == 'playerbar'
+                  ? _PlayerBarShowcase(cover: covers.first)
+                  : page == 'spectrum'
+                      ? const _SpectrumShowcase()
+                      : _ShowcaseShell(
+                          preferences: preferences,
+                          page: switch (page) {
+                            'library' => const AudiosPage(),
+                            'settings' ||
+                            'desktop' ||
+                            'appearance' ||
+                            'theme' =>
+                              const SettingsPage(),
+                            'categories' => CategoriesPage(
+                                audios: audios,
+                                initialCategory: MusicCategoryKind.bitrate,
+                                classificationScanner: classificationScanner,
+                                onOpenGroup: (_) {}),
+                            'folders' => const FoldersPage(),
+                            'statistics' => StatisticsPage(
+                                scanner: statisticsScanner,
+                                statistics: playbackStatistics!),
+                            'search' =>
+                              SearchResultPage(searchResult: searchResult),
+                            _ => PlaylistBrowser(
+                                tree: tree,
+                                library: audios,
+                                persist: () async {},
+                                onPlay: (_, __) {},
+                                onOpenAlbums: () {},
+                                albumCount: 3,
+                                initialView: PlaylistViewMode.circular,
+                              ),
+                          },
+                        ),
         ),
       ]);
       final captureKey = GlobalKey();
@@ -516,6 +899,7 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
+      Future<List<Audio>?>? songPickerResult;
       if (['settings', 'appearance', 'theme'].contains(page)) {
         await _selectSettingsCategory(tester, 'appearance');
       } else if (page == 'desktop') {
@@ -544,6 +928,19 @@ void main() {
         FocusManager.instance.primaryFocus?.unfocus();
         await tester.pumpAndSettle();
       }
+      if (page == 'songpicker') {
+        songPickerResult = showPlaylistSongPicker(
+          tester.element(find.byType(PlaylistBrowser)),
+          existingPaths: audios.take(3).map((audio) => audio.path).toSet(),
+          library: audios,
+          selectedAudios: audios.take(3).toList(),
+          replaceSelection: true,
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(PlaylistSongPicker), findsOneWidget);
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+      }
       // Codec/GPU work runs outside fake widget time. pumpAndSettle alone
       // can finish before the first cold image decode; explicitly await
       // our allowlisted memory/asset images before capturing any frame.
@@ -561,8 +958,11 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect(find.byType(TitleBar),
-          page == 'mini' ? findsNothing : findsOneWidget);
+      expect(
+          find.byType(TitleBar),
+          {'mini', 'playerbar', 'spectrum'}.contains(page)
+              ? findsNothing
+              : findsOneWidget);
       for (final icon in tester.widgetList<Icon>(find.byType(Icon))) {
         final data = icon.icon;
         if (data == null) continue;
@@ -591,7 +991,7 @@ void main() {
         expect(find.text('演示歌单 1 · 色彩练习'), findsOneWidget);
       } else if (page == 'categories') {
         expect(find.byType(CategoriesPage), findsOneWidget);
-        expect(find.text('虚构作曲组 1'), findsOneWidget);
+        expect(find.text('257–320 kbps'), findsOneWidget);
         expect(classificationReads, 0,
             reason: 'Complete fictional tags must not request lyric files.');
       } else if (page == 'mini') {
@@ -602,6 +1002,40 @@ void main() {
       } else if (page == 'search') {
         expect(find.byType(SearchResultPage), findsOneWidget);
         expect(find.byType(AudioTile), findsWidgets);
+      } else if (page == 'folders') {
+        expect(find.byType(FoldersPage), findsOneWidget);
+        expect(find.byType(AudioFolderTile), findsNWidgets(3));
+        expect(find.text('晨光收藏'), findsOneWidget);
+      } else if (page == 'statistics') {
+        expect(find.byType(StatisticsPage), findsOneWidget);
+        expect(find.text('音乐统计'), findsOneWidget);
+        expect(find.text('听歌行为'), findsOneWidget);
+        expect(statisticsFileInspections, audios.length);
+        expect(statisticsLyricReads, 0,
+            reason: 'Complete fictional tags must not request lyric files.');
+      } else if (page == 'playerbar') {
+        expect(find.byType(NowPlayingBarRow), findsOneWidget);
+        expect(find.byType(NowPlayingBarControls), findsOneWidget);
+        expect(find.byType(RectangleProgressIndicator), findsOneWidget);
+        expect(find.byType(SevenToneSpectrum), findsOneWidget);
+        expect(
+            tester
+                .widget<SevenToneSpectrum>(find.byType(SevenToneSpectrum))
+                .levels,
+            _sevenToneLevels);
+      } else if (page == 'songpicker') {
+        expect(find.byType(PlaylistBrowser), findsOneWidget);
+        expect(find.byType(PlaylistSongPicker), findsOneWidget);
+        expect(find.text('更改所选歌曲'), findsOneWidget);
+        expect(find.text('保存选择（3 首）'), findsOneWidget);
+      } else if (page == 'spectrum') {
+        expect(find.byType(SpectrumProgressSection), findsOneWidget);
+        expect(find.byType(SevenToneSpectrum), findsOneWidget);
+        expect(
+            tester
+                .widgetList<CustomPaint>(find.byType(CustomPaint))
+                .any((paint) => paint.painter is FrequencySpectrumPainter),
+            isTrue);
       } else if (page == 'desktop') {
         expect(find.byKey(const ValueKey('tray-menu-blur-radius-setting')),
             findsOneWidget);
@@ -619,6 +1053,12 @@ void main() {
         await tester.tap(find.widgetWithText(TextButton, '取消'));
         await tester.pumpAndSettle();
         expect(find.byType(ThemePickerDialog), findsNothing);
+      }
+      if (page == 'songpicker') {
+        await tester.tap(find.widgetWithText(TextButton, '取消').last);
+        await tester.pumpAndSettle();
+        expect(await songPickerResult, isNull);
+        expect(find.byType(PlaylistSongPicker), findsNothing);
       }
       expect(PlayService.isInitialized, isFalse);
       expect(

@@ -322,6 +322,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
                         painter: RectangleProgressPainter(
                             progress: progress,
                             scheme: scheme,
+                            dragIndicatorColor: scheme.primary,
                             devicePixelRatio:
                                 MediaQuery.devicePixelRatioOf(context),
                             globalOrigin: () {
@@ -407,6 +408,7 @@ class RectangleProgressPainter extends CustomPainter {
   final ValueNotifier<double> progress;
 
   final ColorScheme scheme;
+  final Color dragIndicatorColor;
   final ValueListenable<double>? highlightBoundary;
   final double devicePixelRatio;
   final Offset Function()? globalOrigin;
@@ -414,6 +416,7 @@ class RectangleProgressPainter extends CustomPainter {
   RectangleProgressPainter(
       {required this.progress,
       required this.scheme,
+      required this.dragIndicatorColor,
       this.highlightBoundary,
       this.devicePixelRatio = 1,
       this.globalOrigin})
@@ -453,10 +456,17 @@ class RectangleProgressPainter extends CustomPainter {
                   .roundToDouble() /
               ratio -
           originX;
-      final height = (size.height - 16).clamp(6.0, 26.0);
+      final fullHeight = (size.height - 16).clamp(6.0, 26.0);
+      // Keep the visible core on the active theme colour. Applying the
+      // animation value as alpha blends a saturated primary into a dark track
+      // and can make the handle look black or fixed-grey. Only the short end
+      // of the existing 80/100ms transition changes its length instead.
+      const revealFraction = 0.08;
+      final reveal = (opacity / revealFraction).clamp(0.0, 1.0);
+      final height = fullHeight * Curves.easeOutCubic.transform(reveal);
       final bounds = Rect.fromLTWH(left.clamp(0.0, size.width - width),
           (size.height - height) / 2, width, height);
-      final tint = Paint()..color = scheme.primary.withValues(alpha: opacity);
+      final tint = Paint()..color = dragIndicatorColor;
       // Pixel-aligned, solid core: no gradient, halo or spindle-shaped bulge.
       // Rounded ends meet the colour boundary; only the whole hint fades out.
       canvas.drawRRect(
@@ -467,6 +477,7 @@ class RectangleProgressPainter extends CustomPainter {
   @override
   bool shouldRepaint(RectangleProgressPainter oldDelegate) =>
       oldDelegate.scheme != scheme ||
+      oldDelegate.dragIndicatorColor != dragIndicatorColor ||
       oldDelegate.progress != progress ||
       oldDelegate.devicePixelRatio != devicePixelRatio ||
       oldDelegate.globalOrigin != globalOrigin ||

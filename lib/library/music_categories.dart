@@ -9,15 +9,32 @@ import 'package:path/path.dart' as path;
 enum MusicCategoryKind {
   artist('艺术家', '位艺术家', '未知艺术家'),
   album('专辑', '张专辑', '未知专辑'),
-  composer('作曲家', '位作曲家', '未知作曲家'),
+  bitrate('码率', '个码率区间', '未知码率'),
+  duration('时长', '个时长区间', '未知时长'),
   language('语言', '种语言', '未识别'),
   format('文件格式', '种格式', '未知格式'),
-  source('来源', '种来源', '未知来源');
+  source('来源', '种来源', '未知来源'),
+
+  /// Legacy deep-link compatibility only. It is intentionally absent from
+  /// [browsableValues] and cannot be selected from the category page any more.
+  composer('作曲家', '位作曲家', '未知作曲家');
 
   const MusicCategoryKind(this.label, this.countLabel, this.unknownLabel);
   final String label;
   final String countLabel;
   final String unknownLabel;
+
+  /// Public category rail order. Keep this explicit so adding a compatibility
+  /// projection cannot accidentally expose it in the interface.
+  static const browsableValues = [
+    artist,
+    album,
+    bitrate,
+    duration,
+    language,
+    format,
+    source,
+  ];
 
   static MusicCategoryKind fromName(String? name) =>
       values.where((kind) => kind.name == name).firstOrNull ?? artist;
@@ -32,6 +49,7 @@ class MusicCategoryGroup {
     required this.title,
     required this.subtitle,
     required this.isUnknown,
+    required this.sortOrder,
     required Iterable<Audio> audios,
     required Map<ClassificationEvidence, int> evidenceCounts,
   })  : audios = List.unmodifiable(audios),
@@ -42,6 +60,7 @@ class MusicCategoryGroup {
   final String title;
   final String? subtitle;
   final bool isUnknown;
+  final int sortOrder;
   final List<Audio> audios;
   final Map<ClassificationEvidence, int> evidenceCounts;
 
@@ -76,97 +95,50 @@ class MusicCategories {
     Iterable<Audio> audios, {
     String? artistSplitPattern,
     MusicClassificationSnapshot? classifications,
-  }) {
-    final separator =
-        RegExp(artistSplitPattern ?? AppSettings.instance.artistSplitPattern);
-    final building = <MusicCategoryKind, Map<String, _GroupBuilder>>{
-      for (final kind in MusicCategoryKind.values) kind: {},
-    };
-    for (final audio in audios) {
-      final classification =
-          (classifications ?? const MusicClassificationSnapshot.empty())
-              .forAudio(audio);
-      for (final kind in MusicCategoryKind.values) {
-        if (kind == MusicCategoryKind.album) {
-          final name = _tagName(audio.album);
-          // Album artist is the release identity, NOT a per-track performer.
-          // Without that tag, keep unrelated performers' releases separate.
-          final owner = _tagName(audio.albumArtist) ?? _tagName(audio.artist);
-          final key = jsonEncode([kind.name, name, owner]);
-          building[kind]!
-              .putIfAbsent(
-                key,
-                () => _GroupBuilder(kind, key, name ?? kind.unknownLabel,
-                    owner ?? '未知专辑艺术家', name == null),
-              )
-              .audios
-              .add(audio);
-        } else if (kind == MusicCategoryKind.artist ||
-            kind == MusicCategoryKind.composer) {
-          final value = kind == MusicCategoryKind.artist
-              ? audio.artist
-              : classification.composer.value;
-          final names = _personNames(value, separator);
-          for (final name in names) {
-            final key = jsonEncode([kind.name, name]);
-            building[kind]!
-                .putIfAbsent(
-                  key,
-                  () => _GroupBuilder(
-                      kind, key, name ?? kind.unknownLabel, null, name == null),
-                )
-                .add(audio,
-                    evidence: kind == MusicCategoryKind.composer
-                        ? classification.composer.evidence
-                        : null);
-          }
-        } else {
-          final (identity, title, unknown) = switch (kind) {
-            MusicCategoryKind.language =>
-              _languageIdentity(classification.language),
-            MusicCategoryKind.format => _formatIdentity(audio),
-            MusicCategoryKind.source => (
-                audio.isOnline ? 'online' : 'local',
-                audio.isOnline ? '联网' : '本地',
-                false,
-              ),
-            _ => throw StateError('Unexpected person or album category'),
-          };
-          final key = jsonEncode([kind.name, identity]);
-          building[kind]!
-              .putIfAbsent(
-                key,
-                () => _GroupBuilder(kind, key, title, null, unknown),
-              )
-              .add(audio,
-                  evidence: kind == MusicCategoryKind.language
-                      ? classification.languageEvidence
-                      : null);
-        }
-      }
-    }
-    for (final kind in MusicCategoryKind.values) {
-      final result = building[kind]!
-          .values
-          .map((item) => item.freeze())
-          .toList()
-        ..sort((a, b) {
-          if (a.isUnknown != b.isUnknown) return a.isUnknown ? 1 : -1;
-          final title = a.title.toLowerCase().compareTo(b.title.toLowerCase());
-          return title != 0 ? title : a.id.compareTo(b.id);
-        });
-      _groups[kind] = List.unmodifiable(result);
-    }
-  }
+  })  : _audios = List.unmodifiable(audios),
+        _separator = RegExp(
+            artistSplitPattern ?? AppSettings.instance.artistSplitPattern),
+        _classifications =
+            classifications ?? const MusicClassificationSnapshot.empty();
 
+  final List<Audio> _audios;
+  final RegExp _separator;
+  final MusicClassificationSnapshot _classifications;
   final _groups = <MusicCategoryKind, List<MusicCategoryGroup>>{};
   static final _paths = path.Context(style: path.Style.windows);
   static final _formatExtension = RegExp(r'^[A-Z0-9]{1,12}$');
 
-  static (String, String, bool) _languageIdentity(
+  static (String, String, bool, int) _languageIdentity(
       SongLanguageClassification result) {
     final language = result.language;
-    return (language.name, language.label, language == SongLanguage.unknown);
+    return (
+      language.name,
+      language.label,
+      language == SongLanguage.unknown,
+      language.index,
+    );
+  }
+
+  static (String, String, bool, int) _bitrateIdentity(int? bitrate) {
+    if (bitrate == null || bitrate <= 0) {
+      return ('unknown', MusicCategoryKind.bitrate.unknownLabel, true, 5);
+    }
+    if (bitrate <= 128) return ('le128', '128 kbps 及以下', false, 0);
+    if (bitrate <= 192) return ('129-192', '129–192 kbps', false, 1);
+    if (bitrate <= 256) return ('193-256', '193–256 kbps', false, 2);
+    if (bitrate <= 320) return ('257-320', '257–320 kbps', false, 3);
+    return ('gt320', '高于 320 kbps', false, 4);
+  }
+
+  static (String, String, bool, int) _durationIdentity(int duration) {
+    if (duration <= 0) {
+      return ('unknown', MusicCategoryKind.duration.unknownLabel, true, 5);
+    }
+    if (duration < 2 * 60) return ('lt2m', '少于 2 分钟', false, 0);
+    if (duration < 5 * 60) return ('2-4m', '2–4 分钟', false, 1);
+    if (duration < 10 * 60) return ('5-9m', '5–9 分钟', false, 2);
+    if (duration < 30 * 60) return ('10-29m', '10–29 分钟', false, 3);
+    return ('ge30m', '30 分钟及以上', false, 4);
   }
 
   static String? _formatName(Audio audio) {
@@ -178,16 +150,104 @@ class MusicCategories {
     return _formatExtension.hasMatch(name) ? name : null;
   }
 
-  static (String?, String, bool) _formatIdentity(Audio audio) {
+  static (String?, String, bool, int) _formatIdentity(Audio audio) {
     final format = _formatName(audio);
     return (
       format,
       format ?? MusicCategoryKind.format.unknownLabel,
-      format == null
+      format == null,
+      0,
     );
   }
 
-  List<MusicCategoryGroup> groups(MusicCategoryKind kind) => _groups[kind]!;
+  /// Build only the requested projection. Opening one category therefore does
+  /// not pay for every other grouping (including the hidden legacy composer).
+  List<MusicCategoryGroup> groups(MusicCategoryKind kind) =>
+      _groups.putIfAbsent(kind, () => _buildGroups(kind));
+
+  List<MusicCategoryGroup> _buildGroups(MusicCategoryKind kind) {
+    final building = <String, _GroupBuilder>{};
+    for (final audio in _audios) {
+      if (kind == MusicCategoryKind.album) {
+        final name = _tagName(audio.album);
+        // Album artist is the release identity, NOT a per-track performer.
+        // Without that tag, keep unrelated performers' releases separate.
+        final owner = _tagName(audio.albumArtist) ?? _tagName(audio.artist);
+        final key = jsonEncode([kind.name, name, owner]);
+        building
+            .putIfAbsent(
+              key,
+              () => _GroupBuilder(kind, key, name ?? kind.unknownLabel,
+                  owner ?? '未知专辑艺术家', name == null),
+            )
+            .audios
+            .add(audio);
+        continue;
+      }
+
+      if (kind == MusicCategoryKind.artist ||
+          kind == MusicCategoryKind.composer) {
+        final classification = kind == MusicCategoryKind.composer
+            ? _classifications.forAudio(audio)
+            : null;
+        final value = kind == MusicCategoryKind.artist
+            ? audio.artist
+            : classification!.composer.value;
+        final names = _personNames(value, _separator);
+        for (final name in names) {
+          final key = jsonEncode([kind.name, name]);
+          building
+              .putIfAbsent(
+                key,
+                () => _GroupBuilder(
+                    kind, key, name ?? kind.unknownLabel, null, name == null),
+              )
+              .add(audio,
+                  evidence: kind == MusicCategoryKind.composer
+                      ? classification!.composer.evidence
+                      : null);
+        }
+        continue;
+      }
+
+      final language = kind == MusicCategoryKind.language
+          ? _classifications.forAudio(audio)
+          : null;
+      final (identity, title, unknown, sortOrder) = switch (kind) {
+        MusicCategoryKind.bitrate => _bitrateIdentity(audio.bitrate),
+        MusicCategoryKind.duration => _durationIdentity(audio.duration),
+        MusicCategoryKind.language => _languageIdentity(language!.language),
+        MusicCategoryKind.format => _formatIdentity(audio),
+        MusicCategoryKind.source => (
+            audio.isOnline ? 'online' : 'local',
+            audio.isOnline ? '联网' : '本地',
+            false,
+            0,
+          ),
+        _ => throw StateError('Unexpected person or album category'),
+      };
+      final key = jsonEncode([kind.name, identity]);
+      building
+          .putIfAbsent(
+            key,
+            () => _GroupBuilder(kind, key, title, null, unknown, sortOrder),
+          )
+          .add(audio,
+              evidence: kind == MusicCategoryKind.language
+                  ? language!.languageEvidence
+                  : null);
+    }
+
+    final result = building.values.map((item) => item.freeze()).toList()
+      ..sort((a, b) {
+        if (a.isUnknown != b.isUnknown) return a.isUnknown ? 1 : -1;
+        final order = a.sortOrder.compareTo(b.sortOrder);
+        if (order != 0) return order;
+        final title = a.title.toLowerCase().compareTo(b.title.toLowerCase());
+        return title != 0 ? title : a.id.compareTo(b.id);
+      });
+    return List.unmodifiable(result);
+  }
 
   MusicCategoryGroup? find(MusicCategoryKind kind, String id) =>
       groups(kind).where((group) => group.id == id).firstOrNull;
@@ -228,12 +288,14 @@ class MusicCategories {
 }
 
 class _GroupBuilder {
-  _GroupBuilder(this.kind, this.id, this.title, this.subtitle, this.isUnknown);
+  _GroupBuilder(this.kind, this.id, this.title, this.subtitle, this.isUnknown,
+      [this.sortOrder = 0]);
   final MusicCategoryKind kind;
   final String id;
   final String title;
   final String? subtitle;
   final bool isUnknown;
+  final int sortOrder;
   final audios = <Audio>[];
   final evidenceCounts = <ClassificationEvidence, int>{};
 
@@ -250,6 +312,7 @@ class _GroupBuilder {
         title: title,
         subtitle: subtitle,
         isUnknown: isUnknown,
+        sortOrder: sortOrder,
         audios: audios,
         evidenceCounts: evidenceCounts,
       );

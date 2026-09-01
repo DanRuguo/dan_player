@@ -8,6 +8,7 @@ import 'package:dan_player/page/uni_page_components.dart';
 import 'package:dan_player/page/folders_page.dart' show folderDisplayName;
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:path/path.dart' as path_util;
 
 class FolderDetailPage extends StatelessWidget {
   final AudioFolder folder;
@@ -16,12 +17,23 @@ class FolderDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final contentList = List<Audio>.from(folder.audios);
+    return ValueListenableBuilder<int>(
+      valueListenable: AudioLibrary.changes,
+      builder: (context, _, __) => _buildPage(context),
+    );
+  }
+
+  Widget _buildPage(BuildContext context) {
+    final current = AudioLibrary.instance.folders.where(
+      (candidate) => path_util.equals(candidate.path, folder.path),
+    );
+    final resolved = current.isEmpty ? folder : current.first;
+    final contentList = List<Audio>.from(resolved.audios);
     final multiSelectController = MultiSelectController<Audio>();
     return UniPage<Audio>(
       pref: AppPreference.instance.folderDetailPagePref,
-      title: folderDisplayName(folder.path),
-      subtitle: ui("{0} 首乐曲 · {1}", [contentList.length, folder.path]),
+      title: folderDisplayName(resolved.path),
+      subtitle: ui("{0} 首乐曲 · {1}", [contentList.length, resolved.path]),
       contentList: contentList,
       contentBuilder: (context, item, i, multiSelectController) => AudioTile(
         audioIndex: i,

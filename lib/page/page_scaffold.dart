@@ -140,9 +140,9 @@ class PageScaffold extends StatelessWidget {
                               children: rowChildren,
                             )
                           : LayoutBuilder(builder: (context, constraints) {
-                              final titleWidget = subtitle == null
-                                  ? onlyTitle(scheme)
-                                  : withSubtitle(scheme);
+                              final titleContent = subtitle == null
+                                  ? _onlyTitleContent(scheme)
+                                  : _withSubtitleContent(scheme);
                               final largeText =
                                   MediaQuery.textScalerOf(context).scale(14) >
                                       19;
@@ -151,7 +151,9 @@ class PageScaffold extends StatelessWidget {
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
-                                    Row(children: [titleWidget]),
+                                    Row(children: [
+                                      Expanded(child: titleContent)
+                                    ]),
                                     const SizedBox(height: 12),
                                     Align(
                                       alignment: Alignment.centerRight,
@@ -162,13 +164,16 @@ class PageScaffold extends StatelessWidget {
                               }
                               return Row(
                                 children: [
-                                  titleWidget,
-                                  const SizedBox(width: 20),
+                                  // Localized identity text keeps its natural
+                                  // width while scrolling toolbars receive the
+                                  // otherwise unused middle of a wide header.
                                   ConstrainedBox(
                                     constraints: BoxConstraints(
-                                        maxWidth: constraints.maxWidth * .65),
-                                    child: responsiveActions,
+                                        maxWidth: constraints.maxWidth * .4),
+                                    child: titleContent,
                                   ),
+                                  const SizedBox(width: 20),
+                                  Expanded(child: responsiveActions!),
                                 ],
                               );
                             })),
@@ -203,19 +208,16 @@ class PageScaffold extends StatelessWidget {
     });
   }
 
-  Expanded onlyTitle(ColorScheme scheme) {
-    return Expanded(
-      child: Text(
+  Widget _onlyTitleContent(ColorScheme scheme) => Text(
         title,
         style: TextStyle(fontSize: 32.0, color: scheme.onSurface),
         overflow: TextOverflow.ellipsis,
-      ),
-    );
-  }
+      );
 
-  Expanded withSubtitle(ColorScheme scheme) {
-    return Expanded(
-      child: Column(
+  Expanded onlyTitle(ColorScheme scheme) =>
+      Expanded(child: _onlyTitleContent(scheme));
+
+  Widget _withSubtitleContent(ColorScheme scheme) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
@@ -229,7 +231,8 @@ class PageScaffold extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           )
         ],
-      ),
-    );
-  }
+      );
+
+  Expanded withSubtitle(ColorScheme scheme) =>
+      Expanded(child: _withSubtitleContent(scheme));
 }

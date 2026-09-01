@@ -9,6 +9,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/utils.dart';
+import 'package:path/path.dart' as path_util;
 
 List<Playlist> PLAYLISTS = [];
 Future<void> _playlistWriteQueue = Future.value();
@@ -793,6 +794,31 @@ class PlaylistTree {
   void removeEntry({required Playlist? parent, required String entryId}) {
     _requireEditable();
     removeEntries(parent: parent, entryIds: [entryId]);
+  }
+
+  /// Remove every persisted reference to one local file, including repeated
+  /// legacy occurrences and references nested under child playlists.
+  ///
+  /// This deliberately operates on the file identity rather than [Audio]
+  /// object identity: metadata refreshes may have replaced the in-memory
+  /// object while a menu is still open. The physical file and the library are
+  /// owned by the deletion coordinator; this method only updates playlists.
+  int removeAudioReferences(String audioPath, {bool prevalidated = false}) {
+    _requireEditable();
+    if (!prevalidated) validate();
+    var removed = 0;
+    for (final playlist in allPlaylists) {
+      final before = playlist._entries.length;
+      playlist._entries.removeWhere((entry) =>
+          entry is PlaylistAudioEntry &&
+          (path_util.equals(entry._path, audioPath) ||
+              path_util.equals(entry.audio.path, audioPath)));
+      final count = before - playlist._entries.length;
+      if (count == 0) continue;
+      removed += count;
+      playlist._touch();
+    }
+    return removed;
   }
 
   /// Remove only relationships at one level, validating the whole selection

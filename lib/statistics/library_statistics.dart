@@ -773,6 +773,7 @@ class MusicClassificationScanner {
 
   Future<MusicClassificationSnapshot> scan(
     Iterable<Audio> audios, {
+    bool includeComposer = true,
     bool Function()? isCancelled,
     void Function(int completed, int total)? onProgress,
   }) async {
@@ -788,10 +789,14 @@ class MusicClassificationScanner {
       final batch = tracks.skip(offset).take(8);
       final results = await Future.wait(batch.map((track) async {
         String? lyrics;
-        // Tags suffice only when BOTH language and composer are known.
-        if (!track.$6 &&
-            (_languageFromTag(track.$5) == null ||
-                classifySongComposer(composerTag: track.$3).value == null)) {
+        // Language browsing must not read every lyric merely because the
+        // hidden legacy composer projection is missing a tag. Statistics and
+        // explicit composer deep links keep the former behaviour by leaving
+        // [includeComposer] enabled.
+        final needsLanguageLyrics = _languageFromTag(track.$5) == null;
+        final needsComposerLyrics = includeComposer &&
+            classifySongComposer(composerTag: track.$3).value == null;
+        if (!track.$6 && (needsLanguageLyrics || needsComposerLyrics)) {
           try {
             lyrics = await _readLyrics(track.$1);
           } catch (_) {

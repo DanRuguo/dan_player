@@ -41,6 +41,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
   MusicClassificationSnapshot _classifications =
       const MusicClassificationSnapshot.empty();
   int _scanGeneration = 0;
+  late int _classificationRevision;
   bool _classifying = false;
   bool _classificationsReady = false;
   String _query = '';
@@ -51,12 +52,19 @@ class _CategoriesPageState extends State<CategoriesPage> {
   @override
   void initState() {
     super.initState();
+    _classificationRevision = AudioLibrary.classificationRevision;
     AudioLibrary.changes.addListener(_refresh);
     _scanClassificationsIfNeeded();
   }
 
   void _refresh() {
     if (!mounted) return;
+    final revision = AudioLibrary.classificationRevision;
+    if (revision == _classificationRevision) {
+      setState(() => _snapshot = null);
+      return;
+    }
+    _classificationRevision = revision;
     setState(_invalidateClassifications);
     _scanClassificationsIfNeeded();
   }
@@ -83,6 +91,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
         final classifications = await (widget.classificationScanner ??
                 MusicClassificationScanner.shared)
             .scan(audios,
+                includeComposer: _kind == MusicCategoryKind.composer,
                 isCancelled: () => !mounted || generation != _scanGeneration);
         if (!mounted || generation != _scanGeneration) return;
         setState(() {
@@ -103,8 +112,16 @@ class _CategoriesPageState extends State<CategoriesPage> {
   @override
   void didUpdateWidget(CategoriesPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final categoryChanged = oldWidget.initialCategory != widget.initialCategory;
+    final classificationInputsChanged = categoryChanged ||
+        !identical(oldWidget.audios, widget.audios) ||
+        !identical(
+            oldWidget.classificationScanner, widget.classificationScanner);
+    // Parent/theme rebuilds replace this widget configuration too. They must
+    // not discard a valid language snapshot and restart bounded lyric I/O.
+    if (!classificationInputsChanged) return;
     _invalidateClassifications();
-    if (oldWidget.initialCategory != widget.initialCategory) {
+    if (categoryChanged) {
       _kind = widget.initialCategory;
       _query = '';
       _search.clear();
@@ -162,6 +179,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
                     "语言优先使用标签，其次参考歌词及标题、作曲/参与创作艺术家等元数据推断；推断不等于音频识别，无法确认的歌曲归入“未识别”。"),
             MusicCategoryKind.composer =>
               ui("作曲家采用宽口径：优先使用作曲标签、歌词署名，缺失时回退到参与创作的艺术家；回退结果会单独标注。"),
+            MusicCategoryKind.bitrate => ui("码率按音频索引中的标称值分段；缺失或无效值归入“未知码率”。"),
+            MusicCategoryKind.duration => ui("时长按歌曲总时长分段；缺失或无效值归入“未知时长”。"),
             MusicCategoryKind.format => ui("仅按本地文件扩展名分类；联网歌曲或无扩展名文件归入“未知格式”。"),
             _ => null,
           };
@@ -395,6 +414,8 @@ IconData categoryIcon(MusicCategoryKind kind) => switch (kind) {
       MusicCategoryKind.artist => Icons.person_outline,
       MusicCategoryKind.album => Icons.album_outlined,
       MusicCategoryKind.composer => Icons.music_note_outlined,
+      MusicCategoryKind.bitrate => Icons.speed_outlined,
+      MusicCategoryKind.duration => Icons.schedule_outlined,
       MusicCategoryKind.language => Icons.language,
       MusicCategoryKind.format => Icons.audio_file_outlined,
       MusicCategoryKind.source => Icons.cloud_outlined,
@@ -413,7 +434,7 @@ class _CategorySelector extends StatefulWidget {
 class _CategorySelectorState extends State<_CategorySelector> {
   final _scroll = ScrollController();
   final _chipKeys = {
-    for (final kind in MusicCategoryKind.values) kind: GlobalKey(),
+    for (final kind in MusicCategoryKind.browsableValues) kind: GlobalKey(),
   };
 
   @override
@@ -432,7 +453,7 @@ class _CategorySelectorState extends State<_CategorySelector> {
   void _revealSelected() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final selectedContext = _chipKeys[widget.selected]!.currentContext;
+      final selectedContext = _chipKeys[widget.selected]?.currentContext;
       if (selectedContext != null) {
         Scrollable.ensureVisible(selectedContext, alignment: .5);
       }
@@ -457,8 +478,8 @@ class _CategorySelectorState extends State<_CategorySelector> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              for (final kind in MusicCategoryKind.values) ...[
-                if (kind != MusicCategoryKind.values.first)
+              for (final kind in MusicCategoryKind.browsableValues) ...[
+                if (kind != MusicCategoryKind.browsableValues.first)
                   const SizedBox(width: 8),
                 ConstrainedBox(
                   key: _chipKeys[kind],

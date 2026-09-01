@@ -180,7 +180,9 @@ pub(super) fn refresh(
     let results: Vec<anyhow::Result<serde_json::Value>> = files.par_iter().map(|file| {
         let previous = old.get(&path_key(&file.path)).copied();
         if !force && previous.is_some_and(|value| file.fingerprint.matches(value)
-            && value["metadata_pending"] != true && !needs_classification_backfill(value)) {
+            && value["metadata_pending"] != true
+            && !needs_classification_backfill(value)
+            && !needs_duration_backfill(value)) {
             let mut value = previous.unwrap().clone();
             value["path"] = file.path.to_string_lossy().into_owned().into();
             return Ok(value);
@@ -319,7 +321,8 @@ mod tests {
     fn tags(path: &Path) -> serde_json::Value {
         serde_json::json!({"path": path.to_string_lossy(), "title": "Synthetic title",
             "artist": "Fixture", "album": "Synthetic", "by": "Test", "created": 0,
-            "classification_version": CLASSIFICATION_VERSION})
+            "classification_version": CLASSIFICATION_VERSION,
+            "duration_version": DURATION_VERSION})
     }
     fn songs(index: &serde_json::Value) -> Vec<&serde_json::Value> {
         index["folders"]
@@ -341,6 +344,25 @@ mod tests {
         let second = f.scan(Some(&first), false, &calls);
         assert_eq!(second, first);
         assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+    #[test]
+    fn old_duration_reader_marker_is_backfilled_once_then_reused() {
+        let f = Fixture::new();
+        f.file("a.mp3");
+        let calls = AtomicUsize::new(0);
+        let mut first = f.scan(None, true, &calls);
+        first["folders"][0]["audios"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("duration_version");
+        calls.store(0, Ordering::Relaxed);
+
+        let migrated = f.scan(Some(&first), false, &calls);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(songs(&migrated)[0]["duration_version"], DURATION_VERSION);
+
+        f.scan(Some(&migrated), false, &calls);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
     #[test]
     fn full_refresh_force_reads_every_song_and_preserves_extension_fields() {

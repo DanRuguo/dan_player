@@ -22,7 +22,10 @@ class AudiosPage extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return ListenableBuilder(
-      listenable: OnlineLibrary.instance,
+      listenable: Listenable.merge([
+        OnlineLibrary.instance,
+        AudioLibrary.changes,
+      ]),
       builder: (context, _) => _buildPage(context),
     );
   }

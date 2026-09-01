@@ -3,6 +3,7 @@ import 'package:dan_player/component/app_action_icon.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/audio_columns.dart';
+import 'package:dan_player/component/audio_delete_action.dart';
 import 'package:dan_player/statistics/library_statistics.dart'
     show classifySongComposer;
 import 'package:dan_player/component/audio_metadata_dialog.dart';
@@ -240,6 +241,8 @@ class _AudioTileState extends State<AudioTile> {
         leadingIcon: const Icon(Symbols.info),
         child: Text(ui("详细信息")),
       ),
+      const Divider(),
+      DeleteAudioMenuItem(audio: audio, hostContext: context),
     ];
   }
 

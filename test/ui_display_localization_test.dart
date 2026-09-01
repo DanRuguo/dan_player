@@ -131,6 +131,26 @@ void main() {
     }
   });
 
+  testWidgets('duration notification does not replace visible search results',
+      (tester) async {
+    final result = UnionSearchResult('no structural change')
+      ..online =
+          Future.value(const OnlineSearchResponse(tracks: [], failures: {}));
+    final originalAudios = result.audios;
+    final originalArtists = result.artists;
+    final originalAlbums = result.album;
+    await tester.pumpWidget(_host(SearchResultPage(searchResult: result)));
+    await tester.pumpAndSettle();
+
+    AudioLibrary.instance.publishDurationChanges();
+    await tester.pumpAndSettle();
+
+    expect(result.audios, same(originalAudios));
+    expect(result.artists, same(originalArtists));
+    expect(result.album, same(originalAlbums));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('comment sort and count suffix update without refetching media',
       (tester) async {
     final transport = FakeCommentsTransport((request) =>
