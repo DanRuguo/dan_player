@@ -426,6 +426,11 @@ class _AudioTileState extends State<AudioTile> {
                 }
 
                 if (!selecting) {
+                  if (PlayService
+                          .instance.playbackService.resolvingAudioPath.value ==
+                      audio.path) {
+                    return;
+                  }
                   PlayService.instance.playbackService
                       .play(widget.audioIndex, widget.playlist);
                 } else {

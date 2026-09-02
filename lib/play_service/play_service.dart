@@ -111,6 +111,13 @@ class PlayService {
     return created;
   }
 
+  /// Construct native playback during the startup transition, before song
+  /// tiles become interactive. In particular, this lets a persisted exclusive
+  /// output preference acquire and prewarm its endpoint outside a tap frame.
+  void ensurePlaybackInitialized() {
+    playbackService;
+  }
+
   LyricService get lyricService {
     final existing = _lyricService;
     if (existing != null) return existing;

@@ -6,6 +6,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/online/online_library.dart';
+import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/material.dart';
@@ -109,6 +110,10 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
                         readCustomAudioOrder(),
                         readPlaylists(),
                       ]);
+                      // Do not rely on MiniNowPlaying's first build to create
+                      // BASS. A persisted exclusive-output preference must be
+                      // prewarmed before the first song tile can be tapped.
+                      PlayService.instance.ensurePlaybackInitialized();
                       if (context.mounted) {
                         context.go(app_paths.AUDIOS_PAGE);
                       }

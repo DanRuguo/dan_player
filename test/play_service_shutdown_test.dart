@@ -188,6 +188,17 @@ void main() {
       expect(rig.playback.closes, 1);
     });
 
+    test('startup initialization eagerly constructs playback exactly once',
+        () async {
+      rig.facade.ensurePlaybackInitialized();
+      rig.facade.ensurePlaybackInitialized();
+      expect(rig.creations, (1, 0, 0));
+      expect(rig.ready.value, isFalse);
+      await Future<void>.value();
+      expect(rig.ready.value, isTrue);
+      expect(rig.facade.playbackService, same(rig.playback));
+    });
+
     test('repeated close shares cleanup and disposes helper before player',
         () async {
       rig.facade.desktopLyricService;

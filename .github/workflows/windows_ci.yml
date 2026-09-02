@@ -172,7 +172,7 @@ jobs:
             ${{ github.workspace }}/tool/bass-fx
           key: bass-tempo-windows-x64-${{ hashFiles('scripts/prepare_bass_runtime.ps1', 'scripts/prepare_bass_fx_runtime.ps1') }}
 
-      - name: Download and verify all eight BASS packages
+      - name: Download and verify all nine BASS packages
         run: |
           $runtime = & .\scripts\prepare_bass_runtime.ps1 -CacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass')
           Write-Host "Verified runtime: $($runtime.RuntimeDirectory)"

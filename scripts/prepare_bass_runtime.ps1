@@ -28,10 +28,10 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $repositoryRoot
 if (-not $CacheRoot) { $CacheRoot = Join-Path $workspaceRoot 'tool\bass' }
 $CacheRoot = [IO.Path]::GetFullPath($CacheRoot)
-$runtimeDirectory = Join-Path $CacheRoot 'runtime-x64'
+$runtimeDirectory = Join-Path $CacheRoot 'runtime-x64-9pkg'
 
 # Pin both the complete official archive and the exact x64 DLL copied from it.
-# These values match the official downloads inspected on 2026-08-27. Updating a
+# These values match the official downloads inspected through 2026-09-02. Updating a
 # version requires an explicit review of the new archive and its licence text.
 $packages = @(
     [pscustomobject]@{
@@ -45,6 +45,12 @@ $packages = @(
         Url = 'https://www.un4seen.com/files/basswasapi24.zip'; ArchiveSize = 151147
         ArchiveSha256 = '4BA99200EBEF8DCA11CC99CBA9B5DC3E51A1C467E570DE2CBC0631A038F7EA2D'
         DllSha256 = '6F0869C11431E01F759FBE1CD6080299C833C519EB8AB1FEAE12106907B1FBD1'
+    }
+    [pscustomobject]@{
+        Name = 'BASSMIX'; Version = '2.4.12'; Archive = 'bassmix24.zip'; Dll = 'bassmix.dll'; Notice = 'bassmix.txt'
+        Url = 'https://www.un4seen.com/files/bassmix24.zip'; ArchiveSize = 157731
+        ArchiveSha256 = 'C22D3D6135B5D14AF23AE1D54100BE6C30FE500D9B0F253B5EBC7E9130DBAD85'
+        DllSha256 = 'F782CAE8090700A456C9E7AEAA7770C3B90CB60A1E765C4B3CBAE739D3B4D58D'
     }
     [pscustomobject]@{
         Name = 'BASSAPE'; Version = '2.4.1'; Archive = 'bassape24.zip'; Dll = 'bassape.dll'; Notice = 'bassape.txt'
@@ -286,7 +292,7 @@ try {
 
 if (-not (Test-Path -LiteralPath $runtimeDirectory -PathType Container)) {
     if ($VerifyOnly) { throw "BASS runtime is missing: $runtimeDirectory" }
-    $stagingDirectory = Join-Path $CacheRoot ("runtime-x64.{0}.staging" -f [guid]::NewGuid().ToString('N'))
+    $stagingDirectory = Join-Path $CacheRoot ("runtime-x64-9pkg.{0}.staging" -f [guid]::NewGuid().ToString('N'))
     Assert-ChildPath $stagingDirectory $CacheRoot
     $null = New-Item -ItemType Directory -Path $stagingDirectory
     $null = New-Item -ItemType Directory -Path (Join-Path $stagingDirectory 'BASS')
@@ -316,7 +322,7 @@ Assert-Runtime $runtimeDirectory
 $provenance = [Collections.Generic.List[string]]::new()
 $provenance.Add('# UN4SEEN BASS x64 runtime provenance')
 $provenance.Add('')
-$provenance.Add('Pinned official HTTPS archives reviewed on 2026-08-27. DLLs and original TXT notices are copied byte-for-byte; no signature is added or changed.')
+$provenance.Add('Pinned official HTTPS archives reviewed through 2026-09-02. DLLs and original TXT notices are copied byte-for-byte; no signature is added or changed.')
 $provenance.Add('Official download page: https://www.un4seen.com/bass.html')
 $provenance.Add('')
 $provenance.Add('| Package | Version | Official archive | Archive SHA-256 | DLL SHA-256 |')
@@ -328,7 +334,7 @@ $provenance.Add('')
 $provenance.Add('Every DLL is verified as PE32+ machine 0x8664 (AMD64) with a valid original UN4SEEN Authenticode signature. Dan Player requires BASS 2.4.18 or newer; this manifest pins 2.4.18.3. The adjacent original TXT notices contain the licence, requirements, history and warranty terms.')
 $provenance.Add('BASS permits non-commercial use under its own terms; commercial use requires the appropriate licence. Redistributors must review the original terms and the licences of the application and its other dependencies before publishing a package.')
 
-Write-Host "Verified all eight UN4SEEN x64 runtime DLLs and original notices: $runtimeDirectory"
+Write-Host "Verified all nine UN4SEEN x64 runtime DLLs and original notices: $runtimeDirectory"
 [pscustomobject]@{
     CacheDirectory = $CacheRoot
     RuntimeDirectory = $runtimeDirectory

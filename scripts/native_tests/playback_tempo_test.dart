@@ -12,9 +12,11 @@ import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
 
-Uint8List _silentWave({int seconds = 12}) {
-  const rate = 48000;
-  const channels = 2;
+Uint8List _silentWave({
+  int seconds = 12,
+  int rate = 48000,
+  int channels = 2,
+}) {
   final bytes = Uint8List(44 + rate * channels * 2 * seconds);
   final data = ByteData.sublistView(bytes);
   void fourcc(int offset, String text) =>
@@ -60,6 +62,11 @@ void main() {
     await wave.writeAsBytes(waveBytes, flush: true);
     final finalRapidWave = File(path.join(run.path, 'rapid-final-7s.wav'));
     await finalRapidWave.writeAsBytes(_silentWave(seconds: 7), flush: true);
+    final exclusive441 = File(path.join(run.path, 'exclusive-44100.wav'));
+    await exclusive441.writeAsBytes(_silentWave(rate: 44100), flush: true);
+    final exclusiveSurround =
+        File(path.join(run.path, 'exclusive-48000-6ch.wav'));
+    await exclusiveSurround.writeAsBytes(_silentWave(channels: 6), flush: true);
     final report = <Map<String, Object?>>[];
     void record(String event, Map<String, Object?> values) {
       final row = {'event': event, ...values};
@@ -190,6 +197,78 @@ void main() {
         'state': player.playerState.name,
         'events': states.map((state) => state.name).toList()
       });
+
+      // Real WASAPI integration is intentionally kept in this explicit native
+      // probe rather than ordinary CI: it acquires the current output endpoint
+      // in exclusive mode. Audio is generated silence and VOLDSP remains zero.
+      player.freeFStream();
+      final prewarmStopwatch = Stopwatch()..start();
+      player.wasapiExclusive = true;
+      prewarmStopwatch.stop();
+      final prewarmMilliseconds = prewarmStopwatch.elapsedMilliseconds;
+      final switchTimes = <int>[];
+      for (final source in [wave, exclusive441, exclusiveSurround, wave]) {
+        final stopwatch = Stopwatch()..start();
+        expect(await player.setSource(source.path), isTrue);
+        player.setVolumeDsp(0);
+        player.start();
+        stopwatch.stop();
+        switchTimes.add(stopwatch.elapsedMilliseconds);
+        expect(player.playerState, PlayerState.playing);
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+      // A source open may recall a cloud file, but these generated local files
+      // are already resident. Recreating an exclusive endpoint (~385 ms on the
+      // reported regression machine) must therefore be caught here.
+      record('persistent-exclusive-switch-timing', {
+        'prewarmMilliseconds': prewarmMilliseconds,
+        'switchMilliseconds': switchTimes,
+        'includes': 'setSource+setVolumeDsp+start',
+      });
+      expect(switchTimes.skip(1), everyElement(lessThan(150)));
+      player.pause();
+      expect(player.playerState, PlayerState.paused);
+      final pausedAt = player.position;
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(player.position, closeTo(pausedAt, .01));
+      final pausedSeekStopwatch = Stopwatch()..start();
+      player.seek(2.25);
+      pausedSeekStopwatch.stop();
+      expect(pausedSeekStopwatch.elapsedMilliseconds, lessThan(150));
+      expect(player.playerState, PlayerState.paused);
+      expect(player.position, closeTo(2.25, .01));
+      player.setPlaybackRate(1.5);
+      final pausedResumeStopwatch = Stopwatch()..start();
+      player.start();
+      pausedResumeStopwatch.stop();
+      expect(pausedResumeStopwatch.elapsedMilliseconds, lessThan(150));
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+      expect(player.playerState, PlayerState.playing);
+      expect(player.position, greaterThan(2.35));
+      record('persistent-exclusive-source-switch', {
+        'switchMilliseconds': switchTimes,
+        'prewarmMilliseconds': prewarmMilliseconds,
+        'formats': ['48000/2', '44100/2', '48000/6-downmix', '48000/2'],
+        'pausedSeek': 2.25,
+        'pausedSeekMilliseconds': pausedSeekStopwatch.elapsedMilliseconds,
+        'pausedResumeMilliseconds': pausedResumeStopwatch.elapsedMilliseconds,
+        'rate': player.playbackRate,
+        'state': player.playerState.name,
+      });
+
+      final exclusiveCompleted = player.playerStateStream
+          .firstWhere((state) => state == PlayerState.completed);
+      final playingSeekStopwatch = Stopwatch()..start();
+      player.seek(player.length - .15);
+      playingSeekStopwatch.stop();
+      expect(playingSeekStopwatch.elapsedMilliseconds, lessThan(150));
+      await exclusiveCompleted.timeout(const Duration(seconds: 2));
+      expect(player.playerState, PlayerState.stopped);
+      record('persistent-exclusive-completion', {
+        'state': player.playerState.name,
+        'playingSeekMilliseconds': playingSeekStopwatch.elapsedMilliseconds,
+      });
+
       await player.free();
       expect(player.setPlaybackRate(1), isFalse);
       await player.free();
