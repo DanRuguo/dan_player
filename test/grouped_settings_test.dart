@@ -217,7 +217,7 @@ void main() {
           'RestoreSessionSwitch',
           'MusicSourceSettings',
           'DefaultLyricSourceControl',
-          'LyricApiEditor',
+          'CustomMusicSourceSettings',
           'DynamicThemeSwitch',
           'WindowBackdropInfo',
           'ThemeSelector',

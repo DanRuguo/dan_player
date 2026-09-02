@@ -58,7 +58,7 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
           children: [
             SettingsSurface(
                 child: SettingsHeader(
-                    title: ui("联网歌源"),
+                    title: ui("内置歌源"),
                     icon: Icons.cloud_outlined,
                     subtitle: ui("只影响新的联网搜索。关闭后，不会删除收藏、歌单或队列，也不会中断已有歌曲的播放。"))),
             const SizedBox(height: 12),
@@ -91,11 +91,62 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
                   child:
                       Text(_saveError!, style: TextStyle(color: scheme.error))),
             ],
+            const SizedBox(height: 16),
+            const _LyricCandidateSources(),
           ],
         );
       },
     );
   }
+}
+
+class _LyricCandidateSources extends StatelessWidget {
+  const _LyricCandidateSources();
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return SettingsSurface(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SettingsHeader(
+            title: ui('歌词候选'),
+            icon: Icons.lyrics_outlined,
+            subtitle: ui('匹配歌词时会按候选结果供你选择；歌词来源不等于完整歌曲播放源。'),
+          ),
+          const SizedBox(height: 14),
+          const Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _CandidateChip(label: 'QQ音乐'),
+              _CandidateChip(label: '网易云音乐'),
+              _CandidateChip(label: '酷狗音乐'),
+              _CandidateChip(label: 'LRCLIB'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _Capability(
+            icon: Icons.info_outline,
+            text: ui('酷狗音乐目前仅作为歌词候选；完整播放与下载不会通过不稳定的公开接口直接内置。'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CandidateChip extends StatelessWidget {
+  const _CandidateChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Chip(
+        avatar: const Icon(Icons.lyrics_outlined, size: 18),
+        label: Text(label),
+      );
 }
 
 class _SourceCard extends StatelessWidget {

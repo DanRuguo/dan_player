@@ -6,6 +6,7 @@ import 'package:dan_player/page/settings_page/cache_backup_settings.dart';
 import 'package:dan_player/page/settings_page/create_issue.dart';
 import 'package:dan_player/page/settings_page/other_settings.dart';
 import 'package:dan_player/page/settings_page/music_source_settings.dart';
+import 'package:dan_player/page/settings_page/custom_music_source_settings.dart';
 import 'package:dan_player/page/settings_page/desktop_integration_settings.dart';
 import 'package:dan_player/page/settings_page/desktop_lyric_settings.dart';
 import 'package:dan_player/page/settings_page/grouped_settings.dart';
@@ -47,7 +48,7 @@ class SettingsPage extends StatelessWidget {
           children: [
             const MusicSourceSettings(),
             const DefaultLyricSourceControl(),
-            const LyricApiEditor(),
+            const CustomMusicSourceSettings(),
           ],
         ),
         SettingsSection(

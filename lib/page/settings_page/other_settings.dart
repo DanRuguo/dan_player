@@ -67,6 +67,7 @@ class _DefaultLyricSourceControlState extends State<DefaultLyricSourceControl> {
     UiLanguageScope.watch(context);
     return SettingsTile(
       description: ui("首选歌词来源"),
+      subtitle: ui('仅决定本地歌词与在线候选的优先顺序'),
       icon: Symbols.lyrics,
       action: AppSegmentedControl<bool>(
         value: settings.localLyricFirst,
