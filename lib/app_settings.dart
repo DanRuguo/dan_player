@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dan_player/data/app_data_location.dart';
 import 'package:dan_player/background_preferences.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/player_shortcut_preferences.dart';
@@ -147,6 +148,11 @@ class AppSettings {
   /// Controls new search requests only; saved online tracks remain usable.
   final onlineSources = ValueNotifier(const OnlineSourcePreferences());
 
+  /// User-managed HTTP providers. Profiles remain isolated from the built-in
+  /// source toggles and declare only the capabilities they actually expose.
+  final customMusicSources =
+      ValueNotifier<List<CustomMusicSourceProfile>>(const []);
+
   /// Desktop controls and playback/lyric presentation; independent of data.
   final experience = ValueNotifier(const PlayerExperiencePreferences());
 
@@ -164,8 +170,30 @@ class AppSettings {
   /// 歌词来源：true，本地优先；false，在线优先
   bool localLyricFirst = true;
 
-  /// 用户自定义歌词接口；为空时使用内置 QQ / 酷狗 / 网易搜索。
-  String? lyricApiUrl;
+  /// Backwards-compatible view of the old single custom lyric endpoint.
+  ///
+  /// New code should use [customMusicSources]. Updating this property only
+  /// replaces the fixed legacy profile and never removes other custom sources.
+  String? get lyricApiUrl {
+    for (final profile in customMusicSources.value) {
+      if (!profile.isLegacyLyricProfile) continue;
+      return profile
+          .endpointFor(CustomMusicSourceCapability.lyrics)
+          ?.toString();
+    }
+    return null;
+  }
+
+  set lyricApiUrl(String? value) {
+    final profiles = <CustomMusicSourceProfile>[
+      for (final profile in customMusicSources.value)
+        if (!profile.isLegacyLyricProfile) profile,
+    ];
+    final legacy = CustomMusicSourceProfile.legacyLyric(value);
+    if (value != null && value.trim().isNotEmpty && legacy == null) return;
+    if (legacy != null) profiles.add(legacy);
+    customMusicSources.value = List.unmodifiable(profiles);
+  }
 
   bool restoreLastSession = true;
 
@@ -246,11 +274,7 @@ class AppSettings {
       _instance.localLyricFirst = llf == 1 ? true : false;
     }
 
-    final lyricApiUrl = settingsMap["LyricApiUrl"];
-    _instance.lyricApiUrl =
-        lyricApiUrl is String && lyricApiUrl.trim().isNotEmpty
-            ? lyricApiUrl.trim()
-            : null;
+    _readCustomMusicSources(settingsMap);
 
     final restoreLastSession = settingsMap["RestoreLastSession"];
     if (restoreLastSession != null) {
@@ -298,6 +322,19 @@ class AppSettings {
         lastCheck is String ? DateTime.tryParse(lastCheck) : null;
   }
 
+  static void _readCustomMusicSources(Map settingsMap) {
+    final legacyValue = settingsMap['LyricApiUrl'];
+    final legacyUrl = legacyValue is String && legacyValue.trim().isNotEmpty
+        ? legacyValue.trim()
+        : null;
+    _instance.customMusicSources.value =
+        CustomMusicSourceProfileCodec.decodeSettings(
+      settingsMap['CustomMusicSources'],
+      legacyLyricApiUrl: legacyUrl,
+      fallback: _instance.customMusicSources.value,
+    );
+  }
+
   static Future<void> readFromJson() async {
     try {
       final supportPath = (await getAppDataDir()).path;
@@ -330,11 +367,7 @@ class AppSettings {
         _instance.localLyricFirst = llf;
       }
 
-      final lyricApiUrl = settingsMap["LyricApiUrl"];
-      _instance.lyricApiUrl =
-          lyricApiUrl is String && lyricApiUrl.trim().isNotEmpty
-              ? lyricApiUrl.trim()
-              : null;
+      _readCustomMusicSources(settingsMap);
 
       final restoreLastSession = settingsMap["RestoreLastSession"];
       if (restoreLastSession != null) {
@@ -392,6 +425,9 @@ class AppSettings {
         "Rendering": rendering.value.toMap(),
         "PlayerShortcuts": shortcuts.value.toMap(),
         "OnlineSources": onlineSources.value.toJson(),
+        "CustomMusicSources": CustomMusicSourceProfileCodec.encodeSettings(
+          customMusicSources.value,
+        ),
         "DefaultTheme": defaultTheme,
         "ArtistSeparator": artistSeparator,
         "LocalLyricFirst": localLyricFirst,
