@@ -39,8 +39,8 @@ class _Detail extends StatelessWidget {
       title: '音乐原文 / Album · アルバム · 앨범 {0} 👩🏽‍🎤',
       subtitle: ui('{0} 首乐曲', [audios.length]),
       secondaryContent: audios,
-      secondaryContentBuilder: (_, audio, i, controller) => AudioTile(
-          audioIndex: i, playlist: audios, multiSelectController: controller),
+      secondaryContentBuilder: (_, audio, i, visible, controller) => AudioTile(
+          audioIndex: i, playlist: visible, multiSelectController: controller),
       tertiaryContentTitle: ui('专辑'),
       tertiaryContent: const ['Related Album'],
       tertiaryContentBuilder: (_, title, __, ___) => Text(title),

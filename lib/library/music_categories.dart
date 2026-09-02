@@ -64,6 +64,10 @@ class MusicCategoryGroup {
   final List<Audio> audios;
   final Map<ClassificationEvidence, int> evidenceCounts;
 
+  /// Stable persistence identity. It intentionally excludes translated labels,
+  /// cover/song order and every presentation-only field.
+  String get persistenceKey => categoryCoverPersistenceKey(kind, id);
+
   String get evidenceSummary => [
         for (final evidence in ClassificationEvidence.values)
           if ((evidenceCounts[evidence] ?? 0) > 0)
@@ -89,6 +93,9 @@ class MusicCategoryGroup {
         (subtitle?.toLowerCase().contains(search) ?? false);
   }
 }
+
+String categoryCoverPersistenceKey(MusicCategoryKind kind, String groupId) =>
+    jsonEncode(<Object>[1, kind.name, groupId]);
 
 class MusicCategories {
   MusicCategories(
@@ -285,6 +292,42 @@ class MusicCategories {
     // particular, do not invent a comma split for names such as "Sakamoto, R".
     return names.isEmpty ? const [null] : names.toList();
   }
+}
+
+/// Shared artist/album projection for the live library.
+///
+/// Player-side duration corrections mutate [Audio.duration] and publish the
+/// general library revision, but they cannot change artist or release
+/// membership. Keeping this snapshot on [AudioLibrary.classificationRevision]
+/// lets visible song rows repaint their corrected duration without making
+/// every artist, album and playlist surface regroup the complete library.
+class LibraryMusicCategories {
+  LibraryMusicCategories._();
+
+  static int _revision = -1;
+  static MusicCategories? _snapshot;
+
+  static MusicCategories get _current {
+    final revision = AudioLibrary.classificationRevision;
+    if (_snapshot == null || _revision != revision) {
+      _revision = revision;
+      _snapshot = MusicCategories(AudioLibrary.instance.audioCollection);
+    }
+    return _snapshot!;
+  }
+
+  static List<MusicCategoryGroup> groups(MusicCategoryKind kind) {
+    if (kind != MusicCategoryKind.artist && kind != MusicCategoryKind.album) {
+      throw ArgumentError.value(
+          kind, 'kind', 'Only artist and album groups are shared');
+    }
+    return _current.groups(kind);
+  }
+
+  static MusicCategoryGroup? find(MusicCategoryKind kind, String id) =>
+      groups(kind).where((group) => group.id == id).firstOrNull;
+
+  static int get albumCount => groups(MusicCategoryKind.album).length;
 }
 
 class _GroupBuilder {

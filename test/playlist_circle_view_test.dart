@@ -390,7 +390,7 @@ void main() {
   });
 
   testWidgets(
-      'missing artwork never removes local references or their circle actions',
+      'missing custom cover preserves its path and keeps circle actions',
       (tester) async {
     _size(tester, 1000);
     final fixture = _Fixture();
@@ -412,6 +412,9 @@ void main() {
           fixture.played.add((index: index, queue: List.of(queue))),
     )));
     await _settle(tester);
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pumpAndSettle();
     expect(audio.requests, greaterThan(0));
     expect(find.text(audio.displayTitle), findsOneWidget);
     expect(find.byIcon(Icons.music_note), findsWidgets);

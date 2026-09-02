@@ -88,6 +88,18 @@ class MultiSelectController<T> extends ChangeNotifier {
     selected.addAll(items);
     notifyListeners();
   }
+
+  void replaceSelection(Iterable<T> items) {
+    final replacement = items.toSet();
+    if (selected.length == replacement.length &&
+        selected.containsAll(replacement)) {
+      return;
+    }
+    selected
+      ..clear()
+      ..addAll(replacement);
+    notifyListeners();
+  }
 }
 
 /// `AudiosPage`, `ArtistsPage`, `AlbumsPage`, `FoldersPage`, `FolderDetailPage` 页面的主要组件，

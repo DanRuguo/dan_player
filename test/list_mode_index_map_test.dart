@@ -30,6 +30,9 @@ Widget _page(String kind, _CountedList items, ContentView view) {
   Widget tile(BuildContext context, int item, int index,
           MultiSelectController<int>? controller) =>
       Text('Item $item');
+  Widget detailTile(BuildContext context, int item, int index,
+          List<int> visible, MultiSelectController<int>? controller) =>
+      Text('Item $item');
   if (kind == 'library') {
     return UniPage<int>(
       pref: preference,
@@ -51,7 +54,7 @@ Widget _page(String kind, _CountedList items, ContentView view) {
     title: 'Detail',
     subtitle: 'Synthetic only',
     secondaryContent: items,
-    secondaryContentBuilder: tile,
+    secondaryContentBuilder: detailTile,
     tertiaryContentTitle: '',
     tertiaryContent: const [],
     tertiaryContentBuilder: (_, item, index, controller) => Text(item),

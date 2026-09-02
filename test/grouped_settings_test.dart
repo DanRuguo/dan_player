@@ -220,7 +220,6 @@ void main() {
           'LyricApiEditor',
           'DynamicThemeSwitch',
           'WindowBackdropInfo',
-          'UseSystemThemeSwitch',
           'ThemeSelector',
           'ThemeModeControl',
           'SelectFontCombobox',

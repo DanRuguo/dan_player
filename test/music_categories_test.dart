@@ -485,6 +485,51 @@ void main() {
     expect(AudioLibrary.classificationRevision, classificationBefore);
   });
 
+  test(
+      'live artist and album projections survive duration-only publication but invalidate structurally',
+      () {
+    final library = AudioLibrary.instance;
+    final folders = library.folders;
+    final online = library.onlineAudioCollection;
+    final audio = CategoryTestAudio('cached',
+        artist: 'Cached artist',
+        album: 'Cached album',
+        albumArtist: 'Cached owner',
+        duration: 60);
+    try {
+      library.folders = [
+        AudioFolder([audio], 'D:/category-test-fixtures', 0, 0),
+      ];
+      library.onlineAudioCollection = [];
+      library.rebuildDerivedCollections();
+      final artists = LibraryMusicCategories.groups(MusicCategoryKind.artist);
+      final albums = LibraryMusicCategories.groups(MusicCategoryKind.album);
+
+      audio.duration = 360;
+      library.publishDurationChanges();
+
+      expect(LibraryMusicCategories.groups(MusicCategoryKind.artist),
+          same(artists));
+      expect(
+          LibraryMusicCategories.groups(MusicCategoryKind.album), same(albums));
+      expect(LibraryMusicCategories.albumCount, 1);
+
+      audio.album = 'Changed album';
+      library.rebuildDerivedCollections();
+
+      final changedAlbums =
+          LibraryMusicCategories.groups(MusicCategoryKind.album);
+      expect(changedAlbums, isNot(same(albums)));
+      expect(changedAlbums.single.title, 'Changed album');
+      expect(LibraryMusicCategories.groups(MusicCategoryKind.artist),
+          isNot(same(artists)));
+    } finally {
+      library.folders = folders;
+      library.onlineAudioCollection = online;
+      library.rebuildDerivedCollections();
+    }
+  });
+
   test('removing an indexed song advances structural revisions', () {
     final library = AudioLibrary.instance;
     final folders = library.folders;

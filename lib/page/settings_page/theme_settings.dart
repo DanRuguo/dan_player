@@ -140,33 +140,6 @@ class WindowBackdropInfo extends StatelessWidget {
   }
 }
 
-class UseSystemThemeSwitch extends StatefulWidget {
-  const UseSystemThemeSwitch({super.key});
-
-  @override
-  State<UseSystemThemeSwitch> createState() => _UseSystemThemeSwitchState();
-}
-
-class _UseSystemThemeSwitchState extends State<UseSystemThemeSwitch> {
-  final settings = AppSettings.instance;
-
-  @override
-  Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    return SettingsSwitchTile(
-      title: Text(ui("启动时使用系统主题")),
-      icon: Symbols.desktop_windows,
-      value: settings.useSystemTheme,
-      onChanged: (_) async {
-        setState(() {
-          settings.useSystemTheme = !settings.useSystemTheme;
-        });
-        await settings.saveSettings();
-      },
-    );
-  }
-}
-
 class SelectFontCombobox extends StatelessWidget {
   const SelectFontCombobox({super.key});
 

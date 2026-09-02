@@ -196,6 +196,7 @@ const Map<String, List<String>> uiCatalogA = {
   '继续编辑': ['Keep editing', '編集を続ける', '계속 편집'],
   '放弃修改': ['Discard changes', '変更を破棄', '변경 사항 버리기'],
   '编辑歌词 · {0}': ['Edit lyrics · {0}', '歌詞を編集 · {0}', '가사 편집 · {0}'],
+  '填入联网歌词': ['Fill from online lyrics', 'オンライン歌詞を取り込む', '온라인 가사 불러오기'],
   '保存为同名 .lrc 文件（UTF-8）': [
     'Save as a matching .lrc file (UTF-8)',
     '同じ名前の .lrc ファイル（UTF-8）として保存',
@@ -413,6 +414,11 @@ const Map<String, List<String>> uiCatalogA = {
     '新しいプレイリストは未保存です：{0}',
     '새 재생목록을 아직 저장하지 못했습니다: {0}'
   ],
+  '保存时间较长，操作仍在后台继续。你可以取消并稍后查看结果。': [
+    'Saving is taking longer than expected and will continue in the background. You can cancel and check the result later.',
+    '保存に時間がかかっていますが、処理はバックグラウンドで続行されます。キャンセルして後で結果を確認できます。',
+    '저장에 시간이 걸리고 있으며 백그라운드에서 계속됩니다. 취소한 뒤 나중에 결과를 확인할 수 있습니다.'
+  ],
   '无法创建歌单：{0}': [
     'Could not create playlist: {0}',
     'プレイリストを作成できませんでした：{0}',
@@ -441,6 +447,7 @@ const Map<String, List<String>> uiCatalogA = {
     '{0}곡을 재생목록에 추가'
   ],
   '添加': ['Add', '追加', '추가'],
+  '删除': ['Delete', '削除', '삭제'],
   '所选歌曲已在“{0}”中': [
     'Selected tracks are already in “{0}”',
     '選択した曲はすでに「{0}」にあります',

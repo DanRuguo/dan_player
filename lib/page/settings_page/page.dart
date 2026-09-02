@@ -58,7 +58,6 @@ class SettingsPage extends StatelessWidget {
             const InterfaceSettings(),
             const WindowBackdropInfo(),
             const DynamicThemeSwitch(),
-            const UseSystemThemeSwitch(),
             const ThemeSelector(),
             const ThemeModeControl(),
             const SelectFontCombobox(),

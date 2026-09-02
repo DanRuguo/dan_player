@@ -27,9 +27,10 @@ class SetLyricSourceBtn extends StatelessWidget {
         future: PlayService.instance.lyricService.currLyricFuture,
         builder: (context, snapshot) {
           final audio = PlayService.instance.playbackService.nowPlaying;
-          const loadingWidget = IconButton(
+          final loadingWidget = IconButton(
             onPressed: null,
-            icon: SizedBox(
+            tooltip: ui("正在加载歌词"),
+            icon: const SizedBox(
               height: 20,
               width: 20,
               child: CircularProgressIndicator(),
@@ -44,9 +45,18 @@ class SetLyricSourceBtn extends StatelessWidget {
             ConnectionState.none => loadingWidget,
             ConnectionState.waiting => loadingWidget,
             ConnectionState.active => loadingWidget,
-            ConnectionState.done => _SetLyricSourceBtn(
-                audio: audio,
+            ConnectionState.done => LyricSourceMenuButton(
+                enabled: audio != null,
+                showLocal: audio?.isLocal == true,
                 isLocal: isLocal,
+                onChooseDefault: () {
+                  showAppDialog<String>(
+                    context: context,
+                    builder: (context) => LyricSourceDialog(audio: audio!),
+                  );
+                },
+                onOnline: PlayService.instance.lyricService.useOnlineLyric,
+                onLocal: PlayService.instance.lyricService.useLocalLyric,
               ),
           };
         },
@@ -55,17 +65,36 @@ class SetLyricSourceBtn extends StatelessWidget {
   }
 }
 
-class _SetLyricSourceBtn extends StatelessWidget {
-  final Audio? audio;
+class LyricSourceMenuButton extends StatelessWidget {
+  const LyricSourceMenuButton({
+    super.key,
+    required this.enabled,
+    required this.showLocal,
+    required this.isLocal,
+    required this.onChooseDefault,
+    required this.onOnline,
+    required this.onLocal,
+  });
+
+  final bool enabled;
+  final bool showLocal;
   final bool? isLocal;
-  const _SetLyricSourceBtn({required this.audio, this.isLocal});
+  final VoidCallback onChooseDefault;
+  final VoidCallback onOnline;
+  final VoidCallback onLocal;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    final lyricService = PlayService.instance.lyricService;
     return MenuAnchor(
+      useRootOverlay: true,
+      consumeOutsideTap: true,
+      style: const MenuStyle(
+        shape: WidgetStatePropertyAll(AppShape.control),
+        minimumSize: WidgetStatePropertyAll(Size(220, 0)),
+        maximumSize: WidgetStatePropertyAll(Size(320, double.infinity)),
+      ),
       onOpen: () {
         ALWAYS_SHOW_LYRIC_VIEW_CONTROLS = true;
       },
@@ -74,28 +103,36 @@ class _SetLyricSourceBtn extends StatelessWidget {
       },
       menuChildren: [
         MenuItemButton(
-          onPressed: () {
-            showAppDialog<String>(
-              context: context,
-              builder: (context) => LyricSourceDialog(audio: audio!),
-            );
-          },
-          child: Text(ui("指定默认歌词")),
+          key: const ValueKey('lyric-source-choose-default'),
+          onPressed: onChooseDefault,
+          leadingIcon: const Icon(Symbols.search),
+          child: Text(
+            ui("指定默认歌词"),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
         MenuItemButton(
-          onPressed: lyricService.useOnlineLyric,
-          leadingIcon: isLocal == false ? const Icon(Symbols.check) : null,
+          key: const ValueKey('lyric-source-online'),
+          onPressed: onOnline,
+          leadingIcon: const Icon(Symbols.cloud),
+          trailingIcon:
+              isLocal == false ? const Icon(Symbols.check, size: 20) : null,
           child: Text(ui("在线")),
         ),
-        if (audio?.isLocal == true)
+        if (showLocal)
           MenuItemButton(
-            onPressed: lyricService.useLocalLyric,
-            leadingIcon: isLocal == true ? const Icon(Symbols.check) : null,
+            key: const ValueKey('lyric-source-local-menu-item'),
+            onPressed: onLocal,
+            leadingIcon: const Icon(Symbols.folder),
+            trailingIcon:
+                isLocal == true ? const Icon(Symbols.check, size: 20) : null,
             child: Text(ui("本地")),
           ),
       ],
       builder: (context, controller, _) => IconButton(
-        onPressed: audio == null
+        key: const ValueKey('lyric-source-menu-button'),
+        onPressed: !enabled
             ? null
             : () {
                 if (controller.isOpen) {
@@ -104,6 +141,7 @@ class _SetLyricSourceBtn extends StatelessWidget {
                   controller.open();
                 }
               },
+        tooltip: ui("选择歌词来源"),
         icon: const Icon(Symbols.lyrics),
         color: scheme.onSecondaryContainer,
       ),
@@ -427,6 +465,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
               AppDialogTitle(
                 ui("默认歌词"),
                 style: Theme.of(context).textTheme.titleLarge,
+                leading: const Icon(Symbols.lyrics),
                 trailing: IconButton(
                   key: const ValueKey('lyric-source-close'),
                   tooltip: ui("关闭"),
@@ -434,6 +473,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                   icon: const Icon(Symbols.close),
                 ),
               ),
+              const SizedBox(height: 12),
               Expanded(
                   child: CustomScrollView(
                 key: const ValueKey('lyric-source-scroll'),

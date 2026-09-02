@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:dan_player/app_paths.dart' as app_paths;
@@ -101,7 +102,7 @@ void main() {
     final fixture = _Fixture();
     final first = _audio('First');
     final second = _audio('Second');
-    const image = r'D:\code\codex\player\tool\qa-ui\missing-cover-fixture.png';
+    final image = File('assets/images/RCE_logo_transparent.png').absolute.path;
     await _show(tester,
         fixture.browser(library: [first, second], pickImage: () => image));
     await tapPlaylistAction(tester, 'playlist-create');
@@ -195,7 +196,7 @@ void main() {
     final parent = fixture.tree.createPlaylist('Cover');
     fixture.tree.addAudio(parent, _audio('Keep'));
     final ids = parent.entries.map((entry) => entry.id).toList();
-    const image = r'D:\code\codex\player\tool\qa-ui\missing-custom-cover.png';
+    final image = File('assets/images/RCE_logo_transparent.png').absolute.path;
     await _show(
         tester, fixture.browser(current: parent, pickImage: () => image));
     await _settings(tester, '更改歌单封面');
@@ -208,6 +209,30 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+      'missing cover on an empty playlist preserves its path and uses the default image',
+      (tester) async {
+    final fixture = _Fixture();
+    final empty = fixture.tree.createPlaylist('Empty',
+        imagePath:
+            File('build/missing-empty-playlist-cover.png').absolute.path);
+    await _show(tester, fixture.browser(current: empty));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pumpAndSettle();
+
+    expect(empty.imagePath,
+        File('build/missing-empty-playlist-cover.png').absolute.path);
+    expect(fixture.saves, 0);
+    expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('playlist-header-cover')),
+          matching: find.byIcon(Icons.queue_music),
+        ),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('album shortcut and layout toggle are views not playlist entries',
       (tester) async {
     final fixture = _Fixture();
@@ -215,10 +240,10 @@ void main() {
     fixture.tree.createPlaylist('Child', parent: parent);
     var albumsOpened = 0;
     await _show(tester, fixture.browser(onOpenAlbums: () => albumsOpened++));
-    expect(find.text('专辑 · 388'), findsNothing);
+    expect(find.text('浏览全部专辑 · 388'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('playlist-current-settings')));
     await tester.pumpAndSettle();
-    expect(find.text('专辑 · 388'), findsOneWidget);
+    expect(find.text('浏览全部专辑 · 388'), findsOneWidget);
     await tapPlaylistAction(tester, 'playlist-open-albums');
     await selectPlaylistView(tester, 'grid');
     expect(albumsOpened, 1);

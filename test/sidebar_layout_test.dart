@@ -145,15 +145,44 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('window-size-lock-setting')));
     await tester.pump();
     expect(preferences.value.windowSizeLocked, isTrue);
+    expect(preferences.value.windowAspectRatioLocked, isFalse);
     expect(saves, 3);
+    expect(
+      tester
+          .widget<SwitchListTile>(
+              find.byKey(const ValueKey('window-aspect-ratio-lock-setting')))
+          .onChanged,
+      isNull,
+    );
+    expect(find.text('固定窗口大小开启时不能同时锁定纵横比；请先关闭固定大小。'), findsOneWidget);
+
+    await tester
+        .tap(find.byKey(const ValueKey('window-aspect-ratio-lock-setting')));
+    await tester.pump();
+    expect(preferences.value.windowAspectRatioLocked, isFalse,
+        reason: 'the disabled control cannot create conflicting constraints');
+    expect(saves, 3);
+
+    await tester.tap(find.byKey(const ValueKey('window-size-lock-setting')));
+    await tester.pump();
+    expect(preferences.value.windowSizeLocked, isFalse);
+    expect(saves, 4);
 
     await tester
         .tap(find.byKey(const ValueKey('window-aspect-ratio-lock-setting')));
     await tester.pump();
     expect(preferences.value.windowAspectRatioLocked, isTrue);
+    expect(preferences.value.windowSizeLocked, isFalse);
     expect(preferences.value.windowAspectRatio, 0,
         reason: 'the live controller captures the current window ratio');
-    expect(saves, 4);
+    expect(saves, 5);
+
+    await tester.tap(find.byKey(const ValueKey('window-size-lock-setting')));
+    await tester.pump();
+    expect(preferences.value.windowSizeLocked, isTrue);
+    expect(preferences.value.windowAspectRatioLocked, isFalse,
+        reason: 'enabling fixed size automatically closes ratio lock');
+    expect(saves, 6);
   });
 
   testWidgets('responsive builder uses allocated main-pane constraints',

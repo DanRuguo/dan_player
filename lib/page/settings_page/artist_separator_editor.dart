@@ -43,49 +43,34 @@ class __ArtistSeparatorEditDialogState
     extends State<_ArtistSeparatorEditDialog> {
   final appSettings = AppSettings.instance;
   late List<String> separators = List.from(appSettings.artistSeparator);
-  Map<String, Widget> children = {};
   final currEditController = TextEditingController();
   bool editing = false;
 
-  void _addArtistSeparator() {
-    if (currEditController.text.isEmpty) return;
-    setState(
-      () {
-        children.remove("");
-        children[currEditController.text] = ListTile(
-          title: Text(currEditController.text),
-          trailing: IconButton(
-            onPressed: () {
-              separators.remove(currEditController.text);
-              setState(() {
-                children.remove(currEditController.text);
-              });
-            },
-            icon: const Icon(Symbols.remove),
-          ),
-        );
-        editing = false;
-      },
-    );
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    for (var item in separators) {
-      children[item] = ListTile(
-        title: Text(item),
+  Widget _separatorTile(String separator) => ListTile(
+        title: Text(separator),
         trailing: IconButton(
+          tooltip: ui("删除"),
           onPressed: () {
-            separators.remove(item);
-            setState(() {
-              children.remove(item);
-            });
+            setState(() => separators.remove(separator));
           },
           icon: const Icon(Symbols.remove),
         ),
       );
-    }
+
+  void _addArtistSeparator() {
+    final separator = currEditController.text;
+    if (separator.isEmpty) return;
+    setState(() {
+      if (!separators.contains(separator)) separators.add(separator);
+      currEditController.clear();
+      editing = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    currEditController.dispose();
+    super.dispose();
   }
 
   @override
@@ -113,36 +98,41 @@ class __ArtistSeparatorEditDialogState
                 ),
               ),
               Expanded(
-                child: ListView(children: children.values.toList()),
+                child: ListView(
+                  children: [
+                    for (final separator in separators)
+                      _separatorTile(separator),
+                    if (editing)
+                      ListTile(
+                        title: Focus(
+                          onFocusChange: HotkeysHelper.onFocusChanges,
+                          child: TextField(
+                            controller: currEditController,
+                            autofocus: true,
+                            decoration: InputDecoration(
+                              suffixIcon: IconButton(
+                                tooltip: ui("添加"),
+                                onPressed: _addArtistSeparator,
+                                icon: const Icon(Symbols.done),
+                              ),
+                            ),
+                            onSubmitted: (_) => _addArtistSeparator(),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
               const SizedBox(height: 16.0),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: () {
-                      setState(() {
-                        editing = true;
-                        children[""] = ListTile(
-                          title: Focus(
-                            onFocusChange: HotkeysHelper.onFocusChanges,
-                            child: TextField(
-                              controller: currEditController,
-                              autofocus: true,
-                              decoration: InputDecoration(
-                                suffixIcon: IconButton(
-                                  onPressed: _addArtistSeparator,
-                                  icon: const Icon(Symbols.done),
-                                ),
-                              ),
-                              onSubmitted: (value) {
-                                _addArtistSeparator();
-                              },
-                            ),
-                          ),
-                        );
-                      });
-                    },
+                    onPressed: editing
+                        ? null
+                        : () {
+                            setState(() => editing = true);
+                          },
                     child: Text(ui("新增")),
                   ),
                   const SizedBox(width: 8.0),
@@ -155,8 +145,7 @@ class __ArtistSeparatorEditDialogState
                     onPressed: editing
                         ? null
                         : () async {
-                            appSettings.artistSeparator =
-                                children.keys.toList();
+                            appSettings.artistSeparator = List.of(separators);
                             appSettings.artistSplitPattern =
                                 appSettings.artistSeparator.join("|");
                             await appSettings.saveSettings();

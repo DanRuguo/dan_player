@@ -34,7 +34,7 @@ void main() {
       exclusiveOutput: true,
       sidebarWidth: 244,
       sidebarLocked: true,
-      windowSizeLocked: true,
+      windowSizeLocked: false,
       windowAspectRatioLocked: true,
       windowAspectRatio: 16 / 9,
       roundedWindowCorners: false,
@@ -57,7 +57,7 @@ void main() {
       exclusiveOutput: true,
       sidebarWidth: 260,
       sidebarLocked: true,
-      windowSizeLocked: true,
+      windowSizeLocked: false,
       windowAspectRatioLocked: true,
       windowAspectRatio: 1.6,
     );
@@ -84,6 +84,44 @@ void main() {
         {...value.toMap(), 'windowAspectRatioLocked': false});
     expect(value.copyWith(windowAspectRatio: 0).toMap(),
         {...value.toMap(), 'windowAspectRatio': 0.0});
+  });
+
+  test('window size and aspect locks exclude each other at every boundary', () {
+    const aspectLocked = PlayerExperiencePreferences(
+      windowAspectRatioLocked: true,
+      windowAspectRatio: 16 / 9,
+    );
+    final sizeEnabled = aspectLocked.copyWith(windowSizeLocked: true);
+    expect(sizeEnabled.windowSizeLocked, isTrue);
+    expect(sizeEnabled.windowAspectRatioLocked, isFalse);
+
+    const sizeLocked = PlayerExperiencePreferences(windowSizeLocked: true);
+    final aspectEnabled = sizeLocked.copyWith(windowAspectRatioLocked: true);
+    expect(aspectEnabled.windowSizeLocked, isFalse);
+    expect(aspectEnabled.windowAspectRatioLocked, isTrue);
+    expect(
+      sizeLocked.copyWith(
+        windowSizeLocked: true,
+        windowAspectRatioLocked: true,
+      ),
+      sizeLocked,
+      reason: 'an ambiguous explicit request keeps the fixed-size policy',
+    );
+
+    final legacy = PlayerExperiencePreferences.fromMap(const {
+      'windowSizeLocked': true,
+      'windowAspectRatioLocked': true,
+      'windowAspectRatio': 1.6,
+    });
+    expect(legacy.windowSizeLocked, isTrue);
+    expect(legacy.windowAspectRatioLocked, isFalse);
+
+    const directInvalid = PlayerExperiencePreferences(
+      windowSizeLocked: true,
+      windowAspectRatioLocked: true,
+    );
+    expect(directInvalid.toMap()['windowAspectRatioLocked'], isFalse,
+        reason: 'an invalid transient state is never persisted again');
   });
 
   test('malformed booleans and unknown keys cannot silently enable features',

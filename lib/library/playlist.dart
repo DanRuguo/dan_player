@@ -437,6 +437,29 @@ class Playlist {
   List<Audio> flattenAudios() =>
       flattenEntries().map((entry) => entry.audio).toList();
 
+  /// Finds the first depth-first song without validating or materializing the
+  /// full subtree. Persisted trees are validated when read and mutations are
+  /// validated at their boundary; the guards here keep this display-only read
+  /// finite even if an in-memory tree is unexpectedly damaged.
+  Audio? get firstAudioOrNull {
+    final visited = HashSet<Playlist>.identity();
+
+    Audio? find(Playlist playlist, int depth) {
+      if (depth > PlaylistTree.maxDepth || !visited.add(playlist)) return null;
+      for (final entry in playlist._entries) {
+        if (entry is PlaylistAudioEntry) return entry.audio;
+        final found = find(
+          (entry as PlaylistChildEntry).childPlaylist,
+          depth + 1,
+        );
+        if (found != null) return found;
+      }
+      return null;
+    }
+
+    return find(this, 1);
+  }
+
   int flattenedIndexOf(String entryId) =>
       flattenEntries().indexWhere((entry) => entry.entryId == entryId);
 

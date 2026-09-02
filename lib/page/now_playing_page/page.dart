@@ -1,4 +1,4 @@
-// ignore_for_file: camel_case_types
+// ignore_for_file: camel_case_types, non_constant_identifier_names
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/background_preferences.dart';
@@ -11,6 +11,7 @@ import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/online/song_comments.dart';
@@ -178,38 +179,42 @@ class _NowPlayingMoreAction extends StatelessWidget {
                 ),
               ),
             if (localPlaying != null)
-              SubmenuButton(
-                menuChildren: List.generate(
-                  localPlaying.splitedArtists.length,
-                  (i) => MenuItemButton(
-                    onPressed: () {
-                      final Artist? artist = AudioLibrary.instance
-                          .artistCollection[localPlaying.splitedArtists[i]];
-                      if (artist == null) return;
-                      context.pushReplacement(
-                        app_paths.ARTIST_DETAIL_PAGE,
-                        extra: artist,
-                      );
-                    },
-                    leadingIcon: const Icon(Symbols.people),
-                    child: Text(localPlaying.splitedArtists[i]),
+              for (final artistName in localPlaying.splitedArtists)
+                MenuItemButton(
+                  onPressed: () {
+                    final Artist? artist =
+                        AudioLibrary.instance.artistCollection[artistName];
+                    if (artist == null) return;
+                    context.pushReplacement(
+                      app_paths.ARTIST_DETAIL_PAGE,
+                      extra: artist,
+                    );
+                  },
+                  leadingIcon: const Icon(Symbols.artist),
+                  child: Text(
+                    artistName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                child: Text(ui("艺术家")),
-              ),
             if (localPlaying != null)
               MenuItemButton(
                 onPressed: () {
-                  final album =
-                      AudioLibrary.instance.albumCollection[localPlaying.album];
-                  if (album == null) return;
+                  final album = MusicCategories.albumGroupFor(
+                    localPlaying,
+                    AudioLibrary.instance.audioCollection,
+                  );
                   context.pushReplacement(
-                    app_paths.ALBUM_DETAIL_PAGE,
+                    album.location,
                     extra: album,
                   );
                 },
                 leadingIcon: const Icon(Symbols.album),
-                child: Text(localPlaying.album),
+                child: Text(
+                  localPlaying.album,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             if (nowPlaying != null)
               MenuItemButton(
@@ -303,6 +308,7 @@ class _SleepTimerSubmenu extends StatelessWidget {
                 onPressed: () => service.startSleepTimer(
                   Duration(minutes: minutes),
                 ),
+                leadingIcon: const Icon(Symbols.timer),
                 child: Text(ui("{0} 分钟后", [minutes])),
               ),
             const Divider(),

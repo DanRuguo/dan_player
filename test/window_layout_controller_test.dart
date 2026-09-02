@@ -91,6 +91,29 @@ void main() {
     expect(adapter.calls.last, 'resizable:true');
   });
 
+  test('fixed size wins when an old caller supplies both window constraints',
+      () async {
+    final preferences = ValueNotifier(const PlayerExperiencePreferences(
+      windowSizeLocked: true,
+      windowAspectRatioLocked: true,
+      windowAspectRatio: 16 / 9,
+    ));
+    final adapter = _FakeWindowLayoutAdapter();
+    final controller = WindowLayoutController(
+      adapter: adapter,
+      preferences: preferences,
+      persistCapturedRatio: () async {},
+    );
+    addTearDown(controller.dispose);
+    addTearDown(preferences.dispose);
+
+    await controller.initialize();
+
+    expect(adapter.calls, ['ratio:0.0000', 'resizable:false']);
+    expect(adapter.calls, isNot(contains('getSize')),
+        reason: 'the ignored ratio lock must not capture a new native ratio');
+  });
+
   test('native failure is exposed and a later retry clears it', () async {
     final preferences = ValueNotifier(const PlayerExperiencePreferences());
     final adapter = _FakeWindowLayoutAdapter()..failure = StateError('fixture');

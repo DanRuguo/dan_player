@@ -271,18 +271,35 @@ class Entry extends StatelessWidget {
               GoRoute(
                 path: 'detail',
                 pageBuilder: (context, state) {
+                  final kind = MusicCategoryKind.fromName(
+                      state.uri.queryParameters['by']);
                   final group = state.extra is MusicCategoryGroup
                       ? state.extra as MusicCategoryGroup
                       : null;
+                  final groupId =
+                      state.uri.queryParameters['group'] ?? group?.id ?? '';
+                  final child = switch (kind) {
+                    MusicCategoryKind.artist => ArtistDetailPage.group(
+                        groupId: groupId,
+                        initialGroup: group?.kind == MusicCategoryKind.artist
+                            ? group
+                            : null,
+                      ),
+                    MusicCategoryKind.album => AlbumDetailPage.group(
+                        groupId: groupId,
+                        initialGroup: group?.kind == MusicCategoryKind.album
+                            ? group
+                            : null,
+                      ),
+                    _ => CategoryDetailPage(
+                        kind: kind,
+                        groupId: groupId,
+                        initialGroup: group,
+                      ),
+                  };
                   return SlideTransitionPage(
                     key: state.pageKey,
-                    child: CategoryDetailPage(
-                      kind: MusicCategoryKind.fromName(
-                          state.uri.queryParameters['by']),
-                      groupId:
-                          state.uri.queryParameters['group'] ?? group?.id ?? '',
-                      initialGroup: group,
-                    ),
+                    child: child,
                   );
                 },
               ),
@@ -299,13 +316,21 @@ class Entry extends StatelessWidget {
             routes: [
               GoRoute(
                 path: "detail",
-                pageBuilder: (context, state) => SlideTransitionPage(
-                  key: state.pageKey,
-                  child: state.extra is Artist
-                      ? ArtistDetailPage(artist: state.extra as Artist)
-                      : const CategoriesPage(
-                          initialCategory: MusicCategoryKind.artist),
-                ),
+                pageBuilder: (context, state) {
+                  final extra = state.extra;
+                  final child = extra is Artist
+                      ? ArtistDetailPage(artist: extra)
+                      : extra is MusicCategoryGroup &&
+                              extra.kind == MusicCategoryKind.artist
+                          ? ArtistDetailPage.group(
+                              groupId: extra.id, initialGroup: extra)
+                          : const CategoriesPage(
+                              initialCategory: MusicCategoryKind.artist);
+                  return SlideTransitionPage(
+                    key: state.pageKey,
+                    child: child,
+                  );
+                },
               ),
             ],
           ),
@@ -341,13 +366,21 @@ class Entry extends StatelessWidget {
             routes: [
               GoRoute(
                 path: "detail",
-                pageBuilder: (context, state) => SlideTransitionPage(
-                  key: state.pageKey,
-                  child: state.extra is Album
-                      ? AlbumDetailPage(album: state.extra as Album)
-                      : const CategoriesPage(
-                          initialCategory: MusicCategoryKind.album),
-                ),
+                pageBuilder: (context, state) {
+                  final extra = state.extra;
+                  final child = extra is Album
+                      ? AlbumDetailPage(album: extra)
+                      : extra is MusicCategoryGroup &&
+                              extra.kind == MusicCategoryKind.album
+                          ? AlbumDetailPage.group(
+                              groupId: extra.id, initialGroup: extra)
+                          : const CategoriesPage(
+                              initialCategory: MusicCategoryKind.album);
+                  return SlideTransitionPage(
+                    key: state.pageKey,
+                    child: child,
+                  );
+                },
               ),
             ],
           ),

@@ -895,7 +895,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                     ? PlaylistCover(
                         playlist: folder,
                         size: size,
-                        loadSongArtwork: widget.trackBuilder == null)
+                        loadSongArtwork: widget.trackBuilder == null,
+                      )
                     : AudioArtwork(
                         audio: audio!,
                         size: size,

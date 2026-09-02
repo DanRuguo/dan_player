@@ -66,6 +66,9 @@ Widget _page(
   Widget row(BuildContext context, Audio audio, int index,
           MultiSelectController<Audio>? selection) =>
       AudioTile(audioIndex: index, playlist: songs);
+  Widget detailRow(BuildContext context, Audio audio, int index,
+          List<Audio> visible, MultiSelectController<Audio>? selection) =>
+      AudioTile(audioIndex: index, playlist: visible);
   if (kind == 'playlist') {
     final tree = PlaylistTree([]);
     final parent = tree.createPlaylist('Grid fixture');
@@ -90,7 +93,7 @@ Widget _page(
       title: 'Grid fixture',
       subtitle: 'Synthetic metadata only',
       secondaryContent: songs,
-      secondaryContentBuilder: row,
+      secondaryContentBuilder: detailRow,
       tertiaryContentTitle: '',
       tertiaryContent: const [],
       tertiaryContentBuilder: (_, item, __, ___) => Text(item),

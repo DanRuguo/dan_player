@@ -16,7 +16,8 @@ class NowPlayingBarControls extends StatelessWidget {
       this.onPrevious,
       this.onPlayPause,
       this.onNext,
-      this.onQueue});
+      this.onQueue,
+      this.queueTargetKey});
 
   final bool isPlaying;
   final bool isBuffering;
@@ -25,6 +26,7 @@ class NowPlayingBarControls extends StatelessWidget {
   final VoidCallback? onPlayPause;
   final VoidCallback? onNext;
   final VoidCallback? onQueue;
+  final Key? queueTargetKey;
 
   @override
   Widget build(BuildContext context) {
@@ -81,12 +83,15 @@ class NowPlayingBarControls extends StatelessWidget {
           onPressed: onNext,
           icon: const Icon(Symbols.skip_next)),
       if (showQueue)
-        IconButton(
-            key: const ValueKey('bar-queue'),
-            tooltip: ui('播放列表'),
-            style: style,
-            onPressed: onQueue,
-            icon: const Icon(Symbols.queue_music)),
+        KeyedSubtree(
+          key: queueTargetKey,
+          child: IconButton(
+              key: const ValueKey('bar-queue'),
+              tooltip: ui('播放列表'),
+              style: style,
+              onPressed: onQueue,
+              icon: const Icon(Symbols.queue_music)),
+        ),
     ]);
   }
 }

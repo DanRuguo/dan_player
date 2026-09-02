@@ -234,6 +234,7 @@ const Map<String, List<String>> uiCatalogB = {
   ],
   "搜索{0}": ["Search {0}", "{0}を検索", "{0} 검색"],
   "清除分类搜索": ["Clear category search", "分類検索をクリア", "분류 검색 지우기"],
+  "清除搜索": ["Clear search", "検索をクリア", "검색 지우기"],
   "总乐库还没有歌曲。添加本地音乐或将联网歌曲加入总乐库后即可分类浏览。": [
     "Your library is empty. Add local music or online songs to browse by category.",
     "ライブラリに曲がありません。ローカル音楽やオンラインの曲を追加すると、分類別に閲覧できます。",
@@ -264,6 +265,12 @@ const Map<String, List<String>> uiCatalogB = {
     "No matching songs in this category",
     "この分類に一致する曲がありません",
     "이 분류에 일치하는 곡이 없습니다"
+  ],
+  "未找到匹配的歌曲": ["No matching songs", "一致する曲がありません", "일치하는 곡이 없습니다"],
+  "浏览全部专辑 · {0}": [
+    "Browse all albums · {0}",
+    "すべてのアルバムを表示 · {0}",
+    "모든 앨범 보기 · {0}"
   ],
   "{0} 个文件夹": ["{0} folders", "{0} フォルダー", "폴더 {0}개"],
   "路径": ["Path", "パス", "경로"],
@@ -306,6 +313,7 @@ const Map<String, List<String>> uiCatalogB = {
   ],
   "完成": ["Done", "完了", "완료"],
   "指定默认歌词": ["Choose default lyrics", "既定の歌詞を選択", "기본 가사 지정"],
+  "选择歌词来源": ["Choose lyric source", "歌詞の取得元を選択", "가사 출처 선택"],
   "在线": ["Online", "オンライン", "온라인"],
   "本地": ["Local", "ローカル", "로컬"],
   "搜索歌词候选失败，请检查网络后重试。": [

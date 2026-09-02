@@ -6,6 +6,7 @@ import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/now_playing_bar_controls.dart';
 import 'package:dan_player/component/now_playing_bar_row.dart';
 import 'package:dan_player/component/now_playing_bar_metrics.dart';
+import 'package:dan_player/component/next_play_animation.dart';
 import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/frosted_surface.dart';
 import 'package:dan_player/component/rectangle_progress_indicator.dart';
@@ -207,6 +208,7 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
                       onNext:
                           nowPlaying == null ? null : playbackService.nextAudio,
                       onQueue: _openQueue,
+                      queueTargetKey: NextPlayAnimation.targetKey,
                     );
                   },
                 ),

@@ -151,13 +151,17 @@ class _SidebarLayoutSettingsState extends State<SidebarLayoutSettings> {
             controlKey: const ValueKey('window-aspect-ratio-lock-setting'),
             icon: Symbols.aspect_ratio,
             value: preferences.windowAspectRatioLocked,
-            onChanged: _setWindowAspectRatioLocked,
+            onChanged: preferences.windowSizeLocked
+                ? null
+                : _setWindowAspectRatioLocked,
             title: Text(ui("锁定窗口纵横比")),
-            subtitle: Text(preferences.windowAspectRatioLocked &&
-                    preferences.windowAspectRatio > 0
-                ? ui("拖动窗口时保持 {0} : 1。",
-                    [preferences.windowAspectRatio.toStringAsFixed(3)])
-                : ui("开启时以当前完整播放器的宽高比为准。")),
+            subtitle: Text(preferences.windowSizeLocked
+                ? ui("固定窗口大小开启时不能同时锁定纵横比；请先关闭固定大小。")
+                : preferences.windowAspectRatioLocked &&
+                        preferences.windowAspectRatio > 0
+                    ? ui("拖动窗口时保持 {0} : 1。",
+                        [preferences.windowAspectRatio.toStringAsFixed(3)])
+                    : ui("开启时以当前完整播放器的宽高比为准。")),
           ),
           ListenableBuilder(
             listenable: WindowLayoutController.instance,

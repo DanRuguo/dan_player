@@ -7,8 +7,8 @@ import 'package:dan_player/library/playlist.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
-/// Custom playlist art takes precedence; a moved/missing image never hides the
-/// playlist or changes its stored path. The first song is a display fallback.
+/// Custom playlist art takes precedence. A missing or temporarily unavailable
+/// image falls back for display without erasing the user's persisted path.
 class PlaylistCover extends StatelessWidget {
   const PlaylistCover({
     super.key,
@@ -34,7 +34,7 @@ class PlaylistCover extends StatelessWidget {
         );
     Widget songArt() {
       if (!loadSongArtwork) return placeholder();
-      final Audio? firstSong = playlist.flattenAudios().firstOrNull;
+      final Audio? firstSong = playlist.firstAudioOrNull;
       if (firstSong == null) return placeholder();
       return AudioArtwork(
         audio: firstSong,

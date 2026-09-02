@@ -105,6 +105,22 @@ void main() {
     expect(missing, isEmpty);
   });
 
+  test('unified detail and album browser labels translate in every language',
+      () {
+    const keys = {
+      '清除搜索',
+      '未找到匹配的歌曲',
+      '浏览全部专辑 · {0}',
+    };
+    for (final key in keys) {
+      expect(uiCatalog[key], hasLength(3), reason: key);
+      for (final language in UiLanguage.values.skip(1)) {
+        expect(translateUi(key, language, [23]), isNot(key),
+            reason: '$key/$language');
+      }
+    }
+  });
+
   test('enum-backed visible labels have translations', () {
     final keys = <String>{
       for (final field in AudioSortField.values) ...[

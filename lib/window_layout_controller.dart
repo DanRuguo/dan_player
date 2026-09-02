@@ -82,8 +82,13 @@ class WindowLayoutController extends ChangeNotifier {
     _lastError = null;
     notifyListeners();
     try {
+      // Fixed size is the authoritative fallback for malformed/legacy state
+      // that contains both constraints. Valid settings are already normalized
+      // while loading, but native application must remain safe on its own.
+      final aspectRatioLocked =
+          requested.windowAspectRatioLocked && !requested.windowSizeLocked;
       var ratio = requested.windowAspectRatio;
-      if (requested.windowAspectRatioLocked && ratio == 0) {
+      if (aspectRatioLocked && ratio == 0) {
         final size = await _adapter.getSize();
         if (!size.width.isFinite ||
             !size.height.isFinite ||
@@ -98,13 +103,14 @@ class WindowLayoutController extends ChangeNotifier {
       }
 
       await _adapter.setAspectRatio(
-        requested.windowAspectRatioLocked ? ratio : 0,
+        aspectRatioLocked ? ratio : 0,
       );
       await _adapter.setResizable(!requested.windowSizeLocked);
 
-      if (requested.windowAspectRatioLocked &&
+      if (aspectRatioLocked &&
           requested.windowAspectRatio == 0 &&
-          _preferences.value.windowAspectRatioLocked) {
+          _preferences.value.windowAspectRatioLocked &&
+          !_preferences.value.windowSizeLocked) {
         _preferences.value = _preferences.value.copyWith(
           windowAspectRatio: ratio,
         );

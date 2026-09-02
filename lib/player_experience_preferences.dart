@@ -94,30 +94,41 @@ class PlayerExperiencePreferences {
     bool? windowAspectRatioLocked,
     double? windowAspectRatio,
     bool? roundedWindowCorners,
-  }) =>
-      PlayerExperiencePreferences(
-        closeToTray: closeToTray ?? this.closeToTray,
-        taskbarControls: taskbarControls ?? this.taskbarControls,
-        taskbarSongPreview: taskbarSongPreview ?? this.taskbarSongPreview,
-        trayMenuBlurRadius: safeTrayMenuBlurRadius(trayMenuBlurRadius,
-            fallback: this.trayMenuBlurRadius),
-        springLyrics: springLyrics ?? this.springLyrics,
-        desktopLyricVertical: desktopLyricVertical ?? this.desktopLyricVertical,
-        playbackRate:
-            safePlaybackRate(playbackRate, fallback: this.playbackRate),
-        exclusiveOutput: exclusiveOutput ?? this.exclusiveOutput,
-        sidebarWidth:
-            safeSidebarWidth(sidebarWidth, fallback: this.sidebarWidth),
-        sidebarLocked: sidebarLocked ?? this.sidebarLocked,
-        windowSizeLocked: windowSizeLocked ?? this.windowSizeLocked,
-        windowAspectRatioLocked:
-            windowAspectRatioLocked ?? this.windowAspectRatioLocked,
-        roundedWindowCorners: roundedWindowCorners ?? this.roundedWindowCorners,
-        windowAspectRatio: safeWindowAspectRatio(
-          windowAspectRatio,
-          fallback: this.windowAspectRatio,
-        ),
-      );
+  }) {
+    var nextWindowSizeLocked = windowSizeLocked ?? this.windowSizeLocked;
+    var nextWindowAspectRatioLocked =
+        windowAspectRatioLocked ?? this.windowAspectRatioLocked;
+    if (nextWindowSizeLocked && nextWindowAspectRatioLocked) {
+      // An explicitly enabled ratio lock wins over a previously enabled size
+      // lock. In every other ambiguous case the stricter fixed-size policy
+      // wins, including old callers that pass both flags together.
+      if (windowAspectRatioLocked == true && windowSizeLocked != true) {
+        nextWindowSizeLocked = false;
+      } else {
+        nextWindowAspectRatioLocked = false;
+      }
+    }
+    return PlayerExperiencePreferences(
+      closeToTray: closeToTray ?? this.closeToTray,
+      taskbarControls: taskbarControls ?? this.taskbarControls,
+      taskbarSongPreview: taskbarSongPreview ?? this.taskbarSongPreview,
+      trayMenuBlurRadius: safeTrayMenuBlurRadius(trayMenuBlurRadius,
+          fallback: this.trayMenuBlurRadius),
+      springLyrics: springLyrics ?? this.springLyrics,
+      desktopLyricVertical: desktopLyricVertical ?? this.desktopLyricVertical,
+      playbackRate: safePlaybackRate(playbackRate, fallback: this.playbackRate),
+      exclusiveOutput: exclusiveOutput ?? this.exclusiveOutput,
+      sidebarWidth: safeSidebarWidth(sidebarWidth, fallback: this.sidebarWidth),
+      sidebarLocked: sidebarLocked ?? this.sidebarLocked,
+      windowSizeLocked: nextWindowSizeLocked,
+      windowAspectRatioLocked: nextWindowAspectRatioLocked,
+      roundedWindowCorners: roundedWindowCorners ?? this.roundedWindowCorners,
+      windowAspectRatio: safeWindowAspectRatio(
+        windowAspectRatio,
+        fallback: this.windowAspectRatio,
+      ),
+    );
+  }
 
   Map<String, Object> toMap() => {
         'closeToTray': closeToTray,
@@ -131,7 +142,9 @@ class PlayerExperiencePreferences {
         'sidebarWidth': safeSidebarWidth(sidebarWidth),
         'sidebarLocked': sidebarLocked,
         'windowSizeLocked': windowSizeLocked,
-        'windowAspectRatioLocked': windowAspectRatioLocked,
+        // Persist one authoritative window constraint even when a direct
+        // constructor from older code temporarily supplied both flags.
+        'windowAspectRatioLocked': windowAspectRatioLocked && !windowSizeLocked,
         'roundedWindowCorners': roundedWindowCorners,
         'windowAspectRatio': safeWindowAspectRatio(windowAspectRatio),
       };
@@ -141,6 +154,10 @@ class PlayerExperiencePreferences {
     if (value is! Map) return defaults;
     bool flag(String key, bool fallback) =>
         value[key] is bool ? value[key] as bool : fallback;
+    final windowSizeLocked =
+        flag('windowSizeLocked', defaults.windowSizeLocked);
+    final windowAspectRatioLocked = !windowSizeLocked &&
+        flag('windowAspectRatioLocked', defaults.windowAspectRatioLocked);
     return PlayerExperiencePreferences(
       closeToTray: flag('closeToTray', defaults.closeToTray),
       taskbarControls: flag('taskbarControls', defaults.taskbarControls),
@@ -154,9 +171,8 @@ class PlayerExperiencePreferences {
       exclusiveOutput: flag('exclusiveOutput', defaults.exclusiveOutput),
       sidebarWidth: safeSidebarWidth(value['sidebarWidth']),
       sidebarLocked: flag('sidebarLocked', defaults.sidebarLocked),
-      windowSizeLocked: flag('windowSizeLocked', defaults.windowSizeLocked),
-      windowAspectRatioLocked:
-          flag('windowAspectRatioLocked', defaults.windowAspectRatioLocked),
+      windowSizeLocked: windowSizeLocked,
+      windowAspectRatioLocked: windowAspectRatioLocked,
       roundedWindowCorners:
           flag('roundedWindowCorners', defaults.roundedWindowCorners),
       windowAspectRatio: safeWindowAspectRatio(value['windowAspectRatio']),

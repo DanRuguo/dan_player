@@ -76,7 +76,12 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     if (!mounted) return;
     final revision = AudioLibrary.classificationRevision;
     if (revision == _classificationRevision) {
-      setState(() => _snapshot = null);
+      // Keep artist/album/language membership cached. The setState still
+      // refreshes corrected duration text and duration sorting on the visible
+      // track list; only a duration group needs to be regrouped.
+      setState(() {
+        if (widget.kind == MusicCategoryKind.duration) _snapshot = null;
+      });
       return;
     }
     _classificationRevision = revision;

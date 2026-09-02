@@ -13,6 +13,8 @@ import 'package:dan_player/page/artist_detail_page.dart';
 import 'package:dan_player/page/artists_page.dart';
 import 'package:dan_player/page/categories_page.dart';
 import 'package:dan_player/page/category_detail_page.dart';
+import 'package:dan_player/page/playlists_page.dart';
+import 'package:dan_player/page/uni_detail_page.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:flutter/gestures.dart';
@@ -320,6 +322,26 @@ void main() {
     expect(find.text('日文'), findsOneWidget);
     expect(reads, 1,
         reason: 'duration-only changes reuse the classification snapshot');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('duration notification moves a visible duration category',
+      (tester) async {
+    _viewport(tester);
+    final audio = CategoryTestAudio('Duration bucket', duration: 60);
+    await tester.pumpWidget(_host(CategoriesPage(
+      initialCategory: MusicCategoryKind.duration,
+      audios: [audio],
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('少于 2 分钟'), findsOneWidget);
+
+    audio.duration = 360;
+    AudioLibrary.instance.publishDurationChanges();
+    await tester.pumpAndSettle();
+
+    expect(find.text('少于 2 分钟'), findsNothing);
+    expect(find.text('5–9 分钟'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -817,17 +839,13 @@ void main() {
     await _rightClick(tester, _audioTile(a));
     await tester.tap(find.widgetWithText(MenuItemButton, 'Same album'));
     await tester.pumpAndSettle();
-    final detail =
-        tester.widget<CategoryDetailPage>(find.byType(CategoryDetailPage));
+    final detail = tester.widget<AlbumDetailPage>(find.byType(AlbumDetailPage));
     expect(detail.groupId, expected.id);
-    expect(detail.kind, MusicCategoryKind.album);
     expect(
-        GoRouterState.of(tester.element(find.byType(CategoryDetailPage)))
-            .uri
-            .path,
+        GoRouterState.of(tester.element(find.byType(AlbumDetailPage))).uri.path,
         app_paths.CATEGORY_DETAIL_PAGE);
-    expect(find.text('Release A'), findsOneWidget);
-    expect(find.text('Release B'), findsNothing);
+    expect(find.textContaining('Release A'), findsOneWidget);
+    expect(find.textContaining('Release B'), findsNothing);
     expect(_audioTile(a), findsOneWidget);
     expect(_audioTile(b), findsNothing);
     expect(tester.takeException(), isNull);
@@ -851,6 +869,173 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('此分类已不存在或标签已更新'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'artist and album category routes share the polished detail implementation',
+      (tester) async {
+    _viewport(tester);
+    final first = CategoryTestAudio('First',
+        artist: 'Route Artist', album: 'Route Album', track: 0);
+    final second = CategoryTestAudio('Second',
+        artist: 'Route Artist', album: 'Route Album', track: 0);
+    _library([first, second]);
+    final categories = MusicCategories([first, second]);
+    final artist = categories.groups(MusicCategoryKind.artist).single;
+    final album = categories.groups(MusicCategoryKind.album).single;
+    final router = _productionPages(artist.location);
+    await tester.pumpWidget(_routerHost(router));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ArtistDetailPage), findsOneWidget);
+    expect(find.byType(UniDetailPage<String, Audio, MusicCategoryGroup>),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('detail-play-all')), findsOneWidget);
+    expect(find.byKey(const ValueKey('music-shuffle-action')), findsOneWidget);
+    expect(find.byKey(const ValueKey('detail-add-all-to-playlist')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('uni-detail-search')), findsOneWidget);
+    expect(find.text('搜索标题、歌手或专辑'), findsOneWidget);
+    expect(tester.getSize(find.byKey(const ValueKey('uni-detail-cover'))).width,
+        176);
+    var header =
+        tester.getRect(find.byKey(const ValueKey('uni-detail-header-scroll')));
+    var cover = tester.getRect(find.byKey(const ValueKey('uni-detail-cover')));
+    expect(cover.top, greaterThan(header.top));
+    expect(cover.bottom, lessThan(header.bottom));
+
+    await tester.enterText(
+        find.byKey(const ValueKey('uni-detail-search')), 'Second');
+    await tester.pumpAndSettle();
+    expect(_audioTile(first), findsNothing);
+    expect(_audioTile(second), findsOneWidget);
+    final visibleSecond = tester.widget<AudioTile>(_audioTile(second));
+    expect(visibleSecond.audioIndex, 0);
+    expect(visibleSecond.playlist, [same(second)]);
+    await tester.enterText(
+        find.byKey(const ValueKey('uni-detail-search')), 'Missing');
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('清除搜索'), findsOneWidget);
+    expect(find.text('未找到匹配的歌曲'), findsOneWidget);
+
+    router.go(album.location);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlbumDetailPage), findsOneWidget);
+    expect(find.byType(CategoryDetailPage), findsNothing);
+    expect(tester.getSize(find.byKey(const ValueKey('uni-detail-cover'))).width,
+        200);
+    header =
+        tester.getRect(find.byKey(const ValueKey('uni-detail-header-scroll')));
+    cover = tester.getRect(find.byKey(const ValueKey('uni-detail-cover')));
+    expect(cover.top, greaterThan(header.top));
+    expect(cover.bottom, lessThan(header.bottom));
+    expect(find.text('00'), findsNothing);
+    expect(find.text('01'), findsOneWidget);
+    expect(find.text('02'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unified artist detail keeps a song viewport at 200 percent text',
+      (tester) async {
+    _viewport(tester, width: 440, height: 507);
+    final audio = CategoryTestAudio('Readable song', artist: 'Readable artist');
+    _library([audio]);
+    final group =
+        MusicCategories([audio]).groups(MusicCategoryKind.artist).single;
+    await tester.pumpWidget(_host(
+        ArtistDetailPage.group(groupId: group.id, initialGroup: group),
+        scale: 2));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('uni-detail-search')), findsOneWidget);
+    expect(
+        tester
+            .getSize(find.byKey(const ValueKey('uni-detail-content-scroll')))
+            .height,
+        greaterThan(80));
+    expect(_audioTile(audio), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'unified detail selects only visible songs and prunes removed selections',
+      (tester) async {
+    _viewport(tester);
+    final first = CategoryTestAudio('First', artist: 'Selection artist');
+    final second = CategoryTestAudio('Second', artist: 'Selection artist');
+    _library([first, second]);
+    final group = MusicCategories([first, second])
+        .groups(MusicCategoryKind.artist)
+        .single;
+    await tester.pumpWidget(
+        _host(ArtistDetailPage.group(groupId: group.id, initialGroup: group)));
+    await tester.pumpAndSettle();
+    final detail =
+        tester.widget<UniDetailPage<String, Audio, MusicCategoryGroup>>(
+            find.byType(UniDetailPage<String, Audio, MusicCategoryGroup>));
+    final selection = detail.multiSelectController!;
+    await tester.enterText(
+        find.byKey(const ValueKey('uni-detail-search')), 'Second');
+    selection.useMultiSelectView(true);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('全选'));
+    await tester.pumpAndSettle();
+    expect(selection.selected, {second});
+
+    _library([first]);
+    await tester.pumpAndSettle();
+    expect(selection.selected, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final kind in [MusicCategoryKind.artist, MusicCategoryKind.album]) {
+    testWidgets(
+        '${kind.name} detail uses its initial group once and never resurrects it',
+        (tester) async {
+      _viewport(tester);
+      final initial = CategoryTestAudio('Initial snapshot',
+          artist: 'Snapshot artist',
+          album: 'Snapshot album',
+          albumArtist: 'Snapshot owner');
+      final group = MusicCategories([initial]).groups(kind).single;
+      final page = switch (kind) {
+        MusicCategoryKind.artist =>
+          ArtistDetailPage.group(groupId: group.id, initialGroup: group),
+        MusicCategoryKind.album =>
+          AlbumDetailPage.group(groupId: group.id, initialGroup: group),
+        _ => throw StateError('unsupported fixture'),
+      };
+      _library([]);
+      await tester.pumpWidget(_host(page));
+      await tester.pumpAndSettle();
+      expect(_audioTile(initial), findsOneWidget);
+
+      final live = CategoryTestAudio('Live replacement',
+          artist: initial.artist,
+          album: initial.album,
+          albumArtist: initial.albumArtist);
+      _library([live]);
+      await tester.pumpAndSettle();
+      expect(_audioTile(initial), findsNothing);
+      expect(_audioTile(live), findsOneWidget);
+
+      _library([]);
+      await tester.pumpAndSettle();
+      expect(find.byType(CategoriesPage), findsOneWidget);
+      expect(_audioTile(initial), findsNothing);
+      expect(_audioTile(live), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  test('playlist album count uses the same release identity as categories', () {
+    final a = CategoryTestAudio('A',
+        album: 'Shared title', albumArtist: 'Release owner A');
+    final b = CategoryTestAudio('B',
+        album: 'Shared title', albumArtist: 'Release owner B');
+    final songs = [a, b];
+    expect(libraryAlbumReleaseCount(songs), 2);
+    expect(libraryAlbumReleaseCount(songs),
+        MusicCategories(songs).groups(MusicCategoryKind.album).length);
   });
 
   testWidgets(

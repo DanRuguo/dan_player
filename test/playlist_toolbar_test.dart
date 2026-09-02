@@ -321,7 +321,7 @@ void main() {
       ('playlist-help', 'help'),
     ]) {
       await _open(tester, 'playlist-current-settings');
-      expect(find.text('专辑 · 23'), findsOneWidget);
+      expect(find.text('浏览全部专辑 · 23'), findsOneWidget);
       expect(find.text('重命名'), findsNothing);
       _expectTouchTargets(tester);
       await _choose(tester, _key(key));

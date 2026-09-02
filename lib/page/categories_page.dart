@@ -5,9 +5,11 @@ import 'dart:math' as math;
 
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_shape.dart';
-import 'package:dan_player/component/audio_artwork.dart';
+import 'package:dan_player/component/category_cover.dart';
 import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/playlist_create_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/page/page_scaffold.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
@@ -15,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:dan_player/component/category_labels.dart';
+import 'package:dan_player/utils.dart';
 
 class CategoriesPage extends StatefulWidget {
   const CategoriesPage({
@@ -23,12 +26,16 @@ class CategoriesPage extends StatefulWidget {
     this.audios,
     this.onOpenGroup,
     this.classificationScanner,
+    this.coverStore,
+    this.pickCover,
   });
 
   final MusicCategoryKind initialCategory;
   final List<Audio>? audios;
   final ValueChanged<MusicCategoryGroup>? onOpenGroup;
   final MusicClassificationScanner? classificationScanner;
+  final CategoryCoverStore? coverStore;
+  final PlaylistImagePicker? pickCover;
 
   @override
   State<CategoriesPage> createState() => _CategoriesPageState();
@@ -38,6 +45,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
   final _search = TextEditingController();
   late MusicCategoryKind _kind = widget.initialCategory;
   MusicCategories? _snapshot;
+  int _snapshotLibraryRevision = -1;
   MusicClassificationSnapshot _classifications =
       const MusicClassificationSnapshot.empty();
   int _scanGeneration = 0;
@@ -45,6 +53,11 @@ class _CategoriesPageState extends State<CategoriesPage> {
   bool _classifying = false;
   bool _classificationsReady = false;
   String _query = '';
+  late CategoryCoverStore _covers =
+      widget.coverStore ?? CategoryCoverStore.shared;
+  MusicCategories? _lastCoverReconciliationSnapshot;
+  MusicCategoryKind? _lastCoverReconciliationKind;
+  final Set<String> _coverEdits = <String>{};
 
   List<Audio> get _audios =>
       widget.audios ?? AudioLibrary.instance.audioCollection;
@@ -54,14 +67,24 @@ class _CategoriesPageState extends State<CategoriesPage> {
     super.initState();
     _classificationRevision = AudioLibrary.classificationRevision;
     AudioLibrary.changes.addListener(_refresh);
+    _covers.addListener(_coverChanged);
+    unawaited(_covers.load());
     _scanClassificationsIfNeeded();
+  }
+
+  void _coverChanged() {
+    if (mounted) setState(() {});
   }
 
   void _refresh() {
     if (!mounted) return;
     final revision = AudioLibrary.classificationRevision;
     if (revision == _classificationRevision) {
-      setState(() => _snapshot = null);
+      // A duration correction can move a song between duration buckets, but
+      // it must not discard a currently visible unrelated projection.
+      if (_kind == MusicCategoryKind.duration) {
+        setState(() => _snapshot = null);
+      }
       return;
     }
     _classificationRevision = revision;
@@ -112,6 +135,15 @@ class _CategoriesPageState extends State<CategoriesPage> {
   @override
   void didUpdateWidget(CategoriesPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final oldCoverStore = oldWidget.coverStore ?? CategoryCoverStore.shared;
+    final newCoverStore = widget.coverStore ?? CategoryCoverStore.shared;
+    if (!identical(oldCoverStore, newCoverStore)) {
+      oldCoverStore.removeListener(_coverChanged);
+      _covers = newCoverStore..addListener(_coverChanged);
+      _lastCoverReconciliationSnapshot = null;
+      _lastCoverReconciliationKind = null;
+      unawaited(_covers.load());
+    }
     final categoryChanged = oldWidget.initialCategory != widget.initialCategory;
     final classificationInputsChanged = categoryChanged ||
         !identical(oldWidget.audios, widget.audios) ||
@@ -132,6 +164,10 @@ class _CategoriesPageState extends State<CategoriesPage> {
   void _chooseKind(MusicCategoryKind kind) {
     if (_kind == kind) return;
     setState(() {
+      if (kind == MusicCategoryKind.duration &&
+          _snapshotLibraryRevision != AudioLibrary.revision) {
+        _snapshot = null;
+      }
       _kind = kind;
       _query = '';
       _search.clear();
@@ -147,13 +183,87 @@ class _CategoriesPageState extends State<CategoriesPage> {
     }
   }
 
+  void _scheduleCoverReconciliation(MusicCategories snapshot,
+      MusicCategoryKind kind, List<MusicCategoryGroup> groups) {
+    if (identical(_lastCoverReconciliationSnapshot, snapshot) &&
+        _lastCoverReconciliationKind == kind) {
+      return;
+    }
+    _lastCoverReconciliationSnapshot = snapshot;
+    _lastCoverReconciliationKind = kind;
+    unawaited(_covers.reconcileKind(kind, groups).catchError((Object _) {
+      // Let a later rebuild retry transient storage failures without hashing
+      // every category identity again on each search keystroke.
+      if (identical(_lastCoverReconciliationSnapshot, snapshot) &&
+          _lastCoverReconciliationKind == kind) {
+        _lastCoverReconciliationSnapshot = null;
+        _lastCoverReconciliationKind = null;
+      }
+    }));
+  }
+
+  Future<void> _changeCover(MusicCategoryGroup group) async {
+    final key = group.persistenceKey;
+    if (_coverEdits.contains(key)) return;
+    setState(() => _coverEdits.add(key));
+    try {
+      final selected = await (widget.pickCover ?? pickPlaylistImage)();
+      if (selected == null) return;
+      await _covers.setCover(group, selected);
+    } catch (error) {
+      if (mounted) {
+        showTextOnSnackBar(ui("无法选择歌单封面：{0}", [ui(error.toString())]),
+            context: context);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _coverEdits.remove(key));
+      } else {
+        _coverEdits.remove(key);
+      }
+    }
+  }
+
+  Future<void> _removeCover(MusicCategoryGroup group) async {
+    final key = group.persistenceKey;
+    if (_coverEdits.contains(key)) return;
+    setState(() => _coverEdits.add(key));
+    try {
+      await _covers.removeCover(group);
+    } catch (error) {
+      if (mounted) {
+        showTextOnSnackBar(ui("操作失败：{0}", [ui(error.toString())]),
+            context: context);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _coverEdits.remove(key));
+      } else {
+        _coverEdits.remove(key);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    final categories = _snapshot ??=
+    final existingSnapshot = _snapshot;
+    final categories = existingSnapshot ??
         MusicCategories(_audios, classifications: _classifications);
+    if (existingSnapshot == null) {
+      _snapshot = categories;
+      _snapshotLibraryRevision = AudioLibrary.revision;
+    }
     final groups = categories.groups(_kind);
+    // Language (and the retained composer compatibility route) gains groups
+    // only after its asynchronous bounded scan. Reconciliation before that
+    // scan completes would treat valid saved covers as stale and delete them.
+    if ((_kind != MusicCategoryKind.language &&
+            _kind != MusicCategoryKind.composer) ||
+        _classificationsReady) {
+      _scheduleCoverReconciliation(categories, _kind, groups);
+    }
     final visible = groups
         .where((group) =>
             group.matches(_query) ||
@@ -247,7 +357,14 @@ class _CategoriesPageState extends State<CategoriesPage> {
                                       color: scheme.onSurfaceVariant)),
                             ),
                           ),
-                        _CategoryGrid(groups: visible, onOpen: _open),
+                        _CategoryGrid(
+                          groups: visible,
+                          onOpen: _open,
+                          covers: _covers,
+                          changing: _coverEdits,
+                          onChangeCover: _changeCover,
+                          onRemoveCover: _removeCover,
+                        ),
                         const SliverPadding(
                             padding: EdgeInsets.only(bottom: 96)),
                       ],
@@ -262,6 +379,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
   @override
   void dispose() {
     AudioLibrary.changes.removeListener(_refresh);
+    _covers.removeListener(_coverChanged);
     _search.dispose();
     super.dispose();
   }
@@ -270,10 +388,21 @@ class _CategoriesPageState extends State<CategoriesPage> {
 /// The portrait cards share one virtualized viewport with the explanation.
 /// Keys are group identities, so a search/revision does not reload other art.
 class _CategoryGrid extends StatelessWidget {
-  const _CategoryGrid({required this.groups, required this.onOpen});
+  const _CategoryGrid({
+    required this.groups,
+    required this.onOpen,
+    required this.covers,
+    required this.changing,
+    required this.onChangeCover,
+    required this.onRemoveCover,
+  });
 
   final List<MusicCategoryGroup> groups;
   final ValueChanged<MusicCategoryGroup> onOpen;
+  final CategoryCoverStore covers;
+  final Set<String> changing;
+  final ValueChanged<MusicCategoryGroup> onChangeCover;
+  final ValueChanged<MusicCategoryGroup> onRemoveCover;
 
   @override
   Widget build(BuildContext context) {
@@ -338,17 +467,51 @@ class _CategoryGrid extends StatelessWidget {
                     padding: const EdgeInsets.all(8),
                     child: Column(
                       children: [
-                        ClipOval(
-                          key: ValueKey(('category-cover', group.id)),
-                          child: AudioArtwork(
-                            audio: group.audios.first,
-                            size: coverSize,
-                            placeholder: ColoredBox(
-                              color: scheme.surfaceContainerHighest,
-                              child: Center(
-                                child: Icon(categoryIcon(group.kind),
-                                    size: coverSize * .45,
-                                    color: scheme.onSurfaceVariant),
+                        MenuAnchor(
+                          useRootOverlay: true,
+                          consumeOutsideTap: true,
+                          menuChildren: [
+                            MenuItemButton(
+                              key:
+                                  ValueKey(('category-change-cover', group.id)),
+                              leadingIcon: const Icon(Icons.image_outlined),
+                              onPressed: changing.contains(group.persistenceKey)
+                                  ? null
+                                  : () => onChangeCover(group),
+                              child: Text(ui("更改歌单封面")),
+                            ),
+                            if (covers.hasCover(group))
+                              MenuItemButton(
+                                key: ValueKey(
+                                    ('category-remove-cover', group.id)),
+                                leadingIcon:
+                                    const Icon(Icons.hide_image_outlined),
+                                onPressed:
+                                    changing.contains(group.persistenceKey)
+                                        ? null
+                                        : () => onRemoveCover(group),
+                                child: Text(ui("移除自定义封面")),
+                              ),
+                          ],
+                          builder: (context, controller, _) => GestureDetector(
+                            key: ValueKey(('category-cover-menu', group.id)),
+                            behavior: HitTestBehavior.opaque,
+                            onLongPress: controller.open,
+                            onSecondaryTapDown: (_) => controller.open(),
+                            child: ClipOval(
+                              key: ValueKey(('category-cover', group.id)),
+                              child: CategoryCover(
+                                group: group,
+                                store: covers,
+                                size: coverSize,
+                                placeholder: ColoredBox(
+                                  color: scheme.surfaceContainerHighest,
+                                  child: Center(
+                                    child: Icon(categoryIcon(group.kind),
+                                        size: coverSize * .45,
+                                        color: scheme.onSurfaceVariant),
+                                  ),
+                                ),
                               ),
                             ),
                           ),

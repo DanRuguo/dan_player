@@ -270,7 +270,7 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
           _ToolbarMenuItem(
             value: _PlaylistToolbarAction.albums,
             key: const ValueKey('playlist-open-albums'),
-            label: ui("专辑 · {0}", [widget.albumCount]),
+            label: ui("浏览全部专辑 · {0}", [widget.albumCount]),
             icon: Icons.album_outlined,
             onSelected: widget.onOpenAlbums,
           ),

@@ -5,9 +5,9 @@
 面向 Windows x64 的本地与联网音乐播放器<br>
 基于 Flutter、Rust 与 BASS，专注曲库管理、歌词体验和流畅的桌面交互。
 
-**预览版 26.0.4 snapshot2** · **稳定版 26.0.3**
+**预览版 26.0.4 snapshot3** · **稳定版 26.0.3**
 
-[下载预览版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.2) · [查看稳定版](https://github.com/DanRuguo/dan_player/releases/latest) · [功能导览](docs/feature-tour.md) · [28 张安全界面示例](docs/images/README.md)
+[下载预览版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.3) · [查看稳定版](https://github.com/DanRuguo/dan_player/releases/latest) · [功能导览](docs/feature-tour.md) · [28 张安全界面示例](docs/images/README.md)
 
 </div>
 
@@ -19,7 +19,7 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 
 | 版本 | 适合 | 获取 |
 | --- | --- | --- |
-| **26.0.4 snapshot2** | 提前体验本次新功能 | [安装器与便携 ZIP](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.2) |
+| **26.0.4 snapshot3** | 提前体验本次新功能 | [安装器与便携 ZIP](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.3) |
 | **26.0.3** | 日常稳定使用 | [最新稳定 Release](https://github.com/DanRuguo/dan_player/releases/latest) |
 
 安装器可选择位置、桌面和开始菜单快捷方式；检测到旧版时支持原位升级，手动编辑后的最终路径不会再被自动追加目录。使用便携 ZIP 时，请完整解压后运行 `Dan Player.exe`。包内已包含 BASS 运行库和编译后的 `desktop_lyric` 桌面歌词组件。
@@ -57,17 +57,15 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 
 安装器支持直接编辑最终路径、创建桌面／开始菜单快捷方式和旧版本原位升级。安装器源码、原生安全校验与自动化测试均随项目保存在 [`installer/`](installer/)；Release 额外提供已编译安装包。
 
-## 26.0.4 snapshot2 更新
+## 26.0.4 snapshot3 更新
 
-- 新增极简安装器，支持自选路径、快捷方式及覆盖升级。
-- 播放条支持拖动进度和切歌，美化共享播放队列并统一字体。
-- 主题可跟随系统或记住明暗选择，补全中／英／日／韩界面翻译。
-- 分类增加码率和时长，收紧顶部布局，不再显示作曲家分类。
-- 通用歌曲列表可确认后删除本地歌曲，并刷新曲库、队列和歌单引用。
-- 曲库支持增量刷新，优化搜索、时长校正、标签兼容性及长期运行表现。
-- 新增本地缓存备份与恢复，可迁移歌单、设置、统计和缓存资源。
+- 延续安装器、播放条、多维分类、歌曲删除、增量刷新与缓存迁移。
+- 统一艺术家和专辑详情页，整理歌曲菜单，分类与歌单封面支持缺图回退。
+- 新增“下一首播放”封面动画，改进播放队列、歌词菜单和常用弹窗。
+- 编辑歌词时可从多个联网候选中选择，“加入歌单”界面重新排版。
+- 清理重复主题设置，改善安装器字号、界面刷新和长期运行表现。
 
-这是预览版本；测试与已知边界见 [验证说明](docs/26.0.4-snapshot.2-validation.md)，更新行为见 [更新说明](docs/application-updates.md)。
+这是预览版本；测试与已知边界见 [验证说明](docs/26.0.4-snapshot.3-validation.md)，更新行为见 [更新说明](docs/application-updates.md)。
 
 ## 历史更新
 

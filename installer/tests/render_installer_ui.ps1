@@ -6,6 +6,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $renderRepository = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $renderWorkspace = Split-Path -Parent $renderRepository
+$setupText = [IO.File]::ReadAllText((Join-Path $renderRepository 'installer\setup.iss'))
+if ($setupText -notmatch '(?m)^#define ProductionDialogFontSize 11\s*$' -or
+    $setupText -notmatch '(?m)^DialogFontSize=\{#ProductionDialogFontSize\}\s*$') {
+    throw 'Production installer must retain its audited 11 pt dialog baseline.'
+}
 if (-not $NativeDirectory) { $NativeDirectory = Join-Path $renderWorkspace 'tool\qa-installer\build\Release' }
 $renderRoot = Join-Path $renderWorkspace ('tool\qa-installer\ui-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 $null = New-Item -ItemType Directory -Path $renderRoot
@@ -45,4 +50,5 @@ foreach ($theme in @('light','dark')) {
     Write-Output "PASS actual Inno ${theme}/font${fontSize}: 5 real page renders; negative-layout=$([bool]$ExpectLayoutFailure); fictional sandbox installation only. $frames"
   }
 }
+Write-Output 'PASS production Inno wizard/dialog font baseline: 11 pt; QA metrics retain independent overrides.'
 Write-Output "RESULT $($FontSizes.Count * 2) Inno theme/font-metric scenarios passed (OS DPI unchanged): $renderRoot"

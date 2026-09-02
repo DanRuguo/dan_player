@@ -336,6 +336,11 @@ const Map<String, List<String>> uiCatalogC = {
     "有効にした時点の通常プレーヤーの縦横比を使用します。",
     "켤 때의 전체 플레이어 가로세로 비율을 사용합니다."
   ],
+  "固定窗口大小开启时不能同时锁定纵横比；请先关闭固定大小。": [
+    "Aspect ratio lock is unavailable while window size is locked. Turn off window size lock first.",
+    "ウィンドウサイズの固定中は縦横比を固定できません。先にウィンドウサイズの固定を解除してください。",
+    "창 크기가 잠겨 있으면 가로세로 비율을 함께 잠글 수 없습니다. 먼저 창 크기 잠금을 해제하세요."
+  ],
   "窗口约束暂未应用，请重试。": [
     "Window constraints have not been applied. Try again.",
     "ウィンドウの制約はまだ適用されていません。再試行してください。",
@@ -348,16 +353,6 @@ const Map<String, List<String>> uiCatalogC = {
     "Dynamic colors from album art",
     "アルバムカバーから動的に配色",
     "앨범 커버 기반 동적 색상"
-  ],
-  "启动时使用系统主题": [
-    "Use system theme at startup",
-    "起動時にシステムテーマを使用",
-    "시작할 때 시스템 테마 사용"
-  ],
-  "启动时使用系统主题模式": [
-    "Use system theme mode at startup",
-    "起動時にシステムのテーマモードを使用",
-    "시작할 때 시스템 테마 모드 사용"
   ],
   "自定义字体": ["Custom font", "フォントのカスタマイズ", "사용자 지정 글꼴"],
   "无法获取字体": ["Could not retrieve fonts", "フォントを取得できませんでした", "글꼴을 가져오지 못했습니다"],
@@ -716,4 +711,26 @@ const Map<String, List<String>> uiCatalogC = {
     "가사 창 크기를 조절하지 못했습니다: {0}"
   ],
   "恢复悬浮歌词": ["Restore floating lyrics", "フローティング歌詞に戻す", "떠 있는 가사로 복원"],
+  "选择一条候选歌词填入编辑器；填入后仍需手动保存。": [
+    "Choose a lyric candidate to fill the editor. You will still need to save it manually.",
+    "候補の歌詞を選んでエディターに取り込みます。取り込み後も手動で保存する必要があります。",
+    "가사 후보를 선택해 편집기에 불러오세요. 불러온 뒤에도 직접 저장해야 합니다."
+  ],
+  "该候选没有返回可用歌词，可选择其他候选或重试。": [
+    "This candidate did not return usable lyrics. Choose another candidate or try again.",
+    "この候補から利用可能な歌詞を取得できませんでした。別の候補を選ぶか、再試行してください。",
+    "이 후보에서 사용할 수 있는 가사를 가져오지 못했습니다. 다른 후보를 선택하거나 다시 시도하세요."
+  ],
+  "获取歌词失败，可选择其他候选或重试。": [
+    "Could not load the lyrics. Choose another candidate or try again.",
+    "歌詞を取得できませんでした。別の候補を選ぶか、再試行してください。",
+    "가사를 불러오지 못했습니다. 다른 후보를 선택하거나 다시 시도하세요."
+  ],
+  "请选择一个目标歌单": [
+    "Choose a destination playlist",
+    "追加先のプレイリストを選択してください",
+    "대상 재생목록을 선택하세요"
+  ],
+  "已选择目标歌单": ["Selected destination", "選択中のプレイリスト", "선택한 대상 재생목록"],
+  "{0} 个歌单": ["{0} playlists", "プレイリスト {0} 件", "재생목록 {0}개"],
 };

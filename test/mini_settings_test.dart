@@ -26,6 +26,7 @@ void main() {
   late FakeWindowModeAdapter window;
   late Size previousSize;
   late bool previousMaximized;
+  late int previousDefaultTheme;
   final pendingGates = <Completer<void>>[];
 
   File getSettingsFile() => File(path.join(dataRoot.path, 'settings.json'));
@@ -51,6 +52,7 @@ void main() {
     expect(WindowModeController.instance.isMini, isFalse);
     previousSize = AppSettings.instance.windowSize;
     previousMaximized = AppSettings.instance.isWindowMaximized;
+    previousDefaultTheme = AppSettings.instance.defaultTheme;
     AppSettings.instance.windowSize = const Size(1280, 756);
     AppSettings.instance.isWindowMaximized = false;
   });
@@ -64,6 +66,7 @@ void main() {
     await WindowModeController.instance.exit();
     AppSettings.instance.windowSize = previousSize;
     AppSettings.instance.isWindowMaximized = previousMaximized;
+    AppSettings.instance.defaultTheme = previousDefaultTheme;
     messenger.setMockMethodCallHandler(windowChannel, null);
     messenger.setMockMethodCallHandler(pathChannel, null);
     final resolvedParent = await testParent.resolveSymbolicLinks();
@@ -85,6 +88,25 @@ void main() {
     expect(saved['Version'], AppSettings.version);
     expect(AppSettings.instance.windowSize, const Size(900, 700));
     expect(PlayService.isInitialized, isFalse);
+  });
+
+  test('theme seed persists without the removed startup-system toggle',
+      () async {
+    const seed = 0xff336699;
+    await getSettingsFile().writeAsString(jsonEncode(<String, Object>{
+      'Version': '26.0.4-snapshot.2',
+      'AppearanceThemeMode': 'system',
+      'DefaultTheme': seed,
+    }));
+
+    await AppSettings.readFromJson();
+    expect(AppSettings.instance.defaultTheme, seed);
+
+    await AppSettings.instance.saveSettings(captureWindowSize: false);
+    final saved = await readSettings();
+    expect(saved['DefaultTheme'], seed);
+    expect(saved, isNot(contains('UseSystemTheme')));
+    expect(saved['AppearanceThemeMode'], 'system');
   });
 
   test('legacy maximized minimum-square geometry recovers once', () async {

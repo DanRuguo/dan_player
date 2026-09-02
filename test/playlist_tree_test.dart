@@ -88,6 +88,20 @@ void main() {
         ['A', 'C', 'E', 'F']);
   });
 
+  test('first cover song follows depth-first order without flattening', () {
+    final tree = PlaylistTree([]);
+    final root = tree.createPlaylist('Root');
+    final empty = tree.createPlaylist('Empty', parent: root);
+    tree.createPlaylist('Still empty', parent: empty);
+    final nested = tree.createPlaylist('Nested', parent: root);
+    final expected = tree.addAudio(nested, _song('First nested')).audio;
+    tree.addAudio(root, _song('Later direct'));
+
+    expect(root.firstAudioOrNull, same(expected));
+    expect(empty.firstAudioOrNull, isNull);
+    expect(nested.firstAudioOrNull, same(expected));
+  });
+
   test('same audio in different branches has independent occurrence indices',
       () {
     final example = _Example();

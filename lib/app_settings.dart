@@ -122,7 +122,7 @@ Future<void> scheduleAppDataDirectorySwitch(
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.4-snapshot.2";
+  static const String version = "26.0.4-snapshot.3";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";
@@ -158,9 +158,6 @@ class AppSettings {
 
   /// App-local keyboard bindings. Older settings keep the documented defaults.
   final shortcuts = ValueNotifier(ShortcutPreferences.defaults());
-
-  /// 跟随系统主题色
-  bool useSystemTheme = true;
 
   List artistSeparator = ["/", "、"];
 
@@ -216,6 +213,20 @@ class AppSettings {
 
   int _saveRevision = 0;
 
+  /// Reads the old independent system-accent switch once, then converges on
+  /// one persisted seed color. The light/dark/system choice is handled solely
+  /// by [themeMode] and is intentionally independent from this migration.
+  static void _readThemeSeed(Map settingsMap) {
+    final legacySystemAccent = settingsMap["UseSystemTheme"];
+    final followsSystem = legacySystemAccent == true || legacySystemAccent == 1;
+    if (legacySystemAccent != null && followsSystem) {
+      _instance.defaultTheme = getWindowsTheme();
+      return;
+    }
+    final saved = settingsMap["DefaultTheme"];
+    if (saved is int) _instance.defaultTheme = saved;
+  }
+
   static void _readWindowGeometry(Map settingsMap) {
     final restored = WindowGeometryPolicy.restore(settingsMap);
     _instance.windowSize = Size(restored.size.width, restored.size.height);
@@ -223,16 +234,8 @@ class AppSettings {
   }
 
   static Future<void> _readFromJson_old(Map settingsMap) async {
-    final ust = settingsMap["UseSystemTheme"];
-    if (ust != null) {
-      _instance.useSystemTheme = ust == 1 ? true : false;
-    }
-
     _instance.themeMode = ThemeModePreference.decode(settingsMap);
-
-    if (!_instance.useSystemTheme) {
-      _instance.defaultTheme = settingsMap["DefaultTheme"];
-    }
+    _readThemeSeed(settingsMap);
 
     _instance.dynamicTheme = settingsMap["DynamicTheme"] == 1 ? true : false;
     _instance.artistSeparator = settingsMap["ArtistSeparator"];
@@ -308,16 +311,8 @@ class AppSettings {
         return;
       }
 
-      final ust = settingsMap["UseSystemTheme"];
-      if (ust != null) {
-        _instance.useSystemTheme = ust;
-      }
-
       _instance.themeMode = ThemeModePreference.decode(settingsMap);
-
-      if (!_instance.useSystemTheme) {
-        _instance.defaultTheme = settingsMap["DefaultTheme"];
-      }
+      _readThemeSeed(settingsMap);
 
       final dt = settingsMap["DynamicTheme"];
       if (dt != null) {
@@ -397,7 +392,6 @@ class AppSettings {
         "Rendering": rendering.value.toMap(),
         "PlayerShortcuts": shortcuts.value.toMap(),
         "OnlineSources": onlineSources.value.toJson(),
-        "UseSystemTheme": useSystemTheme,
         "DefaultTheme": defaultTheme,
         "ArtistSeparator": artistSeparator,
         "LocalLyricFirst": localLyricFirst,

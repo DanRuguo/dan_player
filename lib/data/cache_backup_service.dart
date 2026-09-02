@@ -368,6 +368,7 @@ class CacheRestoreDestinationPolicy {
     'settings.json',
     'app_preference.json',
     'playlists.json',
+    'category_covers.json',
     'collections.json',
     'custom_audio_order.json',
     'lyric_source.json',
@@ -379,6 +380,7 @@ class CacheRestoreDestinationPolicy {
     'covers',
     'metadata_preview',
     'imported-assets',
+    'category-covers',
   };
 
   static Future<CacheRestoreDestinationDecision> decide({

@@ -308,6 +308,197 @@ void main() {
     expect(fixture.saves, 0);
   });
 
+  testWidgets('destination picker shows hierarchy and a clear selected target',
+      (tester) async {
+    _size(tester, width: 720, height: 650);
+    final fixture = _Fixture();
+    final root = fixture.root;
+    final child = fixture.child;
+    await tester.pumpWidget(_app(
+      PlaylistDestinationDialog(
+        tree: fixture.tree,
+        title: '加入歌单',
+        confirmLabel: '添加',
+        allowCreate: true,
+      ),
+      textScale: 1.5,
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('请选择一个目标歌单'), findsOneWidget);
+    expect(
+      find.byKey(ValueKey('playlist-destination-${root.id}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('playlist-destination-${child.id}')),
+      findsOneWidget,
+    );
+    expect(find.text('2 个歌单'), findsOneWidget);
+
+    await tester.tap(find.byKey(ValueKey('playlist-destination-${child.id}')));
+    await tester.pump();
+
+    expect(find.text('已选择目标歌单'), findsOneWidget);
+    expect(find.text('Root / Child'), findsWidgets);
+    expect(
+      tester
+          .widget<FilledButton>(
+              find.byKey(const ValueKey('playlist-destination-confirm')))
+          .onPressed,
+      isNotNull,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'destination picker cannot be dismissed while a new playlist is saving',
+      (tester) async {
+    _size(tester, width: 720, height: 650);
+    final fixture = _Fixture();
+    final saving = Completer<void>();
+    var completed = false;
+    await tester.pumpWidget(_app(Builder(
+      builder: (context) => FilledButton(
+        key: const ValueKey('open-playlist-destination'),
+        onPressed: () {
+          showPlaylistDestinationDialog(
+            context,
+            tree: fixture.tree,
+            title: '加入歌单',
+            confirmLabel: '添加',
+            allowCreate: true,
+            persist: () => saving.future,
+          ).then((_) => completed = true);
+        },
+        child: const Text('Open'),
+      ),
+    )));
+
+    await tester.tap(find.byKey(const ValueKey('open-playlist-destination')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('playlist-destination-create')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('playlist-name-input')),
+      'Pending destination',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, '创建'));
+    await tester.pump();
+
+    expect(find.byType(PlaylistDestinationDialog), findsOneWidget);
+    expect(fixture.tree.allPlaylists.last.name, 'Pending destination');
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byKey(const ValueKey('playlist-destination-close')),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tapAt(const Offset(2, 2));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byType(PlaylistDestinationDialog), findsOneWidget);
+    expect(completed, isFalse);
+
+    saving.complete();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(PlaylistDestinationDialog), findsNothing);
+    expect(completed, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a stalled playlist save eventually allows safe dismissal',
+      (tester) async {
+    _size(tester, width: 720, height: 650);
+    final fixture = _Fixture();
+    final saving = Completer<void>();
+    var completed = false;
+    await tester.pumpWidget(_app(Builder(
+      builder: (context) => FilledButton(
+        onPressed: () {
+          showPlaylistDestinationDialog(
+            context,
+            tree: fixture.tree,
+            title: '加入歌单',
+            confirmLabel: '添加',
+            allowCreate: true,
+            persist: () => saving.future,
+          ).then((_) => completed = true);
+        },
+        child: const Text('Open'),
+      ),
+    )));
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('playlist-destination-create')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('playlist-name-input')),
+      'Slow destination',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, '创建'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 12));
+
+    expect(
+      find.text('保存时间较长，操作仍在后台继续。你可以取消并稍后查看结果。'),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byKey(const ValueKey('playlist-destination-close')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('playlist-destination-confirm')),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('playlist-destination-close')));
+    await tester.pumpAndSettle();
+    expect(find.byType(PlaylistDestinationDialog), findsNothing);
+    expect(completed, isTrue);
+
+    saving.complete();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('empty destination stays usable in a short large-text window',
+      (tester) async {
+    _size(tester, width: 380, height: 420);
+    final fixture = _Fixture();
+    await tester.pumpWidget(_app(
+      PlaylistDestinationDialog(
+        tree: fixture.tree,
+        title: '加入歌单',
+        confirmLabel: '添加',
+        allowCreate: true,
+      ),
+      textScale: 2,
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PlaylistDestinationDialog), findsOneWidget);
+    expect(find.text('还没有歌单，请先新建一个。'), findsOneWidget);
+    expect(find.byKey(const ValueKey('playlist-destination-create')),
+        findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
       'subtree deletion needs confirmation and only removes relationships',
       (tester) async {

@@ -9,6 +9,7 @@ import 'package:dan_player/statistics/library_statistics.dart'
 import 'package:dan_player/component/audio_metadata_dialog.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/next_play_animation.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -79,6 +80,20 @@ class AudioTile extends StatefulWidget {
 }
 
 class _AudioTileState extends State<AudioTile> {
+  final GlobalKey _artworkKey = GlobalKey(debugLabel: 'audio-tile-artwork');
+
+  Widget _artwork(Audio audio, Widget placeholder) => RepaintBoundary(
+        key: _artworkKey,
+        child: ClipRRect(
+          borderRadius: AppShape.smallRadius,
+          child: AudioArtwork(
+            audio: audio,
+            size: 48,
+            placeholder: placeholder,
+          ),
+        ),
+      );
+
   Future<void> _toggleOnlineLibrary(Audio audio) async {
     try {
       final library = OnlineLibrary.instance;
@@ -131,6 +146,11 @@ class _AudioTileState extends State<AudioTile> {
       MenuItemButton(
         onPressed: () {
           PlayService.instance.playbackService.addToNext(audio);
+          NextPlayAnimation.fly(
+            context: context,
+            sourceKey: _artworkKey,
+            audio: audio,
+          );
         },
         leadingIcon: const Icon(Symbols.plus_one),
         child: Text(ui("下一首播放")),
@@ -194,23 +214,21 @@ class _AudioTileState extends State<AudioTile> {
     }
 
     return [
-      SubmenuButton(
-        menuChildren: List.generate(
-          audio.splitedArtists.length,
-          (i) => MenuItemButton(
-            onPressed: () {
-              final artist = AudioLibrary
-                  .instance.artistCollection[audio.splitedArtists[i]];
-              if (artist != null) {
-                context.push(app_paths.ARTIST_DETAIL_PAGE, extra: artist);
-              }
-            },
-            leadingIcon: const Icon(Symbols.artist),
-            child: Text(audio.splitedArtists[i]),
+      for (final artistName in audio.splitedArtists)
+        MenuItemButton(
+          onPressed: () {
+            final artist = AudioLibrary.instance.artistCollection[artistName];
+            if (artist != null) {
+              context.push(app_paths.ARTIST_DETAIL_PAGE, extra: artist);
+            }
+          },
+          leadingIcon: const Icon(Symbols.artist),
+          child: Text(
+            artistName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
-        child: Text(ui("艺术家")),
-      ),
       MenuItemButton(
         onPressed: () {
           final album = MusicCategories.albumGroupFor(
@@ -218,7 +236,11 @@ class _AudioTileState extends State<AudioTile> {
           context.push(album.location, extra: album);
         },
         leadingIcon: const Icon(Symbols.album),
-        child: Text(audio.album),
+        child: Text(
+          audio.album,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
       ...common,
       MenuItemButton(
@@ -265,6 +287,11 @@ class _AudioTileState extends State<AudioTile> {
         useRootOverlay: true,
         reservedPadding: const EdgeInsets.fromLTRB(8, 8, 8, 116),
         consumeOutsideTap: true,
+        style: const MenuStyle(
+          maximumSize: WidgetStatePropertyAll(
+            Size(420, double.infinity),
+          ),
+        ),
         menuChildren: _buildMenuItems(context, audio),
         builder: (context, controller, _) {
           final selected = widget.selection?.selected ??
@@ -402,14 +429,7 @@ class _AudioTileState extends State<AudioTile> {
                       // Ink's 1px border is part of its layout padding.
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 7),
-                      artwork: ClipRRect(
-                        borderRadius: AppShape.smallRadius,
-                        child: AudioArtwork(
-                          audio: audio,
-                          size: 48,
-                          placeholder: placeholder,
-                        ),
-                      ),
+                      artwork: _artwork(audio, placeholder),
                       action: widget.action ??
                           AppIconActionButton(
                             key: ValueKey('audio-grid-menu-${audio.path}'),
@@ -438,12 +458,7 @@ class _AudioTileState extends State<AudioTile> {
                             key: const ValueKey('audio-columns-row'),
                             children: [
                               if (widget.leading != null) widget.leading!,
-                              ClipRRect(
-                                  borderRadius: AppShape.smallRadius,
-                                  child: AudioArtwork(
-                                      audio: audio,
-                                      size: 48,
-                                      placeholder: placeholder)),
+                              _artwork(audio, placeholder),
                               const SizedBox(width: 16),
                               Expanded(
                                   child: AudioColumnFields(
@@ -524,14 +539,7 @@ class _AudioTileState extends State<AudioTile> {
                                       ),
 
                                     /// cover
-                                    ClipRRect(
-                                      borderRadius: AppShape.smallRadius,
-                                      child: AudioArtwork(
-                                        audio: audio,
-                                        size: 48,
-                                        placeholder: placeholder,
-                                      ),
-                                    ),
+                                    _artwork(audio, placeholder),
                                     const SizedBox(width: 16.0),
 
                                     /// title, artist and album

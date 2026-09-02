@@ -193,7 +193,7 @@ void main() {
           title: 'Album',
           subtitle: 'Artist',
           secondaryContent: const ['Track'],
-          secondaryContentBuilder: (_, item, __, ___) => Text(item),
+          secondaryContentBuilder: (_, item, __, ___, ____) => Text(item),
           tertiaryContentTitle: 'Related',
           tertiaryContent: const ['Other album'],
           tertiaryContentBuilder: (_, item, __, ___) => Text(item),

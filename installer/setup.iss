@@ -4,6 +4,7 @@
   #error Build with scripts/build_windows_installer.ps1; no implicit payload path.
 #endif
 #include BuildConfig
+#define ProductionDialogFontSize 11
 
 [Setup]
 #ifdef QaBuild
@@ -80,9 +81,14 @@ CreateUninstallRegKey=no
 [Languages]
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
-#ifdef QaDialogFontSize
 [LangOptions]
+#ifdef QaDialogFontSize
 DialogFontSize={#QaDialogFontSize}
+#else
+; 11 pt keeps the embedded CJK face at least as readable as Windows' standard
+; confirmation text. Inno applies this baseline to wizard copy and dialogs and
+; scales its native layout before the private family is selected below.
+DialogFontSize={#ProductionDialogFontSize}
 #endif
 
 [Messages]
