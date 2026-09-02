@@ -80,18 +80,59 @@ class AudioTile extends StatefulWidget {
 }
 
 class _AudioTileState extends State<AudioTile> {
-  final GlobalKey _artworkKey = GlobalKey(debugLabel: 'audio-tile-artwork');
+  BuildContext? _artworkContext;
 
-  Widget _artwork(Audio audio, Widget placeholder) => RepaintBoundary(
-        key: _artworkKey,
-        child: ClipRRect(
-          borderRadius: AppShape.smallRadius,
-          child: AudioArtwork(
-            audio: audio,
-            size: 48,
-            placeholder: placeholder,
-          ),
-        ),
+  /// Opens the shared song menu at the visible trailing action instead of the
+  /// leading edge of the full-width row/card owned by [MenuAnchor].
+  ///
+  /// Right-click already supplies a pointer-local position. Keyboard/touch
+  /// activation of the three-dot button has no pointer position, so a bare
+  /// `open()` falls back to the anchor's start edge (the far left on LTR
+  /// pages). Converting the action's bottom centre back into the anchor's
+  /// coordinate space keeps both entry points on one accessible menu without
+  /// duplicating actions or overlays.
+  void _toggleMenuFromAction(
+    MenuController controller,
+    BuildContext anchorContext,
+    BuildContext actionContext,
+  ) {
+    if (controller.isOpen) {
+      controller.close();
+      return;
+    }
+
+    final anchorBox = anchorContext.findRenderObject() as RenderBox?;
+    final actionBox = actionContext.findRenderObject() as RenderBox?;
+    if (anchorBox == null ||
+        actionBox == null ||
+        !anchorBox.attached ||
+        !actionBox.attached ||
+        !anchorBox.hasSize ||
+        !actionBox.hasSize) {
+      // Defensive fallback for the unlikely frame in which the action has
+      // just changed view and its render box is not available yet.
+      controller.open();
+      return;
+    }
+
+    final actionBottomCenter = actionBox.localToGlobal(
+      Offset(actionBox.size.width / 2, actionBox.size.height),
+    );
+    controller.open(position: anchorBox.globalToLocal(actionBottomCenter));
+  }
+
+  Widget _artwork(Audio audio, Widget placeholder) => Builder(
+        builder: (context) {
+          _artworkContext = context;
+          return ClipRRect(
+            borderRadius: AppShape.smallRadius,
+            child: AudioArtwork(
+              audio: audio,
+              size: 48,
+              placeholder: placeholder,
+            ),
+          );
+        },
       );
 
   Future<void> _toggleOnlineLibrary(Audio audio) async {
@@ -148,7 +189,7 @@ class _AudioTileState extends State<AudioTile> {
           PlayService.instance.playbackService.addToNext(audio);
           NextPlayAnimation.fly(
             context: context,
-            sourceKey: _artworkKey,
+            sourceContext: _artworkContext ?? context,
             audio: audio,
           );
         },
@@ -293,7 +334,7 @@ class _AudioTileState extends State<AudioTile> {
           ),
         ),
         menuChildren: _buildMenuItems(context, audio),
-        builder: (context, controller, _) {
+        builder: (anchorContext, controller, _) {
           final selected = widget.selection?.selected ??
               (widget.multiSelectController?.selected.contains(audio) == true);
           final selecting = widget.selection?.enabled ??
@@ -385,11 +426,6 @@ class _AudioTileState extends State<AudioTile> {
                 }
 
                 if (!selecting) {
-                  if (PlayService
-                          .instance.playbackService.resolvingAudioPath.value ==
-                      audio.path) {
-                    return;
-                  }
                   PlayService.instance.playbackService
                       .play(widget.audioIndex, widget.playlist);
                 } else {
@@ -430,17 +466,27 @@ class _AudioTileState extends State<AudioTile> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 7),
                       artwork: _artwork(audio, placeholder),
+                      contentWrapper: (child) => MusicGridReorderScope.wrap(
+                        context,
+                        item: audio,
+                        label: audio.displayTitle,
+                        child: child,
+                      ),
                       action: widget.action ??
-                          AppIconActionButton(
-                            key: ValueKey('audio-grid-menu-${audio.path}'),
-                            tooltip: ui("歌曲操作"),
-                            onPressed: selecting
-                                ? null
-                                : () => controller.isOpen
-                                    ? controller.close()
-                                    : controller.open(),
-                            selected: controller.isOpen,
-                            glyph: AppActionGlyph.moreVertical,
+                          Builder(
+                            builder: (actionContext) => AppIconActionButton(
+                              key: ValueKey('audio-grid-menu-${audio.path}'),
+                              tooltip: ui("歌曲操作"),
+                              onPressed: selecting
+                                  ? null
+                                  : () => _toggleMenuFromAction(
+                                        controller,
+                                        anchorContext,
+                                        actionContext,
+                                      ),
+                              selected: controller.isOpen,
+                              glyph: AppActionGlyph.moreVertical,
+                            ),
                           ),
                     )
                   : Padding(
@@ -481,17 +527,22 @@ class _AudioTileState extends State<AudioTile> {
                                           child: durationLabel))),
                               const SizedBox(width: 8),
                               widget.action ??
-                                  AppIconActionButton(
-                                      key: ValueKey(
-                                          'audio-columns-menu-${audio.path}'),
-                                      tooltip: ui("歌曲操作"),
-                                      onPressed: selecting
-                                          ? null
-                                          : () => controller.isOpen
-                                              ? controller.close()
-                                              : controller.open(),
-                                      selected: controller.isOpen,
-                                      glyph: AppActionGlyph.moreVertical),
+                                  Builder(
+                                      builder: (actionContext) =>
+                                          AppIconActionButton(
+                                              key: ValueKey(
+                                                  'audio-columns-menu-${audio.path}'),
+                                              tooltip: ui("歌曲操作"),
+                                              onPressed: selecting
+                                                  ? null
+                                                  : () => _toggleMenuFromAction(
+                                                        controller,
+                                                        anchorContext,
+                                                        actionContext,
+                                                      ),
+                                              selected: controller.isOpen,
+                                              glyph:
+                                                  AppActionGlyph.moreVertical)),
                             ],
                           );
                         }

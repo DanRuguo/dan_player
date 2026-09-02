@@ -257,7 +257,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('grid drag retains hierarchy and playback is still depth first',
+  testWidgets(
+      'grid artwork or title drag retains hierarchy and depth-first playback',
       (tester) async {
     final fixture = _Fixture();
     final parent = fixture.tree.createPlaylist('Root');
@@ -268,7 +269,8 @@ void main() {
     await _show(
         tester, fixture.browser(current: parent, view: ContentView.table));
     final drag = await tester.startGesture(
-        tester.getCenter(find.byKey(ValueKey('playlist-drag-${first.id}'))),
+        tester
+            .getCenter(find.byKey(ValueKey('playlist-card-drag-${first.id}'))),
         kind: PointerDeviceKind.mouse);
     await drag.moveBy(const Offset(12, 0));
     await tester.pump();

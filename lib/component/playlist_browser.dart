@@ -3,6 +3,7 @@ import 'package:dan_player/component/now_playing_bar_metrics.dart';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
+import 'package:dan_player/component/adaptive_grid_drag.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_action_icon.dart';
@@ -29,7 +30,6 @@ import 'package:dan_player/page/page_scaffold.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/utils.dart';
-import 'package:flutter/gestures.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -621,7 +621,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     return oldIndex >= 0 && oldIndex < slot ? slot - 1 : slot;
   }
 
-  Widget _dropGap(Playlist? parent, List<_PlaylistRowData> rows, int slot) {
+  Widget _dropGap(Playlist? parent, List<_PlaylistRowData> rows, int slot,
+      {bool grid = false}) {
     final scheme = Theme.of(context).colorScheme;
     return DragTarget<PlaylistDragData>(
       key: ValueKey('playlist-drop-slot-${parent?.id ?? 'root'}-$slot'),
@@ -640,22 +641,42 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         parent,
         index: _dropIndex(details.data, parent, rows, slot),
       )),
-      builder: (context, candidates, rejected) => SizedBox(
-        height: 10,
-        child: Center(
-          child: Container(
-            height: 3,
-            decoration: BoxDecoration(
-              color: candidates.isNotEmpty
-                  ? scheme.primary
-                  : rejected.isNotEmpty
-                      ? scheme.error
-                      : Colors.transparent,
-              borderRadius: AppShape.smallRadius,
+      builder: (context, candidates, rejected) {
+        final color = candidates.isNotEmpty
+            ? scheme.primary
+            : rejected.isNotEmpty
+                ? scheme.error
+                : Colors.transparent;
+        if (grid) {
+          return SizedBox.expand(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: AppShape.smallRadius,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+        return SizedBox(
+          height: 10,
+          child: Center(
+            child: Container(
+              height: 3,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: AppShape.smallRadius,
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -774,52 +795,81 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         child: menuButton,
       );
     }
-    return Builder(
-      builder: (context) => Draggable<PlaylistDragData>(
-        key: ValueKey('playlist-drag-${row.id}'),
-        data: PlaylistDragData(
-          entryId: row.id,
-          sourceParent: parent,
-          label: row.label,
-        ),
-        maxSimultaneousDrags: _editingBlocked ? 0 : 1,
-        allowedButtonsFilter: (buttons) => buttons == kPrimaryButton,
-        onDragStarted: () {
-          Focus.of(context).requestFocus();
-          setState(() => _draggingId = row.id);
-        },
-        onDragEnd: (_) {
-          if (mounted) setState(() => _draggingId = null);
-        },
-        feedback: Material(
-          elevation: 8,
-          shape: AppShape.surface,
-          color: Theme.of(context).colorScheme.surfaceContainerHigh,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 300),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(row.playlist == null ? Icons.music_note : Icons.folder),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(row.label,
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ),
-                ],
+    return _freeGridDragSource(
+      key: ValueKey('playlist-drag-${row.id}'),
+      row: row,
+      parent: parent,
+      child: menuButton,
+    );
+  }
+
+  Widget _gridIdentityDragSource(
+      _PlaylistRowData row, Playlist? parent, Widget child) {
+    if (_selecting ||
+        _editingBlocked ||
+        _sortMode(parent) != PlaylistSortMode.custom ||
+        _view == PlaylistViewMode.list) {
+      return child;
+    }
+    return _freeGridDragSource(
+      key: ValueKey('playlist-card-drag-${row.id}'),
+      row: row,
+      parent: parent,
+      child: child,
+    );
+  }
+
+  Widget _freeGridDragSource({
+    required Key key,
+    required _PlaylistRowData row,
+    required Playlist? parent,
+    required Widget child,
+  }) =>
+      Builder(
+        builder: (context) => AdaptiveGridDragSource<PlaylistDragData>(
+          dragKey: key,
+          data: PlaylistDragData(
+            entryId: row.id,
+            sourceParent: parent,
+            label: row.label,
+          ),
+          maxSimultaneousDrags: _editingBlocked ? 0 : 1,
+          onDragStarted: () {
+            Focus.of(context).requestFocus();
+            setState(() => _draggingId = row.id);
+          },
+          onDragEnd: (_) {
+            if (mounted) setState(() => _draggingId = null);
+          },
+          feedback: Material(
+            elevation: 8,
+            shape: AppShape.surface,
+            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                        row.playlist == null ? Icons.music_note : Icons.folder),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(row.label,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
+          child: MouseRegion(
+            cursor: SystemMouseCursors.grab,
+            child: child,
+          ),
         ),
-        child: MouseRegion(
-          cursor: SystemMouseCursors.grab,
-          child: menuButton,
-        ),
-      ),
-    );
-  }
+      );
 
   Widget _row(Playlist? parent, _PlaylistRowData row, int index, int count,
       List<Audio> queue, Map<String, int> queueIndices,
@@ -850,6 +900,17 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
           final rowAction = _dragHandle(row, parent, index, menuButton);
           final audio = row.audio;
           final queueIndex = queueIndices[row.id] ?? -1;
+          Widget wrapGridIdentity(Widget child) {
+            final draggable = _gridIdentityDragSource(row, parent, child);
+            return folder == null
+                ? draggable
+                : _folderTarget(
+                    target: folder,
+                    targetKey: 'playlist-drop-folder-${folder.id}',
+                    child: draggable,
+                  );
+          }
+
           final Widget content;
           if (_view == PlaylistViewMode.circular) {
             final details = folder == null
@@ -908,13 +969,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                             child: Center(
                                 child: Icon(Icons.music_note,
                                     size: size * .45, color: scheme.primary)))),
-                contentWrapper: folder == null
-                    ? null
-                    : (child) => _folderTarget(
-                          target: folder,
-                          targetKey: 'playlist-drop-folder-${folder.id}',
-                          child: child,
-                        ),
+                contentWrapper: wrapGridIdentity,
                 actions:
                     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   AppIconActionButton(
@@ -933,7 +988,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
               ),
             );
           } else if (audio != null && queueIndex >= 0) {
-            content = widget.trackBuilder?.call(
+            final track = widget.trackBuilder?.call(
                     context,
                     audio,
                     () => _selecting
@@ -953,6 +1008,15 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                   ),
                   additionalMenuItems: menuItems,
                 );
+            content = _view == PlaylistViewMode.grid
+                ? widget.trackBuilder != null
+                    ? wrapGridIdentity(track)
+                    : MusicGridReorderScope(
+                        dragSourceBuilder: (_, __, ___, child) =>
+                            wrapGridIdentity(child),
+                        child: track,
+                      )
+                : track;
           } else {
             content = InkWell(
               key: ValueKey('playlist-open-${row.id}'),
@@ -977,13 +1041,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                               playlist: folder,
                               loadSongArtwork: widget.trackBuilder == null,
                             ),
-                      contentWrapper: folder == null
-                          ? null
-                          : (child) => _folderTarget(
-                                target: folder,
-                                targetKey: 'playlist-drop-folder-${folder.id}',
-                                child: child,
-                              ),
+                      contentWrapper: wrapGridIdentity,
                       action: rowAction,
                     )
                   : Padding(
@@ -1459,56 +1517,70 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                     _view
                                   )),
                                   builder: (context, controller) =>
-                                      GridView.builder(
+                                      GridEdgeAutoScrollRegion(
                                     controller: controller,
-                                    key: PageStorageKey(
-                                        'playlist-${_view.name}-${current?.id ?? 'root'}'),
-                                    padding: EdgeInsets.only(
-                                        bottom:
-                                            NowPlayingBarMetrics.reservedSpace(
-                                                context)),
-                                    gridDelegate: _view ==
-                                            PlaylistViewMode.circular
-                                        ? CompactMusicGridDelegate(
-                                            mainAxisExtent:
-                                                circleGeometry!.extent,
-                                            minimumTileWidth:
-                                                PlaylistCircleTile.minimumWidth,
-                                            spacing: 12)
-                                        : CompactMusicGridDelegate.of(context),
-                                    itemCount: rows.length +
-                                        (_draggingId == null ? 0 : 1),
-                                    findChildIndexCallback: (key) =>
-                                        gridChildIndices[key],
-                                    itemBuilder: (context, index) => index ==
-                                            rows.length
-                                        ? _dropGap(current, rows, rows.length)
-                                        : Stack(
-                                            key: ValueKey((
-                                              'playlist-grid-entry',
-                                              rows[index].id
-                                            )),
-                                            fit: StackFit.expand,
-                                            children: [
-                                              _row(current, rows[index], index,
-                                                  rows.length, queue, indices,
-                                                  circleGeometry:
-                                                      circleGeometry),
-                                              // Drop zones overlay the top edge
-                                              // only while dragging. They no
-                                              // longer add blank vertical rows.
-                                              Positioned(
-                                                top: 0,
-                                                left: 0,
-                                                right: 0,
-                                                child: IgnorePointer(
-                                                  ignoring: _draggingId == null,
-                                                  child: _dropGap(
-                                                      current, rows, index),
+                                    child: GridView.builder(
+                                      controller: controller,
+                                      key: PageStorageKey(
+                                          'playlist-${_view.name}-${current?.id ?? 'root'}'),
+                                      padding: EdgeInsets.only(
+                                          bottom: NowPlayingBarMetrics
+                                              .reservedSpace(context)),
+                                      gridDelegate:
+                                          _view == PlaylistViewMode.circular
+                                              ? CompactMusicGridDelegate(
+                                                  mainAxisExtent:
+                                                      circleGeometry!.extent,
+                                                  minimumTileWidth:
+                                                      PlaylistCircleTile
+                                                          .minimumWidth,
+                                                  spacing: 12)
+                                              : CompactMusicGridDelegate.of(
+                                                  context),
+                                      itemCount: rows.length +
+                                          (_draggingId == null ? 0 : 1),
+                                      findChildIndexCallback: (key) =>
+                                          gridChildIndices[key],
+                                      itemBuilder: (context, index) => index ==
+                                              rows.length
+                                          ? _dropGap(current, rows, rows.length,
+                                              grid: true)
+                                          : Stack(
+                                              key: ValueKey((
+                                                'playlist-grid-entry',
+                                                rows[index].id
+                                              )),
+                                              fit: StackFit.expand,
+                                              children: [
+                                                _row(
+                                                    current,
+                                                    rows[index],
+                                                    index,
+                                                    rows.length,
+                                                    queue,
+                                                    indices,
+                                                    circleGeometry:
+                                                        circleGeometry),
+                                                // Reading order advances across
+                                                // a grid row, so the leading
+                                                // edge is the unambiguous
+                                                // "insert before" target.
+                                                PositionedDirectional(
+                                                  top: 0,
+                                                  bottom: 0,
+                                                  start: 0,
+                                                  width: 36,
+                                                  child: IgnorePointer(
+                                                    ignoring:
+                                                        _draggingId == null,
+                                                    child: _dropGap(
+                                                        current, rows, index,
+                                                        grid: true),
+                                                  ),
                                                 ),
-                                              ),
-                                            ],
-                                          ),
+                                              ],
+                                            ),
+                                    ),
                                   ),
                                 ),
                               )

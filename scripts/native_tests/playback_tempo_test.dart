@@ -12,10 +12,10 @@ import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
 
-Uint8List _silentWave() {
+Uint8List _silentWave({int seconds = 12}) {
   const rate = 48000;
   const channels = 2;
-  final bytes = Uint8List(44 + rate * channels * 2 * 12);
+  final bytes = Uint8List(44 + rate * channels * 2 * seconds);
   final data = ByteData.sublistView(bytes);
   void fourcc(int offset, String text) =>
       bytes.setRange(offset, offset + 4, ascii.encode(text));
@@ -58,6 +58,8 @@ void main() {
     final waveBytes = _silentWave();
     final wave = File(path.join(run.path, 'silent-12s.wav'));
     await wave.writeAsBytes(waveBytes, flush: true);
+    final finalRapidWave = File(path.join(run.path, 'rapid-final-7s.wav'));
+    await finalRapidWave.writeAsBytes(_silentWave(seconds: 7), flush: true);
     final report = <Map<String, Object?>>[];
     void record(String event, Map<String, Object?> values) {
       final row = {'event': event, ...values};
@@ -130,6 +132,20 @@ void main() {
           'pausedPosition': player.position,
         });
       }
+
+      player.setPlaybackRate(1);
+      final rapidResults = await Future.wait([
+        for (var i = 0; i < 12; i++)
+          player.setSource(i == 11 ? finalRapidWave.path : wave.path),
+      ]).timeout(const Duration(seconds: 10));
+      expect(rapidResults.where((applied) => applied), [true]);
+      expect(rapidResults.last, isTrue);
+      expect(player.length, closeTo(7, .001));
+      record('rapid-local-latest-wins', {
+        'requests': rapidResults.length,
+        'applied': rapidResults.where((applied) => applied).length,
+        'duration': player.length,
+      });
 
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       server.listen((request) async {

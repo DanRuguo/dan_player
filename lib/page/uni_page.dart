@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
+import 'package:dan_player/component/adaptive_grid_drag.dart';
 import 'package:dan_player/component/audio_columns.dart';
 import 'package:dan_player/ui_layout_preferences.dart';
 import 'package:dan_player/page/uni_page_components.dart';
@@ -296,10 +297,6 @@ class _UniPageState<T> extends State<UniPage<T>> {
     setState(() {
       currSortMethod = sortMethod;
       widget.pref.sortMethod = index;
-      if (sortMethod.supportsReorder) {
-        currContentView = ContentView.list;
-        widget.pref.contentView = ContentView.list;
-      }
       currSortMethod?.method(widget.contentList, currSortOrder);
     });
   }
@@ -368,8 +365,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
 
   Widget result(
       MultiSelectController<T>? multiSelectController, List<Widget> actions) {
-    final enableReorder = currContentView == ContentView.list &&
-        currSortMethod?.supportsReorder == true &&
+    final enableReorder = currSortMethod?.supportsReorder == true &&
         multiSelectController?.enableMultiSelectView != true;
     final visibleActions = multiSelectController?.enableMultiSelectView == true
         ? widget.multiSelectViewActions!
@@ -476,22 +472,44 @@ class _UniPageState<T> extends State<UniPage<T>> {
                                                     multiSelectController),
                                           ),
                                     ContentView.table => MusicGridScope(
-                                        child: GridView.builder(
-                                          key: _gridKey,
-                                          controller: scrollController,
-                                          padding: EdgeInsets.only(
-                                              bottom: NowPlayingBarMetrics
-                                                  .reservedSpace(context)),
-                                          gridDelegate: widget.gridDelegate ??
-                                              CompactMusicGridDelegate.of(
-                                                  context),
-                                          itemCount: widget.contentList.length,
-                                          findChildIndexCallback: (key) =>
-                                              gridIndices[key],
-                                          itemBuilder: (context, i) => _content(
-                                              context,
-                                              i,
-                                              multiSelectController),
+                                        child: MusicGridReorderScope(
+                                          dragSourceBuilder:
+                                              (context, item, label, child) =>
+                                                  enableReorder
+                                                      ? _gridDragSource(
+                                                          context,
+                                                          item as T,
+                                                          label,
+                                                          child,
+                                                        )
+                                                      : child,
+                                          child: GridEdgeAutoScrollRegion(
+                                            controller: scrollController,
+                                            child: GridView.builder(
+                                              key: _gridKey,
+                                              controller: scrollController,
+                                              padding: EdgeInsets.only(
+                                                  bottom: NowPlayingBarMetrics
+                                                      .reservedSpace(context)),
+                                              gridDelegate: widget
+                                                      .gridDelegate ??
+                                                  CompactMusicGridDelegate.of(
+                                                      context),
+                                              itemCount:
+                                                  widget.contentList.length,
+                                              findChildIndexCallback: (key) =>
+                                                  gridIndices[key],
+                                              itemBuilder: (context, i) =>
+                                                  enableReorder
+                                                      ? _gridDropTarget(
+                                                          widget.contentList[i],
+                                                          _content(context, i,
+                                                              multiSelectController),
+                                                        )
+                                                      : _content(context, i,
+                                                          multiSelectController),
+                                            ),
+                                          ),
                                         ),
                                       ),
                                   }))),
@@ -511,6 +529,84 @@ class _UniPageState<T> extends State<UniPage<T>> {
       widget.listItemExtent ??
       (MediaQuery.textScalerOf(context).scale(14) > 14 ? null : 64.0);
 
+  int _identityIndex(T item) {
+    final identity = widget.contentList
+        .indexWhere((candidate) => identical(candidate, item));
+    return identity >= 0 ? identity : widget.contentList.indexOf(item);
+  }
+
+  void _reorderGrid(_UniGridDrag<T> data, T target) {
+    final oldIndex = _identityIndex(data.item);
+    final targetIndex = _identityIndex(target);
+    if (oldIndex < 0 || targetIndex < 0 || oldIndex == targetIndex) return;
+    setState(() {
+      final item = widget.contentList.removeAt(oldIndex);
+      widget.contentList.insert(targetIndex, item);
+    });
+    currSortMethod?.onReorder?.call(widget.contentList);
+  }
+
+  Widget _gridDragSource(
+      BuildContext context, T item, String label, Widget child) {
+    final scheme = Theme.of(context).colorScheme;
+    return AdaptiveGridDragSource<_UniGridDrag<T>>(
+      dragKey: ValueKey(('uni-grid-drag', item)),
+      data: _UniGridDrag(item),
+      feedback: Material(
+        elevation: 8,
+        color: scheme.surfaceContainerHigh,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: scheme.primary, width: 1.5),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 280),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.drag_indicator, color: scheme.primary),
+              const SizedBox(width: 8),
+              Flexible(
+                child:
+                    Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ]),
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: .35, child: child),
+      child: MouseRegion(cursor: SystemMouseCursors.grab, child: child),
+    );
+  }
+
+  Widget _gridDropTarget(T target, Widget child) => DragTarget<_UniGridDrag<T>>(
+        key: ValueKey(target),
+        onWillAcceptWithDetails: (details) =>
+            _identityIndex(details.data.item) >= 0 &&
+            !identical(details.data.item, target),
+        onAcceptWithDetails: (details) => _reorderGrid(details.data, target),
+        builder: (context, candidates, rejected) => Stack(
+          fit: StackFit.expand,
+          children: [
+            child,
+            if (candidates.isNotEmpty || rejected.isNotEmpty)
+              IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: candidates.isNotEmpty
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.error,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+
   Widget _content(BuildContext context, int index,
       MultiSelectController<T>? multiSelectController) {
     final item = widget.contentList[index];
@@ -521,4 +617,10 @@ class _UniPageState<T> extends State<UniPage<T>> {
       child: widget.contentBuilder(context, item, index, multiSelectController),
     );
   }
+}
+
+class _UniGridDrag<T> {
+  const _UniGridDrag(this.item);
+
+  final T item;
 }

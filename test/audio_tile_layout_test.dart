@@ -203,4 +203,48 @@ void main() {
     expect(anchor.useRootOverlay, isTrue);
     expect(anchor.reservedPadding, const EdgeInsets.fromLTRB(8, 8, 8, 116));
   });
+
+  testWidgets('trailing song action opens its menu beside the action',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 700);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final audio = _LayoutAudio(online: false);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(useMaterial3: true),
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              width: 900,
+              child: AudioTile(
+                audioIndex: 0,
+                playlist: [audio],
+                columns: true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final row = tester.getRect(find.byType(AudioTile));
+    final actionFinder =
+        find.byKey(ValueKey('audio-columns-menu-${audio.path}'));
+    final action = tester.getRect(actionFinder);
+    await tester.tap(actionFinder);
+    await tester.pumpAndSettle();
+
+    final firstAction = tester.getRect(
+      find.widgetWithText(MenuItemButton, '下一首播放'),
+    );
+    expect(firstAction.left, greaterThan(row.center.dx),
+        reason: 'The trailing button must not open the menu at the row start');
+    expect((firstAction.center.dx - action.center.dx).abs(), lessThan(240),
+        reason: 'The menu should remain visually attached to its trigger');
+    expect(tester.takeException(), isNull);
+  });
 }

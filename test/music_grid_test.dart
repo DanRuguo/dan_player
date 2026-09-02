@@ -3,6 +3,7 @@ import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/playlist_browser.dart';
+import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/playlist.dart';
@@ -11,6 +12,7 @@ import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/page/uni_page_components.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -40,6 +42,7 @@ void _viewport(WidgetTester tester, {double width = 900, double dpr = 1}) {
 }
 
 Widget _host(Widget child, {double scale = 1}) => MaterialApp(
+      scrollBehavior: const DanPlayerScrollBehavior(),
       theme: ThemeData(
         platform: TargetPlatform.windows,
         visualDensity: VisualDensity.compact,
@@ -195,6 +198,208 @@ void main() {
     expect(find.text('编辑歌词'), findsNothing);
     expect(find.text('联网歌曲详情'), findsOneWidget);
     expect(find.text('来源：QQ音乐'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'custom library order stays in grid and drags from artwork or title',
+      (tester) async {
+    _viewport(tester);
+    final songs = [
+      _GridAudio('First'),
+      _GridAudio('Second'),
+      _GridAudio('Third'),
+    ];
+    List<Audio>? saved;
+    final methods = [
+      SortMethodDesc<Audio>(
+        icon: Icons.drag_handle,
+        name: 'Custom',
+        usesSortOrder: false,
+        supportsReorder: true,
+        method: (_, __) {},
+        onReorder: (value) => saved = List.of(value),
+      ),
+    ];
+    await tester.pumpWidget(_host(_page('library', songs, methods: methods)));
+    await tester.pumpAndSettle();
+    expect(find.byType(GridView), findsOneWidget);
+
+    final source =
+        find.byKey(ValueKey(('uni-grid-drag', songs.first as Audio)));
+    final target = _gridTile(songs.last);
+    final gesture = await tester.startGesture(tester.getCenter(source),
+        kind: PointerDeviceKind.mouse);
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(target));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(songs.map((song) => song.title), ['Second', 'Third', 'First']);
+    expect(saved, songs);
+    expect(find.byType(GridView), findsOneWidget);
+    await tester
+        .tap(find.byKey(ValueKey('audio-grid-menu-${songs.first.path}')));
+    await tester.pumpAndSettle();
+    expect(find.text('编辑歌曲信息'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('touch swipe scrolls a custom grid without changing its order',
+      (tester) async {
+    _viewport(tester);
+    final songs = [for (var i = 0; i < 120; i++) _GridAudio('Song $i')];
+    final original = List<Audio>.of(songs);
+    var saves = 0;
+    final methods = [
+      SortMethodDesc<Audio>(
+        icon: Icons.drag_handle,
+        name: 'Custom',
+        usesSortOrder: false,
+        supportsReorder: true,
+        method: (_, __) {},
+        onReorder: (_) => saves++,
+      ),
+    ];
+    await tester.pumpWidget(_host(_page('library', songs, methods: methods)));
+    await tester.pumpAndSettle();
+    final grid = tester.widget<GridView>(find.byType(GridView));
+    final source =
+        find.byKey(ValueKey(('uni-grid-drag', songs.first as Audio)));
+    final gesture = await tester.startGesture(tester.getCenter(source),
+        kind: PointerDeviceKind.touch);
+    for (var i = 0; i < 8; i++) {
+      await gesture.moveBy(const Offset(0, -28));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(grid.controller!.offset, greaterThan(0));
+    expect(songs, original);
+    expect(saves, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('touch long press reorders a custom music grid', (tester) async {
+    _viewport(tester);
+    final songs = [
+      _GridAudio('First'),
+      _GridAudio('Second'),
+      _GridAudio('Third')
+    ];
+    var saves = 0;
+    final methods = [
+      SortMethodDesc<Audio>(
+        icon: Icons.drag_handle,
+        name: 'Custom',
+        usesSortOrder: false,
+        supportsReorder: true,
+        method: (_, __) {},
+        onReorder: (_) => saves++,
+      ),
+    ];
+    await tester.pumpWidget(_host(_page('library', songs, methods: methods)));
+    await tester.pumpAndSettle();
+    final source =
+        find.byKey(ValueKey(('uni-grid-drag', songs.first as Audio)));
+    final target = _gridTile(songs.last);
+    final gesture = await tester.startGesture(tester.getCenter(source),
+        kind: PointerDeviceKind.touch);
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(target));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(songs.map((song) => song.title), ['Second', 'Third', 'First']);
+    expect(saves, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('music grid keeps auto-scrolling at its lower and upper edges',
+      (tester) async {
+    _viewport(tester);
+    final songs = [for (var i = 0; i < 180; i++) _GridAudio('Song $i')];
+    final methods = [
+      SortMethodDesc<Audio>(
+        icon: Icons.drag_handle,
+        name: 'Custom',
+        usesSortOrder: false,
+        supportsReorder: true,
+        method: (_, __) {},
+      ),
+    ];
+    await tester.pumpWidget(_host(_page('library', songs, methods: methods)));
+    await tester.pumpAndSettle();
+    final gridFinder = find.byType(GridView);
+    final grid = tester.widget<GridView>(gridFinder);
+    final source =
+        find.byKey(ValueKey(('uni-grid-drag', songs.first as Audio)));
+    final gesture = await tester.startGesture(tester.getCenter(source),
+        kind: PointerDeviceKind.mouse);
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    final rect = tester.getRect(gridFinder);
+    await gesture.moveTo(Offset(rect.center.dx, rect.bottom - 4));
+    await tester.pump(const Duration(milliseconds: 16));
+    final before = grid.controller!.offset;
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(grid.controller!.offset, greaterThan(before + 40));
+    await gesture.cancel();
+    await tester.pump();
+
+    grid.controller!.jumpTo(720);
+    await tester.pump();
+    final upperSource =
+        find.byKey(ValueKey(('uni-grid-drag', songs[33] as Audio)));
+    expect(upperSource, findsOneWidget);
+    final upperGesture = await tester.startGesture(
+        tester.getCenter(upperSource),
+        kind: PointerDeviceKind.mouse);
+    await upperGesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    await upperGesture.moveTo(Offset(rect.center.dx, rect.top + 4));
+    await tester.pump(const Duration(milliseconds: 16));
+    final upperBefore = grid.controller!.offset;
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(grid.controller!.offset, lessThan(upperBefore - 40));
+    await upperGesture.cancel();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('playlist song grid exposes the same identity drag surface',
+      (tester) async {
+    _viewport(tester);
+    final songs = [_GridAudio('First'), _GridAudio('Second')];
+    await tester.pumpWidget(_host(_page('playlist', songs)));
+    await tester.pumpAndSettle();
+    final source = find.byWidgetPredicate((widget) =>
+        widget is Draggable<PlaylistDragData> &&
+        widget.key.toString().contains('playlist-card-drag-'));
+    expect(source, findsNWidgets(3));
+    final first = source.first;
+    final data = tester.widget<Draggable<PlaylistDragData>>(first).data!;
+    final parent = data.sourceParent!;
+    final target = find.byKey(
+        ValueKey('playlist-drop-slot-${parent.id}-${parent.entries.length}'));
+
+    final gesture = await tester.startGesture(tester.getCenter(first),
+        kind: PointerDeviceKind.mouse);
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(target));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(parent.entries.last.audio, same(songs.first));
+    expect(find.byType(GridView), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

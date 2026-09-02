@@ -16,6 +16,42 @@ class MusicGridScope extends InheritedWidget {
   bool updateShouldNotify(MusicGridScope oldWidget) => false;
 }
 
+typedef MusicGridDragSourceBuilder = Widget Function(
+  BuildContext context,
+  Object item,
+  String label,
+  Widget child,
+);
+
+/// Lets the page that owns a custom order turn only a grid card's identity
+/// area into a drag source. The card keeps ownership of playback, selection,
+/// right-click and its action button, so enabling reorder never replaces those
+/// interactions with a second full-card gesture surface.
+class MusicGridReorderScope extends InheritedWidget {
+  const MusicGridReorderScope({
+    super.key,
+    required this.dragSourceBuilder,
+    required super.child,
+  });
+
+  final MusicGridDragSourceBuilder dragSourceBuilder;
+
+  static Widget wrap(
+    BuildContext context, {
+    required Object item,
+    required String label,
+    required Widget child,
+  }) {
+    final scope =
+        context.dependOnInheritedWidgetOfExactType<MusicGridReorderScope>();
+    return scope?.dragSourceBuilder(context, item, label, child) ?? child;
+  }
+
+  @override
+  bool updateShouldNotify(MusicGridReorderScope oldWidget) =>
+      dragSourceBuilder != oldWidget.dragSourceBuilder;
+}
+
 /// Logical-pixel grid geometry shared by library, detail and playlist views.
 /// Width is never multiplied by DPR; only artwork decode targets use DPR.
 class CompactMusicGridDelegate extends SliverGridDelegate {

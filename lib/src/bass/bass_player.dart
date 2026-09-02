@@ -64,6 +64,66 @@ final class BassDx8ParamEq extends ffi.Struct {
 
 typedef _BassOpenResult = ({int handle, int errorCode});
 
+// BASS_StreamCreateFile may synchronously inspect codec headers and trigger a
+// cloud-backed file recall. Keep that work away from Flutter's UI isolate just
+// like the network open below. The returned stream handle is process-wide and
+// remains valid after this worker releases its DynamicLibrary reference.
+Future<_BassOpenResult> _openBassFileInBackground(
+  String libraryPath,
+  String filePath,
+  int flags,
+  int device,
+) {
+  return Isolate.run(
+    () => _openBassFile(libraryPath, filePath, flags, device),
+    debugName: 'bass-file-open',
+  );
+}
+
+_BassOpenResult _openBassFile(
+  String libraryPath,
+  String filePath,
+  int flags,
+  int device,
+) {
+  final library = ffi.DynamicLibrary.open(libraryPath);
+  ffi.Pointer<ffi.Void>? filePointer;
+  try {
+    final setDevice = library.lookupFunction<ffi.Int32 Function(ffi.Uint32),
+        int Function(int)>('BASS_SetDevice');
+    final getError =
+        library.lookupFunction<ffi.Int32 Function(), int Function()>(
+            'BASS_ErrorGetCode');
+    final createFile = library.lookupFunction<
+        ffi.Uint32 Function(
+          ffi.Int32,
+          ffi.Pointer<ffi.Void>,
+          ffi.Uint64,
+          ffi.Uint64,
+          ffi.Uint32,
+        ),
+        int Function(
+          int,
+          ffi.Pointer<ffi.Void>,
+          int,
+          int,
+          int,
+        )>('BASS_StreamCreateFile');
+    filePointer = filePath.toNativeUtf16().cast<ffi.Void>();
+    if (setDevice(device) == BASS.FALSE) {
+      return (handle: 0, errorCode: getError());
+    }
+    final handle = createFile(BASS.FALSE, filePointer, 0, 0, flags);
+    return (
+      handle: handle,
+      errorCode: handle == 0 ? getError() : 0,
+    );
+  } finally {
+    if (filePointer != null) ffi.malloc.free(filePointer);
+    library.close();
+  }
+}
+
 // Keep the isolate closure outside BassPlayer so it cannot capture the player,
 // its FFI objects, stream controllers, or Flutter state.
 Future<_BassOpenResult> _openBassUrlInBackground(
@@ -178,6 +238,70 @@ class _PendingBassUrlOpen {
   }
 }
 
+class _PendingBassFileOpen {
+  _PendingBassFileOpen(this.path);
+
+  final String path;
+  final Completer<void> finished = Completer<void>();
+
+  void complete() {
+    if (!finished.isCompleted) finished.complete();
+  }
+}
+
+/// Bounds native local-file opens while still letting the latest request get
+/// past one slow cloud-backed file. Waiting requests do not create isolates;
+/// they re-check the caller's generation before consuming a released slot.
+class BassFileOpenGate {
+  BassFileOpenGate({this.limit = 2}) : assert(limit > 0);
+
+  final int limit;
+  Completer<void>? _latestWaiter;
+  int _active = 0;
+
+  Future<bool> acquire(bool Function() mayStart) async {
+    if (!mayStart()) return false;
+    while (_active >= limit) {
+      if (!mayStart()) return false;
+      final ready = Completer<void>();
+      final superseded = _latestWaiter;
+      _latestWaiter = ready;
+      if (superseded != null && !superseded.isCompleted) {
+        superseded.complete();
+      }
+      await ready.future;
+      if (identical(_latestWaiter, ready)) _latestWaiter = null;
+      if (!mayStart()) return false;
+    }
+    if (!mayStart()) return false;
+    _active += 1;
+    return true;
+  }
+
+  void release() {
+    assert(_active > 0);
+    if (_active == 0) return;
+    _active -= 1;
+    _wakeLatest();
+  }
+
+  /// Wakes queued callers during shutdown; their generation predicate rejects
+  /// them before they can start a native worker.
+  void cancelWaiters() {
+    final waiter = _latestWaiter;
+    _latestWaiter = null;
+    if (waiter != null && !waiter.isCompleted) waiter.complete();
+  }
+
+  void _wakeLatest() {
+    if (_active >= limit) return;
+    final waiter = _latestWaiter;
+    _latestWaiter = null;
+    if (waiter == null) return;
+    if (!waiter.isCompleted) waiter.complete();
+  }
+}
+
 class BassPlayer {
   static const int _bassAttribFreq = 1;
   static const int _bassDataFft4096 = 0x80000004;
@@ -230,6 +354,8 @@ class BassPlayer {
   Future<void>? _freeFuture;
   int _sourceGeneration = 0;
   final Set<_PendingBassUrlOpen> _pendingUrlOpens = {};
+  final Set<_PendingBassFileOpen> _pendingFileOpens = {};
+  final BassFileOpenGate _fileOpenGate = BassFileOpenGate();
 
   /// audio's length in seconds
   double get length => _fstream == null
@@ -839,11 +965,21 @@ class BassPlayer {
     }
   }
 
+  /// Waits until a cancelled native file open has returned and any stale
+  /// handle has been freed, so Windows can safely delete that exact file.
+  Future<void> waitForPendingFileOpen(String filePath) async {
+    final matching = [
+      for (final request in _pendingFileOpens)
+        if (path.equals(request.path, filePath)) request.finished.future,
+    ];
+    if (matching.isNotEmpty) await Future.wait(matching);
+  }
+
   bool _isCurrentSource(int generation) =>
       !_freed && generation == _sourceGeneration;
 
-  /// Opens the new source before replacing the current stream. Local files are
-  /// still opened synchronously; only the blocking URL open runs in an isolate.
+  /// Opens the new source before replacing the current stream. Potentially
+  /// blocking file/network opens run outside Flutter's UI isolate.
   /// Returns false when a newer request or shutdown cancels this request.
   Future<bool> setSource(String path, {bool isUrl = false}) {
     if (_freed) return Future.value(false);
@@ -873,6 +1009,8 @@ class BassPlayer {
 
     var uncommittedHandle = 0;
     _PendingBassUrlOpen? pending;
+    _PendingBassFileOpen? pendingFile;
+    var fileSlotAcquired = false;
     try {
       if (isUrl) {
         if (_bassStreamCancel == null) {
@@ -906,7 +1044,48 @@ class BassPlayer {
           throw _sourceOpenException(result.errorCode, isUrl: true);
         }
       } else {
-        uncommittedHandle = _openLocalSource(source, flags);
+        fileSlotAcquired =
+            await _fileOpenGate.acquire(() => _isCurrentSource(generation));
+        if (!fileSlotAcquired || !_isCurrentSource(generation)) return false;
+
+        var device = _bassGetDevice();
+        if (device == _bassErrorValue) {
+          _bassInit();
+          device = _bassGetDevice();
+        }
+        if (device == _bassErrorValue) {
+          throw _sourceOpenException(_bass.BASS_ErrorGetCode(), isUrl: false);
+        }
+
+        pendingFile = _PendingBassFileOpen(source);
+        _pendingFileOpens.add(pendingFile);
+        var result = await _openBassFileInBackground(
+          _bassLibraryPath,
+          source,
+          flags,
+          device,
+        );
+        uncommittedHandle = result.handle;
+        if (!_isCurrentSource(generation)) return false;
+        if (uncommittedHandle == 0 &&
+            result.errorCode == BASS.BASS_ERROR_INIT) {
+          _bassInit();
+          device = _bassGetDevice();
+          if (device == _bassErrorValue) {
+            throw _sourceOpenException(_bass.BASS_ErrorGetCode(), isUrl: false);
+          }
+          result = await _openBassFileInBackground(
+            _bassLibraryPath,
+            source,
+            flags,
+            device,
+          );
+          uncommittedHandle = result.handle;
+          if (!_isCurrentSource(generation)) return false;
+        }
+        if (uncommittedHandle == 0) {
+          throw _sourceOpenException(result.errorCode, isUrl: false);
+        }
       }
 
       if (!_isCurrentSource(generation)) return false;
@@ -945,25 +1124,12 @@ class BassPlayer {
           _pendingUrlOpens.remove(pending);
           pending.complete();
         }
+        if (pendingFile != null) {
+          _pendingFileOpens.remove(pendingFile);
+          pendingFile.complete();
+        }
+        if (fileSlotAcquired) _fileOpenGate.release();
       }
-    }
-  }
-
-  int _openLocalSource(String source, int flags) {
-    final pointer = source.toNativeUtf16().cast<ffi.Void>();
-    try {
-      var handle =
-          _bass.BASS_StreamCreateFile(BASS.FALSE, pointer, 0, 0, flags);
-      var errorCode = handle == 0 ? _bass.BASS_ErrorGetCode() : 0;
-      if (handle == 0 && errorCode == BASS.BASS_ERROR_INIT) {
-        _bassInit();
-        handle = _bass.BASS_StreamCreateFile(BASS.FALSE, pointer, 0, 0, flags);
-        errorCode = handle == 0 ? _bass.BASS_ErrorGetCode() : 0;
-      }
-      if (handle == 0) throw _sourceOpenException(errorCode, isUrl: false);
-      return handle;
-    } finally {
-      ffi.malloc.free(pointer);
     }
   }
 
@@ -1251,6 +1417,18 @@ class BassPlayer {
     }
   }
 
+  /// Releases the active native stream only when it owns [filePath]. This also
+  /// covers the narrow hand-off window after a worker commits its HSTREAM but
+  /// before PlaybackService publishes the corresponding nowPlaying value.
+  bool freeSourceIfPath(String filePath) {
+    final currentPath = _fPath;
+    if (currentPath == null || !path.equals(currentPath, filePath)) {
+      return false;
+    }
+    freeFStream();
+    return true;
+  }
+
   /// Frees all resources used by the output device,
   /// including all its samples, streams and MOD musics.
   ///
@@ -1260,6 +1438,7 @@ class BassPlayer {
   Future<void> _free() async {
     _freed = true;
     cancelPendingSource();
+    _fileOpenGate.cancelWaiters();
 
     _positionUpdater?.cancel();
     _positionUpdater = null;
@@ -1268,6 +1447,7 @@ class BassPlayer {
     // until every worker has returned and its uncommitted handle has been freed.
     await Future.wait([
       for (final request in _pendingUrlOpens) request.finished.future,
+      for (final request in _pendingFileOpens) request.finished.future,
     ]);
     if (_bass.BASS_Free() == 0) {
       switch (_bass.BASS_ErrorGetCode()) {

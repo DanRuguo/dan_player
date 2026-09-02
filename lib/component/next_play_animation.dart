@@ -8,9 +8,10 @@ import 'package:flutter/material.dart';
 
 /// Coordinates the short, top-most artwork flight used by “Play next”.
 ///
-/// The queue button registers [targetKey]. Song rows supply their own artwork
-/// key, so no screenshot or synchronous image decoding is needed. A global
-/// pointer route observes later interactions without blocking their hit test.
+/// The queue button registers [targetKey]. Song rows pass the already-mounted
+/// artwork context, so the animation does not add a GlobalKey/RepaintBoundary
+/// to every visible song. A global pointer route observes later interactions
+/// without blocking their hit test.
 class NextPlayAnimation {
   NextPlayAnimation._();
 
@@ -23,15 +24,16 @@ class NextPlayAnimation {
 
   static bool fly({
     required BuildContext context,
-    required GlobalKey sourceKey,
+    required BuildContext sourceContext,
     required Audio audio,
   }) {
     cancel();
+    if (!context.mounted || !sourceContext.mounted) return false;
     if (MediaQuery.maybeOf(context)?.disableAnimations == true) return false;
 
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     final overlayBox = overlay?.context.findRenderObject();
-    final sourceBox = sourceKey.currentContext?.findRenderObject();
+    final sourceBox = sourceContext.findRenderObject();
     final targetBox = targetKey.currentContext?.findRenderObject();
     if (overlay == null ||
         overlayBox is! RenderBox ||

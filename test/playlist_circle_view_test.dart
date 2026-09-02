@@ -8,6 +8,7 @@ import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/playlist_browser.dart';
 import 'package:dan_player/component/playlist_circle_tile.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
+import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/playlist.dart';
@@ -15,6 +16,7 @@ import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/playlist_view.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -72,6 +74,7 @@ Widget _app(Widget page, {double scale = 2}) =>
       valueListenable: uiLanguage,
       child: Scaffold(body: page),
       builder: (_, language, child) => MaterialApp(
+        scrollBehavior: const DanPlayerScrollBehavior(),
         locale: language.locale,
         supportedLocales: [for (final value in UiLanguage.values) value.locale],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -292,7 +295,7 @@ void main() {
   });
 
   testWidgets(
-      'circle mouse reorder still uses exact entry ids after switching language',
+      'circle cover or title reorder still uses exact ids after language switch',
       (tester) async {
     _size(tester, 1800);
     final fixture = _Fixture();
@@ -302,8 +305,8 @@ void main() {
     ];
     await tester.pumpWidget(_app(fixture.browser()));
     await _settle(tester);
-    final handle = _key('playlist-drag-${children.first.id}');
-    final gesture = await tester.startGesture(tester.getCenter(handle),
+    final identity = _key('playlist-card-drag-${children.first.id}');
+    final gesture = await tester.startGesture(tester.getCenter(identity),
         kind: PointerDeviceKind.mouse);
     await gesture.moveBy(const Offset(0, 20));
     await tester.pump();
@@ -318,6 +321,80 @@ void main() {
         [children[1], children[2], children[0]]);
     expect(fixture.saves, 1);
     expect(fixture.played, isEmpty);
+  });
+
+  testWidgets(
+      'playlist circle keeps auto-scrolling while held at its lower edge',
+      (tester) async {
+    _size(tester, 1000);
+    final fixture = _Fixture();
+    final children = [
+      for (var i = 0; i < 80; i++)
+        fixture.tree.createPlaylist('Playlist $i', parent: fixture.parent),
+    ];
+    await tester.pumpWidget(_app(fixture.browser()));
+    await _settle(tester);
+    final gridFinder = find.byType(GridView);
+    final grid = tester.widget<GridView>(gridFinder);
+    final gesture = await tester.startGesture(
+        tester.getCenter(_key('playlist-card-drag-${children.first.id}')),
+        kind: PointerDeviceKind.mouse);
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    final rect = tester.getRect(gridFinder);
+    await gesture.moveTo(Offset(rect.center.dx, rect.bottom - 4));
+    await tester.pump(const Duration(milliseconds: 16));
+    final before = grid.controller!.offset;
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(grid.controller!.offset, greaterThan(before + 40));
+    await gesture.cancel();
+    await _settle(tester);
+    expect(
+        fixture.parent.entries.map((entry) => entry.childPlaylist), children);
+    expect(fixture.saves, 0);
+  });
+
+  testWidgets(
+      'playlist circle touch swipe scrolls and long press alone can reorder',
+      (tester) async {
+    _size(tester, 1000);
+    final fixture = _Fixture();
+    final children = [
+      for (var i = 0; i < 30; i++)
+        fixture.tree.createPlaylist('Playlist $i', parent: fixture.parent),
+    ];
+    await tester.pumpWidget(_app(fixture.browser()));
+    await _settle(tester);
+    final grid = tester.widget<GridView>(find.byType(GridView));
+    final source = _key('playlist-card-drag-${children.first.id}');
+    final swipe = await tester.startGesture(tester.getCenter(source),
+        kind: PointerDeviceKind.touch);
+    for (var i = 0; i < 8; i++) {
+      await swipe.moveBy(const Offset(0, -28));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await swipe.up();
+    await tester.pumpAndSettle();
+    expect(grid.controller!.offset, greaterThan(0));
+    expect(
+        fixture.parent.entries.map((entry) => entry.childPlaylist), children);
+    expect(fixture.saves, 0);
+
+    grid.controller!.jumpTo(0);
+    await tester.pump();
+    final reorder = await tester.startGesture(tester.getCenter(source),
+        kind: PointerDeviceKind.touch);
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await reorder.moveBy(const Offset(20, 0));
+    await tester.pump();
+    final destination = _key('playlist-drop-slot-${fixture.parent.id}-3');
+    await reorder.moveTo(tester.getCenter(destination));
+    await tester.pump();
+    await reorder.up();
+    await _settle(tester);
+    expect(fixture.parent.entries.take(3).map((entry) => entry.childPlaylist),
+        [children[1], children[2], children[0]]);
+    expect(fixture.saves, 1);
   });
 
   testWidgets(

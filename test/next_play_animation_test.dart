@@ -55,7 +55,7 @@ void main() {
     final context = tester.element(find.byKey(sourceKey));
     final started = NextPlayAnimation.fly(
       context: context,
-      sourceKey: sourceKey,
+      sourceContext: context,
       audio: CategoryTestAudio('Flight'),
     );
     expect(started, isTrue);
@@ -70,14 +70,14 @@ void main() {
     expect(
         NextPlayAnimation.fly(
           context: context,
-          sourceKey: sourceKey,
+          sourceContext: context,
           audio: CategoryTestAudio('Replaced'),
         ),
         isTrue);
     expect(
         NextPlayAnimation.fly(
           context: context,
-          sourceKey: sourceKey,
+          sourceContext: context,
           audio: CategoryTestAudio('Cancel'),
         ),
         isTrue);
@@ -93,7 +93,7 @@ void main() {
     expect(
         NextPlayAnimation.fly(
           context: context,
-          sourceKey: sourceKey,
+          sourceContext: context,
           audio: CategoryTestAudio('Finish'),
         ),
         isTrue);
@@ -101,6 +101,17 @@ void main() {
     await tester.pump(const Duration(milliseconds: 440));
     expect(
         find.byKey(const ValueKey('next-play-flight-surface')), findsNothing);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    expect(context.mounted, isFalse);
+    expect(
+      NextPlayAnimation.fly(
+        context: context,
+        sourceContext: context,
+        audio: CategoryTestAudio('Unmounted'),
+      ),
+      isFalse,
+    );
     expect(tester.takeException(), isNull);
   });
 }

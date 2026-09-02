@@ -123,7 +123,7 @@ class AudioDeletionService {
     PlaybackAudioDeletionTicket? playbackTicket;
     if (PlayService.playbackReady.value) {
       playback = PlayService.instance.playbackService;
-      playbackTicket = playback.prepareAudioDeletion(audioPath);
+      playbackTicket = await playback.prepareAudioDeletion(audioPath);
     }
 
     try {
