@@ -10,6 +10,7 @@ import 'package:dan_player/component/audio_metadata_dialog.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/next_play_animation.dart';
+import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/component/readable_ellipsis_text.dart';
 import 'package:dan_player/utils.dart';
@@ -59,6 +60,7 @@ class AudioTile extends StatefulWidget {
     this.additionalMenuItems = const [],
     this.selection,
     this.columns = false,
+    this.showSourceLabel = false,
   });
 
   final int audioIndex;
@@ -75,6 +77,10 @@ class AudioTile extends StatefulWidget {
 
   /// Keep the layout on the row when a reorder proxy moves to the root overlay.
   final bool columns;
+
+  /// Makes the provider visible in mixed-source result lists. The default
+  /// library views keep their existing compact metadata line.
+  final bool showSourceLabel;
 
   @override
   State<AudioTile> createState() => _AudioTileState();
@@ -159,7 +165,7 @@ class _AudioTileState extends State<AudioTile> {
     final service = OnlineMusicService.instance;
     if (!service.canDownload(audio)) {
       showTextOnSnackBar(
-          service.downloadUnavailableReason(audio) ?? ui("当前来源不支持下载"));
+          service.downloadUnavailableReason(audio) ?? "当前来源不支持下载");
       return;
     }
     final picker = SaveFilePicker()
@@ -186,6 +192,10 @@ class _AudioTileState extends State<AudioTile> {
   }
 
   List<Widget> _buildMenuItems(BuildContext context, Audio audio) {
+    final sourceLabel = onlineSourceDisplayLabel(
+      provider: audio.onlineProvider,
+      fallback: audio.sourceLabel,
+    );
     final common = <Widget>[
       MenuItemButton(
         onPressed: () {
@@ -230,7 +240,7 @@ class _AudioTileState extends State<AudioTile> {
         MenuItemButton(
           onPressed: null,
           leadingIcon: const Icon(Symbols.cloud),
-          child: Text(ui("来源：{0}", [audio.sourceLabel])),
+          child: Text(ui("来源：{0}", [sourceLabel])),
         ),
         ...common,
         MenuItemButton(
@@ -243,9 +253,11 @@ class _AudioTileState extends State<AudioTile> {
         MenuItemButton(
           onPressed: canDownload ? () => _downloadOnlineAudio(audio) : null,
           leadingIcon: const Icon(Symbols.download),
-          child: Text(canDownload
-              ? ui("下载")
-              : ui("下载不可用：{0}", [downloadReason ?? '来源未授权'])),
+          child: Text(
+            canDownload
+                ? ui("下载")
+                : ui("下载不可用：{0}", [ui(downloadReason ?? '来源未授权')]),
+          ),
         ),
         MenuItemButton(
           onPressed: () {
@@ -359,6 +371,12 @@ class _AudioTileState extends State<AudioTile> {
           );
           final durationText =
               Duration(seconds: audio.duration).toStringHMMSS();
+          final sourceLabel = audio.isOnline
+              ? onlineSourceDisplayLabel(
+                  provider: audio.onlineProvider,
+                  fallback: audio.sourceLabel,
+                )
+              : null;
           final durationLabel = Text(
             durationText,
             maxLines: 1,
@@ -369,7 +387,7 @@ class _AudioTileState extends State<AudioTile> {
               ? null
               : !PlayService.isInitialized
                   ? Tooltip(
-                      message: ui("联网音乐 · {0}", [audio.sourceLabel]),
+                      message: ui("联网音乐 · {0}", [sourceLabel]),
                       child:
                           Icon(Symbols.cloud, size: 18.0, color: metadataColor),
                     )
@@ -379,7 +397,7 @@ class _AudioTileState extends State<AudioTile> {
                       builder: (context, resolvingPath, _) => Tooltip(
                         message: resolvingPath == audio.path
                             ? ui("正在获取播放地址")
-                            : ui("联网音乐 · {0}", [audio.sourceLabel]),
+                            : ui("联网音乐 · {0}", [sourceLabel]),
                         child: resolvingPath == audio.path
                             ? const SizedBox.square(
                                 dimension: 18.0,
@@ -464,9 +482,15 @@ class _AudioTileState extends State<AudioTile> {
               child: compactGrid
                   ? MusicGridTileBody(
                       key: const ValueKey('audio-grid-content'),
-                      title: audio.displayTitle,
-                      tooltip:
-                          '${audio.displayTitle}\n${audio.isOnline ? '联网音乐 · ${audio.sourceLabel}' : '本地音乐'}',
+                      title: widget.showSourceLabel && sourceLabel != null
+                          ? '${audio.displayTitle}\n${ui("来源：{0}", [
+                                  sourceLabel
+                                ])}'
+                          : audio.displayTitle,
+                      tooltip: '${audio.displayTitle}\n'
+                          '${audio.isOnline ? ui("联网音乐 · {0}", [
+                                  sourceLabel
+                                ]) : ui("本地音乐")}',
                       color: textColor,
                       leading: widget.leading,
                       // Ink's 1px border is part of its layout padding.
@@ -526,7 +550,7 @@ class _AudioTileState extends State<AudioTile> {
                                   child: Tooltip(
                                       message: audio.isOnline
                                           ? ui("{0} · 联网音乐 · {1}",
-                                              [durationText, audio.sourceLabel])
+                                              [durationText, sourceLabel])
                                           : durationText,
                                       child: Align(
                                           alignment:
@@ -618,7 +642,12 @@ class _AudioTileState extends State<AudioTile> {
                                           ),
                                           const SizedBox(width: 4.0),
                                           Text(
-                                            "${audio.artist} - ${audio.album}",
+                                            widget.showSourceLabel &&
+                                                    sourceLabel != null
+                                                ? '${ui("来源：{0}", [
+                                                        sourceLabel
+                                                      ])} · ${audio.artist} - ${audio.album}'
+                                                : "${audio.artist} - ${audio.album}",
                                             style:
                                                 TextStyle(color: metadataColor),
                                             maxLines: 1,

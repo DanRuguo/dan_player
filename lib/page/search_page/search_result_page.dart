@@ -5,6 +5,7 @@ import 'package:dan_player/component/album_tile.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/artist_tile.dart';
 import 'package:dan_player/component/audio_tile.dart';
+import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
@@ -33,6 +34,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
   );
   int _libraryRefresh = 0;
   late int _searchRevision;
+  OnlineSearchCancellation? _pendingOnlineSearch;
 
   @override
   void initState() {
@@ -61,14 +63,29 @@ class _SearchResultPageState extends State<SearchResultPage> {
     final value = query.trim();
     if (value.isEmpty) return;
     final request = ++_libraryRefresh;
-    final result = await UnionSearchResult.search(value);
-    if (!mounted || request != _libraryRefresh) return;
+    searchResult.cancelOnlineSearch();
+    _pendingOnlineSearch?.cancel();
+    final cancellation = OnlineSearchCancellation();
+    _pendingOnlineSearch = cancellation;
+    final result = await UnionSearchResult.search(
+      value,
+      onlineCancellation: cancellation,
+    );
+    if (!mounted || request != _libraryRefresh) {
+      result.cancelOnlineSearch();
+      return;
+    }
+    if (identical(_pendingOnlineSearch, cancellation)) {
+      _pendingOnlineSearch = null;
+    }
     setState(() => searchResult = result);
   }
 
   @override
   void dispose() {
     _libraryRefresh++;
+    _pendingOnlineSearch?.cancel();
+    searchResult.cancelOnlineSearch();
     AudioLibrary.changes.removeListener(_refreshLocalResults);
     searchBarController.dispose();
     super.dispose();
@@ -256,75 +273,69 @@ class _SearchResultBody extends StatelessWidget {
           ),
       ];
 
-  SliverToBoxAdapter _onlineSliver(
+  Widget _onlineSliver(
     BuildContext context, {
     bool showHeader = true,
   }) {
-    return SliverToBoxAdapter(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (showHeader)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8.0, 16.0, 8.0, 8.0),
-              child: AppEntrance(
-                identity: 'search-online-title',
-                order: 2,
-                child: Text(
-                  ui("联网音乐"),
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+    return FutureBuilder<OnlineSearchResponse>(
+      future: result.online,
+      builder: (context, snapshot) {
+        final slivers = <Widget>[
+          if (showHeader) _header(context, ui('联网音乐')),
+        ];
+        if (snapshot.connectionState != ConnectionState.done) {
+          slivers.add(const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(32.0),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          ));
+        } else if (snapshot.hasError) {
+          slivers.add(SliverToBoxAdapter(
+            child: _OnlineFailure(
+              message: snapshot.error.toString(),
+              retry: retryOnline,
+            ),
+          ));
+        } else {
+          final response = snapshot.data!;
+          slivers.add(SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8.0, 4.0, 8.0, 8.0),
+              child: Text(
+                ui('搜索已启用的内置与自定义歌源；搜索只返回候选，播放时再解析地址，只有来源明确授权的歌曲才可下载。'),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
-          FutureBuilder<OnlineSearchResponse>(
-            future: result.online,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
-                return const Padding(
-                  padding: EdgeInsets.all(32.0),
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (snapshot.hasError) {
-                return _OnlineFailure(
-                  message: snapshot.error.toString(),
-                  retry: retryOnline,
-                );
-              }
-              final response = snapshot.data!;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8.0, 4.0, 8.0, 8.0),
-                    child: Text(
-                      ui("搜索已启用的联网歌源；播放能力由平台授权与接口可用性决定，当前不提供下载。"),
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  if (response.failures.isNotEmpty)
-                    _PartialFailure(failures: response.failures),
-                  if (response.tracks.isEmpty)
-                    _EmptyResult(label: ui("联网服务没有找到匹配歌曲"))
-                  else
-                    for (var i = 0; i < response.tracks.length; i++)
-                      AudioTile(
-                        key: ValueKey(response.tracks[i].path),
-                        audioIndex: i,
-                        playlist: response.tracks,
-                      ),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
+          ));
+          if (response.failures.isNotEmpty) {
+            slivers.add(SliverToBoxAdapter(
+              child: _PartialFailure(failures: response.failures),
+            ));
+          }
+          if (response.tracks.isEmpty) {
+            slivers.add(SliverToBoxAdapter(
+              child: _EmptyResult(label: ui('联网服务没有找到匹配歌曲')),
+            ));
+          } else {
+            // Custom providers can legitimately return many combined rows.
+            // Keep the result list lazy so a large multi-source response does
+            // not synchronously build every tile on the UI isolate.
+            slivers.add(SliverList.builder(
+              itemCount: response.tracks.length,
+              itemBuilder: (context, index) => AudioTile(
+                key: ValueKey(response.tracks[index].path),
+                audioIndex: index,
+                playlist: response.tracks,
+                showSourceLabel: true,
+              ),
+            ));
+          }
+        }
+        return SliverMainAxisGroup(slivers: slivers);
+      },
     );
   }
 
@@ -404,7 +415,7 @@ class _OnlineFailure extends StatelessWidget {
           children: [
             Icon(Symbols.cloud_off, color: Theme.of(context).colorScheme.error),
             const SizedBox(height: 8.0),
-            Text(ui("联网搜索失败：{0}", [message]), textAlign: TextAlign.center),
+            Text(ui("联网搜索失败：{0}", [ui(message)]), textAlign: TextAlign.center),
             const SizedBox(height: 12.0),
             OutlinedButton.icon(
               onPressed: retry,
@@ -439,7 +450,8 @@ class _PartialFailure extends StatelessWidget {
               Expanded(
                 child: Text(
                   failures.entries
-                      .map((entry) => "${entry.key}：${entry.value}")
+                      .map((entry) =>
+                          "${onlineSourceDisplayLabel(provider: entry.key, fallback: entry.key)}：${ui(entry.value)}")
                       .join("\n"),
                 ),
               ),

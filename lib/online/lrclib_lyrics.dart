@@ -99,7 +99,7 @@ class LrclibLyricsTransport {
       request.followRedirects = false;
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'DanPlayer/26.0.3 (anonymous read-only lyrics)',
+        'DanPlayer/26.0.4 (anonymous read-only lyrics)',
       );
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final response = await request.close().timeout(_timeout);

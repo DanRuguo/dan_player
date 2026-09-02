@@ -24,6 +24,10 @@ typedef OnlineLyricEditorSearch = Future<LyricSearchResponse> Function(
 typedef OnlineLyricEditorCandidateLoader = Future<Lyric?> Function(
   SongSearchResult candidate,
 );
+typedef OnlineLyricEditorCustomCandidateLoader = Future<Lyric?> Function(
+  Audio audio,
+  CustomLyricSourceChoice choice,
+);
 typedef LocalLyricEditorLoader = Future<String> Function(Audio audio);
 typedef LyricEditorSourcePersistCallback = Future<void> Function(
   String audioPath,
@@ -115,6 +119,8 @@ Future<bool> showLyricEditorDialog(
   Audio audio, {
   OnlineLyricEditorSearch? onlineLyricSearch,
   OnlineLyricEditorCandidateLoader? onlineLyricCandidateLoader,
+  List<CustomLyricSourceChoice>? customLyricChoices,
+  OnlineLyricEditorCustomCandidateLoader? customLyricCandidateLoader,
 }) async {
   if (audio.isOnline) {
     showTextOnSnackBar("联网音乐的歌词为只读，不能修改");
@@ -127,6 +133,8 @@ Future<bool> showLyricEditorDialog(
           audio: audio,
           onlineLyricSearch: onlineLyricSearch,
           onlineLyricCandidateLoader: onlineLyricCandidateLoader,
+          customLyricChoices: customLyricChoices,
+          customLyricCandidateLoader: customLyricCandidateLoader,
         ),
       ) ==
       true;
@@ -138,12 +146,16 @@ class LyricEditorDialog extends StatefulWidget {
     required this.audio,
     this.onlineLyricSearch,
     this.onlineLyricCandidateLoader,
+    this.customLyricChoices,
+    this.customLyricCandidateLoader,
     this.localLyricLoader,
   });
 
   final Audio audio;
   final OnlineLyricEditorSearch? onlineLyricSearch;
   final OnlineLyricEditorCandidateLoader? onlineLyricCandidateLoader;
+  final List<CustomLyricSourceChoice>? customLyricChoices;
+  final OnlineLyricEditorCustomCandidateLoader? customLyricCandidateLoader;
   final LocalLyricEditorLoader? localLyricLoader;
 
   @override
@@ -240,6 +252,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         search: widget.onlineLyricSearch ?? searchLyricCandidates,
         loadCandidate:
             widget.onlineLyricCandidateLoader ?? getLyricForCandidate,
+        customChoices: widget.customLyricChoices ??
+            customLyricSourceChoicesFor(widget.audio),
+        loadCustomCandidate:
+            widget.customLyricCandidateLoader ?? getLyricForCustomSourceChoice,
       ),
     );
 
@@ -630,11 +646,15 @@ class _OnlineLyricCandidateDialog extends StatefulWidget {
     required this.audio,
     required this.search,
     required this.loadCandidate,
+    required this.customChoices,
+    required this.loadCustomCandidate,
   });
 
   final Audio audio;
   final OnlineLyricEditorSearch search;
   final OnlineLyricEditorCandidateLoader loadCandidate;
+  final List<CustomLyricSourceChoice> customChoices;
+  final OnlineLyricEditorCustomCandidateLoader loadCustomCandidate;
 
   @override
   State<_OnlineLyricCandidateDialog> createState() =>
@@ -713,6 +733,42 @@ class _OnlineLyricCandidateDialogState
       if (!mounted || _closing || generation != _loadGeneration) return;
       setState(() {
         _candidateErrors[candidate.identity] = ui("获取歌词失败，可选择其他候选或重试。");
+      });
+    } finally {
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _loadingIdentity = null);
+      }
+    }
+  }
+
+  Future<void> _chooseCustom(CustomLyricSourceChoice choice) async {
+    if (_loadingIdentity != null || _closing) return;
+    final generation = ++_loadGeneration;
+    setState(() {
+      _loadingIdentity = choice.identity;
+      _candidateErrors.remove(choice.identity);
+    });
+    try {
+      final lyric = await widget.loadCustomCandidate(widget.audio, choice);
+      if (!mounted || _closing || generation != _loadGeneration) return;
+      if (lyric == null || lyric.lines.isEmpty) {
+        setState(() {
+          _candidateErrors[choice.identity] = ui(
+            "{0}未返回可用歌词，可选择其他候选或重试。",
+            [choice.profile.name],
+          );
+        });
+        return;
+      }
+      _complete(lyric);
+    } catch (error, trace) {
+      LOGGER.e(
+        '[lyric editor] custom candidate load failed: $error',
+        stackTrace: trace,
+      );
+      if (!mounted || _closing || generation != _loadGeneration) return;
+      setState(() {
+        _candidateErrors[choice.identity] = ui("获取歌词失败，可选择其他候选或重试。");
       });
     } finally {
       if (mounted && generation == _loadGeneration) {
@@ -847,6 +903,9 @@ class _OnlineLyricCandidateDialogState
   }
 
   Widget _buildContent(BuildContext context) {
+    if (widget.customChoices.isNotEmpty) {
+      return _buildContentWithCustomChoices();
+    }
     if (_searching) {
       return _OnlineCandidateState(
         key: const ValueKey('online-lyric-candidate-loading'),
@@ -882,7 +941,7 @@ class _OnlineLyricCandidateDialogState
     }
 
     final failureText = response.failures.entries
-        .map((entry) => '${ui(entry.key.sourceLabel)}：${entry.value}')
+        .map((entry) => '${ui(entry.key.sourceLabel)}：${ui(entry.value)}')
         .join('\n');
     if (response.candidates.isEmpty) {
       return _OnlineCandidateState(
@@ -912,6 +971,108 @@ class _OnlineLyricCandidateDialogState
           final candidateIndex = index - (failureText.isEmpty ? 0 : 1);
           return _candidateTile(response.candidates[candidateIndex]);
         },
+      ),
+    );
+  }
+
+  Widget _buildContentWithCustomChoices() {
+    final response = _response;
+    final children = <Widget>[
+      Padding(
+        padding: const EdgeInsetsDirectional.fromSTEB(12, 10, 12, 2),
+        child: Text(
+          ui("自定义歌源"),
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+      ),
+      for (final choice in widget.customChoices)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 4, 10, 2),
+          child: _customCandidateTile(choice),
+        ),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 4),
+        child: Divider(height: 1),
+      ),
+    ];
+
+    if (_searching) {
+      children.add(
+        ListTile(
+          key: const ValueKey('online-lyric-candidate-loading'),
+          leading: const SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          title: Text(ui("正在加载歌词")),
+        ),
+      );
+    } else if (_searchError != null) {
+      children.add(
+        Padding(
+          padding: const EdgeInsets.all(10),
+          child: _OnlineCandidateNotice(
+            message: _searchError!,
+            onRetry: _search,
+          ),
+        ),
+      );
+    } else if (response == null) {
+      children.add(
+        ListTile(
+          leading: const Icon(Symbols.error),
+          title: Text(ui("候选状态不可用，请重试。")),
+        ),
+      );
+    } else if (response.sourcesDisabled) {
+      children.add(
+        ListTile(
+          key: const ValueKey('online-lyric-candidate-sources-disabled'),
+          leading: const Icon(Symbols.cloud_off),
+          title: Text(ui("内置歌词来源不可用；仍可选择上方的自定义歌源。")),
+        ),
+      );
+    } else {
+      final failureText = response.failures.entries
+          .map((entry) => '${ui(entry.key.sourceLabel)}：${ui(entry.value)}')
+          .join('\n');
+      if (failureText.isNotEmpty) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: _OnlineCandidateNotice(
+              message: failureText,
+              onRetry: _search,
+            ),
+          ),
+        );
+      }
+      if (response.candidates.isEmpty) {
+        children.add(
+          ListTile(
+            key: const ValueKey('online-lyric-candidate-empty'),
+            leading: const Icon(Symbols.search_off),
+            title: Text(ui(failureText.isEmpty
+                ? "没有找到相关歌词候选，可检查歌曲标签后重试。"
+                : "可用来源没有返回候选。")),
+          ),
+        );
+      } else {
+        for (final candidate in response.candidates) {
+          children.add(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 2, 10, 4),
+              child: _candidateTile(candidate),
+            ),
+          );
+        }
+      }
+    }
+
+    return Scrollbar(
+      child: ListView(
+        key: const ValueKey('online-lyric-candidates'),
+        children: children,
       ),
     );
   }
@@ -969,6 +1130,49 @@ class _OnlineLyricCandidateDialogState
               )
             : const Icon(Symbols.chevron_right),
         onTap: loading ? null : () => _choose(candidate),
+      ),
+    );
+  }
+
+  Widget _customCandidateTile(CustomLyricSourceChoice choice) {
+    final scheme = Theme.of(context).colorScheme;
+    final loading = _loadingIdentity == choice.identity;
+    final error = _candidateErrors[choice.identity];
+    return Material(
+      color: loading
+          ? scheme.secondaryContainer.withValues(alpha: .72)
+          : scheme.surfaceContainerLow,
+      shape: AppShape.control,
+      child: ListTile(
+        key: ValueKey('online-lyric-custom-${choice.profile.id}'),
+        enabled: _loadingIdentity == null,
+        shape: AppShape.control,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        leading: CircleAvatar(
+          backgroundColor: scheme.primaryContainer,
+          foregroundColor: scheme.onPrimaryContainer,
+          child: const Icon(Symbols.api, size: 20),
+        ),
+        title: Text(
+          choice.profile.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(ui("来源：{0}", [ui("自定义歌源")])),
+            if (error != null)
+              Text(error, style: TextStyle(color: scheme.error)),
+          ],
+        ),
+        trailing: loading
+            ? const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Symbols.chevron_right),
+        onTap: loading ? null : () => _chooseCustom(choice),
       ),
     );
   }

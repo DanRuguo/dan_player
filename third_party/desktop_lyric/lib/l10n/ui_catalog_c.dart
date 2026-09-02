@@ -78,6 +78,11 @@ const Map<String, List<String>> uiCatalogC = {
     "{0} 個のソースが有効です。新しい検索では有効なソースを同時に検索します。",
     "소스 {0}개가 활성화되었습니다. 새 검색은 활성화된 모든 소스를 함께 검색합니다."
   ],
+  "已启用 {0} 个内置歌源；新搜索会同时查询已启用的来源。": [
+    "{0} built-in sources enabled; new searches query all enabled sources together.",
+    "{0} 個の内蔵音源が有効です。新しい検索では有効なソースを同時に検索します。",
+    "내장 음원 {0}개가 활성화되었습니다. 새 검색은 활성화된 모든 소스를 함께 검색합니다."
+  ],
   "参与新搜索": ["Include in new searches", "新しい検索に含める", "새 검색에 포함"],
   "不参与新搜索；已有歌曲仍可播放": [
     "Exclude from new searches; existing songs still play",

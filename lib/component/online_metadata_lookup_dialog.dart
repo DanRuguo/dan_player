@@ -5,6 +5,9 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/online_artwork_request.dart';
 import 'package:dan_player/online/online_music_service.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:dan_player/online/custom_music_source_transport.dart';
+import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
@@ -80,6 +83,7 @@ class _OnlineMetadataLookupDialogState
   List<Audio> _results = [];
   Audio? _selected;
   bool _loading = false;
+  bool _loadingMetadata = false;
   bool _applying = false;
   bool _closed = false;
   bool _title = true;
@@ -88,8 +92,10 @@ class _OnlineMetadataLookupDialogState
   bool _cover = true;
   int _searchToken = 0;
   String? _error;
-  String? _partialFailure;
+  Map<String, String> _partialFailures = const {};
   OnlineArtworkRequest? _artworkRequest;
+  OnlineSearchCancellation? _searchCancellation;
+  CustomMusicSourceCancellation? _metadataCancellation;
 
   @override
   void initState() {
@@ -99,12 +105,18 @@ class _OnlineMetadataLookupDialogState
 
   Future<void> _search() async {
     if (_closed || _query.text.trim().isEmpty || _applying) return;
+    _searchCancellation?.cancel();
+    _metadataCancellation?.cancel();
+    _metadataCancellation = null;
+    _loadingMetadata = false;
+    final cancellation = OnlineSearchCancellation();
+    _searchCancellation = cancellation;
     final token = ++_searchToken;
     if (_resultsScroll.hasClients) _resultsScroll.jumpTo(0);
     setState(() {
       _loading = true;
       _error = null;
-      _partialFailure = null;
+      _partialFailures = const {};
       _selected = null;
       _results = [];
     });
@@ -112,7 +124,11 @@ class _OnlineMetadataLookupDialogState
       final submittedQuery = _query.text.trim();
       Future<OnlineSearchResponse> search(String query) =>
           widget.search?.call(query) ??
-          OnlineMusicService.instance.search(query, limit: 20);
+          OnlineMusicService.instance.search(
+            query,
+            limit: 20,
+            cancellation: cancellation,
+          );
       var results = await search(submittedQuery);
       if (results.tracks.isEmpty && submittedQuery == widget.query.trim()) {
         final failures = Map<String, String>.of(results.failures);
@@ -142,26 +158,60 @@ class _OnlineMetadataLookupDialogState
             )));
       setState(() {
         _results = ranked;
-        _partialFailure =
-            results.failures.isEmpty ? null : results.failures.values.join('；');
+        _partialFailures = Map<String, String>.unmodifiable(results.failures);
       });
     } catch (error, trace) {
       LOGGER.e('[metadata lookup] $error', stackTrace: trace);
       if (mounted && !_closed && token == _searchToken) {
         setState(() => _error = error is OnlineMusicException
-            ? error.message
+            ? ui(error.message)
             : ui("搜索失败，请检查网络后重试"));
       }
     } finally {
+      if (identical(_searchCancellation, cancellation)) {
+        _searchCancellation = null;
+      }
       if (mounted && !_closed && token == _searchToken) {
         setState(() => _loading = false);
       }
     }
   }
 
+  Future<void> _selectCandidate(Audio candidate) async {
+    if (_closed || _applying) return;
+    _metadataCancellation?.cancel();
+    final cancellation = CustomMusicSourceCancellation();
+    _metadataCancellation = cancellation;
+    final custom = CustomMusicSourceProfile.profileIdFromProvider(
+            candidate.onlineProvider) !=
+        null;
+    setState(() {
+      _selected = candidate;
+      _error = null;
+      _loadingMetadata = custom;
+    });
+    if (!custom) return;
+    bool active() =>
+        mounted &&
+        !_closed &&
+        identical(_metadataCancellation, cancellation) &&
+        !cancellation.isCancelled;
+    try {
+      final detailed = await OnlineMusicService.instance
+          .refreshMetadata(candidate, cancellation: cancellation);
+      if (active()) setState(() => _selected = detailed);
+    } catch (_) {
+      if (active()) {
+        setState(() => _error = ui('补充歌曲信息失败，可重选候选后重试。'));
+      }
+    } finally {
+      if (active()) setState(() => _loadingMetadata = false);
+    }
+  }
+
   Future<void> _apply() async {
     final selected = _selected;
-    if (_closed || selected == null || _applying) return;
+    if (_closed || selected == null || _applying || _loadingMetadata) return;
     setState(() {
       _applying = true;
       _error = null;
@@ -171,7 +221,10 @@ class _OnlineMetadataLookupDialogState
       if (_cover && selected.artworkUrl?.isNotEmpty == true) {
         final request = OnlineArtworkRequest();
         _artworkRequest = request;
-        artwork = await request.loadPng(selected.artworkUrl!);
+        artwork = await request.loadPng(
+          selected.artworkUrl!,
+          provider: selected.onlineProvider,
+        );
       }
       if (!mounted || _closed) return;
       Navigator.pop(
@@ -185,7 +238,7 @@ class _OnlineMetadataLookupDialogState
     } catch (error, trace) {
       LOGGER.e('[metadata artwork] $error', stackTrace: trace);
       if (mounted && !_closed) {
-        setState(() => _error = ui("封面获取失败：{0}。可取消勾选“封面”后继续填入文字信息。", [error]));
+        setState(() => _error = ui("封面获取失败。可取消勾选“封面”后继续填入文字信息。"));
       }
     } finally {
       _artworkRequest = null;
@@ -197,6 +250,8 @@ class _OnlineMetadataLookupDialogState
   void dispose() {
     _closed = true;
     _searchToken++;
+    _searchCancellation?.cancel();
+    _metadataCancellation?.cancel();
     _artworkRequest?.cancel();
     _query.dispose();
     _controlsScroll.dispose();
@@ -216,6 +271,7 @@ class _OnlineMetadataLookupDialogState
         // so a late artwork response cannot pop the editor underneath it.
         _closed = true;
         _searchToken++;
+        _searchCancellation?.cancel();
         _artworkRequest?.cancel();
       },
       child: Dialog(
@@ -316,10 +372,13 @@ class _OnlineMetadataLookupDialogState
                                     const SizedBox(height: 6),
                                     Text(ui("选中候选结果后仅填入编辑器；点击“保存”才会写入本地文件。")),
                                     if (_error != null ||
-                                        _partialFailure != null)
+                                        _partialFailures.isNotEmpty)
                                       Padding(
                                         padding: const EdgeInsets.only(top: 10),
-                                        child: Text(_error ?? _partialFailure!,
+                                        child: Text(
+                                            _error ??
+                                                _onlineFailureSummary(
+                                                    _partialFailures),
                                             maxLines: 3,
                                             overflow: TextOverflow.ellipsis,
                                             style:
@@ -368,7 +427,7 @@ class _OnlineMetadataLookupDialogState
                                   selectedTileColor: scheme.secondaryContainer,
                                   shape: AppShape.control,
                                   enabled: !_applying,
-                                  onTap: () => setState(() => _selected = item),
+                                  onTap: () => _selectCandidate(item),
                                   leading: ClipRRect(
                                     borderRadius: AppShape.smallRadius,
                                     child: AudioArtwork(
@@ -380,7 +439,7 @@ class _OnlineMetadataLookupDialogState
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis),
                                   subtitle: Text(
-                                      '${item.artist} · ${item.album}\n${item.sourceLabel} · ${item.duration ~/ 60}:${(item.duration % 60).toString().padLeft(2, '0')}',
+                                      '${item.artist} · ${item.album}\n${onlineSourceDisplayLabel(provider: item.onlineProvider, fallback: item.sourceLabel)} · ${item.duration ~/ 60}:${(item.duration % 60).toString().padLeft(2, '0')}',
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis),
                                   trailing: Icon(selected
@@ -406,6 +465,7 @@ class _OnlineMetadataLookupDialogState
                             child: Text(ui("取消"))),
                         FilledButton.icon(
                             onPressed: _selected == null ||
+                                    _loadingMetadata ||
                                     _applying ||
                                     !(_title ||
                                         _artist ||
@@ -413,13 +473,17 @@ class _OnlineMetadataLookupDialogState
                                         (_cover && selectedHasCover))
                                 ? null
                                 : _apply,
-                            icon: _applying
+                            icon: _applying || _loadingMetadata
                                 ? const SizedBox.square(
                                     dimension: 16,
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2))
                                 : const Icon(Symbols.download_done),
-                            label: Text(_applying ? ui("获取封面…") : ui("填入编辑器"))),
+                            label: Text(_loadingMetadata
+                                ? ui('读取歌曲信息…')
+                                : _applying
+                                    ? ui("获取封面…")
+                                    : ui("填入编辑器"))),
                       ]),
                 ]),
           ),
@@ -428,3 +492,8 @@ class _OnlineMetadataLookupDialogState
     );
   }
 }
+
+String _onlineFailureSummary(Map<String, String> failures) => failures.entries
+    .map((entry) =>
+        '${onlineSourceDisplayLabel(provider: entry.key, fallback: entry.key)}：${ui(entry.value)}')
+    .join('；');

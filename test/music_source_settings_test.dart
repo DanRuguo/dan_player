@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/page/settings_page/music_source_settings.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -43,12 +45,21 @@ bool _focusIsInside(Finder finder) {
 }
 
 Future<void> _toggle(WidgetTester tester, String id) async {
-  await tester.ensureVisible(_source(id));
-  await tester.tap(_source(id));
+  final control =
+      find.descendant(of: _source(id), matching: find.byType(Switch));
+  await tester.ensureVisible(control);
+  await tester.pumpAndSettle();
+  await tester.tap(control);
   await tester.pumpAndSettle();
 }
 
 void main() {
+  late bool previousLrclib;
+  setUp(() {
+    previousLrclib = AppSettings.instance.lrclibEnabled.value;
+    AppSettings.instance.lrclibEnabled.value = false;
+  });
+  tearDown(() => AppSettings.instance.lrclibEnabled.value = previousLrclib);
   testWidgets(
       'initial view is descriptive only and never probes a network or saves',
       (tester) async {
@@ -70,9 +81,10 @@ void main() {
     expect(saves, 0);
     expect(tester.widget<SwitchListTile>(_source('qq')).value, isTrue);
     expect(tester.widget<SwitchListTile>(_source('netease')).value, isTrue);
-    expect(find.textContaining('QQ音乐匿名接口当前未提供可靠的下载权限'), findsOneWidget);
-    expect(find.textContaining('网易云音乐匿名接口当前未提供可靠的下载权限'), findsOneWidget);
+    expect(find.text('下载按接口实际返回执行，需登录或受限时会提示。'), findsNWidgets(2));
+    expect(find.textContaining('接口域名（只读）'), findsNWidgets(3));
     expect(find.textContaining('只读公开评论'), findsNWidgets(2));
+    expect(find.byType(Chip), findsNothing);
     expect(PlayService.isInitialized, isFalse);
   });
 
@@ -91,7 +103,7 @@ void main() {
     expect(preferences.value.toJson(), ['netease']);
     await _toggle(tester, 'netease');
     expect(preferences.value.isEmpty, isTrue);
-    expect(find.text(onlineSourcesDisabledMessage), findsOneWidget);
+    expect(find.text('此类来源均已停用'), findsOneWidget);
     expect(tester.widget<SwitchListTile>(_source('qq')).onChanged, isNotNull);
     expect(
         tester.widget<SwitchListTile>(_source('netease')).onChanged, isNotNull);
@@ -182,7 +194,7 @@ void main() {
         final status = find.byKey(const ValueKey('music-source-status'));
         await tester.ensureVisible(status);
         await tester.pumpAndSettle();
-        expect(find.text(onlineSourcesDisabledMessage), findsOneWidget);
+        expect(find.text('此类来源均已停用'), findsOneWidget);
         expect(preferences.value.isEmpty, isTrue);
       });
     }
@@ -235,4 +247,56 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('LRCLIB is a separate read-only lyric source with its own switch',
+      (tester) async {
+    final preferences = ValueNotifier(const OnlineSourcePreferences());
+    final lrclib = ValueNotifier(true);
+    addTearDown(preferences.dispose);
+    addTearDown(lrclib.dispose);
+    var saves = 0;
+    await tester.pumpWidget(_host(MusicSourceSettings(
+      preferences: preferences,
+      lrclibEnabled: lrclib,
+      persist: () async => saves++,
+    )));
+    expect(find.text('LRCLIB'), findsOneWidget);
+    expect(find.text('参与歌词匹配'), findsOneWidget);
+    await _toggle(tester, 'lrclib');
+    expect(lrclib.value, isFalse);
+    expect(preferences.value.qqEnabled, isTrue);
+    expect(preferences.value.neteaseEnabled, isTrue);
+    expect(saves, 1);
+    expect(find.text('不参与歌词匹配'), findsOneWidget);
+  });
+
+  for (final language in UiLanguage.values) {
+    testWidgets('${language.code} source groups fit 320px at 200%',
+        (tester) async {
+      final previous = uiLanguage.value;
+      uiLanguage.value = language;
+      addTearDown(() => uiLanguage.value = previous);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 560);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final preferences = ValueNotifier(const OnlineSourcePreferences());
+      final lrclib = ValueNotifier(true);
+      addTearDown(preferences.dispose);
+      addTearDown(lrclib.dispose);
+      await tester.pumpWidget(_host(
+          MusicSourceSettings(
+            preferences: preferences,
+            lrclibEnabled: lrclib,
+            persist: () async {},
+          ),
+          scale: 2));
+      for (final id in ['qq', 'netease', 'lrclib']) {
+        await tester.ensureVisible(_source(id));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+      expect(find.byType(Chip), findsNothing);
+    });
+  }
 }

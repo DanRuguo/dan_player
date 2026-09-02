@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/online/song_comment_association.dart';
 // Pinned music_api exposes no public serializer. Reuse its implementation rather
 // than copying cryptographic source; keep this adapter covered by request tests.
@@ -24,7 +27,9 @@ class SongCommentsTarget {
   final String provider;
   final String songId;
 
-  String get sourceLabel => provider == 'qq' ? 'QQ音乐' : '网易云音乐';
+  String get sourceLabel =>
+      CommentSourceIdentity.tryCreate(provider, songId)?.sourceLabel ??
+      provider;
   String get identity => '$provider:$songId';
 
   static SongCommentsTarget? fromIdentity(CommentSourceIdentity? identity) =>
@@ -233,7 +238,7 @@ class AnonymousSongCommentsTransport implements SongCommentsTransport {
       cancellation.check();
       request.followRedirects = false;
       request.headers.set(HttpHeaders.userAgentHeader,
-          'Mozilla/5.0 DanPlayer/26.0.3 AnonymousComments');
+          'Mozilla/5.0 DanPlayer/26.0.4 AnonymousComments');
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
           HttpHeaders.refererHeader,
@@ -253,11 +258,11 @@ class AnonymousSongCommentsTransport implements SongCommentsTransport {
       cancellation.check();
       if (const [401, 403, 429].contains(response.statusCode)) {
         throw const SongCommentsException(
-            SongCommentsFailure.denied, '平台暂不允许匿名读取评论或请求过于频繁，请稍后重试。');
+            SongCommentsFailure.denied, '评论来源暂不允许匿名读取或请求过于频繁，请稍后重试。');
       }
       if (response.statusCode != HttpStatus.ok) {
-        throw SongCommentsException(SongCommentsFailure.network,
-            '评论服务返回 HTTP ${response.statusCode}，请稍后重试。');
+        throw const SongCommentsException(
+            SongCommentsFailure.network, '评论服务暂时不可用，请稍后重试。');
       }
       if (response.contentLength > responseByteLimit) {
         throw const FormatException('Comment response exceeds limit');
@@ -283,11 +288,101 @@ class AnonymousSongCommentsTransport implements SongCommentsTransport {
   }
 }
 
+/// Routes built-in anonymous reads and user-managed comment providers without
+/// allowing one custom request to alter another source's client or token.
+class DefaultSongCommentsTransport implements SongCommentsTransport {
+  DefaultSongCommentsTransport({
+    AnonymousSongCommentsTransport? builtIn,
+    CustomMusicSourceTransport Function(CustomMusicSourceProfile)?
+        customTransportFactory,
+  })  : _builtIn = builtIn ?? AnonymousSongCommentsTransport(),
+        _customTransportFactory =
+            customTransportFactory ?? CustomMusicSourceTransport.new;
+
+  final AnonymousSongCommentsTransport _builtIn;
+  final CustomMusicSourceTransport Function(CustomMusicSourceProfile)
+      _customTransportFactory;
+
+  @override
+  Future<Map<String, dynamic>> fetch(
+    SongCommentsTarget target, {
+    required SongCommentSort sort,
+    required int page,
+    required SongCommentsCancellation cancellation,
+  }) async {
+    final profile = _customCommentsProfile(target.provider);
+    if (profile == null) {
+      if (CustomMusicSourceProfile.profileIdFromProvider(target.provider) !=
+          null) {
+        throw const SongCommentsException(
+          SongCommentsFailure.unavailable,
+          '对应的自定义歌源已移除、停用或未配置评论能力。',
+        );
+      }
+      return _builtIn.fetch(
+        target,
+        sort: sort,
+        page: page,
+        cancellation: cancellation,
+      );
+    }
+
+    final customCancellation = CustomMusicSourceCancellation();
+    final removeListener = cancellation.onCancel(customCancellation.cancel);
+    try {
+      final result = await _customTransportFactory(profile).comments(
+        Audio.online(
+          provider: target.provider,
+          id: target.songId,
+          title: 'UNKNOWN',
+          artist: 'UNKNOWN',
+          album: 'UNKNOWN',
+          duration: 0,
+        ),
+        page: page,
+        limit: SongCommentsService.pageSize,
+        sort: sort == SongCommentSort.hot
+            ? CustomMusicCommentsSort.hot
+            : CustomMusicCommentsSort.latest,
+        cancellation: customCancellation,
+      );
+      if (!identical(_customCommentsProfile(target.provider), profile)) {
+        throw const SongCommentsException(
+          SongCommentsFailure.unavailable,
+          '对应的自定义歌源在请求期间已修改或停用。',
+        );
+      }
+      return <String, dynamic>{
+        _customResponseMarker: true,
+        'comments': <Map<String, Object?>>[
+          for (final comment in result.comments)
+            <String, Object?>{
+              'id': comment.id,
+              'author': comment.author,
+              'content': comment.content,
+              if (comment.publishedAt != null)
+                'publishedAt': comment.publishedAt!.toIso8601String(),
+              'likeCount': comment.likeCount,
+            },
+        ],
+        'hasMore': result.hasMore,
+        if (result.total != null) 'total': result.total,
+      };
+    } on CustomMusicSourceCancelled {
+      throw const SongCommentsCancelled();
+    } on CustomMusicSourceException catch (error) {
+      throw _mapCustomCommentsError(error);
+    } finally {
+      removeListener();
+    }
+  }
+}
+
 class SongCommentsService {
   SongCommentsService({
     SongCommentsTransport? transport,
     Duration timeout = requestTimeout,
-  })  : _transport = transport ?? AnonymousSongCommentsTransport(),
+  })  : _transport = transport ?? DefaultSongCommentsTransport(),
         _timeout = timeout;
 
   static final instance = SongCommentsService();
@@ -304,11 +399,11 @@ class SongCommentsService {
       final store = SongCommentAssociationStore.instance;
       final association = store.associationFor(audio);
       final identity = store.identityFor(audio);
-      if (identity != null) return null;
+      if (identity != null) return _customCommentsUnavailable(identity);
       if (association?.mode == SongCommentAssociationMode.followLyric) {
         return '当前选择了“跟随联网歌词”，但歌词来源没有可用于评论的 QQ音乐或网易云歌曲 ID。可以重新选择联网歌词，或独立指定歌曲。';
       }
-      return '本地歌曲尚未关联评论来源。可以跟随当前联网歌词，或从搜索候选中独立指定一首平台歌曲。';
+      return '本地歌曲尚未关联评论来源。可以跟随当前联网歌词，或从搜索候选中独立指定一首来源歌曲。';
     }
     if (audio.onlineProvider == 'qq') {
       if ((audio.onlineNumericId ?? 0) <= 0) {
@@ -322,7 +417,17 @@ class SongCommentsService {
       }
       return null;
     }
-    return '当前仅支持 QQ音乐和网易云音乐的公开只读评论。';
+    final customIdentity = CommentSourceIdentity.tryCreate(
+      audio.onlineProvider,
+      audio.onlineId,
+    );
+    if (customIdentity != null) {
+      return _customCommentsUnavailable(customIdentity);
+    }
+    if (audio.onlineProvider?.startsWith('custom:') == true) {
+      return '这首自定义来源歌曲缺少可安全保存的来源歌曲 ID，暂时不能关联评论。';
+    }
+    return '当前支持 QQ音乐、网易云音乐及已配置评论能力的自定义歌源。';
   }
 
   static SongCommentsTarget? targetFor(Audio audio) {
@@ -332,11 +437,10 @@ class SongCommentsService {
         SongCommentAssociationStore.instance.identityFor(audio),
       );
     }
-    return SongCommentsTarget._(
-        audio.onlineProvider!,
-        audio.onlineProvider == 'qq'
-            ? '${audio.onlineNumericId}'
-            : audio.onlineId!);
+    return SongCommentsTarget.fromIdentity(CommentSourceIdentity.tryCreate(
+      audio.onlineProvider,
+      audio.onlineProvider == 'qq' ? audio.onlineNumericId : audio.onlineId,
+    ));
   }
 
   Future<SongCommentsPage> loadPage({
@@ -370,7 +474,7 @@ class SongCommentsService {
     } on FormatException {
       token.check();
       throw const SongCommentsException(
-          SongCommentsFailure.invalid, '平台返回的评论格式异常或内容过大，暂时无法读取，请稍后重试。');
+          SongCommentsFailure.invalid, '评论来源返回的格式异常或内容过大，暂时无法读取，请稍后重试。');
     } catch (_) {
       token.check();
       throw const SongCommentsException(
@@ -380,6 +484,9 @@ class SongCommentsService {
 
   SongCommentsPage _parse(
       Map response, SongCommentsTarget target, SongCommentSort sort, int page) {
+    if (response[_customResponseMarker] == true) {
+      return _parseCustomComments(response, page);
+    }
     final qq = target.provider == 'qq';
     final code = _number(response['code']);
     _checkCode(code, qq ? 0 : 200);
@@ -433,6 +540,89 @@ class SongCommentsService {
       reachedLimit: reachedLimit,
     );
   }
+
+  SongCommentsPage _parseCustomComments(Map response, int page) {
+    final rows = _rows(response['comments']);
+    final comments = <SongComment>[];
+    final seen = <String>{};
+    for (final row in rows.take(pageSize)) {
+      if (row is! Map) continue;
+      final parsed = _customComment(row);
+      if (parsed != null && seen.add(parsed.id)) comments.add(parsed);
+    }
+    if (rows.isNotEmpty && comments.isEmpty) {
+      throw const FormatException('No recognizable custom comments');
+    }
+    final total = _number(response['total']);
+    final serverHasMore = rows.isNotEmpty &&
+        (_flag(response['hasMore']) ??
+            (total != null && total > 0
+                ? (page + 1) * pageSize < total
+                : rows.length >= pageSize));
+    final reachedLimit = serverHasMore && page + 1 >= maxPages;
+    return SongCommentsPage(
+      comments: comments,
+      hasMore: serverHasMore && !reachedLimit,
+      page: page,
+      reportedTotal: total != null && total >= 0 ? total : null,
+      reachedLimit: reachedLimit,
+    );
+  }
+}
+
+const _customResponseMarker = '_danPlayerCustomSource';
+
+CustomMusicSourceProfile? _customCommentsProfile(String providerId) {
+  final profileId = CustomMusicSourceProfile.profileIdFromProvider(providerId);
+  if (profileId == null) return null;
+  for (final profile in AppSettings.instance.customMusicSources.value) {
+    if (profile.id == profileId &&
+        profile.enabled &&
+        profile.authentication == null &&
+        profile.capabilities.contains(CustomMusicSourceCapability.comments) &&
+        profile.endpointFor(CustomMusicSourceCapability.comments) != null) {
+      return profile;
+    }
+  }
+  return null;
+}
+
+String? _customCommentsUnavailable(CommentSourceIdentity identity) {
+  if (CustomMusicSourceProfile.profileIdFromProvider(identity.provider) ==
+      null) {
+    return null;
+  }
+  final profile = _customCommentsProfile(identity.provider);
+  if (profile != null) return null;
+  return '对应的自定义歌源已移除、停用或未配置评论能力。';
+}
+
+SongCommentsException _mapCustomCommentsError(
+    CustomMusicSourceException error) {
+  final failure = switch (error.kind) {
+    CustomMusicSourceFailureKind.timeout => SongCommentsFailure.timeout,
+    CustomMusicSourceFailureKind.cancelled => SongCommentsFailure.unavailable,
+    CustomMusicSourceFailureKind.unavailable ||
+    CustomMusicSourceFailureKind.credentialsNotConfigured =>
+      SongCommentsFailure.unavailable,
+    CustomMusicSourceFailureKind.responseTooLarge ||
+    CustomMusicSourceFailureKind.invalidResponse =>
+      SongCommentsFailure.invalid,
+    CustomMusicSourceFailureKind.http
+        when error.statusCode == 401 ||
+            error.statusCode == 403 ||
+            error.statusCode == 429 =>
+      SongCommentsFailure.denied,
+    _ => SongCommentsFailure.network,
+  };
+  final message = switch (failure) {
+    SongCommentsFailure.timeout => '评论请求超时，请检查网络后重试。',
+    SongCommentsFailure.unavailable => '对应的自定义歌源当前不可用。',
+    SongCommentsFailure.invalid => '歌源返回的评论格式异常或内容过大。',
+    SongCommentsFailure.denied => '歌源拒绝了评论请求，请检查接口配置。',
+    _ => '评论加载失败，请检查网络连接后重试。',
+  };
+  return SongCommentsException(failure, message);
 }
 
 bool _positiveId(String? value) =>
@@ -492,6 +682,24 @@ DateTime? _timestamp(Object? value, {bool seconds = false}) {
 }
 
 int _likes(Object? value) => (_number(value) ?? 0).clamp(0, 0x7fffffff);
+
+SongComment? _customComment(Map row) {
+  final id = _text(row['id']);
+  final content = _text(row['content']);
+  if (id.isEmpty || content.isEmpty) return null;
+  final author = _text(row['author']);
+  final rawPublishedAt = row['publishedAt'];
+  final publishedAt = rawPublishedAt is String
+      ? DateTime.tryParse(rawPublishedAt)?.toLocal()
+      : null;
+  return SongComment(
+    id: id,
+    author: author.isEmpty ? '平台用户' : author,
+    content: content,
+    publishedAt: publishedAt,
+    likeCount: _likes(row['likeCount']),
+  );
+}
 
 SongComment? _neteaseComment(Map row) {
   final id = _id(row['commentId']);

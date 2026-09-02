@@ -79,6 +79,10 @@ void main() {
       () async {
     final old = AppSettings.instance.onlineSources.value;
     addTearDown(() => AppSettings.instance.onlineSources.value = old);
+    final oldCustom = AppSettings.instance.customMusicSources.value;
+    addTearDown(
+        () => AppSettings.instance.customMusicSources.value = oldCustom);
+    AppSettings.instance.customMusicSources.value = [];
     AppSettings.instance.onlineSources.value =
         const OnlineSourcePreferences(qqEnabled: false, neteaseEnabled: false);
     var clients = 0;
@@ -200,7 +204,7 @@ void main() {
     );
     final partial = await service.search('first');
     expect(partial.tracks, [track]);
-    expect(partial.failures.keys, ['QQ音乐']);
+    expect(partial.failures.keys, ['qq']);
     expect(partial.hasPartialFailure, isTrue);
     preferences = const OnlineSourcePreferences(qqEnabled: false);
     final success = await service.search('next');
@@ -287,15 +291,14 @@ void main() {
     expect(qq.path, isNot(netease.path));
   });
 
-  test(
-      'search switches never change the existing conservative download capability',
+  test('known sources allow download attempts independently of search switches',
       () {
     for (final source in OnlineMusicSource.values) {
       final track = _track(source.id, '1');
-      expect(source.supportsDownload, isFalse);
-      expect(OnlineMusicService.instance.canDownload(track), isFalse);
-      expect(OnlineMusicService.instance.downloadUnavailableReason(track),
-          source.downloadUnavailableReason);
+      expect(source.supportsDownload, isTrue);
+      expect(OnlineMusicService.instance.canDownload(track), isTrue);
+      expect(
+          OnlineMusicService.instance.downloadUnavailableReason(track), isNull);
     }
   });
 }

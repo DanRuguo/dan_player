@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:dan_player/library/artwork_size.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:dan_player/online/online_artwork_request.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
@@ -22,6 +24,71 @@ Uri artworkUriForSize(Uri source, ArtworkSize size, {String? provider}) {
           .firstMatch(source.path);
   if (match == null) return source;
   return source.replace(path: '${match[1]}R800x800${match[2]}');
+}
+
+/// A bounded, profile-scoped image source for user-managed music providers.
+///
+/// Unlike [NetworkImage], this does not open the connection until
+/// [OnlineArtworkRequest] has verified that [expectedProfile] is still the
+/// exact enabled profile saved in settings. The request owns the byte, image
+/// dimension and wall-clock limits; a disable, delete or edit invalidates the
+/// load before its result can enter Flutter's image cache.
+@immutable
+class CustomOnlineArtworkImageProvider
+    extends ImageProvider<CustomOnlineArtworkImageProvider> {
+  const CustomOnlineArtworkImageProvider(
+    this.address, {
+    required this.expectedProfile,
+  });
+
+  final String address;
+  final CustomMusicSourceProfile expectedProfile;
+
+  @override
+  Future<CustomOnlineArtworkImageProvider> obtainKey(
+    ImageConfiguration configuration,
+  ) =>
+      SynchronousFuture<CustomOnlineArtworkImageProvider>(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    CustomOnlineArtworkImageProvider key,
+    ImageDecoderCallback decode,
+  ) =>
+      MultiFrameImageStreamCompleter(
+        codec: _loadAsync(key, decode),
+        scale: 1,
+        debugLabel:
+            'CustomOnlineArtworkImageProvider(${key.expectedProfile.id})',
+        informationCollector: () => <DiagnosticsNode>[
+          DiagnosticsProperty<String>('profile', key.expectedProfile.id),
+        ],
+      );
+
+  static Future<ui.Codec> _loadAsync(
+    CustomOnlineArtworkImageProvider key,
+    ImageDecoderCallback decode,
+  ) async {
+    final bytes = await OnlineArtworkRequest().loadPng(
+      key.address,
+      provider: key.expectedProfile.providerId,
+      expectedProfile: key.expectedProfile,
+    );
+    return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is CustomOnlineArtworkImageProvider &&
+      address == other.address &&
+      identical(expectedProfile, other.expectedProfile);
+
+  @override
+  int get hashCode => Object.hash(address, identityHashCode(expectedProfile));
+
+  @override
+  String toString() =>
+      'CustomOnlineArtworkImageProvider(profile: ${expectedProfile.id})';
 }
 
 /// A cover-aware decode hint, unlike ResizeImage's contain/exact policies.

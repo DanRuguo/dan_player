@@ -9,6 +9,7 @@ import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/title_bar.dart';
 import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
+import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/music_categories.dart';
@@ -118,6 +119,12 @@ class _NowPlayingMoreAction extends StatelessWidget {
     final nowPlaying = playbackService.nowPlaying;
     final onlinePlaying = nowPlaying?.isOnline == true ? nowPlaying : null;
     final localPlaying = nowPlaying?.isLocal == true ? nowPlaying : null;
+    final onlineSourceLabel = onlinePlaying == null
+        ? null
+        : onlineSourceDisplayLabel(
+            provider: onlinePlaying.onlineProvider,
+            fallback: onlinePlaying.sourceLabel,
+          );
     final scheme = Theme.of(context).colorScheme;
 
     return ListenableBuilder(
@@ -135,7 +142,7 @@ class _NowPlayingMoreAction extends StatelessWidget {
               MenuItemButton(
                 onPressed: null,
                 leadingIcon: const Icon(Symbols.cloud),
-                child: Text(ui("来源：{0}", [ui(onlinePlaying.sourceLabel)])),
+                child: Text(ui("来源：{0}", [onlineSourceLabel])),
               ),
             if (nowPlaying != null)
               MenuItemButton(
@@ -173,8 +180,9 @@ class _NowPlayingMoreAction extends StatelessWidget {
                 leadingIcon: const Icon(Symbols.download),
                 child: Text(
                   ui("下载不可用：{0}", [
-                    OnlineMusicService.instance
-                        .downloadUnavailableReason(onlinePlaying)
+                    ui(OnlineMusicService.instance
+                            .downloadUnavailableReason(onlinePlaying) ??
+                        "当前来源不支持下载")
                   ]),
                 ),
               ),

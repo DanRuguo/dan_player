@@ -7,6 +7,7 @@ import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/music_matcher.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -28,6 +29,8 @@ Widget _host(
   Audio audio, {
   required OnlineLyricEditorSearch search,
   required OnlineLyricEditorCandidateLoader loadCandidate,
+  List<CustomLyricSourceChoice> customChoices = const [],
+  OnlineLyricEditorCustomCandidateLoader? loadCustomCandidate,
   double textScale = 1,
 }) =>
     MaterialApp(
@@ -51,6 +54,9 @@ Widget _host(
                   audio: audio,
                   onlineLyricSearch: search,
                   onlineLyricCandidateLoader: loadCandidate,
+                  customLyricChoices: customChoices,
+                  customLyricCandidateLoader:
+                      loadCustomCandidate ?? (_, __) async => null,
                   localLyricLoader: (_) async => '[00:00.00]Local line',
                 ),
               ),
@@ -79,6 +85,17 @@ Lyric _lyric(String content, int seconds) => Lrc(
         ),
       ],
       LrcSource.web,
+    );
+
+CustomLyricSourceChoice _customChoice(String id, String name) =>
+    CustomLyricSourceChoice(
+      CustomMusicSourceProfile.tryCreate(
+        id: id,
+        name: name,
+        baseUrl: 'https://example.com',
+        capabilities: const {CustomMusicSourceCapability.lyrics},
+        endpoints: const {CustomMusicSourceCapability.lyrics: '/lyrics'},
+      )!,
     );
 
 (Directory, File, Audio) _fixture() {
@@ -212,6 +229,88 @@ void main() {
           )
           .onPressed,
       isNotNull,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('custom lyric source requests only after the user chooses it',
+      (tester) async {
+    final (directory, sidecar, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final choice = _customChoice('editor-custom', 'My lyric source');
+    var requests = 0;
+    await tester.pumpWidget(_host(
+      audio,
+      search: (_) async =>
+          LyricSearchResponse(candidates: [], failures: const {}),
+      loadCandidate: (_) async => null,
+      customChoices: [choice],
+      loadCustomCandidate: (_, selected) async {
+        requests++;
+        expect(selected.identity, choice.identity);
+        return _lyric('Chosen custom line', 3);
+      },
+    ));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-fill-online')));
+    await _pumpCandidateTransition(tester);
+
+    expect(find.text('My lyric source'), findsOneWidget);
+    expect(requests, 0, reason: 'listing a custom source must not query it');
+    await tester.tap(
+      find.byKey(const ValueKey('online-lyric-custom-editor-custom')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(requests, 1);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
+          .controller!
+          .text,
+      '[00:03.00]Chosen custom line',
+    );
+    expect(sidecar.readAsStringSync(), '[00:00.00]Local line');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('closing a pending custom lyric request keeps the editor intact',
+      (tester) async {
+    final (directory, _, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final choice = _customChoice('pending-custom', 'Pending custom source');
+    final pending = Completer<Lyric?>();
+    await tester.pumpWidget(_host(
+      audio,
+      search: (_) async =>
+          LyricSearchResponse(candidates: [], failures: const {}),
+      loadCandidate: (_) async => null,
+      customChoices: [choice],
+      loadCustomCandidate: (_, __) => pending.future,
+    ));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-fill-online')));
+    await _pumpCandidateTransition(tester);
+    await tester.tap(
+      find.byKey(const ValueKey('online-lyric-custom-pending-custom')),
+    );
+    await tester.pump();
+    await tester.tapAt(const Offset(2, 2));
+    await _pumpCandidateTransition(tester);
+    expect(find.byType(LyricEditorDialog), findsOneWidget);
+
+    pending.complete(_lyric('Late custom line', 4));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
+          .controller!
+          .text,
+      '[00:00.00]Local line',
     );
     expect(tester.takeException(), isNull);
   });

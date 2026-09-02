@@ -349,6 +349,7 @@ class PlaybackService extends ChangeNotifier {
 
     if (wasCurrent || wasPending) {
       _sourceRequestToken += 1;
+      OnlineMusicService.instance.cancelPendingStreamResolution();
       _player.cancelPendingSource();
       isBuffering.value = false;
       resolvingAudioPath.value = null;
@@ -542,6 +543,7 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
     final token = ++_sourceRequestToken;
+    OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
     unawaited(_loadAndPlayResolved(token, audioIndex, playlist));
   }
@@ -726,6 +728,7 @@ class PlaybackService extends ChangeNotifier {
   }) {
     if (_closed) return;
     final token = ++_sourceRequestToken;
+    OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
     unawaited(
       _loadPausedResolved(
@@ -1096,6 +1099,7 @@ class PlaybackService extends ChangeNotifier {
   Future<void> _close() async {
     _closed = true;
     _sourceRequestToken += 1;
+    OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
     isBuffering.value = false;
     resolvingAudioPath.value = null;

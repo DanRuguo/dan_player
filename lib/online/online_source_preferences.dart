@@ -3,8 +3,8 @@ import 'package:flutter/foundation.dart';
 /// Built-in providers only. Enabling a provider is a search-routing choice,
 /// never permission to bypass its access restrictions or alter saved tracks.
 enum OnlineMusicSource {
-  qq('qq', 'QQ音乐', 'QQ音乐匿名接口当前未提供可靠的下载权限'),
-  netease('netease', '网易云音乐', '网易云音乐匿名接口当前未提供可靠的下载权限');
+  qq('qq', 'QQ音乐', '该歌曲的下载地址当前不可用或需要登录'),
+  netease('netease', '网易云音乐', '该歌曲的下载地址当前不可用或需要登录');
 
   const OnlineMusicSource(this.id, this.label, this.downloadUnavailableReason);
 
@@ -12,7 +12,9 @@ enum OnlineMusicSource {
   final String label;
   final String downloadUnavailableReason;
 
-  bool get supportsDownload => false;
+  /// Allows a user-initiated attempt; the actual endpoint still decides
+  /// whether this particular track is available anonymously.
+  bool get supportsDownload => true;
 
   static OnlineMusicSource? fromId(String? id) {
     for (final source in values) {

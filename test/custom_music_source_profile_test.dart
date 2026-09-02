@@ -101,8 +101,36 @@ void main() {
       expect(profile!.endpoints, isEmpty);
     });
 
-    test('bad entries and unknown fields do not discard valid or legacy data',
-        () {
+    test('search owns metadata and cover while legacy stays lyric-only', () {
+      expect(
+        CustomMusicSourceProfile.tryCreate(
+          id: 'orphan-cover',
+          name: 'Orphan cover',
+          baseUrl: 'https://source.example/',
+          capabilities: const {CustomMusicSourceCapability.cover},
+        ),
+        isNull,
+      );
+      expect(
+        CustomMusicSourceProfile.tryCreate(
+          id: CustomMusicSourceProfile.legacyLyricProfileId,
+          name: 'Unsafe legacy',
+          baseUrl: 'https://source.example/',
+          protocol: CustomMusicSourceProtocol.legacyLyrics,
+          capabilities: const {
+            CustomMusicSourceCapability.lyrics,
+            CustomMusicSourceCapability.stream,
+          },
+          endpoints: const {
+            CustomMusicSourceCapability.lyrics: '/lyrics',
+            CustomMusicSourceCapability.stream: '/stream',
+          },
+        ),
+        isNull,
+      );
+    });
+
+    test('valid modern settings stay authoritative over legacy fields', () {
       final valid = CustomMusicSourceProfile.tryCreate(
         id: 'one',
         name: 'One',
@@ -132,11 +160,10 @@ void main() {
       );
       expect(decoded.map((profile) => profile.id), [
         'one',
-        CustomMusicSourceProfile.legacyLyricProfileId,
+        CustomMusicSourceProfile.kugouProfileId,
       ]);
       expect(decoded.first, valid);
-      expect(decoded.last.endpointFor(CustomMusicSourceCapability.lyrics),
-          Uri.parse('https://legacy.example/lyric'));
+      expect(decoded.where((profile) => profile.isLegacyLyricProfile), isEmpty);
 
       final fallback = [valid];
       expect(
@@ -196,6 +223,58 @@ void main() {
         imported.last.id,
         reason: 'A migrated backup entry needs a stable deterministic ID.',
       );
+    });
+
+    test('LRC API keeps its stable ID when protocol and capabilities change',
+        () {
+      final source = CustomMusicSourceProfile.lrcApiPreset().copyWith(
+        name: 'My source',
+        protocol: CustomMusicSourceProtocol.danSourceV1,
+        capabilities: const {CustomMusicSourceCapability.search},
+        endpoints: const {CustomMusicSourceCapability.search: '/search'},
+      );
+      expect(source.id, CustomMusicSourceProfile.legacyLyricProfileId);
+      expect(source.protocol, CustomMusicSourceProtocol.danSourceV1);
+      final decoded = CustomMusicSourceProfileCodec.decodeSettings(
+        CustomMusicSourceProfileCodec.encodeSettings([source]),
+        legacyLyricApiUrl: 'https://stale.example/lyrics',
+      );
+      expect(decoded, [source]);
+    });
+
+    test(
+        'default preset migration runs once and never revives explicit deletions',
+        () {
+      final defaults = CustomMusicSourceProfile.builtInPresets();
+      expect(defaults.map((profile) => profile.id), [
+        CustomMusicSourceProfile.legacyLyricProfileId,
+        CustomMusicSourceProfile.kugouProfileId
+      ]);
+      expect(defaults.every((profile) => profile.enabled), isTrue);
+      final old =
+          CustomMusicSourceProfile.legacyLyric('https://mine.example/lyrics')!
+              .copyWith(name: 'My lyrics', enabled: false);
+      final migrated = CustomMusicSourceProfileCodec.decodeSettings({
+        'version': 1,
+        'profiles': [old.toJson()],
+      });
+      expect(migrated.first, old);
+      expect(migrated.last, CustomMusicSourceProfile.kugouPreset());
+      final deletedKugou = CustomMusicSourceProfileCodec.encodeSettings([old]);
+      expect(CustomMusicSourceProfileCodec.decodeSettings(deletedKugou), [old]);
+      final deletedLrc = CustomMusicSourceProfileCodec.encodeSettings(
+          [CustomMusicSourceProfile.kugouPreset()]);
+      expect(
+        CustomMusicSourceProfileCodec.decodeSettings(deletedLrc,
+            legacyLyricApiUrl: 'https://stale.example/lyrics'),
+        [CustomMusicSourceProfile.kugouPreset()],
+      );
+      expect(
+          CustomMusicSourceProfileCodec.decodeSettings(
+            {'version': 1, 'profiles': []},
+            legacyLyricApiUrl: 'https://stale.example/lyrics',
+          ),
+          isEmpty);
     });
   });
 

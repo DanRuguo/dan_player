@@ -353,10 +353,10 @@ const Map<String, List<String>> uiCatalogB = {
     "再生中の曲が変わりました。歌詞の取り違えを防ぐため、閉じてから新しい曲で選択し直してください。",
     "재생 중인 곡이 바뀌었습니다. 가사가 다른 곡에 적용되지 않도록 이 창을 닫고 새 곡에서 다시 선택하세요."
   ],
-  "自动匹配会先尝试自定义歌词接口；接口结果没有平台歌曲 ID，因此不会出现在下面的内置平台候选中。": [
-    "Automatic matching tries custom lyric APIs first. Their results have no platform song IDs, so they do not appear among the built-in platform candidates below.",
-    "自動検索ではカスタム歌詞 API を先に試します。その結果にはプラットフォームの曲 ID がないため、下の標準プラットフォーム候補には表示されません。",
-    "자동 검색은 사용자 지정 가사 API를 먼저 시도합니다. 해당 결과에는 플랫폼 곡 ID가 없으므로 아래 기본 플랫폼 후보 목록에는 표시되지 않습니다."
+  "自动匹配会按保存顺序尝试已启用的自定义歌词源；自定义结果不会列入下面的内置平台候选。": [
+    "Automatic matching tries enabled custom lyric sources in saved order; custom results are not listed among the built-in platform candidates below.",
+    "自動検索では、有効なカスタム歌詞ソースを保存順に試します。カスタム結果は下の内蔵プラットフォーム候補には表示されません。",
+    "자동 검색은 활성화된 사용자 지정 가사 소스를 저장 순서대로 시도합니다. 사용자 지정 결과는 아래 내장 플랫폼 후보 목록에 표시되지 않습니다."
   ],
   "使用本地歌词": ["Use local lyrics", "ローカル歌詞を使用", "로컬 가사 사용"],
   "读取内嵌歌词或同目录同名 LRC 文件": [
@@ -469,6 +469,11 @@ const Map<String, List<String>> uiCatalogB = {
     "Search enabled online music sources. Playback depends on platform authorization and API availability. Downloads are currently unavailable.",
     "有効なオンライン音楽ソースを検索します。再生できるかどうかはプラットフォームの許可と API の可用性に依存します。現在、ダウンロードは利用できません。",
     "활성화된 온라인 음악 소스를 검색합니다. 재생 가능 여부는 플랫폼의 허가와 API 가용성에 따라 달라지며, 현재 다운로드는 제공하지 않습니다."
+  ],
+  "搜索已启用的内置与自定义歌源；搜索只返回候选，播放时再解析地址，只有来源明确授权的歌曲才可下载。": [
+    "Search enabled built-in and custom sources. Search returns candidates, playback URLs are resolved on demand, and downloads are available only when the source explicitly authorizes a track.",
+    "有効な内蔵音源とカスタム音源を検索します。検索は候補のみを返し、再生時にアドレスを解決します。ダウンロードは音源が曲ごとに明示的に許可した場合だけ利用できます。",
+    "활성화된 내장 및 사용자 지정 음원을 검색합니다. 검색은 후보만 반환하고 재생할 때 주소를 확인하며, 다운로드는 음원이 해당 곡을 명시적으로 허용한 경우에만 가능합니다."
   ],
   "联网服务没有找到匹配歌曲": [
     "No matching songs were found online",

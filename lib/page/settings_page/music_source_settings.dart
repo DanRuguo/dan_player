@@ -9,9 +9,11 @@ import 'package:desktop_lyric/ui_language.dart';
 /// Declarative provider capabilities and search switches. Building the settings
 /// or changing a switch does not search, probe, log in, or touch saved music.
 class MusicSourceSettings extends StatefulWidget {
-  const MusicSourceSettings({super.key, this.preferences, this.persist});
+  const MusicSourceSettings(
+      {super.key, this.preferences, this.lrclibEnabled, this.persist});
 
   final ValueNotifier<OnlineSourcePreferences>? preferences;
+  final ValueNotifier<bool>? lrclibEnabled;
   final Future<void> Function()? persist;
 
   @override
@@ -24,6 +26,9 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
 
   ValueNotifier<OnlineSourcePreferences> get _preferences =>
       widget.preferences ?? AppSettings.instance.onlineSources;
+
+  ValueNotifier<bool> get _lrclibEnabled =>
+      widget.lrclibEnabled ?? AppSettings.instance.lrclibEnabled;
 
   Future<void> _change(OnlineMusicSource source, bool enabled) async {
     final preferences = _preferences;
@@ -45,12 +50,34 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
     }
   }
 
+  Future<void> _changeLrclib(bool enabled) async {
+    final notifier = _lrclibEnabled;
+    if (notifier.value == enabled) return;
+    final revision = ++_saveRevision;
+    setState(() => _saveError = null);
+    notifier.value = enabled;
+    try {
+      await (widget.persist ??
+          () => AppSettings.instance.saveSettings(throwOnError: true))();
+    } catch (_) {
+      if (!mounted ||
+          revision != _saveRevision ||
+          !identical(notifier, _lrclibEnabled)) {
+        return;
+      }
+      setState(() => _saveError = ui('保存歌源设置失败；当前选择仍对本次会话生效。'));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return ValueListenableBuilder(
-      valueListenable: _preferences,
-      builder: (context, preferences, _) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([_preferences, _lrclibEnabled]),
+      builder: (context, _) {
+        final preferences = _preferences.value;
+        final enabledCount =
+            preferences.enabledSources.length + (_lrclibEnabled.value ? 1 : 0);
         final scheme = Theme.of(context).colorScheme;
         return Column(
           key: const ValueKey('music-source-settings'),
@@ -58,9 +85,18 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
           children: [
             SettingsSurface(
                 child: SettingsHeader(
-                    title: ui("内置歌源"),
+                    title: ui('平台直连与公开 API'),
                     icon: Icons.cloud_outlined,
-                    subtitle: ui("只影响新的联网搜索。关闭后，不会删除收藏、歌单或队列，也不会中断已有歌曲的播放。"))),
+                    subtitle:
+                        ui('按标注能力启用联网请求。关闭不会删除收藏、歌单或队列；已有平台歌曲的播放不受搜索开关影响。'))),
+            const SizedBox(height: 8),
+            Text(
+              ui('名称、接口和能力由播放器维护。平台域名不代表官方开放接口、下载授权或长期可用承诺。'),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
             const SizedBox(height: 12),
             for (final source in OnlineMusicSource.values) ...[
               _SourceCard(
@@ -70,16 +106,20 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
               ),
               const SizedBox(height: 10),
             ],
+            _LrclibSourceCard(
+              enabled: _lrclibEnabled.value,
+              onChanged: (value) => unawaited(_changeLrclib(value)),
+            ),
+            const SizedBox(height: 10),
             Semantics(
               liveRegion: true,
               child: Text(
-                preferences.isEmpty
-                    ? onlineSourcesDisabledMessage
-                    : ui("已启用 {0} 个歌源；新搜索会同时查询已启用的来源。",
-                        [preferences.enabledSources.length]),
+                enabledCount == 0
+                    ? ui('此类来源均已停用')
+                    : ui('已启用 {0} 个此类来源；各项按已标注能力参与联网请求。', [enabledCount]),
                 key: const ValueKey('music-source-status'),
                 style: TextStyle(
-                    color: preferences.isEmpty
+                    color: enabledCount == 0
                         ? scheme.error
                         : scheme.onSurfaceVariant),
               ),
@@ -91,8 +131,6 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
                   child:
                       Text(_saveError!, style: TextStyle(color: scheme.error))),
             ],
-            const SizedBox(height: 16),
-            const _LyricCandidateSources(),
           ],
         );
       },
@@ -100,53 +138,48 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
   }
 }
 
-class _LyricCandidateSources extends StatelessWidget {
-  const _LyricCandidateSources();
+class _LrclibSourceCard extends StatelessWidget {
+  const _LrclibSourceCard({required this.enabled, required this.onChanged});
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return SettingsSurface(
+      padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SettingsHeader(
-            title: ui('歌词候选'),
+          SettingsSwitchTile(
+            surface: false,
             icon: Icons.lyrics_outlined,
-            subtitle: ui('匹配歌词时会按候选结果供你选择；歌词来源不等于完整歌曲播放源。'),
+            controlKey: const ValueKey('online-source-lrclib'),
+            value: enabled,
+            onChanged: onChanged,
+            title: const Text('LRCLIB'),
+            subtitle: Text(enabled ? ui('参与歌词匹配') : ui('不参与歌词匹配')),
           ),
-          const SizedBox(height: 14),
-          const Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _CandidateChip(label: 'QQ音乐'),
-              _CandidateChip(label: '网易云音乐'),
-              _CandidateChip(label: '酷狗音乐'),
-              _CandidateChip(label: 'LRCLIB'),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _Capability(
-            icon: Icons.info_outline,
-            text: ui('酷狗音乐目前仅作为歌词候选；完整播放与下载不会通过不稳定的公开接口直接内置。'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Capability(
+                    icon: Icons.link, text: ui('接口域名（只读）：{0}', ['lrclib.net'])),
+                const SizedBox(height: 10),
+                const _SourceCapability(
+                    icon: Icons.lyrics_outlined, label: '歌词'),
+                const SizedBox(height: 10),
+                Text(ui('通过 LRCLIB 公开 API 匹配歌词；不提供歌曲播放或下载。'),
+                    style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
-}
-
-class _CandidateChip extends StatelessWidget {
-  const _CandidateChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Chip(
-        avatar: const Icon(Icons.lyrics_outlined, size: 18),
-        label: Text(label),
-      );
 }
 
 class _SourceCard extends StatelessWidget {
@@ -180,13 +213,38 @@ class _SourceCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _Capability(
+                  icon: Icons.link,
+                  text: ui('接口域名（只读）：{0}', [
+                    source == OnlineMusicSource.qq
+                        ? 'u.y.qq.com · c.y.qq.com'
+                        : 'music.163.com',
+                  ]),
+                ),
+                const SizedBox(height: 10),
+                const Wrap(
+                  spacing: 14,
+                  runSpacing: 8,
+                  children: [
+                    _SourceCapability(icon: Icons.search, label: '搜索'),
+                    _SourceCapability(icon: Icons.info_outline, label: '歌曲信息'),
+                    _SourceCapability(icon: Icons.image_outlined, label: '封面'),
+                    _SourceCapability(icon: Icons.lyrics_outlined, label: '歌词'),
+                    _SourceCapability(
+                        icon: Icons.play_circle_outline, label: '播放'),
+                    _SourceCapability(
+                        icon: Icons.download_outlined, label: '下载'),
+                    _SourceCapability(
+                        icon: Icons.comment_outlined, label: '评论'),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                _Capability(
                     icon: Icons.manage_search,
                     text: ui("歌曲搜索；公开可用音源播放；歌词和封面（来源提供时）。")),
                 const SizedBox(height: 8),
                 _Capability(
-                    icon: Icons.file_download_off_outlined,
-                    text: ui(
-                        "下载未开放：{0}。", [ui(source.downloadUnavailableReason)])),
+                    icon: Icons.file_download_outlined,
+                    text: ui('下载按接口实际返回执行，需登录或受限时会提示。')),
                 const SizedBox(height: 8),
                 _Capability(
                     icon: Icons.comment_outlined,
@@ -198,6 +256,24 @@ class _SourceCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SourceCapability extends StatelessWidget {
+  const _SourceCapability({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 5),
+          Flexible(
+              child: Text(ui(label),
+                  style: Theme.of(context).textTheme.bodySmall)),
+        ],
+      );
 }
 
 class _Capability extends StatelessWidget {

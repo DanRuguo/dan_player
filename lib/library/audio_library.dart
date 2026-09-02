@@ -6,6 +6,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/cover_cache.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier;
@@ -421,8 +422,8 @@ class Audio {
   /// the source did not supply a per-track answer (including legacy records).
   final bool? onlinePlayable;
 
-  /// Explicit per-track download authorization reported by the provider.
-  /// Capability support alone must never be treated as permission to download.
+  /// Optional per-track availability reported by the provider. An explicit
+  /// false blocks downloading; null means the endpoint has to be tried.
   final bool? onlineDownloadAllowed;
 
   /// 以“、”和“/”分割艺术家，会把名称中带有这些符号的艺术家分割。
@@ -538,12 +539,66 @@ class Audio {
   bool get isOnline => onlineProvider != null && onlineId != null;
   bool get classificationTagsRead => classificationVersion >= 1;
   bool get isLocal => !isOnline;
-  String get sourceLabel => switch (onlineProvider) {
-        "qq" => "QQ音乐",
-        "netease" => "网易云音乐",
-        final String provider => provider,
-        null => "本地",
-      };
+  String get sourceLabel {
+    final provider = onlineProvider;
+    if (provider == null) return "本地";
+    if (provider == "qq") return "QQ音乐";
+    if (provider == "netease") return "网易云音乐";
+    final profileId = CustomMusicSourceProfile.profileIdFromProvider(provider);
+    if (profileId != null) {
+      for (final profile in AppSettings.instance.customMusicSources.value) {
+        if (profile.id == profileId) return profile.name;
+      }
+      return "自定义歌源";
+    }
+    return provider;
+  }
+
+  /// Whether a persisted remote artwork URL may be contacted right now.
+  ///
+  /// Built-in source switches intentionally affect new searches only, so
+  /// their saved tracks keep working. Custom source switches are strict: a
+  /// disabled, removed or currently unusable profile must not leak a request
+  /// to the previously saved artwork host.
+  bool get canFetchRemoteArtwork {
+    if (!isOnline) return false;
+    final provider = onlineProvider;
+    if (provider == null || !provider.startsWith('custom:')) return true;
+    return _currentCustomArtworkProfile != null;
+  }
+
+  CustomMusicSourceProfile? get _currentCustomArtworkProfile {
+    final provider = onlineProvider;
+    final profileId = CustomMusicSourceProfile.profileIdFromProvider(provider);
+    if (profileId == null) return null;
+    for (final profile in AppSettings.instance.customMusicSources.value) {
+      if (profile.id != profileId) continue;
+      return profile.enabled &&
+              profile.authentication == null &&
+              profile.capabilities.contains(CustomMusicSourceCapability.cover)
+          ? profile
+          : null;
+    }
+    return null;
+  }
+
+  bool _allowsRemoteArtworkUri(
+    Uri artwork, {
+    CustomMusicSourceProfile? customProfile,
+  }) {
+    final provider = onlineProvider;
+    final isCustomProvider = provider?.startsWith('custom:') == true;
+    if (isCustomProvider && customProfile?.providerId != provider) return false;
+    if (artwork.scheme == 'https') return true;
+    if (artwork.scheme != 'http') return false;
+    if (!isCustomProvider) return true;
+    if (customProfile == null) return false;
+    final base = Uri.tryParse(customProfile.baseUrl);
+    return base != null &&
+        base.scheme == 'http' &&
+        base.host.toLowerCase() == artwork.host.toLowerCase() &&
+        base.port == artwork.port;
+  }
 
   String get fileNameTitle =>
       isOnline ? title : path_util.basenameWithoutExtension(path);
@@ -657,10 +712,27 @@ class Audio {
   /// use AudioArtwork or pass their own View DPR to [coverForDisplay].
   Future<ImageProvider?> artworkForSize(ArtworkSize size) async {
     final remoteArtwork = artworkUrl;
-    if (isOnline && remoteArtwork != null && remoteArtwork.isNotEmpty) {
+    final isCustomProvider = onlineProvider?.startsWith('custom:') == true;
+    final customProfile =
+        isCustomProvider ? _currentCustomArtworkProfile : null;
+    final mayFetchRemoteArtwork =
+        isOnline && (!isCustomProvider || customProfile != null);
+    if (mayFetchRemoteArtwork &&
+        remoteArtwork != null &&
+        remoteArtwork.isNotEmpty) {
       final uri = Uri.tryParse(remoteArtwork);
-      if (uri != null && (uri.scheme == "http" || uri.scheme == "https")) {
+      if (uri != null &&
+          _allowsRemoteArtworkUri(uri, customProfile: customProfile)) {
         final sizedUri = artworkUriForSize(uri, size, provider: onlineProvider);
+        if (customProfile != null) {
+          return ArtworkImageProvider(
+            CustomOnlineArtworkImageProvider(
+              sizedUri.toString(),
+              expectedProfile: customProfile,
+            ),
+            size,
+          );
+        }
         return ArtworkImageProvider(NetworkImage(sizedUri.toString()), size);
       }
     }

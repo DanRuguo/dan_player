@@ -148,10 +148,13 @@ class AppSettings {
   /// Controls new search requests only; saved online tracks remain usable.
   final onlineSources = ValueNotifier(const OnlineSourcePreferences());
 
+  /// LRCLIB is a read-only public lyric API, independent of track search.
+  final lrclibEnabled = ValueNotifier(true);
+
   /// User-managed HTTP providers. Profiles remain isolated from the built-in
   /// source toggles and declare only the capabilities they actually expose.
-  final customMusicSources =
-      ValueNotifier<List<CustomMusicSourceProfile>>(const []);
+  final customMusicSources = ValueNotifier<List<CustomMusicSourceProfile>>(
+      CustomMusicSourceProfile.builtInPresets());
 
   /// Desktop controls and playback/lyric presentation; independent of data.
   final experience = ValueNotifier(const PlayerExperiencePreferences());
@@ -185,6 +188,13 @@ class AppSettings {
   }
 
   set lyricApiUrl(String? value) {
+    // The compatibility setter must not overwrite a source that the user has
+    // already converted to a different protocol under the same stable ID.
+    if (customMusicSources.value.any((profile) =>
+        profile.id == CustomMusicSourceProfile.legacyLyricProfileId &&
+        !profile.isLegacyLyricProfile)) {
+      return;
+    }
     final profiles = <CustomMusicSourceProfile>[
       for (final profile in customMusicSources.value)
         if (!profile.isLegacyLyricProfile) profile,
@@ -293,6 +303,9 @@ class AppSettings {
         BackgroundPreferences.fromMap(settingsMap['Backgrounds']);
     _instance.onlineSources.value =
         OnlineSourcePreferences.fromJson(settingsMap['OnlineSources']);
+    _instance.lrclibEnabled.value = settingsMap['LrclibEnabled'] is bool
+        ? settingsMap['LrclibEnabled'] as bool
+        : true;
     _instance.experience.value =
         PlayerExperiencePreferences.fromMap(settingsMap['PlayerExperience']);
     _instance.desktopLyricAppearance.value =
@@ -425,6 +438,7 @@ class AppSettings {
         "Rendering": rendering.value.toMap(),
         "PlayerShortcuts": shortcuts.value.toMap(),
         "OnlineSources": onlineSources.value.toJson(),
+        "LrclibEnabled": lrclibEnabled.value,
         "CustomMusicSources": CustomMusicSourceProfileCodec.encodeSettings(
           customMusicSources.value,
         ),

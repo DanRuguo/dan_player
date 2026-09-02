@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:dan_player/online/kugou_music_api.dart';
 
 enum CustomMusicSourceFailureKind {
   unavailable,
@@ -192,12 +193,21 @@ class CustomMusicSourceTransport {
   final HttpClient Function() _httpClientFactory;
   final Duration requestTimeout;
 
+  KugouMusicApi get _kugou => KugouMusicApi(
+        profile,
+        httpClientFactory: _httpClientFactory,
+        requestTimeout: requestTimeout,
+      );
+
   Future<CustomMusicSearchResult> search(
     String rawQuery, {
     int limit = maximumSearchResults,
     CustomMusicSourceCancellation? cancellation,
   }) async {
     _requireReady(CustomMusicSourceCapability.search);
+    if (profile.protocol == CustomMusicSourceProtocol.kugou) {
+      return _kugou.search(rawQuery, limit: limit, cancellation: cancellation);
+    }
     final query = rawQuery.trim();
     if (query.isEmpty) {
       return CustomMusicSearchResult(
@@ -247,16 +257,69 @@ class CustomMusicSourceTransport {
     );
   }
 
+  /// Fetches additional information only on explicit selection or probing.
+  /// Search-only protocols keep their already returned metadata unchanged.
+  Future<Audio> metadata(
+    Audio audio, {
+    CustomMusicSourceCancellation? cancellation,
+  }) async {
+    _requireReady(
+        profile.capabilities.contains(CustomMusicSourceCapability.metadata)
+            ? CustomMusicSourceCapability.metadata
+            : CustomMusicSourceCapability.cover);
+    _requireOwnedTrack(audio);
+    if (profile.protocol == CustomMusicSourceProtocol.kugou) {
+      return _kugou.metadata(audio, cancellation: cancellation);
+    }
+    if (!profile.endpoints.containsKey(CustomMusicSourceCapability.metadata)) {
+      if (profile.protocol == CustomMusicSourceProtocol.danSourceV1 &&
+          profile.endpointFor(CustomMusicSourceCapability.cover) != null) {
+        return Audio.fromOnlineMap({
+          ...audio.toOnlineMap(),
+          'artworkUrl': _withQuery(_endpoint(CustomMusicSourceCapability.cover),
+              {'id': audio.onlineId!}).toString(),
+        });
+      }
+      return audio;
+    }
+    final body = await _get(
+      _withQuery(_endpoint(CustomMusicSourceCapability.metadata),
+          _standardTrackQuery(audio, includeIdentity: true)),
+      byteLimit: searchResponseByteLimit,
+      cancellation: cancellation,
+    );
+    final payload = _payload(_decodeObject(body, operation: '歌曲信息'));
+    final value = payload['track'] is Map ? payload['track'] as Map : payload;
+    // Metadata must not rebind a saved song to a different source identity.
+    final track = _danSourceAudio(<String, dynamic>{
+      'title': audio.title,
+      'artist': audio.artist,
+      'album': audio.album,
+      'duration': audio.duration,
+      'coverUrl': audio.artworkUrl,
+      'streamAvailable': audio.onlinePlayable,
+      'downloadAllowed': audio.onlineDownloadAllowed,
+      ...value.cast<String, dynamic>(),
+      'id': audio.onlineId,
+    });
+    if (track == null) throw _invalid('自定义歌源返回了无法识别的歌曲信息');
+    return track;
+  }
+
   Future<CustomMusicLyricsResult> lyrics(
     Audio audio, {
     CustomMusicSourceCancellation? cancellation,
   }) async {
     _requireReady(CustomMusicSourceCapability.lyrics);
+    if (profile.protocol == CustomMusicSourceProtocol.kugou) {
+      return _kugou.lyrics(audio, cancellation: cancellation);
+    }
     final endpoint = _endpoint(CustomMusicSourceCapability.lyrics);
     final query = switch (profile.protocol) {
       CustomMusicSourceProtocol.goMusicApi =>
         _goMusicTrackQuery(_requireGoMusicDescriptor(audio)),
-      CustomMusicSourceProtocol.danSourceV1 =>
+      CustomMusicSourceProtocol.danSourceV1 ||
+      CustomMusicSourceProtocol.kugou =>
         _standardTrackQuery(audio, includeIdentity: true),
       CustomMusicSourceProtocol.legacyLyrics =>
         _standardTrackQuery(audio, includeIdentity: false),
@@ -379,6 +442,10 @@ class CustomMusicSourceTransport {
         : CustomMusicSourceCapability.stream;
     _requireReady(capability);
     _requireOwnedTrack(audio);
+    if (profile.protocol == CustomMusicSourceProtocol.kugou) {
+      return _kugou.resolve(audio,
+          forDownload: forDownload, cancellation: cancellation);
+    }
     if (profile.protocol == CustomMusicSourceProtocol.goMusicApi) {
       final descriptor = _requireGoMusicDescriptor(audio);
       final uri =
@@ -405,22 +472,33 @@ class CustomMusicSourceTransport {
     );
     final root = _decodeObject(body, operation: '播放地址解析');
     final payload = _payload(root);
+    if ([root, payload].any((part) =>
+        part['requiresLogin'] == true ||
+        part['loginRequired'] == true ||
+        const {'401', '403'}.contains('${part['code']}'))) {
+      throw const CustomMusicSourceException(
+        CustomMusicSourceFailureKind.http,
+        '该歌曲需要登录后才能获取音源',
+        statusCode: 401,
+      );
+    }
     final rawUrl = _firstText(<Object?>[payload['url']]);
     if (rawUrl == null) {
       throw _invalid('自定义歌源响应中没有播放地址');
     }
-    final explicitDownload = payload['downloadAllowed'] == true &&
+    final downloadAvailable = [root, payload].every((part) =>
+            part['downloadAllowed'] != false && part['canDownload'] != false) &&
         profile.capabilities.contains(CustomMusicSourceCapability.download);
-    if (forDownload && !explicitDownload) {
+    if (forDownload && !downloadAvailable) {
       throw const CustomMusicSourceException(
         CustomMusicSourceFailureKind.unavailable,
-        '该歌源没有对这首歌曲明确授权下载',
+        '该歌源拒绝下载此歌曲或要求登录',
       );
     }
     return CustomMusicStreamResolution(
       uri: _safeResponseUri(rawUrl),
       expiresAt: _dateTime(payload['expiresAt']),
-      downloadAllowed: explicitDownload,
+      downloadAllowed: downloadAvailable,
       mimeType: _safeMimeType(payload['mimeType'] ?? payload['mime']),
       supportsRange: payload['supportsRange'] is bool
           ? payload['supportsRange'] as bool
@@ -461,6 +539,7 @@ class CustomMusicSourceTransport {
     final route = switch (capability) {
       CustomMusicSourceCapability.search => 'api/v1/music/search',
       CustomMusicSourceCapability.lyrics => 'api/v1/music/lyric',
+      CustomMusicSourceCapability.cover => 'api/v1/music/cover',
       CustomMusicSourceCapability.stream ||
       CustomMusicSourceCapability.download =>
         'api/v1/music/stream',
@@ -520,6 +599,16 @@ class CustomMusicSourceTransport {
     final id = _firstText(<Object?>[value['id']]);
     final title = _firstText(<Object?>[value['title'], value['name']]);
     if (id == null || title == null || id.length > 4096) return null;
+    final extendedMetadata =
+        profile.capabilities.contains(CustomMusicSourceCapability.metadata);
+    final coverEnabled =
+        profile.capabilities.contains(CustomMusicSourceCapability.cover);
+    final streamEnabled =
+        profile.capabilities.contains(CustomMusicSourceCapability.stream);
+    final downloadEnabled =
+        profile.capabilities.contains(CustomMusicSourceCapability.download);
+    final needsLogin =
+        value['requiresLogin'] == true || value['loginRequired'] == true;
     return Audio.online(
       provider: profile.providerId,
       id: id,
@@ -528,30 +617,51 @@ class CustomMusicSourceTransport {
           _firstText(<Object?>[value['artist'], value['artists']]) ?? 'UNKNOWN',
       album: _firstText(<Object?>[value['album']]) ?? 'UNKNOWN',
       duration: _boundedDuration(value['duration']),
-      artworkUrl: _optionalSafeUrl(
-        value['artworkUrl'] ?? value['coverUrl'] ?? value['cover'],
-      ),
-      playable: value['streamAvailable'] is bool
-          ? value['streamAvailable'] as bool
-          : value['playable'] is bool
-              ? value['playable'] as bool
-              : null,
-      downloadAllowed: value['downloadAllowed'] is bool
-          ? value['downloadAllowed'] as bool
+      artworkUrl: coverEnabled
+          ? profile.protocol == CustomMusicSourceProtocol.danSourceV1 &&
+                  profile.endpointFor(CustomMusicSourceCapability.cover) != null
+              ? _withQuery(
+                      _endpoint(CustomMusicSourceCapability.cover), {'id': id})
+                  .toString()
+              : _optionalSafeUrl(
+                  value['artworkUrl'] ?? value['coverUrl'] ?? value['cover'],
+                )
           : null,
-      bitrate: _optionalNonNegativeInt(value['bitrate']),
-      albumArtist: _firstText(<Object?>[
-        value['albumArtist'],
-        value['album_artist'],
-      ]),
-      composer: _firstText(<Object?>[value['composer']]),
-      language: _firstText(<Object?>[value['language']]),
+      playable: needsLogin
+          ? false
+          : streamEnabled
+              ? value['streamAvailable'] is bool
+                  ? value['streamAvailable'] as bool
+                  : value['playable'] is bool
+                      ? value['playable'] as bool
+                      : null
+              : null,
+      downloadAllowed: needsLogin ||
+              value['downloadAllowed'] == false ||
+              value['canDownload'] == false
+          ? false
+          : downloadEnabled &&
+                  (value['downloadAllowed'] == true ||
+                      value['canDownload'] == true)
+              ? true
+              : null,
+      bitrate:
+          extendedMetadata ? _optionalNonNegativeInt(value['bitrate']) : null,
+      albumArtist: extendedMetadata
+          ? _firstText(<Object?>[
+              value['albumArtist'],
+              value['album_artist'],
+            ])
+          : null,
+      composer:
+          extendedMetadata ? _firstText(<Object?>[value['composer']]) : null,
+      language:
+          extendedMetadata ? _firstText(<Object?>[value['language']]) : null,
     );
   }
 
   Audio? _goMusicAudio(Map value) {
     if (value['is_invalid'] == true) return null;
-    final explicitlyValid = value['is_invalid'] == false;
     final id = _firstText(<Object?>[value['id']]);
     final source = _firstText(<Object?>[value['source']]);
     final title = _firstText(<Object?>[value['name']]);
@@ -568,6 +678,21 @@ class CustomMusicSourceTransport {
     );
     final opaqueId = descriptor.encode();
     if (opaqueId.length > 16384) return null;
+    final available = value['is_invalid'] != true;
+    final coverEnabled =
+        profile.capabilities.contains(CustomMusicSourceCapability.cover);
+    final metadataEnabled =
+        profile.capabilities.contains(CustomMusicSourceCapability.metadata);
+    final artworkUrl = coverEnabled && descriptor.cover != null
+        ? _withQuery(
+            _endpoint(CustomMusicSourceCapability.cover),
+            <String, String>{
+              'url': descriptor.cover!,
+              'name': descriptor.name,
+              'artist': descriptor.artist,
+            },
+          ).toString()
+        : null;
     return Audio.online(
       provider: profile.providerId,
       id: opaqueId,
@@ -575,20 +700,20 @@ class CustomMusicSourceTransport {
       artist: descriptor.artist,
       album: descriptor.album,
       duration: descriptor.duration,
-      artworkUrl: descriptor.cover,
-      playable: value['is_invalid'] is bool
-          ? explicitlyValid &&
+      artworkUrl: artworkUrl,
+      playable: available &&
               profile.capabilities.contains(CustomMusicSourceCapability.stream)
+          ? true
           : null,
-      // The go-music-api preset is a user-operated media proxy whose /stream
-      // route serves both playback and downloads. This is the sole preset
-      // where that local proxy contract may stand in for a per-row flag.
-      downloadAllowed: explicitlyValid &&
+      // The go-music-api preset's stream route serves both playback and
+      // downloads; its actual HTTP response determines media availability.
+      downloadAllowed: available &&
               profile.capabilities
                   .contains(CustomMusicSourceCapability.download)
           ? true
           : null,
-      bitrate: _optionalNonNegativeInt(value['bitrate']),
+      bitrate:
+          metadataEnabled ? _optionalNonNegativeInt(value['bitrate']) : null,
     );
   }
 
@@ -629,10 +754,23 @@ class CustomMusicSourceTransport {
     token.check();
     final client = _httpClientFactory()..connectionTimeout = requestTimeout;
     final removeListener = token.onCancel(() => client.close(force: true));
+    final deadline = Completer<void>();
+    var deadlineExpired = false;
+    final deadlineTimer = Timer(requestTimeout, () {
+      deadlineExpired = true;
+      if (!deadline.isCompleted) deadline.complete();
+      client.close(force: true);
+    });
+
+    Future<T> withinDeadline<T>(Future<T> operation) => Future.any(<Future<T>>[
+          token.race(operation),
+          deadline.future.then<T>(
+            (_) => throw TimeoutException('Custom source request timed out'),
+          ),
+        ]);
+
     try {
-      final request = await token.race(
-        client.getUrl(uri).timeout(requestTimeout),
-      );
+      final request = await withinDeadline(client.getUrl(uri));
       token.check();
       request.followRedirects = false;
       request.headers.set(
@@ -643,9 +781,7 @@ class CustomMusicSourceTransport {
       for (final entry in profile.publicHeaders.entries) {
         request.headers.set(entry.key, entry.value);
       }
-      final response = await token.race(
-        request.close().timeout(requestTimeout),
-      );
+      final response = await withinDeadline(request.close());
       token.check();
       if (response.isRedirect ||
           (response.statusCode >= 300 && response.statusCode < 400)) {
@@ -667,25 +803,34 @@ class CustomMusicSourceTransport {
           '自定义歌源响应过大，已停止读取',
         );
       }
-      final bytes = BytesBuilder(copy: false);
-      final stream = response.timeout(requestTimeout);
-      await for (final chunk in stream) {
-        token.check();
-        if (bytes.length + chunk.length > byteLimit) {
-          throw const CustomMusicSourceException(
-            CustomMusicSourceFailureKind.responseTooLarge,
-            '自定义歌源响应过大，已停止读取',
-          );
+      final body = await withinDeadline(() async {
+        final bytes = BytesBuilder(copy: false);
+        await for (final chunk in response) {
+          token.check();
+          if (bytes.length + chunk.length > byteLimit) {
+            throw const CustomMusicSourceException(
+              CustomMusicSourceFailureKind.responseTooLarge,
+              '自定义歌源响应过大，已停止读取',
+            );
+          }
+          bytes.add(chunk);
         }
-        bytes.add(chunk);
-      }
+        token.check();
+        return bytes.takeBytes();
+      }());
       token.check();
       try {
-        return utf8.decode(bytes.takeBytes());
+        return utf8.decode(body);
       } on FormatException {
         throw _invalid('自定义歌源返回的文本不是有效 UTF-8');
       }
     } on CustomMusicSourceException {
+      if (deadlineExpired && !token.isCancelled) {
+        throw const CustomMusicSourceException(
+          CustomMusicSourceFailureKind.timeout,
+          '自定义歌源请求超时',
+        );
+      }
       rethrow;
     } on TimeoutException {
       if (token.isCancelled) throw const CustomMusicSourceCancelled();
@@ -695,23 +840,42 @@ class CustomMusicSourceTransport {
       );
     } on SocketException {
       if (token.isCancelled) throw const CustomMusicSourceCancelled();
+      if (deadlineExpired) {
+        throw const CustomMusicSourceException(
+          CustomMusicSourceFailureKind.timeout,
+          '自定义歌源请求超时',
+        );
+      }
       throw const CustomMusicSourceException(
         CustomMusicSourceFailureKind.network,
         '无法连接自定义歌源',
       );
     } on HttpException {
       if (token.isCancelled) throw const CustomMusicSourceCancelled();
+      if (deadlineExpired) {
+        throw const CustomMusicSourceException(
+          CustomMusicSourceFailureKind.timeout,
+          '自定义歌源请求超时',
+        );
+      }
       throw const CustomMusicSourceException(
         CustomMusicSourceFailureKind.network,
         '自定义歌源连接异常',
       );
     } on Object {
       if (token.isCancelled) throw const CustomMusicSourceCancelled();
+      if (deadlineExpired) {
+        throw const CustomMusicSourceException(
+          CustomMusicSourceFailureKind.timeout,
+          '自定义歌源请求超时',
+        );
+      }
       throw const CustomMusicSourceException(
         CustomMusicSourceFailureKind.network,
         '自定义歌源请求异常',
       );
     } finally {
+      deadlineTimer.cancel();
       removeListener();
       client.close(force: true);
     }

@@ -11,6 +11,8 @@ import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/qrc.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/online/lrclib_lyrics.dart';
 import 'package:dan_player/online/qq_public_search.dart';
 import 'package:dan_player/utils.dart';
@@ -80,21 +82,6 @@ class LyricApiConnectivityResult {
     required this.message,
     this.statusCode,
   });
-}
-
-class _CustomLyricApiFetchResult {
-  final int? statusCode;
-  final String? body;
-  final String? errorMessage;
-
-  const _CustomLyricApiFetchResult({
-    this.statusCode,
-    this.body,
-    this.errorMessage,
-  });
-
-  bool get isHttpOk =>
-      statusCode != null && statusCode! >= 200 && statusCode! < 300;
 }
 
 final RegExp _matchSeparators = RegExp(
@@ -250,15 +237,21 @@ class SongSearchResult {
   /// for LRCLIB result
   final int? lrclibId;
 
+  /// Retains the exact editable provider snapshot until a candidate is chosen.
+  final CustomMusicSourceProfile? customProfile;
+  final Audio? customAudio;
+
   SongSearchResult(
       this.source, this.title, this.artists, this.album, this.score,
       {this.qqSongId,
       this.qqSongMid,
       this.neteaseSongId,
       this.kugouSongHash,
-      this.lrclibId});
+      this.lrclibId,
+      this.customProfile,
+      this.customAudio});
 
-  String get sourceLabel => source.sourceLabel;
+  String get sourceLabel => customProfile?.name ?? source.sourceLabel;
 
   String get identity => switch (source) {
         ResultSource.qq => 'qq:${qqSongId ?? qqSongMid ?? ''}',
@@ -280,21 +273,94 @@ class SongSearchResult {
 }
 
 const _providerTimeout = Duration(seconds: 12);
+const _customLyricSweepTimeout = Duration(seconds: 8);
 const _lyricResponseByteLimit = 2 * 1024 * 1024;
+
+/// One user-managed lyric provider that can be requested explicitly from the
+/// lyric editor. It deliberately stays separate from [ResultSource]: custom
+/// providers are profiles, not built-in search-result platforms.
+class CustomLyricSourceChoice {
+  const CustomLyricSourceChoice(this.profile);
+
+  final CustomMusicSourceProfile profile;
+
+  String get identity => 'custom-lyric:${profile.id}';
+}
+
+/// Returns a stable snapshot of selectable custom lyric providers.
+///
+/// Metadata-based Dan v1 and legacy endpoints can look up local tracks. The
+/// go-music-api preset instead needs the opaque identity produced by the same
+/// profile's search response, so it is never offered for an unrelated track.
+List<CustomLyricSourceChoice> customLyricSourceChoicesFor(
+  Audio audio, {
+  Iterable<CustomMusicSourceProfile>? profiles,
+}) =>
+    List<CustomLyricSourceChoice>.unmodifiable(
+      (profiles ?? AppSettings.instance.customMusicSources.value)
+          .where((profile) => _customLyricProfileCanQuery(profile, audio))
+          .map(CustomLyricSourceChoice.new),
+    );
+
+bool _customLyricProfileCanQuery(
+  CustomMusicSourceProfile profile,
+  Audio audio,
+) {
+  if (!profile.enabled ||
+      profile.authentication != null ||
+      !profile.capabilities.contains(CustomMusicSourceCapability.lyrics)) {
+    return false;
+  }
+  if (profile.protocol != CustomMusicSourceProtocol.goMusicApi) return true;
+  return audio.onlineProvider == profile.providerId &&
+      _hasUsableGoMusicIdentity(audio.onlineId);
+}
+
+bool _hasUsableGoMusicIdentity(String? value) {
+  if (value == null || !value.startsWith('gma1.') || value.length > 16384) {
+    return false;
+  }
+  try {
+    var encoded = value.substring('gma1.'.length);
+    encoded += '=' * ((4 - encoded.length % 4) % 4);
+    final decoded = jsonDecode(utf8.decode(base64Url.decode(encoded)));
+    if (decoded is! Map) return false;
+    return <Object?>[
+      decoded['id'],
+      decoded['source'],
+      decoded['name'],
+    ].every((field) => field is String && field.trim().isNotEmpty);
+  } on Object {
+    return false;
+  }
+}
 
 Set<ResultSource> _configuredLyricSearchSources() {
   final preferences = AppSettings.instance.onlineSources.value;
   return {
     if (preferences.qqEnabled) ResultSource.qq,
-    // Kugou remains a built-in lyric-only fallback. The shared online-song
-    // preferences currently expose no Kugou switch, so filtering it here
-    // would silently regress the documented three-provider lyric behavior.
-    ResultSource.kugou,
+    if (_configuredKugouLyricProfile(needsSearch: true) != null)
+      ResultSource.kugou,
     if (preferences.neteaseEnabled) ResultSource.netease,
-    // LRCLIB is a read-only lyric catalogue, not an online-song source. It is
-    // kept as a final fallback when a platform knows the song but has no lyric.
-    ResultSource.lrclib,
+    if (AppSettings.instance.lrclibEnabled.value) ResultSource.lrclib,
   };
+}
+
+CustomMusicSourceProfile? _configuredKugouLyricProfile({
+  bool needsSearch = false,
+}) {
+  for (final profile in AppSettings.instance.customMusicSources.value) {
+    if (profile.id == 'kugou' &&
+        profile.enabled &&
+        profile.authentication == null &&
+        profile.capabilities.contains(CustomMusicSourceCapability.lyrics) &&
+        (!needsSearch ||
+            profile.capabilities
+                .contains(CustomMusicSourceCapability.search))) {
+      return profile;
+    }
+  }
+  return null;
 }
 
 Future<Object?> _loadQqSearchPayload(String query, int limit) async {
@@ -327,14 +393,6 @@ Future<Object?> _loadNeteaseSearchPayload(String query, int limit) async {
   final answer = await Netease.search(keyWord: query, size: limit)
       .timeout(_providerTimeout);
   _requireTransportCode(answer.code, ResultSource.netease);
-  return answer.data;
-}
-
-Future<Object?> _loadKugouSearchPayload(String query, int limit) async {
-  final answer = await KuGou.searchSong(keyword: query, size: limit).timeout(
-    _providerTimeout,
-  );
-  _requireTransportCode(answer.code, ResultSource.kugou);
   return answer.data;
 }
 
@@ -374,7 +432,30 @@ Future<LyricSearchResponse> searchLyricCandidates(
   final lrclibTransport = LrclibLyricsTransport();
   final loaders = <ResultSource, LyricProviderPayloadLoader>{
     ResultSource.qq: qqSearch ?? _loadQqSearchPayload,
-    ResultSource.kugou: kugouSearch ?? _loadKugouSearchPayload,
+    ResultSource.kugou: kugouSearch ??
+        (query, limit) async {
+          final profile = _configuredKugouLyricProfile(needsSearch: true);
+          if (profile == null) return <SongSearchResult>[];
+          final response = await CustomMusicSourceTransport(profile)
+              .search(query, limit: limit);
+          if (!_isCurrentCustomLyricProfile(profile)) {
+            return <SongSearchResult>[];
+          }
+          return [
+            for (final track in response.tracks)
+              SongSearchResult(
+                ResultSource.kugou,
+                track.title,
+                track.artist,
+                track.album,
+                computeSongMatchScore(
+                    audio, track.title, track.artist, track.album),
+                kugouSongHash: track.onlineId,
+                customProfile: profile,
+                customAudio: track,
+              ),
+          ];
+        },
     ResultSource.netease: neteaseSearch ?? _loadNeteaseSearchPayload,
     ResultSource.lrclib: lrclibSearch ??
         (query, limit) async {
@@ -453,8 +534,9 @@ Future<_ProviderSearchResult> _searchLyricSource({
         final payload = await loader(query, limit).timeout(_providerTimeout);
         final candidates = switch (source) {
           ResultSource.qq => parseQqLyricSearchPayload(payload, audio, limit),
-          ResultSource.kugou =>
-            parseKugouLyricSearchPayload(payload, audio, limit),
+          ResultSource.kugou => payload is List<SongSearchResult>
+              ? payload
+              : parseKugouLyricSearchPayload(payload, audio, limit),
           ResultSource.netease =>
             parseNeteaseLyricSearchPayload(payload, audio, limit),
           ResultSource.lrclib =>
@@ -475,7 +557,7 @@ Future<_ProviderSearchResult> _searchLyricSource({
           }
           continue;
         }
-        final message = _searchFailureMessage(source, lastError);
+        final message = _searchFailureMessage(lastError);
         LOGGER.w(
           '[lyric search/${source.name}] $message',
           stackTrace: lastTrace,
@@ -495,16 +577,16 @@ bool _isRetryableSearchError(Object error) =>
     (error is LrclibException && error.retryable) ||
     (error is _LyricProviderException && error.retryable);
 
-String _searchFailureMessage(ResultSource source, Object? error) {
+String _searchFailureMessage(Object? error) {
   if (error is _LyricProviderException) return error.message;
   if (error is LrclibException) return error.message;
-  if (error is TimeoutException) return '${_sourceLabel(source)}搜索超时，请重试';
+  if (error is TimeoutException) return '搜索超时，请重试。';
   if (error is SocketException ||
       error is HandshakeException ||
       error is HttpException) {
-    return '${_sourceLabel(source)}联网失败，请检查网络';
+    return '联网失败，请检查网络。';
   }
-  return '${_sourceLabel(source)}返回的数据无法解析，请重试';
+  return '返回的数据无法解析，请重试。';
 }
 
 String _sourceLabel(ResultSource source) => source.sourceLabel;
@@ -741,7 +823,7 @@ Future<Object?> _loadNeteaseLyricPayload(String songId) async {
     request.followRedirects = false;
     request.headers.set(
       HttpHeaders.userAgentHeader,
-      'Mozilla/5.0 DanPlayer/26.0.3 AnonymousLyrics',
+      'Mozilla/5.0 DanPlayer/26.0.4 AnonymousLyrics',
     );
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
@@ -832,7 +914,7 @@ Future<Object?> _loadQqPublicLyricPayload(
     request.followRedirects = false;
     request.headers.set(
       HttpHeaders.userAgentHeader,
-      'Mozilla/5.0 DanPlayer/26.0.3 AnonymousLyrics',
+      'Mozilla/5.0 DanPlayer/26.0.4 AnonymousLyrics',
     );
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');
@@ -989,15 +1071,20 @@ Future<Qrc?> _getQQSyncLyric(int songId) async {
   return null;
 }
 
-Future<Krc?> _getKugouSyncLyric(String kugouSongHash) async {
+Future<Lyric?> _getKugouSyncLyric(String kugouSongHash) async {
+  final profile = _configuredKugouLyricProfile();
+  if (profile == null) return null;
   try {
-    final answer =
-        await KuGou.krc(hash: kugouSongHash).timeout(_providerTimeout);
-    if (answer.code != 200 || answer.data is! Map) return null;
-    final krcText = (answer.data as Map)["lyric"];
-    if (krcText is String) {
-      return _validLyric(Krc.fromKrcText(krcText));
-    }
+    final audio = Audio.online(
+      provider: profile.providerId,
+      id: kugouSongHash,
+      title: '',
+      artist: '',
+      album: '',
+      duration: 0,
+    );
+    return await getLyricForCustomSourceChoice(
+        audio, CustomLyricSourceChoice(profile));
   } catch (err, trace) {
     LOGGER.w('[lyric/kugou] 无法读取歌词', stackTrace: trace);
   }
@@ -1031,139 +1118,170 @@ Future<Lyric?> getOnlineLyric({
   return lyric;
 }
 
-Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) =>
-    getOnlineLyric(
-      qqSongId: candidate.qqSongId,
-      qqSongMid: candidate.qqSongMid,
-      kugouSongHash: candidate.kugouSongHash,
-      neteaseSongId: candidate.neteaseSongId,
-      lrclibId: candidate.lrclibId,
-    );
+Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) {
+  if (candidate.customProfile case final profile?) {
+    final audio = candidate.customAudio;
+    if (audio == null) return Future.value(null);
+    return getLyricForCustomSourceChoice(
+        audio, CustomLyricSourceChoice(profile));
+  }
+  return getOnlineLyric(
+    qqSongId: candidate.qqSongId,
+    qqSongMid: candidate.qqSongMid,
+    kugouSongHash: candidate.kugouSongHash,
+    neteaseSongId: candidate.neteaseSongId,
+    lrclibId: candidate.lrclibId,
+  );
+}
+
+/// Loads exactly the custom lyric provider selected by the user.
+///
+/// A profile is checked both before and after I/O. This prevents a response
+/// from a source edited, disabled or removed while the request was in flight
+/// from being published into the editor.
+Future<Lyric?> getLyricForCustomSourceChoice(
+  Audio audio,
+  CustomLyricSourceChoice choice, {
+  Duration timeout = _customLyricSweepTimeout,
+}) async {
+  final profile = choice.profile;
+  if (!_customLyricProfileCanQuery(profile, audio) ||
+      !_isCurrentCustomLyricProfile(profile)) {
+    return null;
+  }
+
+  final cancellation = CustomMusicSourceCancellation();
+  final deadlineTimer = Timer(timeout, cancellation.cancel);
+  try {
+    final response = await CustomMusicSourceTransport(
+      profile,
+      requestTimeout: timeout,
+    ).lyrics(audio, cancellation: cancellation).timeout(timeout);
+    if (!_isCurrentCustomLyricProfile(profile)) return null;
+    return _parseCustomLyricResponse(response.rawBody);
+  } on TimeoutException {
+    cancellation.cancel();
+    rethrow;
+  } finally {
+    deadlineTimer.cancel();
+  }
+}
 
 Future<Lyric?> _getCustomLyric(Audio audio) async {
-  final endpoint = AppSettings.instance.lyricApiUrl?.trim();
-  if (endpoint == null || endpoint.isEmpty) return null;
-
-  final uri = _buildCustomLyricUri(endpoint, {
-    "title": audio.title,
-    "artist": audio.artist,
-    "album": audio.album,
-    "duration": audio.duration.toString(),
-    "fileName": audio.fileNameTitle,
-    "displayTitle": audio.displayTitle,
-  });
-
-  if (uri == null) {
-    LOGGER.w("Invalid custom lyric API endpoint");
-    return null;
-  }
-
-  final response = await _fetchCustomLyricApi(uri);
-  if (!response.isHttpOk) {
-    if (response.statusCode != null) {
-      LOGGER.w(
-        "Custom lyric API returned ${response.statusCode}: "
-        "${uri.scheme}://${uri.host}${uri.path}",
-      );
-    } else {
-      LOGGER.w("Custom lyric API network request failed");
+  final profiles = AppSettings.instance.customMusicSources.value;
+  final deadline = DateTime.now().add(_customLyricSweepTimeout);
+  for (final profile in profiles) {
+    if (!profile.enabled ||
+        profile.authentication != null ||
+        !profile.capabilities.contains(CustomMusicSourceCapability.lyrics)) {
+      continue;
     }
-    return null;
+    // go-music-api resolves lyrics from the opaque identity returned by its
+    // own search; unlike Dan v1 and legacy lyric endpoints it cannot match an
+    // unrelated local file from metadata alone.
+    if (profile.protocol == CustomMusicSourceProtocol.goMusicApi &&
+        audio.onlineProvider != profile.providerId) {
+      continue;
+    }
+    final remaining = deadline.difference(DateTime.now());
+    if (remaining <= Duration.zero) break;
+    final cancellation = CustomMusicSourceCancellation();
+    final deadlineTimer = Timer(remaining, cancellation.cancel);
+    try {
+      final response = await CustomMusicSourceTransport(profile)
+          .lyrics(audio, cancellation: cancellation)
+          .timeout(remaining);
+      if (!_isCurrentCustomLyricProfile(profile)) {
+        return null;
+      }
+      final lyric = _parseCustomLyricResponse(response.rawBody);
+      if (lyric != null) return lyric;
+    } on TimeoutException {
+      cancellation.cancel();
+      break;
+    } on CustomMusicSourceCancelled {
+      break;
+    } catch (error, trace) {
+      LOGGER.w(
+        '[lyric/custom:${profile.id}] ${profile.name} 未返回可用歌词',
+        stackTrace: trace,
+      );
+    } finally {
+      deadlineTimer.cancel();
+    }
   }
+  return null;
+}
 
-  return _parseCustomLyricResponse(response.body ?? "");
+bool _isCurrentCustomLyricProfile(CustomMusicSourceProfile expected) {
+  for (final current in AppSettings.instance.customMusicSources.value) {
+    if (identical(current, expected) &&
+        current.enabled &&
+        current.authentication == null &&
+        current.capabilities.contains(CustomMusicSourceCapability.lyrics)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 Future<LyricApiConnectivityResult> testLyricApiConnectivity(
   String endpoint,
 ) async {
-  final uri = _buildCustomLyricUri(endpoint.trim(), const {
-    "title": "Dan Player Test",
-    "artist": "Dan Player",
-    "album": "Dan Player",
-    "duration": "0",
-    "fileName": "Dan Player Test",
-    "displayTitle": "Dan Player Test",
-    "probe": "1",
-  });
-
-  if (uri == null) {
+  final profile = CustomMusicSourceProfile.legacyLyric(endpoint.trim());
+  if (profile == null) {
     return const LyricApiConnectivityResult(
       isReachable: false,
       lyricRecognized: false,
       message: "接口地址无效，请使用 http 或 https 地址",
     );
   }
-
-  final response = await _fetchCustomLyricApi(uri);
-  if (!response.isHttpOk) {
-    final statusCode = response.statusCode;
+  try {
+    final response = await CustomMusicSourceTransport(profile).lyrics(
+      Audio(
+        'Dan Player Test',
+        'Dan Player',
+        'Dan Player',
+        0,
+        0,
+        null,
+        null,
+        'Dan Player Test.mp3',
+        0,
+        0,
+        null,
+      ),
+    );
+    final lyric = _parseCustomLyricResponse(response.rawBody);
+    if (lyric != null) {
+      return const LyricApiConnectivityResult(
+        isReachable: true,
+        lyricRecognized: true,
+        statusCode: HttpStatus.ok,
+        message: "连通正常，返回歌词格式可识别",
+      );
+    }
+    return const LyricApiConnectivityResult(
+      isReachable: true,
+      lyricRecognized: false,
+      statusCode: HttpStatus.ok,
+      message: "接口可连接，但测试响应未包含可识别歌词",
+    );
+  } on CustomMusicSourceException catch (error) {
     return LyricApiConnectivityResult(
       isReachable: false,
       lyricRecognized: false,
-      statusCode: statusCode,
-      message: statusCode == null
-          ? "连接失败：${response.errorMessage ?? "未知错误"}"
-          : "连接失败：HTTP $statusCode",
+      statusCode: error.statusCode,
+      message: error.statusCode == null
+          ? "连接失败：${error.message}"
+          : "连接失败：HTTP ${error.statusCode}",
     );
-  }
-
-  final lyric = _parseCustomLyricResponse(response.body ?? "");
-  if (lyric != null) {
-    return LyricApiConnectivityResult(
-      isReachable: true,
-      lyricRecognized: true,
-      statusCode: response.statusCode,
-      message: "连通正常，返回歌词格式可识别",
+  } catch (_) {
+    return const LyricApiConnectivityResult(
+      isReachable: false,
+      lyricRecognized: false,
+      message: "连接失败：网络请求失败",
     );
-  }
-
-  return LyricApiConnectivityResult(
-    isReachable: true,
-    lyricRecognized: false,
-    statusCode: response.statusCode,
-    message: "接口可连接，但测试响应未包含可识别歌词",
-  );
-}
-
-Uri? _buildCustomLyricUri(String endpoint, Map<String, String> parameters) {
-  final baseUri = Uri.tryParse(endpoint);
-  if (baseUri == null ||
-      !(baseUri.scheme == "http" || baseUri.scheme == "https") ||
-      baseUri.host.isEmpty) {
-    return null;
-  }
-
-  final queryParameters = Map<String, String>.from(baseUri.queryParameters);
-  queryParameters.addAll(parameters);
-  return baseUri.replace(queryParameters: queryParameters);
-}
-
-Future<_CustomLyricApiFetchResult> _fetchCustomLyricApi(Uri uri) async {
-  final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
-  try {
-    final request = await client.getUrl(uri).timeout(
-          const Duration(seconds: 8),
-        );
-    request.headers.set(
-      HttpHeaders.acceptHeader,
-      "application/json, text/plain;q=0.9, */*;q=0.8",
-    );
-
-    final response = await request.close().timeout(
-          const Duration(seconds: 12),
-        );
-    final body = await response.transform(utf8.decoder).join();
-    return _CustomLyricApiFetchResult(
-      statusCode: response.statusCode,
-      body: body,
-    );
-  } catch (err) {
-    return _CustomLyricApiFetchResult(
-      errorMessage: err is TimeoutException ? "请求超时" : "网络请求失败",
-    );
-  } finally {
-    client.close(force: true);
   }
 }
 

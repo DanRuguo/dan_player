@@ -4,8 +4,10 @@ import 'dart:convert';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/custom_music_source_probe_dialog.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
@@ -14,6 +16,9 @@ import 'package:material_symbols_icons/symbols.dart';
 
 typedef CustomSourceImportReader = Future<String?> Function();
 typedef CustomSourceExportWriter = Future<void> Function(String contents);
+typedef CustomSourceProbe = Future<void> Function(
+  CustomMusicSourceProfile profile,
+);
 
 /// Manages user-supplied HTTP providers without probing them while settings are
 /// being viewed. Search and playback resolution remain separate operations in
@@ -25,6 +30,7 @@ class CustomMusicSourceSettings extends StatefulWidget {
     this.persist,
     this.importReader,
     this.exportWriter,
+    this.probe,
   });
 
   final ValueNotifier<List<CustomMusicSourceProfile>>? profiles;
@@ -33,6 +39,7 @@ class CustomMusicSourceSettings extends StatefulWidget {
   /// Test seams also keep picker I/O out of widget tests.
   final CustomSourceImportReader? importReader;
   final CustomSourceExportWriter? exportWriter;
+  final CustomSourceProbe? probe;
 
   @override
   State<CustomMusicSourceSettings> createState() =>
@@ -43,6 +50,7 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
   int _saveRevision = 0;
   String? _saveError;
   bool _transferring = false;
+  String? _testingId;
 
   ValueNotifier<List<CustomMusicSourceProfile>> get _profiles =>
       widget.profiles ?? AppSettings.instance.customMusicSources;
@@ -99,6 +107,51 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
           if (item.id == profile.id) item.copyWith(enabled: enabled) else item,
       ]);
 
+  Future<void> _addPreset() async {
+    final existingIds = _profiles.value.map((profile) => profile.id).toSet();
+    final available = CustomMusicSourceProfile.builtInPresets()
+        .where((profile) => !existingIds.contains(profile.id))
+        .toList(growable: false);
+    if (available.isEmpty) return;
+    final selected = await showAppDialog<CustomMusicSourceProfile>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title:
+            AppDialogTitle(ui('添加内置预设'), leading: const Icon(Symbols.add_box)),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(ui('预设添加后可自由编辑；不会覆盖现有的同名或同 ID 配置。')),
+              const SizedBox(height: 10),
+              for (final profile in available)
+                ListTile(
+                  key: ValueKey('custom-source-preset-${profile.id}'),
+                  leading: const Icon(Symbols.cloud_download),
+                  title: Text(profile.name),
+                  subtitle: Text(_protocolLabel(profile.protocol)),
+                  onTap: () => Navigator.pop(context, profile),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: Text(ui('取消'))),
+        ],
+      ),
+    );
+    if (!mounted || selected == null) return;
+    if (_profiles.value.any((profile) => profile.id == selected.id)) return;
+    if (_profiles.value.length >=
+        CustomMusicSourceProfileCodec.maximumProfiles) {
+      return;
+    }
+    await _commit([..._profiles.value, selected]);
+  }
+
   Future<void> _delete(CustomMusicSourceProfile profile) async {
     final confirmed = await showAppDialog<bool>(
           context: context,
@@ -128,6 +181,65 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
       for (final item in _profiles.value)
         if (item.id != profile.id) item,
     ]);
+  }
+
+  Future<void> _test(CustomMusicSourceProfile profile) async {
+    if (_testingId != null) return;
+    if (widget.probe == null) {
+      setState(() => _testingId = profile.id);
+      try {
+        await showCustomMusicSourceProbeDialog(
+          context,
+          profile: profile,
+          onApplyCapabilities: (capabilities) {
+            if (!mounted) return;
+            final current = _profiles.value
+                .where((item) => item.id == profile.id)
+                .firstOrNull;
+            if (!identical(current, profile)) return;
+            unawaited(_commit([
+              for (final item in _profiles.value)
+                if (item.id == profile.id)
+                  item.copyWith(capabilities: capabilities)
+                else
+                  item,
+            ]));
+          },
+        );
+      } finally {
+        if (mounted) setState(() => _testingId = null);
+      }
+      return;
+    }
+    if (!profile.capabilities.contains(CustomMusicSourceCapability.search)) {
+      showTextOnSnackBar('该歌源需在实际歌曲上测试',
+          kind: AppNoticeKind.warning, context: context);
+      return;
+    }
+    setState(() => _testingId = profile.id);
+    try {
+      final probe = profile.enabled ? profile : profile.copyWith(enabled: true);
+      if (widget.probe case final test?) {
+        await test(probe);
+      } else {
+        await CustomMusicSourceTransport(probe)
+            .search('Dan Player Test', limit: 1);
+      }
+      if (mounted) {
+        showTextOnSnackBar('搜索接口连接正常；其他能力需使用实际歌曲验证',
+            kind: AppNoticeKind.success, context: context);
+      }
+    } catch (error, trace) {
+      LOGGER.w('[custom source settings] probe failed', stackTrace: trace);
+      if (mounted) {
+        showTextOnSnackBar('歌源测试失败：{0}',
+            arguments: [_localizedProbeFailure(error)],
+            kind: AppNoticeKind.error,
+            context: context);
+      }
+    } finally {
+      if (mounted) setState(() => _testingId = null);
+    }
   }
 
   Future<String?> _readImportFile() async {
@@ -282,7 +394,7 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
       );
       final written = await _writeExportFile(json);
       if (mounted && written) {
-        showTextOnSnackBar('歌源配置已导出；文件不包含密钥',
+        showTextOnSnackBar('歌源配置已导出；请勿在地址或公开请求头中填写密钥',
             kind: AppNoticeKind.success, context: context);
       }
     } catch (error, trace) {
@@ -309,13 +421,37 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SettingsHeader(
-              title: ui('自定义歌源 API'),
+              title: ui('第三方源'),
               icon: Symbols.api,
-              subtitle: ui('可同时保留多个服务；搜索只返回候选，播放时再解析地址。'),
+              subtitle: ui('内置预设和自行添加的服务都可编辑、启用、停用或删除。搜索与播放解析分开进行。'),
             ),
             const SizedBox(height: 12),
             Text(
-              ui('能力声明不代表永久可用或获得下载授权。不会绕过登录、付费或 DRM；搜索信息会发送到已启用的服务。'),
+              ui('能力以接口实际返回为准；需要登录或受限时会提示，不绕过登录、付费或 DRM。'),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              ui('停用或删除后立即停止该来源的新请求；已保存的收藏、歌单和歌曲信息不会删除。'),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              ui('搜索会发送关键词；歌词、评论和播放/下载解析会向所选来源发送来源歌曲 ID 或必要的歌曲信息。'),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              ui('请勿在地址或公开请求头中填写密钥。'),
               style: Theme.of(context)
                   .textTheme
                   .bodySmall
@@ -327,6 +463,19 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
               spacing: 8,
               runSpacing: 8,
               children: [
+                OutlinedButton.icon(
+                  key: const ValueKey('custom-source-add-preset'),
+                  onPressed: _transferring ||
+                          profiles.length >=
+                              CustomMusicSourceProfileCodec.maximumProfiles ||
+                          CustomMusicSourceProfile.builtInPresets().every(
+                              (preset) => profiles
+                                  .any((profile) => profile.id == preset.id))
+                      ? null
+                      : _addPreset,
+                  icon: const Icon(Symbols.add_box),
+                  label: Text(ui('添加内置预设')),
+                ),
                 OutlinedButton.icon(
                   key: const ValueKey('custom-source-import'),
                   onPressed: _transferring ? null : _import,
@@ -366,6 +515,9 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
                   profile: profiles[index],
                   onEnabled: (enabled) =>
                       unawaited(_setEnabled(profiles[index], enabled)),
+                  testing: _testingId == profiles[index].id,
+                  testBusy: _testingId != null,
+                  onTest: () => _test(profiles[index]),
                   onEdit: () => _openEditor(profiles[index]),
                   onDelete: () => _delete(profiles[index]),
                 ),
@@ -401,7 +553,7 @@ class _EmptyCustomSources extends StatelessWidget {
           Text(ui('尚未添加自定义歌源')),
           const SizedBox(height: 4),
           Text(
-            ui('可添加 Dan Player 通用协议、旧版歌词接口或你自行部署的兼容服务。'),
+            ui('可恢复内置预设，或添加歌词 API、通用协议和你自行部署的服务。'),
             textAlign: TextAlign.center,
             style: Theme.of(context)
                 .textTheme
@@ -424,12 +576,18 @@ class _CustomSourceCard extends StatelessWidget {
   const _CustomSourceCard({
     required this.profile,
     required this.onEnabled,
+    required this.testing,
+    required this.testBusy,
+    required this.onTest,
     required this.onEdit,
     required this.onDelete,
   });
 
   final CustomMusicSourceProfile profile;
   final ValueChanged<bool> onEnabled;
+  final bool testing;
+  final bool testBusy;
+  final VoidCallback onTest;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -494,10 +652,7 @@ class _CustomSourceCard extends StatelessWidget {
             children: [
               for (final capability in CustomMusicSourceCapability.values)
                 if (profile.capabilities.contains(capability))
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text(_capabilityLabel(capability)),
-                  ),
+                  _CapabilityLabel(capability),
             ],
           ),
           const SizedBox(height: 8),
@@ -506,6 +661,17 @@ class _CustomSourceCard extends StatelessWidget {
             spacing: 6,
             runSpacing: 6,
             children: [
+              TextButton.icon(
+                key: ValueKey('custom-source-test-${profile.id}'),
+                onPressed: testBusy ? null : onTest,
+                icon: testing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Symbols.network_check),
+                label: Text(ui('测试')),
+              ),
               TextButton.icon(
                 key: ValueKey('custom-source-edit-${profile.id}'),
                 onPressed: onEdit,
@@ -537,17 +703,34 @@ class _CustomSourceEditorDialog extends StatefulWidget {
       _CustomSourceEditorDialogState();
 }
 
+class _CapabilityLabel extends StatelessWidget {
+  const _CapabilityLabel(this.capability);
+  final CustomMusicSourceCapability capability;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_capabilityIcon(capability),
+              size: 16, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 5),
+          Text(_capabilityLabel(capability),
+              style: Theme.of(context).textTheme.bodySmall),
+        ],
+      );
+}
+
 class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _urlController;
+  late final Map<CustomMusicSourceCapability, TextEditingController>
+      _endpointControllers;
   late CustomMusicSourceProtocol _protocol;
   late Set<CustomMusicSourceCapability> _capabilities;
   String? _nameError;
   String? _urlError;
   String? _capabilityError;
-
-  bool get _protocolLocked =>
-      widget.profile?.protocol == CustomMusicSourceProtocol.legacyLyrics;
+  String? _endpointError;
 
   @override
   void initState() {
@@ -563,6 +746,10 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
           : profile?.baseUrl ?? '',
     );
     _protocol = profile?.protocol ?? CustomMusicSourceProtocol.danSourceV1;
+    _endpointControllers = {
+      for (final capability in CustomMusicSourceCapability.values)
+        capability: TextEditingController(text: profile?.endpoints[capability]),
+    };
     _capabilities = Set.of(profile?.capabilities ??
         const {
           CustomMusicSourceCapability.search,
@@ -578,24 +765,38 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
   void dispose() {
     _nameController.dispose();
     _urlController.dispose();
+    for (final controller in _endpointControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
-  void _applyProtocolCapabilities() {
-    _capabilities = switch (_protocol) {
-      CustomMusicSourceProtocol.legacyLyrics => {
-          CustomMusicSourceCapability.lyrics,
-        },
-      CustomMusicSourceProtocol.goMusicApi => {
-          CustomMusicSourceCapability.search,
-          CustomMusicSourceCapability.metadata,
-          CustomMusicSourceCapability.cover,
-          CustomMusicSourceCapability.lyrics,
-          CustomMusicSourceCapability.stream,
-          CustomMusicSourceCapability.download,
-        },
-      CustomMusicSourceProtocol.danSourceV1 => _capabilities,
-    };
+  void _applyProtocolCapabilities({bool reset = false}) {
+    final supported = _supportedCapabilities(_protocol);
+    if (reset || _protocol == CustomMusicSourceProtocol.legacyLyrics) {
+      _capabilities = Set.of(supported);
+    } else {
+      _capabilities = _capabilities.intersection(supported);
+    }
+  }
+
+  void _changeProtocol(CustomMusicSourceProtocol value) {
+    _protocol = value;
+    _applyProtocolCapabilities(reset: true);
+    final defaults = value == CustomMusicSourceProtocol.kugou
+        ? CustomMusicSourceProfile.kugouPreset()
+        : null;
+    for (final entry in _endpointControllers.entries) {
+      entry.value.text = defaults?.endpoints[entry.key] ?? '';
+    }
+    if (widget.profile == null && _urlController.text.trim().isEmpty) {
+      _urlController.text = defaults?.baseUrl ?? '';
+      if (_nameController.text.trim().isEmpty && defaults != null) {
+        _nameController.text = defaults.name;
+      }
+    }
+    _capabilityError = null;
+    _endpointError = null;
   }
 
   void _save() {
@@ -610,6 +811,7 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
       _nameError = name.isEmpty ? ui('请输入名称') : null;
       _urlError = validUrl ? null : ui('请输入 http 或 https 接口地址');
       _capabilityError = _capabilities.isEmpty ? ui('至少选择一项能力') : null;
+      _endpointError = null;
     });
     if (_nameError != null || _urlError != null || _capabilityError != null) {
       return;
@@ -624,25 +826,39 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
       enabled: widget.profile?.enabled ?? true,
       protocol: _protocol,
       capabilities: _capabilities,
-      endpoints: switch (_protocol) {
-        CustomMusicSourceProtocol.goMusicApi => const {},
-        _ => {
-            for (final capability in _capabilities) capability: url,
-          },
-      },
+      endpoints: _protocol == CustomMusicSourceProtocol.legacyLyrics
+          ? {
+              CustomMusicSourceCapability.lyrics: url,
+            }
+          : _editedEndpoints(url),
+      publicHeaders: widget.profile?.publicHeaders ?? const {},
+      authentication: widget.profile?.authentication,
     );
     if (result == null) {
       setState(() => _urlError = ui('该配置无法保存，请检查名称和地址'));
       return;
     }
+    if (_protocol != CustomMusicSourceProtocol.legacyLyrics &&
+        result.endpoints.length != _editedEndpoints(url).length) {
+      setState(() => _endpointError = ui('接口地址无效，请使用 http(s) 地址或相对路径。'));
+      return;
+    }
     Navigator.pop(context, result);
   }
+
+  Map<CustomMusicSourceCapability, String> _editedEndpoints(String url) => {
+        for (final capability in _capabilities)
+          if (_endpointControllers[capability]!.text.trim().isNotEmpty)
+            capability: _endpointControllers[capability]!.text.trim()
+          else if (_protocol == CustomMusicSourceProtocol.danSourceV1 &&
+              capability != CustomMusicSourceCapability.metadata &&
+              capability != CustomMusicSourceCapability.cover)
+            capability: url,
+      };
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final fixedCapabilities =
-        _protocol != CustomMusicSourceProtocol.danSourceV1;
     return AlertDialog(
       scrollable: true,
       title: AppDialogTitle(
@@ -669,6 +885,7 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
               key: const ValueKey('custom-source-protocol'),
               initialValue: _protocol,
               isExpanded: true,
+              itemHeight: null,
               decoration: InputDecoration(
                 labelText: ui('协议'),
                 prefixIcon: const Icon(Symbols.schema),
@@ -677,25 +894,32 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
                 for (final protocol in CustomMusicSourceProtocol.values)
                   DropdownMenuItem(
                     value: protocol,
-                    child: Text(_protocolLabel(protocol)),
+                    child: Text(_protocolLabel(protocol),
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
                   ),
               ],
-              onChanged: _protocolLocked
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      setState(() {
-                        _protocol = value;
-                        _applyProtocolCapabilities();
-                        _capabilityError = null;
-                      });
-                    },
+              selectedItemBuilder: (context) => [
+                for (final protocol in CustomMusicSourceProtocol.values)
+                  Text(_protocolLabel(protocol),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() => _changeProtocol(value));
+              },
             ),
             const SizedBox(height: 8),
             Text(
               _protocolDescription(_protocol),
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (_protocol == CustomMusicSourceProtocol.danSourceV1) ...[
+              const SizedBox(height: 6),
+              Text(
+                ui('歌曲信息和封面留空时使用搜索结果；封面地址应返回图片。'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
             const SizedBox(height: 14),
             TextField(
               key: const ValueKey('custom-source-url'),
@@ -715,42 +939,45 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
             const SizedBox(height: 16),
             Text(ui('能力'), style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final capability in CustomMusicSourceCapability.values)
-                  FilterChip(
-                    key: ValueKey('custom-capability-${capability.id}'),
-                    selected: _capabilities.contains(capability),
-                    onSelected: fixedCapabilities
-                        ? null
-                        : (selected) => setState(() {
-                              if (selected) {
-                                _capabilities.add(capability);
-                                if (capability ==
-                                        CustomMusicSourceCapability.metadata ||
-                                    capability ==
-                                        CustomMusicSourceCapability.cover) {
-                                  _capabilities
-                                      .add(CustomMusicSourceCapability.search);
-                                }
-                              } else {
-                                _capabilities.remove(capability);
-                                if (capability ==
-                                    CustomMusicSourceCapability.search) {
-                                  _capabilities.remove(
-                                      CustomMusicSourceCapability.metadata);
-                                  _capabilities.remove(
-                                      CustomMusicSourceCapability.cover);
-                                }
-                              }
-                              _capabilityError = null;
-                            }),
-                    label: Text(_capabilityLabel(capability)),
-                  ),
-              ],
-            ),
+            if (_protocol == CustomMusicSourceProtocol.legacyLyrics)
+              const _CapabilityLabel(CustomMusicSourceCapability.lyrics)
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final capability in CustomMusicSourceCapability.values)
+                    if (_supportedCapabilities(_protocol).contains(capability))
+                      FilterChip(
+                        key: ValueKey('custom-capability-${capability.id}'),
+                        selected: _capabilities.contains(capability),
+                        onSelected: (selected) => setState(() {
+                          if (selected) {
+                            _capabilities.add(capability);
+                            if (capability ==
+                                    CustomMusicSourceCapability.metadata ||
+                                capability ==
+                                    CustomMusicSourceCapability.cover) {
+                              _capabilities
+                                  .add(CustomMusicSourceCapability.search);
+                            }
+                          } else {
+                            _capabilities.remove(capability);
+                            if (capability ==
+                                CustomMusicSourceCapability.search) {
+                              _capabilities
+                                  .remove(CustomMusicSourceCapability.metadata);
+                              _capabilities
+                                  .remove(CustomMusicSourceCapability.cover);
+                            }
+                          }
+                          _capabilityError = null;
+                        }),
+                        label: Text(_capabilityLabel(capability)),
+                        avatar: Icon(_capabilityIcon(capability), size: 18),
+                      ),
+                ],
+              ),
             if (_capabilityError != null) ...[
               const SizedBox(height: 6),
               Text(
@@ -761,6 +988,36 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
                     ?.copyWith(color: Theme.of(context).colorScheme.error),
               ),
             ],
+            if (_protocol != CustomMusicSourceProtocol.legacyLyrics) ...[
+              const SizedBox(height: 12),
+              ExpansionTile(
+                key: const ValueKey('custom-source-endpoints'),
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(bottom: 8),
+                title: Text(ui('独立接口地址（可选）')),
+                subtitle: Text(ui('单独填写的地址优先使用；相对路径以服务地址为起点。')),
+                children: [
+                  for (final capability in CustomMusicSourceCapability.values)
+                    if (_capabilities.contains(capability))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: TextField(
+                          key: ValueKey('custom-endpoint-${capability.id}'),
+                          controller: _endpointControllers[capability],
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                            labelText: _capabilityLabel(capability),
+                            prefixIcon: Icon(_capabilityIcon(capability)),
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+            ],
+            if (_endpointError != null)
+              Text(_endpointError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
             if (_protocol == CustomMusicSourceProtocol.goMusicApi) ...[
               const SizedBox(height: 12),
               Text(
@@ -787,16 +1044,36 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
   }
 }
 
+String _localizedProbeFailure(Object error) {
+  if (error is! CustomMusicSourceException) return ui('网络请求失败');
+  return switch (error.kind) {
+    CustomMusicSourceFailureKind.timeout => ui('连接超时'),
+    CustomMusicSourceFailureKind.credentialsNotConfigured => ui('凭据尚未配置'),
+    CustomMusicSourceFailureKind.unavailable => ui('歌源配置尚不可用'),
+    CustomMusicSourceFailureKind.cancelled => ui('测试已取消'),
+    CustomMusicSourceFailureKind.http =>
+      ui('接口返回 HTTP {0}', [error.statusCode ?? '—']),
+    CustomMusicSourceFailureKind.redirect ||
+    CustomMusicSourceFailureKind.responseTooLarge ||
+    CustomMusicSourceFailureKind.invalidResponse =>
+      ui('接口响应格式不可识别'),
+    CustomMusicSourceFailureKind.network => ui('网络请求失败'),
+  };
+}
+
 String _protocolLabel(CustomMusicSourceProtocol protocol) => switch (protocol) {
       CustomMusicSourceProtocol.danSourceV1 => ui('Dan Player 通用 v1'),
-      CustomMusicSourceProtocol.legacyLyrics => ui('旧版歌词 API'),
+      CustomMusicSourceProtocol.legacyLyrics => ui('歌词 API'),
       CustomMusicSourceProtocol.goMusicApi => ui('go-music-api（自托管）'),
+      CustomMusicSourceProtocol.kugou => ui('酷狗接口'),
     };
 
 String _profileDisplayName(CustomMusicSourceProfile profile) {
   if (profile.protocol == CustomMusicSourceProtocol.legacyLyrics) {
-    if (profile.name == 'Legacy lyric API') return ui('旧版歌词 API');
-    if (profile.name == 'Imported lyric API') return ui('导入的歌词 API');
+    if (profile.name == 'Legacy lyric API' ||
+        profile.name == 'Imported lyric API') {
+      return 'LRC API';
+    }
   }
   return profile.name;
 }
@@ -804,19 +1081,44 @@ String _profileDisplayName(CustomMusicSourceProfile profile) {
 String _protocolDescription(CustomMusicSourceProtocol protocol) =>
     switch (protocol) {
       CustomMusicSourceProtocol.danSourceV1 =>
-        ui('通用能力协议：按服务实际支持的内容选择；歌曲信息和封面随搜索结果返回。'),
-      CustomMusicSourceProtocol.legacyLyrics => ui('兼容原有歌词接口，仅提供歌词候选。'),
-      CustomMusicSourceProtocol.goMusicApi =>
-        ui('自托管兼容预设：搜索、歌曲信息、封面、歌词、播放解析与授权下载。'),
+        ui('通用能力协议：按服务实际支持的内容选择，可分别填写接口地址。'),
+      CustomMusicSourceProtocol.legacyLyrics =>
+        ui('歌词接口：接收歌曲信息并返回歌词；可更换协议以配置其他能力。'),
+      CustomMusicSourceProtocol.goMusicApi => ui('自托管兼容接口：能力按服务实际返回执行。'),
+      CustomMusicSourceProtocol.kugou =>
+        ui('酷狗兼容接口：可分别配置搜索、歌曲信息、封面、歌词、播放和下载地址。'),
     };
 
 String _capabilityLabel(CustomMusicSourceCapability capability) =>
     switch (capability) {
       CustomMusicSourceCapability.search => ui('搜索'),
-      CustomMusicSourceCapability.metadata => ui('歌曲信息（随搜索）'),
-      CustomMusicSourceCapability.cover => ui('封面（随搜索）'),
+      CustomMusicSourceCapability.metadata => ui('歌曲信息'),
+      CustomMusicSourceCapability.cover => ui('封面'),
       CustomMusicSourceCapability.lyrics => ui('歌词'),
       CustomMusicSourceCapability.comments => ui('评论'),
       CustomMusicSourceCapability.stream => ui('播放解析'),
       CustomMusicSourceCapability.download => ui('下载'),
+    };
+
+IconData _capabilityIcon(CustomMusicSourceCapability capability) =>
+    switch (capability) {
+      CustomMusicSourceCapability.search => Symbols.search,
+      CustomMusicSourceCapability.metadata => Symbols.info,
+      CustomMusicSourceCapability.cover => Symbols.image,
+      CustomMusicSourceCapability.lyrics => Symbols.lyrics,
+      CustomMusicSourceCapability.comments => Symbols.comment,
+      CustomMusicSourceCapability.stream => Symbols.play_circle,
+      CustomMusicSourceCapability.download => Symbols.download,
+    };
+
+Set<CustomMusicSourceCapability> _supportedCapabilities(
+        CustomMusicSourceProtocol protocol) =>
+    switch (protocol) {
+      CustomMusicSourceProtocol.legacyLyrics => const {
+          CustomMusicSourceCapability.lyrics,
+        },
+      CustomMusicSourceProtocol.goMusicApi ||
+      CustomMusicSourceProtocol.kugou ||
+      CustomMusicSourceProtocol.danSourceV1 =>
+        CustomMusicSourceCapability.values.toSet(),
     };

@@ -3,8 +3,10 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/online_metadata_lookup_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/online_artwork_request.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -87,6 +89,233 @@ void main() {
     codec.dispose();
   });
 
+  test('enabled custom source may load cover over its own HTTP host', () async {
+    final previous = AppSettings.instance.customMusicSources.value;
+    addTearDown(() => AppSettings.instance.customMusicSources.value = previous);
+    final profile = CustomMusicSourceProfile.tryCreate(
+      id: 'local-cover',
+      name: 'Local cover source',
+      baseUrl: 'http://127.0.0.1:8123',
+      capabilities: const {
+        CustomMusicSourceCapability.search,
+        CustomMusicSourceCapability.cover,
+      },
+      endpoints: const {
+        CustomMusicSourceCapability.search: '/search',
+        CustomMusicSourceCapability.cover: '/cover',
+      },
+    )!;
+    AppSettings.instance.customMusicSources.value = [profile];
+    final fixture = await _smallPng();
+    final client = _Client((_) => _Response(fixture));
+    final request = OnlineArtworkRequest(httpClientFactory: () => client);
+
+    await request.loadPng(
+      'http://127.0.0.1:8123/cover?id=1',
+      provider: profile.providerId,
+      expectedProfile: profile,
+    );
+
+    expect(client.requested.single.scheme, 'http');
+  });
+
+  test('stale expected custom profile is rejected before opening a client',
+      () async {
+    final previous = AppSettings.instance.customMusicSources.value;
+    addTearDown(() => AppSettings.instance.customMusicSources.value = previous);
+    final profile = CustomMusicSourceProfile.tryCreate(
+      id: 'stale-cover',
+      name: 'Stale cover source',
+      baseUrl: 'http://127.0.0.1:8126',
+      capabilities: const {
+        CustomMusicSourceCapability.search,
+        CustomMusicSourceCapability.cover,
+      },
+      endpoints: const {
+        CustomMusicSourceCapability.search: '/search',
+        CustomMusicSourceCapability.cover: '/cover',
+      },
+    )!;
+    final equivalentReplacement = profile.copyWith();
+    expect(equivalentReplacement, equals(profile));
+    expect(identical(equivalentReplacement, profile), isFalse);
+    AppSettings.instance.customMusicSources.value = [equivalentReplacement];
+    var opened = false;
+    final request = OnlineArtworkRequest(httpClientFactory: () {
+      opened = true;
+      return _Client((_) => _Response(const []));
+    });
+
+    await expectLater(
+      request.loadPng(
+        'http://127.0.0.1:8126/cover',
+        provider: profile.providerId,
+        expectedProfile: profile,
+      ),
+      throwsFormatException,
+    );
+    expect(opened, isFalse);
+  });
+
+  test('custom cover rejects disabled, edited and unrelated HTTP sources',
+      () async {
+    final previous = AppSettings.instance.customMusicSources.value;
+    addTearDown(() => AppSettings.instance.customMusicSources.value = previous);
+    final profile = CustomMusicSourceProfile.tryCreate(
+      id: 'strict-cover',
+      name: 'Strict cover source',
+      baseUrl: 'http://127.0.0.1:8124',
+      capabilities: const {
+        CustomMusicSourceCapability.search,
+        CustomMusicSourceCapability.cover,
+      },
+      endpoints: const {
+        CustomMusicSourceCapability.search: '/search',
+        CustomMusicSourceCapability.cover: '/cover',
+      },
+    )!;
+    AppSettings.instance.customMusicSources.value = [profile];
+    var opened = false;
+    var request = OnlineArtworkRequest(httpClientFactory: () {
+      opened = true;
+      return _Client((_) => _Response(const []));
+    });
+    await expectLater(
+      request.loadPng(
+        'http://192.168.1.5:8124/old-cover',
+        provider: profile.providerId,
+      ),
+      throwsFormatException,
+    );
+    expect(opened, isFalse,
+        reason: 'custom HTTP is restricted to the configured host and port');
+
+    AppSettings.instance.customMusicSources.value = [
+      profile.copyWith(enabled: false),
+    ];
+    request = OnlineArtworkRequest(httpClientFactory: () {
+      opened = true;
+      return _Client((_) => _Response(const []));
+    });
+    await expectLater(
+      request.loadPng(
+        'https://127.0.0.1:8124/cover',
+        provider: profile.providerId,
+      ),
+      throwsFormatException,
+    );
+
+    final authentication = CustomMusicSourceAuthentication.tryCreate(
+      kind: CustomMusicSourceAuthenticationKind.bearerHeader,
+      credentialRef: 'cover-token',
+    )!;
+    for (final unavailableProfile in [
+      profile.copyWith(
+        capabilities: const {CustomMusicSourceCapability.search},
+      ),
+      profile.copyWith(authentication: authentication),
+    ]) {
+      AppSettings.instance.customMusicSources.value = [unavailableProfile];
+      var invalidProfileOpened = false;
+      request = OnlineArtworkRequest(httpClientFactory: () {
+        invalidProfileOpened = true;
+        return _Client((_) => _Response(const []));
+      });
+      await expectLater(
+        request.loadPng(
+          'https://127.0.0.1:8124/cover',
+          provider: profile.providerId,
+        ),
+        throwsFormatException,
+      );
+      expect(invalidProfileOpened, isFalse);
+    }
+
+    AppSettings.instance.customMusicSources.value = [profile];
+    final fixture = await _smallPng();
+    late _Client editingClient;
+    editingClient = _Client((_) => _Response(
+          fixture,
+          onListen: () {
+            AppSettings.instance.customMusicSources.value = [
+              profile.copyWith(name: 'Edited source'),
+            ];
+          },
+        ));
+    request = OnlineArtworkRequest(httpClientFactory: () => editingClient);
+    await expectLater(
+      request.loadPng(
+        'http://127.0.0.1:8124/cover',
+        provider: profile.providerId,
+      ),
+      throwsA(isA<HttpException>()),
+    );
+    expect(editingClient.requested, hasLength(1));
+
+    AppSettings.instance.customMusicSources.value = [profile];
+    final bodyDelivered = Completer<void>();
+    final finishBody = Completer<void>();
+    final completedBodyClient = _Client((_) => _DeferredDoneResponse(
+          fixture,
+          delivered: bodyDelivered,
+          finish: finishBody,
+        ));
+    request =
+        OnlineArtworkRequest(httpClientFactory: () => completedBodyClient);
+    final pendingDecode = request.loadPng(
+      'http://127.0.0.1:8124/cover',
+      provider: profile.providerId,
+    );
+    await bodyDelivered.future;
+    AppSettings.instance.customMusicSources.value = [
+      profile.copyWith(name: 'Edited before decode'),
+    ];
+    finishBody.complete();
+    await expectLater(
+      pendingDecode,
+      throwsA(isA<HttpException>()),
+    );
+  });
+
+  test('custom cover public headers never leak across an origin redirect',
+      () async {
+    final previous = AppSettings.instance.customMusicSources.value;
+    addTearDown(() => AppSettings.instance.customMusicSources.value = previous);
+    final profile = CustomMusicSourceProfile.tryCreate(
+      id: 'header-cover',
+      name: 'Header cover source',
+      baseUrl: 'http://127.0.0.1:8125',
+      capabilities: const {
+        CustomMusicSourceCapability.search,
+        CustomMusicSourceCapability.cover,
+      },
+      endpoints: const {
+        CustomMusicSourceCapability.search: '/search',
+        CustomMusicSourceCapability.cover: '/cover',
+      },
+      publicHeaders: const {'X-Public-Tenant': 'tenant-a'},
+    )!;
+    AppSettings.instance.customMusicSources.value = [profile];
+    final fixture = await _smallPng();
+    final client = _Client((uri) => uri.host == '127.0.0.1'
+        ? _Response(
+            const [],
+            status: 302,
+            location: 'https://cdn.example.test/cover.png',
+          )
+        : _Response(fixture));
+    final request = OnlineArtworkRequest(httpClientFactory: () => client);
+
+    await request.loadPng(
+      'http://127.0.0.1:8125/cover?id=1',
+      provider: profile.providerId,
+    );
+
+    expect(client.requested, hasLength(2));
+    expect(client.requestHeaders[0]['x-public-tenant'], 'tenant-a');
+    expect(client.requestHeaders[1], isNot(contains('x-public-tenant')));
+  });
+
   test('an HTTPS downgrade is rejected before following the redirect',
       () async {
     final client = _Client((_) =>
@@ -146,6 +375,32 @@ void main() {
         throwsA(isA<HttpException>()));
     expect(client.closed, isTrue);
   });
+
+  test('artwork deadline covers the whole multi-stage request', () async {
+    final fixture = await _smallPng();
+    var bodyStarted = false;
+    final client = _Client(
+      (_) => _Response(
+        fixture,
+        delay: const Duration(milliseconds: 90),
+        onListen: () => bodyStarted = true,
+      ),
+      closeDelay: const Duration(milliseconds: 90),
+    );
+    final request = OnlineArtworkRequest(
+      httpClientFactory: () => client,
+      totalTimeout: const Duration(milliseconds: 150),
+    );
+
+    await expectLater(
+      request.loadPng('https://example.com/cover'),
+      throwsA(isA<TimeoutException>()),
+    );
+
+    expect(bodyStarted, isTrue,
+        reason: 'each phase is shorter than the deadline on its own');
+    expect(client.closed, isTrue);
+  });
 }
 
 Future<Uint8List> _smallPng() async {
@@ -163,16 +418,20 @@ Future<Uint8List> _smallPng() async {
 }
 
 class _Client implements HttpClient {
-  _Client(this.response);
+  _Client(this.response, {this.closeDelay = Duration.zero});
   final _Response Function(Uri) response;
+  final Duration closeDelay;
   final requested = <Uri>[];
+  final requestHeaders = <Map<String, String>>[];
   bool closed = false;
   @override
   Duration? connectionTimeout;
   @override
   Future<HttpClientRequest> getUrl(Uri url) async {
     requested.add(url);
-    return _Request(response(url));
+    final headers = _Headers();
+    requestHeaders.add(headers.values);
+    return _Request(response(url), headers, closeDelay);
   }
 
   @override
@@ -182,14 +441,19 @@ class _Client implements HttpClient {
 }
 
 class _Request implements HttpClientRequest {
-  _Request(this.response);
+  _Request(this.response, this.headers, this.closeDelay);
   final _Response response;
+  final Duration closeDelay;
   @override
-  final HttpHeaders headers = _Headers();
+  final HttpHeaders headers;
   @override
   bool followRedirects = true;
   @override
-  Future<HttpClientResponse> close() async => response;
+  Future<HttpClientResponse> close() async {
+    if (closeDelay > Duration.zero) await Future<void>.delayed(closeDelay);
+    return response;
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -197,8 +461,12 @@ class _Request implements HttpClientRequest {
 class _Headers implements HttpHeaders {
   _Headers([this.location]);
   final String? location;
+  final Map<String, String> values = <String, String>{};
   @override
-  void set(String name, Object value, {bool preserveHeaderCase = false}) {}
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {
+    values[name.toLowerCase()] = value.toString();
+  }
+
   @override
   String? value(String name) =>
       name == HttpHeaders.locationHeader ? location : null;
@@ -208,11 +476,16 @@ class _Headers implements HttpHeaders {
 
 class _Response extends Stream<List<int>> implements HttpClientResponse {
   _Response(this.bytes,
-      {int? length, int status = 200, String? location, this.onListen})
+      {int? length,
+      int status = 200,
+      String? location,
+      this.delay = Duration.zero,
+      this.onListen})
       : contentLength = length ?? bytes.length,
         statusCode = status,
         headers = _Headers(location);
   final List<int> bytes;
+  final Duration delay;
   final void Function()? onListen;
   @override
   final int contentLength;
@@ -224,10 +497,47 @@ class _Response extends Stream<List<int>> implements HttpClientResponse {
   StreamSubscription<List<int>> listen(void Function(List<int>)? onData,
       {Function? onError, void Function()? onDone, bool? cancelOnError}) {
     onListen?.call();
-    return Stream.value(bytes).listen(onData,
+    final stream = delay > Duration.zero
+        ? Stream<List<int>>.fromFuture(
+            Future<List<int>>.delayed(delay, () => bytes),
+          )
+        : Stream<List<int>>.value(bytes);
+    return stream.listen(onData,
         onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _DeferredDoneResponse extends _Response {
+  _DeferredDoneResponse(
+    super.bytes, {
+    required this.delivered,
+    required this.finish,
+  });
+
+  final Completer<void> delivered;
+  final Completer<void> finish;
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int>)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    final body = bytes;
+    return (() async* {
+      yield body;
+      if (!delivered.isCompleted) delivered.complete();
+      await finish.future;
+    })()
+        .listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
 }

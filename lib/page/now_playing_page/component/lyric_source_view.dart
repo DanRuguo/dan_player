@@ -8,6 +8,7 @@ import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/music_matcher.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
@@ -501,15 +502,19 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                           message: _operationError!(),
                           color: scheme.errorContainer,
                         ),
-                      if ((AppSettings.instance.lyricApiUrl ?? '')
-                          .trim()
-                          .isNotEmpty)
+                      if (AppSettings.instance.customMusicSources.value.any(
+                        (profile) =>
+                            profile.enabled &&
+                            profile.capabilities.contains(
+                              CustomMusicSourceCapability.lyrics,
+                            ),
+                      ))
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: _MessagePanel(
                             key: const ValueKey('lyric-source-custom-api-note'),
                             message: ui(
-                                "自动匹配会先尝试自定义歌词接口；接口结果没有平台歌曲 ID，因此不会出现在下面的内置平台候选中。"),
+                                "自动匹配会按保存顺序尝试已启用的自定义歌词源；自定义结果不会列入下面的内置平台候选。"),
                             color: scheme.secondaryContainer,
                           ),
                         ),
@@ -580,7 +585,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
     }
 
     final failureText = response.failures.entries
-        .map((entry) => '${ui(entry.key.sourceLabel)}：${entry.value}')
+        .map((entry) => '${ui(entry.key.sourceLabel)}：${ui(entry.value)}')
         .join('\n');
     return [
       if (failureText.isNotEmpty)

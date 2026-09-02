@@ -7,6 +7,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/online/song_comments.dart';
+import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -52,8 +53,9 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
   Audio? _selected;
   SongComment? _preview;
   SongCommentsCancellation? _previewCancellation;
+  OnlineSearchCancellation? _searchCancellation;
   String Function()? _searchError;
-  String? _partialFailure;
+  Map<String, String> _partialFailures = const {};
   String Function()? _previewError;
   bool _searching = false;
   bool _previewing = false;
@@ -89,20 +91,27 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
   Future<void> _search() async {
     final query = _query.text.trim();
     if (_closed || _searching || query.isEmpty) return;
+    _searchCancellation?.cancel();
+    final cancellation = OnlineSearchCancellation();
+    _searchCancellation = cancellation;
     final generation = ++_searchGeneration;
     _cancelPreview();
     setState(() {
       _searching = true;
       _searchError = null;
-      _partialFailure = null;
+      _partialFailures = const {};
       _results = const [];
       _selected = null;
       _preview = null;
     });
     try {
-      final result = await (widget.search ??
-          (value) =>
-              OnlineMusicService.instance.search(value, limit: 30))(query);
+      final result = widget.search != null
+          ? await widget.search!(query)
+          : await OnlineMusicService.instance.search(
+              query,
+              limit: 30,
+              cancellation: cancellation,
+            );
       if (!_isCurrentSearch(generation)) return;
       setState(() {
         final ranked = result.tracks
@@ -124,14 +133,17 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
             return score != 0 ? score : left.index.compareTo(right.index);
           });
         _results = ranked.map((entry) => entry.audio).toList(growable: false);
-        _partialFailure =
-            result.failures.isEmpty ? null : result.failures.values.join('；');
+        _partialFailures = Map<String, String>.unmodifiable(result.failures);
       });
     } catch (error) {
       if (!_isCurrentSearch(generation)) return;
-      setState(() => _searchError = () =>
-          error is OnlineMusicException ? error.message : ui("搜索失败，请检查网络后重试。"));
+      setState(() => _searchError = () => error is OnlineMusicException
+          ? ui(error.message)
+          : ui("搜索失败，请检查网络后重试。"));
     } finally {
+      if (identical(_searchCancellation, cancellation)) {
+        _searchCancellation = null;
+      }
       if (_isCurrentSearch(generation)) {
         setState(() => _searching = false);
       }
@@ -202,6 +214,8 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
     if (_closed) return;
     _closed = true;
     _searchGeneration++;
+    _searchCancellation?.cancel();
+    _searchCancellation = null;
     _cancelPreview();
   }
 
@@ -268,11 +282,12 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
                             icon: const Icon(Symbols.search),
                           ),
                         ]),
-                        if (_searchError != null || _partialFailure != null)
+                        if (_searchError != null || _partialFailures.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
-                              _searchError?.call() ?? _partialFailure!,
+                              _searchError?.call() ??
+                                  _onlineFailureSummary(_partialFailures),
                               style: TextStyle(color: scheme.error),
                             ),
                           ),
@@ -317,7 +332,10 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
                                 item.composer?.trim().isNotEmpty == true
                                     ? item.composer
                                     : ui('平台未提供'),
-                                ui(item.sourceLabel)
+                                onlineSourceDisplayLabel(
+                                  provider: item.onlineProvider,
+                                  fallback: item.sourceLabel,
+                                )
                               ]),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -398,3 +416,8 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
     );
   }
 }
+
+String _onlineFailureSummary(Map<String, String> failures) => failures.entries
+    .map((entry) =>
+        '${onlineSourceDisplayLabel(provider: entry.key, fallback: entry.key)}：${ui(entry.value)}')
+    .join('；');

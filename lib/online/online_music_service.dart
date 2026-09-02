@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/online/qq_public_search.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/utils.dart';
@@ -16,6 +18,10 @@ import 'package:music_api/src/utils/crypto.dart' show weApi;
 
 typedef OnlineProviderSearch = Future<List<Audio>> Function(
     String query, int limit);
+
+typedef _CustomTransportFactory = CustomMusicSourceTransport Function(
+  CustomMusicSourceProfile profile,
+);
 
 enum OnlineMusicFailureKind {
   network,
@@ -53,32 +59,70 @@ class OnlineSearchResponse {
   bool get hasPartialFailure => tracks.isNotEmpty && failures.isNotEmpty;
 }
 
-class _ProviderSearchResult {
-  const _ProviderSearchResult(this.provider, this.tracks, [this.error]);
+/// Cancels one submitted online search and every active custom-source request
+/// owned by it. Built-in transports are still independently bounded, while the
+/// caller can stop waiting for them immediately when its page/dialog closes.
+class OnlineSearchCancellation {
+  final CustomMusicSourceCancellation _token = CustomMusicSourceCancellation();
 
-  final String provider;
+  bool get isCancelled => _token.isCancelled;
+
+  void cancel() => _token.cancel();
+
+  void check() {
+    if (isCancelled) throw _cancelledOnlineSearch();
+  }
+
+  void Function() onCancel(void Function() listener) =>
+      _token.onCancel(listener);
+
+  Future<T> race<T>(Future<T> operation) async {
+    try {
+      return await _token.race(operation);
+    } on CustomMusicSourceCancelled {
+      throw _cancelledOnlineSearch();
+    }
+  }
+}
+
+OnlineMusicException _cancelledOnlineSearch() => const OnlineMusicException(
+      OnlineMusicFailureKind.unavailable,
+      '联网请求已取消',
+    );
+
+class _ProviderSearchResult {
+  const _ProviderSearchResult(this.providerKey, this.tracks, [this.error]);
+
+  final String providerKey;
   final List<Audio> tracks;
   final OnlineMusicException? error;
 }
 
 class _ResolvedUrl {
-  const _ResolvedUrl(this.url, this.expiresAt);
+  const _ResolvedUrl(this.url, this.expiresAt, {this.profileScope});
 
   final Uri url;
   final DateTime expiresAt;
+
+  /// Custom profiles are immutable. Binding a cache entry to the exact
+  /// instance makes any edit, disable/re-enable cycle or import invalidate it
+  /// without coupling this service to settings UI events.
+  final CustomMusicSourceProfile? profileScope;
 }
 
 /// Unified online music gateway.
 ///
-/// It intentionally uses only endpoints already supplied by the project's
-/// pinned music_api dependency. No login cookie, paid-track key, or DRM bypass
-/// is attempted. Providers may therefore return "不可播放/下载" for restricted
-/// tracks, which is surfaced to the UI as a normal capability error.
+/// Requests platform endpoints and explicit user-managed provider protocols.
+/// No login cookie, paid-track key, or DRM bypass is attempted. Availability
+/// is resolved per track rather than inferred from the provider's publisher.
 class OnlineMusicService {
   OnlineMusicService._()
       : _sourcePreferences = (() => AppSettings.instance.onlineSources.value),
+        _customProfiles = (() => AppSettings.instance.customMusicSources.value),
         _qqSearchOverride = null,
         _neteaseSearchOverride = null,
+        _customTransportFactory = CustomMusicSourceTransport.new,
+        _customSearchSweepTimeout = const Duration(seconds: 8),
         _retryDelay = const Duration(milliseconds: 220),
         _httpClientFactory = HttpClient.new;
 
@@ -88,11 +132,19 @@ class OnlineMusicService {
     required OnlineSourcePreferences Function() sourcePreferences,
     required OnlineProviderSearch qqSearch,
     required OnlineProviderSearch neteaseSearch,
+    List<CustomMusicSourceProfile> Function()? customProfiles,
+    CustomMusicSourceTransport Function(CustomMusicSourceProfile)?
+        customTransportFactory,
+    Duration customSearchSweepTimeout = const Duration(seconds: 8),
     Duration retryDelay = Duration.zero,
     HttpClient Function()? httpClientFactory,
   })  : _sourcePreferences = sourcePreferences,
+        _customProfiles = customProfiles ?? (() => const []),
         _qqSearchOverride = qqSearch,
         _neteaseSearchOverride = neteaseSearch,
+        _customTransportFactory =
+            customTransportFactory ?? CustomMusicSourceTransport.new,
+        _customSearchSweepTimeout = customSearchSweepTimeout,
         _retryDelay = retryDelay,
         _httpClientFactory = httpClientFactory ?? HttpClient.new;
 
@@ -103,8 +155,11 @@ class OnlineMusicService {
     Duration retryDelay = Duration.zero,
   })  : _sourcePreferences =
             (() => const OnlineSourcePreferences(qqEnabled: false)),
+        _customProfiles = (() => const []),
         _qqSearchOverride = ((_, __) async => const <Audio>[]),
         _neteaseSearchOverride = null,
+        _customTransportFactory = CustomMusicSourceTransport.new,
+        _customSearchSweepTimeout = const Duration(seconds: 8),
         _retryDelay = retryDelay,
         _httpClientFactory = httpClientFactory;
 
@@ -113,99 +168,162 @@ class OnlineMusicService {
   static const _requestTimeout = Duration(seconds: 12);
   static const _downloadReadTimeout = Duration(seconds: 20);
   static const _searchResponseByteLimit = 2 * 1024 * 1024;
-  static const _downloadEnabledProviders = <String>{};
   final OnlineSourcePreferences Function() _sourcePreferences;
+  final List<CustomMusicSourceProfile> Function() _customProfiles;
   final OnlineProviderSearch? _qqSearchOverride;
   final OnlineProviderSearch? _neteaseSearchOverride;
+  final _CustomTransportFactory _customTransportFactory;
+  final Duration _customSearchSweepTimeout;
   final Duration _retryDelay;
   final HttpClient Function() _httpClientFactory;
   final Map<String, _ResolvedUrl> _streamCache = {};
+  CustomMusicSourceCancellation? _pendingCustomStreamResolution;
 
-  /// Conservative synchronous capability for menus.
-  ///
-  /// The pinned anonymous QQ and Netease download endpoints currently reject
-  /// requests in real responses. [download] still verifies the official
-  /// endpoint when called directly, but the UI should not advertise download
-  /// until a provider is explicitly enabled here.
-  bool canDownload(Audio audio) =>
-      audio.isOnline &&
-      _downloadEnabledProviders.contains(audio.onlineProvider?.trim());
+  void cancelPendingStreamResolution() {
+    _pendingCustomStreamResolution?.cancel();
+    _pendingCustomStreamResolution = null;
+  }
+
+  /// Whether a user can try downloading. Unknown per-track availability is
+  /// resolved by the endpoint, not a source-wide or publisher-based denylist.
+  bool canDownload(Audio audio) {
+    if (!audio.isOnline || audio.onlineDownloadAllowed == false) return false;
+    final custom = _customProfileFor(audio.onlineProvider);
+    if (custom != null) {
+      return custom.enabled &&
+          custom.authentication == null &&
+          custom.capabilities.contains(CustomMusicSourceCapability.download);
+    }
+    return OnlineMusicSource.fromId(audio.onlineProvider)?.supportsDownload ??
+        false;
+  }
 
   String? downloadUnavailableReason(Audio audio) {
     if (!audio.isOnline) return "该歌曲不是联网曲目";
     if (canDownload(audio)) return null;
+    if (audio.onlineDownloadAllowed == false) {
+      return "该歌源明确标记这首歌曲不可下载";
+    }
+    final customId =
+        CustomMusicSourceProfile.profileIdFromProvider(audio.onlineProvider);
+    if (customId != null) {
+      final profile = _customProfileFor(audio.onlineProvider);
+      if (profile == null) return "对应的自定义歌源已被移除";
+      if (!profile.enabled) return "对应的自定义歌源已停用";
+      if (profile.authentication != null) return "歌源凭据尚未配置";
+      if (!profile.capabilities
+          .contains(CustomMusicSourceCapability.download)) {
+        return "该自定义歌源未提供下载能力";
+      }
+      return "该歌曲的下载地址当前不可用或需要登录";
+    }
     return OnlineMusicSource.fromId(audio.onlineProvider)
             ?.downloadUnavailableReason ??
         "该联网音乐来源当前不支持下载";
   }
 
-  Future<OnlineSearchResponse> search(String rawQuery, {int limit = 30}) async {
+  Future<OnlineSearchResponse> search(
+    String rawQuery, {
+    int limit = 30,
+    OnlineSearchCancellation? cancellation,
+  }) async {
+    cancellation?.check();
     final query = rawQuery.trim();
     if (query.isEmpty) {
       return const OnlineSearchResponse(tracks: [], failures: {});
     }
 
-    // Snapshot once. Toggling settings affects the next submitted search, not
-    // in-flight work or the URL/lyrics resolvers for saved/queued online songs.
+    // Snapshot once. Built-in search switches affect the next submitted
+    // search. A custom profile's own enable switch is stricter: disabling it
+    // prevents future requests to that user-managed server.
     final sources = _sourcePreferences().enabledSources;
-    if (sources.isEmpty) {
+    final customProfiles = _customProfiles()
+        .where((profile) =>
+            profile.enabled &&
+            profile.capabilities.contains(CustomMusicSourceCapability.search))
+        .take(CustomMusicSourceProfileCodec.maximumProfiles)
+        .toList(growable: false);
+    if (sources.isEmpty && customProfiles.isEmpty) {
       throw const OnlineMusicException(
         OnlineMusicFailureKind.unavailable,
         onlineSourcesDisabledMessage,
       );
     }
     final safeLimit = limit < 1 ? 1 : (limit > 50 ? 50 : limit);
-    final results = await Future.wait([
-      for (final source in sources)
-        _guardSearch(
-            source.label,
-            () => switch (source) {
-                  OnlineMusicSource.qq =>
-                    (_qqSearchOverride ?? _searchQq)(query, safeLimit),
-                  OnlineMusicSource.netease => (_neteaseSearchOverride ??
-                      _searchNetease)(query, safeLimit),
-                }),
+    final batchesFuture = Future.wait(<Future<List<_ProviderSearchResult>>>[
+      Future.wait(<Future<_ProviderSearchResult>>[
+        for (final source in sources)
+          _guardSearch(
+              source.id,
+              source.label,
+              () => switch (source) {
+                    OnlineMusicSource.qq =>
+                      (_qqSearchOverride ?? _searchQq)(query, safeLimit),
+                    OnlineMusicSource.netease => (_neteaseSearchOverride ??
+                        _searchNetease)(query, safeLimit),
+                  }),
+      ]),
+      _searchCustomProfiles(
+        customProfiles,
+        query,
+        safeLimit,
+        cancellation: cancellation,
+      ),
     ]);
+    final batches = cancellation == null
+        ? await batchesFuture
+        : await cancellation.race(batchesFuture);
+    final results = <_ProviderSearchResult>[
+      for (final batch in batches) ...batch,
+    ];
     final failures = <String, String>{};
     final tracks = <Audio>[];
     final identities = <String>{};
     for (final result in results) {
       if (result.error != null) {
-        failures[result.provider] = result.error!.message;
+        failures.update(
+          result.providerKey,
+          (existing) => '$existing；${result.error!.message}',
+          ifAbsent: () => result.error!.message,
+        );
       }
       for (final track in result.tracks) {
         if (identities.add(track.path)) tracks.add(track);
       }
     }
 
-    if (tracks.isEmpty && failures.length == results.length) {
+    if (tracks.isEmpty &&
+        results.isNotEmpty &&
+        results.every((result) => result.error != null)) {
       final errors = results.map((result) => result.error!).toList();
       throw OnlineMusicException(
         _combinedFailureKind(errors),
-        failures.values.join("；"),
+        failures.values.toSet().join("；"),
       );
     }
     return OnlineSearchResponse(tracks: tracks, failures: failures);
   }
 
   Future<_ProviderSearchResult> _guardSearch(
-    String provider,
-    Future<List<Audio>> Function() search,
-  ) async {
-    const maxAttempts = 2;
+    String providerKey,
+    String displayLabel,
+    Future<List<Audio>> Function() search, {
+    int maxAttempts = 2,
+  }) async {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return _ProviderSearchResult(provider, await search());
+        return _ProviderSearchResult(providerKey, await search());
       } catch (error, trace) {
-        final mapped = _mapError(error, operation: "搜索", provider: provider);
+        final mapped =
+            _mapError(error, operation: "搜索", provider: displayLabel);
         final willRetry = mapped.retryable && attempt < maxAttempts;
         LOGGER.w(
-          "[online/$provider] ${mapped.message} "
+          "[online/$displayLabel] ${mapped.message} "
           "(attempt $attempt/$maxAttempts${willRetry ? ', retrying' : ''})",
           stackTrace: trace,
         );
         if (!willRetry) {
-          return _ProviderSearchResult(provider, const [], mapped);
+          return _ProviderSearchResult(providerKey, const [], mapped);
         }
         if (_retryDelay > Duration.zero) {
           await Future<void>.delayed(_retryDelay);
@@ -213,6 +331,117 @@ class OnlineMusicService {
       }
     }
     throw StateError('unreachable');
+  }
+
+  Future<List<_ProviderSearchResult>> _searchCustomProfiles(
+    List<CustomMusicSourceProfile> profiles,
+    String query,
+    int limit, {
+    OnlineSearchCancellation? cancellation,
+  }) async {
+    if (profiles.isEmpty) return const <_ProviderSearchResult>[];
+    final results = List<_ProviderSearchResult?>.filled(profiles.length, null);
+    var nextIndex = 0;
+    var deadlineExpired = false;
+    final sweepCancellation = CustomMusicSourceCancellation();
+    final removeExternalCancellation =
+        cancellation?.onCancel(sweepCancellation.cancel);
+    final deadlineTimer = Timer(_customSearchSweepTimeout, () {
+      deadlineExpired = true;
+      sweepCancellation.cancel();
+    });
+
+    OnlineMusicException stoppedError() => deadlineExpired
+        ? const OnlineMusicException(
+            OnlineMusicFailureKind.timeout,
+            '联网请求超时，请稍后重试',
+            retryable: true,
+          )
+        : _cancelledOnlineSearch();
+
+    Future<void> worker() async {
+      while (nextIndex < profiles.length) {
+        final index = nextIndex++;
+        final profile = profiles[index];
+        if (sweepCancellation.isCancelled) {
+          results[index] = _ProviderSearchResult(
+              profile.providerId, const [], stoppedError());
+          continue;
+        }
+        // Each custom transport already owns a strict total deadline. A dead
+        // user-managed service must not receive an automatic second request.
+        final result = await _guardSearch(
+          profile.providerId,
+          profile.name,
+          () async => (await _customTransportFactory(profile).search(
+            query,
+            limit: limit,
+            cancellation: sweepCancellation,
+          ))
+              .tracks,
+          maxAttempts: 1,
+        );
+        if (sweepCancellation.isCancelled) {
+          results[index] = _ProviderSearchResult(
+            profile.providerId,
+            const [],
+            stoppedError(),
+          );
+        } else if (result.error == null &&
+            !_isCurrentCustomProfileSnapshot(
+              profile,
+              CustomMusicSourceCapability.search,
+            )) {
+          results[index] = _ProviderSearchResult(
+            profile.providerId,
+            const [],
+            const OnlineMusicException(
+              OnlineMusicFailureKind.unavailable,
+              '该联网音乐来源当前不可用',
+            ),
+          );
+        } else {
+          results[index] = result;
+        }
+      }
+    }
+
+    try {
+      final workerCount = profiles.length < 4 ? profiles.length : 4;
+      await Future.wait(
+          List<Future<void>>.generate(workerCount, (_) => worker()));
+      for (var index = 0; index < results.length; index++) {
+        final result = results[index];
+        if (result == null || result.error != null) continue;
+        if (_isCurrentCustomProfileSnapshot(
+          profiles[index],
+          CustomMusicSourceCapability.search,
+        )) {
+          continue;
+        }
+        results[index] = _ProviderSearchResult(
+          profiles[index].providerId,
+          const [],
+          const OnlineMusicException(
+            OnlineMusicFailureKind.unavailable,
+            '该联网音乐来源当前不可用',
+          ),
+        );
+      }
+      return <_ProviderSearchResult>[
+        for (var index = 0; index < results.length; index++)
+          results[index] ??
+              _ProviderSearchResult(
+                profiles[index].providerId,
+                const [],
+                stoppedError(),
+              ),
+      ];
+    } finally {
+      deadlineTimer.cancel();
+      removeExternalCancellation?.call();
+      sweepCancellation.cancel();
+    }
   }
 
   Future<List<Audio>> _searchQq(String query, int limit) async {
@@ -286,7 +515,7 @@ class OnlineMusicService {
       final request = await client.postUrl(uri).timeout(_requestTimeout);
       request.followRedirects = false;
       request.headers.set(HttpHeaders.userAgentHeader,
-          'Mozilla/5.0 DanPlayer/26.0.3 AnonymousSearch');
+          'Mozilla/5.0 DanPlayer/26.0.4 AnonymousSearch');
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
       request.headers.contentType = ContentType(
@@ -385,27 +614,141 @@ class OnlineMusicService {
     );
   }
 
+  Future<Audio> refreshMetadata(
+    Audio audio, {
+    CustomMusicSourceCancellation? cancellation,
+  }) async {
+    final custom = _customProfileFor(audio.onlineProvider);
+    if (custom == null) {
+      if (CustomMusicSourceProfile.profileIdFromProvider(
+              audio.onlineProvider) !=
+          null) {
+        throw const OnlineMusicException(
+            OnlineMusicFailureKind.unavailable, '对应的自定义歌源已被移除');
+      }
+      return audio;
+    }
+    final capability =
+        custom.capabilities.contains(CustomMusicSourceCapability.metadata)
+            ? CustomMusicSourceCapability.metadata
+            : custom.capabilities.contains(CustomMusicSourceCapability.cover)
+                ? CustomMusicSourceCapability.cover
+                : CustomMusicSourceCapability.search;
+    _requireCurrentCustomProfile(audio,
+        expected: custom, capability: capability, operation: '读取歌曲信息');
+    if (capability == CustomMusicSourceCapability.search) return audio;
+    final result = await _customTransportFactory(custom)
+        .metadata(audio, cancellation: cancellation);
+    _requireCurrentCustomProfile(audio,
+        expected: custom, capability: capability, operation: '读取歌曲信息');
+    return result;
+  }
+
   Future<Uri> resolveStreamUrl(Audio audio, {bool forceRefresh = false}) async {
     _validateOnlineAudio(audio);
+    cancelPendingStreamResolution();
+    final customProfileId =
+        CustomMusicSourceProfile.profileIdFromProvider(audio.onlineProvider);
+    final initialCustom = _customProfileFor(audio.onlineProvider);
+    if (customProfileId != null) {
+      if (initialCustom == null || !initialCustom.enabled) {
+        _streamCache.remove(audio.path);
+        throw const OnlineMusicException(
+          OnlineMusicFailureKind.unavailable,
+          "对应的自定义歌源已移除或停用，无法解析播放地址",
+        );
+      }
+      if (!initialCustom.capabilities
+          .contains(CustomMusicSourceCapability.stream)) {
+        _streamCache.remove(audio.path);
+        throw const OnlineMusicException(
+          OnlineMusicFailureKind.unavailable,
+          "该自定义歌源当前未提供播放解析能力",
+        );
+      }
+      if (initialCustom.authentication != null) {
+        _streamCache.remove(audio.path);
+        throw const OnlineMusicException(
+          OnlineMusicFailureKind.unavailable,
+          "该歌源需要凭据，但安全凭据尚未配置",
+        );
+      }
+      if (audio.onlinePlayable == false) {
+        _streamCache.remove(audio.path);
+        throw const OnlineMusicException(
+          OnlineMusicFailureKind.unavailable,
+          "该歌源明确标记这首歌曲不可播放",
+        );
+      }
+    }
     final cached = _streamCache[audio.path];
+    final cacheMatchesProfile = initialCustom == null
+        ? cached?.profileScope == null
+        : identical(cached?.profileScope, initialCustom);
     if (!forceRefresh &&
         cached != null &&
+        cacheMatchesProfile &&
         cached.expiresAt.isAfter(DateTime.now())) {
       return cached.url;
     }
+    if (cached != null && !cacheMatchesProfile) {
+      _streamCache.remove(audio.path);
+    }
 
     try {
-      final url = switch (audio.onlineProvider) {
-        "qq" => await _resolveQqUrl(audio),
-        "netease" => await _resolveNeteaseUrl(audio),
-        _ => throw OnlineMusicException(
-            OnlineMusicFailureKind.api,
-            "不支持的联网音乐来源：${audio.onlineProvider}",
-          ),
-      };
+      final now = DateTime.now();
+      final custom = initialCustom;
+      late final Uri url;
+      var expiresAt = now.add(const Duration(minutes: 10));
+      if (custom != null) {
+        final cancellation = CustomMusicSourceCancellation();
+        _pendingCustomStreamResolution = cancellation;
+        late final CustomMusicStreamResolution resolution;
+        try {
+          resolution = await _customTransportFactory(custom).resolve(
+            audio,
+            cancellation: cancellation,
+          );
+        } finally {
+          if (identical(_pendingCustomStreamResolution, cancellation)) {
+            _pendingCustomStreamResolution = null;
+          }
+        }
+        _requireCurrentCustomProfile(
+          audio,
+          expected: custom,
+          capability: CustomMusicSourceCapability.stream,
+          operation: '播放',
+        );
+        url = _validatedUri(resolution.uri);
+        final remoteExpiry = resolution.expiresAt;
+        if (remoteExpiry != null) {
+          // Refresh a little before signed URLs expire. An already-expired
+          // value remains usable for this attempt but is not cached.
+          final early = remoteExpiry.subtract(const Duration(seconds: 5));
+          expiresAt = early.isAfter(now) ? early : now;
+        }
+      } else if (CustomMusicSourceProfile.profileIdFromProvider(
+              audio.onlineProvider) !=
+          null) {
+        throw const OnlineMusicException(
+          OnlineMusicFailureKind.unavailable,
+          "对应的自定义歌源已被移除，无法解析播放地址",
+        );
+      } else {
+        url = switch (audio.onlineProvider) {
+          "qq" => await _resolveQqUrl(audio),
+          "netease" => await _resolveNeteaseUrl(audio),
+          _ => throw OnlineMusicException(
+              OnlineMusicFailureKind.api,
+              "不支持的联网音乐来源：${audio.onlineProvider}",
+            ),
+        };
+      }
       _streamCache[audio.path] = _ResolvedUrl(
         url,
-        DateTime.now().add(const Duration(minutes: 10)),
+        expiresAt,
+        profileScope: custom,
       );
       return url;
     } catch (error) {
@@ -538,6 +881,12 @@ class OnlineMusicService {
     void Function(int received, int? total)? onProgress,
   }) async {
     _validateOnlineAudio(audio);
+    if (!canDownload(audio)) {
+      throw OnlineMusicException(
+        OnlineMusicFailureKind.unavailable,
+        downloadUnavailableReason(audio) ?? "当前来源不支持下载",
+      );
+    }
     if (destination.path.trim().isEmpty) {
       throw const OnlineMusicException(
         OnlineMusicFailureKind.download,
@@ -545,15 +894,45 @@ class OnlineMusicService {
       );
     }
     Uri uri;
+    CustomMusicSourceProfile? resolvedCustomProfile;
     try {
-      uri = switch (audio.onlineProvider) {
-        "qq" => await _resolveQqUrl(audio, download: true),
-        "netease" => await _resolveNeteaseDownloadUrl(audio),
-        _ => throw OnlineMusicException(
-            OnlineMusicFailureKind.api,
-            "不支持的联网音乐来源：${audio.onlineProvider}",
-          ),
-      };
+      final custom = _customProfileFor(audio.onlineProvider);
+      if (custom != null) {
+        resolvedCustomProfile = custom;
+        final resolution = await _customTransportFactory(custom).resolve(
+          audio,
+          forDownload: true,
+        );
+        _requireCurrentCustomProfile(
+          audio,
+          expected: custom,
+          capability: CustomMusicSourceCapability.download,
+          operation: '下载',
+        );
+        if (!resolution.downloadAllowed) {
+          throw const OnlineMusicException(
+            OnlineMusicFailureKind.unavailable,
+            "该歌源明确标记这首歌曲不可下载",
+          );
+        }
+        uri = _validatedUri(resolution.uri);
+      } else if (CustomMusicSourceProfile.profileIdFromProvider(
+              audio.onlineProvider) !=
+          null) {
+        throw const OnlineMusicException(
+          OnlineMusicFailureKind.unavailable,
+          "对应的自定义歌源已被移除，无法下载",
+        );
+      } else {
+        uri = switch (audio.onlineProvider) {
+          "qq" => await _resolveQqUrl(audio, download: true),
+          "netease" => await _resolveNeteaseDownloadUrl(audio),
+          _ => throw OnlineMusicException(
+              OnlineMusicFailureKind.api,
+              "不支持的联网音乐来源：${audio.onlineProvider}",
+            ),
+        };
+      }
     } on OnlineMusicException {
       rethrow;
     } catch (error) {
@@ -561,14 +940,52 @@ class OnlineMusicService {
     }
 
     final client = HttpClient()..connectionTimeout = _requestTimeout;
+    OnlineMusicException? customProfileInvalidation;
+    Timer? customProfileMonitor;
+
+    void requireCurrentDownloadProfile() {
+      final invalidation = customProfileInvalidation;
+      if (invalidation != null) throw invalidation;
+      if (resolvedCustomProfile case final expected?) {
+        _requireCurrentCustomProfile(
+          audio,
+          expected: expected,
+          capability: CustomMusicSourceCapability.download,
+          operation: '下载',
+        );
+      }
+    }
+
+    if (resolvedCustomProfile != null) {
+      requireCurrentDownloadProfile();
+      // Closing the client immediately avoids waiting for the media server's
+      // read timeout when a profile is disabled or edited mid-download. The
+      // explicit checks after every await/chunk remain the source of truth and
+      // also cover test/custom profile providers that do not expose a notifier.
+      customProfileMonitor = Timer.periodic(
+        const Duration(milliseconds: 100),
+        (_) {
+          if (customProfileInvalidation != null) return;
+          try {
+            requireCurrentDownloadProfile();
+          } on OnlineMusicException catch (error) {
+            customProfileInvalidation = error;
+            client.close(force: true);
+          }
+        },
+      );
+    }
     final temporary = File(
       "${destination.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.part",
     );
     IOSink? sink;
     try {
+      requireCurrentDownloadProfile();
       final request = await client.getUrl(uri).timeout(_requestTimeout);
-      request.headers.set(HttpHeaders.userAgentHeader, "Dan Player/26.0.3");
+      requireCurrentDownloadProfile();
+      request.headers.set(HttpHeaders.userAgentHeader, "Dan Player/26.0.4");
       final response = await request.close().timeout(_requestTimeout);
+      requireCurrentDownloadProfile();
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw OnlineMusicException(
           OnlineMusicFailureKind.download,
@@ -590,17 +1007,22 @@ class OnlineMusicService {
         );
       }
       await destination.parent.create(recursive: true);
+      requireCurrentDownloadProfile();
       sink = temporary.openWrite();
       var received = 0;
       final total = response.contentLength >= 0 ? response.contentLength : null;
       await for (final chunk in response.timeout(_downloadReadTimeout)) {
+        requireCurrentDownloadProfile();
         sink.add(chunk);
         received += chunk.length;
         onProgress?.call(received, total);
       }
+      requireCurrentDownloadProfile();
       await sink.flush();
+      requireCurrentDownloadProfile();
       await sink.close();
       sink = null;
+      requireCurrentDownloadProfile();
       if (received == 0) {
         throw const OnlineMusicException(
           OnlineMusicFailureKind.download,
@@ -613,7 +1035,11 @@ class OnlineMusicService {
           "下载失败：文件接收不完整",
         );
       }
-      await _replaceDownloadedFile(temporary, destination);
+      await _replaceDownloadedFile(
+        temporary,
+        destination,
+        validate: requireCurrentDownloadProfile,
+      );
     } catch (error) {
       try {
         await sink?.close();
@@ -623,8 +1049,12 @@ class OnlineMusicService {
           await temporary.delete();
         } catch (_) {}
       }
+      if (customProfileInvalidation case final invalidation?) {
+        throw invalidation;
+      }
       throw _mapError(error, operation: "下载", provider: audio.sourceLabel);
     } finally {
+      customProfileMonitor?.cancel();
       client.close(force: true);
     }
   }
@@ -655,7 +1085,10 @@ class OnlineMusicService {
       );
 
   Uri _validatedUri(Uri uri) {
-    if ((uri.scheme != "http" && uri.scheme != "https") || uri.host.isEmpty) {
+    if ((uri.scheme != "http" && uri.scheme != "https") ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasFragment) {
       throw const OnlineMusicException(
         OnlineMusicFailureKind.api,
         "音乐服务返回了无效地址",
@@ -670,10 +1103,64 @@ class OnlineMusicService {
     required String provider,
   }) {
     if (error is OnlineMusicException) return error;
+    if (error is CustomMusicSourceException) {
+      late final OnlineMusicFailureKind kind;
+      late final String message;
+      switch (error.kind) {
+        case CustomMusicSourceFailureKind.timeout:
+          kind = OnlineMusicFailureKind.timeout;
+          message = '联网请求超时，请稍后重试';
+        case CustomMusicSourceFailureKind.network:
+          kind = OnlineMusicFailureKind.network;
+          message = '联网失败，请检查网络连接';
+        case CustomMusicSourceFailureKind.credentialsNotConfigured:
+          kind = OnlineMusicFailureKind.unavailable;
+          message = '歌源凭据尚未配置';
+        case CustomMusicSourceFailureKind.cancelled:
+          kind = OnlineMusicFailureKind.unavailable;
+          message = '联网请求已取消';
+        case CustomMusicSourceFailureKind.unavailable:
+          kind = OnlineMusicFailureKind.unavailable;
+          message = '该联网音乐来源当前不可用';
+        case CustomMusicSourceFailureKind.responseTooLarge:
+        case CustomMusicSourceFailureKind.invalidResponse:
+          kind = OnlineMusicFailureKind.api;
+          message = '音乐服务返回的数据无效或过大';
+        case CustomMusicSourceFailureKind.redirect:
+          kind = OnlineMusicFailureKind.api;
+          message = '音乐服务拒绝了请求';
+        case CustomMusicSourceFailureKind.http:
+          final statusCode = error.statusCode ?? 0;
+          if (statusCode == 401 || statusCode == 403) {
+            kind = OnlineMusicFailureKind.unavailable;
+            message = '音乐服务要求登录或拒绝访问此歌曲';
+          } else if (statusCode == 408 || statusCode == 504) {
+            kind = OnlineMusicFailureKind.timeout;
+            message = '联网请求超时，请稍后重试';
+          } else if (statusCode == 429 || statusCode >= 500) {
+            kind = OnlineMusicFailureKind.network;
+            message = '联网失败，请检查网络连接';
+          } else if (statusCode == 404 || statusCode == 410) {
+            kind = OnlineMusicFailureKind.unavailable;
+            message = '该联网音乐来源当前不可用';
+          } else {
+            kind = OnlineMusicFailureKind.api;
+            message = '音乐服务拒绝了请求';
+          }
+      }
+      return OnlineMusicException(
+        kind,
+        message,
+        cause: error,
+        retryable: kind == OnlineMusicFailureKind.network ||
+            kind == OnlineMusicFailureKind.timeout,
+        serviceCode: error.statusCode,
+      );
+    }
     if (error is TimeoutException) {
       return OnlineMusicException(
         OnlineMusicFailureKind.timeout,
-        "$provider$operation超时，请稍后重试",
+        '联网请求超时，请稍后重试',
         cause: error,
         retryable: true,
       );
@@ -683,7 +1170,7 @@ class OnlineMusicService {
         error is HttpException) {
       return OnlineMusicException(
         OnlineMusicFailureKind.network,
-        "$provider联网失败，请检查网络连接",
+        '联网失败，请检查网络连接',
         cause: error,
         retryable: true,
       );
@@ -697,7 +1184,7 @@ class OnlineMusicService {
     }
     return OnlineMusicException(
       OnlineMusicFailureKind.api,
-      "$provider$operation失败，请稍后重试",
+      '联网操作失败，请稍后重试',
       cause: error,
     );
   }
@@ -712,7 +1199,84 @@ class OnlineMusicService {
     if (kinds.contains(OnlineMusicFailureKind.timeout)) {
       return OnlineMusicFailureKind.timeout;
     }
+    if (kinds.length == 1 &&
+        kinds.contains(OnlineMusicFailureKind.unavailable)) {
+      return OnlineMusicFailureKind.unavailable;
+    }
     return OnlineMusicFailureKind.api;
+  }
+
+  CustomMusicSourceProfile? _customProfileFor(String? providerId) {
+    final profileId =
+        CustomMusicSourceProfile.profileIdFromProvider(providerId);
+    if (profileId == null) return null;
+    for (final profile in _customProfiles()) {
+      if (profile.id == profileId) return profile;
+    }
+    return null;
+  }
+
+  bool _isCurrentCustomProfileSnapshot(
+    CustomMusicSourceProfile expected,
+    CustomMusicSourceCapability capability,
+  ) {
+    final current = _customProfileFor(expected.providerId);
+    return identical(current, expected) &&
+        current!.enabled &&
+        current.authentication == null &&
+        current.capabilities.contains(capability);
+  }
+
+  void _requireCurrentCustomProfile(
+    Audio audio, {
+    required CustomMusicSourceProfile expected,
+    required CustomMusicSourceCapability capability,
+    required String operation,
+  }) {
+    final current = _customProfileFor(audio.onlineProvider);
+    if (current == null || !current.enabled) {
+      _streamCache.remove(audio.path);
+      throw OnlineMusicException(
+        OnlineMusicFailureKind.unavailable,
+        '对应的自定义歌源已移除或停用，无法$operation',
+      );
+    }
+    if (!identical(current, expected)) {
+      _streamCache.remove(audio.path);
+      throw OnlineMusicException(
+        OnlineMusicFailureKind.unavailable,
+        '自定义歌源配置已改变，请重新$operation',
+      );
+    }
+    if (!current.capabilities.contains(capability)) {
+      _streamCache.remove(audio.path);
+      throw const OnlineMusicException(
+        OnlineMusicFailureKind.unavailable,
+        '该自定义歌源当前未提供所需能力',
+      );
+    }
+    if (current.authentication != null) {
+      _streamCache.remove(audio.path);
+      throw const OnlineMusicException(
+        OnlineMusicFailureKind.unavailable,
+        '该歌源需要凭据，但安全凭据尚未配置',
+      );
+    }
+    if (capability == CustomMusicSourceCapability.stream &&
+        audio.onlinePlayable == false) {
+      _streamCache.remove(audio.path);
+      throw const OnlineMusicException(
+        OnlineMusicFailureKind.unavailable,
+        '该歌源明确标记这首歌曲不可播放',
+      );
+    }
+    if (capability == CustomMusicSourceCapability.download &&
+        audio.onlineDownloadAllowed == false) {
+      throw const OnlineMusicException(
+        OnlineMusicFailureKind.unavailable,
+        '该歌源明确标记这首歌曲不可下载',
+      );
+    }
   }
 
   static void _requireAnswerSuccess(
@@ -804,24 +1368,37 @@ class OnlineMusicService {
 
   static Future<void> _replaceDownloadedFile(
     File temporary,
-    File destination,
-  ) async {
+    File destination, {
+    void Function()? validate,
+  }) async {
     File? backup;
-    if (await destination.exists()) {
-      backup = File(
-        "${destination.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.backup",
-      );
-      await destination.rename(backup.path);
-    }
-
+    var replacedDestination = false;
     try {
+      validate?.call();
+      if (await destination.exists()) {
+        validate?.call();
+        backup = File(
+          "${destination.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.backup",
+        );
+        await destination.rename(backup.path);
+        validate?.call();
+      }
+
+      validate?.call();
       await temporary.rename(destination.path);
+      replacedDestination = true;
+      validate?.call();
     } catch (_) {
-      if (backup != null &&
-          await backup.exists() &&
-          !await destination.exists()) {
+      if (replacedDestination && await destination.exists()) {
         try {
-          await backup.rename(destination.path);
+          await destination.delete();
+        } catch (_) {}
+      }
+      if (backup != null && await backup.exists()) {
+        try {
+          if (!await destination.exists()) {
+            await backup.rename(destination.path);
+          }
         } catch (restoreError, trace) {
           LOGGER.e(
             "[online download] failed to restore existing destination: "

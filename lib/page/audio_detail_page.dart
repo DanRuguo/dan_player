@@ -6,6 +6,7 @@ import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/audio_metadata_dialog.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
+import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/component/song_comments_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_library.dart';
@@ -52,7 +53,7 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
     final service = OnlineMusicService.instance;
     if (!service.canDownload(audio)) {
       showTextOnSnackBar(
-          service.downloadUnavailableReason(audio) ?? ui("当前来源不支持下载"));
+          service.downloadUnavailableReason(audio) ?? "当前来源不支持下载");
       return;
     }
     final picker = SaveFilePicker()
@@ -174,7 +175,12 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                     _SpecCard(
                       icon: Symbols.cloud,
                       label: ui("来源"),
-                      value: audio.isOnline ? audio.sourceLabel : "本地文件",
+                      value: audio.isOnline
+                          ? onlineSourceDisplayLabel(
+                              provider: audio.onlineProvider,
+                              fallback: audio.sourceLabel,
+                            )
+                          : ui("本地文件"),
                     ),
                     if (audio.track > 0)
                       _SpecCard(
@@ -198,8 +204,11 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                       _SpecCard(
                         icon: Symbols.play_circle,
                         label: ui("播放统计"),
-                        value: "${trackStats.playCount} 次 · "
-                            "${Duration(milliseconds: trackStats.listenMilliseconds).toStringHMMSS()}",
+                        value: ui("{0} 次 · {1}", [
+                          trackStats.playCount,
+                          Duration(milliseconds: trackStats.listenMilliseconds)
+                              .toStringHMMSS(),
+                        ]),
                       ),
                   ],
                 ),
@@ -227,8 +236,9 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                 if (audio.isOnline)
                   _DetailSection(
                     title: ui("联网标识"),
-                    child: SelectableText(
-                      "${audio.onlineProvider} · ${audio.onlineId}",
+                    child: OnlineIdentitySummary(
+                      provider: audio.onlineProvider ?? '',
+                      id: audio.onlineId ?? '',
                     ),
                   )
                 else ...[
@@ -334,9 +344,18 @@ class _HeroInfo extends StatelessWidget {
         Chip(
           avatar: Icon(audio.isOnline ? Symbols.cloud : Symbols.hard_drive,
               size: 18),
-          label: Text(audio.isOnline
-              ? ui("联网音乐 · {0}", [audio.sourceLabel])
-              : ui("本地音乐")),
+          label: Text(
+            audio.isOnline
+                ? ui("联网音乐 · {0}", [
+                    onlineSourceDisplayLabel(
+                      provider: audio.onlineProvider,
+                      fallback: audio.sourceLabel,
+                    )
+                  ])
+                : ui("本地音乐"),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
         const SizedBox(height: 10.0),
         Text(
@@ -393,7 +412,7 @@ class _HeroInfo extends StatelessWidget {
               Tooltip(
                 message: canDownload
                     ? ui("保存到本地")
-                    : downloadReason ?? ui("当前来源不支持下载"),
+                    : ui(downloadReason ?? "当前来源不支持下载"),
                 child: OutlinedButton.icon(
                   onPressed: canDownload ? onDownload : null,
                   icon: const Icon(Symbols.download),
@@ -461,7 +480,7 @@ class _SpecCard extends StatelessWidget {
       identity: ('audio-spec', label),
       order: 3,
       child: Container(
-        constraints: const BoxConstraints(minWidth: 160),
+        constraints: const BoxConstraints(minWidth: 160, maxWidth: 320),
         padding: const EdgeInsets.all(14.0),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -472,13 +491,24 @@ class _SpecCard extends StatelessWidget {
           children: [
             Icon(icon),
             const SizedBox(width: 10.0),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: Theme.of(context).textTheme.bodySmall),
-                Text(value,
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-              ],
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  Text(
+                    value,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

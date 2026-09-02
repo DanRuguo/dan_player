@@ -27,6 +27,10 @@ void main() {
                 'album': 'Album',
                 'duration': 123,
                 'coverUrl': 'https://images.example.test/cover.jpg',
+                'bitrate': 320,
+                'albumArtist': 'Album artist',
+                'composer': 'Composer',
+                'language': 'ja',
                 'streamAvailable': true,
                 'downloadAllowed': false,
                 // A search response URL is deliberately ignored. Playback is
@@ -50,7 +54,11 @@ void main() {
         });
         final profile = _danProfile(
           server,
-          capabilities: const {CustomMusicSourceCapability.search},
+          capabilities: const {
+            CustomMusicSourceCapability.search,
+            CustomMusicSourceCapability.stream,
+            CustomMusicSourceCapability.download,
+          },
           endpoints: const {CustomMusicSourceCapability.search: 'search'},
           headers: const {'X-Client': 'Dan Player test'},
         );
@@ -73,6 +81,13 @@ void main() {
         expect(result.tracks.first.onlineDownloadAllowed, isFalse);
         expect(result.tracks[1].onlinePlayable, isFalse);
         expect(result.tracks[1].onlineDownloadAllowed, isTrue);
+        expect(result.tracks.first.artworkUrl, isNull,
+            reason: 'cover fields require the declared cover capability');
+        expect(result.tracks.first.bitrate, isNull);
+        expect(result.tracks.first.albumArtist, isNull);
+        expect(result.tracks.first.composer, isNull);
+        expect(result.tracks.first.language, isNull,
+            reason: 'extended fields require the metadata capability');
         expect(result.tracks.first.path, isNot(contains('must-not-be-used')));
         expect(result.toString(), isNot(contains('hello world')));
       });
@@ -169,7 +184,48 @@ void main() {
       });
     });
 
-    test('resolution requires an explicit per-track download grant', () async {
+    test('explicit metadata endpoint preserves the selected song identity',
+        () async {
+      await _withServer((server) async {
+        server.listen((request) async {
+          expect(request.uri.path, '/metadata');
+          expect(request.uri.queryParameters['id'], 'selected-id');
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({
+            'track': {
+              'id': 'must-not-rebind',
+              'title': 'Detailed title',
+              'artist': 'Detailed artist',
+              'coverUrl': 'https://example.test/a.jpg',
+            }
+          }));
+          await request.response.close();
+        });
+        final profile = _danProfile(server, capabilities: const {
+          CustomMusicSourceCapability.search,
+          CustomMusicSourceCapability.metadata,
+          CustomMusicSourceCapability.cover,
+        }, endpoints: const {
+          CustomMusicSourceCapability.metadata: '/metadata'
+        });
+        final audio = Audio.online(
+            provider: profile.providerId,
+            id: 'selected-id',
+            title: 'Original',
+            artist: 'Artist',
+            album: 'Album',
+            duration: 123);
+        final detail =
+            await CustomMusicSourceTransport(profile).metadata(audio);
+        expect(detail.onlineId, 'selected-id');
+        expect(detail.title, 'Detailed title');
+        expect(detail.album, 'Album');
+        expect(detail.artworkUrl, 'https://example.test/a.jpg');
+      });
+    });
+
+    test('resolution honors an explicit per-track download restriction',
+        () async {
       await _withServer((server) async {
         final purposes = <String>[];
         server.listen((request) async {
@@ -363,6 +419,47 @@ void main() {
       });
     });
 
+    test('one wall-clock deadline stops a slow trickle response', () async {
+      await _withServer((server) async {
+        server.listen((request) async {
+          request.response.headers.contentType = ContentType.json;
+          try {
+            request.response.write('{"tracks":[');
+            await request.response.flush();
+            for (var index = 0; index < 30; index++) {
+              await Future<void>.delayed(const Duration(milliseconds: 25));
+              request.response.write(' ');
+              await request.response.flush();
+            }
+            request.response.write(']}');
+            await request.response.close();
+          } on Object {
+            // The total deadline deliberately closes the slow response.
+          }
+        });
+        final profile = _danProfile(
+          server,
+          capabilities: const {CustomMusicSourceCapability.search},
+          endpoints: const {CustomMusicSourceCapability.search: 'trickle'},
+        );
+        final stopwatch = Stopwatch()..start();
+
+        await expectLater(
+          CustomMusicSourceTransport(
+            profile,
+            requestTimeout: const Duration(milliseconds: 90),
+          ).search('deadline'),
+          throwsA(isA<CustomMusicSourceException>().having(
+            (error) => error.kind,
+            'kind',
+            CustomMusicSourceFailureKind.timeout,
+          )),
+        );
+
+        expect(stopwatch.elapsed, lessThan(const Duration(milliseconds: 500)));
+      });
+    });
+
     test('credential references remain inert and redacted', () async {
       final authentication = CustomMusicSourceAuthentication.tryCreate(
         kind: CustomMusicSourceAuthenticationKind.apiKeyHeader,
@@ -413,7 +510,8 @@ void main() {
                   'source': 'kugou',
                   'cover': 'https://cover.example.test/a.jpg',
                   'extra': {'album_id': '123', 'quality': 320},
-                  'is_invalid': false,
+                  // The upstream Go model uses `omitempty`; valid rows omit
+                  // `is_invalid` instead of serializing false.
                   'is_vip': false,
                 },
                 {
@@ -444,6 +542,8 @@ void main() {
         protocol: CustomMusicSourceProtocol.goMusicApi,
         capabilities: const {
           CustomMusicSourceCapability.search,
+          CustomMusicSourceCapability.metadata,
+          CustomMusicSourceCapability.cover,
           CustomMusicSourceCapability.lyrics,
           CustomMusicSourceCapability.stream,
           CustomMusicSourceCapability.download,
@@ -458,6 +558,10 @@ void main() {
       expect(audio.onlineId, startsWith('gma1.'));
       expect(audio.onlinePlayable, isTrue);
       expect(audio.onlineDownloadAllowed, isTrue);
+      final artwork = Uri.parse(audio.artworkUrl!);
+      expect(artwork.path, '/prefix/api/v1/music/cover');
+      expect(
+          artwork.queryParameters['url'], 'https://cover.example.test/a.jpg');
       expect(requested.single.path, '/prefix/api/v1/music/search');
       expect(requested.single.queryParameters['type'], 'song');
 

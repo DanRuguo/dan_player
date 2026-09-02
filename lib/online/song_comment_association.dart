@@ -24,12 +24,19 @@ class CommentSourceIdentity {
   final String provider;
   final String songId;
 
-  String get sourceLabel => switch (provider) {
-        'qq' => 'QQ音乐',
-        'netease' => '网易云音乐',
-        _ when provider.startsWith(_customProviderPrefix) => '自定义歌源',
-        _ => provider,
-      };
+  String get sourceLabel {
+    if (provider == 'qq') return 'QQ音乐';
+    if (provider == 'netease') return '网易云音乐';
+    final profileId = _customProfileId(provider);
+    if (profileId != null) {
+      for (final profile in AppSettings.instance.customMusicSources.value) {
+        if (profile.id == profileId) return profile.name;
+      }
+      return '自定义歌源';
+    }
+    return provider;
+  }
+
   String get identity => '$provider:$songId';
 
   static CommentSourceIdentity? tryCreate(String? provider, Object? id) {

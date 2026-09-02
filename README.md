@@ -63,6 +63,7 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 - 统一艺术家和专辑详情页，整理歌曲菜单，分类与歌单封面支持缺图回退。
 - 新增“下一首播放”封面动画，改进播放队列、歌词菜单和常用弹窗。
 - 编辑歌词时可从多个联网候选中选择，“加入歌单”界面重新排版。
+- “联网与歌词”统一管理平台直连与第三方 API，支持酷狗和多个自定义歌源；可按歌曲测试搜索、歌曲信息、封面、歌词、评论、播放与下载能力。
 - 消除本地歌曲点按时的界面阻塞，修正歌曲操作菜单定位。
 - 完善音乐与歌单的网格／圆形封面拖动排序，清理重复主题设置并改善安装器字号。
 
@@ -131,7 +132,7 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 | 歌单 | 歌曲与子歌单混排、嵌套整理、封面与选曲编辑、旧合集无损迁移 |
 | 播放 | BASS、保音高倍速、WASAPI 独占、均衡器、睡眠定时、队列与会话恢复 |
 | 歌词 | 本地／在线优先级、LRC 与逐字歌词、翻译、编辑、横排／竖排桌面歌词 |
-| 联网 | 多来源检索与播放、按来源能力下载、候选歌曲信息与专辑封面 |
+| 联网 | 多来源检索与播放、候选歌曲信息与专辑封面、来源和单曲均授权时下载 |
 | 界面 | 明暗／动态／系统主题、迷你模式、背景、触控手势、任务栏与托盘控制 |
 
 ## 支持格式
@@ -247,7 +248,7 @@ Dan Player 基于开源项目 [Ferry-200/coriander_player](https://github.com/Fe
 - [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge)：Flutter 与 Rust 交互。
 - [Flutter](https://flutter.dev/) 和 Material Design：桌面 UI 基础。
 
-26.0.3 的联网模型、歌词交互、触控与播放器信息架构还调研了 [Melodify](https://github.com/LPFVG/Melodify)、[LyciaMusic](https://github.com/Billy636/LyciaMusic)、[ECHO](https://github.com/moekotori/echo)、[Mineradio](https://github.com/XxHuberrr/Mineradio)、[LX Music Desktop](https://github.com/lyswhut/lx-music-desktop) 和 [QueMusic](https://github.com/bronekox/quemusic)。实现为针对 Dan Player 的独立代码；各参考项目代码仍受其各自许可证约束。
+26.0.3–26.0.4 的联网模型、歌词交互、自定义歌源信息架构、触控与播放器细节还调研了 [ZeroBit Player 固定提交](https://github.com/Empty-57/ZeroBit-Player/tree/e47d34fb5c946a6cf10041377b15eb6f089f5d28)（GPL-3.0）、[ECHO 固定提交](https://github.com/Moekotori/ECHO/tree/45ea979d18da08234307b13c215f56abe3c00556)（LGPL-3.0-only）、[Melodify](https://github.com/LPFVG/Melodify)、[LyciaMusic](https://github.com/Billy636/LyciaMusic)、[Mineradio](https://github.com/XxHuberrr/Mineradio)、[LX Music Desktop](https://github.com/lyswhut/lx-music-desktop) 和 [QueMusic](https://github.com/bronekox/quemusic)。[`go-music-api` 固定提交](https://github.com/guohuiyuan/go-music-api/tree/bacdfbe6cf6a5ba7331463d2039e3aac915c627f)（AGPL-3.0）只作为用户自行部署的兼容目标。Dan Player 没有复制这些项目的实现，也不捆绑其服务、远程脚本、平台账号或登录凭据；各项目代码仍受其各自许可证约束。
 
 ## 反馈
 

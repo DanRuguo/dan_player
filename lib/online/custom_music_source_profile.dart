@@ -35,6 +35,7 @@ enum CustomMusicSourceCapability {
 enum CustomMusicSourceProtocol {
   danSourceV1('dan-source-v1'),
   goMusicApi('go-music-api-v1'),
+  kugou('kugou-v1'),
   legacyLyrics('legacy-lyrics');
 
   const CustomMusicSourceProtocol(this.id);
@@ -163,6 +164,7 @@ class CustomMusicSourceProfile {
 
   static const int currentProtocolVersion = 1;
   static const String legacyLyricProfileId = 'legacy-lyric-api';
+  static const String kugouProfileId = 'kugou';
 
   final String id;
   final String name;
@@ -219,10 +221,6 @@ class CustomMusicSourceProfile {
     final safeName = _safeDisplayName(name);
     final safeBaseUrl = _safeHttpUrl(baseUrl);
     if (safeId == null || safeName == null || safeBaseUrl == null) return null;
-    if (safeId == legacyLyricProfileId &&
-        protocol != CustomMusicSourceProtocol.legacyLyrics) {
-      return null;
-    }
     if (protocolVersion < 1 || protocolVersion > currentProtocolVersion) {
       return null;
     }
@@ -231,6 +229,18 @@ class CustomMusicSourceProfile {
       capabilities,
     );
     if (safeCapabilities.isEmpty) return null;
+    final searchOwnedDetails =
+        safeCapabilities.contains(CustomMusicSourceCapability.metadata) ||
+            safeCapabilities.contains(CustomMusicSourceCapability.cover);
+    if (searchOwnedDetails &&
+        !safeCapabilities.contains(CustomMusicSourceCapability.search)) {
+      return null;
+    }
+    if (protocol == CustomMusicSourceProtocol.legacyLyrics &&
+        (safeCapabilities.length != 1 ||
+            !safeCapabilities.contains(CustomMusicSourceCapability.lyrics))) {
+      return null;
+    }
 
     final safeEndpoints = <CustomMusicSourceCapability, String>{};
     for (final entry in endpoints.entries) {
@@ -243,7 +253,6 @@ class CustomMusicSourceProfile {
             !safeEndpoints.containsKey(CustomMusicSourceCapability.lyrics))) {
       return null;
     }
-
     final safeHeaders = <String, String>{};
     for (final entry in publicHeaders.entries) {
       final name = entry.key.trim();
@@ -280,13 +289,46 @@ class CustomMusicSourceProfile {
     final base = uri.replace(path: '', query: null, fragment: null).toString();
     return tryCreate(
       id: legacyLyricProfileId,
-      name: 'Legacy lyric API',
+      name: 'LRC API',
       baseUrl: base,
       protocol: CustomMusicSourceProtocol.legacyLyrics,
       capabilities: const {CustomMusicSourceCapability.lyrics},
       endpoints: {CustomMusicSourceCapability.lyrics: url},
     );
   }
+
+  /// Editable third-party defaults. Stable IDs preserve saved associations
+  /// when the user removes and later restores a preset.
+  static CustomMusicSourceProfile lrcApiPreset() =>
+      legacyLyric('https://api.lrc.cx/lyrics')!;
+
+  static CustomMusicSourceProfile kugouPreset() => tryCreate(
+        id: kugouProfileId,
+        name: 'Kugou',
+        baseUrl: 'https://mobiles.kugou.com/api/v3/',
+        protocol: CustomMusicSourceProtocol.kugou,
+        capabilities: const {
+          CustomMusicSourceCapability.search,
+          CustomMusicSourceCapability.metadata,
+          CustomMusicSourceCapability.cover,
+          CustomMusicSourceCapability.lyrics,
+          CustomMusicSourceCapability.stream,
+          CustomMusicSourceCapability.download,
+        },
+        endpoints: const {
+          CustomMusicSourceCapability.search: 'search/song',
+          CustomMusicSourceCapability.metadata: 'song/info',
+          CustomMusicSourceCapability.cover: 'song/info',
+          CustomMusicSourceCapability.lyrics: 'https://lyrics.kugou.com/',
+          CustomMusicSourceCapability.stream:
+              'https://m.kugou.com/app/i/getSongInfo.php',
+          CustomMusicSourceCapability.download:
+              'https://m.kugou.com/app/i/getSongInfo.php',
+        },
+      )!;
+
+  static List<CustomMusicSourceProfile> builtInPresets() =>
+      List.unmodifiable([lrcApiPreset(), kugouPreset()]);
 
   static CustomMusicSourceProfile? fromJson(Object? value) {
     if (value is! Map) return null;
@@ -332,7 +374,12 @@ class CustomMusicSourceProfile {
     if (protocol == null) return null;
     return tryCreate(
       id: rawId,
-      name: rawName,
+      name: protocol == CustomMusicSourceProtocol.legacyLyrics &&
+              (rawId == legacyLyricProfileId ||
+                  rawId.startsWith('legacy-lyric-')) &&
+              (rawName == 'Legacy lyric API' || rawName == 'Imported lyric API')
+          ? 'LRC API'
+          : rawName,
       baseUrl: rawBaseUrl,
       enabled: value['enabled'] is bool ? value['enabled'] as bool : true,
       protocol: protocol,
@@ -448,12 +495,14 @@ class CustomMusicSourceProfileCodec {
 
   static const String backupFormat = 'dan-player-custom-music-sources';
   static const int formatVersion = 1;
+  static const int defaultsRevision = 1;
   static const int maximumProfiles = 32;
 
   static Map<String, Object> encodeSettings(
           Iterable<CustomMusicSourceProfile> profiles) =>
       <String, Object>{
         'version': formatVersion,
+        'defaultsRevision': defaultsRevision,
         'profiles': <Map<String, Object>>[
           for (final profile in profiles.take(maximumProfiles))
             profile.toJson(),
@@ -485,7 +534,23 @@ class CustomMusicSourceProfileCodec {
     final profiles = value == null
         ? <CustomMusicSourceProfile>[]
         : decoded ?? List<CustomMusicSourceProfile>.of(fallback);
-    _appendLegacyLyric(profiles, legacyLyricApiUrl);
+    // A recognized profile list is authoritative, including a missing LRC
+    // preset or an empty list. Never undo deletion from a stale legacy field.
+    if (decoded == null) {
+      _appendLegacyLyric(profiles, legacyLyricApiUrl);
+    }
+    final savedDefaultsRevision =
+        value is Map && value['defaultsRevision'] is int
+            ? value['defaultsRevision'] as int
+            : 0;
+    if (savedDefaultsRevision < defaultsRevision &&
+        (value == null || decoded != null) &&
+        profiles.isNotEmpty &&
+        profiles.length < maximumProfiles &&
+        !profiles.any((profile) =>
+            profile.id == CustomMusicSourceProfile.kugouProfileId)) {
+      profiles.add(CustomMusicSourceProfile.kugouPreset());
+    }
     return List.unmodifiable(profiles.take(maximumProfiles));
   }
 
@@ -545,7 +610,7 @@ class CustomMusicSourceProfileCodec {
       final digest = sha256.convert(utf8.encode(url)).toString();
       final profile = CustomMusicSourceProfile.tryCreate(
         id: 'legacy-lyric-${digest.substring(0, 20)}',
-        name: _safeDisplayName(name ?? '') ?? 'Imported lyric API',
+        name: _safeDisplayName(name ?? '') ?? 'LRC API',
         baseUrl: base.baseUrl,
         protocol: CustomMusicSourceProtocol.legacyLyrics,
         capabilities: const {CustomMusicSourceCapability.lyrics},
@@ -576,7 +641,10 @@ class CustomMusicSourceProfileCodec {
 
   static void _appendLegacyLyric(
       List<CustomMusicSourceProfile> profiles, String? legacyUrl) {
-    if (profiles.any((profile) => profile.isLegacyLyricProfile)) return;
+    if (profiles.any((profile) =>
+        profile.id == CustomMusicSourceProfile.legacyLyricProfileId)) {
+      return;
+    }
     final legacy = CustomMusicSourceProfile.legacyLyric(legacyUrl);
     if (legacy != null) profiles.add(legacy);
   }

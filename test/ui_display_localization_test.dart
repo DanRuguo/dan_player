@@ -1,4 +1,5 @@
 import 'package:dan_player/component/compact_player.dart';
+import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/song_comment_match_dialog.dart';
 import 'package:dan_player/component/song_comments_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -129,6 +130,37 @@ void main() {
       expect(tester.state(find.byType(SearchResultPage)), same(state));
       expect(tester.takeException(), isNull);
     }
+  });
+
+  testWidgets('large multi-source online results build lazily', (tester) async {
+    tester.view.physicalSize = const Size(900, 650);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final tracks = <Audio>[
+      for (var index = 0; index < 500; index++)
+        Audio.online(
+          provider: 'custom:source',
+          id: 'track-$index',
+          title: 'Track $index',
+          artist: 'Artist',
+          album: 'Album',
+          duration: 120,
+        ),
+    ];
+    final result = UnionSearchResult('many')
+      ..online = Future.value(OnlineSearchResponse(
+        tracks: tracks,
+        failures: const {},
+      ));
+
+    await tester.pumpWidget(_host(SearchResultPage(searchResult: result)));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AudioTile), findsWidgets);
+    expect(find.byType(AudioTile).evaluate().length, lessThan(100));
+    expect(find.textContaining('只有来源明确授权的歌曲才可下载'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('duration notification does not replace visible search results',

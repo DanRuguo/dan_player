@@ -16,17 +16,41 @@ class UnionSearchResult {
   List<Audio> audios = [];
   List<Artist> artists = [];
   List<Album> album = [];
-  late Future<OnlineSearchResponse> online;
+  late Future<OnlineSearchResponse> _online;
+  bool _onlineInitialized = false;
+  final OnlineSearchCancellation onlineCancellation;
 
-  UnionSearchResult(this.query);
+  Future<OnlineSearchResponse> get online => _online;
+  set online(Future<OnlineSearchResponse> value) {
+    _online = value;
+    _onlineInitialized = true;
+  }
+
+  UnionSearchResult(
+    this.query, {
+    OnlineSearchCancellation? onlineCancellation,
+  }) : onlineCancellation = onlineCancellation ?? OnlineSearchCancellation();
+
+  void cancelOnlineSearch() {
+    onlineCancellation.cancel();
+    // A result can become stale between the local index await and attaching
+    // its FutureBuilder. Observe its cancellation error in that narrow case.
+    if (_onlineInitialized) _online.ignore();
+  }
 
   /// Build local pinyin projections without monopolising the UI isolate.
   ///
   /// Refresh and deletion normally warm the index in the background, but a
   /// search submitted during that short window must not fall back to the
   /// synchronous builder and make the field/button look stuck.
-  static Future<UnionSearchResult> search(String query) async {
-    final result = UnionSearchResult(query);
+  static Future<UnionSearchResult> search(
+    String query, {
+    OnlineSearchCancellation? onlineCancellation,
+  }) async {
+    final result = UnionSearchResult(
+      query,
+      onlineCancellation: onlineCancellation,
+    );
     final index = AudioSearchIndex.instance;
     await index.ensureBuilt();
     result.audios = index.searchAudios(query);
@@ -35,7 +59,10 @@ class UnionSearchResult {
     // Attach the provider future only when the result can immediately be
     // presented by a FutureBuilder. Starting it before the chunked build can
     // leave a fast provider failure temporarily unobserved.
-    result.online = OnlineMusicService.instance.search(query);
+    result.online = OnlineMusicService.instance.search(
+      query,
+      cancellation: result.onlineCancellation,
+    );
     return result;
   }
 }
@@ -93,7 +120,10 @@ class SearchPage extends StatelessWidget {
                             if (query.trim().isEmpty) return;
                             final result =
                                 await UnionSearchResult.search(query);
-                            if (!context.mounted) return;
+                            if (!context.mounted) {
+                              result.cancelOnlineSearch();
+                              return;
+                            }
                             context.push(
                               app_paths.SEARCH_RESULT_PAGE,
                               extra: result,

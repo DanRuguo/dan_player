@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/component/song_comment_match_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/song_comment_association.dart';
@@ -377,7 +378,12 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
           const SizedBox(height: 6),
           Text(_target == null
               ? ui("只按你确认的平台歌曲 ID 关联，不会仅凭同名歌曲自动猜测。")
-              : ui("来源：{0} · 只读 · 按平台歌曲 ID 精确匹配", [ui(_target!.sourceLabel)])),
+              : ui("来源：{0} · 只读 · 按平台歌曲 ID 精确匹配", [
+                  onlineSourceDisplayLabel(
+                    provider: _target!.provider,
+                    fallback: _target!.sourceLabel,
+                  )
+                ])),
           if (_target != null) ...[
             const SizedBox(height: 4),
             Text(ui("评论由平台用户发表；不加载头像、图片或音频。"),
@@ -416,7 +422,12 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
                   ? ui("评论来源：尚未关联")
                   : ui("评论来源：{0}{1}", [
                       ui(association.mode.label),
-                      _target == null ? '' : ' · ${ui(_target!.sourceLabel)}'
+                      _target == null
+                          ? ''
+                          : ' · ${onlineSourceDisplayLabel(
+                              provider: _target!.provider,
+                              fallback: _target!.sourceLabel,
+                            )}'
                     ]),
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
