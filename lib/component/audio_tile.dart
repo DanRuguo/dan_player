@@ -11,6 +11,7 @@ import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/next_play_animation.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
+import 'package:dan_player/component/readable_ellipsis_text.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/music_categories.dart';
@@ -134,6 +135,8 @@ class _AudioTileState extends State<AudioTile> {
           );
         },
       );
+
+  Widget _metadataMenuLabel(String label) => ReadableEllipsisText(label);
 
   Future<void> _toggleOnlineLibrary(Audio audio) async {
     try {
@@ -264,11 +267,7 @@ class _AudioTileState extends State<AudioTile> {
             }
           },
           leadingIcon: const Icon(Symbols.artist),
-          child: Text(
-            artistName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+          child: _metadataMenuLabel(artistName),
         ),
       MenuItemButton(
         onPressed: () {
@@ -277,11 +276,7 @@ class _AudioTileState extends State<AudioTile> {
           context.push(album.location, extra: album);
         },
         leadingIcon: const Icon(Symbols.album),
-        child: Text(
-          audio.album,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        child: _metadataMenuLabel(audio.album),
       ),
       ...common,
       MenuItemButton(
@@ -326,6 +321,13 @@ class _AudioTileState extends State<AudioTile> {
         // editing/actions; this inset also makes a long menu scroll above the
         // player's full footprint instead of hiding its final actions.
         useRootOverlay: true,
+        // MenuAnchor otherwise measures its horizontal "natural" width before
+        // applying maximumSize. A long metadata/additional item is then clipped
+        // as one oversized rectangle, which hides both TextOverflow.ellipsis
+        // and the menu surface's rounded corners. Keep the panel constrained by
+        // the overlay from the start so every item receives the real width.
+        crossAxisUnconstrained: false,
+        alignmentOffset: const Offset(8, 0),
         reservedPadding: const EdgeInsets.fromLTRB(8, 8, 8, 116),
         consumeOutsideTap: true,
         style: const MenuStyle(
