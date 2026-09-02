@@ -66,4 +66,42 @@ void main() {
     expect(playlist.audios.values.single.isOnline, isTrue);
     expect(playlist.audios.values.single.onlineId, '9988');
   });
+
+  test('custom source identity and per-track permissions round-trip', () {
+    final audio = Audio.online(
+      provider: 'custom:home-server',
+      id: 'track_42-v2',
+      title: 'Custom track',
+      artist: 'Artist',
+      album: 'Album',
+      duration: 200,
+      playable: true,
+      downloadAllowed: false,
+    );
+
+    final descriptor = audio.toOnlineMap();
+    final restored = Audio.fromOnlineMap(descriptor);
+
+    expect(restored.onlineProvider, 'custom:home-server');
+    expect(restored.onlineId, 'track_42-v2');
+    expect(restored.path, audio.path);
+    expect(restored.onlinePlayable, isTrue);
+    expect(restored.onlineDownloadAllowed, isFalse);
+  });
+
+  test('legacy descriptors leave per-track permissions unknown', () {
+    final restored = Audio.fromOnlineMap({
+      'provider': 'netease',
+      'id': '9988',
+      'title': 'Legacy remote',
+      'artist': 'Artist',
+      'album': 'Album',
+      'duration': 90,
+    });
+
+    expect(restored.onlinePlayable, isNull);
+    expect(restored.onlineDownloadAllowed, isNull);
+    expect(restored.toOnlineMap().containsKey('playable'), isFalse);
+    expect(restored.toOnlineMap().containsKey('downloadAllowed'), isFalse);
+  });
 }

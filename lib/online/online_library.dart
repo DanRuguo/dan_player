@@ -97,6 +97,8 @@ class OnlineLibrary extends ChangeNotifier {
           mediaId: audio.onlineMediaId,
           numericId: audio.onlineNumericId,
           artworkUrl: audio.artworkUrl,
+          playable: audio.onlinePlayable,
+          downloadAllowed: audio.onlineDownloadAllowed,
           bitrate: audio.bitrate,
           created: existing.created,
           language: audio.language ?? existing.language,

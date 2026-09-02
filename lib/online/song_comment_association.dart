@@ -24,20 +24,34 @@ class CommentSourceIdentity {
   final String provider;
   final String songId;
 
-  String get sourceLabel => provider == 'qq' ? 'QQ音乐' : '网易云音乐';
+  String get sourceLabel => switch (provider) {
+        'qq' => 'QQ音乐',
+        'netease' => '网易云音乐',
+        _ when provider.startsWith(_customProviderPrefix) => '自定义歌源',
+        _ => provider,
+      };
   String get identity => '$provider:$songId';
 
   static CommentSourceIdentity? tryCreate(String? provider, Object? id) {
-    final normalizedProvider = provider?.trim().toLowerCase();
+    final rawProvider = provider?.trim();
     final normalizedId = id?.toString().trim();
-    if (normalizedProvider == null ||
-        normalizedId == null ||
-        !_positiveId(normalizedId) ||
-        !const {'qq', 'netease'}.contains(normalizedProvider)) {
+    if (rawProvider == null || normalizedId == null) {
+      return null;
+    }
+    final builtInProvider = rawProvider.toLowerCase();
+    if (const {'qq', 'netease'}.contains(builtInProvider)) {
+      if (!_positiveId(normalizedId)) return null;
+      return CommentSourceIdentity(
+        provider: builtInProvider,
+        songId: normalizedId,
+      );
+    }
+    final customProfileId = _customProfileId(rawProvider);
+    if (customProfileId == null || !_safeOpaqueSongId(normalizedId)) {
       return null;
     }
     return CommentSourceIdentity(
-      provider: normalizedProvider,
+      provider: '$_customProviderPrefix$customProfileId',
       songId: normalizedId,
     );
   }
@@ -199,7 +213,7 @@ class SongCommentAssociationStore extends ChangeNotifier {
           : candidate.onlineId,
     );
     if (identity == null) {
-      throw const FormatException('候选歌曲缺少可核实的平台数字 ID');
+      throw const FormatException('候选歌曲缺少可核实的安全平台歌曲 ID');
     }
     await _replace(
       audio.path,
@@ -361,3 +375,20 @@ String? _optionalText(Object? value) {
 bool _positiveId(String value) =>
     RegExp(r'^[0-9]{1,20}$').hasMatch(value) &&
     BigInt.parse(value) > BigInt.zero;
+
+const _customProviderPrefix = 'custom:';
+
+String? _customProfileId(String provider) {
+  if (!provider.startsWith(_customProviderPrefix)) return null;
+  final profileId = provider.substring(_customProviderPrefix.length);
+  return profileId.length <= 96 &&
+          RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]*$').hasMatch(profileId)
+      ? profileId
+      : null;
+}
+
+/// Keep the persisted remote identifier opaque: it may be a hash or UUID, but
+/// never a path, URL, query, control text or whitespace-bearing search term.
+bool _safeOpaqueSongId(String value) =>
+    value.length <= 256 &&
+    RegExp(r'^[A-Za-z0-9][A-Za-z0-9._~-]*$').hasMatch(value);

@@ -105,6 +105,46 @@ void main() {
     expect(store.identityFor(audio)?.identity, 'netease:222');
   });
 
+  test('custom source keeps profile identity and opaque song ID', () async {
+    final audio = _local(r'C:\Music\custom.mp3');
+    final candidate = _online('custom:living-room', 'Track_42-v2');
+
+    await store.setIndependent(audio, candidate);
+
+    expect(store.identityFor(audio)?.provider, 'custom:living-room');
+    expect(store.identityFor(audio)?.songId, 'Track_42-v2');
+    expect(store.identityFor(audio)?.sourceLabel, '自定义歌源');
+
+    store.resetForTesting();
+    await store.initialize(directory: root);
+    expect(
+        store.identityFor(audio)?.identity, 'custom:living-room:Track_42-v2');
+  });
+
+  test('custom source rejects unsafe profile and song identifiers', () {
+    expect(
+      CommentSourceIdentity.tryCreate('custom:valid-profile', 'hash_123'),
+      isNotNull,
+    );
+    expect(
+      CommentSourceIdentity.tryCreate('custom:../profile', 'hash_123'),
+      isNull,
+    );
+    expect(
+      CommentSourceIdentity.tryCreate(
+          'custom:valid-profile', r'C:\Music\song.mp3'),
+      isNull,
+    );
+    expect(
+      CommentSourceIdentity.tryCreate('custom:valid-profile', 'search words'),
+      isNull,
+    );
+    expect(
+      CommentSourceIdentity.tryCreate('custom:valid-profile', 'id?token=x'),
+      isNull,
+    );
+  });
+
   test('app-created rename moves association without title guessing', () async {
     final audio = _local(r'C:\Music\old.mp3');
     await store.setIndependent(audio, _online('qq', 'mid', numericId: 987));

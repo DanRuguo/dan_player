@@ -417,6 +417,14 @@ class Audio {
   final int? onlineNumericId;
   final String? artworkUrl;
 
+  /// Provider-declared availability for this exact result. A null value means
+  /// the source did not supply a per-track answer (including legacy records).
+  final bool? onlinePlayable;
+
+  /// Explicit per-track download authorization reported by the provider.
+  /// Capability support alone must never be treated as permission to download.
+  final bool? onlineDownloadAllowed;
+
   /// 以“、”和“/”分割艺术家，会把名称中带有这些符号的艺术家分割。
   /// 暂时想不到别的方法。
   Audio(
@@ -444,6 +452,8 @@ class Audio {
     this.onlineMediaId,
     this.onlineNumericId,
     this.artworkUrl,
+    this.onlinePlayable,
+    this.onlineDownloadAllowed,
   }) : splitedArtists = artist.split(
           RegExp(AppSettings.instance.artistSplitPattern),
         );
@@ -458,6 +468,8 @@ class Audio {
     String? mediaId,
     int? numericId,
     String? artworkUrl,
+    bool? playable,
+    bool? downloadAllowed,
     int? bitrate,
     int? created,
     String? language,
@@ -488,6 +500,8 @@ class Audio {
       onlineMediaId: mediaId,
       onlineNumericId: numericId,
       artworkUrl: artworkUrl,
+      onlinePlayable: playable,
+      onlineDownloadAllowed: downloadAllowed,
     );
   }
 
@@ -507,6 +521,10 @@ class Audio {
       mediaId: map["mediaId"]?.toString(),
       numericId: (map["numericId"] as num?)?.toInt(),
       artworkUrl: map["artworkUrl"]?.toString(),
+      playable: map["playable"] is bool ? map["playable"] as bool : null,
+      downloadAllowed: map["downloadAllowed"] is bool
+          ? map["downloadAllowed"] as bool
+          : null,
       bitrate: (map["bitrate"] as num?)?.toInt(),
       created: (map["created"] as num?)?.toInt(),
       language: map["language"] is String ? map["language"] : null,
@@ -622,6 +640,9 @@ class Audio {
         "duration": duration,
         "bitrate": bitrate,
         "artworkUrl": artworkUrl,
+        if (onlinePlayable != null) "playable": onlinePlayable,
+        if (onlineDownloadAllowed != null)
+          "downloadAllowed": onlineDownloadAllowed,
         "created": created,
         "language": language,
       };
