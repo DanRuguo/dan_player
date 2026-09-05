@@ -5,9 +5,9 @@
 面向 Windows x64 的本地与联网音乐播放器<br>
 基于 Flutter、Rust 与 BASS，专注曲库管理、歌词体验和流畅的桌面交互。
 
-**预览版 26.0.4 snapshot3** · **稳定版 26.0.3**
+**稳定版 26.0.4** · Windows x64
 
-[下载预览版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.3) · [查看稳定版](https://github.com/DanRuguo/dan_player/releases/latest) · [功能导览](docs/feature-tour.md) · [28 张安全界面示例](docs/images/README.md)
+[下载正式版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) · [更新说明](docs/release-26.0.4.md) · [功能导览](docs/feature-tour.md) · [28 张安全界面示例](docs/images/README.md)
 
 </div>
 
@@ -17,14 +17,16 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 
 ## 下载
 
+**26.0.4 正式版**新增批量菜单、M3U8 歌单互通、命名播放书签、网易增强 API 适配与 Windows 快捷任务，并改进搜索、评论及歌词播放控制。实际能力与检查范围见 [更新说明](docs/release-26.0.4.md) 和 [API 兼容性实测](docs/26.0.4-api-compatibility.md)。
+
 | 版本 | 适合 | 获取 |
 | --- | --- | --- |
-| **26.0.4 snapshot3** | 提前体验本次新功能 | [安装器与便携 ZIP](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4-snapshot.3) |
-| **26.0.3** | 日常稳定使用 | [最新稳定 Release](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **26.0.4** | 日常使用 | [安装器、便携 ZIP 与 SHA256SUMS](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) |
+| 历史版本 | 查看旧版与预览版 | [全部 Release](https://github.com/DanRuguo/dan_player/releases) |
 
 安装器可选择位置、桌面和开始菜单快捷方式；检测到旧版时支持原位升级，手动编辑后的最终路径不会再被自动追加目录。使用便携 ZIP 时，请完整解压后运行 `Dan Player.exe`。包内已包含 BASS 运行库和编译后的 `desktop_lyric` 桌面歌词组件。
 
-> 自有程序使用 RCEIT.Inc 自签名证书。由于未获得公共 CA 信任，Windows 仍可能提示“未知发布者”；安装器不会自动安装信任证书。
+> 自有程序使用 RCEIT.Inc 自签名证书，仍可能出现 Windows 信任或 SmartScreen 提示。26.0.4 更换了签名证书；旧版用户请手动下载本版安装器升级，旧版自动更新的证书校验不会接受新证书。安装器不会自动安装信任证书。
 
 ## 界面预览
 
@@ -57,7 +59,17 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 
 安装器支持直接编辑最终路径、创建桌面／开始菜单快捷方式和旧版本原位升级。安装器源码、原生安全校验与自动化测试均随项目保存在 [`installer/`](installer/)；Release 额外提供已编译安装包。
 
-## 26.0.4 snapshot3 更新
+## 26.0.4 更新
+
+- 多选支持播放、随机播放、下一批、追加队列、加入歌单、复制信息/路径、反选与 M3U8 导出。
+- 标准歌单导入/导出保留顺序、重复项和相对路径；详情页可保存命名位置与 A-B 片段书签。
+- QQ 搜索/评论兼容修复，评论排序按来源能力显示；增加经真实服务验证的网易云增强 API 专用协议和可编辑预设。
+- 歌词页采用透明描边播放按钮和可形变进度手柄；搜索分类、迷你歌词过渡、选择状态与异步请求生命周期同步改善。
+- Windows 右键快捷任务、同一程序单实例、设置内卸载入口与更短启动画面。
+
+详见 [完整更新](docs/release-26.0.4.md)、[必要验证](docs/26.0.4-validation.md)、[播放器参考研究](docs/26.0.4-final-player-research.md)、[第三方 API 配置与实测](docs/26.0.4-api-release-additions.md)。
+
+### 整合 snapshot3 改进
 
 - 延续安装器、播放条、多维分类、歌曲删除、增量刷新与缓存迁移。
 - 统一艺术家和专辑详情页，整理歌曲菜单，分类与歌单封面支持缺图回退。
@@ -67,7 +79,7 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 - 消除本地歌曲点按时的界面阻塞，修正歌曲操作菜单定位。
 - 完善音乐与歌单的网格／圆形封面拖动排序，清理重复主题设置并改善安装器字号。
 
-这是预览版本；测试与已知边界见 [验证说明](docs/26.0.4-snapshot.3-validation.md)，更新行为见 [更新说明](docs/application-updates.md)。
+上述预览阶段的历史检查见 [snapshot3 验证说明](docs/26.0.4-snapshot.3-validation.md)，更新行为见 [更新说明](docs/application-updates.md)。
 
 ## 历史更新
 
@@ -211,7 +223,9 @@ Windows CI 执行分析、测试、两个程序的构建及未签名便携包组
 
 ## Windows 代码签名
 
-Windows 版本资源中的公司名为 `RCEIT.Inc`。本地开发证书主题为 `CN=RCEIT.Inc`，有效期为 2026-08-27 至 2027-08-27；私钥保存在构建机的 Windows 个人证书库，公开证书保存在仓库外的签名工具目录，不会提交到 Git。
+Windows 版本资源中的公司名为 `RCEIT.Inc`。当前本地开发证书主题为 `CN=RCEIT.Inc`，有效期为 2026-09-05 至 2036-09-05，指纹为 `492AD4FCB49C9898B6B98251D4FE9FE78BDB56C1`。私钥可导出，保存在构建机的 Windows 个人证书库；公钥证书、加密 PFX 备份和本机配置均在仓库外的 `tool/signing/`，不会提交到 Git。本机初始化环境会读取 `tool/signing/active-certificate.json` 并设置 `RCEIT_SIGNING_THUMBPRINT`；其他构建环境应显式指定所用证书指纹。
+
+此证书替代旧机 2026-08-27 至 2027-08-27 的自签名证书。即使主题相同，新旧证书的密钥和指纹仍不同；旧版切换到新证书版本需要手动运行新安装器。运行时仍要求 Windows 信任签名并核对实际证书，不因公司名相同而放行。
 
 构建、签名并组装主播放器和桌面歌词：
 
@@ -233,7 +247,7 @@ Windows 版本资源中的公司名为 `RCEIT.Inc`。本地开发证书主题为
 
 该步骤先签安装器自有辅助文件，再生成载荷清单，最后签 Setup 并输出其 `.exe.sha256`；示例将新产物写入工作区 `dist/` 的独立目录，不修改便携目录或历史发布包。
 
-该证书是本地自签名代码签名证书，可验证文件签名和发布者主题，但默认不在其他 Windows 设备的可信根中。正式公开发行若要获得 SmartScreen/系统级公共信任，请改用颁发给 RCEIT.Inc 的 CA 代码签名证书，并通过 `RCEIT_SIGNING_THUMBPRINT` 指定其指纹；不要提交 PFX 或私钥。
+该证书是本地自签名代码签名证书，可验证文件签名和发布者主题，默认不受 Windows 信任。公共信任通常需要向受信任的 CA 或签名服务申请、核验发布者身份并付费；公共信任与 SmartScreen 文件信誉是两项不同的判断，购买证书不保证新文件立即消除提示。参见 [Microsoft 代码签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options) 和 [SmartScreen 信誉说明](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)。不要提交 PFX 或私钥。
 
 ## 致谢
 

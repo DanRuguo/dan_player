@@ -14,9 +14,22 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
-class AudiosPage extends StatelessWidget {
+class AudiosPage extends StatefulWidget {
   final Audio? locateTo;
   const AudiosPage({super.key, this.locateTo});
+
+  @override
+  State<AudiosPage> createState() => _AudiosPageState();
+}
+
+class _AudiosPageState extends State<AudiosPage> {
+  final multiSelectController = MultiSelectController<Audio>();
+
+  @override
+  void dispose() {
+    multiSelectController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +45,6 @@ class AudiosPage extends StatelessWidget {
 
   Widget _buildPage(BuildContext context) {
     final contentList = List<Audio>.from(AudioLibrary.instance.audioCollection);
-    final multiSelectController = MultiSelectController<Audio>();
     return UniPage<Audio>(
       pref: AppPreference.instance.audiosPagePref,
       title: ui("音乐"),
@@ -41,7 +53,7 @@ class AudiosPage extends StatelessWidget {
       contentBuilder: (context, item, i, multiSelectController) => AudioTile(
         audioIndex: i,
         playlist: contentList,
-        focus: item == locateTo,
+        focus: item == widget.locateTo,
         multiSelectController: multiSelectController,
         columns: AudioColumnsScope.of(context),
       ),
@@ -56,15 +68,13 @@ class AudiosPage extends StatelessWidget {
       enableSortOrder: true,
       enableContentViewSwitch: true,
       enableAudioColumns: true,
-      locateTo: locateTo,
+      locateTo: widget.locateTo,
       multiSelectController: multiSelectController,
       multiSelectViewActions: [
-        AddAllToPlaylist(multiSelectController: multiSelectController),
-        MultiSelectSelectOrClearAll(
-          multiSelectController: multiSelectController,
+        AudioMultiSelectionActions(
+          controller: multiSelectController,
           contentList: contentList,
         ),
-        MultiSelectExit(multiSelectController: multiSelectController),
       ],
       sortMethods: audioSortMethods(
         AudioSortProfile.library,

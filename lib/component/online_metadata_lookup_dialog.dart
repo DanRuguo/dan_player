@@ -182,15 +182,16 @@ class _OnlineMetadataLookupDialogState
     _metadataCancellation?.cancel();
     final cancellation = CustomMusicSourceCancellation();
     _metadataCancellation = cancellation;
-    final custom = CustomMusicSourceProfile.profileIdFromProvider(
-            candidate.onlineProvider) !=
-        null;
+    final needsMetadata = candidate.onlineProvider == 'netease' ||
+        CustomMusicSourceProfile.profileIdFromProvider(
+                candidate.onlineProvider) !=
+            null;
     setState(() {
       _selected = candidate;
       _error = null;
-      _loadingMetadata = custom;
+      _loadingMetadata = needsMetadata;
     });
-    if (!custom) return;
+    if (!needsMetadata) return;
     bool active() =>
         mounted &&
         !_closed &&

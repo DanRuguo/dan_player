@@ -257,15 +257,19 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
         : widget.multiSelectViewActions ??
             [
               if (widget.enableMultiSelectAddToPlaylist)
-                AddAllToPlaylist(
-                  multiSelectController:
+                AudioMultiSelectionActions(
+                  controller:
                       multiSelectController as MultiSelectController<Audio>,
+                  contentList: visibleSecondaryContent.cast<Audio>(),
                 ),
-              _VisibleSelectOrClearAll<S>(
-                multiSelectController: multiSelectController,
-                visibleContent: visibleSecondaryContent,
-              ),
-              MultiSelectExit<S>(multiSelectController: multiSelectController),
+              if (!widget.enableMultiSelectAddToPlaylist) ...[
+                _VisibleSelectOrClearAll<S>(
+                  multiSelectController: multiSelectController,
+                  visibleContent: visibleSecondaryContent,
+                ),
+                MultiSelectExit<S>(
+                    multiSelectController: multiSelectController),
+              ],
             ];
     final gridIndices = currContentView == ContentView.table
         ? <Key, int>{

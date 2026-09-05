@@ -3,6 +3,11 @@
 // Used by Runner.rc
 //
 #define IDI_APP_ICON                    101
+#define IDI_TASK_WINDOW                 201
+#define IDI_TASK_PLAY                   202
+#define IDI_TASK_PREVIOUS               203
+#define IDI_TASK_NEXT                   204
+#define IDI_TASK_MINI                   205
 
 // Next default values for new objects
 //

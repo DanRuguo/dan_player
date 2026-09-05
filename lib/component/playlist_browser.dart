@@ -20,6 +20,8 @@ import 'package:dan_player/component/playlist_name_dialog.dart';
 import 'package:dan_player/component/playlist_reorder_surface.dart';
 import 'package:dan_player/component/playlist_song_picker.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
+import 'package:dan_player/component/audio_selection_toolbar.dart';
+import 'package:dan_player/component/playlist_exchange_dialog.dart';
 import 'package:dan_player/component/playlist_ui_actions.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
@@ -189,6 +191,34 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
   void _selectAll(List<_PlaylistRowData> rows) {
     setState(() => _selectedEntries.addAll(rows.map((row) => row.id)));
+  }
+
+  void _invertSelection(List<_PlaylistRowData> rows) {
+    setState(() {
+      for (final row in rows) {
+        if (!_selectedEntries.remove(row.id)) _selectedEntries.add(row.id);
+      }
+    });
+  }
+
+  List<Audio> _selectedAudios(List<_PlaylistRowData> rows) => [
+        for (final row in rows.where(_isSelected))
+          if (row.audio != null)
+            row.audio!
+          else if (row.playlist != null)
+            ..._orderedOccurrences(row.playlist!).map((entry) => entry.audio),
+      ];
+
+  Future<void> _importM3u() async {
+    if (_editingBlocked) return;
+    final imported = await importM3uPlaylist(context,
+        library:
+            List.of(widget.library ?? AudioLibrary.instance.audioCollection));
+    if (imported == null || !mounted || _editingBlocked) return;
+    Playlist? created;
+    await _edit(() => created =
+        _tree.createPlaylistFromAudios(imported.name, imported.audios));
+    if (mounted && created != null) _navigate(created);
   }
 
   Future<bool> _edit(VoidCallback mutation) async {
@@ -1262,6 +1292,29 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         sortMode: _sortMode(current),
         view: _view,
         onCreate: () => unawaited(_create(current)),
+        onImportM3u: _importM3u,
+        onExportM3u: current == null
+            ? null
+            : () => unawaited(
+                exportM3uPlaylist(context, List.of(queue), name: current.name)),
+        selectionTools: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.tonalIcon(
+                  key: const ValueKey('playlist-play-selected'),
+                  onPressed: selectedCount > 0
+                      ? () => _play(_selectedAudios(rows))
+                      : null,
+                  icon: const Icon(Icons.play_arrow),
+                  label: Text(ui('播放所选'))),
+              AudioSelectionMenu(
+                  selected: _selectedAudios(rows),
+                  onInvert: () => _invertSelection(rows),
+                  onExport: (audios) => exportM3uPlaylist(context, audios,
+                      name: current?.name ?? 'Dan Player')),
+            ]),
         onAddSongs:
             current == null ? null : () => unawaited(_addSongs(current)),
         onPlayAll: () => _play(queue),

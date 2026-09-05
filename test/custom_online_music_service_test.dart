@@ -9,6 +9,21 @@ import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('comment candidate search skips sources without a comment endpoint',
+      () async {
+    final service = OnlineMusicService.forTesting(
+      sourcePreferences: () => const OnlineSourcePreferences(),
+      qqSearch: (_, __) async => [],
+      neteaseSearch: (_, __) async => [],
+      customProfiles: () => [CustomMusicSourceProfile.kugouPreset()],
+      customTransportFactory: (_) =>
+          throw StateError('Non-comment source requested'),
+    );
+    final response = await service.search('song', commentsOnly: true);
+    expect(response.tracks, isEmpty);
+    expect(response.failures, isEmpty);
+  });
+
   test('custom source downloads public URLs without extra grant fields',
       () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

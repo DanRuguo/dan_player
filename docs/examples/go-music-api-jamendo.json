@@ -1,0 +1,22 @@
+{
+  "format": "dan-player-custom-music-sources",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "self-hosted-jamendo",
+      "name": "Jamendo · 自托管 go-music-api",
+      "baseUrl": "http://127.0.0.1:8080/",
+      "enabled": false,
+      "protocol": "go-music-api-v1",
+      "protocolVersion": 1,
+      "capabilities": ["search", "metadata", "cover", "lyrics", "stream", "download"],
+      "endpoints": {
+        "search": "api/v1/music/search?sources=jamendo",
+        "lyrics": "api/v1/music/lyric",
+        "cover": "api/v1/music/cover",
+        "stream": "api/v1/music/stream",
+        "download": "api/v1/music/stream"
+      }
+    }
+  ]
+}

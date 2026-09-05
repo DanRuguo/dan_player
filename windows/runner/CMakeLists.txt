@@ -14,6 +14,7 @@ add_executable(${BINARY_NAME} WIN32
   "main.cpp"
   "utils.cpp"
   "window_backdrop.cpp"
+  "windows_shell.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
@@ -48,11 +49,17 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib" "uuid.lib"
-  "gdi32.lib" "advapi32.lib" "bcrypt.lib" "crypt32.lib" "wintrust.lib" "version.lib")
+  "gdi32.lib" "advapi32.lib" "bcrypt.lib" "crypt32.lib" "wintrust.lib" "version.lib" "propsys.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+add_executable(windows_shell_policy_test EXCLUDE_FROM_ALL
+  "tests/windows_shell_policy_test.cpp")
+set_target_properties(windows_shell_policy_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
 
 add_executable(installer_launch_test EXCLUDE_FROM_ALL
   "tests/installer_launch_test.cpp"

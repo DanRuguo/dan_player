@@ -19,7 +19,10 @@ import 'package:dan_player/online/song_comments.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/page/now_playing_page/component/current_playlist_view.dart';
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
-import 'package:dan_player/page/now_playing_page/component/filled_icon_button_style.dart';
+import 'package:dan_player/page/now_playing_page/component/playback_bookmarks_dialog.dart';
+import 'package:dan_player/page/now_playing_page/component/detail_transport_button.dart';
+import 'package:dan_player/page/now_playing_page/component/detail_progress_slider.dart';
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/page/settings_page/playback_settings.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
@@ -137,6 +140,13 @@ class _NowPlayingMoreAction extends StatelessWidget {
               child: Text(ui("均衡器")),
             ),
             const _SleepTimerSubmenu(),
+            if (localPlaying != null)
+              MenuItemButton(
+                onPressed: () =>
+                    showPlaybackBookmarksDialog(context, playbackService),
+                leadingIcon: const Icon(Symbols.bookmarks),
+                child: Text(ui('播放书签')),
+              ),
             if (nowPlaying != null) const Divider(),
             if (onlinePlaying != null)
               MenuItemButton(
@@ -416,6 +426,12 @@ class _NowPlayingVolDspSliderState extends State<_NowPlayingVolDspSlider> {
   bool isDragging = false;
 
   @override
+  void dispose() {
+    dragVolDsp.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
@@ -551,205 +567,67 @@ class _NowPlayingMainControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
     final playbackService = PlayService.instance.playbackService;
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          tooltip: ui("上一曲"),
-          onPressed: playbackService.lastAudio,
-          icon: const Icon(Symbols.skip_previous),
-          style: LargeFilledIconButtonStyle(primary: false, scheme: scheme),
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      DetailTransportButton(
+        tooltip: ui("上一曲"),
+        onPressed: playbackService.lastAudio,
+        icon: Symbols.skip_previous,
+      ),
+      const SizedBox(width: 16),
+      ValueListenableBuilder<bool>(
+        valueListenable: playbackService.isBuffering,
+        builder: (context, buffering, _) => StreamBuilder(
+          stream: playbackService.playerStateStream,
+          initialData: playbackService.playerState,
+          builder: (context, snapshot) {
+            final playerState = snapshot.data!;
+            final playing = playerState == PlayerState.playing;
+            return DetailTransportButton(
+              primary: true,
+              buffering: buffering,
+              tooltip: buffering
+                  ? ui("正在获取播放地址")
+                  : playing
+                      ? ui("暂停")
+                      : ui("播放"),
+              onPressed: playing
+                  ? playbackService.pause
+                  : playerState == PlayerState.completed
+                      ? playbackService.playAgain
+                      : playbackService.start,
+              icon: playing ? Symbols.pause : Symbols.play_arrow,
+            );
+          },
         ),
-        const SizedBox(width: 16),
-        ValueListenableBuilder<bool>(
-          valueListenable: playbackService.isBuffering,
-          builder: (context, isBuffering, _) => StreamBuilder(
-            stream: playbackService.playerStateStream,
-            initialData: playbackService.playerState,
-            builder: (context, snapshot) {
-              final playerState = snapshot.data!;
-              late void Function() onTap;
-              if (playerState == PlayerState.playing) {
-                onTap = playbackService.pause;
-              } else if (playerState == PlayerState.completed) {
-                onTap = playbackService.playAgain;
-              } else {
-                onTap = playbackService.start;
-              }
-
-              return IconButton(
-                tooltip: isBuffering
-                    ? ui("正在获取播放地址")
-                    : playerState == PlayerState.playing
-                        ? ui("暂停")
-                        : ui("播放"),
-                onPressed: isBuffering ? null : onTap,
-                icon: isBuffering
-                    ? const SizedBox.square(
-                        dimension: 22.0,
-                        child: CircularProgressIndicator(strokeWidth: 2.2),
-                      )
-                    : Icon(
-                        playerState == PlayerState.playing
-                            ? Symbols.pause
-                            : Symbols.play_arrow,
-                      ),
-                style:
-                    LargeFilledIconButtonStyle(primary: true, scheme: scheme),
-              );
-            },
-          ),
-        ),
-        const SizedBox(width: 16),
-        IconButton(
-          tooltip: ui("下一曲"),
-          onPressed: playbackService.nextAudio,
-          icon: const Icon(Symbols.skip_next),
-          style: LargeFilledIconButtonStyle(primary: false, scheme: scheme),
-        ),
-      ],
-    );
+      ),
+      const SizedBox(width: 16),
+      DetailTransportButton(
+        tooltip: ui("下一曲"),
+        onPressed: playbackService.nextAudio,
+        icon: Symbols.skip_next,
+      ),
+    ]);
   }
 }
 
-/// suiggly slider, position and length
-class _NowPlayingSlider extends StatefulWidget {
+class _NowPlayingSlider extends StatelessWidget {
   const _NowPlayingSlider();
 
   @override
-  State<_NowPlayingSlider> createState() => _NowPlayingSliderState();
-}
-
-class _NowPlayingSliderState extends State<_NowPlayingSlider> {
-  final dragPosition = ValueNotifier(0.0);
-  bool isDragging = false;
-  String? _dragAudioPath;
-
-  @override
-  void dispose() {
-    dragPosition.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
-    final playbackService = context.watch<PlaybackService>();
-    final nowPlayingLength = playbackService.length;
-
-    return Column(
-      children: [
-        SliderTheme(
-          data: const SliderThemeData(
-            showValueIndicator: ShowValueIndicator.onDrag,
-          ),
-          child: StreamBuilder(
-            stream: playbackService.playerStateStream,
-            initialData: playbackService.playerState,
-            builder: (context, playerStateSnapshot) => ListenableBuilder(
-              listenable: dragPosition,
-              builder: (context, _) => StreamBuilder(
-                stream: playbackService.positionStream,
-                initialData: playbackService.position,
-                builder: (context, positionSnapshot) => Slider(
-                  thumbColor: scheme.primary,
-                  activeColor: scheme.primary,
-                  inactiveColor: scheme.outline,
-                  min: 0.0,
-                  max: nowPlayingLength,
-                  value:
-                      (isDragging ? dragPosition.value : positionSnapshot.data!)
-                          .clamp(0.0, nowPlayingLength)
-                          .toDouble(),
-                  label: Duration(
-                    milliseconds: (dragPosition.value * 1000).toInt(),
-                  ).toStringHMMSS(),
-                  onChangeStart: (value) {
-                    isDragging = true;
-                    _dragAudioPath = playbackService.nowPlaying?.path;
-                    dragPosition.value = value;
-                  },
-                  onChanged: (value) {
-                    dragPosition.value = value;
-                  },
-                  onChangeEnd: (value) {
-                    isDragging = false;
-                    if (_dragAudioPath == playbackService.nowPlaying?.path) {
-                      playbackService.seek(value);
-                    }
-                    _dragAudioPath = null;
-                  },
-                ),
-                // builder: (context, positionSnapshot) => SquigglySlider(
-                //   thumbColor: scheme.primary,
-                //   activeColor: scheme.primary,
-                //   inactiveColor: scheme.outline,
-                //   useLineThumb: true,
-                //   squiggleAmplitude:
-                //       playerStateSnapshot.data == PlayerState.playing ? 6.0 : 0,
-                //   squiggleWavelength: 10.0,
-                //   squiggleSpeed: 0.08,
-                //   min: 0.0,
-                //   max: nowPlayingLength,
-                //   value: isDragging
-                //       ? dragPosition.value
-                //       : positionSnapshot.data! > nowPlayingLength
-                //           ? nowPlayingLength
-                //           : positionSnapshot.data!,
-                //   label: Duration(
-                //     milliseconds: (dragPosition.value * 1000).toInt(),
-                //   ).toStringHMMSS(),
-                //   onChangeStart: (value) {
-                //     isDragging = true;
-                //     dragPosition.value = value;
-                //   },
-                //   onChanged: (value) {
-                //     dragPosition.value = value;
-                //   },
-                //   onChangeEnd: (value) {
-                //     isDragging = false;
-                //     playbackService.seek(value);
-                //   },
-                // ),
-              ),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: OverflowBar(
-            alignment: MainAxisAlignment.spaceBetween,
-            spacing: 8,
-            overflowSpacing: 2,
-            overflowAlignment: OverflowBarAlignment.end,
-            children: [
-              StreamBuilder(
-                stream: playbackService.positionStream,
-                initialData: playbackService.position,
-                builder: (context, snapshot) {
-                  final pos = snapshot.data!;
-                  return Text(
-                    Duration(
-                      milliseconds: (pos * 1000).toInt(),
-                    ).toStringHMMSS(),
-                    style: TextStyle(color: scheme.onSecondaryContainer),
-                  );
-                },
-              ),
-              Text(
-                Duration(
-                  milliseconds: (nowPlayingLength * 1000).toInt(),
-                ).toStringHMMSS(),
-                style: TextStyle(color: scheme.onSecondaryContainer),
-              ),
-            ],
-          ),
-        )
-      ],
+    final playback = context.watch<PlaybackService>();
+    return ValueListenableBuilder<bool>(
+      valueListenable: playback.isBuffering,
+      builder: (context, buffering, _) => DetailProgressSlider(
+        positions: playback.positionStream,
+        readPosition: () => playback.position,
+        duration: playback.length,
+        trackIdentity: playback.nowPlaying?.path,
+        enabled: playback.nowPlaying != null && !buffering,
+        onSeek: playback.seek,
+        hidden: DesktopIntegration.instance.isHidden,
+      ),
     );
   }
 }

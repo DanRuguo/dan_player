@@ -5,12 +5,13 @@ import 'package:dan_player/component/album_tile.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/artist_tile.dart';
 import 'package:dan_player/component/audio_tile.dart';
+import 'package:dan_player/component/library_search_field.dart';
+import 'package:dan_player/component/search_category_tabs.dart';
 import 'package:dan_player/component/online_source_display.dart';
-import 'package:dan_player/hotkeys_helper.dart';
+import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/page/search_page/search_page.dart';
-import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
@@ -19,9 +20,13 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 class SearchResultPage extends StatefulWidget {
-  const SearchResultPage({super.key, required this.searchResult});
+  const SearchResultPage(
+      {super.key,
+      required this.searchResult,
+      this.search = UnionSearchResult.search});
 
   final UnionSearchResult searchResult;
+  final LibrarySearch search;
 
   @override
   State<SearchResultPage> createState() => _SearchResultPageState();
@@ -35,6 +40,19 @@ class _SearchResultPageState extends State<SearchResultPage> {
   int _libraryRefresh = 0;
   late int _searchRevision;
   OnlineSearchCancellation? _pendingOnlineSearch;
+  int _searchRequest = 0;
+  String? _pendingQuery;
+  String? _error;
+
+  void _queryChanged(String value) {
+    if (value.trim() != _pendingQuery) {
+      _searchRequest++;
+      _pendingOnlineSearch?.cancel();
+      _pendingOnlineSearch = null;
+      _pendingQuery = null;
+    }
+    setState(() => _error = null);
+  }
 
   @override
   void initState() {
@@ -56,34 +74,49 @@ class _SearchResultPageState extends State<SearchResultPage> {
         searchResult.artists = index.searchArtists(searchResult.query);
         searchResult.album = index.searchAlbums(searchResult.query);
       });
+    }).catchError((Object error, StackTrace trace) {
+      LOGGER.w('[search index refresh] $error', stackTrace: trace);
     }));
   }
 
   Future<void> _search(String query) async {
     final value = query.trim();
-    if (value.isEmpty) return;
-    final request = ++_libraryRefresh;
-    searchResult.cancelOnlineSearch();
+    if (value.isEmpty || value == _pendingQuery) return;
+    final request = ++_searchRequest;
     _pendingOnlineSearch?.cancel();
     final cancellation = OnlineSearchCancellation();
     _pendingOnlineSearch = cancellation;
-    final result = await UnionSearchResult.search(
-      value,
-      onlineCancellation: cancellation,
-    );
-    if (!mounted || request != _libraryRefresh) {
-      result.cancelOnlineSearch();
-      return;
-    }
-    if (identical(_pendingOnlineSearch, cancellation)) {
+    setState(() {
+      _pendingQuery = value;
+      _error = null;
+    });
+    try {
+      final result =
+          await widget.search(value, onlineCancellation: cancellation);
+      if (!mounted || request != _searchRequest) {
+        result.cancelOnlineSearch();
+        return;
+      }
       _pendingOnlineSearch = null;
+      // A library publication must not invalidate an independent typed query.
+      _libraryRefresh++;
+      searchResult.cancelOnlineSearch();
+      setState(() => searchResult = result);
+    } catch (error, trace) {
+      if (!mounted || request != _searchRequest) return;
+      LOGGER.w('[library search] $error', stackTrace: trace);
+      setState(() => _error = ui('搜索暂时不可用，请重试。'));
+    } finally {
+      if (mounted && request == _searchRequest) {
+        setState(() => _pendingQuery = null);
+      }
     }
-    setState(() => searchResult = result);
   }
 
   @override
   void dispose() {
     _libraryRefresh++;
+    _searchRequest++;
     _pendingOnlineSearch?.cancel();
     searchResult.cancelOnlineSearch();
     AudioLibrary.changes.removeListener(_refreshLocalResults);
@@ -105,39 +138,31 @@ class _SearchResultPageState extends State<SearchResultPage> {
             children: [
               AppEntrance(
                 identity: 'search-result-input',
-                child: Focus(
-                  onFocusChange: HotkeysHelper.onFocusChanges,
-                  child: Hero(
-                    tag: SEARCH_BAR_KEY,
-                    child: TextField(
+                child: Hero(
+                  tag: SEARCH_BAR_KEY,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: LibrarySearchField(
                       controller: searchBarController,
-                      textInputAction: TextInputAction.search,
-                      decoration: InputDecoration(
-                        suffixIcon: const Padding(
-                          padding: EdgeInsets.only(right: 12.0),
-                          child: Icon(Symbols.search),
-                        ),
-                        hintText: ui("搜索本地曲库和联网音乐"),
-                        border: AppShape.inputBorder,
-                      ),
+                      busy: _pendingQuery != null,
+                      onChanged: _queryChanged,
                       onSubmitted: _search,
                     ),
                   ),
                 ),
               ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(_error!, style: TextStyle(color: scheme.error)),
+                ),
               const SizedBox(height: 8.0),
-              AppEntrance(
+              const AppEntrance(
                 identity: 'search-result-tabs',
                 order: 1,
                 child: Material(
                   type: MaterialType.transparency,
-                  child: TabBar(
-                    isScrollable: true,
-                    tabAlignment: TabAlignment.start,
-                    tabs: _SearchResultFilter.values
-                        .map((filter) => Tab(text: ui(filter.label)))
-                        .toList(),
-                  ),
+                  child: SearchCategoryTabs(),
                 ),
               ),
               Expanded(
@@ -299,17 +324,6 @@ class _SearchResultBody extends StatelessWidget {
           ));
         } else {
           final response = snapshot.data!;
-          slivers.add(SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8.0, 4.0, 8.0, 8.0),
-              child: Text(
-                ui('搜索已启用的内置与自定义歌源；搜索只返回候选，播放时再解析地址，只有来源明确授权的歌曲才可下载。'),
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ));
           if (response.failures.isNotEmpty) {
             slivers.add(SliverToBoxAdapter(
               child: _PartialFailure(failures: response.failures),

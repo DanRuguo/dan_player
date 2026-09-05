@@ -21,7 +21,7 @@ void main() {
     expect(value.needsNativeGlass, isTrue);
     expect(BackgroundPreferences.fromMap(null), value);
     expect(BackgroundPreferences.fromMap('old-settings'), value);
-    expect(AppSettings.version, '26.0.4-snapshot.3');
+    expect(AppSettings.version, '26.0.4');
   });
 
   for (final scene in BackgroundScene.values) {

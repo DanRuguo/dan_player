@@ -101,6 +101,8 @@ enum _PlaylistToolbarAction {
   resetCover,
   albums,
   help,
+  importM3u,
+  exportM3u,
 }
 
 /// Compact, descriptor-only playlist actions. No playback/library singleton is
@@ -137,6 +139,9 @@ class PlaylistToolbar extends StatefulWidget {
     this.onOpenAlbums,
     this.albumCount = 0,
     this.onHelp,
+    this.onImportM3u,
+    this.onExportM3u,
+    this.selectionTools,
     this.alignment = WrapAlignment.end,
   })  : assert(selectedCount >= 0),
         assert(albumCount >= 0);
@@ -167,6 +172,9 @@ class PlaylistToolbar extends StatefulWidget {
   final VoidCallback? onOpenAlbums;
   final int albumCount;
   final VoidCallback? onHelp;
+  final VoidCallback? onImportM3u;
+  final VoidCallback? onExportM3u;
+  final Widget? selectionTools;
   final WrapAlignment alignment;
 
   @override
@@ -213,6 +221,20 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
   }
 
   List<_ToolbarMenuItem<_PlaylistToolbarAction>?> _moreItems() => [
+        if (widget.onImportM3u != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.importM3u,
+              key: const ValueKey('playlist-import-m3u'),
+              label: ui('导入 M3U8 歌单'),
+              icon: Icons.file_open_outlined,
+              onSelected: widget.editingEnabled ? widget.onImportM3u : null),
+        if (widget.onExportM3u != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.exportM3u,
+              key: const ValueKey('playlist-export-m3u'),
+              label: ui('导出 M3U8 歌单'),
+              icon: Icons.file_download_outlined,
+              onSelected: widget.canPlay ? widget.onExportM3u : null),
         if (widget.isRoot)
           _ToolbarMenuItem(
             value: _PlaylistToolbarAction.playAll,
@@ -438,6 +460,7 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
   }
 
   List<Widget> _selectionActions(bool reduced, double maxWidth) => [
+        if (widget.selectionTools != null) widget.selectionTools!,
         _ToolbarActionButton(
           key: const ValueKey('playlist-remove-selected'),
           label: ui("移除所选（{0}）", [widget.selectedCount]),

@@ -11,6 +11,7 @@
 #include "window_backdrop.h"
 #include "window_resize_policy.h"
 #include "window_teardown.h"
+#include "windows_shell.h"
 
 namespace {
 
@@ -119,6 +120,8 @@ bool FlutterWindow::OnCreate() {
       GetHandle(), flutter_controller_->engine());
   installer_launcher_ = std::make_unique<InstallerLauncherController>(
       flutter_controller_->engine());
+  windows_shell_ = std::make_unique<WindowsShellController>(
+      GetHandle(), flutter_controller_->engine());
 
   // Dart applies restored bounds, resize policy and the backdrop before it
   // explicitly shows the HWND. Showing here on the first Flutter frame races
@@ -131,6 +134,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   window_teardown::HideBeforeResources(GetHandle());
+  windows_shell_.reset();
   installer_launcher_.reset();
   desktop_controller_.reset();
   backdrop_controller_.reset();
@@ -145,6 +149,11 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (windows_shell_) {
+    if (const auto result = windows_shell_->HandleMessage(message, wparam, lparam)) {
+      return *result;
+    }
+  }
   if (message == WM_STYLECHANGED) {
     RefreshNonClientFrameAfterResizeStyleChange(hwnd, wparam, lparam);
   }

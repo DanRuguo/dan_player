@@ -517,7 +517,7 @@ class DesktopIntegration implements Listenable {
     }
   }
 
-  @visibleForTesting
+  /// Shared by the native tray, taskbar buttons and Windows Jump List tasks.
   Future<void> dispatchAction(String action) async {
     if (_closed || _exitRequested) return;
     try {

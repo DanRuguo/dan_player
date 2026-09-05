@@ -15,7 +15,8 @@ import 'package:music_api/src/utils/crypto.dart' show weApi;
 
 enum SongCommentSort {
   hot('热门'),
-  latest('最新');
+  latest('最新'),
+  standard('评论');
 
   const SongCommentSort(this.label);
   final String label;
@@ -75,13 +76,18 @@ class SongCommentsPage {
     required this.page,
     this.reportedTotal,
     this.reachedLimit = false,
-  }) : comments = List.unmodifiable(comments);
+    List<SongCommentSort> availableSorts = const [],
+  })  : comments = List.unmodifiable(comments),
+        availableSorts = List.unmodifiable(availableSorts);
 
   final List<SongComment> comments;
   final bool hasMore;
   final int page;
   final int? reportedTotal;
   final bool reachedLimit;
+
+  /// Additional orders explicitly advertised by this source's response.
+  final List<SongCommentSort> availableSorts;
 }
 
 enum SongCommentsFailure {
@@ -170,7 +176,7 @@ class AnonymousSongCommentsTransport implements SongCommentsTransport {
     Object? jsonBody;
     Map<String, String>? form;
     if (target.provider == 'qq') {
-      if (sort == SongCommentSort.latest) {
+      if (sort != SongCommentSort.hot) {
         uri = Uri.https(
             'c.y.qq.com', '/base/fcgi-bin/fcg_global_comment_h5.fcg', {
           'biztype': '1',
@@ -265,13 +271,15 @@ class AnonymousSongCommentsTransport implements SongCommentsTransport {
             SongCommentsFailure.network, '评论服务暂时不可用，请稍后重试。');
       }
       if (response.contentLength > responseByteLimit) {
-        throw const FormatException('Comment response exceeds limit');
+        throw const SongCommentsException(SongCommentsFailure.invalid,
+            '评论响应超过大小限制，请稍后重试或切换评论来源。');
       }
       final bytes = BytesBuilder(copy: false);
       await for (final chunk in response) {
         cancellation.check();
         if (bytes.length + chunk.length > responseByteLimit) {
-          throw const FormatException('Comment response exceeds limit');
+          throw const SongCommentsException(SongCommentsFailure.invalid,
+              '评论响应超过大小限制，请稍后重试或切换评论来源。');
         }
         bytes.add(chunk);
       }
@@ -341,9 +349,11 @@ class DefaultSongCommentsTransport implements SongCommentsTransport {
         ),
         page: page,
         limit: SongCommentsService.pageSize,
-        sort: sort == SongCommentSort.hot
-            ? CustomMusicCommentsSort.hot
-            : CustomMusicCommentsSort.latest,
+        sort: switch (sort) {
+          SongCommentSort.hot => CustomMusicCommentsSort.hot,
+          SongCommentSort.latest => CustomMusicCommentsSort.latest,
+          SongCommentSort.standard => CustomMusicCommentsSort.standard,
+        },
         cancellation: customCancellation,
       );
       if (!identical(_customCommentsProfile(target.provider), profile)) {
@@ -366,6 +376,7 @@ class DefaultSongCommentsTransport implements SongCommentsTransport {
             },
         ],
         'hasMore': result.hasMore,
+        'supportedSorts': [for (final sort in result.supportedSorts) sort.name],
         if (result.total != null) 'total': result.total,
       };
     } on CustomMusicSourceCancelled {
@@ -393,6 +404,13 @@ class SongCommentsService {
   final Duration _timeout;
 
   static bool canRead(Audio audio) => unavailableReason(audio) == null;
+
+  /// Built-in adapters have known contracts. A generic comments endpoint only
+  /// promises its default list; extra orders are discovered on the first read.
+  static List<SongCommentSort> sortsFor(SongCommentsTarget? target) =>
+      target?.provider == 'qq' || target?.provider == 'netease'
+          ? const [SongCommentSort.hot, SongCommentSort.latest]
+          : const [SongCommentSort.standard];
 
   static String? unavailableReason(Audio audio) {
     if (!audio.isOnline) {
@@ -474,7 +492,7 @@ class SongCommentsService {
     } on FormatException {
       token.check();
       throw const SongCommentsException(
-          SongCommentsFailure.invalid, '评论来源返回的格式异常或内容过大，暂时无法读取，请稍后重试。');
+          SongCommentsFailure.invalid, '评论来源返回的格式无法识别，请稍后重试或切换评论来源。');
     } catch (_) {
       token.check();
       throw const SongCommentsException(
@@ -498,7 +516,7 @@ class SongCommentsService {
           response[sort == SongCommentSort.hot ? 'hotComments' : 'comments']);
       more = response[sort == SongCommentSort.hot ? 'hasMore' : 'more'];
       total = _number(response['total']);
-    } else if (sort == SongCommentSort.latest) {
+    } else if (sort != SongCommentSort.hot) {
       final section = _map(response['comment']);
       rows = _rows(section['commentlist']);
       more = response['morecomment'];
@@ -566,6 +584,12 @@ class SongCommentsService {
       page: page,
       reportedTotal: total != null && total >= 0 ? total : null,
       reachedLimit: reachedLimit,
+      availableSorts: [
+        SongCommentSort.standard,
+        if (response['supportedSorts'] case final List sorts)
+          for (final sort in [SongCommentSort.hot, SongCommentSort.latest])
+            if (sorts.contains(sort.name)) sort,
+      ],
     );
   }
 }
@@ -731,8 +755,10 @@ SongComment? _neteaseComment(Map row) {
 }
 
 SongComment? _qqComment(Map row, {required bool hot}) {
-  final id = _id(row[hot ? 'CmId' : 'commentid']);
-  final rootId = _id(row[hot ? 'SeqNo' : 'rootcommentid']) ?? id;
+  // QQ now returns opaque comment IDs such as "1!…". These are display and
+  // deduplication keys, not the numeric song ID sent to the endpoint.
+  final id = _qqCommentId(row[hot ? 'CmId' : 'commentid']);
+  final rootId = _qqCommentId(row[hot ? 'SeqNo' : 'rootcommentid']) ?? id;
   final text = _text(row[hot ? 'Content' : 'rootcommentcontent']);
   if (id == null || text.isEmpty) return null;
   final author = _text(row[hot ? 'Nick' : 'rootcommentnick']);
@@ -759,4 +785,13 @@ SongComment? _qqComment(Map row, {required bool hot}) {
     likeCount: _likes(row[hot ? 'PraiseNum' : 'praisenum']),
     replies: List.unmodifiable(replies),
   );
+}
+
+String? _qqCommentId(Object? value) {
+  if (value is int) return value > 0 ? '$value' : null;
+  if (value is! String || value.isEmpty || value.length > 512) return null;
+  if (value.trim() != value || RegExp(r'[\x00-\x20\x7f]').hasMatch(value)) {
+    return null;
+  }
+  return value;
 }

@@ -225,6 +225,7 @@ class OnlineMusicService {
   Future<OnlineSearchResponse> search(
     String rawQuery, {
     int limit = 30,
+    bool commentsOnly = false,
     OnlineSearchCancellation? cancellation,
   }) async {
     cancellation?.check();
@@ -240,7 +241,11 @@ class OnlineMusicService {
     final customProfiles = _customProfiles()
         .where((profile) =>
             profile.enabled &&
-            profile.capabilities.contains(CustomMusicSourceCapability.search))
+            profile.capabilities.contains(CustomMusicSourceCapability.search) &&
+            (!commentsOnly ||
+                (profile.authentication == null &&
+                    profile.endpointFor(CustomMusicSourceCapability.comments) !=
+                        null)))
         .take(CustomMusicSourceProfileCodec.maximumProfiles)
         .toList(growable: false);
     if (sources.isEmpty && customProfiles.isEmpty) {
@@ -618,6 +623,9 @@ class OnlineMusicService {
     Audio audio, {
     CustomMusicSourceCancellation? cancellation,
   }) async {
+    if (audio.onlineProvider == 'netease') {
+      return _refreshNeteaseMetadata(audio, cancellation: cancellation);
+    }
     final custom = _customProfileFor(audio.onlineProvider);
     if (custom == null) {
       if (CustomMusicSourceProfile.profileIdFromProvider(
@@ -642,6 +650,74 @@ class OnlineMusicService {
     _requireCurrentCustomProfile(audio,
         expected: custom, capability: capability, operation: '读取歌曲信息');
     return result;
+  }
+
+  Future<Audio> _refreshNeteaseMetadata(
+    Audio audio, {
+    CustomMusicSourceCancellation? cancellation,
+  }) async {
+    final id = audio.onlineId;
+    if (id == null || !RegExp(r'^[1-9][0-9]{0,19}$').hasMatch(id)) return audio;
+    final token = cancellation ?? CustomMusicSourceCancellation();
+    token.check();
+    final client = _httpClientFactory()..connectionTimeout = _requestTimeout;
+    final unlink = token.onCancel(() => client.close(force: true));
+    try {
+      final operation = () async {
+        final request = await client.getUrl(Uri.https(
+          'music.163.com',
+          '/api/song/detail/',
+          {'id': id, 'ids': '[$id]'},
+        ));
+        token.check();
+        request.followRedirects = false;
+        request.headers
+            .set(HttpHeaders.refererHeader, 'https://music.163.com/');
+        request.headers.set(HttpHeaders.userAgentHeader,
+            'Mozilla/5.0 DanPlayer/26.0.4 AnonymousMetadata');
+        final response = await request.close();
+        token.check();
+        const limit = 256 * 1024;
+        if (response.statusCode != HttpStatus.ok ||
+            response.contentLength > limit) {
+          throw const FormatException(
+              'Invalid metadata HTTP response or length');
+        }
+        final bytes = BytesBuilder(copy: false);
+        await for (final chunk in response) {
+          token.check();
+          if (bytes.length + chunk.length > limit) {
+            throw const FormatException('Metadata response exceeds limit');
+          }
+          bytes.add(chunk);
+        }
+        final root = jsonDecode(utf8.decode(bytes.takeBytes()));
+        if (root is! Map) throw const FormatException('Missing song metadata');
+        _requireBusinessCode(root['code'], expected: 200, provider: '网易云音乐');
+        final songs = root['songs'];
+        if (songs is! List) {
+          throw const FormatException('Missing song metadata');
+        }
+        for (final row in songs.whereType<Map>()) {
+          final detailed = _neteaseAudio(row);
+          if (detailed == null || detailed.onlineId != id) continue;
+          return Audio.fromOnlineMap({
+            ...audio.toOnlineMap(),
+            'title': detailed.title,
+            'artist': detailed.artist,
+            'album': detailed.album,
+            'duration':
+                detailed.duration > 0 ? detailed.duration : audio.duration,
+            'artworkUrl': detailed.artworkUrl ?? audio.artworkUrl,
+          });
+        }
+        return audio;
+      }();
+      return await token.race(operation).timeout(_requestTimeout);
+    } finally {
+      unlink();
+      client.close(force: true);
+    }
   }
 
   Future<Uri> resolveStreamUrl(Audio audio, {bool forceRefresh = false}) async {

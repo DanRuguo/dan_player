@@ -198,6 +198,7 @@ void main() {
   for (final marker in [
     '纯音乐，请欣赏',
     '纯音乐，请您欣赏。',
+    '此歌曲为没有填词的纯音乐，请您欣赏',
     '[Instrumental]',
     'Instrumental version',
   ]) {

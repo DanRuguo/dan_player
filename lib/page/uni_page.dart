@@ -101,6 +101,26 @@ class MultiSelectController<T> extends ChangeNotifier {
       ..addAll(replacement);
     notifyListeners();
   }
+
+  /// Actions follow the displayed order, rather than the order of clicks.
+  List<T> selectedInOrder(Iterable<T> items) =>
+      items.where(selected.contains).toList(growable: false);
+
+  void toggleAllVisible(Iterable<T> items) {
+    final visible = items.toSet();
+    if (visible.isEmpty) return;
+    replaceSelection(selected.containsAll(visible)
+        ? selected.where((item) => !visible.contains(item))
+        : {...selected, ...visible});
+  }
+
+  void invertVisible(Iterable<T> items) {
+    final visible = items.toSet();
+    replaceSelection({
+      ...selected.where((item) => !visible.contains(item)),
+      ...visible.where((item) => !selected.contains(item)),
+    });
+  }
 }
 
 /// `AudiosPage`, `ArtistsPage`, `AlbumsPage`, `FoldersPage`, `FolderDetailPage` 页面的主要组件，
@@ -193,6 +213,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
   void initState() {
     super.initState();
     currSortMethod?.method(widget.contentList, currSortOrder);
+    _reconcileSelection();
     if (widget.locateTo == null) return;
     _scheduleLocate(_locateGeneration);
   }
@@ -288,6 +309,19 @@ class _UniPageState<T> extends State<UniPage<T>> {
     super.didUpdateWidget(oldWidget);
     currSortMethod = _preferredSortMethod();
     currSortMethod?.method(widget.contentList, currSortOrder);
+    _reconcileSelection();
+  }
+
+  void _reconcileSelection() {
+    final controller = widget.multiSelectController;
+    if (controller == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(controller, widget.multiSelectController)) {
+        return;
+      }
+      final allowed = widget.contentList.toSet();
+      controller.replaceSelection(controller.selected.where(allowed.contains));
+    });
   }
 
   void setSortMethod(SortMethodDesc<T> sortMethod) {

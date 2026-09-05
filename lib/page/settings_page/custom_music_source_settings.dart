@@ -130,7 +130,7 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
                 ListTile(
                   key: ValueKey('custom-source-preset-${profile.id}'),
                   leading: const Icon(Symbols.cloud_download),
-                  title: Text(profile.name),
+                  title: Text(_profileDisplayName(profile)),
                   subtitle: Text(_protocolLabel(profile.protocol)),
                   onTap: () => Navigator.pop(context, profile),
                 ),
@@ -783,9 +783,12 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
   void _changeProtocol(CustomMusicSourceProtocol value) {
     _protocol = value;
     _applyProtocolCapabilities(reset: true);
-    final defaults = value == CustomMusicSourceProtocol.kugou
-        ? CustomMusicSourceProfile.kugouPreset()
-        : null;
+    final defaults = switch (value) {
+      CustomMusicSourceProtocol.kugou => CustomMusicSourceProfile.kugouPreset(),
+      CustomMusicSourceProtocol.neteaseApi =>
+        CustomMusicSourceProfile.neteaseApiPreset(),
+      _ => null,
+    };
     for (final entry in _endpointControllers.entries) {
       entry.value.text = defaults?.endpoints[entry.key] ?? '';
     }
@@ -1066,9 +1069,14 @@ String _protocolLabel(CustomMusicSourceProtocol protocol) => switch (protocol) {
       CustomMusicSourceProtocol.legacyLyrics => ui('歌词 API'),
       CustomMusicSourceProtocol.goMusicApi => ui('go-music-api（自托管）'),
       CustomMusicSourceProtocol.kugou => ui('酷狗接口'),
+      CustomMusicSourceProtocol.neteaseApi => ui('网易云增强 API（自托管）'),
     };
 
 String _profileDisplayName(CustomMusicSourceProfile profile) {
+  if (profile.protocol == CustomMusicSourceProtocol.neteaseApi &&
+      profile.name == '网易云增强 API') {
+    return ui('网易云增强 API');
+  }
   if (profile.protocol == CustomMusicSourceProtocol.legacyLyrics) {
     if (profile.name == 'Legacy lyric API' ||
         profile.name == 'Imported lyric API') {
@@ -1085,6 +1093,8 @@ String _protocolDescription(CustomMusicSourceProtocol protocol) =>
       CustomMusicSourceProtocol.legacyLyrics =>
         ui('歌词接口：接收歌曲信息并返回歌词；可更换协议以配置其他能力。'),
       CustomMusicSourceProtocol.goMusicApi => ui('自托管兼容接口：能力按服务实际返回执行。'),
+      CustomMusicSourceProtocol.neteaseApi =>
+        ui('连接自己部署的网易云增强 API，支持搜索、歌词、评论和歌曲信息；音频以服务实际权限为准。'),
       CustomMusicSourceProtocol.kugou =>
         ui('酷狗兼容接口：可分别配置搜索、歌曲信息、封面、歌词、播放和下载地址。'),
     };
@@ -1118,6 +1128,7 @@ Set<CustomMusicSourceCapability> _supportedCapabilities(
           CustomMusicSourceCapability.lyrics,
         },
       CustomMusicSourceProtocol.goMusicApi ||
+      CustomMusicSourceProtocol.neteaseApi ||
       CustomMusicSourceProtocol.kugou ||
       CustomMusicSourceProtocol.danSourceV1 =>
         CustomMusicSourceCapability.values.toSet(),

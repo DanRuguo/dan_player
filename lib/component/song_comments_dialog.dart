@@ -87,6 +87,7 @@ class _CommentScrollController extends ScrollController {
 
 class _SongCommentsDialogState extends State<SongCommentsDialog> {
   late Map<SongCommentSort, _CommentTab> _tabs;
+  late List<SongCommentSort> _availableSorts;
   SongCommentSort _sort = SongCommentSort.hot;
   SongCommentsTarget? _target;
   String? _unavailable;
@@ -109,6 +110,8 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
   void _configure() {
     _target = SongCommentsService.targetFor(widget.audio);
     _unavailable = SongCommentsService.unavailableReason(widget.audio);
+    _availableSorts = SongCommentsService.sortsFor(_target);
+    _sort = _availableSorts.first;
     _tabs = {for (final sort in SongCommentSort.values) sort: _CommentTab()};
     if (_target != null) unawaited(_load());
   }
@@ -126,8 +129,9 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     setState(() {
       _target = SongCommentsService.targetFor(widget.audio);
       _unavailable = SongCommentsService.unavailableReason(widget.audio);
+      _availableSorts = SongCommentsService.sortsFor(_target);
       _tabs = {for (final sort in SongCommentSort.values) sort: _CommentTab()};
-      _sort = SongCommentSort.hot;
+      _sort = _availableSorts.first;
       _associationError = null;
     });
     if (_target != null) unawaited(_load());
@@ -206,7 +210,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
   }
 
   void _select(SongCommentSort sort) {
-    if (_closed || sort == _sort) return;
+    if (_closed || sort == _sort || !_availableSorts.contains(sort)) return;
     _cancel();
     setState(() {
       _tab.loading = false;
@@ -246,6 +250,10 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
       final incoming =
           result.comments.where((comment) => seen.add(comment.id)).toList();
       setState(() {
+        if (result.availableSorts.isNotEmpty) {
+          _availableSorts =
+              {..._availableSorts, ...result.availableSorts}.toList();
+        }
         tab.comments.addAll(incoming);
         tab.loaded = true;
         tab.total = result.reportedTotal;
@@ -318,12 +326,12 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
                 ),
               ),
             ),
-            if (_target != null)
+            if (_target != null && _availableSorts.length > 1)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Row(children: [
-                  for (final sort in SongCommentSort.values) ...[
-                    if (sort.index != 0) const SizedBox(width: 8),
+                  for (final sort in _availableSorts) ...[
+                    if (sort != _availableSorts.first) const SizedBox(width: 8),
                     Expanded(
                         child: Semantics(
                       selected: _sort == sort,
@@ -385,6 +393,10 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
                   )
                 ])),
           if (_target != null) ...[
+            if (_availableSorts.length == 1) ...[
+              const SizedBox(height: 4),
+              Text(ui('按来源默认顺序显示；仅在来源支持时提供热门或最新分类。')),
+            ],
             const SizedBox(height: 4),
             Text(ui("评论由平台用户发表；不加载头像、图片或音频。"),
                 style: TextStyle(

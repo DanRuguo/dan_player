@@ -15,6 +15,7 @@ import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/utils.dart';
+import 'package:dan_player/windows_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
@@ -90,6 +91,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
         ),
       );
       await PlayService.instance.playbackService.restoreLastSessionOnce();
+      await WindowsShell.instance.markLibraryReady();
       await _subscription?.cancel();
       if (mounted) {
         context.go(app_paths.START_PAGES[AppPreference.instance.startPage]);

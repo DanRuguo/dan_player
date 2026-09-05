@@ -714,6 +714,22 @@ class PlaylistTree {
     return playlist;
   }
 
+  /// Capture a playback queue as a new playlist, retaining repeated tracks.
+  /// Validate all entries before attaching the new node to the existing tree.
+  Playlist createPlaylistFromAudios(String name, Iterable<Audio> audios) {
+    _requireEditable();
+    validate();
+    final checkedName = _checkedName(name);
+    final entries = <PlaylistAudioEntry>[];
+    for (final audio in audios) {
+      _checkAudioKey(audio.path, audio);
+      entries.add(PlaylistAudioEntry._(_newPlaylistId('pe_'), audio));
+    }
+    final created = Playlist(checkedName, {}).._entries.addAll(entries);
+    roots.add(created);
+    return created;
+  }
+
   PlaylistAudioEntry addAudio(Playlist parent, Audio audio, {int? index}) {
     _requireEditable();
     _requireMember(parent);

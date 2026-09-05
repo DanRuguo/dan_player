@@ -2,8 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
-
 typedef QqSearchHttpClientFactory = HttpClient Function();
 
 class QqPublicSearchException implements Exception {
@@ -59,90 +57,39 @@ class QqPublicSong {
       };
 }
 
-/// Anonymous, read-only QQ search used when no account cookie is available.
-///
-/// The dependency's older `DoSearchForQQMusicMobile` request now commonly
-/// returns business code 2001. The current mobile request requires a signature
-/// over the exact JSON body. No cookie, login identifier, audio URL or paid
-/// media key is sent by this transport.
+/// Anonymous, read-only QQ search using the public client search endpoint.
+/// The mobile MusicU route now returns code 2001 with a login feedback URL.
+/// Keep the public endpoint's song IDs, media IDs and metadata together so
+/// search, comments, lyrics and playback refer to the same selected song.
 class QqPublicSearchTransport {
-  QqPublicSearchTransport({
-    QqSearchHttpClientFactory? httpClientFactory,
-    DateTime Function()? now,
-  })  : _httpClientFactory = httpClientFactory ?? HttpClient.new,
-        _now = now ?? DateTime.now;
+  QqPublicSearchTransport({QqSearchHttpClientFactory? httpClientFactory})
+      : _httpClientFactory = httpClientFactory ?? HttpClient.new;
 
   static const _timeout = Duration(seconds: 12);
   static const _responseByteLimit = 2 * 1024 * 1024;
-
   final QqSearchHttpClientFactory _httpClientFactory;
-  final DateTime Function() _now;
 
   Future<List<QqPublicSong>> search(String rawQuery, int rawLimit) async {
     final query = rawQuery.trim();
     if (query.isEmpty) return const [];
     final limit = rawLimit.clamp(1, 30).toInt();
-    final searchId = _now().microsecondsSinceEpoch.toString();
-    final body = jsonEncode({
-      'comm': {
-        'ct': '11',
-        'cv': '14090508',
-        'v': '14090508',
-        'tmeAppID': 'qqmusic',
-        'phonetype': 'Android',
-        'os_ver': '12',
-        'OpenUDID': '0',
-        'QIMEI36': '0',
-        'udid': '0',
-        'chid': '0',
-        'aid': '0',
-        'oaid': '0',
-        'taid': '0',
-        'tid': '0',
-        'wid': '0',
-        'uid': '0',
-        'sid': '0',
-        'modeSwitch': '6',
-        'teenMode': '0',
-        'ui_mode': '2',
-        'nettype': '1020',
-      },
-      'req': {
-        'module': 'music.search.SearchCgiService',
-        'method': 'DoSearchForQQMusicMobile',
-        'param': {
-          'search_type': 0,
-          'searchid': searchId,
-          'query': query,
-          'page_num': 1,
-          'num_per_page': limit,
-          'highlight': 0,
-          'nqc_flag': 0,
-          'multi_zhida': 0,
-          'cat': 2,
-          'grp': 1,
-          'sin': 0,
-          'sem': 0,
-        },
-      },
+    final uri = Uri.https('c.y.qq.com', '/soso/fcgi-bin/client_search_cp', {
+      'format': 'json',
+      'n': '$limit',
+      'p': '1',
+      'w': query,
+      'cr': '1',
+      'g_tk': '5381',
+      't': '0',
     });
-    final signature = qqSearchSignature(body);
-    final uri = Uri.https(
-      'u.y.qq.com',
-      '/cgi-bin/musics.fcg',
-      {'sign': signature},
-    );
     final client = _httpClientFactory()..connectionTimeout = _timeout;
     try {
-      final request = await client.postUrl(uri).timeout(_timeout);
+      final request = await client.getUrl(uri).timeout(_timeout);
       request.followRedirects = false;
-      request.headers.set(
-        HttpHeaders.userAgentHeader,
-        'QQMusic/14090508 (Android 12; DanPlayer 26.0.3)',
-      );
+      request.headers.set(HttpHeaders.userAgentHeader,
+          'Mozilla/5.0 DanPlayer/26.0.4 PublicSearch');
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers.contentType = ContentType.json;
-      request.write(body);
+      request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');
       final response = await request.close().timeout(_timeout);
       final payload = await _readJsonResponse(response);
       return parseQqPublicSearchPayload(payload, limit: limit);
@@ -187,50 +134,6 @@ class QqPublicSearchTransport {
   }
 }
 
-String qqSearchSignature(String body) {
-  final hash = sha1.convert(utf8.encode(body)).toString();
-  const firstIndexes = [23, 14, 6, 36, 16, 40, 7, 19];
-  const secondIndexes = [16, 1, 32, 12, 19, 27, 8, 5];
-  const scramble = [
-    89,
-    39,
-    179,
-    150,
-    218,
-    82,
-    58,
-    252,
-    177,
-    52,
-    186,
-    123,
-    120,
-    64,
-    242,
-    133,
-    143,
-    161,
-    121,
-    179,
-  ];
-  // The public web algorithm carries a historical index 40 although a SHA-1
-  // hex digest ends at 39. JavaScript implementations append an empty value
-  // for that slot; skip it explicitly instead of indexing past the Dart string.
-  String pick(List<int> indexes) => indexes
-      .where((index) => index >= 0 && index < hash.length)
-      .map((index) => hash[index])
-      .join();
-  final first = pick(firstIndexes);
-  final second = pick(secondIndexes);
-  final mixed = Uint8List(scramble.length);
-  for (var index = 0; index < scramble.length; index++) {
-    final byte = int.parse(hash.substring(index * 2, index * 2 + 2), radix: 16);
-    mixed[index] = scramble[index] ^ byte;
-  }
-  final middle = base64Encode(mixed).replaceAll(RegExp(r'[/\\+=]'), '');
-  return 'zzc$first$middle$second'.toLowerCase();
-}
-
 List<QqPublicSong> parseQqPublicSearchPayload(
   Object? payload, {
   int limit = 30,
@@ -240,16 +143,19 @@ List<QqPublicSong> parseQqPublicSearchPayload(
   }
   _requireCode(payload['code'], expected: 0);
   final request = payload['req'] ?? payload['req_1'];
-  if (request is! Map) {
+  final publicData = payload['data'];
+  if (request is! Map && publicData is! Map) {
     throw const QqPublicSearchException('QQ音乐搜索响应缺少请求结果');
   }
-  _requireCode(request['code'], expected: 0);
-  final data = request['data'];
+  if (request is Map) _requireCode(request['code'], expected: 0);
+  final data = request is Map ? request['data'] : publicData;
   final body = data is Map ? data['body'] : null;
   final rows = body is Map
       ? body['item_song'] ??
           (body['song'] is Map ? (body['song'] as Map)['list'] : null)
-      : null;
+      : data is Map && data['song'] is Map
+          ? (data['song'] as Map)['list']
+          : null;
   if (rows is! List) {
     throw const QqPublicSearchException('QQ音乐搜索响应缺少歌曲列表');
   }
@@ -274,12 +180,13 @@ List<QqPublicSong> parseQqPublicSearchPayload(
     final album = albumRow is Map
         ? _text(albumRow['name'] ?? albumRow['title']) ?? ''
         : _text(albumRow) ?? _text(row['albumname']) ?? '';
-    final albumMid =
-        albumRow is Map ? _text(albumRow['mid'] ?? albumRow['pmid']) : null;
+    final albumMid = albumRow is Map
+        ? _text(albumRow['mid'] ?? albumRow['pmid'])
+        : _text(row['albummid']);
     final file = row['file'];
     final mediaMid = file is Map
         ? _text(file['media_mid'] ?? file['mediaMid'])
-        : _text(row['media_mid']);
+        : _text(row['media_mid'] ?? row['strMediaMid']);
     result.add(QqPublicSong(
       title: title,
       mid: mid,

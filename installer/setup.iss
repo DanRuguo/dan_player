@@ -110,8 +110,8 @@ Source: "{#RepositoryRoot}\assets\fonts\PingFangSC-Regular.ttf"; Flags: dontcopy
 #include PayloadFileEntries
 
 [Icons]
-Name: "{code:DesktopDirectory}\Dan Player"; Filename: "{app}\Dan Player.exe"; WorkingDir: "{app}"; Check: WantDesktop; AfterInstall: ShortcutInstalled(True)
-Name: "{code:StartDirectory}\Dan Player"; Filename: "{app}\Dan Player.exe"; WorkingDir: "{app}"; Check: WantStartMenu; AfterInstall: ShortcutInstalled(False)
+Name: "{code:DesktopDirectory}\Dan Player"; Filename: "{app}\Dan Player.exe"; WorkingDir: "{app}"; AppUserModelID: "DanRuguo.DanPlayer"; Check: WantDesktop; AfterInstall: ShortcutInstalled(True)
+Name: "{code:StartDirectory}\Dan Player"; Filename: "{app}\Dan Player.exe"; WorkingDir: "{app}"; AppUserModelID: "DanRuguo.DanPlayer"; Check: WantStartMenu; AfterInstall: ShortcutInstalled(False)
 
 [Code]
 type
@@ -145,6 +145,12 @@ var
 
 function DP_GetError(Buffer: String; Capacity: Integer): Integer;
   external 'DP_GetError@files:dan_installer_native.dll stdcall';
+function OpenPlayerForUninstall(Access: LongWord; Inherit: Boolean; PID: LongWord): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForPlayerExit(Process: THandle; Milliseconds: LongWord): LongWord;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function ClosePlayerHandle(Process: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
 function DP_UpdateOpen(Target, Manifest, Version, ParentPID, ReadyEvent: String): Integer;
   external 'DP_UpdateOpen@files:dan_installer_native.dll stdcall';
 function DP_UpdatePoll(): Integer;
@@ -907,4 +913,28 @@ begin
     font resource. GDI owns its copied font data, never a temp-file mapping. }
   if Assigned(WizardForm) then WizardForm.Font.Name := 'Segoe UI';
   DP_CloseBrand();
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  PlayerPID: Integer;
+  PlayerProcess: THandle;
+  WaitResult: LongWord;
+begin
+  Result := True;
+  PlayerPID := StrToIntDef(ExpandConstant('{param:DANPLAYERPID|0}'), 0);
+  if PlayerPID <= 0 then Exit;
+  { The settings handoff starts us before saving and exiting. Do not expose the
+    removal confirmation until that exact process exits and releases its data. }
+  PlayerProcess := OpenPlayerForUninstall($00100000, False, PlayerPID);
+  if PlayerProcess = 0 then begin
+    { ERROR_INVALID_PARAMETER means the supplied process has already exited. }
+    Result := DLLGetLastError() = 87;
+  end else begin
+    WaitResult := WaitForPlayerExit(PlayerProcess, 15000);
+    ClosePlayerHandle(PlayerProcess);
+    Result := WaitResult = 0;
+  end;
+  if not Result then
+    MsgBox('Dan Player 尚未完全退出。请先关闭播放器，再从 Windows“已安装的应用”中卸载。', mbInformation, MB_OK);
 end;

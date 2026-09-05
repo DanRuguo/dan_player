@@ -13,6 +13,7 @@ import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/page/page_scaffold.dart';
 import 'package:dan_player/page/uni_page.dart';
+import 'package:dan_player/page/uni_page_components.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:flutter/material.dart';
@@ -213,6 +214,11 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final group = _group;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final allowed = (_group?.audios ?? <Audio>[]).toSet();
+      _selection.replaceSelection(_selection.selected.where(allowed.contains));
+    });
     if (group == null) {
       return PageScaffold(
         title: ui(widget.kind.label),
@@ -234,8 +240,6 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
       listenable: _selection,
       builder: (context, _) {
         final selecting = _selection.enableMultiSelectView;
-        final selected = queue.where(_selection.selected.contains).toList();
-        final addQueue = selecting ? selected : queue;
         return PageScaffold(
           title: ui(widget.kind.label),
           subtitle: ui("{0} 首 · {1}",
@@ -255,34 +259,22 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                   child: AppToolbarLabel(
                       label: ui("播放全部"), icon: Icons.play_arrow),
                 ),
-              if (selecting) ...[
-                TextButton(
-                  onPressed: () => _selection.selectAll(queue),
-                  style: _actionStyle(context),
-                  child: Text(ui("全选"),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
+              if (selecting)
+                AudioMultiSelectionActions(
+                  controller: _selection,
+                  contentList: queue,
+                  onPlay: (selected) => _play(0, selected),
+                  onAddToPlaylist: _add,
                 ),
-                TextButton(
-                  onPressed: () {
-                    _selection.clear();
-                    _selection.useMultiSelectView(false);
-                  },
+              if (!selecting)
+                OutlinedButton(
+                  key: const ValueKey('category-add-playlist'),
+                  onPressed:
+                      queue.isEmpty ? null : () => unawaited(_add(queue)),
                   style: _actionStyle(context),
-                  child: Text(ui("退出多选"),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  child: AppToolbarLabel(
+                      icon: Icons.playlist_add, label: ui("加入歌单")),
                 ),
-              ],
-              OutlinedButton(
-                key: const ValueKey('category-add-playlist'),
-                onPressed:
-                    addQueue.isEmpty ? null : () => unawaited(_add(addQueue)),
-                style: _actionStyle(context),
-                child: AppToolbarLabel(
-                    icon: Icons.playlist_add,
-                    label: selecting
-                        ? ui("加入歌单 ({0})", [selected.length])
-                        : ui("加入歌单")),
-              ),
               if (!selecting)
                 AppSortButton<AudioSortField>(
                   key: const ValueKey('category-track-sort'),

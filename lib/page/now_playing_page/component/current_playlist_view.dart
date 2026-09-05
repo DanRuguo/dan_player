@@ -1,5 +1,9 @@
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/playlist_name_dialog.dart';
+import 'package:dan_player/component/playlist_ui_actions.dart';
+import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/page/now_playing_page/component/segment_loop_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -38,6 +42,37 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   int? _lastIndex;
   double _rowHeight = 0;
   bool _alignQueued = false;
+  bool _savingQueue = false;
+
+  Future<void> _saveQueue() async {
+    if (_savingQueue || playbackService.playlist.value.isEmpty) return;
+    final snapshot = List<Audio>.from(playbackService.playlist.value);
+    setState(() => _savingQueue = true);
+    var created = false;
+    try {
+      final name = await showPlaylistNameDialog(context,
+          title: ui('将队列保存为歌单'),
+          confirmLabel: ui('保存'),
+          initialName: ui(
+              '播放队列 {0}', [DateTime.now().toIso8601String().substring(0, 10)]));
+      if (name == null || !mounted) return;
+      playlistTree.createPlaylistFromAudios(name, snapshot);
+      created = true;
+      await savePlaylistUiChanges();
+      if (mounted) {
+        showTextOnSnackBar('已保存 {0} 首歌曲到“{1}”',
+            arguments: [snapshot.length, name], context: context);
+      }
+    } catch (error, trace) {
+      LOGGER.e('[queue] save playlist failed: $error', stackTrace: trace);
+      if (mounted) {
+        showTextOnSnackBar(created ? '歌单已创建，但保存失败；请在歌单页重试保存' : '无法保存队列为歌单：{0}',
+            arguments: [error], context: context);
+      }
+    } finally {
+      if (mounted) setState(() => _savingQueue = false);
+    }
+  }
 
   PlaybackService _resolvePlaybackService() =>
       widget.playbackService ?? PlayService.instance.playbackService;
@@ -129,6 +164,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         listenable: Listenable.merge([
           playbackService,
           playbackService.playlist,
+          playbackService.resolvingAudioPath,
+          playbackService.isChangingOutput,
+          playbackService.segmentLoop,
           OnlineLibrary.instance,
         ]),
         builder: (context, _) {
@@ -149,6 +187,42 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                   count: queue.length,
                   currentIndex: currentIndex,
                 ),
+              Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Wrap(spacing: 4, runSpacing: 4, children: [
+                    IconButton(
+                        key: const ValueKey('queue-locate-current'),
+                        tooltip: ui('定位当前歌曲'),
+                        onPressed: currentIndex < 0
+                            ? null
+                            : () => _scheduleAlignment(force: true),
+                        icon: const Icon(Symbols.my_location)),
+                    IconButton(
+                        key: const ValueKey('queue-save-playlist'),
+                        tooltip: ui('将队列保存为歌单'),
+                        onPressed:
+                            queue.isEmpty || _savingQueue ? null : _saveQueue,
+                        icon: const Icon(Symbols.playlist_add)),
+                    IconButton(
+                        key: const ValueKey('queue-keep-current'),
+                        tooltip: ui('仅保留当前歌曲'),
+                        onPressed: currentIndex < 0 ||
+                                queue.length <= 1 ||
+                                !playbackService.canEditQueue
+                            ? null
+                            : playbackService.keepOnlyCurrentQueueItem,
+                        icon: const Icon(Symbols.playlist_remove)),
+                    Tooltip(
+                        message: ui('A-B 片段循环'),
+                        child: TextButton.icon(
+                            key: const ValueKey('queue-segment-loop'),
+                            onPressed: () =>
+                                showSegmentLoopDialog(context, playbackService),
+                            icon: Icon(playbackService.segmentLoop.enabled
+                                ? Symbols.repeat_on
+                                : Symbols.repeat),
+                            label: const Text('A-B'))),
+                  ])),
               Expanded(
                 child: Container(
                   margin: EdgeInsets.fromLTRB(
@@ -270,7 +344,7 @@ class _EmptyPlaylistView extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -358,6 +432,22 @@ class _PlaylistViewItem extends StatelessWidget {
           onPressed: () => playbackService.playIndexOfPlaylist(index),
           leadingIcon: const Icon(Symbols.play_arrow),
           child: Text(ui("播放")),
+        ),
+        MenuItemButton(
+          onPressed: !current &&
+                  playbackService.canEditQueue &&
+                  playbackService.nowPlaying != null
+              ? () => playbackService.moveQueueItemNext(index)
+              : null,
+          leadingIcon: const Icon(Symbols.playlist_play),
+          child: Text(ui('移到下一首')),
+        ),
+        MenuItemButton(
+          onPressed: !current && playbackService.canEditQueue
+              ? () => playbackService.removeQueueItem(index)
+              : null,
+          leadingIcon: const Icon(Symbols.playlist_remove),
+          child: Text(ui(current ? '正在播放的歌曲保留在队列中' : '从播放队列移除')),
         ),
         if (item.isOnline && !OnlineLibrary.instance.contains(item))
           MenuItemButton(

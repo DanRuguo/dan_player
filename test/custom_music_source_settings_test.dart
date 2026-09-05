@@ -75,7 +75,8 @@ void main() {
     expect(profiles.value.first, first);
     expect(profiles.value.last.name, 'Second source');
     for (final capability in profiles.value.last.capabilities) {
-      expect(profiles.value.last.endpointFor(capability)?.toString(),
+      expect(
+          profiles.value.last.endpointFor(capability)?.toString(),
           capability == CustomMusicSourceCapability.metadata ||
                   capability == CustomMusicSourceCapability.cover
               ? isNull
@@ -341,6 +342,40 @@ void main() {
     expect(profiles.value.single.capabilities,
         isNot(contains(CustomMusicSourceCapability.download)));
     expect(profiles.value.single.publicHeaders, profile.publicHeaders);
+  });
+
+  testWidgets(
+      'NetEase preset can be added disabled and configured in the editor',
+      (tester) async {
+    final profiles = ValueNotifier<List<CustomMusicSourceProfile>>([]);
+    addTearDown(profiles.dispose);
+    await tester.pumpWidget(_host(CustomMusicSourceSettings(
+      profiles: profiles,
+      persist: () async {},
+    )));
+    await tester.tap(find.byKey(const ValueKey('custom-source-add-preset')));
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const ValueKey('custom-source-preset-netease-api')));
+    await tester.pumpAndSettle();
+    expect(profiles.value.single.enabled, isFalse);
+    final edit = find.byKey(const ValueKey('custom-source-edit-netease-api'));
+    await tester.ensureVisible(edit);
+    await tester.tap(edit);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('custom-source-url')),
+        'http://127.0.0.1:3333/');
+    await tester.tap(find.byKey(const ValueKey('custom-source-save')));
+    await tester.pumpAndSettle();
+    expect(profiles.value.single.baseUrl, 'http://127.0.0.1:3333/');
+    expect(
+        profiles.value.single.protocol, CustomMusicSourceProtocol.neteaseApi);
+    expect(
+        profiles.value.single
+            .endpointFor(CustomMusicSourceCapability.comments)!
+            .path,
+        '/comment/music');
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('manual probe is scoped to search and disables peer buttons',

@@ -1,4 +1,5 @@
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/component/audio_selection_toolbar.dart';
 import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/component/app_sort_button.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
@@ -180,6 +181,47 @@ class AddAllToPlaylist extends StatelessWidget {
   }
 }
 
+class AudioMultiSelectionActions extends StatelessWidget {
+  const AudioMultiSelectionActions({
+    super.key,
+    required this.controller,
+    required this.contentList,
+    this.onPlay,
+    this.onAddToPlaylist,
+    this.onExport,
+  });
+
+  final MultiSelectController<Audio> controller;
+  final List<Audio> contentList;
+  final SelectedAudioAction? onPlay;
+  final SelectedAudioAction? onAddToPlaylist;
+  final SelectedAudioAction? onExport;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          final selected = controller.selectedInOrder(contentList);
+          return AudioSelectionToolbar(
+            selected: selected,
+            hiddenSelectionCount: controller.selected.length - selected.length,
+            hasItems: contentList.isNotEmpty,
+            allVisibleSelected: contentList.isNotEmpty &&
+                contentList.every(controller.selected.contains),
+            onToggleAll: () => controller.toggleAllVisible(contentList),
+            onInvert: () => controller.invertVisible(contentList),
+            onExit: () {
+              controller.clear();
+              controller.useMultiSelectView(false);
+            },
+            onPlay: onPlay,
+            onAddToPlaylist: onAddToPlaylist,
+            onExport: onExport,
+          );
+        },
+      );
+}
+
 class MultiSelectSelectOrClearAll<T> extends StatelessWidget {
   final MultiSelectController<T> multiSelectController;
   final List<T> contentList;
@@ -197,18 +239,18 @@ class MultiSelectSelectOrClearAll<T> extends StatelessWidget {
       builder: (context, _) => IconButton.filledTonal(
         style: appToolbarControlStyle(context,
             primary: true, tonal: true, iconOnly: true),
-        tooltip: multiSelectController.selected.isEmpty ? ui("全选") : ui("取消全选"),
+        tooltip: contentList.isNotEmpty &&
+                contentList.every(multiSelectController.selected.contains)
+            ? ui("取消全选")
+            : ui("全选"),
         onPressed: () {
-          if (multiSelectController.selected.isEmpty) {
-            multiSelectController.selectAll(contentList);
-          } else {
-            multiSelectController.clear();
-          }
+          multiSelectController.toggleAllVisible(contentList);
         },
         icon: Icon(
-          multiSelectController.selected.isEmpty
-              ? Symbols.select_all
-              : Symbols.clear_all,
+          contentList.isNotEmpty &&
+                  contentList.every(multiSelectController.selected.contains)
+              ? Symbols.clear_all
+              : Symbols.select_all,
         ),
       ),
     );

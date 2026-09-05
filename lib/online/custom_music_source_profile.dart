@@ -36,6 +36,7 @@ enum CustomMusicSourceProtocol {
   danSourceV1('dan-source-v1'),
   goMusicApi('go-music-api-v1'),
   kugou('kugou-v1'),
+  neteaseApi('netease-api-v1'),
   legacyLyrics('legacy-lyrics');
 
   const CustomMusicSourceProtocol(this.id);
@@ -328,7 +329,27 @@ class CustomMusicSourceProfile {
       )!;
 
   static List<CustomMusicSourceProfile> builtInPresets() =>
-      List.unmodifiable([lrcApiPreset(), kugouPreset()]);
+      List.unmodifiable([lrcApiPreset(), kugouPreset(), neteaseApiPreset()]);
+
+  /// An actual protocol adapter, with a local service address the user edits.
+  /// Never enable an undeployed service automatically on upgrade.
+  static CustomMusicSourceProfile neteaseApiPreset() => tryCreate(
+        id: 'netease-api',
+        name: '网易云增强 API',
+        baseUrl: 'http://127.0.0.1:3000/',
+        enabled: false,
+        protocol: CustomMusicSourceProtocol.neteaseApi,
+        capabilities: CustomMusicSourceCapability.values,
+        endpoints: const {
+          CustomMusicSourceCapability.search: 'search',
+          CustomMusicSourceCapability.metadata: 'song/detail',
+          CustomMusicSourceCapability.cover: 'song/detail',
+          CustomMusicSourceCapability.lyrics: 'lyric',
+          CustomMusicSourceCapability.comments: 'comment/music',
+          CustomMusicSourceCapability.stream: 'song/url',
+          CustomMusicSourceCapability.download: 'song/download/url',
+        },
+      )!;
 
   static CustomMusicSourceProfile? fromJson(Object? value) {
     if (value is! Map) return null;

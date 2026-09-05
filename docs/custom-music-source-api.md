@@ -1,6 +1,6 @@
 # 自定义歌源 API 接入
 
-Dan Player 的自定义歌源使用显式能力声明。搜索只返回歌曲候选；播放或下载地址在用户选择歌曲后才解析。接口均为 `GET`，响应须为 UTF-8，JSON 根对象也可包在 `data` 字段中。
+Dan Player 的自定义歌源使用显式能力声明。搜索只返回歌曲候选；播放或下载地址在用户选择歌曲后才解析。接口均为 `GET`，响应须为 UTF-8。下面的通用 v1 契约允许对象包在 `data` 字段中；网易云增强 API 等专用协议由对应适配器解析，不能只换地址当作通用 v1。
 
 ## Dan Player 通用 v1
 
@@ -45,7 +45,7 @@ Dan Player 的自定义歌源使用显式能力声明。搜索只返回歌曲候
 
 ### 评论
 
-请求参数：`id`、`page`、`limit`、`sort`，其中 `sort` 为 `hot` 或 `latest`。响应：
+首次请求参数：`id`、`page`（从 0 开始）、`limit`，不指定排序，读取来源默认评论列表。来源如果支持热门或最新，可在响应中明确声明 `supportedSorts`；用户点击相应分类后才追加 `sort=hot` 或 `sort=latest`。只声明 `comments` 能力不代表同时支持这两种排序，未声明时不会显示对应分类。响应示例：
 
 ```json
 {
@@ -59,7 +59,8 @@ Dan Player 的自定义歌源使用显式能力声明。搜索只返回歌曲候
     }
   ],
   "hasMore": false,
-  "total": 1
+  "total": 1,
+  "supportedSorts": ["hot", "latest"]
 }
 ```
 
@@ -118,6 +119,7 @@ Dan Player 的自定义歌源使用显式能力声明。搜索只返回歌曲候
 
 - `legacy-lyrics`：LRC API 的歌词协议；名称仅用于配置兼容，界面显示为普通第三方 API。内置 LRC API 可改名、改地址、停用或删除。
 - `kugou-v1`：独立实现的酷狗协议适配，参考 ZeroBit 的歌词、封面取用方式及 ECHO 的音源解析方式。搜索、歌词、歌曲信息、播放和下载分别使用可编辑的端点；评论没有默认端点，不宣称支持。
+- `netease-api-v1`：连接自行部署的网易云 Node.js API / 增强版。设置中“添加内置预设 → 网易云增强 API”可添加完整可编辑配置，默认关闭，地址 `http://127.0.0.1:3000/` 需要对应的真实服务。实际协议适配及联网结果见 [发布前接入记录](26.0.4-api-release-additions.md)。
 - `go-music-api-v1`：连接用户自行部署的 [`go-music-api` 固定提交](https://github.com/guohuiyuan/go-music-api/tree/bacdfbe6cf6a5ba7331463d2039e3aac915c627f) 兼容服务，默认使用完整路径 `/api/v1/music/search`、`/api/v1/music/lyric`、`/api/v1/music/cover` 与 `/api/v1/music/stream`；最后一个端点同时用于播放和下载代理。Dan Player 不提供或代理该服务器。
 - 通用 v1 配置声明下载能力即可尝试实际解析，不再强制接口重复提供 `downloadAllowed: true`。搜索或解析返回 `downloadAllowed: false`、`canDownload: false`、要求登录或拒绝访问时仍会停止。`go-music-api-v1` 使用自托管流代理；它不需要额外的解析授权 JSON。
 - `go-music-api-v1` 的歌词需要该来源搜索结果中保存的不透明歌曲身份，不能仅凭任意本地歌曲的标题和艺术家查询。
@@ -128,6 +130,8 @@ Dan Player 的自定义歌源使用显式能力声明。搜索只返回歌曲候
 
 用户输入歌曲名称（必填）、艺术家和专辑（选填）后，分别检测搜索、歌曲信息、封面、歌词、评论、播放和下载。播放与下载只解析地址并取少量响应，不启动播放、不保存歌曲。没有匹配样本、接口不支持、超时、需登录与成功分别显示；一次无结果不会自动删除已声明的能力。用户确认后才可将检测成功的能力应用到第三方配置。
 
-内置预设仅在初次安装或一次性迁移时添加；明确清空列表及已保存后删除的预设不会在重启时复活。旧 `LyricApiUrl` 的名称、地址和开关会保留，只有原来的默认名称改为 LRC API。
+自动预置仅在初次安装或一次性迁移时执行；用户也可通过“添加内置预设”主动选择。明确清空列表及已保存后删除的预设不会在重启时复活。旧 `LyricApiUrl` 的名称、地址和开关会保留，只有原来的默认名称改为 LRC API。
+
+网易云增强 API 预设不会在升级时自动启用或启动服务器；已有用户可通过“添加内置预设”选择。该协议使用 `keywords` 搜索、`ids` 读取已选歌曲详情、`id` 获取歌词和音频。最新评论使用 `comment/music` 的 `offset`，热门评论使用同目录 `comment/hot` 的 `type=0` / `offset`（默认最多 10 页）；不混用 `comment/new` 的游标协议。若服务有路径前缀，基地址和相对端点会保留该前缀。搜索结果不包含已解析音频，播放时访问 `song/url`，下载时独立访问 `song/download/url`；没有有效 URL、身份不符、服务拒绝或 `freeTrialInfo` 试听片段均不会当作完整音频。账户登录、点赞、发评论等写入能力不在该适配范围。
 
 整体信息架构仅参考 [ZeroBit Player 固定提交的歌词 API 选择界面](https://github.com/Empty-57/ZeroBit-Player/blob/e47d34fb5c946a6cf10041377b15eb6f089f5d28/lib/pages/setting_page.dart)（[GPL-3.0](https://github.com/Empty-57/ZeroBit-Player/blob/e47d34fb5c946a6cf10041377b15eb6f089f5d28/LICENSE)）与 [ECHO 固定提交的 provider 文档](https://github.com/Moekotori/ECHO/blob/45ea979d18da08234307b13c215f56abe3c00556/docs/ECHO_NEXT_PLUGINS.md)（[LGPL-3.0-only](https://github.com/Moekotori/ECHO/blob/45ea979d18da08234307b13c215f56abe3c00556/LICENSE)）；`go-music-api` 固定兼容目标采用 [AGPL-3.0](https://github.com/guohuiyuan/go-music-api/blob/bacdfbe6cf6a5ba7331463d2039e3aac915c627f/LICENSE)。协议和实现均为 Dan Player 独立代码，没有复制或捆绑这些项目的代码、服务、远程脚本、平台账号或登录凭据。

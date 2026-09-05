@@ -248,9 +248,11 @@ void main() {
       final defaults = CustomMusicSourceProfile.builtInPresets();
       expect(defaults.map((profile) => profile.id), [
         CustomMusicSourceProfile.legacyLyricProfileId,
-        CustomMusicSourceProfile.kugouProfileId
+        CustomMusicSourceProfile.kugouProfileId,
+        'netease-api',
       ]);
-      expect(defaults.every((profile) => profile.enabled), isTrue);
+      expect(defaults.take(2).every((profile) => profile.enabled), isTrue);
+      expect(defaults.last.enabled, isFalse);
       final old =
           CustomMusicSourceProfile.legacyLyric('https://mine.example/lyrics')!
               .copyWith(name: 'My lyrics', enabled: false);

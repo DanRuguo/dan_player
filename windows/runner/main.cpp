@@ -4,6 +4,7 @@
 
 #include "flutter_window.h"
 #include "utils.h"
+#include "windows_shell.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
@@ -17,11 +18,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  auto command_line_arguments = GetCommandLineArguments();
+  PlayerInstanceLease instance_lease(command_line_arguments);
+  if (!instance_lease.is_primary()) {
+    if (!instance_lease.forwarded()) {
+      MessageBoxW(nullptr,
+          L"Dan Player 正在启动或暂未响应，请稍后重试。",
+          L"Dan Player", MB_OK | MB_ICONINFORMATION);
+    }
+    ::CoUninitialize();
+    return instance_lease.forwarded() ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
+
   flutter::DartProject project(L"data");
   project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnSeparateThread);
-
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 

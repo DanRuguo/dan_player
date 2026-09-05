@@ -10,6 +10,44 @@ import 'package:flutter_test/flutter_test.dart';
 const _hash = 'abcdef1234567890abcdef1234567890';
 
 void main() {
+  test(
+      'verbose 25-song search pages fit while oversized responses stay bounded',
+      () async {
+    await _server((server) async {
+      final payload = {
+        'status': 1,
+        'data': {
+          'info': List.generate(
+              25,
+              (index) => {
+                    ..._song(),
+                    'hash': (index + 1).toRadixString(16).padLeft(32, '0'),
+                    'extended_metadata': 'x' * 5600,
+                  }),
+        },
+      };
+      expect(utf8.encode(jsonEncode(payload)).length, greaterThan(128 * 1024));
+      var oversized = false;
+      server.listen((request) async {
+        expect(request.uri.queryParameters['pagesize'], '25');
+        await _json(
+            request,
+            oversized
+                ? {
+                    'status': 1,
+                    'data': {'info': [], 'padding': 'x' * (256 * 1024)}
+                  }
+                : payload);
+      });
+      final api = KugouMusicApi(_profile(server));
+      final result = await api.search('Good Time Owl City Carly Rae Jepsen');
+      expect(result.tracks, hasLength(25));
+      oversized = true;
+      await expectLater(api.search('Good Time Owl City Carly Rae Jepsen'),
+          _failure(CustomMusicSourceFailureKind.responseTooLarge));
+    });
+  });
+
   test('search respects the editable profile without resolving media',
       () async {
     await _server((server) async {

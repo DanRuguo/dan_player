@@ -15,6 +15,7 @@ import 'package:dan_player/page/settings_page/playback_settings.dart';
 import 'package:dan_player/page/settings_page/shortcut_settings.dart';
 import 'package:dan_player/page/settings_page/sidebar_layout_settings.dart';
 import 'package:dan_player/page/settings_page/theme_settings.dart';
+import 'package:dan_player/page/settings_page/uninstall_settings.dart';
 import 'package:flutter/material.dart';
 import 'interface_settings.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -90,6 +91,7 @@ class SettingsPage extends StatelessWidget {
           icon: Icons.info_outline,
           children: [
             const CheckForUpdate(),
+            const UninstallSettings(),
             const CreateIssueTile(),
             const AboutBrand()
           ],

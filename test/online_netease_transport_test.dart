@@ -3,10 +3,71 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/online/online_music_service.dart';
+import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('selected NetEase metadata gets cover only for the exact requested ID',
+      () async {
+    final client = _Client(_Response.json({
+      'code': 200,
+      'songs': [
+        {
+          'id': 12,
+          'name': 'Wrong song',
+          'album': {'picUrl': 'https://img/wrong'}
+        },
+        {
+          'id': 11,
+          'name': 'Song',
+          'artists': [
+            {'name': 'Artist'}
+          ],
+          'album': {'name': 'Album', 'picUrl': 'https://img/cover'},
+          'duration': 180000
+        },
+      ]
+    }));
+    final service = OnlineMusicService.forNeteaseTransportTesting(
+        httpClientFactory: () => client);
+    final original = Audio.online(
+        provider: 'netease',
+        id: '11',
+        title: 'Song',
+        artist: 'Artist',
+        album: 'Album',
+        duration: 180,
+        downloadAllowed: false);
+    final result = await service.refreshMetadata(original);
+    expect(result.onlineId, '11');
+    expect(result.onlineDownloadAllowed, isFalse);
+    expect(result.artworkUrl, 'https://img/cover');
+    expect(client.method, 'GET');
+    expect(client.uri!.queryParameters['ids'], '[11]');
+    expect(client.request.headers.values.keys, isNot(contains('cookie')));
+    expect(client.request.followRedirects, isFalse);
+    expect(client.closed, isTrue);
+  });
+
+  test('cancelled selected metadata never opens an HTTP client', () async {
+    final service = OnlineMusicService.forNeteaseTransportTesting(
+        httpClientFactory: () => throw StateError('Unexpected client'));
+    final token = CustomMusicSourceCancellation()..cancel();
+    await expectLater(
+        service.refreshMetadata(
+            Audio.online(
+                provider: 'netease',
+                id: '11',
+                title: 'Song',
+                artist: 'Artist',
+                album: 'Album',
+                duration: 180),
+            cancellation: token),
+        throwsA(isA<CustomMusicSourceCancelled>()));
+  });
 
   test(
       'owned Netease transport preserves HTTP request and parses mixed schemas',
@@ -141,6 +202,13 @@ class _Client implements HttpClient {
   Future<HttpClientRequest> postUrl(Uri url) async {
     uri = url;
     method = 'POST';
+    return request;
+  }
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async {
+    uri = url;
+    method = 'GET';
     return request;
   }
 

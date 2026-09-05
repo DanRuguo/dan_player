@@ -1,9 +1,18 @@
 param(
     [Parameter(Mandatory=$true)][string] $ReceiptPath,
-    [switch] $UnsignedCandidate
+    [switch] $UnsignedCandidate,
+    [string] $SigningThumbprint = $env:RCEIT_SIGNING_THUMBPRINT
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$expectedSigningThumbprint = ($SigningThumbprint -replace '\s', '').ToUpperInvariant()
+if (-not $expectedSigningThumbprint) {
+    # Preserve verification of historical releases when no certificate is selected.
+    $expectedSigningThumbprint = 'E11D145A3C0D7298F4D3E96BADC497E360CAF510'
+}
+if ($expectedSigningThumbprint -notmatch '^[0-9A-F]{40}$') {
+    throw 'SigningThumbprint must contain exactly 40 hexadecimal characters (whitespace is ignored).'
+}
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $receipt = Get-Content -LiteralPath $ReceiptPath -Raw | ConvertFrom-Json
 $repo = Split-Path -Parent $PSScriptRoot
@@ -103,17 +112,18 @@ $signatures = foreach ($relative in @('Dan Player.exe', 'rust_lib_dan_player.dll
         if ($signature.Status.ToString() -ne 'NotSigned' -or $null -ne $signature.SignerCertificate) {
             throw "Local unsigned candidate contains a signed/stale/invalid own binary: $relative"
         }
-        [pscustomobject]@{ File = $relative; Status = 'NotSigned'; Subject = $null }
+        [pscustomobject]@{ File = $relative; Status = 'NotSigned'; Subject = $null; Thumbprint = $null }
         continue
     }
     if ($null -eq $signature.SignerCertificate -or
-        $signature.SignerCertificate.Thumbprint -ne 'E11D145A3C0D7298F4D3E96BADC497E360CAF510' -or
+        $signature.SignerCertificate.Thumbprint -ne $expectedSigningThumbprint -or
         $signature.Status.ToString() -in @('NotSigned', 'HashMismatch', 'NotSupported')) {
         throw "Signature missing, changed, or invalid: $relative"
     }
     [pscustomobject]@{
         File = $relative
         Subject = $signature.SignerCertificate.Subject
+        Thumbprint = $signature.SignerCertificate.Thumbprint
         Expires = $signature.SignerCertificate.NotAfter.ToString('o')
         Status = $signature.Status.ToString()
         StatusMessage = $signature.StatusMessage

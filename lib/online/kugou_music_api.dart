@@ -34,7 +34,10 @@ class KugouMusicApi {
   final Duration requestTimeout;
   final HttpClient Function() _httpClientFactory;
 
-  static const _searchByteLimit = 128 * 1024;
+  // A normal 25-song "Good Time Owl City Carly Rae Jepsen" page is 138 KiB
+  // on the wire. Allow bounded metadata growth without raising other budgets.
+  static const _searchByteLimit = 256 * 1024;
+  static const _metadataByteLimit = 128 * 1024;
   static const _lyricsByteLimit = 128 * 1024;
   static const _resolutionByteLimit = 32 * 1024;
   static const _maximumResults = 25;
@@ -100,7 +103,7 @@ class KugouMusicApi {
         _query(_endpoint(primary), {
           'hash': key.hash,
         }),
-        byteLimit: _searchByteLimit,
+        byteLimit: _metadataByteLimit,
       );
       var payload = _payload(response);
       if (profile.capabilities.contains(CustomMusicSourceCapability.cover) &&
@@ -109,7 +112,7 @@ class KugouMusicApi {
         final cover = await session.get(
           _query(
               _endpoint(CustomMusicSourceCapability.cover), {'hash': key.hash}),
-          byteLimit: _searchByteLimit,
+          byteLimit: _metadataByteLimit,
         );
         final url = _cover(_payload(cover));
         if (url == null) throw _unavailable();

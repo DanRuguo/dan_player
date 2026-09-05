@@ -110,6 +110,7 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
           : await OnlineMusicService.instance.search(
               query,
               limit: 30,
+              commentsOnly: true,
               cancellation: cancellation,
             );
       if (!_isCurrentSearch(generation)) return;
@@ -182,7 +183,7 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
     try {
       final page = await _comments.loadPage(
         target: target,
-        sort: SongCommentSort.hot,
+        sort: SongCommentsService.sortsFor(target).first,
         page: 0,
         cancellation: cancellation,
       );
@@ -260,6 +261,8 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
                           ui("只保存所选平台与歌曲 ID，不登录平台，也不会修改歌词或本地音频标签。"),
                           style: TextStyle(color: scheme.onSurfaceVariant),
                         ),
+                        const SizedBox(height: 4),
+                        Text(ui('已合并支持评论的来源；选择歌曲后再查看该来源提供的评论分类。')),
                         const SizedBox(height: 14),
                         Row(children: [
                           Expanded(

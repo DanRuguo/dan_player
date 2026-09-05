@@ -10,9 +10,31 @@ import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:path/path.dart' as path_util;
 
-class FolderDetailPage extends StatelessWidget {
+class FolderDetailPage extends StatefulWidget {
   final AudioFolder folder;
   const FolderDetailPage({super.key, required this.folder});
+
+  @override
+  State<FolderDetailPage> createState() => _FolderDetailPageState();
+}
+
+class _FolderDetailPageState extends State<FolderDetailPage> {
+  final multiSelectController = MultiSelectController<Audio>();
+
+  @override
+  void didUpdateWidget(FolderDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!path_util.equals(oldWidget.folder.path, widget.folder.path)) {
+      multiSelectController.selected.clear();
+      multiSelectController.enableMultiSelectView = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    multiSelectController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,11 +47,10 @@ class FolderDetailPage extends StatelessWidget {
 
   Widget _buildPage(BuildContext context) {
     final current = AudioLibrary.instance.folders.where(
-      (candidate) => path_util.equals(candidate.path, folder.path),
+      (candidate) => path_util.equals(candidate.path, widget.folder.path),
     );
-    final resolved = current.isEmpty ? folder : current.first;
+    final resolved = current.isEmpty ? widget.folder : current.first;
     final contentList = List<Audio>.from(resolved.audios);
-    final multiSelectController = MultiSelectController<Audio>();
     return UniPage<Audio>(
       pref: AppPreference.instance.folderDetailPagePref,
       title: folderDisplayName(resolved.path),
@@ -48,11 +69,10 @@ class FolderDetailPage extends StatelessWidget {
       enableAudioColumns: true,
       multiSelectController: multiSelectController,
       multiSelectViewActions: [
-        MultiSelectSelectOrClearAll(
-          multiSelectController: multiSelectController,
+        AudioMultiSelectionActions(
+          controller: multiSelectController,
           contentList: contentList,
         ),
-        MultiSelectExit(multiSelectController: multiSelectController),
       ],
       sortMethods: audioSortMethods(AudioSortProfile.folder),
     );

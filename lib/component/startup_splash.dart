@@ -6,13 +6,13 @@ class StartupSplash extends StatefulWidget {
   const StartupSplash({
     super.key,
     required this.child,
-    this.minimumVisibleDuration = const Duration(milliseconds: 2700),
+    this.minimumVisibleDuration = const Duration(milliseconds: 1700),
     this.fadeDuration = const Duration(milliseconds: 300),
     this.logoTransitionDuration = const Duration(milliseconds: 420),
   });
 
-  static const totalDuration = Duration(seconds: 3);
-  static const logoPhaseDuration = Duration(milliseconds: 1500);
+  static const totalDuration = Duration(seconds: 2);
+  static const logoPhaseDuration = Duration(seconds: 1);
   static const overlayKey = ValueKey('startup-brand-overlay');
   static const surfaceKey = ValueKey('startup-brand-surface');
   static const rceOpacityKey = ValueKey('startup-rce-opacity');
@@ -20,7 +20,7 @@ class StartupSplash extends StatefulWidget {
 
   final Widget child;
 
-  /// Time before the final fade begins; the fade is part of the three-second
+  /// Time before the final fade begins; the fade is part of the two-second
   /// sequence, rather than an extra delay after both brand presentations.
   final Duration minimumVisibleDuration;
   final Duration fadeDuration;
@@ -75,7 +75,7 @@ class _StartupSplashState extends State<StartupSplash>
   void _onTimelineTick() {
     // Flutter's interpolation simulation reports `completed` only on the
     // first frame strictly after its duration. Retire the overlay when the
-    // value reaches its endpoint so the 3000 ms frame is already interactive.
+    // value reaches its endpoint so the 2000 ms frame is already interactive.
     if (_timeline.value >= 1 && !_removed && mounted) {
       _timeline.stop(canceled: false);
       setState(() => _removed = true);

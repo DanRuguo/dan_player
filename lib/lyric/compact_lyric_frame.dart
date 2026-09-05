@@ -200,6 +200,7 @@ bool _isInstrumentalMarker(String text) => const {
       '纯音乐',
       '纯音乐请欣赏',
       '纯音乐请您欣赏',
+      '此歌曲为没有填词的纯音乐请您欣赏',
       'instrumental',
       'instrumentalversion',
       'instrumentaltrack',

@@ -11,6 +11,7 @@
 class WindowBackdropController;
 class DesktopIntegrationController;
 class InstallerLauncherController;
+class WindowsShellController;
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -38,6 +39,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<WindowBackdropController> backdrop_controller_;
   std::unique_ptr<DesktopIntegrationController> desktop_controller_;
   std::unique_ptr<InstallerLauncherController> installer_launcher_;
+  std::unique_ptr<WindowsShellController> windows_shell_;
 
   // Windows 10 paints the non-client resize insets kept by window_manager's
   // hidden title-bar implementation with the user's accent color. These flags

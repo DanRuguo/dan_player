@@ -14,6 +14,7 @@ import 'package:dan_player/utils.dart';
 import 'package:dan_player/window_backdrop.dart';
 import 'package:dan_player/window_layout_controller.dart';
 import 'package:dan_player/window_mode_controller.dart';
+import 'package:dan_player/windows_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -132,4 +133,5 @@ Future<void> main() async {
   runApp(Entry(welcome: welcome));
   await showPreparedWindow();
   HotkeysHelper.registerHotKeys();
+  await WindowsShell.instance.initialize(welcome: welcome);
 }

@@ -6,63 +6,51 @@ import 'package:dan_player/online/qq_public_search.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('QQ search signature stays compatible with the fixed request vector',
-      () {
-    expect(
-      qqSearchSignature('{}'),
-      'zzcf8e26805gyafigxmxjehoe02mvsjjgtwzw6f1a05f9',
-    );
-    expect(
-      qqSearchSignature('{"query":"卡农"}'),
-      'zzc15073ba0lfpntrgyksnpoa6sqi7lpfmbfi3b7fa8ea',
-    );
-  });
-
-  test('signed anonymous transport posts the current request without cookies',
+  test('public client search keeps exact IDs and metadata without cookies',
       () async {
     final client = _Client(_Response.json({
       'code': 0,
-      'req': {
-        'code': 0,
-        'data': {
-          'body': {
-            'item_song': [
-              {
-                'id': 42,
-                'mid': 'MID42',
-                'name': '結想は花となる',
-                'singer': [
-                  {'name': 'ウォルピスカーター'},
-                ],
-                'album': {'name': 'Album', 'mid': 'ALBUM42'},
-                'file': {'media_mid': 'MEDIA42'},
-                'interval': 123,
-              },
-            ],
-          },
-        },
+      'data': {
+        'song': {
+          'list': [
+            {
+              'songid': 42,
+              'songmid': 'MID42',
+              'songname': '結想は花となる',
+              'songname_hilight': '<em>not the display name</em>',
+              'singer': [
+                {'name': 'ウォルピスカーター'}
+              ],
+              'albumname': 'Album',
+              'albummid': 'ALBUM42',
+              'strMediaMid': 'MEDIA42',
+              'interval': 123,
+            }
+          ]
+        }
       },
     }));
-    final songs = await QqPublicSearchTransport(
-      httpClientFactory: () => client,
-      now: () => DateTime.fromMicrosecondsSinceEpoch(123456789),
-    ).search('結想は花となる', 20);
-
+    final songs = await QqPublicSearchTransport(httpClientFactory: () => client)
+        .search('  結想は花となる  ', 20);
     expect(songs, hasLength(1));
     expect(songs.single.numericId, 42);
     expect(songs.single.mid, 'MID42');
+    expect(songs.single.title, '結想は花となる');
     expect(songs.single.artists, 'ウォルピスカーター');
+    expect(songs.single.album, 'Album');
     expect(songs.single.albumMid, 'ALBUM42');
-    expect(client.method, 'POST');
-    expect(client.uri?.host, 'u.y.qq.com');
-    expect(client.uri?.path, '/cgi-bin/musics.fcg');
-    expect(client.uri?.queryParameters['sign'], isNotEmpty);
+    expect(songs.single.mediaMid, 'MEDIA42');
+    expect(songs.single.durationSeconds, 123);
+    expect(client.method, 'GET');
+    expect(client.uri?.scheme, 'https');
+    expect(client.uri?.host, 'c.y.qq.com');
+    expect(client.uri?.path, '/soso/fcgi-bin/client_search_cp');
+    expect(client.uri?.queryParameters, containsPair('w', '結想は花となる'));
+    expect(client.uri?.queryParameters, containsPair('n', '20'));
     expect(client.request.followRedirects, isFalse);
     expect(client.request.headers.values, isNot(contains('cookie')));
-    final body = jsonDecode(client.request.body.toString()) as Map;
-    expect(body['req']['method'], 'DoSearchForQQMusicMobile');
-    expect(body['req']['param']['query'], '結想は花となる');
-    expect(body['req']['param']['searchid'], '123456789');
+    expect(client.request.headers.values, isNot(contains('authorization')));
+    expect(client.request.body.toString(), isEmpty);
     expect(client.closed, isTrue);
   });
 
@@ -128,9 +116,9 @@ class _Client implements HttpClient {
   Duration? connectionTimeout;
 
   @override
-  Future<HttpClientRequest> postUrl(Uri url) async {
+  Future<HttpClientRequest> getUrl(Uri url) async {
     uri = url;
-    method = 'POST';
+    method = 'GET';
     return request;
   }
 

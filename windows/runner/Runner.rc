@@ -53,6 +53,11 @@ END
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
+IDI_TASK_WINDOW         ICON                    "resources\\task_window.ico"
+IDI_TASK_PLAY           ICON                    "resources\\task_play.ico"
+IDI_TASK_PREVIOUS       ICON                    "resources\\task_previous.ico"
+IDI_TASK_NEXT           ICON                    "resources\\task_next.ico"
+IDI_TASK_MINI           ICON                    "resources\\task_mini.ico"
 
 
 /////////////////////////////////////////////////////////////////////////////

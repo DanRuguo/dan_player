@@ -226,6 +226,16 @@ void main() {
     );
     expect(
         tester.widget<AnimatedSwitcher>(_switcher()).duration, AppMotion.quick);
+    for (var frame = 0; frame < 5; frame++) {
+      final visible = tester
+          .widgetList<FadeTransition>(find.descendant(
+              of: _switcher(), matching: find.byType(FadeTransition)))
+          .where((fade) => fade.opacity.value > 0)
+          .length;
+      expect(visible, lessThanOrEqualTo(1),
+          reason: 'Lyric text must not overlap');
+      await tester.pump(const Duration(milliseconds: 20));
+    }
     await tester.pumpAndSettle();
     expect(find.text('Old line'), findsNothing);
     expect(_text(tester, _primary()), 'New line');

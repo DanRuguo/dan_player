@@ -209,6 +209,33 @@ void main() {
     expect(result.comments.single.replies.single.content, '回复');
   });
 
+  for (final sort in [SongCommentSort.hot, SongCommentSort.latest]) {
+    test('QQ ${sort.name} accepts current opaque comment IDs and deduplicates',
+        () async {
+      const opaque = '1!mQ8MxfPOoL1FDVd8YQgZzk4NZxID28zSXzS63Rzn0xG.test-*';
+      final hot = sort == SongCommentSort.hot;
+      final row = hot ? qqHotComment(1) : qqLatestComment(1);
+      row[hot ? 'CmId' : 'commentid'] = opaque;
+      row[hot ? 'SeqNo' : 'rootcommentid'] =
+          hot ? '1274150547095562240' : opaque;
+      final invalid = Map<String, dynamic>.of(row)
+        ..[hot ? 'CmId' : 'commentid'] = 'bad\nidentifier';
+      final response = hot
+          ? qqHotComments([row, row, invalid])
+          : qqLatestComments([row, row, invalid]);
+      final result = await read(
+        SongCommentsService(transport: FakeCommentsTransport((_) => response)),
+        provider: 'qq',
+        sort: sort,
+      );
+      expect(result.comments, hasLength(1));
+      expect(result.comments.single.id, endsWith(':$opaque'));
+      expect(result.comments.single.content,
+          row[hot ? 'Content' : 'rootcommentcontent']);
+      expect(result.comments.single.publishedAt, isNotNull);
+    });
+  }
+
   test('QQ remote seconds cannot wrap into a fake epoch date', () async {
     for (final sort in SongCommentSort.values) {
       final transport = FakeCommentsTransport((_) {

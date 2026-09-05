@@ -74,13 +74,13 @@ class _FailingImageProvider extends ImageProvider<_FailingImageProvider> {
 }
 
 void main() {
-  testWidgets('two brands share a three-second clock with a soft handoff',
+  testWidgets('two brands share a two-second clock with a soft handoff',
       (tester) async {
     await tester.pumpWidget(_host(const StartupSplash(child: Text('Ready'))));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 0);
 
-    await tester.pump(const Duration(milliseconds: 1290));
+    await tester.pump(const Duration(milliseconds: 790));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), closeTo(1, .001));
     await tester.pump(const Duration(milliseconds: 210));
     final rce = _opacity(tester, StartupSplash.rceOpacityKey);
@@ -95,7 +95,7 @@ void main() {
     expect(_opacity(tester, StartupSplash.rceOpacityKey), closeTo(0, .001));
     expect(
         _opacity(tester, StartupSplash.danRuguoOpacityKey), closeTo(1, .001));
-    await tester.pump(const Duration(milliseconds: 990));
+    await tester.pump(const Duration(milliseconds: 490));
     expect(_overlayOpacity(tester), closeTo(1, .001));
     await tester.pump(const Duration(milliseconds: 150));
     expect(_overlayOpacity(tester), allOf(greaterThan(0), lessThan(1)));
@@ -108,19 +108,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('reduced motion keeps two static 1.5-second brand presentations',
+  testWidgets('reduced motion keeps two static one-second brand presentations',
       (tester) async {
     await tester.pumpWidget(_host(
       const StartupSplash(child: Text('Ready')),
       reducedMotion: true,
     ));
-    await tester.pump(const Duration(milliseconds: 1499));
+    await tester.pump(const Duration(milliseconds: 999));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 0);
     await tester.pump(const Duration(milliseconds: 1));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 0);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 1);
-    await tester.pump(const Duration(milliseconds: 1499));
+    await tester.pump(const Duration(milliseconds: 999));
     expect(_overlayOpacity(tester), 1);
     expect(find.byKey(StartupSplash.overlayKey), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 1));
@@ -131,7 +131,7 @@ void main() {
       (tester) async {
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     await tester.pumpWidget(_host(const StartupSplash(child: Text('Ready'))));
-    await tester.pump(const Duration(milliseconds: 1400));
+    await tester.pump(const Duration(milliseconds: 900));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), lessThan(1));
     tester.platformDispatcher.accessibilityFeaturesTestValue =
         const FakeAccessibilityFeatures(reduceMotion: true);
@@ -139,7 +139,7 @@ void main() {
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
     await tester.pump(const Duration(milliseconds: 100));
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 1);
-    await tester.pump(const Duration(milliseconds: 1499));
+    await tester.pump(const Duration(milliseconds: 999));
     expect(find.byKey(StartupSplash.overlayKey), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 1));
     expect(find.byKey(StartupSplash.overlayKey), findsNothing);
@@ -158,7 +158,7 @@ void main() {
       tester.widget<ColoredBox>(find.byKey(StartupSplash.surfaceKey)).color,
       const Color(0xFFF6F8F2),
     );
-    await tester.pump(const Duration(milliseconds: 1800));
+    await tester.pump(const Duration(milliseconds: 1300));
     await tester.pumpWidget(_host(splash, brightness: Brightness.dark));
     expect((_brandImage(tester, AppBrand.rce).image as AssetImage).assetName,
         BrandLogo.rceDarkAsset);
@@ -171,7 +171,7 @@ void main() {
     );
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 1,
         reason: 'Rebuilding the theme must not replay the RCE stage');
-    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pump(const Duration(milliseconds: 700));
     expect(find.byKey(StartupSplash.overlayKey), findsNothing);
   });
 
@@ -195,10 +195,10 @@ void main() {
       expect(find.semantics.byLabel('Hidden action'), findsNothing);
       await tester.tapAt(tester.getCenter(find.text('Hidden action')));
       expect(taps, 0);
-      await tester.pump(const Duration(milliseconds: 1500));
+      await tester.pump(const Duration(milliseconds: 1000));
       expect(find.semantics.byLabel('RCE'), findsNothing);
       expect(find.semantics.byLabel('DanRuguo'), findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 1500));
+      await tester.pump(const Duration(milliseconds: 1000));
       await tester.tap(find.text('Hidden action'));
       expect(taps, 1);
     } finally {

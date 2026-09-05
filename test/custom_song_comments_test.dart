@@ -62,6 +62,13 @@ void main() {
     expect(page.comments.single.likeCount, 7);
     expect(page.reportedTotal, 1);
 
+    final defaultPage = await SongCommentsService().loadPage(
+      target: target,
+      sort: SongCommentsService.sortsFor(target).first,
+    );
+    expect(requested.queryParameters.containsKey('sort'), isFalse);
+    expect(defaultPage.availableSorts, [SongCommentSort.standard]);
+
     AppSettings.instance.customMusicSources.value = [
       profile.copyWith(enabled: false),
     ];

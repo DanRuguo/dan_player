@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/online/custom_music_source_profile.dart';
 
 import 'package:dan_player/component/song_comments_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -97,6 +99,51 @@ Future<void> _show(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
+  for (final supportsSorts in [false, true]) {
+    testWidgets(
+        'custom source discovers orders only after its default read ($supportsSorts)',
+        (tester) async {
+      final previous = AppSettings.instance.customMusicSources.value;
+      addTearDown(
+          () => AppSettings.instance.customMusicSources.value = previous);
+      final profile = CustomMusicSourceProfile.tryCreate(
+        id: 'comments-widget',
+        name: 'Comment source',
+        baseUrl: 'https://example.invalid',
+        capabilities: const {CustomMusicSourceCapability.comments},
+        endpoints: const {CustomMusicSourceCapability.comments: '/comments'},
+      )!;
+      AppSettings.instance.customMusicSources.value = [profile];
+      final transport = FakeCommentsTransport((request) => {
+            '_danPlayerCustomSource': true,
+            'comments': [
+              {
+                'id': 'comment-1',
+                'author': 'Listener',
+                'content': 'Source comment'
+              }
+            ],
+            'hasMore': false,
+            if (supportsSorts && request.sort == SongCommentSort.standard)
+              'supportedSorts': ['latest', 'invalid-feature'],
+          });
+      await _launch(tester, SongCommentsService(transport: transport),
+          audio: commentAudio(provider: profile.providerId));
+      expect(transport.requests.single.sort, SongCommentSort.standard);
+      expect(find.byKey(_hot), findsNothing);
+      expect(
+          find.byKey(_latest), supportsSorts ? findsOneWidget : findsNothing);
+      expect(find.text('Source comment'), findsOneWidget);
+      if (supportsSorts) {
+        await tester.tap(find.byKey(_latest));
+        await tester.pumpAndSettle();
+        expect(transport.requests.last.sort, SongCommentSort.latest);
+        // A later page need not repeat capability metadata.
+        expect(find.byKey(_latest), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
   testWidgets(
       'Windows compact shrinkWrap still gives every comment action a 44px hitbox',
       (tester) async {

@@ -1,6 +1,8 @@
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/page/now_playing_page/component/current_playlist_view.dart';
 import 'package:dan_player/play_service/playback_service.dart';
+import 'package:dan_player/play_service/queue_edits.dart';
+import 'package:dan_player/play_service/segment_loop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -20,6 +22,46 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
 
   int selectedIndex;
   int? lastPlayed;
+  int? lastRemoved;
+  int? lastMoved;
+  @override
+  final resolvingAudioPath = ValueNotifier<String?>(null);
+  @override
+  final isChangingOutput = ValueNotifier(false);
+  @override
+  final segmentLoop = SegmentLoopController();
+  @override
+  bool get canEditQueue => resolvingAudioPath.value == null;
+
+  @override
+  bool removeQueueItem(int index) {
+    final edit = QueueEdit.remove(playlist.value, selectedIndex, index);
+    if (edit == null || !canEditQueue) return false;
+    lastRemoved = index;
+    selectedIndex = edit.currentIndex;
+    playlist.value = edit.items;
+    notifyListeners();
+    return true;
+  }
+
+  @override
+  bool moveQueueItemNext(int index) {
+    final edit = QueueEdit.moveNext(playlist.value, selectedIndex, index);
+    if (edit == null || !canEditQueue) return false;
+    lastMoved = index;
+    selectedIndex = edit.currentIndex;
+    playlist.value = edit.items;
+    notifyListeners();
+    return true;
+  }
+
+  @override
+  bool keepOnlyCurrentQueueItem() {
+    playlist.value = [nowPlaying!];
+    selectedIndex = 0;
+    notifyListeners();
+    return true;
+  }
 
   @override
   int get playlistIndex => selectedIndex;
@@ -36,6 +78,9 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   @override
   void dispose() {
     playlist.dispose();
+    resolvingAudioPath.dispose();
+    isChangingOutput.dispose();
+    segmentLoop.dispose();
     super.dispose();
   }
 
@@ -64,6 +109,65 @@ Widget _host(_QueuePlayback playback,
     );
 
 void main() {
+  testWidgets('queue edits preserve the active duplicate and block during load',
+      (tester) async {
+    final duplicate = CategoryTestAudio('same');
+    final playback = _QueuePlayback([
+      duplicate,
+      CategoryTestAudio('second'),
+      duplicate,
+      CategoryTestAudio('last')
+    ], selectedIndex: 2);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(_host(playback));
+    await tester.pumpAndSettle();
+    await tester
+        .longPress(find.byKey(const ValueKey('current-playlist-item-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('从播放队列移除'));
+    await tester.pumpAndSettle();
+    expect(playback.lastRemoved, 0);
+    expect(playback.selectedIndex, 1);
+    expect(playback.nowPlaying, same(duplicate));
+    expect(playback.playlist.value.length, 3);
+    playback.resolvingAudioPath.value = 'loading';
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<IconButton>(
+                find.byKey(const ValueKey('queue-keep-current')))
+            .onPressed,
+        isNull);
+    playback.resolvingAudioPath.value = null;
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-keep-current')));
+    await tester.pumpAndSettle();
+    expect(playback.playlist.value, [duplicate]);
+    expect(playback.selectedIndex, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('cancel saving a queue leaves it unchanged and allows retry',
+      (tester) async {
+    final playback = _QueuePlayback([CategoryTestAudio('first')]);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(_host(playback));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-save-playlist')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('playlist-name-input')), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(playback.playlist.value.length, 1);
+    expect(
+        tester
+            .widget<IconButton>(
+                find.byKey(const ValueKey('queue-save-playlist')))
+            .onPressed,
+        isNotNull);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
       'shared queue uses app typography and one occurrence for current state',
       (tester) async {

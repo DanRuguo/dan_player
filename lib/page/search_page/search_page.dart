@@ -1,13 +1,12 @@
 import 'package:dan_player/app_paths.dart' as app_paths;
-import 'package:dan_player/hotkeys_helper.dart';
+import 'package:dan_player/component/library_search_field.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/search/audio_search_index.dart';
-import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 class UnionSearchResult {
@@ -53,6 +52,7 @@ class UnionSearchResult {
     );
     final index = AudioSearchIndex.instance;
     await index.ensureBuilt();
+    result.onlineCancellation.check();
     result.audios = index.searchAudios(query);
     result.artists = index.searchArtists(query);
     result.album = index.searchAlbums(query);
@@ -69,8 +69,77 @@ class UnionSearchResult {
 
 final SEARCH_BAR_KEY = GlobalKey();
 
-class SearchPage extends StatelessWidget {
-  const SearchPage({super.key});
+typedef LibrarySearch = Future<UnionSearchResult> Function(
+  String query, {
+  OnlineSearchCancellation? onlineCancellation,
+});
+
+class SearchPage extends StatefulWidget {
+  const SearchPage({super.key, this.search = UnionSearchResult.search});
+
+  final LibrarySearch search;
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  final _controller = TextEditingController();
+  OnlineSearchCancellation? _cancellation;
+  String? _pendingQuery;
+  String? _error;
+  int _request = 0;
+
+  void _changed(String value) {
+    if (value.trim() != _pendingQuery) {
+      _request++;
+      _cancellation?.cancel();
+      _cancellation = null;
+      _pendingQuery = null;
+    }
+    setState(() => _error = null);
+  }
+
+  Future<void> _search(String query) async {
+    final value = query.trim();
+    if (value.isEmpty || value == _pendingQuery) return;
+    final request = ++_request;
+    _cancellation?.cancel();
+    final cancellation = OnlineSearchCancellation();
+    _cancellation = cancellation;
+    setState(() {
+      _pendingQuery = value;
+      _error = null;
+    });
+    try {
+      final result =
+          await widget.search(value, onlineCancellation: cancellation);
+      if (!mounted ||
+          request != _request ||
+          ModalRoute.of(context)?.isCurrent == false) {
+        result.cancelOnlineSearch();
+        return;
+      }
+      _cancellation = null; // The results page now owns this request.
+      context.push(app_paths.SEARCH_RESULT_PAGE, extra: result);
+    } catch (error, trace) {
+      if (!mounted || request != _request) return;
+      LOGGER.w('[library search] $error', stackTrace: trace);
+      setState(() => _error = ui('搜索暂时不可用，请重试。'));
+    } finally {
+      if (mounted && request == _request) {
+        setState(() => _pendingQuery = null);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _request++;
+    _cancellation?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -81,61 +150,53 @@ class SearchPage extends StatelessWidget {
       color: scheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Center(
-          child: Transform.translate(
-            offset: const Offset(0, -40.0),
-            child: AppEntrance(
-              identity: 'search-form',
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    ui("搜索"),
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Padding(padding: EdgeInsets.only(bottom: 32.0)),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 400.0),
-                    child: Focus(
-                      onFocusChange: HotkeysHelper.onFocusChanges,
-                      child: Hero(
-                        tag: SEARCH_BAR_KEY,
-                        child: TextField(
-                          autofocus: true,
-                          decoration: InputDecoration(
-                            suffixIcon: const Padding(
-                              padding: EdgeInsets.only(right: 12.0),
-                              child: Icon(Symbols.search),
-                            ),
-                            hintText: ui("搜索本地曲库和联网音乐"),
-                            border: AppShape.inputBorder,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                    child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: AppEntrance(
+                    identity: 'search-form',
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          ui("搜索"),
+                          style: TextStyle(
+                            color: scheme.onSurface,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
                           ),
-
-                          /// when 'enter' is pressed
-                          onSubmitted: (String query) async {
-                            if (query.trim().isEmpty) return;
-                            final result =
-                                await UnionSearchResult.search(query);
-                            if (!context.mounted) {
-                              result.cancelOnlineSearch();
-                              return;
-                            }
-                            context.push(
-                              app_paths.SEARCH_RESULT_PAGE,
-                              extra: result,
-                            );
-                          },
                         ),
-                      ),
+                        const Padding(padding: EdgeInsets.only(bottom: 32.0)),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 400.0),
+                          child: Hero(
+                            tag: SEARCH_BAR_KEY,
+                            child: Material(
+                              type: MaterialType.transparency,
+                              child: LibrarySearchField(
+                                controller: _controller,
+                                autofocus: true,
+                                busy: _pendingQuery != null,
+                                onChanged: _changed,
+                                onSubmitted: _search,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(_error!,
+                                style: TextStyle(color: scheme.error)),
+                          ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
+                ))),
           ),
         ),
       ),

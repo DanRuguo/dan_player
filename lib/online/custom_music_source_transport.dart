@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/kugou_music_api.dart';
+import 'package:dan_player/online/netease_music_api.dart';
 
 enum CustomMusicSourceFailureKind {
   unavailable,
@@ -112,7 +113,7 @@ class CustomMusicLyricsResult {
       'CustomMusicLyricsResult(type: ${type ?? 'plain'}, chars: ${lyric.length})';
 }
 
-enum CustomMusicCommentsSort { hot, latest }
+enum CustomMusicCommentsSort { hot, latest, standard }
 
 class CustomMusicComment {
   const CustomMusicComment({
@@ -136,12 +137,15 @@ class CustomMusicCommentsResult {
     required this.page,
     required this.hasMore,
     this.total,
-  }) : comments = List<CustomMusicComment>.unmodifiable(comments);
+    List<CustomMusicCommentsSort> supportedSorts = const [],
+  })  : comments = List<CustomMusicComment>.unmodifiable(comments),
+        supportedSorts = List.unmodifiable(supportedSorts);
 
   final List<CustomMusicComment> comments;
   final int page;
   final bool hasMore;
   final int? total;
+  final List<CustomMusicCommentsSort> supportedSorts;
 
   @override
   String toString() =>
@@ -199,6 +203,8 @@ class CustomMusicSourceTransport {
         requestTimeout: requestTimeout,
       );
 
+  NeteaseMusicApi get _netease => NeteaseMusicApi(profile, get: _get);
+
   Future<CustomMusicSearchResult> search(
     String rawQuery, {
     int limit = maximumSearchResults,
@@ -207,6 +213,10 @@ class CustomMusicSourceTransport {
     _requireReady(CustomMusicSourceCapability.search);
     if (profile.protocol == CustomMusicSourceProtocol.kugou) {
       return _kugou.search(rawQuery, limit: limit, cancellation: cancellation);
+    }
+    if (profile.protocol == CustomMusicSourceProtocol.neteaseApi) {
+      return _netease.search(rawQuery,
+          limit: limit, cancellation: cancellation);
     }
     final query = rawQuery.trim();
     if (query.isEmpty) {
@@ -271,6 +281,9 @@ class CustomMusicSourceTransport {
     if (profile.protocol == CustomMusicSourceProtocol.kugou) {
       return _kugou.metadata(audio, cancellation: cancellation);
     }
+    if (profile.protocol == CustomMusicSourceProtocol.neteaseApi) {
+      return _netease.metadata(audio, cancellation: cancellation);
+    }
     if (!profile.endpoints.containsKey(CustomMusicSourceCapability.metadata)) {
       if (profile.protocol == CustomMusicSourceProtocol.danSourceV1 &&
           profile.endpointFor(CustomMusicSourceCapability.cover) != null) {
@@ -314,11 +327,15 @@ class CustomMusicSourceTransport {
     if (profile.protocol == CustomMusicSourceProtocol.kugou) {
       return _kugou.lyrics(audio, cancellation: cancellation);
     }
+    if (profile.protocol == CustomMusicSourceProtocol.neteaseApi) {
+      return _netease.lyrics(audio, cancellation: cancellation);
+    }
     final endpoint = _endpoint(CustomMusicSourceCapability.lyrics);
     final query = switch (profile.protocol) {
       CustomMusicSourceProtocol.goMusicApi =>
         _goMusicTrackQuery(_requireGoMusicDescriptor(audio)),
       CustomMusicSourceProtocol.danSourceV1 ||
+      CustomMusicSourceProtocol.neteaseApi ||
       CustomMusicSourceProtocol.kugou =>
         _standardTrackQuery(audio, includeIdentity: true),
       CustomMusicSourceProtocol.legacyLyrics =>
@@ -369,10 +386,14 @@ class CustomMusicSourceTransport {
     Audio audio, {
     int page = 0,
     int limit = 30,
-    CustomMusicCommentsSort sort = CustomMusicCommentsSort.hot,
+    CustomMusicCommentsSort sort = CustomMusicCommentsSort.standard,
     CustomMusicSourceCancellation? cancellation,
   }) async {
     _requireReady(CustomMusicSourceCapability.comments);
+    if (profile.protocol == CustomMusicSourceProtocol.neteaseApi) {
+      return _netease.comments(audio,
+          page: page, limit: limit, sort: sort, cancellation: cancellation);
+    }
     if (profile.protocol == CustomMusicSourceProtocol.goMusicApi &&
         profile.endpoints[CustomMusicSourceCapability.comments] == null) {
       throw const CustomMusicSourceException(
@@ -389,7 +410,7 @@ class CustomMusicSourceTransport {
         'id': audio.onlineId!,
         'page': '$safePage',
         'limit': '$safeLimit',
-        'sort': sort.name,
+        if (sort != CustomMusicCommentsSort.standard) 'sort': sort.name,
       },
     );
     final body = await _get(
@@ -429,6 +450,14 @@ class CustomMusicSourceTransport {
       page: safePage,
       hasMore: payload['hasMore'] == true || values.length > safeLimit,
       total: _optionalNonNegativeInt(payload['total']),
+      supportedSorts: [
+        if (payload['supportedSorts'] case final List sorts)
+          for (final sort in [
+            CustomMusicCommentsSort.hot,
+            CustomMusicCommentsSort.latest,
+          ])
+            if (sorts.contains(sort.name)) sort,
+      ],
     );
   }
 
@@ -444,6 +473,10 @@ class CustomMusicSourceTransport {
     _requireOwnedTrack(audio);
     if (profile.protocol == CustomMusicSourceProtocol.kugou) {
       return _kugou.resolve(audio,
+          forDownload: forDownload, cancellation: cancellation);
+    }
+    if (profile.protocol == CustomMusicSourceProtocol.neteaseApi) {
+      return _netease.resolve(audio,
           forDownload: forDownload, cancellation: cancellation);
     }
     if (profile.protocol == CustomMusicSourceProtocol.goMusicApi) {

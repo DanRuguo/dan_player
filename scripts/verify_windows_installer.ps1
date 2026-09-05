@@ -53,7 +53,8 @@ foreach ($line in $lines | Select-Object -Skip 2) {
 }
 if ($seen.Count -ne $build.PayloadFiles -or
     $seen.Count -ne @(Get-ChildItem -LiteralPath $payload -Recurse -File -Force).Count + 1 -or
-    -not $seen.Contains('native_assets.json')) { throw 'Incomplete payload coverage.' }
+    (-not $seen.Contains('native_assets.json') -and
+     -not $seen.Contains('data/flutter_assets/NativeAssetsManifest.json'))) { throw 'Incomplete payload coverage.' }
 $signatures = @()
 if ($RequireSigned) {
     if (-not $build.Signed) { throw 'Build receipt is not signed.' }
