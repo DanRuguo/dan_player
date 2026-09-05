@@ -131,6 +131,27 @@ Widget _host(_QueuePlayback playback,
     );
 
 void main() {
+  testWidgets('queue action icons share a center line at every text scale',
+      (tester) async {
+    final playback = _QueuePlayback([CategoryTestAudio('first')]);
+    addTearDown(playback.dispose);
+    for (final scale in [1.0, 2.0, 3.0]) {
+      await tester.pumpWidget(_host(playback, textScale: scale));
+      await tester.pumpAndSettle();
+      final center = tester.getCenter(find.byIcon(Symbols.my_location)).dy;
+      for (final icon in [
+        Symbols.playlist_add,
+        Symbols.playlist_remove,
+        Symbols.undo,
+        Symbols.repeat
+      ]) {
+        expect(tester.getCenter(find.byIcon(icon)).dy, closeTo(center, 0.1),
+            reason: 'toolbar icon at text scale $scale');
+      }
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('undo restores the current occurrence and waits through loading',
       (tester) async {
     final same = CategoryTestAudio('same');

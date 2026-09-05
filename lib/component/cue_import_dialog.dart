@@ -168,7 +168,7 @@ class _CueImportDialogState extends State<CueImportDialog> {
                     _name.text.trim().length <= 120
                 ? _submit
                 : null,
-            child: Text(ui('创建歌单')))
+            child: Text(ui('新建歌单')))
       ],
     );
   }

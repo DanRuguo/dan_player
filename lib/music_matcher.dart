@@ -1120,11 +1120,14 @@ Future<Lyric?> _getKugouSyncLyric(String kugouSongHash) async {
       album: '',
       duration: 0,
     );
-    // Older saved associations retain only the hash. Recover that exact song's
+    // Older Kugou associations retain only the hash. Recover that exact song's
     // metadata before accepting a lyric-server fallback with its own identity.
+    // An edited protocol keeps its own direct lyric contract and need not
+    // provide a metadata endpoint merely because the stable profile ID remains.
     final transport = CustomMusicSourceTransport(profile);
-    final selected =
-        await transport.metadata(audio, cancellation: cancellation);
+    final selected = profile.protocol == CustomMusicSourceProtocol.kugou
+        ? await transport.metadata(audio, cancellation: cancellation)
+        : audio;
     final response =
         await transport.lyrics(selected, cancellation: cancellation);
     if (!_isCurrentCustomLyricProfile(profile)) return null;

@@ -90,7 +90,7 @@ void main() {
       expect(selected, isNull);
       expect(find.textContaining('2 首 CUE 分轨'), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.text('创建歌单'));
+      await tester.tap(find.text('新建歌单'));
       await tester.pumpAndSettle();
       expect(selected!.name, 'Album');
       expect(selected!.audios.map((a) => a.displayTitle), ['卡农', 'Good Time']);
@@ -115,7 +115,7 @@ void main() {
     expect(find.text('CUE INDEX 时间格式无效。'), findsOneWidget);
     expect(
         tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, '创建歌单'))
+            .widget<FilledButton>(find.widgetWithText(FilledButton, '新建歌单'))
             .onPressed,
         isNull);
     await tester.tap(find.text('取消'));

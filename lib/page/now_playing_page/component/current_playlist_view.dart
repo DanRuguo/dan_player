@@ -189,47 +189,52 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                 ),
               Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Wrap(spacing: 4, runSpacing: 4, children: [
-                    IconButton(
-                        key: const ValueKey('queue-locate-current'),
-                        tooltip: ui('定位当前歌曲'),
-                        onPressed: currentIndex < 0
-                            ? null
-                            : () => _scheduleAlignment(force: true),
-                        icon: const Icon(Symbols.my_location)),
-                    IconButton(
-                        key: const ValueKey('queue-save-playlist'),
-                        tooltip: ui('将队列保存为歌单'),
-                        onPressed:
-                            queue.isEmpty || _savingQueue ? null : _saveQueue,
-                        icon: const Icon(Symbols.playlist_add)),
-                    IconButton(
-                        key: const ValueKey('queue-keep-current'),
-                        tooltip: ui('仅保留当前歌曲'),
-                        onPressed: currentIndex < 0 ||
-                                queue.length <= 1 ||
-                                !playbackService.canEditQueue
-                            ? null
-                            : playbackService.keepOnlyCurrentQueueItem,
-                        icon: const Icon(Symbols.playlist_remove)),
-                    IconButton(
-                        key: const ValueKey('queue-undo-edit'),
-                        tooltip: ui('撤销队列整理（最多 10 步；切换歌曲或队列后清空）'),
-                        onPressed: playbackService.canUndoQueueEdit
-                            ? playbackService.undoQueueEdit
-                            : null,
-                        icon: const Icon(Symbols.undo)),
-                    Tooltip(
-                        message: ui('A-B 片段循环'),
-                        child: TextButton.icon(
-                            key: const ValueKey('queue-segment-loop'),
-                            onPressed: () =>
-                                showSegmentLoopDialog(context, playbackService),
-                            icon: Icon(playbackService.segmentLoop.enabled
-                                ? Symbols.repeat_on
-                                : Symbols.repeat),
-                            label: const Text('A-B'))),
-                  ])),
+                  child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        IconButton(
+                            key: const ValueKey('queue-locate-current'),
+                            tooltip: ui('定位当前歌曲'),
+                            onPressed: currentIndex < 0
+                                ? null
+                                : () => _scheduleAlignment(force: true),
+                            icon: const Icon(Symbols.my_location)),
+                        IconButton(
+                            key: const ValueKey('queue-save-playlist'),
+                            tooltip: ui('将队列保存为歌单'),
+                            onPressed: queue.isEmpty || _savingQueue
+                                ? null
+                                : _saveQueue,
+                            icon: const Icon(Symbols.playlist_add)),
+                        IconButton(
+                            key: const ValueKey('queue-keep-current'),
+                            tooltip: ui('仅保留当前歌曲'),
+                            onPressed: currentIndex < 0 ||
+                                    queue.length <= 1 ||
+                                    !playbackService.canEditQueue
+                                ? null
+                                : playbackService.keepOnlyCurrentQueueItem,
+                            icon: const Icon(Symbols.playlist_remove)),
+                        IconButton(
+                            key: const ValueKey('queue-undo-edit'),
+                            tooltip: ui('撤销队列整理（最多 10 步；切换歌曲或队列后清空）'),
+                            onPressed: playbackService.canUndoQueueEdit
+                                ? playbackService.undoQueueEdit
+                                : null,
+                            icon: const Icon(Symbols.undo)),
+                        Tooltip(
+                            message: ui('A-B 片段循环'),
+                            child: TextButton.icon(
+                                key: const ValueKey('queue-segment-loop'),
+                                onPressed: () => showSegmentLoopDialog(
+                                    context, playbackService),
+                                icon: Icon(playbackService.segmentLoop.enabled
+                                    ? Symbols.repeat_on
+                                    : Symbols.repeat),
+                                label: const Text('A-B'))),
+                      ])),
               Expanded(
                 child: Container(
                   margin: EdgeInsets.fromLTRB(
