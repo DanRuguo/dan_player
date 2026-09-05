@@ -201,7 +201,7 @@ String selectedTrackInfo(Iterable<Audio> audios) => audios
 
 List<String> selectedLocalPaths(Iterable<Audio> audios) => [
       for (final audio in audios)
-        if (!audio.isOnline) audio.path
+        if (!audio.isOnline) audio.localFilePath
     ];
 
 Future<void> _runSelectedAction(BuildContext context,

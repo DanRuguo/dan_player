@@ -119,7 +119,7 @@ packages:
       path: "third_party/desktop_lyric"
       relative: true
     source: path
-    version: "26.0.4-snapshot.3"
+    version: "26.0.4"
   encrypt:
     dependency: transitive
     description:

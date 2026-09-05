@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/utils.dart';
 
 class SavedPlaybackState {
@@ -11,6 +12,7 @@ class SavedPlaybackState {
     required this.index,
     required this.position,
     required this.shuffle,
+    this.cueTracks = const [],
   });
 
   final List<String> queuePaths;
@@ -19,6 +21,10 @@ class SavedPlaybackState {
   final double position;
   final bool shuffle;
 
+  /// CUE entries may outlive the playlist they were imported into. Retain
+  /// their independent source coordinates without adding them to the scanner.
+  final List<Audio> cueTracks;
+
   Map<String, Object> toMap() => {
         "version": 1,
         "queuePaths": queuePaths,
@@ -26,6 +32,8 @@ class SavedPlaybackState {
         "index": index,
         "position": position,
         "shuffle": shuffle,
+        if (cueTracks.isNotEmpty)
+          'cueTracks': [for (final audio in cueTracks) audio.toMap()],
       };
 
   static SavedPlaybackState? fromMap(Map map) {
@@ -37,6 +45,20 @@ class SavedPlaybackState {
     final rawBackup = map["backupPaths"];
     final backup =
         rawBackup is List ? rawBackup.whereType<String>().toList() : queue;
+    final cueTracks = <Audio>[];
+    final rawCue = map['cueTracks'];
+    if (rawCue is List) {
+      for (final item in rawCue.whereType<Map>()) {
+        try {
+          final audio = Audio.fromMap(item);
+          if (audio.isCueTrack) cueTracks.add(audio);
+        } on FormatException {
+          // A broken optional descriptor must not discard the surviving queue.
+        } on TypeError {
+          // Old/corrupt optional metadata can contain an unexpected value type.
+        }
+      }
+    }
     return SavedPlaybackState(
       queuePaths: queue,
       backupPaths: backup.isEmpty ? queue : backup,
@@ -44,6 +66,7 @@ class SavedPlaybackState {
       position:
           map["position"] is num ? (map["position"] as num).toDouble() : 0,
       shuffle: map["shuffle"] == true,
+      cueTracks: List.unmodifiable(cueTracks),
     );
   }
 }

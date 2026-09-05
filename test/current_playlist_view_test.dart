@@ -24,6 +24,9 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   int? lastPlayed;
   int? lastRemoved;
   int? lastMoved;
+  final history = QueueEditHistory<Audio>();
+  @override
+  double get position => 47.25;
   @override
   final resolvingAudioPath = ValueNotifier<String?>(null);
   @override
@@ -34,13 +37,35 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   bool get canEditQueue => resolvingAudioPath.value == null;
 
   @override
+  bool get canUndoQueueEdit =>
+      canEditQueue &&
+      history.canUndo(playlist.value, playlist.value, selectedIndex);
+
+  void commit(QueueEdit<Audio> edit) {
+    history.record(QueueSnapshot(playlist.value, playlist.value, selectedIndex),
+        QueueSnapshot(edit.items, edit.items, edit.currentIndex));
+    selectedIndex = edit.currentIndex;
+    playlist.value = edit.items;
+    notifyListeners();
+  }
+
+  @override
+  bool undoQueueEdit() {
+    if (!canEditQueue) return false;
+    final state = history.undo(playlist.value, playlist.value, selectedIndex);
+    if (state == null) return false;
+    selectedIndex = state.currentIndex;
+    playlist.value = state.items;
+    notifyListeners();
+    return true;
+  }
+
+  @override
   bool removeQueueItem(int index) {
     final edit = QueueEdit.remove(playlist.value, selectedIndex, index);
     if (edit == null || !canEditQueue) return false;
     lastRemoved = index;
-    selectedIndex = edit.currentIndex;
-    playlist.value = edit.items;
-    notifyListeners();
+    commit(edit);
     return true;
   }
 
@@ -49,17 +74,13 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
     final edit = QueueEdit.moveNext(playlist.value, selectedIndex, index);
     if (edit == null || !canEditQueue) return false;
     lastMoved = index;
-    selectedIndex = edit.currentIndex;
-    playlist.value = edit.items;
-    notifyListeners();
+    commit(edit);
     return true;
   }
 
   @override
   bool keepOnlyCurrentQueueItem() {
-    playlist.value = [nowPlaying!];
-    selectedIndex = 0;
-    notifyListeners();
+    commit(QueueEdit([nowPlaying!], 0));
     return true;
   }
 
@@ -69,6 +90,7 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   @override
   void playIndexOfPlaylist(int audioIndex) {
     if (audioIndex < 0 || audioIndex >= playlist.value.length) return;
+    history.clear();
     selectedIndex = audioIndex;
     lastPlayed = audioIndex;
     nowPlaying = playlist.value[audioIndex];
@@ -109,6 +131,37 @@ Widget _host(_QueuePlayback playback,
     );
 
 void main() {
+  testWidgets('undo restores the current occurrence and waits through loading',
+      (tester) async {
+    final same = CategoryTestAudio('same');
+    final last = CategoryTestAudio('last');
+    final playback = _QueuePlayback([same, last, same], selectedIndex: 2);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(_host(playback));
+    await tester.pumpAndSettle();
+    IconButton undo() => tester
+        .widget<IconButton>(find.byKey(const ValueKey('queue-undo-edit')));
+    expect(undo().onPressed, isNull);
+    await tester.tap(find.byKey(const ValueKey('queue-keep-current')));
+    await tester.pumpAndSettle();
+    expect(undo().onPressed, isNotNull);
+    playback.resolvingAudioPath.value = 'pending';
+    await tester.pumpAndSettle();
+    expect(undo().onPressed, isNull);
+    expect(playback.undoQueueEdit(), isFalse);
+    playback.resolvingAudioPath.value = null;
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-undo-edit')));
+    await tester.pumpAndSettle();
+    expect(playback.playlist.value, [same, last, same]);
+    expect(playback.selectedIndex, 2);
+    expect(playback.nowPlaying, same);
+    expect(playback.position, 47.25);
+    expect(playback.lastPlayed, isNull);
+    expect(undo().onPressed, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('queue edits preserve the active duplicate and block during load',
       (tester) async {
     final duplicate = CategoryTestAudio('same');

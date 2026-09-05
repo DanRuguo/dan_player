@@ -122,6 +122,10 @@ Future<bool> showLyricEditorDialog(
   List<CustomLyricSourceChoice>? customLyricChoices,
   OnlineLyricEditorCustomCandidateLoader? customLyricCandidateLoader,
 }) async {
+  if (audio.isCueTrack) {
+    showTextOnSnackBar('CUE 分轨不能写入整轨歌词，可在歌词来源中关联歌曲。');
+    return false;
+  }
   if (audio.isOnline) {
     showTextOnSnackBar("联网音乐的歌词为只读，不能修改");
     return false;

@@ -291,19 +291,21 @@ class _AudioTileState extends State<AudioTile> {
         child: _metadataMenuLabel(audio.album),
       ),
       ...common,
-      MenuItemButton(
-        onPressed: () async {
-          final updated = await showEditAudioMetadataDialog(context, audio);
-          if (updated && mounted) setState(() {});
-        },
-        leadingIcon: const Icon(Symbols.edit_note),
-        child: Text(ui("编辑歌曲信息")),
-      ),
-      MenuItemButton(
-        onPressed: () => showLyricEditorDialog(context, audio),
-        leadingIcon: const Icon(Symbols.lyrics),
-        child: Text(ui("编辑歌词")),
-      ),
+      if (audio.canEditLocalFile)
+        MenuItemButton(
+          onPressed: () async {
+            final updated = await showEditAudioMetadataDialog(context, audio);
+            if (updated && mounted) setState(() {});
+          },
+          leadingIcon: const Icon(Symbols.edit_note),
+          child: Text(ui("编辑歌曲信息")),
+        ),
+      if (audio.canEditLocalFile)
+        MenuItemButton(
+          onPressed: () => showLyricEditorDialog(context, audio),
+          leadingIcon: const Icon(Symbols.lyrics),
+          child: Text(ui("编辑歌词")),
+        ),
       MenuItemButton(
         onPressed: () {
           context.push(app_paths.AUDIO_DETAIL_PAGE, extra: audio);
@@ -311,8 +313,10 @@ class _AudioTileState extends State<AudioTile> {
         leadingIcon: const Icon(Symbols.info),
         child: Text(ui("详细信息")),
       ),
-      const Divider(),
-      DeleteAudioMenuItem(audio: audio, hostContext: context),
+      if (audio.canEditLocalFile) ...[
+        const Divider(),
+        DeleteAudioMenuItem(audio: audio, hostContext: context),
+      ],
     ];
   }
 

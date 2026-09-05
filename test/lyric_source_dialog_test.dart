@@ -5,6 +5,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
+import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_source_view.dart';
 import 'package:flutter/material.dart';
@@ -72,6 +73,32 @@ Widget _launcher(LyricSourceDialog dialog) => MaterialApp(
 void main() {
   setUp(LYRIC_SOURCES.clear);
   tearDown(LYRIC_SOURCES.clear);
+
+  testWidgets(
+      'short version warns about an unmarked candidate without rejecting manual selection',
+      (tester) async {
+    final audio = _audio(r'C:\Music\OP.wav')..title = '結想は花となる short ver.';
+    await tester.pumpWidget(_host(LyricSourceDialog(
+      audio: audio,
+      currentTrackPath: () => audio.path,
+      search: (_) async => LyricSearchResponse(candidates: [
+        _candidate(1, title: '結想は花となる'),
+        _candidate(2, title: '結想は花となる short ver.'),
+      ], failures: const {}),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('版本可能不同'), findsOneWidget);
+    expect(
+        tester
+            .widget<ListTile>(
+                find.byKey(const ValueKey('lyric-candidate-qq:1')))
+            .onTap,
+        isNotNull);
+    expect(
+        lyricCandidateMayUseDifferentVersion(
+            audio, _candidate(2, title: '結想は花となる short ver.')),
+        isFalse);
+  });
 
   testWidgets('search is owned by State and is not recreated by build',
       (tester) async {
@@ -305,4 +332,38 @@ void main() {
     expect(find.textContaining('旧设置已保留'), findsOneWidget);
     expect(find.byKey(const ValueKey('lyric-candidate-qq:1')), findsOneWidget);
   });
+
+  for (final failure in <Object, String>{
+    const LyricUnavailableException(): '此来源暂未提供这条录音',
+    TimeoutException('fixture'): '获取歌词超时',
+    const SocketException('fixture'): '连接歌词来源失败',
+    const FormatException('fixture'): '内容无法解析',
+  }.entries) {
+    testWidgets(
+        'lyric fetch ${failure.key.runtimeType} cannot save a new source',
+        (tester) async {
+      final audio = _audio(r'C:\Music\Song A.mp3');
+      final original =
+          LyricSource(LyricSourceType.netease, neteaseSongId: '123');
+      LYRIC_SOURCES[audio.path] = original;
+      var saved = 0;
+      await tester.pumpWidget(_host(LyricSourceDialog(
+        audio: audio,
+        currentTrackPath: () => audio.path,
+        search: (_) async => LyricSearchResponse(
+            candidates: [_candidate(1)], failures: const {}),
+        loadCandidate: (_) async => throw failure.key,
+        persistSource: (_, __) async {
+          saved++;
+        },
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('lyric-candidate-qq:1')));
+      await tester.pumpAndSettle();
+      expect(saved, 0);
+      expect(LYRIC_SOURCES[audio.path], same(original));
+      expect(find.textContaining(failure.value), findsOneWidget);
+      expect(find.textContaining('保存来源失败'), findsNothing);
+    });
+  }
 }

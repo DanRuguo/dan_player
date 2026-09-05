@@ -6,6 +6,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/cover_cache.dart';
+import 'package:dan_player/library/cue_track.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
@@ -399,7 +400,12 @@ class Audio {
   String? get coverFingerprint =>
       modifiedNanos == null ? null : '${modifiedNanos}_s${fileSizeBytes ?? 0}';
 
-  /// absolute path
+  final CueTrackReference? cueTrack;
+  bool get isCueTrack => cueTrack != null;
+  String get localFilePath => cueTrack?.sourcePath ?? path;
+  bool get canEditLocalFile => isLocal && !isCueTrack;
+
+  /// Absolute file path or the stable identity of an online/CUE track.
   String path;
 
   /// secs since UNIX EPOCH
@@ -447,6 +453,7 @@ class Audio {
     this.fileSizeBytes,
     this.modifiedNanos,
     this.metadataReadPending = false,
+    this.cueTrack,
     this.durationVersion = 1,
     this.onlineProvider,
     this.onlineId,
@@ -601,10 +608,10 @@ class Audio {
   }
 
   String get fileNameTitle =>
-      isOnline ? title : path_util.basenameWithoutExtension(path);
+      isOnline || isCueTrack ? title : path_util.basenameWithoutExtension(path);
 
   String get displayTitle {
-    if (isOnline) return title;
+    if (isOnline || isCueTrack) return title;
     final name = fileNameTitle.trim();
     return name.isEmpty ? title : name;
   }
@@ -634,6 +641,12 @@ class Audio {
     if (audioPath is! String || audioPath.isEmpty) {
       throw const FormatException("Invalid audio path");
     }
+    final cue = map['cue_track'] is Map
+        ? CueTrackReference.fromMap(map['cue_track'] as Map)
+        : null;
+    if (audioPath.startsWith('cue:') != (cue != null)) {
+      throw const FormatException('CUE 分轨引用无效。');
+    }
     return Audio(
       map["title"] is String ? map["title"] : path_util.basename(audioPath),
       map["artist"] is String ? map["artist"] : "UNKNOWN",
@@ -655,6 +668,7 @@ class Audio {
           map["file_size"] is num ? (map["file_size"] as num).toInt() : null,
       modifiedNanos: map['modified_ns'] is String ? map['modified_ns'] : null,
       metadataReadPending: map['metadata_pending'] == true,
+      cueTrack: cue,
       durationVersion: (map['duration_version'] as num?)?.toInt() ?? 0,
     );
   }
@@ -676,6 +690,7 @@ class Audio {
         "modified_ns": modifiedNanos,
         "metadata_pending": metadataReadPending,
         "path": path,
+        if (cueTrack != null) 'cue_track': cueTrack!.toMap(),
         "modified": modified,
         "created": created,
         "by": by
@@ -739,7 +754,7 @@ class Audio {
     if (isOnline) return null;
     // Capture mutable metadata now: an edit must not make a queued request
     // read a different file and cache it under the previous file's identity.
-    final requestedPath = path;
+    final requestedPath = localFilePath;
     final requestedModified = modified;
     final requestedFingerprint = coverFingerprint;
     return CoverCache.instance.imageFor(

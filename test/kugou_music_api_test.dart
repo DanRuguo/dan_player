@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/online/kugou_music_api.dart';
@@ -157,6 +158,111 @@ void main() {
       expect(result.expiresAt!.isAfter(DateTime.now()), isTrue);
       expect(result.toString(), isNot(contains('private-link')));
       expect(result.toString(), isNot(contains('media.example.test')));
+    });
+  });
+
+  test('empty lyric candidates are unavailable rather than transport failure',
+      () async {
+    await _server((server) async {
+      server.listen(
+          (request) => _json(request, {'status': 200, 'candidates': []}));
+      await expectLater(
+          KugouMusicApi(_profile(server)).lyrics(_audio(_profile(server))),
+          throwsA(isA<LyricUnavailableException>()));
+    });
+  });
+
+  test(
+      'lyric lookup rejects conflicting title artist and duration before download',
+      () async {
+    await _server((server) async {
+      var requests = 0;
+      server.listen((request) async {
+        requests++;
+        await _json(request, {
+          'status': 200,
+          'candidates': [
+            {
+              'id': '1',
+              'accesskey': 'a',
+              'song': 'The Seasons Op. 37b',
+              'singer': 'Other',
+              'duration': 320317
+            },
+            {
+              'id': '2',
+              'accesskey': 'b',
+              'song': '結想は花となる short ver.',
+              'singer': 'Other',
+              'duration': 96000
+            },
+            {
+              'id': '3',
+              'accesskey': 'c',
+              'song': '結想は花となる short ver.',
+              'singer': 'ウォルピスカーター',
+              'duration': 195000
+            },
+          ]
+        });
+      });
+      final profile = _profile(server);
+      final track = Audio.online(
+          provider: profile.providerId,
+          id: _hash,
+          title: '結想は花となる short ver.',
+          artist: 'ウォルピスカーター',
+          album: 'ARTEISIA',
+          duration: 96);
+      await expectLater(KugouMusicApi(profile).lyrics(track),
+          throwsA(isA<LyricUnavailableException>()));
+      expect(requests, 1, reason: 'No unrelated lyric download is made');
+    });
+  });
+
+  test('matching lyric metadata accepts an artist alias and wrapped base64',
+      () async {
+    await _server((server) async {
+      server.listen((request) async {
+        if (request.uri.path.endsWith('/search')) {
+          await _json(request, {
+            'status': 200,
+            'candidates': [
+              {
+                'id': '1',
+                'accesskey': 'a',
+                'song': 'Other Song',
+                'singer': 'Other',
+                'duration': 96000
+              },
+              {
+                'id': '2',
+                'accesskey': 'b',
+                'song': '結想は花となる short ver.',
+                'singer': 'ウォルピスカーター',
+                'duration': 97000
+              },
+            ]
+          });
+        } else {
+          expect(request.uri.queryParameters['id'], '2');
+          final encoded = base64Encode(utf8.encode('[00:01.00]Fixture lyric'));
+          await _json(request, {
+            'status': 200,
+            'content': '${encoded.substring(0, 12)}\n${encoded.substring(12)}'
+          });
+        }
+      });
+      final profile = _profile(server);
+      final track = Audio.online(
+          provider: profile.providerId,
+          id: _hash,
+          title: '結想は花となる short ver.',
+          artist: 'ウォルピスカーター (Wolpis Carter)',
+          album: 'ARTEISIA',
+          duration: 96);
+      expect((await KugouMusicApi(profile).lyrics(track)).lyric,
+          '[00:01.00]Fixture lyric');
     });
   });
 

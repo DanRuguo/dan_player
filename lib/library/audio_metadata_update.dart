@@ -118,6 +118,10 @@ class AudioMetadataEditCoordinator {
       : path_util.normalize(path);
 
   Future<Audio> apply(Audio audio, AudioMetadataEdit request) async {
+    if (audio.isCueTrack) {
+      throw const AudioMetadataEditException(
+          'TAG_CUE_READ_ONLY', 'CUE 分轨信息由 CUE 文件提供，不能修改整轨音频。');
+    }
     final key = _pathKey(audio.path);
     if (_active.contains(audio) || _activePaths.containsKey(key)) {
       throw const AudioMetadataEditException(

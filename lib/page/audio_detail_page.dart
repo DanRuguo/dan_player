@@ -247,12 +247,20 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SelectableText(audio.path),
+                        SelectableText(audio.localFilePath),
+                        if (audio.cueTrack case final cue?) ...[
+                          const SizedBox(height: 8),
+                          Text(ui('CUE 分轨 · 第 {0} 轨 · 起点 {1} 秒', [
+                            cue.number,
+                            cue.startSeconds.toStringAsFixed(2)
+                          ])),
+                          SelectableText(cue.cuePath),
+                        ],
                         const SizedBox(height: 8.0),
                         OutlinedButton.icon(
                           onPressed: () async {
                             final result =
-                                await showInExplorer(path: audio.path);
+                                await showInExplorer(path: audio.localFilePath);
                             if (!result) showTextOnSnackBar("打开失败");
                           },
                           icon: const Icon(Symbols.folder_open),
@@ -381,16 +389,18 @@ class _HeroInfo extends StatelessWidget {
               label: Text(ui("播放")),
             ),
             if (audio.isLocal) ...[
-              OutlinedButton.icon(
-                onPressed: onEditMetadata,
-                icon: const Icon(Symbols.edit_note),
-                label: Text(ui("编辑信息")),
-              ),
-              OutlinedButton.icon(
-                onPressed: onEditLyric,
-                icon: const Icon(Symbols.lyrics),
-                label: Text(ui("编辑歌词")),
-              ),
+              if (audio.canEditLocalFile)
+                OutlinedButton.icon(
+                  onPressed: onEditMetadata,
+                  icon: const Icon(Symbols.edit_note),
+                  label: Text(ui("编辑信息")),
+                ),
+              if (audio.canEditLocalFile)
+                OutlinedButton.icon(
+                  onPressed: onEditLyric,
+                  icon: const Icon(Symbols.lyrics),
+                  label: Text(ui("编辑歌词")),
+                ),
               OutlinedButton.icon(
                 onPressed: () => showSongCommentsDialog(context, audio),
                 icon: const Icon(Symbols.chat_bubble_outline),

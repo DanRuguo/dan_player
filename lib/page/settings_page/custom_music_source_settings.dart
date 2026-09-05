@@ -714,8 +714,10 @@ class _CapabilityLabel extends StatelessWidget {
           Icon(_capabilityIcon(capability),
               size: 16, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 5),
-          Text(_capabilityLabel(capability),
-              style: Theme.of(context).textTheme.bodySmall),
+          Flexible(
+            child: Text(_capabilityLabel(capability),
+                style: Theme.of(context).textTheme.bodySmall),
+          ),
         ],
       );
 }

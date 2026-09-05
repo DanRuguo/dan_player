@@ -99,7 +99,15 @@ Future<Directory> getAppDataDir() async {
   }
   // Freeze the chosen path for this process. A restored backup can safely
   // schedule another path without live stores starting to split their writes.
-  return _processAppDataDirectory ??= _resolveDefaultAppDataDir();
+  final request = _processAppDataDirectory ??= _resolveDefaultAppDataDir();
+  try {
+    return await request;
+  } catch (_) {
+    if (identical(_processAppDataDirectory, request)) {
+      _processAppDataDirectory = null;
+    }
+    rethrow;
+  }
 }
 
 /// Makes [directory] the data root on the next launch. Existing services keep

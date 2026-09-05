@@ -212,6 +212,13 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                             ? null
                             : playbackService.keepOnlyCurrentQueueItem,
                         icon: const Icon(Symbols.playlist_remove)),
+                    IconButton(
+                        key: const ValueKey('queue-undo-edit'),
+                        tooltip: ui('撤销队列整理（最多 10 步；切换歌曲或队列后清空）'),
+                        onPressed: playbackService.canUndoQueueEdit
+                            ? playbackService.undoQueueEdit
+                            : null,
+                        icon: const Icon(Symbols.undo)),
                     Tooltip(
                         message: ui('A-B 片段循环'),
                         child: TextButton.icon(

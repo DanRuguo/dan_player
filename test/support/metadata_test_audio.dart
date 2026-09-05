@@ -15,6 +15,14 @@ class MetadataTestAudio extends Fake implements Audio {
   int modified = 1;
   @override
   bool get isOnline => false;
+  @override
+  bool get isLocal => true;
+  @override
+  bool get isCueTrack => false;
+  @override
+  bool get canEditLocalFile => true;
+  @override
+  String get localFilePath => path;
 
   @override
   void applyEditedMetadata(

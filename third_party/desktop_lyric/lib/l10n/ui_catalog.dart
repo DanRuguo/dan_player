@@ -24,12 +24,20 @@ import 'catalog_selection_release.dart';
 import 'catalog_player_release.dart';
 import 'catalog_api_release.dart';
 import 'catalog_playlist_exchange.dart';
+import 'catalog_lyric_lookup_fix.dart';
+import 'catalog_queue_undo.dart';
+import 'catalog_smart_playlist_dialog.dart';
+import 'catalog_cue_release.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogSelectionRelease,
   ...catalogPlayerRelease,
   ...catalogApiRelease,
   ...catalogPlaylistExchange,
+  ...catalogLyricLookupFix,
+  ...catalogQueueUndo,
+  ...catalogSmartPlaylistDialog,
+  ...catalogCueRelease,
   ...uiCatalogA,
   ...uiCatalogB,
   ...uiCatalogC,

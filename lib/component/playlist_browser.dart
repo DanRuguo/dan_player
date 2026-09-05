@@ -22,6 +22,8 @@ import 'package:dan_player/component/playlist_song_picker.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
 import 'package:dan_player/component/audio_selection_toolbar.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
+import 'package:dan_player/component/smart_playlist_dialog.dart';
+import 'package:dan_player/component/cue_import_dialog.dart';
 import 'package:dan_player/component/playlist_ui_actions.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
@@ -212,6 +214,18 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   Future<void> _importM3u() async {
     if (_editingBlocked) return;
     final imported = await importM3uPlaylist(context,
+        library:
+            List.of(widget.library ?? AudioLibrary.instance.audioCollection));
+    if (imported == null || !mounted || _editingBlocked) return;
+    Playlist? created;
+    await _edit(() => created =
+        _tree.createPlaylistFromAudios(imported.name, imported.audios));
+    if (mounted && created != null) _navigate(created);
+  }
+
+  Future<void> _importCue() async {
+    if (_editingBlocked) return;
+    final imported = await importCuePlaylist(context,
         library:
             List.of(widget.library ?? AudioLibrary.instance.audioCollection));
     if (imported == null || !mounted || _editingBlocked) return;
@@ -1293,6 +1307,11 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         view: _view,
         onCreate: () => unawaited(_create(current)),
         onImportM3u: _importM3u,
+        onImportCue: _importCue,
+        onOpenSmartPlaylists: () => unawaited(showSmartPlaylists(context,
+            library: () =>
+                widget.library ?? AudioLibrary.instance.audioCollection,
+            libraryChanges: AudioLibrary.changes)),
         onExportM3u: current == null
             ? null
             : () => unawaited(

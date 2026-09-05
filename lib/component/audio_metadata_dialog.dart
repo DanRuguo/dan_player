@@ -23,6 +23,10 @@ Future<bool> showEditAudioMetadataDialog(
   Future<Audio> Function(Audio, AudioMetadataEdit) saveMetadata =
       applyAudioMetadataEdit,
 }) async {
+  if (audio.isCueTrack) {
+    showTextOnSnackBar('CUE 分轨信息由 CUE 文件提供，不能修改整轨音频。');
+    return false;
+  }
   if (audio.isOnline) {
     showTextOnSnackBar("联网歌曲信息由来源提供，不能修改其标签");
     return false;

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 
@@ -156,6 +157,7 @@ class KugouMusicApi {
       String? accessKey;
       for (final candidate in candidates.take(5)) {
         if (candidate is! Map) continue;
+        if (!_matchesLyricRecording(audio, candidate)) continue;
         final id = _text(candidate['id']);
         final access = _text(candidate['accesskey'] ?? candidate['accessKey']);
         if (id != null &&
@@ -167,7 +169,9 @@ class KugouMusicApi {
           break;
         }
       }
-      if (lyricId == null || accessKey == null) throw _unavailable();
+      if (lyricId == null || accessKey == null) {
+        throw const LyricUnavailableException();
+      }
       final content = await session.get(
         _query(base.resolve('download'), {
           ...endpoint.queryParameters,
@@ -180,21 +184,26 @@ class KugouMusicApi {
         }),
         byteLimit: _lyricsByteLimit,
       );
-      final raw = _text(content['content'] ?? _payload(content)['content']);
-      if (raw == null) throw _unavailable();
+      final payload = _payload(content);
+      if (!content.containsKey('content') && !payload.containsKey('content')) {
+        throw _invalid();
+      }
+      final raw = content['content'] ?? payload['content'];
+      if (raw == null || raw is String && raw.trim().isEmpty) {
+        throw const LyricUnavailableException();
+      }
+      if (raw is! String) throw _invalid();
       String lyric;
-      if (raw.contains('[') ||
-          raw.contains('\n') ||
-          RegExp(r'[^\x00-\x7f]').hasMatch(raw)) {
+      if (raw.contains('[') || RegExp(r'[^\x00-\x7f]').hasMatch(raw)) {
         lyric = raw;
       } else {
         try {
-          lyric = utf8.decode(base64Decode(raw));
+          lyric = utf8.decode(base64Decode(raw.replaceAll(RegExp(r'\s+'), '')));
         } on FormatException {
           throw _invalid();
         }
       }
-      if (lyric.trim().isEmpty) throw _unavailable();
+      if (lyric.trim().isEmpty) throw const LyricUnavailableException();
       final normalized = <String, dynamic>{'type': 'lrc', 'lyric': lyric};
       return CustomMusicLyricsResult(
         rawBody: jsonEncode(normalized),
@@ -407,7 +416,10 @@ class KugouMusicApi {
         throw const CustomMusicSourceException(
             CustomMusicSourceFailureKind.timeout, '联网请求超时，请稍后重试');
       }
-      if (error is CustomMusicSourceException) rethrow;
+      if (error is CustomMusicSourceException ||
+          error is LyricUnavailableException) {
+        rethrow;
+      }
       throw const CustomMusicSourceException(
           CustomMusicSourceFailureKind.network, '无法连接自定义歌源');
     } finally {
@@ -424,6 +436,43 @@ class KugouMusicApi {
                 '${Uri.encodeQueryComponent(entry.key)}=${Uri.encodeQueryComponent(entry.value)}')
             .join('&'),
       );
+
+  /// The lyric server can return a keyword fallback even for a known hash.
+  /// Reject explicit metadata conflicts instead of downloading the first row:
+  /// a short OP must not silently get full-length or unrelated piano lyrics.
+  static bool _matchesLyricRecording(Audio audio, Map candidate) {
+    String normalize(String value) => value.toLowerCase().replaceAll(
+        RegExp(r'[\s_\-—–·・、,，.。!！?？:：;；/\\|&＋+()\[\]{}（）【】「」『』]+'), '');
+    bool meaningful(String? value) =>
+        value != null &&
+        value.trim().isNotEmpty &&
+        !const {'unknown', '未知', '未知艺术家'}.contains(value.trim().toLowerCase());
+    final title = _text(candidate['song']);
+    if (meaningful(audio.title) &&
+        meaningful(title) &&
+        normalize(audio.title) != normalize(title!)) {
+      return false;
+    }
+    final singer = _text(candidate['singer']);
+    if (meaningful(audio.artist) && meaningful(singer)) {
+      Set<String> artists(String value) => value
+          .split(RegExp(r'[、,，;&/|()（）]'))
+          .map(normalize)
+          .where((name) => name.isNotEmpty)
+          .toSet();
+      if (artists(audio.artist).intersection(artists(singer!)).isEmpty) {
+        return false;
+      }
+    }
+    final milliseconds = _number(candidate['duration']);
+    if (audio.duration > 0 && milliseconds != null && milliseconds > 0) {
+      final difference = (milliseconds / 1000 - audio.duration).abs();
+      final tolerance = (audio.duration * .03).clamp(5, 15);
+      if (difference > tolerance) return false;
+    }
+    return true;
+  }
+
   static Map _payload(Map root) =>
       root['data'] is Map ? root['data'] as Map : root;
   static String? _text(Object? value) {

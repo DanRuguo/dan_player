@@ -103,6 +103,8 @@ enum _PlaylistToolbarAction {
   help,
   importM3u,
   exportM3u,
+  importCue,
+  smartPlaylists,
 }
 
 /// Compact, descriptor-only playlist actions. No playback/library singleton is
@@ -141,6 +143,8 @@ class PlaylistToolbar extends StatefulWidget {
     this.onHelp,
     this.onImportM3u,
     this.onExportM3u,
+    this.onImportCue,
+    this.onOpenSmartPlaylists,
     this.selectionTools,
     this.alignment = WrapAlignment.end,
   })  : assert(selectedCount >= 0),
@@ -174,6 +178,8 @@ class PlaylistToolbar extends StatefulWidget {
   final VoidCallback? onHelp;
   final VoidCallback? onImportM3u;
   final VoidCallback? onExportM3u;
+  final VoidCallback? onImportCue;
+  final VoidCallback? onOpenSmartPlaylists;
   final Widget? selectionTools;
   final WrapAlignment alignment;
 
@@ -228,6 +234,20 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
               label: ui('导入 M3U8 歌单'),
               icon: Icons.file_open_outlined,
               onSelected: widget.editingEnabled ? widget.onImportM3u : null),
+        if (widget.onImportCue != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.importCue,
+              key: const ValueKey('playlist-import-cue'),
+              label: ui('导入 CUE 分轨'),
+              icon: Icons.album_outlined,
+              onSelected: widget.editingEnabled ? widget.onImportCue : null),
+        if (widget.onOpenSmartPlaylists != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.smartPlaylists,
+              key: const ValueKey('playlist-smart-playlists'),
+              label: ui('智能歌单'),
+              icon: Icons.auto_awesome_outlined,
+              onSelected: widget.onOpenSmartPlaylists),
         if (widget.onExportM3u != null)
           _ToolbarMenuItem(
               value: _PlaylistToolbarAction.exportM3u,

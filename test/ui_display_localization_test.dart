@@ -110,23 +110,35 @@ void main() {
     final result = UnionSearchResult('暂停 {1}')
       ..online =
           Future.value(const OnlineSearchResponse(tracks: [], failures: {}));
+    final originalOnline = result.online;
+    final originalAudios = result.audios;
     await tester.pumpWidget(_host(SearchResultPage(searchResult: result)));
     await tester.pumpAndSettle();
     final state = tester.state(find.byType(SearchResultPage));
     for (final language in [UiLanguage.en, UiLanguage.ja, UiLanguage.ko]) {
       await _language(tester, language);
-      final tabs = tester.widgetList<Tab>(find.byType(Tab));
-      expect(tabs.map((tab) => tab.text), [
-        ui('所有'),
-        ui('总乐库'),
-        ui('联网'),
-        ui('艺术家'),
-        ui('专辑'),
-      ]);
-      expect(tabs.first.text, isNot('所有'));
+      const categories = ['所有', '总乐库', '联网', '艺术家', '专辑'];
+      final tabBar = find.byType(TabBar);
+      final tabLabels =
+          find.descendant(of: tabBar, matching: find.byType(Text));
+      // Both Tab.text and icon/label tabs render Text descendants. Verify what
+      // the user reads instead of coupling this test to a Tab constructor.
+      expect(tester.widgetList<Text>(tabLabels).map((text) => text.data),
+          categories.map(ui));
+      for (final source in categories) {
+        expect(
+            find
+                .descendant(of: tabBar, matching: find.text(ui(source)))
+                .hitTestable(),
+            findsOneWidget);
+        expect(find.descendant(of: tabBar, matching: find.text(source)),
+            findsNothing);
+      }
       expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
           '暂停 {1}');
       expect(result.query, '暂停 {1}');
+      expect(result.online, same(originalOnline));
+      expect(result.audios, same(originalAudios));
       expect(tester.state(find.byType(SearchResultPage)), same(state));
       expect(tester.takeException(), isNull);
     }
@@ -140,7 +152,7 @@ void main() {
     final tracks = <Audio>[
       for (var index = 0; index < 500; index++)
         Audio.online(
-          provider: 'custom:source',
+          provider: 'custom:source-${index % 3}',
           id: 'track-$index',
           title: 'Track $index',
           artist: 'Artist',
@@ -159,7 +171,31 @@ void main() {
 
     expect(find.byType(AudioTile), findsWidgets);
     expect(find.byType(AudioTile).evaluate().length, lessThan(100));
-    expect(find.textContaining('只有来源明确授权的歌曲才可下载'), findsOneWidget);
+    final initialIndices = tester
+        .widgetList<AudioTile>(find.byType(AudioTile))
+        .map((tile) => tile.audioIndex)
+        .toList();
+    expect(initialIndices, contains(0));
+    expect(find.byKey(ValueKey(tracks.last.path)), findsNothing);
+    final input = tester.widget<TextField>(find.byType(TextField));
+    expect(input.decoration!.hintText, ui('搜索本地曲库和联网音乐'));
+    expect(input.controller!.text, 'many');
+
+    await tester.drag(find.byType(CustomScrollView).hitTestable().first,
+        const Offset(0, -1600));
+    await tester.pumpAndSettle();
+    final laterTiles =
+        tester.widgetList<AudioTile>(find.byType(AudioTile)).toList();
+    expect(laterTiles, isNotEmpty);
+    expect(laterTiles.length, lessThan(100));
+    expect(
+        laterTiles
+            .map((tile) => tile.audioIndex)
+            .reduce((a, b) => a > b ? a : b),
+        greaterThan(initialIndices.reduce((a, b) => a > b ? a : b)));
+    expect(
+        laterTiles.every((tile) => identical(tile.playlist, tracks)), isTrue);
+    expect(result.query, 'many');
     expect(tester.takeException(), isNull);
   });
 

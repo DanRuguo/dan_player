@@ -851,7 +851,8 @@ class PlaylistTree {
       playlist._entries.removeWhere((entry) =>
           entry is PlaylistAudioEntry &&
           (path_util.equals(entry._path, audioPath) ||
-              path_util.equals(entry.audio.path, audioPath)));
+              path_util.equals(entry.audio.path, audioPath) ||
+              path_util.equals(entry.audio.localFilePath, audioPath)));
       final count = before - playlist._entries.length;
       if (count == 0) continue;
       removed += count;

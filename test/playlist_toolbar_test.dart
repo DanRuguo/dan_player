@@ -24,6 +24,7 @@ class _Fixture {
   bool resetCover = true;
   bool albums = true;
   bool help = true;
+  bool releaseTools = false;
   final calls = <String>[];
 
   Widget toolbar() => PlaylistToolbar(
@@ -53,6 +54,9 @@ class _Fixture {
         onOpenAlbums: albums ? () => calls.add('albums') : null,
         albumCount: 23,
         onHelp: help ? () => calls.add('help') : null,
+        onImportCue: releaseTools ? () => calls.add('importCue') : null,
+        onOpenSmartPlaylists:
+            releaseTools ? () => calls.add('smartPlaylists') : null,
       );
 }
 
@@ -166,6 +170,47 @@ void _expectTouchTargets(WidgetTester tester) {
 }
 
 void main() {
+  testWidgets(
+      'CUE and smart playlist entries are reachable in empty root and detail menus',
+      (tester) async {
+    final fixture = _Fixture()
+      ..releaseTools = true
+      ..hasItems = false
+      ..canPlay = false;
+    for (final root in [true, false]) {
+      fixture
+        ..isRoot = root
+        ..editingEnabled = true;
+      await tester.pumpWidget(_app(fixture, reduced: true));
+      await tester.pumpAndSettle();
+      await _open(tester, 'playlist-current-settings');
+      await _choose(tester, _key('playlist-import-cue'));
+      await _open(tester, 'playlist-current-settings');
+      await _choose(tester, _key('playlist-smart-playlists'));
+      fixture.editingEnabled = false;
+      await tester.pumpWidget(_app(fixture, reduced: true));
+      await tester.pumpAndSettle();
+      await _open(tester, 'playlist-current-settings');
+      expect(tester.widget<PopupMenuItem>(_key('playlist-import-cue')).enabled,
+          isFalse);
+      expect(
+          tester
+              .widget<PopupMenuItem>(_key('playlist-smart-playlists'))
+              .enabled,
+          isTrue);
+      await _choose(tester, _key('playlist-smart-playlists'));
+      expect(tester.takeException(), isNull);
+    }
+    expect(fixture.calls, [
+      'importCue',
+      'smartPlaylists',
+      'smartPlaylists',
+      'importCue',
+      'smartPlaylists',
+      'smartPlaylists'
+    ]);
+  });
+
   for (final mode in ['root', 'detail', 'selection']) {
     for (final brightness in Brightness.values) {
       testWidgets(

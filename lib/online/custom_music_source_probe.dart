@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 
@@ -454,6 +455,10 @@ CustomMusicSourceProbeResult _errorResult(
   if (cancelled || error is CustomMusicSourceCancelled) {
     return CustomMusicSourceProbeResult(
         capability, CustomMusicSourceProbeStatus.cancelled, '测试已取消');
+  }
+  if (error is LyricUnavailableException) {
+    return CustomMusicSourceProbeResult(
+        capability, CustomMusicSourceProbeStatus.noSample, '未找到可用于此项测试的歌曲样本');
   }
   if (error is CustomMusicSourceException) {
     if (error.kind == CustomMusicSourceFailureKind.credentialsNotConfigured ||

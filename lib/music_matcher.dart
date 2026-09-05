@@ -9,6 +9,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/krc.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/qrc.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
@@ -224,6 +225,9 @@ class SongSearchResult {
   final String album;
   final double score;
 
+  /// Duration supplied by the search response; null means version unverified.
+  final double? durationSeconds;
+
   /// for qq result
   final int? qqSongId;
   final String? qqSongMid;
@@ -243,7 +247,8 @@ class SongSearchResult {
 
   SongSearchResult(
       this.source, this.title, this.artists, this.album, this.score,
-      {this.qqSongId,
+      {this.durationSeconds,
+      this.qqSongId,
       this.qqSongMid,
       this.neteaseSongId,
       this.kugouSongHash,
@@ -453,6 +458,7 @@ Future<LyricSearchResponse> searchLyricCandidates(
                 kugouSongHash: track.onlineId,
                 customProfile: profile,
                 customAudio: track,
+                durationSeconds: _positiveSeconds(track.duration),
               ),
           ];
         },
@@ -632,6 +638,7 @@ List<SongSearchResult> parseQqLyricSearchPayload(
       computeSongMatchScore(audio, title, artists, album),
       qqSongId: id,
       qqSongMid: mid,
+      durationSeconds: _positiveSeconds(value['interval']),
     ));
   }
   return results;
@@ -665,6 +672,8 @@ List<SongSearchResult> parseNeteaseLyricSearchPayload(
       album,
       computeSongMatchScore(audio, title, artists, album),
       neteaseSongId: id,
+      durationSeconds: _positiveSeconds(value['duration'] ?? value['dt'],
+          milliseconds: true),
     ));
   }
   return results;
@@ -697,6 +706,7 @@ List<SongSearchResult> parseKugouLyricSearchPayload(
       album,
       computeSongMatchScore(audio, title, artists, album),
       kugouSongHash: hash,
+      durationSeconds: _positiveSeconds(value['duration']),
     ));
   }
   return results;
@@ -722,6 +732,7 @@ List<SongSearchResult> parseLrclibLyricSearchPayload(
           record.albumName,
         ),
         lrclibId: record.id,
+        durationSeconds: _positiveSeconds(record.durationSeconds),
       ),
   ];
 }
@@ -798,6 +809,12 @@ int? _integer(Object? value) {
 int? _positiveInt(Object? value) {
   final parsed = _integer(value);
   return parsed != null && parsed > 0 ? parsed : null;
+}
+
+double? _positiveSeconds(Object? value, {bool milliseconds = false}) {
+  final parsed = value is num ? value.toDouble() : double.tryParse('$value');
+  if (parsed == null || !parsed.isFinite || parsed <= 0) return null;
+  return milliseconds ? parsed / 1000 : parsed;
 }
 
 String? _positiveNumericText(Object? value) {
@@ -991,6 +1008,7 @@ Future<Lrc?> getQqPublicLyric({
   int? songId,
   String? songMid,
   QqLyricPayloadLoader? payloadLoader,
+  bool throwOnFailure = false,
 }) async {
   if ((songId == null || songId <= 0) && songMid?.trim().isNotEmpty != true) {
     return null;
@@ -999,8 +1017,25 @@ Future<Lrc?> getQqPublicLyric({
     final payload = await (payloadLoader ?? _loadQqPublicLyricPayload)
         .call(songId, songMid)
         .timeout(_providerTimeout);
-    return parseQqPublicLyricPayload(payload);
+    if (payload is! Map) {
+      throw const FormatException('Invalid QQ lyric response');
+    }
+    final code = _integer(payload['code'] ?? payload['retcode']);
+    if (code == -1901) throw const LyricUnavailableException();
+    if (code != null && code != 0) {
+      throw HttpException('QQ lyric service code $code');
+    }
+    final text = payload['lyric'];
+    if (text == null || text is String && text.trim().isEmpty) {
+      throw const LyricUnavailableException();
+    }
+    final parsed = parseQqPublicLyricPayload(payload);
+    if (parsed == null) {
+      throw const FormatException('Invalid QQ lyric text');
+    }
+    return parsed;
   } catch (error, trace) {
+    if (throwOnFailure) rethrow;
     LOGGER.w('[lyric/qq-public] 无法读取普通歌词', stackTrace: trace);
   }
   return null;
@@ -1074,6 +1109,8 @@ Future<Qrc?> _getQQSyncLyric(int songId) async {
 Future<Lyric?> _getKugouSyncLyric(String kugouSongHash) async {
   final profile = _configuredKugouLyricProfile();
   if (profile == null) return null;
+  final cancellation = CustomMusicSourceCancellation();
+  final deadline = Timer(_customLyricSweepTimeout, cancellation.cancel);
   try {
     final audio = Audio.online(
       provider: profile.providerId,
@@ -1083,10 +1120,19 @@ Future<Lyric?> _getKugouSyncLyric(String kugouSongHash) async {
       album: '',
       duration: 0,
     );
-    return await getLyricForCustomSourceChoice(
-        audio, CustomLyricSourceChoice(profile));
+    // Older saved associations retain only the hash. Recover that exact song's
+    // metadata before accepting a lyric-server fallback with its own identity.
+    final transport = CustomMusicSourceTransport(profile);
+    final selected =
+        await transport.metadata(audio, cancellation: cancellation);
+    final response =
+        await transport.lyrics(selected, cancellation: cancellation);
+    if (!_isCurrentCustomLyricProfile(profile)) return null;
+    return _parseCustomLyricResponse(response.rawBody);
   } catch (err, trace) {
     LOGGER.w('[lyric/kugou] 无法读取歌词', stackTrace: trace);
+  } finally {
+    deadline.cancel();
   }
 
   return null;
@@ -1098,24 +1144,41 @@ Future<Lyric?> getOnlineLyric({
   String? kugouSongHash,
   String? neteaseSongId,
   int? lrclibId,
+  bool throwOnFailure = false,
 }) async {
-  Lyric? lyric;
-  if (qqSongId != null || qqSongMid != null) {
-    lyric = await getQqPublicLyric(songId: qqSongId, songMid: qqSongMid);
-    if (lyric == null && qqSongId != null) {
-      lyric = await _getQQSyncLyric(qqSongId);
+  try {
+    Lyric? lyric;
+    if (qqSongId != null || qqSongMid != null) {
+      Object? publicFailure;
+      StackTrace? publicFailureTrace;
+      try {
+        lyric = await getQqPublicLyric(
+            songId: qqSongId, songMid: qqSongMid, throwOnFailure: true);
+      } catch (error, trace) {
+        publicFailure = error;
+        publicFailureTrace = trace;
+      }
+      if (lyric == null && qqSongId != null) {
+        lyric = await _getQQSyncLyric(qqSongId);
+      }
+      if (lyric == null && qqSongMid != null && qqSongMid.trim().isNotEmpty) {
+        lyric = await _getQQUnsyncLyric(qqSongMid.trim());
+      }
+      if (lyric == null && publicFailure != null) {
+        Error.throwWithStackTrace(publicFailure, publicFailureTrace!);
+      }
+    } else if (kugouSongHash != null) {
+      lyric = (await _getKugouSyncLyric(kugouSongHash));
+    } else if (neteaseSongId != null) {
+      lyric = await getNeteaseLyric(neteaseSongId);
+    } else if (lrclibId != null) {
+      lyric = await getLrclibLyric(lrclibId);
     }
-    if (lyric == null && qqSongMid != null && qqSongMid.trim().isNotEmpty) {
-      lyric = await _getQQUnsyncLyric(qqSongMid.trim());
-    }
-  } else if (kugouSongHash != null) {
-    lyric = (await _getKugouSyncLyric(kugouSongHash));
-  } else if (neteaseSongId != null) {
-    lyric = await getNeteaseLyric(neteaseSongId);
-  } else if (lrclibId != null) {
-    lyric = await getLrclibLyric(lrclibId);
+    return lyric;
+  } catch (_) {
+    if (throwOnFailure) rethrow;
+    return null;
   }
-  return lyric;
 }
 
 Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) {
@@ -1131,6 +1194,7 @@ Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) {
     kugouSongHash: candidate.kugouSongHash,
     neteaseSongId: candidate.neteaseSongId,
     lrclibId: candidate.lrclibId,
+    throwOnFailure: true,
   );
 }
 
@@ -1181,6 +1245,14 @@ Future<Lyric?> _getCustomLyric(Audio audio) async {
     // unrelated local file from metadata alone.
     if (profile.protocol == CustomMusicSourceProtocol.goMusicApi &&
         audio.onlineProvider != profile.providerId) {
+      continue;
+    }
+    // Text-only metadata lookups cannot prove which short/full recording they
+    // returned. Explicit user choices and existing saved associations still
+    // use their normal loader; only unsolicited automatic matching skips them.
+    if (_songVersionKind(audio.title) != null &&
+        audio.onlineProvider != profile.providerId &&
+        profile.protocol != CustomMusicSourceProtocol.kugou) {
       continue;
     }
     final remaining = deadline.difference(DateTime.now());
@@ -1414,7 +1486,10 @@ Future<Lyric?> getMostMatchedLyric(
     return null;
   }
   final load = candidateLyricLoader ?? getLyricForCandidate;
-  for (final candidate in response.candidates.take(5)) {
+  for (final candidate in response.candidates
+      .where(
+          (candidate) => isAutomaticLyricCandidateCompatible(audio, candidate))
+      .take(5)) {
     try {
       final lyric = await load(candidate);
       if (lyric != null && lyric.lines.isNotEmpty) return lyric;
@@ -1426,6 +1501,42 @@ Future<Lyric?> getMostMatchedLyric(
     }
   }
   return null;
+}
+
+String? _songVersionKind(String title) {
+  if (RegExp(r'\bshort(?:\s*ver\.?)?|\btv\s*(?:size|ver\.?)|ショート|短版',
+          caseSensitive: false)
+      .hasMatch(title)) {
+    return 'short';
+  }
+  if (RegExp(r'\bfull(?:\s*(?:ver(?:sion)?\.?|size))?\b|完整版|フル',
+          caseSensitive: false)
+      .hasMatch(title)) {
+    return 'full';
+  }
+  return null;
+}
+
+/// Automatic matching must retain version evidence that the fuzzy text score
+/// deliberately ignores. Manual selection does not use this acceptance gate.
+bool isAutomaticLyricCandidateCompatible(
+    Audio audio, SongSearchResult candidate) {
+  final duration = candidate.durationSeconds ??
+      _positiveSeconds(candidate.customAudio?.duration);
+  final hasDurations = audio.duration > 0 && duration != null;
+  if (hasDurations &&
+      (audio.duration - duration).abs() > (audio.duration * .04).clamp(5, 12)) {
+    return false;
+  }
+  final localVersion = _songVersionKind(audio.title);
+  final remoteVersion = _songVersionKind(candidate.title);
+  if (localVersion != null &&
+      remoteVersion != null &&
+      localVersion != remoteVersion) {
+    return false;
+  }
+  if (localVersion != remoteVersion && !hasDurations) return false;
+  return true;
 }
 
 Future<Lrc?> _getQQUnsyncLyric(String songMid) async {

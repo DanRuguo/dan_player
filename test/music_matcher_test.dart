@@ -5,6 +5,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
@@ -15,13 +16,14 @@ Audio _audio({
   String artist = 'Artist A',
   String album = 'Album A',
   String path = r'C:\Music\Song A.mp3',
+  int duration = 180,
 }) =>
     Audio(
       title,
       artist,
       album,
       0,
-      180,
+      duration,
       null,
       null,
       path,
@@ -431,6 +433,42 @@ void main() {
     expect(parseQqPublicLyricPayload({'retcode': 1}), isNull);
   });
 
+  test(
+      'QQ strict lyrics distinguish missing records, network and malformed data',
+      () async {
+    await expectLater(
+        getQqPublicLyric(
+            songId: 722606321,
+            throwOnFailure: true,
+            payloadLoader: (_, __) async => {'code': -1901, 'retcode': -1901}),
+        throwsA(isA<LyricUnavailableException>()));
+    await expectLater(
+        getQqPublicLyric(
+            songId: 42,
+            throwOnFailure: true,
+            payloadLoader: (_, __) async =>
+                throw const SocketException('fixture')),
+        throwsA(isA<SocketException>()));
+    await expectLater(
+        getQqPublicLyric(
+            songId: 42,
+            throwOnFailure: true,
+            payloadLoader: (_, __) async => {'code': 0, 'lyric': 123}),
+        throwsA(isA<FormatException>()));
+    await expectLater(
+        getQqPublicLyric(
+            songId: 42,
+            throwOnFailure: true,
+            payloadLoader: (_, __) async => {'code': 500}),
+        throwsA(isA<HttpException>()));
+    expect(
+        await getQqPublicLyric(
+            songId: 42, payloadLoader: (_, __) async => {'code': -1901}),
+        isNull,
+        reason:
+            'Automatic loading retains the existing optional result contract');
+  });
+
   test('LRCLIB title-only fallback handles composer tagged as artist',
       () async {
     final audio = _audio(
@@ -526,7 +564,7 @@ void main() {
     ];
     final loaded = <ResultSource>[];
     final lyric = await getMostMatchedLyric(
-      _audio(title: '結想は花となる -OP- short ver.', artist: '堀江晶太'),
+      _audio(title: '結想は花となる', artist: '堀江晶太', duration: 195),
       customLyricLoader: (_) async => null,
       candidateSearch: (_) async => LyricSearchResponse(
         candidates: candidates,
@@ -677,6 +715,91 @@ void main() {
     expect(result, isNotNull);
     expect((result!.lines.single as LrcLine).content, 'third candidate');
     expect(loaded, [1, 2, 3]);
+  });
+
+  test('automatic short matching rejects full and unknown versions before I/O',
+      () async {
+    final audio =
+        _audio(title: '結想は花となる short ver.', artist: '堀江晶太', duration: 96);
+    SongSearchResult candidate(int id, String title, double? duration) =>
+        SongSearchResult(ResultSource.qq, title, 'ウォルピスカーター',
+            'as:9-nine- ARTEISIA ORIGINAL SOUND TRACK', .79,
+            qqSongId: id, durationSeconds: duration);
+    final candidates = [
+      candidate(1, '結想は花となる', 195),
+      candidate(2, '結想は花となる', null),
+      candidate(3, '結想は花となる full ver.', 96),
+      candidate(4, '結想は花となる short ver.', 195),
+      candidate(5, '結想は花となる short ver.', 96),
+    ];
+    final loaded = <int?>[];
+    final lyric = await getMostMatchedLyric(audio,
+        customLyricLoader: (_) async => null,
+        candidateSearch: (_) async =>
+            LyricSearchResponse(candidates: candidates, failures: const {}),
+        candidateLyricLoader: (candidate) async {
+          loaded.add(candidate.qqSongId);
+          return _lyric('selected short recording');
+        });
+    expect(loaded, [5]);
+    expect(lyric, isNotNull);
+    expect(candidates.length, 5,
+        reason:
+            'manual candidates remain available, even when automatic rejects them');
+    expect(
+        isAutomaticLyricCandidateCompatible(audio, candidate(6, '結想は花となる', 96)),
+        isTrue);
+    expect(
+        isAutomaticLyricCandidateCompatible(
+            _audio(title: '結想は花となる', duration: 195),
+            candidate(7, '結想は花となる', 96)),
+        isFalse);
+  });
+
+  test('all search parsers retain supplied duration without detail requests',
+      () {
+    final audio = _audio();
+    final qq = parseQqLyricSearchPayload(
+        _qqPayload([
+          {..._qqSong(1, 'Song A'), 'interval': 96},
+        ]),
+        audio,
+        5);
+    final netease = parseNeteaseLyricSearchPayload(
+        _neteasePayload([
+          {'id': 2, 'name': 'Song A', 'duration': 96000},
+          {'id': 3, 'name': 'Song A', 'dt': 195500},
+        ]),
+        audio,
+        5);
+    final kugou = parseKugouLyricSearchPayload({
+      'error_code': 0,
+      'data': {
+        'info': [
+          {'songname': 'Song A', 'hash': 'HASH', 'duration': 96}
+        ]
+      },
+    }, audio, 5);
+    final lrclib = parseLrclibLyricSearchPayload([
+      {
+        'id': 4,
+        'trackName': 'Song A',
+        'artistName': 'Artist A',
+        'albumName': 'Album A',
+        'duration': 96.5,
+        'instrumental': false,
+        'plainLyrics': 'fixture'
+      },
+    ], audio, 5);
+    expect(qq.single.durationSeconds, 96);
+    expect(netease.map((track) => track.durationSeconds), [96, 195.5]);
+    expect(kugou.single.durationSeconds, 96);
+    expect(lrclib.single.durationSeconds, 96.5);
+    expect(
+        parseQqLyricSearchPayload(_qqPayload([_qqSong(5, 'Song A')]), audio, 5)
+            .single
+            .durationSeconds,
+        isNull);
   });
 
   test('an explicitly empty provider set reports disabled sources', () async {

@@ -60,6 +60,20 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (_) async => testRoot.path);
 
+  // Each data-root resolution asks for Documents and then ApplicationSupport
+  // (the data_location.json pointer). Gate only Documents, once per operation:
+  // counting both calls would block/fail the older operation's support lookup
+  // instead of the newer read/write this test is meant to control.
+  void gateDataDirectoryRequests(Future<void> Function() gate) {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getApplicationDocumentsDirectory') {
+        await gate();
+      }
+      return testRoot.path;
+    });
+  }
+
   Playlist createNested() {
     final tree = playlistTree;
     final root = tree.createPlaylist('根');
@@ -322,8 +336,7 @@ void main() {
     final entered = Completer<void>();
     final release = Completer<void>();
     var calls = 0;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) async {
+    gateDataDirectoryRequests(() async {
       final call = ++calls;
       if (call == 1) {
         entered.complete();
@@ -331,7 +344,6 @@ void main() {
       } else if (call == 2) {
         throw PlatformException(code: 'newest-write-denied');
       }
-      return testRoot.path;
     });
     try {
       root.name = '较早快照';
@@ -344,6 +356,7 @@ void main() {
       release.complete();
       await older;
       await newerFailure;
+      expect(calls, 2);
       restorePathHandler();
       expect(
           decodePlaylists(
@@ -372,14 +385,12 @@ void main() {
     final entered = Completer<void>();
     final release = Completer<void>();
     var calls = 0;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) async {
+    gateDataDirectoryRequests(() async {
       if (++calls == 1) {
         entered.complete();
         await release.future;
         throw PlatformException(code: 'older-write-denied');
       }
-      return testRoot.path;
     });
     try {
       root.name = '旧失败';
@@ -411,8 +422,7 @@ void main() {
     final entered = Completer<void>();
     final release = Completer<void>();
     var calls = 0;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) async {
+    gateDataDirectoryRequests(() async {
       final call = ++calls;
       if (call == 1) {
         entered.complete();
@@ -420,7 +430,6 @@ void main() {
       } else if (call == 2) {
         throw PlatformException(code: 'concurrent-save-denied');
       }
-      return testRoot.path;
     });
     try {
       final reload = readPlaylists();
@@ -447,8 +456,7 @@ void main() {
     final releaseOlder = Completer<void>();
     final releaseNewer = Completer<void>();
     var calls = 0;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) async {
+    gateDataDirectoryRequests(() async {
       final call = ++calls;
       if (call == 1) {
         enteredOlder.complete();
@@ -457,7 +465,6 @@ void main() {
         enteredNewer.complete();
         await releaseNewer.future;
       }
-      return testRoot.path;
     });
     try {
       root.name = '旧的';
@@ -521,14 +528,12 @@ void main() {
     final entered = Completer<void>();
     final release = Completer<void>();
     var calls = 0;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) async {
+    gateDataDirectoryRequests(() async {
       if (++calls == 1) {
         entered.complete();
         await release.future;
         throw PlatformException(code: 'stale-read-failed');
       }
-      return testRoot.path;
     });
     try {
       final reload = readPlaylists();

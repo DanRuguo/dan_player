@@ -10,6 +10,52 @@ import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+      'versioned local track skips unverified text-only auto lookup but allows manual',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    var requests = 0;
+    final subscription = server.listen((request) {
+      requests++;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'lyric': '[00:01.00]Fixture'}));
+      request.response.close();
+    });
+    final previous = AppSettings.instance.customMusicSources.value;
+    final profile = CustomMusicSourceProfile.legacyLyric(
+        'http://127.0.0.1:${server.port}/lyrics')!;
+    AppSettings.instance.customMusicSources.value = [profile];
+    final audio = Audio(
+        '結想は花となる short ver.',
+        '堀江晶太',
+        'as:9-nine- ARTEISIA O.S.T',
+        0,
+        96,
+        null,
+        null,
+        'fixture.flac',
+        0,
+        0,
+        null);
+    try {
+      expect(
+          await getMostMatchedLyric(audio,
+              candidateSearch: (_) async => LyricSearchResponse(
+                  candidates: const [], failures: const {})),
+          isNull);
+      expect(requests, 0);
+      expect(
+          await getLyricForCustomSourceChoice(
+              audio, CustomLyricSourceChoice(profile)),
+          isA<Lrc>());
+      expect(requests, 1);
+    } finally {
+      AppSettings.instance.customMusicSources.value = previous;
+      await subscription.cancel();
+      await server.close(force: true);
+    }
+  });
+
   test("custom lyric API uses metadata query and parses LRC JSON", () async {
     final requests = <Uri>[];
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

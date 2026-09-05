@@ -68,6 +68,9 @@ class AudioDeletionService {
   }
 
   Future<AudioDeletionOutcome> _delete(Audio requested) async {
+    if (requested.isCueTrack) {
+      throw const AudioDeletionException('CUE 分轨仅引用整轨音频，请使用歌单中的移除功能。');
+    }
     if (requested.isOnline) {
       throw const AudioDeletionException('联网歌曲没有可删除的本地文件。');
     }

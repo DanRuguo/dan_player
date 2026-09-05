@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -7,6 +8,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
+import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -165,6 +167,15 @@ typedef LyricCandidateApplyCallback = bool Function(
   Lyric lyric,
 );
 typedef LocalLyricApplyCallback = bool Function(String expectedTrackPath);
+
+bool lyricCandidateMayUseDifferentVersion(
+    Audio audio, SongSearchResult candidate) {
+  final shortVersion = RegExp(
+      r'\bshort(?:\s*ver\.?)?|\btv\s*(?:size|ver\.?)|ショート|短版',
+      caseSensitive: false);
+  return shortVersion.hasMatch(audio.title) &&
+      !shortVersion.hasMatch(candidate.title);
+}
 
 /// The dialog owns one search generation. It never creates a network Future in
 /// build, and a selected lyric is committed only if the captured song is still
@@ -336,6 +347,8 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       _operationError = null;
       _candidateErrors.remove(candidate.identity);
     });
+    var stage =
+        0; // Fetch, persist, then apply have different recovery actions.
     try {
       final lyric =
           await (widget.loadCandidate ?? getLyricForCandidate)(candidate);
@@ -350,11 +363,13 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
         return;
       }
       final source = _sourceFor(candidate);
+      stage = 1;
       await (widget.persistSource ?? persistLyricSource)(
         widget.audio.path,
         source,
       );
       if (!_isSelectionCurrent(generation)) return;
+      stage = 2;
       final applied = (widget.applyCandidate ??
           PlayService.instance.lyricService.useSpecificLyricForTrack)(
         widget.audio.path,
@@ -366,10 +381,25 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       }
       if (!mounted) return;
       Navigator.of(context).pop();
-    } catch (_) {
+    } catch (error) {
       if (_isSelectionCurrent(generation)) {
-        setState(() => _candidateErrors[candidate.identity] =
-            () => ui("获取或保存歌词失败，旧设置已保留，请重试。"));
+        final message = stage == 1
+            ? '歌词已获取，但保存来源失败；旧设置已保留，请检查数据目录权限后重试。'
+            : stage == 2
+                ? '歌词来源已保存，但未能应用；请重新打开当前歌曲后重试。'
+                : error is LyricUnavailableException
+                    ? '此来源暂未提供这条录音的可用歌词，请选择其他候选。'
+                    : error is TimeoutException
+                        ? '获取歌词超时，请重试或选择其他候选。'
+                        : error is SocketException ||
+                                error is HandshakeException ||
+                                error is HttpException
+                            ? '连接歌词来源失败，请检查网络或代理后重试。'
+                            : error is FormatException
+                                ? '歌词来源返回的内容无法解析，请重试或选择其他候选。'
+                                : '获取歌词失败，可选择其他候选或重试。';
+        setState(
+            () => _candidateErrors[candidate.identity] = () => ui(message));
       }
     } finally {
       if (_isSelectionCurrent(generation)) {
@@ -654,6 +684,9 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
               ui("来源：{0} · 匹配 {1}%",
                   [ui(candidate.sourceLabel), (candidate.score * 100).round()]),
             ),
+            if (lyricCandidateMayUseDifferentVersion(widget.audio, candidate))
+              Text(ui('版本可能不同：当前歌曲为短版，候选未注明短版。'),
+                  style: Theme.of(context).textTheme.bodySmall),
             if (error != null)
               Text(
                 error(),

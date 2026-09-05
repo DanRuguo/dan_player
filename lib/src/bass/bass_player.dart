@@ -9,6 +9,7 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
 import 'package:dan_player/src/bass/bass_mix.dart';
 import 'package:dan_player/src/bass/bass_tempo.dart';
+import 'package:dan_player/src/bass/audio_segment.dart';
 import 'package:dan_player/src/bass/wasapi_output_policy.dart';
 import 'package:dan_player/src/bass/bass_wasapi.dart' as BASS;
 import 'package:dan_player/utils.dart';
@@ -74,9 +75,10 @@ Future<_BassOpenResult> _openBassFileInBackground(
   String filePath,
   int flags,
   int device,
+  AudioSegment? segment,
 ) {
   return Isolate.run(
-    () => _openBassFile(libraryPath, filePath, flags, device),
+    () => _openBassFile(libraryPath, filePath, flags, device, segment),
     debugName: 'bass-file-open',
   );
 }
@@ -86,6 +88,7 @@ _BassOpenResult _openBassFile(
   String filePath,
   int flags,
   int device,
+  AudioSegment? segment,
 ) {
   final library = ffi.DynamicLibrary.open(libraryPath);
   ffi.Pointer<ffi.Void>? filePointer;
@@ -115,6 +118,15 @@ _BassOpenResult _openBassFile(
       return (handle: 0, errorCode: getError());
     }
     final handle = createFile(BASS.FALSE, filePointer, 0, 0, flags);
+    if (handle != 0 && segment != null) {
+      final api = BASS.Bass(library);
+      try {
+        prepareBassSegment(api, handle, segment);
+      } catch (_) {
+        api.BASS_StreamFree(handle);
+        rethrow;
+      }
+    }
     return (
       handle: handle,
       errorCode: handle == 0 ? getError() : 0,
@@ -333,6 +345,8 @@ class BassPlayer {
 
   String? _fPath;
   bool _sourceIsUrl = false;
+  AudioSegment? _segment;
+  double? _segmentLength;
   int? _fstream;
 
   final _outputMode = WasapiOutputMode();
@@ -382,8 +396,9 @@ class BassPlayer {
   /// audio's length in seconds
   double get length => _fstream == null
       ? 1.0
-      : _bass.BASS_ChannelBytes2Seconds(_fstream!,
-          _bass.BASS_ChannelGetLength(_fstream!, BASS.BASS_POS_BYTE));
+      : _segmentLength ??
+          _bass.BASS_ChannelBytes2Seconds(_fstream!,
+              _bass.BASS_ChannelGetLength(_fstream!, BASS.BASS_POS_BYTE));
 
   /// current position in seconds
   double get position {
@@ -393,7 +408,8 @@ class BassPlayer {
         ? _mix!.getChannelPosition(stream, BASS.BASS_POS_BYTE)
         : _bass.BASS_ChannelGetPosition(stream, BASS.BASS_POS_BYTE);
     if (bytes == _bassPositionErrorValue) return 0.0;
-    return _bass.BASS_ChannelBytes2Seconds(stream, bytes);
+    final absolute = _bass.BASS_ChannelBytes2Seconds(stream, bytes);
+    return _segment?.relativePosition(absolute, length) ?? absolute;
   }
 
   PlayerState get playerState {
@@ -917,6 +933,7 @@ class BassPlayer {
 
     final sourcePath = _fPath;
     final sourceIsUrl = _sourceIsUrl;
+    final sourceSegment = _segment;
     final previousMode = wasapiExclusive;
     var lastPos = position;
     var wasPlaying = playerState == PlayerState.playing;
@@ -944,6 +961,7 @@ class BassPlayer {
       final applied = await _setSource(
         sourcePath,
         isUrl: sourceIsUrl,
+        segment: sourceSegment,
         exclusive: exclusive,
         generation: generation,
         onBeforeCommit: () {
@@ -980,6 +998,7 @@ class BassPlayer {
         try {
           final restored = await _setSource(sourcePath,
               isUrl: sourceIsUrl,
+              segment: sourceSegment,
               exclusive: previousMode,
               generation: generation);
           if (!restored || !_isCurrentSource(generation)) return false;
@@ -1032,12 +1051,14 @@ class BassPlayer {
   /// Opens the new source before replacing the current stream. Potentially
   /// blocking file/network opens run outside Flutter's UI isolate.
   /// Returns false when a newer request or shutdown cancels this request.
-  Future<bool> setSource(String path, {bool isUrl = false}) {
+  Future<bool> setSource(String path,
+      {bool isUrl = false, AudioSegment? segment}) {
     if (_freed) return Future.value(false);
     cancelPendingSource();
     return _setSource(
       path,
       isUrl: isUrl,
+      segment: segment,
       exclusive: _outputMode.preferred,
       generation: _sourceGeneration,
     );
@@ -1048,6 +1069,7 @@ class BassPlayer {
     required bool isUrl,
     required bool exclusive,
     required int generation,
+    AudioSegment? segment,
     void Function()? onBeforeCommit,
   }) async {
     const fileFlags =
@@ -1056,6 +1078,10 @@ class BassPlayer {
     // BASS may still apply BLOCK itself for unknown-length/live streams.
     const urlFlags = BASS.BASS_UNICODE | BASS.BASS_SAMPLE_FLOAT;
     var flags = isUrl ? urlFlags : fileFlags;
+    if (segment != null) {
+      if (isUrl) throw const FormatException('CUE 分轨仅支持本地音频文件。');
+      flags |= 0x20000; // BASS_STREAM_PRESCAN: accurate MP3 source positions.
+    }
     if (exclusive || _tempo != null) flags |= BASS.BASS_STREAM_DECODE;
 
     var uncommittedHandle = 0;
@@ -1116,6 +1142,7 @@ class BassPlayer {
           source,
           flags,
           device,
+          segment,
         );
         uncommittedHandle = result.handle;
         if (!_isCurrentSource(generation)) return false;
@@ -1131,6 +1158,7 @@ class BassPlayer {
             source,
             flags,
             device,
+            segment,
           );
           uncommittedHandle = result.handle;
           if (!_isCurrentSource(generation)) return false;
@@ -1163,6 +1191,9 @@ class BassPlayer {
         }
         uncommittedInMixer = true;
       }
+      final segmentLength = segment?.duration(_bass.BASS_ChannelBytes2Seconds(
+          uncommittedHandle,
+          _bass.BASS_ChannelGetLength(uncommittedHandle, BASS.BASS_POS_BYTE)));
       onBeforeCommit?.call();
       freeFStream();
       if (!exclusive) _disposeExclusiveOutput();
@@ -1172,6 +1203,8 @@ class BassPlayer {
       uncommittedHandle = 0; // ownership has moved to the active stream
       _fPath = source;
       _sourceIsUrl = isUrl;
+      _segment = segment;
+      _segmentLength = segmentLength;
       if (_eqEnabled) _applyEqToStream();
       return true;
     } catch (_) {
@@ -1369,6 +1402,8 @@ class BassPlayer {
   void start() {
     if (_fstream == null) return;
 
+    if (_segment != null && position >= length) _seekNative(0);
+
     _positionUpdater?.cancel();
 
     if (wasapiExclusive) {
@@ -1467,7 +1502,9 @@ class BassPlayer {
 
   void _seekNative(double position) {
     final stream = _fstream!;
-    final bytes = _bass.BASS_ChannelSeconds2Bytes(stream, position);
+    final sourcePosition =
+        _segment?.sourcePosition(position, length) ?? position;
+    final bytes = _bass.BASS_ChannelSeconds2Bytes(stream, sourcePosition);
     final moved = wasapiExclusive && _exclusiveMixer != null
         ? _mix!.setChannelPosition(
             stream,
@@ -1522,6 +1559,8 @@ class BassPlayer {
     _fstream = null;
     _fPath = null;
     _sourceIsUrl = false;
+    _segment = null;
+    _segmentLength = null;
     _resetSpectrum();
 
     if (_bass.BASS_StreamFree(handle) == 0) {
