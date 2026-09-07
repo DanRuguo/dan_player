@@ -22,7 +22,7 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 | 版本 | 适合 | 获取 |
 | --- | --- | --- |
 | **26.0.4** | 日常使用 | [安装器、便携 ZIP 与 SHA256SUMS](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) |
-| **26.0.5-snapshot.2** | 体验新功能的预览版 | [签名便携 ZIP 与 SHA256SUMS](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.2) |
+| **26.0.5-snapshot.2** | 体验新功能的预览版 | [签名安装器、便携 ZIP 与 SHA256SUMS](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.2) |
 | 历史版本 | 查看旧版与预览版 | [全部 Release](https://github.com/DanRuguo/dan_player/releases) |
 
 安装器可选择位置、桌面和开始菜单快捷方式；检测到旧版时支持原位升级，手动编辑后的最终路径不会再被自动追加目录。使用便携 ZIP 时，请完整解压后运行 `Dan Player.exe`。包内已包含 BASS 运行库和桌面歌词；26.0.5 预览版由同一 EXE 启动独立歌词进程。
@@ -71,7 +71,7 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 - 统一图标主题、紧凑通知及分档动效，加快返回；重做任务栏预览，修复队列留白和分类首曲封面。
 - 支持文件夹自动增量刷新，改进标签同步与备份并发保护，降低大曲库搜索和索引缓存开销。
 
-歌单首页仅保留歌单管理操作，歌曲页继续显示播放模式控件。本次预览发行提供 RCEIT.Inc 签名便携包；正式版下载仍为 26.0.4。详见 [预览更新说明](docs/release-26.0.5-snapshot.2.md)。
+歌单首页仅保留歌单管理操作，歌曲页继续显示播放模式控件。本次预览发行提供 RCEIT.Inc 签名安装器和便携包；正式版下载仍为 26.0.4。详见 [预览更新说明](docs/release-26.0.5-snapshot.2.md)。
 
 ## 26.0.4 更新
 
@@ -222,7 +222,7 @@ flutter build windows --release
 
 便携包包含共享 Flutter 资源、BASS、原始签名的 Microsoft x64 CRT 和许可证说明，并生成包内文件清单及 ZIP 的 `SHA256SUMS`。联网播放要求 BASS 2.4.18 或更新版；准备脚本固定官方版本与哈希，下载内容变化会报错，不会默默接受更新。BASS 的商业使用及公开分发需另行核对其许可，DLL 不会被改签成 RCEIT.Inc。
 
-Windows CI 执行分析、测试、主程序及歌词测试壳构建，再组装未签名便携包；只上传构建 artifact，不会发布 GitHub Release。发行时提供对应源代码与许可证；本次预览仅发布签名便携 ZIP 和校验文件，需手动下载。预览 Release 不更改最新稳定版。提供安装器的版本，其同名 `.exe.sha256` 文件必须在签名之后生成，记录上传资产的文件名，而非本地子目录。
+Windows CI 执行分析、测试、主程序及歌词测试壳构建，再组装未签名便携包；只上传构建 artifact，不会发布 GitHub Release。发行时提供对应源代码与许可证；本次预览提供签名安装器、便携 ZIP 和校验文件。预览 Release 不更改最新稳定版。安装器同名 `.exe.sha256` 文件必须在签名之后生成，记录上传资产的文件名，而非本地子目录。
 
 开发测试可在启动进程前设置绝对路径环境变量 `DAN_PLAYER_DATA_DIR`，将索引、设置和缓存隔离到工作区。指定此变量时不会迁移或导入用户原有文档目录曲库；正常启动不设置该变量即可沿用原来的数据。
 
