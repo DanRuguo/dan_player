@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/brand_logo.dart';
 import 'package:flutter/material.dart';
 
@@ -7,8 +8,8 @@ class StartupSplash extends StatefulWidget {
     super.key,
     required this.child,
     this.minimumVisibleDuration = const Duration(milliseconds: 1700),
-    this.fadeDuration = const Duration(milliseconds: 300),
-    this.logoTransitionDuration = const Duration(milliseconds: 420),
+    this.fadeDuration = AppMotion.long,
+    this.logoTransitionDuration = AppMotion.emphasized,
   });
 
   static const totalDuration = Duration(seconds: 2);

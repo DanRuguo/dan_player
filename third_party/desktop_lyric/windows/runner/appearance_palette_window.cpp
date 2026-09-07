@@ -8,6 +8,8 @@
 #include <utility>
 #include "palette_window_shape.h"
 
+namespace desktop_lyric_runner {
+
 namespace {
 using Value = flutter::EncodableValue;
 const Value* Field(const Value* value, const char* name) {
@@ -373,3 +375,5 @@ void PaletteWindowManager::EvictCache() {
   auto palette = std::exchange(palette_, nullptr);
   if (palette) palette->Destroy();
 }
+
+}  // namespace desktop_lyric_runner

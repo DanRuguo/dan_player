@@ -55,7 +55,6 @@ class CustomAudioOrder {
   }
 
   bool sanitize({bool rebuildWhenBroken = false}) {
-    final byPath = _audioByPath;
     if (rebuildWhenBroken || _paths.isEmpty) {
       rebuildDefault();
       return true;
@@ -66,7 +65,9 @@ class CustomAudioOrder {
     final sanitized = <String>[];
 
     for (final path in _paths) {
-      if (byPath.containsKey(path) && seen.add(path)) {
+      // Temporary source loss must not erase a user's ordering. Explicit
+      // deletion uses removePath; rendering simply skips unavailable objects.
+      if (seen.add(path)) {
         sanitized.add(path);
       } else {
         changed = true;
@@ -100,8 +101,28 @@ class CustomAudioOrder {
   }
 
   Future<void> setFromAudios(List<Audio> audios) async {
-    _paths = audios.map((audio) => audio.path).toList();
-    await saveCustomAudioOrder();
+    final previous = List<String>.of(_paths);
+    final incoming = audios.map((audio) => audio.path).toList();
+    final supplied = incoming.toSet();
+    final byPath = _audioByPath;
+    var next = 0;
+    _paths = [
+      for (final previousPath in previous)
+        if (!supplied.contains(previousPath) &&
+            !byPath.containsKey(previousPath))
+          previousPath
+        else if (next < incoming.length)
+          incoming[next++],
+      ...incoming.skip(next),
+    ];
+    try {
+      await saveCustomAudioOrder(rethrowOnError: true);
+    } catch (error, trace) {
+      _paths = previous;
+      applyTo(audios);
+      LOGGER.e(error, stackTrace: trace);
+      showTextOnSnackBar('自定义顺序保存失败，原有顺序已恢复。');
+    }
   }
 
   bool replacePath(String oldPath, String newPath) {
@@ -130,7 +151,6 @@ class CustomAudioOrder {
   bool tryReadFromMap(Map map) {
     final paths = map["paths"];
     if (paths is! List || paths.any((item) => item is! String)) {
-      rebuildDefault();
       return false;
     }
 
@@ -263,39 +283,145 @@ List<CollectionEntry> allCollectionEntries() => [
 
 Future<void> readCustomAudioOrder() async {
   try {
-    final supportPath = (await getAppDataDir()).path;
-    final file = File("$supportPath\\custom_audio_order.json");
-    if (!file.existsSync()) {
+    final store = await _customOrderStore();
+    final paths = await store.read();
+    if (paths == null) {
       customAudioOrder.rebuildDefault();
-      await saveCustomAudioOrder();
+      await store.save(customAudioOrder.paths);
       return;
     }
-
-    final map = json.decode(await file.readAsString());
-    if (map is! Map || !customAudioOrder.tryReadFromMap(map)) {
-      await saveCustomAudioOrder();
-      return;
-    }
-
-    if (customAudioOrder.sanitize()) {
-      await saveCustomAudioOrder();
-    }
+    customAudioOrder._paths = List<String>.of(paths);
+    if (customAudioOrder.sanitize()) await store.save(customAudioOrder.paths);
   } catch (err, trace) {
     LOGGER.e(err, stackTrace: trace);
+    // The fallback is only a usable in-memory view. A damaged order remains
+    // on disk and further saves are blocked until recovery succeeds.
     customAudioOrder.rebuildDefault();
-    await saveCustomAudioOrder();
   }
 }
 
 Future<void> saveCustomAudioOrder({bool rethrowOnError = false}) async {
   try {
-    final supportPath = (await getAppDataDir()).path;
-    final file = await File("$supportPath\\custom_audio_order.json")
-        .create(recursive: true);
-    await file.writeAsString(json.encode(customAudioOrder.toMap()));
+    await (await _customOrderStore()).save(customAudioOrder.paths);
   } catch (err, trace) {
     LOGGER.e(err, stackTrace: trace);
     if (rethrowOnError) rethrow;
+  }
+}
+
+CustomAudioOrderPersistence? _orderPersistence;
+String? get customAudioOrderStorageWarning => _orderPersistence?.warning;
+
+Future<CustomAudioOrderPersistence> _customOrderStore() async {
+  final directory = await getAppDataDir();
+  final file = File(path_util.join(directory.path, 'custom_audio_order.json'));
+  if (_orderPersistence?.file.path != file.path) {
+    _orderPersistence = CustomAudioOrderPersistence(file);
+  }
+  return _orderPersistence!;
+}
+
+/// The v1 order schema remains unchanged. The optional hook exercises commit
+/// failures without changing filesystem permissions or real user data.
+class CustomAudioOrderPersistence {
+  CustomAudioOrderPersistence(this.file, {this.beforeReplace});
+  final File file;
+  final Future<void> Function()? beforeReplace;
+  Future<void> _writes = Future.value();
+  Future<List<String>?>? _reading;
+  bool _loaded = false;
+  bool _writable = true;
+  bool _preserveBackup = false;
+  String? warning;
+  static const maxBytes = 32 * 1024 * 1024;
+
+  Future<List<String>?> read() =>
+      _reading ??= _read().whenComplete(() => _reading = null);
+
+  Future<List<String>?> _read() async {
+    _loaded = false;
+    await _writes;
+    _writable = true;
+    warning = null;
+    _preserveBackup = false;
+    Object? firstError;
+    for (final candidate in [file, File('${file.path}.bak')]) {
+      if (!await candidate.exists()) continue;
+      try {
+        if (await candidate.length() > maxBytes) {
+          throw const FormatException('自定义顺序文件超过 32 MiB。');
+        }
+        final text = await candidate.readAsString();
+        if (utf8.encode(text).length > maxBytes) {
+          throw const FormatException('自定义顺序文件超过 32 MiB。');
+        }
+        final value = jsonDecode(text);
+        if (value is! Map ||
+            (value['version'] ?? 1) != 1 ||
+            value['paths'] is! List ||
+            (value['paths'] as List).any((item) => item is! String)) {
+          throw const FormatException('自定义顺序文件损坏。');
+        }
+        final paths = List<String>.from(value['paths']);
+        _loaded = true;
+        if (candidate.path != file.path) {
+          _preserveBackup = true;
+          await save(paths);
+          warning = '自定义顺序已从备份恢复，损坏文件已保留。';
+        }
+        return paths;
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+    if (firstError != null) {
+      _loaded = true;
+      _writable = false;
+      warning = '自定义顺序读取失败；原文件和备份已保留，恢复前不会覆盖。';
+      throw FormatException('$warning $firstError');
+    }
+    _loaded = true;
+    return null;
+  }
+
+  Future<void> save(List<String> paths) async {
+    final frozen = List<String>.of(paths);
+    if (!_loaded) await read();
+    if (!_writable) {
+      throw StateError(warning ?? 'Custom order storage is protected');
+    }
+    final snapshot = jsonEncode({'version': 1, 'paths': frozen});
+    if (utf8.encode(snapshot).length > maxBytes) {
+      throw const FormatException('自定义顺序超过 32 MiB。');
+    }
+    final result = _writes.then((_) async {
+      if (!_writable) throw StateError('Custom order storage is protected');
+      await file.parent.create(recursive: true);
+      final temporary = File('${file.path}.tmp');
+      final backup = File('${file.path}.bak');
+      await temporary.writeAsString(snapshot, flush: true);
+      try {
+        await beforeReplace?.call();
+        if (!_preserveBackup && await file.exists()) {
+          if (await backup.exists()) await backup.delete();
+          await file.rename(backup.path);
+        } else if (_preserveBackup && await file.exists()) {
+          await file.rename(
+              '${file.path}.damaged-${DateTime.now().microsecondsSinceEpoch}');
+        }
+        await temporary.rename(file.path);
+        _preserveBackup = false;
+      } catch (_) {
+        if (!await file.exists() && await backup.exists()) {
+          await backup.copy(file.path);
+        }
+        rethrow;
+      } finally {
+        if (await temporary.exists()) await temporary.delete();
+      }
+    });
+    _writes = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return result;
   }
 }
 

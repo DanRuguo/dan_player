@@ -122,7 +122,17 @@ foreach ($file in $files) {
     $totalBytes += $file.Length
 }
 if ($totalBytes -gt 8GB) { throw 'Payload exceeds 8 GiB safety budget' }
-foreach ($required in @('Dan Player.exe','data/app.so','desktop_lyric/desktop_lyric.exe')) {
+$requiredPlayerFiles = @('Dan Player.exe', 'data/app.so')
+if ($known.ContainsKey('DESKTOP-LYRIC-MODE')) {
+    $lyricLayout = [IO.File]::ReadAllText((Join-Path $PayloadDirectory 'DESKTOP-LYRIC-MODE'))
+    if ($lyricLayout -cne "shared-executable-v1`n" -or
+        @($known.Keys | Where-Object { $_.StartsWith('desktop_lyric/', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        throw 'Invalid or mixed desktop lyric payload layout'
+    }
+} else {
+    $requiredPlayerFiles += 'desktop_lyric/desktop_lyric.exe'
+}
+foreach ($required in $requiredPlayerFiles) {
     if (-not $known.ContainsKey($required)) { throw "Incomplete player payload: $required" }
 }
 if (-not $QaBuild) {

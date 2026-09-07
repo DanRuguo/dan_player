@@ -23,6 +23,7 @@ class ArtistSeparatorEditor extends StatelessWidget {
         onPressed: () {
           showAppDialog(
             context: context,
+            dialogBottomInset: 0,
             builder: (context) => const _ArtistSeparatorEditDialog(),
           );
         },

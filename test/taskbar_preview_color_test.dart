@@ -15,10 +15,10 @@ import 'support/fake_desktop_integration.dart';
 const _track = TaskbarPreviewTrack(
     identity: 'same-song', title: 'TRACK', artist: 'ARTIST', album: 'ALBUM');
 const _textRegions = <String, Rect>{
-  'title': Rect.fromLTRB(220, 35, 456, 94),
-  'artist': Rect.fromLTRB(220, 104, 456, 153),
-  'album': Rect.fromLTRB(220, 162, 456, 188),
-  'brand': Rect.fromLTRB(220, 199, 456, 230),
+  'title': Rect.fromLTRB(232, 51, 448, 108),
+  'artist': Rect.fromLTRB(232, 115, 448, 138),
+  'album': Rect.fromLTRB(232, 144, 448, 166),
+  'brand': Rect.fromLTRB(232, 24, 448, 43),
 };
 
 int _argb(TaskbarThumbnail card, int x, int y) {

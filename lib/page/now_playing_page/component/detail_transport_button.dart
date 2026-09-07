@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:flutter/material.dart';
@@ -10,8 +11,7 @@ class DetailTransportButtonStyle extends ButtonStyle {
     required this.scheme,
     bool reducedMotion = false,
   }) : super(
-          animationDuration:
-              reducedMotion ? Duration.zero : const Duration(milliseconds: 140),
+          animationDuration: reducedMotion ? Duration.zero : AppMotion.quick,
           enableFeedback: true,
           alignment: Alignment.center,
         );
@@ -116,7 +116,7 @@ class DetailTransportButton extends StatelessWidget {
           scheme: Theme.of(context).colorScheme,
           reducedMotion: reduced),
       icon: AnimatedSwitcher(
-        duration: reduced ? Duration.zero : const Duration(milliseconds: 140),
+        duration: reduced ? Duration.zero : AppMotion.quick,
         switchInCurve: Curves.easeOutCubic,
         switchOutCurve: Curves.easeInCubic,
         child: buffering

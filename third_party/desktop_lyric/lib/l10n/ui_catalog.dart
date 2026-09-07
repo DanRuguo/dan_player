@@ -28,6 +28,13 @@ import 'catalog_lyric_lookup_fix.dart';
 import 'catalog_queue_undo.dart';
 import 'catalog_smart_playlist_dialog.dart';
 import 'catalog_cue_release.dart';
+import 'catalog_taskbar_preview.dart';
+import 'catalog_smart_playlist_history.dart';
+import 'catalog_queue_search.dart';
+import 'catalog_replay_gain.dart';
+import 'catalog_library_watch.dart';
+import 'catalog_playback_mode_controls.dart';
+import 'catalog_track_resume.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogSelectionRelease,
@@ -38,6 +45,13 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogQueueUndo,
   ...catalogSmartPlaylistDialog,
   ...catalogCueRelease,
+  ...catalogTaskbarPreview,
+  ...catalogSmartPlaylistHistory,
+  ...catalogQueueSearch,
+  ...catalogReplayGain,
+  ...catalogLibraryWatch,
+  ...catalogPlaybackModeControls,
+  ...catalogTrackResume,
   ...uiCatalogA,
   ...uiCatalogB,
   ...uiCatalogC,

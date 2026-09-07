@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_motion.dart';
 
 class LargeFilledIconButtonStyle extends ButtonStyle {
   const LargeFilledIconButtonStyle(
       {required this.primary, required this.scheme})
       : super(
-          animationDuration: kThemeChangeDuration,
+          animationDuration: AppMotion.quick,
           enableFeedback: true,
           alignment: Alignment.center,
         );

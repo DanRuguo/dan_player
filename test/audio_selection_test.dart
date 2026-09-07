@@ -1,5 +1,6 @@
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/audio_selection_toolbar.dart';
+import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/page/audios_page.dart';
@@ -21,7 +22,7 @@ Widget _host(Widget child, {double scale = 1}) => MaterialApp(
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context).copyWith(
             textScaler: TextScaler.linear(scale), disableAnimations: true),
-        child: UiLanguageScope(child: child!),
+        child: UiLanguageScope(child: AppPresentationHost(child: child!)),
       ),
       home: Scaffold(body: child),
     );
@@ -140,6 +141,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('audio-selection-copy-paths')));
     await tester.pumpAndSettle();
     expect(copied, [local.path]);
+    // Every menu result (including enqueue) uses the shared helper. A direct
+    // messenger call here would reproduce the full-width black bar regression.
+    expect(find.byType(SnackBar), findsNothing);
+    expect(find.byKey(const ValueKey('app-notice-bubble')), findsOneWidget);
+    expect(find.byKey(const ValueKey('app-notice-close')), findsOneWidget);
+    expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
     await tester.pumpWidget(_host(const AudioSelectionMenu(selected: [])));
     await tester.tap(find.byKey(const ValueKey('audio-selection-more')));
     await tester.pumpAndSettle();
@@ -158,7 +165,7 @@ void main() {
   });
 
   testWidgets(
-      'library refresh retains controller and removes vanished selection',
+      'library refresh rebinds selected metadata and removes vanished songs',
       (tester) async {
     final library = AudioLibrary.instance;
     final original = library.audioCollection;
@@ -180,7 +187,8 @@ void main() {
     selection.useMultiSelectView(true);
     selection.selectAll([first, second]);
     await tester.pumpAndSettle();
-    library.audioCollection = [second];
+    final updated = CategoryTestAudio('Updated second', path: second.path);
+    library.audioCollection = [updated];
     AudioLibrary.changes.value++;
     await tester.pumpAndSettle();
     final refreshed = tester
@@ -188,7 +196,8 @@ void main() {
         .multiSelectController;
     expect(refreshed, same(selection));
     expect(selection.enableMultiSelectView, isTrue);
-    expect(selection.selected, {second});
+    expect(selection.selected, {updated});
+    expect(selection.selected.single, isNot(same(second)));
     expect(tester.takeException(), isNull);
   });
 

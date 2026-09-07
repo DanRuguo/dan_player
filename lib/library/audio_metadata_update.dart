@@ -2,6 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/audio_metadata_journal.dart';
+import 'package:dan_player/library/playback_bookmarks.dart';
+import 'package:dan_player/library/track_resume_store.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
+import 'package:dan_player/lyric/lyric_source.dart';
+import 'package:dan_player/app_settings.dart' show getAppDataDir;
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/library_mutation_gate.dart';
@@ -33,6 +39,7 @@ class AudioMetadataEditException implements Exception {
       {this.fileWasUpdated = false});
 
   factory AudioMetadataEditException.fromNative(Object error) {
+    if (error is AudioMetadataEditException) return error;
     var raw = error.toString().trim();
     if (raw.startsWith('AnyhowException(') && raw.endsWith(')')) {
       raw = raw.substring('AnyhowException('.length, raw.length - 1);
@@ -103,11 +110,20 @@ class AudioMetadataEditCoordinator {
   AudioMetadataEditCoordinator({
     required AudioMetadataWriter write,
     required AudioMetadataSynchronizer synchronize,
+    Future<void> Function(AudioMetadataCommittedEdit)? recordCommit,
+    Future<void> Function()? clearCommit,
+    Audio? Function(String path)? currentAudio,
   })  : _write = write,
-        _synchronize = synchronize;
+        _synchronize = synchronize,
+        _currentAudio = currentAudio,
+        _recordCommit = recordCommit,
+        _clearCommit = clearCommit;
 
   final AudioMetadataWriter _write;
   final AudioMetadataSynchronizer _synchronize;
+  final Audio? Function(String path)? _currentAudio;
+  final Future<void> Function(AudioMetadataCommittedEdit)? _recordCommit;
+  final Future<void> Function()? _clearCommit;
   final _pending = Expando<AudioMetadataCommittedEdit>();
   final _active = Set<Audio>.identity();
   final _activePaths = <String, int>{};
@@ -160,11 +176,22 @@ class AudioMetadataEditCoordinator {
         // This also avoids writing the same selected cover again on retry.
         if (_sameEdit(pending.edit, edit)) return audio;
       }
-      if (path_util.basename(audio.path) == edit.fileName &&
-          audio.title == edit.title &&
-          audio.artist == edit.artist &&
-          audio.album == edit.album &&
+      // A form can outlive an automatic library reload. Compare against the
+      // current model while preserving the user's requested field values.
+      final current = _currentAudio?.call(audio.path) ?? audio;
+      if (path_util.basename(current.path) == edit.fileName &&
+          current.title == edit.title &&
+          current.artist == edit.artist &&
+          current.album == edit.album &&
           edit.picturePath == null) {
+        if (!identical(current, audio)) {
+          audio.applyEditedMetadata(
+              newPath: current.path,
+              newTitle: current.title,
+              newArtist: current.artist,
+              newAlbum: current.album,
+              newModified: current.modified);
+        }
         return audio;
       }
       final oldPath = audio.path;
@@ -196,6 +223,7 @@ class AudioMetadataEditCoordinator {
 
   Future<void> _sync(Audio audio, AudioMetadataCommittedEdit commit) async {
     try {
+      await _recordCommit?.call(commit);
       // Update identity before any asynchronous app I/O. If stat/index saving
       // fails after a rename, neither the form nor the library should retain a
       // now-missing path and offer to write it again.
@@ -207,6 +235,7 @@ class AudioMetadataEditCoordinator {
         newModified: audio.modified,
       );
       await _synchronize(audio, commit);
+      await _clearCommit?.call();
       _pending[audio] = null;
     } catch (_) {
       throw const AudioMetadataEditException(
@@ -226,15 +255,31 @@ class AudioMetadataEditCoordinator {
 }
 
 final _metadataEdits = AudioMetadataEditCoordinator(
-  write: (path, edit) => updateAudioMetadata(
-    path: path,
-    fileName: edit.fileName,
-    title: edit.title,
-    artist: edit.artist,
-    album: edit.album,
-    picturePath: edit.picturePath,
-  ),
-  synchronize: _synchronizeMetadataEdit,
+  write: (path, edit) async {
+    final journal = AudioMetadataJournal(await getAppDataDir());
+    if (await journal.hasPending) {
+      throw const AudioMetadataEditException(
+          'TAG_LIBRARY_SYNC_PENDING', '另一首歌曲的文件已保存但关系同步未完成，请先重试该歌曲或重启播放器。');
+    }
+    return updateAudioMetadata(
+      path: path,
+      fileName: edit.fileName,
+      title: edit.title,
+      artist: edit.artist,
+      album: edit.album,
+      picturePath: edit.picturePath,
+    );
+  },
+  synchronize: synchronizeAudioMetadataEdit,
+  recordCommit: (commit) async => AudioMetadataJournal(await getAppDataDir())
+      .record(
+          oldPath: commit.oldPath,
+          newPath: commit.newPath,
+          title: commit.edit.title,
+          artist: commit.edit.artist,
+          album: commit.edit.album),
+  clearCommit: () async => AudioMetadataJournal(await getAppDataDir()).clear(),
+  currentAudio: (path) => AudioLibrary.instance.audioByPath[path],
 );
 
 Future<Audio> applyAudioMetadataEdit(
@@ -248,7 +293,9 @@ Future<Audio> applyAudioMetadataEdit(
   }
 }
 
-Future<void> _synchronizeMetadataEdit(
+/// Resolve live library entries after native commit. The editor's Audio may
+/// belong to an older index instance, while its draft and retry token survive.
+Future<void> synchronizeAudioMetadataEdit(
     Audio audio, AudioMetadataCommittedEdit commit) async {
   final oldPath = commit.oldPath;
   final newPath = commit.newPath;
@@ -259,24 +306,59 @@ Future<void> _synchronizeMetadataEdit(
   }
   audio.modified = stat.modified.millisecondsSinceEpoch ~/ 1000;
   audio.fileSizeBytes = stat.size;
+  var reference = audio;
+  final library = AudioLibrary.instance;
+  for (final folder in library.folders) {
+    for (final current in folder.audios) {
+      if (!current.canEditLocalFile ||
+          (!path_util.equals(current.path, oldPath) &&
+              !path_util.equals(current.path, newPath))) {
+        continue;
+      }
+      // Keep newly scanned duration/composer/etc. and apply only the fields
+      // the native edit committed; a stale editor must not revert other tags.
+      if (!identical(current, audio)) {
+        current.applyEditedMetadata(
+            newPath: newPath,
+            newTitle: commit.edit.title,
+            newArtist: commit.edit.artist,
+            newAlbum: commit.edit.album,
+            newModified: audio.modified);
+        current.fileSizeBytes = stat.size;
+      }
+      if (identical(reference, audio)) reference = current;
+    }
+  }
   await CoverCache.instance.invalidate(oldPath);
   if (newPath != oldPath) await CoverCache.instance.invalidate(newPath);
-  AudioLibrary.instance.rebuildDerivedCollections();
+  library.rebuildDerivedCollections();
 
   // Latch dirty flags across retries; reapplying an already replaced path may
   // return false even though its first persistence attempt did not complete.
   if (oldPath != newPath && customAudioOrder.replacePath(oldPath, newPath)) {
     commit.customOrderNeedsSave = true;
   }
-  if (replaceAudioInPlaylists(oldPath, newPath, audio)) {
+  if (replaceAudioInPlaylists(oldPath, newPath, reference)) {
     commit.playlistsNeedSave = true;
   }
   if (PlayService.playbackReady.value) {
-    PlayService.instance.playbackService.replaceAudioReference(oldPath, audio);
+    PlayService.instance.playbackService
+        .replaceAudioReference(oldPath, reference);
+    if (newPath != oldPath) {
+      PlayService.instance.playbackService.relinkLocalPath(oldPath, newPath);
+    }
   }
-  await AudioLibrary.instance.saveIndex();
+  await library.saveIndex();
   if (newPath != oldPath) {
     await SongCommentAssociationStore.instance.movePath(oldPath, newPath);
+    await (await PlaybackBookmarkStore.instance).relocatePath(oldPath, newPath);
+    await (await TrackResumeStore.instance).relocatePath(oldPath, newPath);
+    await LyricDocumentStore.instance.relocatePath(oldPath, newPath);
+    final source = LYRIC_SOURCES.remove(oldPath);
+    if (source != null) {
+      LYRIC_SOURCES[newPath] = source;
+      await saveLyricSources();
+    }
   }
   if (commit.customOrderNeedsSave) {
     await saveCustomAudioOrder(rethrowOnError: true);

@@ -633,7 +633,7 @@ void main() {
       onAddToPlaylist: (queue) => added = queue,
     )));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('category-play-all')));
+    await tester.tap(find.byKey(ValueKey(('track', second.path))));
     expect(index, 0);
     expect(played, [same(second), same(first), same(remote)]);
     await tester.tap(find.byKey(const ValueKey('category-add-playlist')));
@@ -642,7 +642,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('category-sort-title')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('category-play-all')));
+    await tester.tap(find.byKey(ValueKey(('track', second.path))));
     expect(played, [same(second), same(remote), same(first)]);
     await tester.enterText(
         find.byKey(const ValueKey('category-track-search')), 'Remote');
@@ -670,12 +670,8 @@ void main() {
         find.byKey(const ValueKey('category-track-search')), 'not present');
     await tester.pumpAndSettle();
     expect(find.text('此分类中未找到匹配的歌曲'), findsOneWidget);
-    expect(
-        tester
-            .widget<FilledButton>(
-                find.byKey(const ValueKey('category-play-all')))
-            .onPressed,
-        isNull);
+    expect(find.byKey(const ValueKey('playback-mode-shuffle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('playback-mode-repeat')), findsOneWidget);
     expect(
         tester
             .widget<OutlinedButton>(
@@ -703,14 +699,14 @@ void main() {
               trackBuilder: _track),
           scale: scale));
       await tester.pumpAndSettle();
-      final play = find.byKey(const ValueKey('category-play-all'));
+      final play = find.byKey(const ValueKey('playback-mode-shuffle'));
       final add = find.byKey(const ValueKey('category-add-playlist'));
       final sort = find.byKey(const ValueKey('category-track-sort'));
       final height = tester.getSize(play).height;
       expect(height, greaterThanOrEqualTo(44));
       expect(tester.getSize(add).height, closeTo(height, .01));
       expect(tester.getSize(sort).height, closeTo(height, .01));
-      expect(tester.widget<FilledButton>(play).style!.visualDensity,
+      expect(tester.widget<IconButton>(play).style!.visualDensity,
           VisualDensity.standard);
       expect(tester.widget<OutlinedButton>(add).style!.visualDensity,
           VisualDensity.standard);
@@ -890,8 +886,8 @@ void main() {
     expect(find.byType(ArtistDetailPage), findsOneWidget);
     expect(find.byType(UniDetailPage<String, Audio, MusicCategoryGroup>),
         findsOneWidget);
-    expect(find.byKey(const ValueKey('detail-play-all')), findsOneWidget);
-    expect(find.byKey(const ValueKey('music-shuffle-action')), findsOneWidget);
+    expect(find.byKey(const ValueKey('playback-mode-repeat')), findsOneWidget);
+    expect(find.byKey(const ValueKey('playback-mode-shuffle')), findsOneWidget);
     expect(find.byKey(const ValueKey('detail-add-all-to-playlist')),
         findsOneWidget);
     expect(find.byKey(const ValueKey('uni-detail-search')), findsOneWidget);

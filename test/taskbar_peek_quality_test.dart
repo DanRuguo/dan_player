@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as raster;
 
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/desktop_tray_appearance.dart';
@@ -61,7 +62,7 @@ void main() {
 
   for (final brightness in Brightness.values) {
     testWidgets(
-        '$brightness Peek has newly rasterized glyph detail, thumbnail stays 480',
+        '$brightness Peek has independent large composition, thumbnail stays 480',
         (tester) async {
       const track = TaskbarPreviewTrack(
           identity: 'synthetic',
@@ -74,15 +75,15 @@ void main() {
           danEmbeddedFontFamily));
       expect((card!.width, card.height), (480, 240));
       final peek = card.peek!;
-      expect((peek.width, peek.height), (1440, 720));
+      expect((peek.width, peek.height), (1280, 800));
       expect(peek.pixels.length, lessThanOrEqualTo(4 * 1024 * 1024));
       var differentFromNearest = 0, differentFromBilinear = 0;
-      for (var y = 105; y < 280; y++) {
-        for (var x = 660; x < 1368; x++) {
+      for (var y = 180; y < 316; y++) {
+        for (var x = 592; x < 1166; x++) {
           final offset = (y * peek.width + x) * 4;
           expect(peek.pixels[offset + 3], 255);
-          final sx = ((x + .5) / 3 - .5).clamp(0.0, 479.0);
-          final sy = ((y + .5) / 3 - .5).clamp(0.0, 239.0);
+          final sx = ((x + .5) * 480 / 1280 - .5).clamp(0.0, 479.0);
+          final sy = ((y + .5) * 240 / 800 - .5).clamp(0.0, 239.0);
           final left = sx.floor(), top = sy.floor();
           final right = (left + 1).clamp(0, 479),
               bottom = (top + 1).clamp(0, 239);
@@ -98,7 +99,7 @@ void main() {
           if ((peek.pixels[offset] - bilinear).abs() > 4) {
             differentFromBilinear++;
           }
-          if (peek.pixels[offset] != sample(x ~/ 3, y ~/ 3)) {
+          if (peek.pixels[offset] != sample(x * 480 ~/ 1280, y * 240 ~/ 800)) {
             differentFromNearest++;
           }
         }
@@ -106,7 +107,79 @@ void main() {
       expect(differentFromNearest, greaterThan(200));
       expect(differentFromBilinear, greaterThan(200),
           reason:
-              '3x vector re-rasterization must not be a stretched 480px bitmap');
+              'large cover and separately rasterized title must not stretch the small card');
+    });
+
+    testWidgets(
+        '$brightness synthetic artwork and status produce bounded exportable previews',
+        (tester) async {
+      await tester.runAsync(() async {
+        final recorder = raster.PictureRecorder();
+        final canvas = Canvas(recorder);
+        const bounds = Rect.fromLTWH(0, 0, 448, 448);
+        canvas.drawRect(
+            bounds,
+            Paint()
+              ..shader = const LinearGradient(
+                      colors: [Color(0xff0b5e6b), Color(0xff8fc9be)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight)
+                  .createShader(bounds));
+        canvas.drawCircle(const Offset(324, 108), 60,
+            Paint()..color = const Color(0xffffd49b));
+        for (var i = 0; i < 5; i++) {
+          canvas.drawOval(
+              Rect.fromLTWH(-140 + i * 30, 210 + i * 42, 740, 390),
+              Paint()
+                ..color = Color.lerp(
+                    const Color(0xff0b5c70), const Color(0xffbfdccd), i / 5)!);
+        }
+        final picture = recorder.endRecording();
+        final art = await picture.toImage(448, 448);
+        final png = await art.toByteData(format: raster.ImageByteFormat.png);
+        final provider = MemoryImage(png!.buffer.asUint8List());
+        art.dispose();
+        picture.dispose();
+        final card = await renderTaskbarSongPreview(
+            TaskbarPreviewTrack(
+                identity: 'synthetic-qa',
+                title: '海岸回声 · Coastal Echoes',
+                artist: 'Dan Player Studio',
+                album: 'Blue Hour / 合成视觉样例',
+                durationSeconds: 237,
+                playing: brightness == Brightness.light,
+                statusLabel: brightness == Brightness.light ? '正在播放' : '已暂停',
+                loadArtwork: () async => provider),
+            ColorScheme.fromSeed(
+                seedColor: Colors.teal, brightness: brightness),
+            danEmbeddedFontFamily);
+        expect(card.peek!.pixels.length, 4096000);
+        expect(card.peek!.pixels.length, lessThan(4 * 1024 * 1024));
+        final output = Platform.environment['DAN_PLAYER_PREVIEW_QA_DIR'];
+        if (output != null) {
+          await Directory(output).create(recursive: true);
+          Future<void> write(
+              String kind, int width, int height, Uint8List rgba) async {
+            final result = Completer<raster.Image>();
+            raster.decodeImageFromPixels(rgba, width, height,
+                raster.PixelFormat.rgba8888, result.complete);
+            final image = await result.future;
+            final bytes =
+                await image.toByteData(format: raster.ImageByteFormat.png);
+            image.dispose();
+            await File('$output/taskbar-$kind-${brightness.name}.png')
+                .writeAsBytes(bytes!.buffer.asUint8List());
+            if (kind == 'peek') {
+              await File('$output/taskbar-$kind-${brightness.name}.rgba')
+                  .writeAsBytes(rgba);
+            }
+          }
+
+          await write('small', card.width, card.height, card.pixels);
+          await write(
+              'peek', card.peek!.width, card.peek!.height, card.peek!.pixels);
+        }
+      });
     });
   }
 

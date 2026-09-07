@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/app_shutdown.dart';
@@ -7,7 +9,9 @@ import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/data/cache_backup_service.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart';
+import 'package:dan_player/library/library_mutation_gate.dart';
 import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/library/track_resume_store.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
@@ -17,6 +21,22 @@ import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:path_provider/path_provider.dart';
+
+/// Hold the index mutation gate until archiving finishes, not just while
+/// flushing. A scanner must not replace index.json midway through a backup.
+Future<CacheBackupResult> exportLibraryCacheBackup({
+  required CacheBackupService service,
+  required File destination,
+  required Future<void> Function() flush,
+  Future<Directory> Function()? dataDirectory,
+  LibraryMutationGate? gate,
+}) =>
+    (gate ?? LibraryMutationGate.shared).run(() async {
+      await flush();
+      return service.exportBackup(
+          source: await (dataDirectory ?? getAppDataDir)(),
+          destination: destination);
+    });
 
 class CacheBackupSettings extends StatefulWidget {
   const CacheBackupSettings(
@@ -68,6 +88,7 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
             .saveSettings(captureWindowSize: false, throwOnError: true),
         AppPreference.instance.save(),
         PlaybackStatistics.instance.flush(),
+        TrackResumeStore.flushIfInitialized(),
       ]);
 
   Future<void> _export() async {
@@ -96,9 +117,9 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
 
     setState(() => _busy = true);
     try {
-      await _flushPersistentState();
-      final result = await widget.service.exportBackup(
-        source: await getAppDataDir(),
+      final result = await exportLibraryCacheBackup(
+        service: widget.service,
+        flush: _flushPersistentState,
         destination: output,
       );
       if (!mounted) return;
@@ -118,6 +139,11 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
           ],
         ),
       );
+    } on LibraryMutationBusy {
+      if (mounted) {
+        showTextOnSnackBar('曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试',
+            kind: AppNoticeKind.warning, context: context);
+      }
     } catch (error, trace) {
       LOGGER.e('[cache backup] $error', stackTrace: trace);
       if (mounted) {

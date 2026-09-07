@@ -4,6 +4,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/lyric/lyric_timeline.dart';
 import 'package:dan_player/music_matcher.dart';
@@ -14,18 +15,23 @@ import 'package:flutter/foundation.dart';
 class LyricService extends ChangeNotifier {
   final PlayService playService;
   final Future<Lyric?> Function(bool localFirst)? _resolveDefaultForTesting;
+  final LyricDocumentStore? documents;
   bool _disposed = false;
 
-  LyricService(PlayService playService) : this._(playService, null);
+  LyricService(PlayService playService)
+      : this._(playService, null, LyricDocumentStore.instance);
 
   @visibleForTesting
   LyricService.forTesting(
     PlayService playService, {
     required Future<Lyric?> Function(bool localFirst) resolveDefaultLyric,
-  }) : this._(playService, resolveDefaultLyric);
+    LyricDocumentStore? documents,
+  }) : this._(playService, resolveDefaultLyric, documents);
 
   late final StreamSubscription<double> _positionStreamSubscription;
-  LyricService._(this.playService, this._resolveDefaultForTesting) {
+  LyricService._(
+      this.playService, this._resolveDefaultForTesting, this.documents) {
+    documents?.addListener(_handleDocumentChange);
     _positionStreamSubscription =
         playService.playbackService.positionStream.listen((pos) {
       if (_disposed) return;
@@ -49,9 +55,37 @@ class LyricService extends ChangeNotifier {
   Future<Lyric?> currLyricFuture = Future.value(null);
 
   Lyric? _resolvedLyric;
+  Lyric? _rawResolvedLyric;
+
+  /// Canonical timestamps, before the song's application offset. Locking and
+  /// editing must use this copy instead of saving the displayed offset twice.
+  Lyric? get rawCurrentLyric => _rawResolvedLyric;
+  int _documentRevision = -1;
   int _lyricToken = 0;
+  int get resolutionGeneration => _lyricToken;
   int _currentLyricLine = -1;
   bool _isCurrent(int token) => !_disposed && token == _lyricToken;
+
+  void _handleDocumentChange() {
+    final audio = _getNowPlaying();
+    if (audio != null && documents!.revisionFor(audio) != _documentRevision) {
+      updateLyric();
+    }
+  }
+
+  void _useRawFuture(Future<Lyric?> raw, {int offsetMs = 0}) {
+    currLyricFuture.ignore();
+    final token = _lyricToken + 1;
+    _rawResolvedLyric = null;
+    currLyricFuture = raw.then((value) {
+      if (_isCurrent(token)) _rawResolvedLyric = value;
+      return value == null || offsetMs == 0
+          ? value
+          : LyricSnapshot.capture(value).toLyric(offsetMs: offsetMs);
+    });
+    _trackLyricFuture();
+    notifyListeners();
+  }
 
   void _trackLyricFuture() {
     if (_disposed) return;
@@ -217,9 +251,23 @@ class LyricService extends ChangeNotifier {
     final nowPlaying = _getNowPlaying();
     if (nowPlaying == null) return;
 
-    currLyricFuture.ignore();
+    final store = documents;
+    if (store != null) {
+      final document = store.forAudio(nowPlaying);
+      _documentRevision = document?.revision ?? 0;
+      if (document?.noLyrics == true) {
+        _useRawFuture(Future.value(null));
+        return;
+      }
+      if (document?.effective != null) {
+        _useRawFuture(Future.value(document!.effective!.toLyric()),
+            offsetMs: document.offsetMs);
+        return;
+      }
+    }
 
-    final configuredSource = LYRIC_SOURCES[nowPlaying.path];
+    final configuredSource =
+        store?.forAudio(nowPlaying)?.source ?? LYRIC_SOURCES[nowPlaying.path];
     final hasInvalidOnlineLocalSource = configuredSource != null &&
         !isLyricSourceCompatible(
           isOnline: nowPlaying.isOnline,
@@ -229,13 +277,14 @@ class LyricService extends ChangeNotifier {
       LYRIC_SOURCES.remove(nowPlaying.path);
     }
     final lyricSource = hasInvalidOnlineLocalSource ? null : configuredSource;
+    Future<Lyric?> raw;
     if (lyricSource == null) {
-      currLyricFuture = _getLyricDefault(AppSettings.instance.localLyricFirst);
+      raw = _getLyricDefault(AppSettings.instance.localLyricFirst);
     } else {
       if (lyricSource.source == LyricSourceType.local) {
-        currLyricFuture = Lrc.fromAudioPath(nowPlaying);
+        raw = Lrc.fromAudioPath(nowPlaying);
       } else {
-        currLyricFuture = getOnlineLyric(
+        raw = getOnlineLyric(
           qqSongId: lyricSource.qqSongId,
           qqSongMid: lyricSource.qqSongMid,
           kugouSongHash: lyricSource.kugouSongHash,
@@ -244,9 +293,7 @@ class LyricService extends ChangeNotifier {
         );
       }
     }
-    _trackLyricFuture();
-
-    notifyListeners();
+    _useRawFuture(raw, offsetMs: store?.forAudio(nowPlaying)?.offsetMs ?? 0);
   }
 
   void useLocalLyric() {
@@ -267,12 +314,8 @@ class LyricService extends ChangeNotifier {
       return true;
     }
 
-    currLyricFuture.ignore();
-
-    currLyricFuture = Lrc.fromAudioPath(nowPlaying);
-    _trackLyricFuture();
-
-    notifyListeners();
+    _useExplicitFuture(nowPlaying, Lrc.fromAudioPath(nowPlaying),
+        source: LyricSource(LyricSourceType.local));
     return true;
   }
 
@@ -281,14 +324,33 @@ class LyricService extends ChangeNotifier {
     final nowPlaying = _getNowPlaying();
     if (nowPlaying == null) return;
 
-    currLyricFuture.ignore();
-
-    currLyricFuture = nowPlaying.isOnline
+    final raw = nowPlaying.isOnline
         ? _getLyricDefault(false)
         : getMostMatchedLyric(nowPlaying);
-    _trackLyricFuture();
+    _useExplicitFuture(nowPlaying, raw);
+  }
 
-    notifyListeners();
+  void _useExplicitFuture(Audio audio, Future<Lyric?> raw,
+      {LyricSource? source}) {
+    final store = documents;
+    if (store == null) {
+      _useRawFuture(raw);
+      return;
+    }
+    final revision = store.revisionFor(audio);
+    final token = _lyricToken + 1;
+    final selected = raw.then((value) async {
+      if (!_isCurrent(token)) return null;
+      if (value == null || value.lines.isEmpty) {
+        throw StateError('此来源未返回可用歌词，之前保存的版本已保留。');
+      }
+      await store.select(audio, value,
+          source: source,
+          expectedRevision: revision,
+          stillCurrent: () => _isCurrent(token));
+      return value;
+    });
+    _useRawFuture(selected, offsetMs: store.forAudio(audio)?.offsetMs ?? 0);
   }
 
   void useSpecificLyric(Lyric lyric) {
@@ -303,12 +365,8 @@ class LyricService extends ChangeNotifier {
     if (nowPlaying == null || nowPlaying.path != expectedTrackPath) {
       return false;
     }
-    currLyricFuture.ignore();
-
-    currLyricFuture = Future.value(lyric);
-    _trackLyricFuture();
-
-    notifyListeners();
+    _useRawFuture(Future.value(lyric),
+        offsetMs: documents?.forAudio(nowPlaying)?.offsetMs ?? 0);
     return true;
   }
 
@@ -316,6 +374,7 @@ class LyricService extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    documents?.removeListener(_handleDocumentChange);
     _lyricToken++;
     _resolvedLyric = null;
     _currentLyricLine = -1;

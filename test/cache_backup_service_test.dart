@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:dan_player/data/cache_backup_service.dart';
+import 'package:dan_player/library/cue_track.dart';
+import 'package:dan_player/library/track_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
 
@@ -18,7 +20,7 @@ void main() {
       if (await sandbox.exists()) await sandbox.delete(recursive: true);
     });
 
-    test('maps root-relative songs, drops missing references, and keeps assets',
+    test('maps songs, preserves missing occurrences, and keeps assets',
         () async {
       final oldMusic = Directory(path.join(sandbox.path, 'old', 'Music'));
       final newMusic = Directory(path.join(sandbox.path, 'new', 'Renamed'));
@@ -96,13 +98,15 @@ void main() {
       final folder = (restoredIndex['folders'] as List).single as Map;
       expect(folder['path'], newAlbum.path);
       final audios = folder['audios'] as List;
-      expect(audios, hasLength(1));
-      expect((audios.single as Map)['path'], newSong.path);
+      expect(audios, hasLength(2));
+      expect((audios.first as Map)['path'], newSong.path);
+      expect((audios.last as Map)['path'],
+          path.join(newAlbum.path, 'missing.mp3'));
 
       final playlist = json.decode(
           await File(path.join(staged!.path, 'playlists.json'))
               .readAsString()) as Map;
-      expect(playlist['entries'], hasLength(1));
+      expect(playlist['entries'], hasLength(2));
       final imagePath = playlist['imagePath'] as String;
       expect(path.isWithin(target.path, imagePath), isTrue);
       final stagedImage = File(
@@ -223,7 +227,9 @@ void main() {
       final restoredIndex = json.decode(
               await File(path.join(staged!.path, 'index.json')).readAsString())
           as Map;
-      expect(restoredIndex['folders'], isEmpty);
+      final retained = (restoredIndex['folders'] as List).single as Map;
+      expect(retained['audios'], hasLength(1));
+      expect(retained['path'], contains('missing-library'));
     });
 
     test('stale music outside scan roots is referenced but never copied',
@@ -282,7 +288,209 @@ void main() {
       final playlist = json.decode(
           await File(path.join(staged!.path, 'playlists.json'))
               .readAsString()) as Map;
-      expect(playlist['entries'], isEmpty);
+      expect(playlist['entries'], hasLength(1));
+      expect(((playlist['entries'] as List).single as Map)['audio']['path'],
+          contains('missing-library'));
+    });
+
+    test('stable identities, missing CUE, lyrics and old totals survive backup',
+        () async {
+      final music =
+          await Directory(path.join(sandbox.path, 'oldMusic')).create();
+      final newMusic =
+          await Directory(path.join(sandbox.path, 'newMusic')).create();
+      final song = File(path.join(music.path, 'song.mp3'));
+      final movedSong = File(path.join(newMusic.path, 'song.mp3'));
+      await song.writeAsBytes([1, 2, 3]);
+      await movedSong.writeAsBytes([1, 2, 3]);
+      final cue = CueTrackReference(
+          cuePath: path.join(music.path, 'album.cue'),
+          sourcePath: path.join(music.path, 'album.flac'),
+          number: 2,
+          startFrame: 15001,
+          endFrame: 30003);
+      final source =
+          await Directory(path.join(sandbox.path, 'source')).create();
+      final registry = TrackIdentityRegistry.inMemory();
+      await registry.initialize(directory: source);
+      final songId = registry.idFor(song.path);
+      final cueId = registry.idFor(cue.identity, cue: cue);
+      await registry.flush();
+      final identities = registry.toMap();
+      ((identities['records'] as List).first as Map)['aliases'] = [
+        path.join(sandbox.path, 'previous', 'song.mp3')
+      ];
+      await _json(
+          File(path.join(source.path, 'track_identities.json')), identities);
+      await _json(
+          File(path.join(source.path, 'index.json')),
+          _index(music.path, music.path, [
+            {..._audio(song.path, 3), 'track_id': songId},
+            {
+              ..._audio(cue.identity, 100),
+              'track_id': cueId,
+              'cue_track': cue.toMap()
+            },
+          ]));
+      await _json(File(path.join(source.path, 'lyric_documents.json')), {
+        'version': 1,
+        'documents': {
+          cueId: {
+            'trackId': cueId,
+            'path': cue.identity,
+            'locked': true,
+            'original': '[00:01.00]Original',
+            'text': '[00:01.00]Edited',
+            'offsetMilliseconds': 321,
+          }
+        },
+      });
+      await _json(File(path.join(source.path, 'playback_statistics.json')), {
+        'version': 2,
+        'tracks': [
+          {'id': songId, 'playCount': 7, 'listenMilliseconds': 12345},
+          {
+            'id': 'local:legacy-unassigned',
+            'playCount': 9,
+            'listenMilliseconds': 45678,
+            'legacyUnassigned': true,
+            'candidateTrackIds': [songId, cueId]
+          },
+        ],
+        'days': {'2026-09-07': 58023},
+      });
+      await _json(
+          File(path.join(
+              source.path, 'library_migrations', 'batch', 'manifest.json')),
+          {'privatePath': song.path});
+      await _json(File(path.join(source.path, 'library_migration_last.json')),
+          {'batch': 'batch'});
+      final current =
+          await Directory(path.join(sandbox.path, 'current')).create();
+      await _json(File(path.join(current.path, 'index.json')),
+          _index(newMusic.path, newMusic.path, [_audio(movedSong.path, 3)]));
+      final backup = File(path.join(sandbox.path, 'identities.bak'));
+      await const CacheBackupService()
+          .exportBackup(source: source, destination: backup);
+      final archive = ZipDecoder().decodeBytes(await backup.readAsBytes());
+      expect(
+          archive.files
+              .where((entry) => entry.name.contains('library_migration')),
+          isEmpty);
+      Directory? staged;
+      await const CacheBackupService().restoreBackup(
+          backup: backup,
+          destination: Directory(path.join(sandbox.path, 'restored')),
+          currentData: current,
+          activateLocation: (_, ready) async => staged = ready);
+      final restoredRegistry = jsonDecode(
+          await File(path.join(staged!.path, 'track_identities.json'))
+              .readAsString()) as Map;
+      expect(
+          (restoredRegistry['records'] as List)
+              .map((entry) => entry['trackId'])
+              .toSet(),
+          {songId, cueId});
+      expect(((restoredRegistry['records'] as List).first as Map)['aliases'],
+          hasLength(1));
+      final restoredIndex = jsonDecode(
+              await File(path.join(staged!.path, 'index.json')).readAsString())
+          as Map;
+      final restoredCue =
+          ((restoredIndex['folders'] as List).single['audios'] as List).last
+              as Map;
+      final cueReference = CueTrackReference.fromMap(restoredCue['cue_track']);
+      expect(restoredCue['path'], cueReference.identity);
+      expect(cueReference.startFrame, 15001);
+      expect(cueReference.endFrame, 30003);
+      final restoredLyrics = jsonDecode(
+          await File(path.join(staged!.path, 'lyric_documents.json'))
+              .readAsString()) as Map;
+      expect(restoredLyrics['documents'][cueId]['path'], cueReference.identity);
+      expect(restoredLyrics['documents'][cueId]['locked'], isTrue);
+      expect(restoredLyrics['documents'][cueId]['offsetMilliseconds'], 321);
+      final stats = jsonDecode(
+          await File(path.join(staged!.path, 'playback_statistics.json'))
+              .readAsString()) as Map;
+      expect(
+          (stats['tracks'] as List)
+              .fold<int>(0, (total, row) => total + row['playCount'] as int),
+          16);
+      expect(stats['days']['2026-09-07'], 58023);
+      final stableReload = TrackIdentityRegistry.inMemory();
+      await stableReload.initialize(directory: staged!);
+      expect(stableReload.idFor(movedSong.path), songId,
+          reason: 'A historical alias is not another physical recording.');
+      expect(
+          stableReload.idFor(cueReference.identity, cue: cueReference), cueId);
+    });
+
+    test('two canonical recordings never collapse onto one destination file',
+        () async {
+      final music =
+          await Directory(path.join(sandbox.path, 'oldMusic')).create();
+      final newMusic =
+          await Directory(path.join(sandbox.path, 'newMusic')).create();
+      final survivor = File(path.join(newMusic.path, 'song.mp3'));
+      await survivor.writeAsBytes([1, 2, 3]);
+      final source =
+          await Directory(path.join(sandbox.path, 'source')).create();
+      await _json(
+          File(path.join(source.path, 'index.json')),
+          _index(music.path, music.path, [
+            {
+              ..._audio(path.join(music.path, 'A', 'song.mp3'), 3),
+              'track_id': 'first-id'
+            },
+            {
+              ..._audio(path.join(music.path, 'B', 'song.mp3'), 3),
+              'track_id': 'second-id'
+            },
+          ]));
+      final current =
+          await Directory(path.join(sandbox.path, 'current')).create();
+      await _json(File(path.join(current.path, 'index.json')),
+          _index(newMusic.path, newMusic.path, [_audio(survivor.path, 3)]));
+      final backup = File(path.join(sandbox.path, 'recordings.bak'));
+      await const CacheBackupService()
+          .exportBackup(source: source, destination: backup);
+      Directory? staged;
+      final restored = await const CacheBackupService().restoreBackup(
+          backup: backup,
+          destination: Directory(path.join(sandbox.path, 'restored')),
+          currentData: current,
+          activateLocation: (_, ready) async => staged = ready);
+      expect(restored.restoredSongs, 0);
+      expect(restored.missingSongs, 2);
+      final index = jsonDecode(
+              await File(path.join(staged!.path, 'index.json')).readAsString())
+          as Map;
+      final rows = (index['folders'] as List).single['audios'] as List;
+      expect(rows.map((row) => row['track_id']), ['first-id', 'second-id']);
+      final paths = rows.map((row) => row['path']).toSet();
+      expect(paths, hasLength(2));
+      expect(paths, isNot(contains(survivor.path)));
+    });
+
+    test(
+        'pending metadata commit blocks export instead of rewriting its journal',
+        () async {
+      final source =
+          await Directory(path.join(sandbox.path, 'source')).create();
+      await _json(File(path.join(source.path, 'metadata_committed.json')),
+          {'path': 'pending'});
+      await expectLater(
+          const CacheBackupService().exportBackup(
+              source: source,
+              destination: File(path.join(sandbox.path, 'pending.bak'))),
+          throwsA(isA<CacheBackupException>()));
+      await File(path.join(source.path, 'metadata_committed.json'))
+          .rename(path.join(source.path, 'metadata_committed.json.tmp'));
+      await expectLater(
+          const CacheBackupService().exportBackup(
+              source: source,
+              destination: File(path.join(sandbox.path, 'pending-temp.bak'))),
+          throwsA(isA<CacheBackupException>()));
     });
 
     test('archive path traversal is rejected before extraction', () async {

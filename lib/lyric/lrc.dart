@@ -188,7 +188,9 @@ class Lrc extends Lyric {
     Audio belongTo, {
     String? separator = "┃",
   }) async {
-    if (belongTo.isOnline) return null;
+    // A whole-file sidecar uses a different timeline from a CUE segment. CUE
+    // revisions live in the application document under the segment identity.
+    if (belongTo.isOnline || belongTo.isCueTrack) return null;
     // A user-edited sidecar is an explicit local override. Embedded tags must
     // not hide it immediately after the editor has saved it.
     final sidecar = File(path.setExtension(belongTo.path, '.lrc'));

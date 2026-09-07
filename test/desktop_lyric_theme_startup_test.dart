@@ -80,7 +80,7 @@ void main() {
       executableExists: (_) => true,
       readTheme: () => theme.currScheme,
       startProcess: (_, args) {
-        initial = jsonDecode(args.single) as Map<String, dynamic>;
+        initial = jsonDecode(args.last) as Map<String, dynamic>;
         return gate.future;
       },
     );
@@ -120,7 +120,7 @@ void main() {
         executableExists: (_) => true,
         readTheme: () => theme.currScheme,
         startProcess: (_, args) async {
-          initial = jsonDecode(args.single) as Map<String, dynamic>;
+          initial = jsonDecode(args.last) as Map<String, dynamic>;
           return process;
         },
       );

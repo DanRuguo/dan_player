@@ -171,13 +171,13 @@ inline PeekLayout FitPeekLayout(Size source, Size client, unsigned dpi = 96) {
       std::sqrt(kMaximumPeekPixels / pixels)});
   const Size canvas{std::max(1, static_cast<int>(client.width * scale)),
                     std::max(1, static_cast<int>(client.height * scale))};
-  // A 640x320 logical card is clearly readable without filling the entire
-  // desktop. The separately rasterized high-resolution source sets the hard
+  // A 1120x700 logical composition makes useful use of the restored window.
+  // The separately rasterized high-resolution source sets the hard
   // clarity ceiling: never invent glyph pixels by upscaling it. Old peers'
   // thumbnail-only payloads remain supported at their native resolution.
   const double density = std::clamp(dpi, 48u, 768u) / 96.0;
   const double content_scale = std::min({1.0,
-      640.0 * density / source.width, 320.0 * density / source.height,
+      1120.0 * density / source.width, 700.0 * density / source.height,
       static_cast<double>(canvas.width) / source.width,
       static_cast<double>(canvas.height) / source.height});
   const Size content{
@@ -274,13 +274,26 @@ class Image {
         layout.content.height > layout.canvas.height ||
         layout.left > layout.canvas.width - layout.content.width ||
         layout.top > layout.canvas.height - layout.content.height) return false;
-    // The producer renders an opaque card. Its top-left background pixel is
-    // also used for letterbox margins, so every source edge/text stays intact.
-    for (std::size_t index = 0; index < bytes; index += 4) {
-      output[index] = rgba_[2];
-      output[index + 1] = rgba_[1];
-      output[index + 2] = rgba_[0];
-      output[index + 3] = rgba_[3];
+    // Continue the producer's top/bottom background tones through the margins
+    // instead of leaving a large flat white window. Interpolate premultiplied
+    // channels together and write one packed BGRA value per pixel; no second
+    // full-size image, decoder, timer or bitmap is retained for the backdrop.
+    const auto bottom = static_cast<std::size_t>(size_.height - 1) * size_.width * 4;
+    const auto denominator = std::max(1, layout.canvas.height - 1);
+    for (int y = 0; y < layout.canvas.height; ++y) {
+      std::array<std::uint8_t, 4> color{};
+      for (int channel = 0; channel < 4; ++channel) {
+        const int source_channel = channel == 0 ? 2 : channel == 2 ? 0 : channel;
+        const auto top_value = rgba_[source_channel];
+        const auto bottom_value = rgba_[bottom + source_channel];
+        color[channel] = static_cast<std::uint8_t>((
+            top_value * (denominator - y) + bottom_value * y + denominator / 2) /
+            denominator);
+      }
+      auto* row = output + static_cast<std::size_t>(y) * layout.canvas.width * 4;
+      for (int x = 0; x < layout.canvas.width; ++x) {
+        std::memcpy(row + x * 4, color.data(), 4);
+      }
     }
     return WriteScaledBgra(layout.content,
         output + (static_cast<std::size_t>(layout.top) * layout.canvas.width +

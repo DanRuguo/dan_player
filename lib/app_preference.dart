@@ -63,6 +63,9 @@ class NowPlayingPagePreference {
 
 class PlaybackPreference {
   PlayMode playMode;
+
+  /// Null lets a legacy playback_state.json supply its last shuffle choice.
+  bool? shuffle;
   double volumeDsp;
   bool eqEnabled;
   List<double> eqGains;
@@ -70,12 +73,14 @@ class PlaybackPreference {
   PlaybackPreference(
     this.playMode,
     this.volumeDsp, {
+    this.shuffle,
     this.eqEnabled = false,
     List<double>? eqGains,
   }) : eqGains = eqGains ?? List.filled(BassPlayer.eqBandCenters.length, 0.0);
 
   Map toMap() => {
         "playMode": playMode.name,
+        if (shuffle != null) "shuffle": shuffle,
         "volumeDsp": volumeDsp,
         "eqEnabled": eqEnabled,
         "eqGains": eqGains,
@@ -91,6 +96,7 @@ class PlaybackPreference {
     return PlaybackPreference(
       PlayMode.fromString(map["playMode"]) ?? PlayMode.forward,
       (map["volumeDsp"] as num?)?.toDouble() ?? 1.0,
+      shuffle: map["shuffle"] is bool ? map["shuffle"] as bool : null,
       eqEnabled: map["eqEnabled"] == true,
       eqGains: gains,
     );

@@ -12,6 +12,10 @@ import 'package:dan_player/page/settings_page/desktop_lyric_settings.dart';
 import 'package:dan_player/page/settings_page/grouped_settings.dart';
 import 'package:dan_player/page/settings_page/lyric_experience_settings.dart';
 import 'package:dan_player/page/settings_page/playback_settings.dart';
+import 'package:dan_player/page/settings_page/library_watch_settings.dart';
+import 'package:dan_player/page/settings_page/library_health_settings.dart';
+import 'package:dan_player/page/settings_page/replay_gain_settings.dart';
+import 'package:dan_player/page/settings_page/track_resume_settings.dart';
 import 'package:dan_player/page/settings_page/shortcut_settings.dart';
 import 'package:dan_player/page/settings_page/sidebar_layout_settings.dart';
 import 'package:dan_player/page/settings_page/theme_settings.dart';
@@ -37,9 +41,13 @@ class SettingsPage extends StatelessWidget {
           children: [
             const AudioLibraryEditor(),
             const RefreshAudioLibraryTile(),
+            const LibraryWatchSettings(),
+            const LibraryHealthSettings(),
             const ArtistSeparatorEditor(),
             const RestoreSessionSwitch(),
             const PlaybackSettings(),
+            const ReplayGainSettings(),
+            const TrackResumeSettings(),
           ],
         ),
         SettingsSection(

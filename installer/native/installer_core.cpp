@@ -156,7 +156,7 @@ bool IsPayloadNamespace(const fs::path& relative) {
   return extension == L".dll" || first == L"dan player.exe" ||
          first == L"license" || first == L"sha256sums" ||
          first == L"build-provenance.json" || first == L"font-integrity.json" ||
-         first == L"native_assets.json" ||
+         first == L"native_assets.json" || first == L"desktop-lyric-mode" ||
          first == L"portable-readme.txt" || first == L"desktop-experience.md" ||
          first == L"validation.md" || first == L"playlist-migration.md" ||
          first == L"font-integrity.md" || first == L"classification.md" ||
@@ -165,7 +165,13 @@ bool IsPayloadNamespace(const fs::path& relative) {
          first == L"lyric-motion.md" || first == L"ui-polish-26.0.3.md" ||
          first == L"lyric-emphasis-spectrum-notes.md" || first == L"online-sources.md" ||
          first == L"song-comments-notes.md" || first == L"settings-backgrounds.md" ||
-         first == L"lyric-experience.md";
+         first == L"lyric-experience.md" ||
+         first == L"26.0.5-snapshot.1-validation.md" ||
+         first == L"26.0.5-snapshot.1-player-research.md" ||
+         first == L"26.0.5-snapshot.1-computer-use.md" ||
+         first == L"release-26.0.5-snapshot.1.md" || first == L"replay-gain.md" ||
+         first == L"26.0.5-snapshot.2-validation.md" ||
+         first == L"release-26.0.5-snapshot.2.md";
 }
 uint64_t Number(const std::string& value) {
   if (value.empty() || !std::all_of(value.begin(), value.end(), ::isdigit)) Fail("Invalid numeric field");
@@ -221,7 +227,18 @@ Manifest ReadPortableManifest(const fs::path& target) {
     if (fs::is_regular_file(file) && Sha256(file) == line.substr(0, 64))
       result.files.push_back({relative, line.substr(0, 64), fs::file_size(file)});
   }
-  for (const auto* critical : {L"Dan Player.exe", L"data/app.so", L"desktop_lyric/desktop_lyric.exe"}) {
+  const bool shared_lyrics = unique.count(L"desktop-lyric-mode") != 0;
+  std::vector<std::wstring> critical_files = {L"Dan Player.exe", L"data/app.so"};
+  if (shared_lyrics) {
+    critical_files.push_back(L"DESKTOP-LYRIC-MODE");
+    if (ReadBounded(target / L"DESKTOP-LYRIC-MODE", 64) != "shared-executable-v1\n" ||
+        std::any_of(unique.begin(), unique.end(), [](const auto& name) {
+          return name.rfind(L"desktop_lyric/", 0) == 0;
+        })) Fail("Invalid or mixed desktop lyric payload layout");
+  } else {
+    critical_files.push_back(L"desktop_lyric/desktop_lyric.exe");
+  }
+  for (const auto& critical : critical_files) {
     if (std::none_of(result.files.begin(), result.files.end(), [&](const auto& f) {
           return Lower(f.relative_path.generic_wstring()) == Lower(critical);
         })) Fail("Portable player identity checksum does not match");

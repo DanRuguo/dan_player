@@ -125,8 +125,11 @@ void main() {
       await mount(tester, brightness: brightness);
       showEditor();
       await tester.pumpAndSettle();
+      final originalEditor = tester.getRect(find.byKey(editorKey));
       showAppNotice('已填入候选信息，请核对后保存', kind: AppNoticeKind.success);
       await tester.pumpAndSettle();
+      expect(tester.getRect(find.byKey(editorKey)), originalEditor,
+          reason: 'Ample space below the editor must not move its controls.');
       final panel = tester.getRect(find.byKey(panelKey));
       final notice = tester.getRect(bubble);
       expect(notice.center.dx, panel.center.dx);
@@ -145,6 +148,35 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets(
+      'notice moves a nearly full dialog only to its safe bottom and restores it',
+      (tester) async {
+    await mount(tester, size: const Size(740, 500));
+    showAppDialog<void>(
+        context: pageContext,
+        builder: (_) => const Dialog(
+            child: SizedBox(key: editorKey, width: 280, height: 320)));
+    await tester.pumpAndSettle();
+    final original = tester.getRect(find.byKey(editorKey));
+    showAppNotice('已保存');
+    await tester.pump();
+    final moved = tester.getRect(find.byKey(editorKey));
+    expect(moved.size, original.size);
+    expect(moved.left, original.left);
+    expect(moved.top, lessThan(original.top));
+    expect(original.top - moved.top, lessThan(32));
+    expect(moved.bottom, lessThan(tester.getRect(bubble).top));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byKey(editorKey)), moved);
+    // The dialog's own bottom margin is included in the notice's 8px safe
+    // separation, rather than moving the actual surface another 12px upward.
+    expect(moved.bottom, closeTo(tester.getRect(bubble).top - 8, .01));
+    await tester.tap(find.byKey(const ValueKey('app-notice-close')));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byKey(editorKey)), original);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
       'notice follows text width, wraps at 60%, and ellipsizes bounded lines',

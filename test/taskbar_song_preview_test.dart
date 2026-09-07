@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_desktop_integration.dart';
+import 'support/music_category_fixtures.dart';
 
 const first = TaskbarPreviewTrack(
     identity: 'a', title: '歌曲 A', artist: '艺术家', album: '专辑');
@@ -19,6 +20,19 @@ TaskbarThumbnail pixel(int value) =>
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final scheme = ColorScheme.fromSeed(seedColor: Colors.teal);
+
+  test('same-second artwork changes invalidate frozen preview metadata', () {
+    final audio = CategoryTestAudio('cover')
+      ..modifiedNanos = '10000000100'
+      ..fileSizeBytes = 123;
+    final before = TaskbarPreviewTrack.fromAudio(audio);
+    audio.modifiedNanos = '10000000200';
+    final after = TaskbarPreviewTrack.fromAudio(audio);
+    expect(after, isNot(before));
+    expect(TaskbarPreviewTrack.fromAudio(audio), after);
+    audio.fileSizeBytes = 124;
+    expect(TaskbarPreviewTrack.fromAudio(audio), isNot(after));
+  });
 
   test('pixel protocol rejects invalid dimensions and byte length', () {
     for (final (w, h, length) in [
@@ -74,6 +88,44 @@ void main() {
     expect(calls, ['setThumbnail', 'clearThumbnail']);
     await publisher.dispose();
     expect(calls, hasLength(2));
+  });
+
+  test('playback state and duration refresh preview without any position clock',
+      () async {
+    final rendered = <TaskbarPreviewTrack>[];
+    final publisher = TaskbarPreviewPublisher(
+        invoke: (_, [__]) async => null,
+        renderer: (track, _, __) async {
+          rendered.add(track);
+          return pixel(1);
+        });
+    final playing = first.withPlaybackState(
+        playing: true, buffering: false, label: 'Playing');
+    publisher.synchronize(enabled: true, track: playing, scheme: scheme);
+    await flushDesktopEvents();
+    for (var i = 0; i < 100; i++) {
+      publisher.synchronize(
+          enabled: true,
+          track: first.withPlaybackState(
+              playing: true, buffering: false, label: 'Playing'),
+          scheme: scheme);
+    }
+    await flushDesktopEvents();
+    expect(rendered, [playing]);
+    final paused = first.withPlaybackState(
+        playing: false, buffering: false, label: 'Paused');
+    publisher.synchronize(enabled: true, track: paused, scheme: scheme);
+    await flushDesktopEvents();
+    expect(rendered, [playing, paused]);
+    expect(
+        const TaskbarPreviewTrack(
+            identity: 'a',
+            title: '歌曲 A',
+            artist: '艺术家',
+            album: '专辑',
+            durationSeconds: 30),
+        isNot(first));
+    await publisher.dispose();
   });
 
   test('rapid songs coalesce to one render and cannot publish stale artwork',
@@ -454,7 +506,15 @@ void main() {
       for (var i = 3; i < card.pixels.length; i += 4) {
         if (card.pixels[i] != 255) fail('Transparent pixel at ${i ~/ 4}');
       }
-      expect(card.pixels[0], (colors.surface.toARGB32() >> 16) & 255);
+      final panel = (120 * card.width + 220) * 4;
+      expect(card.pixels[panel], (colors.surface.toARGB32() >> 16) & 255,
+          reason:
+              'metadata keeps an opaque readable surface inside the gradient');
+      expect(
+          card.pixels.sublist(0, 3),
+          isNot(card.pixels
+              .sublist(card.pixels.length - 4, card.pixels.length - 1)),
+          reason: 'preview margins carry theme tones instead of flat white');
     });
   }
 

@@ -281,7 +281,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(parent.entries.first.childPlaylist, same(child));
     expect(child.entries.last.id, first.id);
-    await tapPlaylistAction(tester, 'playlist-play-all');
+    await playVisiblePlaylistSelection(tester);
     expect(fixture.played.single.queue.map((song) => song.title),
         ['Nested', 'First', 'Last']);
     expect(fixture.saves, 1);

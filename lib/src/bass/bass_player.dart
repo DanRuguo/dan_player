@@ -5,8 +5,11 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
-import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
+import 'package:dan_player/play_service/playback_diagnostics.dart';
+import 'package:dan_player/src/bass/bass_diagnostics.dart';
+import 'package:dan_player/play_service/replay_gain.dart';
+import 'package:dan_player/src/bass/bass_replay_gain.dart';
 import 'package:dan_player/src/bass/bass_mix.dart';
 import 'package:dan_player/src/bass/bass_tempo.dart';
 import 'package:dan_player/src/bass/audio_segment.dart';
@@ -42,6 +45,17 @@ enum PlayerState {
   unknown,
 }
 
+class BassPlaybackEvent {
+  const BassPlaybackEvent(this.stamp, this.state, {this.reason, this.problem});
+  final PlaybackStamp stamp;
+  final PlayerState state;
+  final PlaybackEndReason? reason;
+  final PlaybackProblem? problem;
+  bool get completed =>
+      reason == PlaybackEndReason.naturalEnd ||
+      reason == PlaybackEndReason.segmentEnd;
+}
+
 const BASS_PLUGINS = [
   "BASS\\bassape.dll",
   "BASS\\bassdsd.dll",
@@ -64,7 +78,11 @@ final class BassDx8ParamEq extends ffi.Struct {
   external double fGain;
 }
 
-typedef _BassOpenResult = ({int handle, int errorCode});
+typedef _BassOpenResult = ({
+  int handle,
+  int errorCode,
+  ReplayGainTags replayGain,
+});
 
 // BASS_StreamCreateFile may synchronously inspect codec headers and trigger a
 // cloud-backed file recall. Keep that work away from Flutter's UI isolate just
@@ -115,7 +133,11 @@ _BassOpenResult _openBassFile(
         )>('BASS_StreamCreateFile');
     filePointer = filePath.toNativeUtf16().cast<ffi.Void>();
     if (setDevice(device) == BASS.FALSE) {
-      return (handle: 0, errorCode: getError());
+      return (
+        handle: 0,
+        errorCode: getError(),
+        replayGain: const ReplayGainTags(),
+      );
     }
     final handle = createFile(BASS.FALSE, filePointer, 0, 0, flags);
     if (handle != 0 && segment != null) {
@@ -127,9 +149,19 @@ _BassOpenResult _openBassFile(
         rethrow;
       }
     }
+    var replayGain = const ReplayGainTags();
+    if (handle != 0) {
+      try {
+        replayGain = readBassReplayGain(library, handle);
+      } catch (_) {
+        // Optional metadata must neither fail playback nor orphan the newly
+        // opened stream. Unsupported tags simply keep the original volume.
+      }
+    }
     return (
       handle: handle,
       errorCode: handle == 0 ? getError() : 0,
+      replayGain: replayGain,
     );
   } finally {
     if (filePointer != null) ffi.malloc.free(filePointer);
@@ -198,7 +230,11 @@ _BassOpenResult _openBassUrl(
     // BASS's selected device and error code are thread-local. These calls stay
     // in one synchronous worker invocation, with no await between them.
     if (setDevice(device) == BASS.FALSE) {
-      return (handle: 0, errorCode: getError());
+      return (
+        handle: 0,
+        errorCode: getError(),
+        replayGain: const ReplayGainTags(),
+      );
     }
     final handle = createUrl(
       urlPointer,
@@ -208,7 +244,11 @@ _BassOpenResult _openBassUrl(
       ffi.Pointer<ffi.Void>.fromAddress(requestId),
     );
     final errorCode = handle == 0 ? getError() : 0;
-    return (handle: handle, errorCode: errorCode);
+    return (
+      handle: handle,
+      errorCode: errorCode,
+      replayGain: const ReplayGainTags(),
+    );
   } finally {
     if (urlPointer != null) ffi.malloc.free(urlPointer);
     // A VM worker thread may later run another isolate; do not leave per-thread
@@ -348,6 +388,95 @@ class BassPlayer {
   AudioSegment? _segment;
   double? _segmentLength;
   int? _fstream;
+  double _userVolumeDsp = 1;
+  ReplayGainPreferences _replayGain = const ReplayGainPreferences();
+  ReplayGainTags _replayGainTags = const ReplayGainTags();
+
+  ReplayGainTags get replayGainTags => _replayGainTags;
+  ReplayGainPreferences get replayGain => _replayGain;
+
+  final _eventBoundary = PlaybackEventBoundary();
+  BassPlaybackEvent? _lastEvent;
+  BassFormatSnapshot? _sourceFormat;
+  int get sessionId => _eventBoundary.stamp.session;
+  BassPlaybackEvent? get lastEvent => _lastEvent;
+  BassFormatSnapshot? get sourceFormat => _sourceFormat;
+  bool _deviceInterrupted = false;
+
+  /// Called only after a filesystem rename was committed and verified. The
+  /// current decoder keeps its handle/position and unrelated opens keep their
+  /// generation. Only future same-source reopen operations use the new path.
+  bool relinkLocalPath(String oldPath, String newPath) {
+    if (_freed || _fstream == null) return false;
+    final next = relinkedLocalPlaybackPath(
+        currentPath: _fPath,
+        isUrl: _sourceIsUrl,
+        oldPath: oldPath,
+        newPath: newPath);
+    if (next == null) return false;
+    _fPath = next;
+    return true;
+  }
+
+  /// Explicit refresh only (not a 33 ms diagnostics poll). No private path,
+  /// URL, native filename pointer or device name enters the export.
+  Map<String, Object?> outputDiagnostics() => {
+        'session': sessionId,
+        'state': playerState.name,
+        'endReason': _lastEvent?.reason?.name,
+        'error': _lastEvent?.problem?.toSafeJson(),
+        'source': _sourceFormat?.toJson(),
+        'requestedOutput': _outputMode.preferred ? 'exclusive' : 'shared',
+        'streamOutput': wasapiExclusive ? 'exclusive' : 'shared',
+        'exclusiveInitialized': _wasapiInitialized,
+        'deviceNumber': _diagnosticDeviceNumber,
+        'deviceFormat': wasapiExclusive && _wasapiInitialized
+            ? readBassWasapiFormat(_bassWasapiLib)?.toJson()
+            : null,
+        'mixerFormat': wasapiExclusive && _exclusiveMixer != null
+            ? readBassChannelFormat(_bassLib, _exclusiveMixer!)?.toJson()
+            : null,
+        'userVolume': _userVolumeDsp,
+        'effectiveDspMultiplier': _readEffectiveVolume(),
+        'replayGainRequested': _replayGain.mode.name,
+        'replayGainApplied': _fstream == null
+            ? null
+            : _replayGainTags.appliedMode(_replayGain)?.name,
+        'replayGainEffectiveDb': _effectiveReplayGainDb,
+        'peakProtection': _replayGain.preventClipping,
+        'eqRequested': _eqEnabled,
+        'eqAppliedBands': _eqAppliedGains.whereType<double>().length,
+        'eqRequestedGainsDb': _eqEnabled ? eqGains : null,
+        'eqGainsDb': _eqFxHandles.isEmpty ? null : List.of(_eqAppliedGains),
+        'eqSettingsApplied': !_eqEnabled ||
+            List.generate(_eqGains.length, (index) => index)
+                .every((index) => _eqAppliedGains[index] == _eqGains[index]),
+        'playbackRate': _playbackRate,
+        'tempoAvailable': supportsPlaybackRate,
+        'physicalOutputDrained': null,
+        'bitPerfectVerified': false,
+        'gaplessOutputVerified': false,
+      };
+
+  int? get _diagnosticDeviceNumber {
+    final value = wasapiExclusive && _wasapiInitialized
+        ? _bassWasapiLib.lookupFunction<ffi.Uint32 Function(), int Function()>(
+            'BASS_WASAPI_GetDevice')()
+        : _fstream == null
+            ? null
+            : _bassChannelGetDevice(_fstream!);
+    return value == _bassErrorValue ? null : value;
+  }
+
+  double? get _effectiveReplayGainDb {
+    if (_userVolumeDsp <= 0 ||
+        _replayGainTags.appliedMode(_replayGain) == null) {
+      return null;
+    }
+    final native = _readEffectiveVolume();
+    if (native == null || native <= 0) return null;
+    return 20 * math.log(native / _userVolumeDsp) / math.ln10;
+  }
 
   final _outputMode = WasapiOutputMode();
 
@@ -374,9 +503,10 @@ class BassPlayer {
   }
 
   Timer? _positionUpdater;
-  final _positionStreamController = StreamController<double>.broadcast();
+  final _positionStreamController =
+      StreamController<({PlaybackStamp stamp, double position})>.broadcast();
   final _playerStateStreamController =
-      StreamController<PlayerState>.broadcast();
+      StreamController<BassPlaybackEvent>.broadcast();
   final _spectrumStreamController = StreamController<List<double>>.broadcast();
   final _frequencySpectrumStreamController =
       StreamController<List<double>>.broadcast();
@@ -416,6 +546,7 @@ class BassPlayer {
     if (_fstream == null) {
       return PlayerState.unknown;
     }
+    if (_deviceInterrupted) return PlayerState.pausedDevice;
 
     final active = wasapiExclusive && _exclusiveMixer != null
         ? _mix!.channelIsActive(_fstream!)
@@ -426,7 +557,7 @@ class BassPlayer {
       case BASS.BASS_ACTIVE_PLAYING:
         if (wasapiExclusive &&
             _bassWasapi.BASS_WASAPI_IsStarted() != BASS.TRUE) {
-          return PlayerState.paused;
+          return PlayerState.pausedDevice;
         }
         return PlayerState.playing;
       case BASS.BASS_ACTIVE_PAUSED:
@@ -440,17 +571,25 @@ class BassPlayer {
     }
   }
 
-  double get volumeDsp {
-    if (_fstream == null) return 0;
+  /// User volume stays independent of the current song's ReplayGain tags.
+  double get volumeDsp => _fstream == null ? 0 : _userVolumeDsp;
+
+  /// Actual native DSP multiplier, useful for output diagnostics.
+  double get effectiveVolumeDsp {
+    return _readEffectiveVolume() ?? 0;
+  }
+
+  double? _readEffectiveVolume() {
+    if (_fstream == null || _freed) return null;
 
     final volDsp = ffi.malloc.allocate<ffi.Float>(ffi.sizeOf<ffi.Float>());
     try {
-      _bass.BASS_ChannelGetAttribute(
+      final read = _bass.BASS_ChannelGetAttribute(
         _fstream!,
         BASS.BASS_ATTRIB_VOLDSP,
         volDsp,
       );
-      return volDsp.value;
+      return read != 0 && volDsp.value.isFinite ? volDsp.value : null;
     } finally {
       ffi.malloc.free(volDsp);
     }
@@ -458,10 +597,29 @@ class BassPlayer {
 
   /// Normal playback updates every 33ms. Successful seeks additionally publish
   /// the actual native position immediately, including while paused.
-  Stream<double> get positionStream => _positionStreamController.stream;
+  Stream<double> get positionStream => _eventBoundary
+      .currentEvents(_positionStreamController.stream, (event) => event.stamp)
+      .map((event) => event.position);
 
   Stream<PlayerState> get playerStateStream =>
-      _playerStateStreamController.stream;
+      playbackEvents.map((event) => event.state);
+
+  Stream<BassPlaybackEvent> get playbackEvents => _eventBoundary.currentEvents(
+      _playerStateStreamController.stream, (event) => event.stamp);
+
+  void _publishPosition() => _positionStreamController
+      .add((stamp: _eventBoundary.stamp, position: position));
+
+  void _publishState(
+    PlayerState state, {
+    PlaybackEndReason? reason,
+    PlaybackProblem? problem,
+  }) {
+    final event = BassPlaybackEvent(_eventBoundary.stamp, state,
+        reason: reason, problem: problem);
+    _lastEvent = event;
+    _playerStateStreamController.add(event);
+  }
 
   Stream<List<double>> get spectrumStream => _spectrumStreamController.stream;
 
@@ -474,20 +632,81 @@ class BassPlayer {
       List.unmodifiable(_frequencySpectrumLevels);
 
   Timer _getPositionUpdater() {
+    final stamp = _eventBoundary.stamp;
+    var lastObserved = playerState;
+    final initialDevice = !wasapiExclusive && _fstream != null
+        ? _bassChannelGetDevice(_fstream!)
+        : null;
     return Timer.periodic(
       const Duration(milliseconds: 33),
       (timer) {
-        _positionStreamController.add(position);
+        if (_freed || !_eventBoundary.accepts(stamp)) {
+          timer.cancel();
+          return;
+        }
+        _publishPosition();
 
-        /// check if the channel has completed
-        if (playerState == PlayerState.stopped) {
+        final changedDevice = initialDevice != null &&
+            _fstream != null &&
+            _bassChannelGetDevice(_fstream!) != initialDevice;
+        final observed = changedDevice ? PlayerState.pausedDevice : playerState;
+        // BASS reports STOPPED for an invalid handle as well as a valid
+        // inactive channel. Read its error immediately, before any other FFI.
+        final nativeError = _bass.BASS_ErrorGetCode();
+        if (observed == PlayerState.stopped ||
+            observed == PlayerState.pausedDevice) {
           _resetSpectrum();
           timer.cancel();
           if (identical(_positionUpdater, timer)) {
             _positionUpdater = null;
           }
-          _playerStateStreamController.add(PlayerState.completed);
+          final reason = classifyPlaybackStop(
+            validHandle: observed != PlayerState.stopped ||
+                nativeError != BASS.BASS_ERROR_HANDLE,
+            deviceAvailable: observed != PlayerState.pausedDevice,
+            position: _boundaryPosition,
+            duration: length,
+            segment: _segment != null,
+          );
+          if (!_eventBoundary.settle(stamp)) return;
+          if (reason == PlaybackEndReason.naturalEnd ||
+              reason == PlaybackEndReason.segmentEnd) {
+            _publishState(PlayerState.completed, reason: reason);
+          } else {
+            final device = reason == PlaybackEndReason.deviceUnavailable;
+            // Explicit user recovery is required after an endpoint failure;
+            // never silently relabel it as shared output or completed audio.
+            if (device) {
+              if (wasapiExclusive && _fstream != null) {
+                _mix?.setChannelPaused(_fstream!, true);
+              } else if (_fstream != null) {
+                _bass.BASS_ChannelPause(_fstream!);
+              }
+              _deviceInterrupted = true;
+            }
+            _publishState(
+                device ? PlayerState.pausedDevice : PlayerState.stopped,
+                reason: reason,
+                problem: PlaybackProblem(
+                  device
+                      ? PlaybackProblemKind.deviceDisconnected
+                      : reason == PlaybackEndReason.invalidHandle
+                          ? PlaybackProblemKind.invalidHandle
+                          : PlaybackProblemKind.unexpectedStop,
+                  device
+                      ? changedDevice
+                          ? '默认输出设备已变化，播放已暂停。'
+                          : '音频设备已暂停或断开。'
+                      : '音频在到达可确认的结束位置前停止。',
+                  nativeCode: nativeError == 0 ? null : nativeError,
+                ));
+          }
           return;
+        }
+
+        if (observed != lastObserved) {
+          lastObserved = observed;
+          _publishState(observed);
         }
 
         if (_spectrumStreamController.hasListener ||
@@ -546,6 +765,10 @@ class BassPlayer {
 
   late final int Function() _bassGetDevice = _bassLib
       .lookupFunction<ffi.Uint32 Function(), int Function()>('BASS_GetDevice');
+
+  late final int Function(int) _bassChannelGetDevice = _bassLib.lookupFunction<
+      ffi.Uint32 Function(ffi.Uint32),
+      int Function(int)>('BASS_ChannelGetDevice');
 
   late final int Function(ffi.Pointer<ffi.Void>)? _bassStreamCancel =
       _lookupStreamCancel();
@@ -714,9 +937,10 @@ class BassPlayer {
   List<double> get eqGains => List.unmodifiable(_eqGains);
 
   final List<int> _eqFxHandles = [];
+  final List<double?> _eqAppliedGains = List.filled(eqBandCenters.length, null);
   bool get eqActive => _eqFxHandles.isNotEmpty;
 
-  void _setEqFxParams(int fx, int band) {
+  bool _setEqFxParams(int fx, int band) {
     final parameters =
         ffi.malloc.allocate<BassDx8ParamEq>(ffi.sizeOf<BassDx8ParamEq>());
     try {
@@ -728,7 +952,10 @@ class BassPlayer {
           "[eq] set parameters failed for band $band: "
           "${_bass.BASS_ErrorGetCode()}",
         );
+        return false;
       }
+      _eqAppliedGains[band] = _eqGains[band];
+      return true;
     } finally {
       ffi.malloc.free(parameters);
     }
@@ -746,7 +973,10 @@ class BassPlayer {
         return false;
       }
       _eqFxHandles.add(fx);
-      _setEqFxParams(fx, band);
+      if (!_setEqFxParams(fx, band)) {
+        _removeEqFromStream();
+        return false;
+      }
     }
     return true;
   }
@@ -758,6 +988,7 @@ class BassPlayer {
       }
     }
     _eqFxHandles.clear();
+    _eqAppliedGains.fillRange(0, _eqAppliedGains.length, null);
   }
 
   bool setEqEnabled(bool enabled) {
@@ -803,47 +1034,26 @@ class BassPlayer {
     _bassSetConfig(_bassConfigDevDefault, BASS.TRUE);
 
     if (_bass.BASS_Init(-1, 48000, 0, ffi.nullptr, ffi.nullptr) == 0) {
-      switch (_bass.BASS_ErrorGetCode()) {
-        case BASS.BASS_ERROR_ALREADY:
-          return;
-        case BASS.BASS_ERROR_DEVICE:
-          throw const FormatException("device is invalid.");
-        case BASS.BASS_ERROR_ILLPARAM:
-          throw const FormatException("win is not a valid window handle.");
-        case BASS.BASS_ERROR_DRIVER:
-          throw const FormatException("There is no available device driver.");
-        case BASS.BASS_ERROR_BUSY:
-          throw const FormatException(
-              "Something else has exclusive use of the device.");
-        case BASS.BASS_ERROR_FORMAT:
-          throw const FormatException(
-              "The specified format is not supported by the device. Try changing the freq parameter.");
-        case BASS.BASS_ERROR_MEM:
-          throw const FormatException("There is insufficient memory.");
-        case BASS.BASS_ERROR_UNKNOWN:
-          throw const FormatException(
-              "Some other mystery problem! Maybe Something else has exclusive use of the device.");
-      }
+      final code = _bass.BASS_ErrorGetCode();
+      if (code == BASS.BASS_ERROR_ALREADY) return;
+      throw PlaybackProblem(
+          code == BASS.BASS_ERROR_BUSY
+              ? PlaybackProblemKind.exclusiveDenied
+              : PlaybackProblemKind.deviceInitialization,
+          '无法初始化音频设备。',
+          nativeCode: code);
     }
   }
 
   void _startDevice() {
-    if (_bass.BASS_Start() == BASS.FALSE) {
-      switch (_bass.BASS_ErrorGetCode()) {
-        case BASS.BASS_ERROR_INIT:
-          _bassInit();
-          _startDevice();
-          break;
-        case BASS.BASS_ERROR_BUSY:
-          throw const FormatException(
-              "The app's audio has been interrupted and cannot be resumed yet. (iOS only)");
-        case BASS.BASS_ERROR_REINIT:
-          throw const FormatException(
-              "The device is currently being reinitialized or needs to be.");
-        case BASS.BASS_ERROR_UNKNOWN:
-          throw const FormatException(
-              "Some other mystery problem! Maybe Something else has exclusive use of the device.");
-      }
+    final error = startBassDeviceOnce(
+        start: _bass.BASS_Start,
+        errorCode: _bass.BASS_ErrorGetCode,
+        initialize: _bassInit);
+    if (error != 0) {
+      throw PlaybackProblem(
+          PlaybackProblemKind.deviceInitialization, '音频设备无法恢复。',
+          nativeCode: error);
     }
   }
 
@@ -971,7 +1181,6 @@ class BassPlayer {
       );
       if (!applied || !_isCurrentSource(generation)) return false;
 
-      setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
       if (exclusive) _bassWasapiInit();
       if (lastPos > 0) {
         try {
@@ -984,7 +1193,7 @@ class BassPlayer {
       if (wasPlaying) {
         start();
       } else {
-        _playerStateStreamController.add(playerState);
+        _publishState(playerState);
       }
       _outputMode.confirmActive();
       return true;
@@ -996,27 +1205,32 @@ class BassPlayer {
       // failed exclusive decoder behind and silently stopping the old song.
       if (wasapiExclusive != previousMode) {
         try {
-          final restored = await _setSource(sourcePath,
+          final restored = await _setSource(
+              sourceIsUrl ? sourcePath : _fPath ?? sourcePath,
               isUrl: sourceIsUrl,
               segment: sourceSegment,
               exclusive: previousMode,
               generation: generation);
           if (!restored || !_isCurrentSource(generation)) return false;
-          setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
           if (lastPos > 0) seek(lastPos);
           if (wasPlaying) start();
-          _playerStateStreamController.add(playerState);
+          _publishState(playerState);
           showTextOnSnackBar('输出模式切换失败，已恢复原模式：{0}', arguments: [err]);
         } catch (restoreError, restoreTrace) {
           if (!_isCurrentSource(generation)) return false;
           LOGGER.e('[restore output mode] $restoreError',
               stackTrace: restoreTrace);
           showTextOnSnackBar('音频设备不可用，原模式也未能恢复；请检查设备后重试');
-          _playerStateStreamController.add(playerState);
+          _publishState(playerState);
         }
       } else {
         showTextOnSnackBar('切换音频输出失败，原模式保持不变：{0}', arguments: [err]);
       }
+      _publishState(playerState,
+          problem: err is PlaybackProblem
+              ? err
+              : const PlaybackProblem(
+                  PlaybackProblemKind.deviceInitialization, '音频输出切换失败。'));
       return false;
     }
   }
@@ -1026,6 +1240,15 @@ class BassPlayer {
   /// phase, rather than waiting until that newer URL has been resolved.
   void cancelPendingSource() {
     _sourceGeneration += 1;
+    // Discard events already queued by the previous explicit source request.
+    // The retained stream may keep playing while another file opens, using a
+    // fresh observation stamp; opening cancellation remains independently
+    // guarded by _sourceGeneration.
+    _eventBoundary.command();
+    if (_positionUpdater != null) {
+      _positionUpdater!.cancel();
+      _positionUpdater = _freed ? null : _getPositionUpdater();
+    }
     if (_pendingUrlOpens.isEmpty) return;
 
     final cancelStream = _bassStreamCancel;
@@ -1072,6 +1295,7 @@ class BassPlayer {
     AudioSegment? segment,
     void Function()? onBeforeCommit,
   }) async {
+    final priorSourcePath = _fPath;
     const fileFlags =
         BASS.BASS_UNICODE | BASS.BASS_SAMPLE_FLOAT | BASS.BASS_ASYNCFILE;
     // On-demand tracks need the downloaded data retained for seek/loop.
@@ -1085,6 +1309,7 @@ class BassPlayer {
     if (exclusive || _tempo != null) flags |= BASS.BASS_STREAM_DECODE;
 
     var uncommittedHandle = 0;
+    var openedReplayGain = const ReplayGainTags();
     var uncommittedInMixer = false;
     _PendingBassUrlOpen? pending;
     _PendingBassFileOpen? pendingFile;
@@ -1166,9 +1391,11 @@ class BassPlayer {
         if (uncommittedHandle == 0) {
           throw _sourceOpenException(result.errorCode, isUrl: false);
         }
+        openedReplayGain = result.replayGain;
       }
 
       if (!_isCurrentSource(generation)) return false;
+      final openedFormat = readBassChannelFormat(_bassLib, uncommittedHandle);
       if (_tempo != null) {
         final wrapped =
             _tempo!.createStream(uncommittedHandle, decodingOutput: exclusive);
@@ -1194,17 +1421,34 @@ class BassPlayer {
       final segmentLength = segment?.duration(_bass.BASS_ChannelBytes2Seconds(
           uncommittedHandle,
           _bass.BASS_ChannelGetLength(uncommittedHandle, BASS.BASS_POS_BYTE)));
+      // Only the final stream receives the composed multiplier. Applying it
+      // to both the raw decoder and its tempo wrapper would double the gain.
+      _setNativeVolume(uncommittedHandle,
+          openedReplayGain.volume(_userVolumeDsp, _replayGain));
       onBeforeCommit?.call();
+      // A metadata rename may land while this same source is rebuilding its
+      // output. Keep the verified new location rather than restoring a stale
+      // filename captured before the await. Unrelated new tracks are untouched.
+      final committedPath = sourcePathAfterLocalRelink(
+          requested: source,
+          previousCurrent: priorSourcePath,
+          current: _fPath,
+          isUrl: isUrl);
       freeFStream();
       if (!exclusive) _disposeExclusiveOutput();
       _outputMode.commitStream(exclusive);
       _fstream = uncommittedHandle;
       uncommittedInMixer = false;
       uncommittedHandle = 0; // ownership has moved to the active stream
-      _fPath = source;
+      _fPath = committedPath;
       _sourceIsUrl = isUrl;
       _segment = segment;
       _segmentLength = segmentLength;
+      _replayGainTags = openedReplayGain;
+      _sourceFormat = openedFormat;
+      _eventBoundary.replace();
+      _lastEvent = null;
+      _deviceInterrupted = false;
       if (_eqEnabled) _applyEqToStream();
       return true;
     } catch (_) {
@@ -1232,7 +1476,7 @@ class BassPlayer {
     }
   }
 
-  static FormatException _sourceOpenException(int code, {required bool isUrl}) {
+  static PlaybackProblem _sourceOpenException(int code, {required bool isUrl}) {
     final message = switch (code) {
       BASS.BASS_ERROR_INIT => '音频设备未初始化，请检查输出设备后重试',
       BASS.BASS_ERROR_DEVICE => '音频输出设备无效或已断开',
@@ -1256,15 +1500,68 @@ class BassPlayer {
       BASS.BASS_ERROR_NO3D => '无法初始化 3D 音频',
       _ => '打开${isUrl ? '在线' : '本地'}音频失败（BASS 错误码 $code）',
     };
-    return FormatException(message);
+    return PlaybackProblem(
+        switch (code) {
+          BASS.BASS_ERROR_INIT ||
+          BASS.BASS_ERROR_DEVICE ||
+          BASS.BASS_ERROR_DRIVER =>
+            PlaybackProblemKind.deviceInitialization,
+          BASS.BASS_ERROR_FILEFORM ||
+          BASS.BASS_ERROR_NOTAUDIO ||
+          BASS.BASS_ERROR_CODEC ||
+          BASS.BASS_ERROR_FORMAT =>
+            PlaybackProblemKind.decodeFailure,
+          BASS.BASS_ERROR_HANDLE => PlaybackProblemKind.invalidHandle,
+          _ => PlaybackProblemKind.sourceUnavailable,
+        },
+        message,
+        nativeCode: code);
   }
 
   /// [BASS_ATTRIB_VOLDSP] attribute does have direct effect on decoding/recording channels.
   void setVolumeDsp(double volume) {
-    if (_fstream == null) return;
+    if (!volume.isFinite || volume < 0) {
+      throw ArgumentError.value(
+          volume, 'volume', 'Must be finite and nonnegative');
+    }
+    if (_fstream != null) {
+      _setNativeVolume(_fstream!, _replayGainTags.volume(volume, _replayGain));
+    }
+    _userVolumeDsp = volume;
+  }
 
+  /// The decoder position diagnoses the cause of an inactive stream. In
+  /// exclusive mode the UI clock compensates mixer buffering, and therefore
+  /// must not be mistaken for the raw decoder's end marker (or vice versa).
+  double get _boundaryPosition {
+    final stream = _fstream;
+    if (stream == null) return double.nan;
+    final bytes = _bass.BASS_ChannelGetPosition(stream, BASS.BASS_POS_BYTE);
+    if (bytes == _bassPositionErrorValue) return double.nan;
+    final seconds = _bass.BASS_ChannelBytes2Seconds(stream, bytes);
+    return _segment?.relativePosition(seconds, length) ?? seconds;
+  }
+
+  /// Transactional and safe during source opening: the commit uses the latest
+  /// preferences. Persist only after true; a failed native call keeps old prefs.
+  bool configureReplayGain(ReplayGainPreferences preferences) {
+    if (_freed) return false;
+    try {
+      if (_fstream != null) {
+        _setNativeVolume(
+            _fstream!, _replayGainTags.volume(_userVolumeDsp, preferences));
+      }
+      _replayGain = preferences;
+      return true;
+    } catch (error, trace) {
+      LOGGER.w('[replay gain] $error', stackTrace: trace);
+      return false;
+    }
+  }
+
+  void _setNativeVolume(int stream, double volume) {
     if (_bass.BASS_ChannelSetAttribute(
-          _fstream!,
+          stream,
           BASS.BASS_ATTRIB_VOLDSP,
           volume,
         ) ==
@@ -1276,6 +1573,8 @@ class BassPlayer {
           throw const FormatException("attrib is not valid.");
         case BASS.BASS_ERROR_ILLPARAM:
           throw const FormatException("value is not valid.");
+        default:
+          throw const FormatException('Unable to apply DSP volume.');
       }
     }
   }
@@ -1299,7 +1598,7 @@ class BassPlayer {
     }
     if (_fstream != null) _setNativeTempo(_fstream!, rate);
     _playbackRate = rate;
-    if (_fstream != null) _positionStreamController.add(position);
+    if (_fstream != null) _publishPosition();
     return true;
   }
 
@@ -1360,7 +1659,13 @@ class BassPlayer {
         BASS.BASS_ERROR_WASAPI_BUFFER => '设备不支持所需的输出缓冲区',
         _ => 'WASAPI 初始化失败（错误码 ${result.errorCode}）',
       };
-      throw FormatException(reason);
+      throw PlaybackProblem(
+          result.errorCode == BASS.BASS_ERROR_BUSY ||
+                  result.errorCode == BASS.BASS_ERROR_WASAPI_DENIED
+              ? PlaybackProblemKind.exclusiveDenied
+              : PlaybackProblemKind.deviceInitialization,
+          reason,
+          nativeCode: result.errorCode);
     }
     _wasapiInitialized = true;
   }
@@ -1392,7 +1697,7 @@ class BassPlayer {
       _mix!.setChannelPaused(stream, true);
       rethrow;
     }
-    _playerStateStreamController.add(playerState);
+    _publishState(playerState);
     _positionUpdater = _getPositionUpdater();
   }
 
@@ -1402,6 +1707,24 @@ class BassPlayer {
   void start() {
     if (_fstream == null) return;
 
+    try {
+      _startCurrentStream();
+    } catch (error) {
+      final problem = error is PlaybackProblem
+          ? error
+          : PlaybackProblem(
+              PlaybackProblemKind.deviceInitialization, '无法启动音频输出。',
+              nativeCode: _bass.BASS_ErrorGetCode());
+      _publishState(playerState, problem: problem);
+      rethrow;
+    }
+  }
+
+  void _startCurrentStream() {
+    final interrupted = _deviceInterrupted;
+    _deviceInterrupted = false;
+    _eventBoundary.command(rearm: true);
+
     if (_segment != null && position >= length) _seekNative(0);
 
     _positionUpdater?.cancel();
@@ -1409,21 +1732,18 @@ class BassPlayer {
     if (wasapiExclusive) {
       return _start_wasapiExclusive();
     }
-    if (_bass.BASS_ChannelStart(_fstream!) == 0) {
-      switch (_bass.BASS_ErrorGetCode()) {
-        case BASS.BASS_ERROR_HANDLE:
-          throw const FormatException("handle is not a valid channel.");
-        case BASS.BASS_ERROR_DECODE:
-          throw const FormatException(
-              "handle is a decoding channel, so cannot be played.");
-        case BASS.BASS_ERROR_START:
-          _startDevice();
-          start();
-          break;
-      }
+    if (interrupted) _startDevice();
+    var started = _bass.BASS_ChannelStart(_fstream!);
+    if (started == 0 && _bass.BASS_ErrorGetCode() == BASS.BASS_ERROR_START) {
+      _startDevice();
+      started = _bass.BASS_ChannelStart(_fstream!);
+    }
+    if (started == 0) {
+      throw _sourceOpenException(_bass.BASS_ErrorGetCode(),
+          isUrl: _sourceIsUrl);
     }
 
-    _playerStateStreamController.add(playerState);
+    _publishState(playerState);
     _positionUpdater = _getPositionUpdater();
   }
 
@@ -1431,7 +1751,8 @@ class BassPlayer {
     if (_mix!.setChannelPaused(_fstream!, true) == BassMixLibrary.errorValue) {
       throw FormatException('无法暂停独占解码源（BASS 错误码 ${_bass.BASS_ErrorGetCode()}）');
     }
-    _playerStateStreamController.add(playerState);
+    _eventBoundary.command();
+    _publishState(playerState);
     _positionUpdater?.cancel();
     _positionUpdater = null;
   }
@@ -1460,7 +1781,8 @@ class BassPlayer {
       }
     }
 
-    _playerStateStreamController.add(playerState);
+    _eventBoundary.command();
+    _publishState(playerState);
     _positionUpdater?.cancel();
     _resetSpectrum();
   }
@@ -1471,6 +1793,7 @@ class BassPlayer {
   /// do nothing if [setSource] hasn't been called
   void seek(double position) {
     if (_fstream == null) return;
+    final wasPlaying = playerState == PlayerState.playing;
 
     if (wasapiExclusive && _wasapiInitialized) {
       seekWasapiOutput(
@@ -1497,7 +1820,11 @@ class BassPlayer {
     // Pause cancels the periodic updater. Publish only after native success so
     // paused sliders/lyrics update without resuming playback, and report BASS's
     // real (possibly sample-rounded) position rather than an optimistic target.
-    _positionStreamController.add(this.position);
+    _eventBoundary.command(rearm: true);
+    _positionUpdater?.cancel();
+    _positionUpdater = wasPlaying ? _getPositionUpdater() : null;
+    _publishPosition();
+    _publishState(playerState);
   }
 
   void _seekNative(double position) {
@@ -1545,10 +1872,13 @@ class BassPlayer {
   void freeFStream() {
     if (_fstream == null) return;
 
+    _eventBoundary.replace();
+
     _positionUpdater?.cancel();
     _positionUpdater = null;
 
     _eqFxHandles.clear();
+    _eqAppliedGains.fillRange(0, _eqAppliedGains.length, null);
     final handle = _fstream!;
     if (wasapiExclusive && _exclusiveMixer != null) {
       // Detach only the decoder. The silent NONSTOP mixer and WASAPI device
@@ -1561,6 +1891,10 @@ class BassPlayer {
     _sourceIsUrl = false;
     _segment = null;
     _segmentLength = null;
+    _replayGainTags = const ReplayGainTags();
+    _sourceFormat = null;
+    _deviceInterrupted = false;
+    _publishState(PlayerState.stopped, reason: PlaybackEndReason.userStop);
     _resetSpectrum();
 
     if (_bass.BASS_StreamFree(handle) == 0) {

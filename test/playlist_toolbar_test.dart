@@ -6,11 +6,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/playback_mode_fixture.dart';
+
 const _toolbarKey = ValueKey('toolbar-under-test');
 const _boundsKey = ValueKey('toolbar-bounds');
 const _switcherKey = ValueKey('playlist-toolbar-switcher');
 
 class _Fixture {
+  _Fixture() {
+    addTearDown(playback.dispose);
+  }
+  final playback = PlaybackModeFixture();
   bool isRoot = true;
   bool selecting = false;
   int selectedCount = 0;
@@ -29,6 +35,7 @@ class _Fixture {
 
   Widget toolbar() => PlaylistToolbar(
         key: _toolbarKey,
+        playbackService: playback,
         isRoot: isRoot,
         selecting: selecting,
         selectedCount: selectedCount,
@@ -39,7 +46,6 @@ class _Fixture {
         gridView: gridView,
         onCreate: () => calls.add('create'),
         onAddSongs: addSongs ? () => calls.add('addSongs') : null,
-        onPlayAll: () => calls.add('playAll'),
         onStartSelection: () => calls.add('startSelection'),
         onEndSelection: () => calls.add('endSelection'),
         onSelectAll: () => calls.add('selectAll'),
@@ -240,7 +246,9 @@ void main() {
                     'playlist-end-selection',
                   ]
                 : [
-                    mode == 'root' ? 'playlist-create' : 'playlist-play-all',
+                    mode == 'root'
+                        ? 'playlist-create'
+                        : 'playback-mode-shuffle',
                     if (mode == 'detail') 'playlist-add-menu',
                     'playlist-sort',
                     'playlist-view-toggle',
@@ -294,7 +302,7 @@ void main() {
         labelStyle: const TextStyle(fontSize: 22, height: 1.7)));
     await tester.pumpAndSettle();
     final keys = [
-      'playlist-play-all',
+      'playback-mode-shuffle',
       'playlist-add-menu',
       'playlist-sort',
       'playlist-view-toggle',
@@ -336,13 +344,15 @@ void main() {
     }
   });
 
-  testWidgets('root exposes four compact controls and retains direct actions',
+  testWidgets('root omits playback modes and retains library actions',
       (tester) async {
     final fixture = _Fixture();
     await tester.pumpWidget(_app(fixture));
     expect(find.byType(FilledButton), findsOneWidget);
     expect(find.byType(OutlinedButton), findsOneWidget);
     expect(find.byType(IconButton), findsNWidgets(2));
+    expect(_key('playback-mode-shuffle'), findsNothing);
+    expect(_key('playback-mode-repeat'), findsNothing);
     expect(_key('playlist-play-all'), findsNothing);
     expect(_key('playlist-start-selection'), findsNothing);
     expect(_key('playlist-open-albums'), findsNothing);
@@ -355,12 +365,11 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('root more menu preserves play, selection, albums and help',
+  testWidgets('root more menu preserves selection, albums and help',
       (tester) async {
     final fixture = _Fixture();
     await tester.pumpWidget(_app(fixture));
     for (final (key, event) in [
-      ('playlist-play-all', 'playAll'),
       ('playlist-start-selection', 'startSelection'),
       ('playlist-open-albums', 'albums'),
       ('playlist-help', 'help'),
@@ -372,7 +381,7 @@ void main() {
       await _choose(tester, _key(key));
       expect(fixture.calls.last, event);
     }
-    expect(fixture.calls.length, 4);
+    expect(fixture.calls.length, 3);
   });
 
   testWidgets('root sort excludes track-only modes and reports current choice',
@@ -399,15 +408,16 @@ void main() {
     expect(fixture.calls, ['sort:nameDescending']);
   });
 
-  testWidgets('detail keeps play primary and groups both add operations',
+  testWidgets('detail exposes mode controls and groups both add operations',
       (tester) async {
     final fixture = _Fixture()..isRoot = false;
     await tester.pumpWidget(_app(fixture));
-    expect(find.byType(FilledButton), findsOneWidget);
+    expect(find.byType(FilledButton), findsNothing);
     expect(find.byType(OutlinedButton), findsNWidgets(2));
     expect(_key('playlist-add-songs'), findsNothing);
     expect(_key('playlist-create'), findsNothing);
-    await tester.tap(_control('playlist-play-all'));
+    await tester.tap(_control('playback-mode-shuffle'));
+    expect(fixture.playback.calls, ['shuffle:true']);
     for (final (key, event) in [
       ('playlist-add-songs', 'addSongs'),
       ('playlist-create', 'create'),
@@ -419,7 +429,7 @@ void main() {
       await _choose(tester, _key(key));
       expect(fixture.calls.last, event);
     }
-    expect(fixture.calls, ['playAll', 'addSongs', 'create']);
+    expect(fixture.calls, ['addSongs', 'create']);
   });
 
   testWidgets('detail more menu keeps every management callback',
@@ -538,11 +548,12 @@ void main() {
       ..isRoot = false
       ..editingEnabled = false;
     await tester.pumpWidget(_app(fixture));
-    expect(_enabled(tester, 'playlist-play-all'), isTrue);
+    expect(_enabled(tester, 'playback-mode-shuffle'), isTrue);
     expect(_enabled(tester, 'playlist-add-menu'), isFalse);
     expect(_enabled(tester, 'playlist-sort'), isFalse);
     expect(_enabled(tester, 'playlist-view-toggle'), isTrue);
-    await tester.tap(_control('playlist-play-all'));
+    await tester.tap(_control('playback-mode-shuffle'));
+    expect(fixture.playback.calls, ['shuffle:true']);
     await tester.tap(_control('playlist-view-toggle'));
     await _open(tester, 'playlist-current-settings');
     for (final element in _menuItems().evaluate()) {
@@ -551,20 +562,19 @@ void main() {
     }
     await tester.tap(find.text('重命名'));
     await tester.pump();
-    expect(fixture.calls, ['playAll', 'view']);
+    expect(fixture.calls, ['view']);
     await _choose(tester, _key('playlist-help'));
     expect(fixture.calls.last, 'help');
   });
 
-  testWidgets('read-only root still permits albums, play and help',
+  testWidgets('read-only root still permits modes, albums and help',
       (tester) async {
     final fixture = _Fixture()..editingEnabled = false;
     await tester.pumpWidget(_app(fixture));
     expect(_enabled(tester, 'playlist-create'), isFalse);
     expect(_enabled(tester, 'playlist-sort'), isFalse);
     await _open(tester, 'playlist-current-settings');
-    expect(tester.widget<PopupMenuItem>(_key('playlist-play-all')).enabled,
-        isTrue);
+    expect(_key('playlist-play-all'), findsNothing);
     expect(
         tester.widget<PopupMenuItem>(_key('playlist-start-selection')).enabled,
         isFalse);
@@ -590,7 +600,7 @@ void main() {
   });
 
   testWidgets(
-      'empty root retains create but disables play, sorting and selection',
+      'empty root permits mode presets and create but disables sorting and selection',
       (tester) async {
     final fixture = _Fixture()
       ..hasItems = false
@@ -598,9 +608,12 @@ void main() {
     await tester.pumpWidget(_app(fixture));
     expect(_enabled(tester, 'playlist-create'), isTrue);
     expect(_enabled(tester, 'playlist-sort'), isFalse);
+    expect(_key('playback-mode-shuffle'), findsNothing);
+    expect(_key('playback-mode-repeat'), findsNothing);
+    expect(fixture.playback.calls, isEmpty);
+    expect(fixture.calls, isEmpty);
     await _open(tester, 'playlist-current-settings');
-    expect(tester.widget<PopupMenuItem>(_key('playlist-play-all')).enabled,
-        isFalse);
+    expect(_key('playlist-play-all'), findsNothing);
     expect(
         tester.widget<PopupMenuItem>(_key('playlist-start-selection')).enabled,
         isFalse);
@@ -653,8 +666,8 @@ void main() {
     // The outgoing toolbar is still mounted for its 220ms transition, and the
     // popup itself lives outside that subtree in Navigator's overlay.
     expect(_key('playlist-create'), findsOneWidget);
-    expect(_key('playlist-play-all'), findsOneWidget);
-    await _choose(tester, _key('playlist-play-all'));
+    expect(_key('playlist-open-albums'), findsOneWidget);
+    await _choose(tester, _key('playlist-open-albums'));
     expect(fixture.calls, isEmpty);
     expect(_key('playlist-remove-selected'), findsOneWidget);
   });
@@ -696,7 +709,6 @@ void main() {
       (tester) async {
     await tester.pumpWidget(_app(_Fixture()..isRoot = false));
     for (final key in [
-      'playlist-play-all',
       'playlist-add-menu',
       'playlist-sort',
       'playlist-view-toggle',

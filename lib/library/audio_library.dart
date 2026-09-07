@@ -7,6 +7,7 @@ import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/cue_track.dart';
+import 'package:dan_player/library/track_identity.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
@@ -132,6 +133,7 @@ class AudioLibrary {
   /// ```
   static Future<void> initFromIndex() async {
     try {
+      await TrackIdentityRegistry.instance.initialize();
       final supportPath = (await getAppDataDir()).path;
       final indexPath = "$supportPath\\index.json";
       final indexFile = File(indexPath);
@@ -173,6 +175,13 @@ class AudioLibrary {
           (roots is! List || roots.any((root) => root is! String))) {
         throw const FormatException('Audio index roots must be strings');
       }
+      for (final folder in folders) {
+        for (final audio in folder.audios) {
+          audio.stableTrackId;
+        }
+      }
+      // Publish the new library only after the durable identities exist.
+      await TrackIdentityRegistry.instance.flush();
       _instance = AudioLibrary._(folders)
         .._scanRoots = roots == null ? null : List<String>.from(roots)
         ..onlineAudioCollection = onlineAudios;
@@ -290,6 +299,7 @@ class AudioLibrary {
         "roots": List<String>.of(scanRoots),
         "folders": [for (final folder in folders) folder.toMap()],
       };
+      await TrackIdentityRegistry.instance.flush();
       final supportPath = (await getAppDataDir()).path;
       final indexPath = "$supportPath\\index.json";
       final contents = await Isolate.run(() => json.encode(snapshot));
@@ -355,6 +365,20 @@ class AudioFolder {
 }
 
 class Audio {
+  final String? _identityHint;
+  String? _stableTrackId;
+
+  /// Persistent local identity; editable metadata and locations are not IDs.
+  /// Online tracks retain their provider-scoped URI identity.
+  String get stableTrackId => isOnline
+      ? path
+      : _stableTrackId ??= TrackIdentityRegistry.instance.idFor(
+          path,
+          cue: cueTrack,
+          preferredId: _identityHint,
+        );
+  String get trackId => stableTrackId;
+
   String title;
 
   /// 从音乐标签中读取的艺术家字符串，可能包含多个艺术家，以“、”，“/”等分隔。
@@ -462,7 +486,9 @@ class Audio {
     this.artworkUrl,
     this.onlinePlayable,
     this.onlineDownloadAllowed,
-  }) : splitedArtists = artist.split(
+    String? stableTrackId,
+  })  : _identityHint = stableTrackId,
+        splitedArtists = artist.split(
           RegExp(AppSettings.instance.artistSplitPattern),
         );
 
@@ -623,6 +649,18 @@ class Audio {
     required String newAlbum,
     required int newModified,
   }) {
+    final previousPath = path;
+    // A stale editor and a fresh scan may be references to the same explicitly
+    // renamed file; the first reference can already have moved the registry.
+    _stableTrackId ??= TrackIdentityRegistry.instance.resolvePath(previousPath);
+    stableTrackId;
+    if (newPath != previousPath) {
+      TrackIdentityRegistry.instance.remapPaths((candidate) =>
+          TrackIdentityRegistry.normalizePath(candidate) ==
+                  TrackIdentityRegistry.normalizePath(previousPath)
+              ? newPath
+              : candidate);
+    }
     path = newPath;
     title = newTitle;
     artist = newArtist;
@@ -670,10 +708,12 @@ class Audio {
       metadataReadPending: map['metadata_pending'] == true,
       cueTrack: cue,
       durationVersion: (map['duration_version'] as num?)?.toInt() ?? 0,
+      stableTrackId: map['track_id'] is String ? map['track_id'] : null,
     );
   }
 
   Map toMap() => {
+        "track_id": stableTrackId,
         "title": title,
         "artist": artist,
         "album": album,

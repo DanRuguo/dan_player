@@ -23,6 +23,10 @@ class UnionSearchResult {
   set online(Future<OnlineSearchResponse> value) {
     _online = value;
     _onlineInitialized = true;
+    // A disabled provider can fail before navigation's first frame attaches
+    // FutureBuilder. Observe that branch now, while retaining the original
+    // Future and its error for the results UI and retry affordance.
+    value.ignore();
   }
 
   UnionSearchResult(
@@ -51,14 +55,14 @@ class UnionSearchResult {
       onlineCancellation: onlineCancellation,
     );
     final index = AudioSearchIndex.instance;
-    await index.ensureBuilt();
+    final local = await index.searchAll(query,
+        checkCancelled: result.onlineCancellation.check);
     result.onlineCancellation.check();
-    result.audios = index.searchAudios(query);
-    result.artists = index.searchArtists(query);
-    result.album = index.searchAlbums(query);
-    // Attach the provider future only when the result can immediately be
-    // presented by a FutureBuilder. Starting it before the chunked build can
-    // leave a fast provider failure temporarily unobserved.
+    result.audios = local.audios;
+    result.artists = local.artists;
+    result.album = local.albums;
+    // Avoid starting providers for an already cancelled local query. The
+    // setter also observes failures that precede FutureBuilder's first frame.
     result.online = OnlineMusicService.instance.search(
       query,
       cancellation: result.onlineCancellation,

@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/play_service/desktop_lyric_service.dart';
 import 'package:dan_player/play_service/lyric_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -14,6 +16,8 @@ class _Audio extends Fake implements Audio {
   String get path => 'synthetic-lyric-lifecycle-not-opened.wav';
   @override
   bool get isOnline => false;
+  @override
+  String get stableTrackId => 'synthetic-stable-lyric-track';
 }
 
 class _Lyric extends Lyric {
@@ -59,6 +63,7 @@ class _Desktop extends Fake implements DesktopLyricService {
   int timelines = 0;
   int missing = 0;
   final lines = <int>[];
+  final starts = <Duration>[];
 
   @override
   Future<bool> get canSendMessage {
@@ -71,8 +76,11 @@ class _Desktop extends Fake implements DesktopLyricService {
   @override
   void sendNoLyricMessage() => missing++;
   @override
-  void sendLyricLineMessage(LyricLine line, {required int lineIndex}) =>
-      lines.add(lineIndex);
+  void sendLyricLineMessage(LyricLine line, {required int lineIndex}) {
+    lines.add(lineIndex);
+    starts.add(line.start);
+  }
+
   @override
   void dispose() => disposals++;
   @override
@@ -80,7 +88,7 @@ class _Desktop extends Fake implements DesktopLyricService {
 }
 
 class _Harness {
-  _Harness() {
+  _Harness({LyricDocumentStore? documents}) {
     facade = PlayService.forTesting(
       readiness: ready,
       createPlayback: (_) {
@@ -91,8 +99,8 @@ class _Harness {
         helperCreations++;
         return desktop;
       },
-      createLyric: (owner) =>
-          LyricService.forTesting(owner, resolveDefaultLyric: (localFirst) {
+      createLyric: (owner) => LyricService.forTesting(owner,
+          documents: documents, resolveDefaultLyric: (localFirst) {
         requests++;
         return resolve(localFirst);
       }),
@@ -109,8 +117,11 @@ class _Harness {
   int playerCreations = 0;
   int helperCreations = 0;
   int requests = 0;
+  bool _cleaned = false;
 
   Future<void> cleanUp() async {
+    if (_cleaned) return;
+    _cleaned = true;
     await facade.close();
     await playback.positions.close();
     ready.dispose();
@@ -128,6 +139,93 @@ void main() {
   late _Harness rig;
   setUp(() => rig = _Harness());
   tearDown(() => rig.cleanUp());
+
+  Future<LyricDocumentStore> useDocuments() async {
+    final directory =
+        await Directory.systemTemp.createTemp('dan-lyric-service-');
+    final store = LyricDocumentStore(storageDirectory: directory);
+    await store.load();
+    await rig.cleanUp();
+    rig = _Harness(documents: store);
+    addTearDown(() async {
+      await rig.cleanUp();
+      store.dispose();
+      await directory.delete(recursive: true);
+    });
+    return store;
+  }
+
+  test('same-track manual lock supersedes a pending automatic result',
+      () async {
+    final store = await useDocuments();
+    final pending = Completer<Lyric?>();
+    rig.resolve = (_) => pending.future;
+    rig.service.updateLyric();
+    await store.edit(rig.playback.audio, '[00:00.00]Human version');
+    pending.complete(_sampleLyric());
+    await _flush();
+    final lyric = await rig.service.currLyricFuture;
+    expect((lyric!.lines.single as UnsyncLyricLine).content, 'Human version');
+    expect(store.forAudio(rig.playback.audio)!.locked, isTrue);
+  });
+
+  test('reentering the same track invalidates an earlier automatic request',
+      () async {
+    await useDocuments();
+    final first = Completer<Lyric?>();
+    final second = Completer<Lyric?>();
+    rig.resolve = (_) => rig.requests == 1 ? first.future : second.future;
+    rig.service.updateLyric();
+    final initialGeneration = rig.service.resolutionGeneration;
+    rig.service.updateLyric();
+    expect(rig.service.resolutionGeneration, greaterThan(initialGeneration));
+    second.complete(Lrc.fromLrcText('[00:00.00]New session', LrcSource.web));
+    await _flush();
+    first.complete(_sampleLyric());
+    await _flush();
+    expect(
+        (rig.service.rawCurrentLyric!.lines.single as UnsyncLyricLine).content,
+        'New session');
+  });
+
+  test('locked and no-lyric documents avoid repeated online resolution',
+      () async {
+    final store = await useDocuments();
+    await store.setLocked(rig.playback.audio, true, current: _sampleLyric());
+    rig.service.updateLyric();
+    await _flush();
+    expect(rig.requests, 0);
+    await store.setNoLyrics(rig.playback.audio, true);
+    rig.service.updateLyric();
+    await _flush();
+    expect(await rig.service.currLyricFuture, isNull);
+    expect(rig.requests, 0);
+    expect(rig.desktop.missing, greaterThan(0));
+  });
+
+  test('display and desktop share once-shifted media timestamps after seek',
+      () async {
+    final store = await useDocuments();
+    await store.select(rig.playback.audio, _sampleLyric(), locked: true);
+    await store.setOffset(rig.playback.audio, 500);
+    rig.playback.currentPosition = 2.2;
+    rig.service.findCurrLyricLine();
+    await _flush();
+    expect(rig.desktop.lines.last, 0);
+    expect(rig.desktop.starts.last, const Duration(milliseconds: 500));
+    rig.playback.currentPosition = 2.7;
+    rig.playback.positions.add(2.7);
+    await _flush();
+    expect(rig.desktop.lines.last, 1);
+    expect(rig.desktop.starts.last, const Duration(milliseconds: 2500));
+    expect(rig.service.rawCurrentLyric!.lines[1].start,
+        const Duration(seconds: 2));
+    await store.setLocked(rig.playback.audio, true,
+        current: rig.service.rawCurrentLyric);
+    await _flush();
+    expect((await rig.service.currLyricFuture)!.lines[1].start,
+        const Duration(milliseconds: 2500));
+  });
 
   for (final failed in [false, true]) {
     test('pending lyric ${failed ? 'failure' : 'success'} after close is inert',

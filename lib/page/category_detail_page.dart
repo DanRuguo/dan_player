@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'dart:async';
 
 import 'package:dan_player/component/app_content_scrollbar.dart';
@@ -216,8 +217,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     final group = _group;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final allowed = (_group?.audios ?? <Audio>[]).toSet();
-      _selection.replaceSelection(_selection.selected.where(allowed.contains));
+      _selection.retainCurrentItems(_group?.audios ?? <Audio>[]);
     });
     if (group == null) {
       return PageScaffold(
@@ -251,14 +251,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              if (!selecting)
-                FilledButton(
-                  key: const ValueKey('category-play-all'),
-                  onPressed: queue.isEmpty ? null : () => _play(0, queue),
-                  style: _actionStyle(context, primary: true),
-                  child: AppToolbarLabel(
-                      label: ui("播放全部"), icon: Icons.play_arrow),
-                ),
+              if (!selecting) const AppPlaybackModeControls(),
               if (selecting)
                 AudioMultiSelectionActions(
                   controller: _selection,

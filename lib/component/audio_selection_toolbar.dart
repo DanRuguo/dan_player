@@ -5,6 +5,7 @@ import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -209,7 +210,9 @@ Future<void> _runSelectedAction(BuildContext context,
   try {
     await action(audios);
   } catch (_) {
-    if (context.mounted) _notice(context, ui('处理所选歌曲失败，请重试'));
+    if (context.mounted) {
+      _notice(context, ui('处理所选歌曲失败，请重试'), kind: AppNoticeKind.error);
+    }
   }
 }
 
@@ -217,9 +220,10 @@ void _enqueue(BuildContext context, List<Audio> audios, {required bool next}) {
   final added =
       PlayService.instance.playbackService.enqueueAudios(audios, next: next);
   _notice(context,
-      added ? ui('已加入播放队列：{0} 首', [audios.length]) : ui('歌曲正在加载，请稍后重试'));
+      added ? ui('已加入播放队列：{0} 首', [audios.length]) : ui('歌曲正在加载，请稍后重试'),
+      kind: added ? AppNoticeKind.success : AppNoticeKind.warning);
 }
 
-void _notice(BuildContext context, String text) =>
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text(text)));
+void _notice(BuildContext context, String text,
+        {AppNoticeKind kind = AppNoticeKind.success}) =>
+    showTextOnSnackBar(text, context: context, kind: kind);

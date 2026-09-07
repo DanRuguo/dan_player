@@ -40,7 +40,7 @@ void main() {
         const BoxConstraints.tightFor(width: 44, height: 44));
     expect(button.style!.tapTargetSize, MaterialTapTargetSize.shrinkWrap);
     expect(button.style!.foregroundColor!.resolve(<WidgetState>{}),
-        scheme.onSurfaceVariant);
+        scheme.primary);
     expect(
       button.style!.backgroundColor!
           .resolve(<WidgetState>{WidgetState.hovered}),

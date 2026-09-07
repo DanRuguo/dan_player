@@ -6,6 +6,8 @@ import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/player_experience_preferences.dart';
+import 'package:dan_player/play_service/replay_gain.dart';
+import 'package:dan_player/play_service/track_resume_preferences.dart';
 import 'package:dan_player/player_shortcut_preferences.dart';
 import 'package:dan_player/src/rust/api/system_theme.dart';
 import 'package:dan_player/utils.dart';
@@ -131,7 +133,7 @@ Future<void> scheduleAppDataDirectorySwitch(
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.4";
+  static const String version = "26.0.5-snapshot.2";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";
@@ -214,6 +216,11 @@ class AppSettings {
   }
 
   bool restoreLastSession = true;
+
+  /// Watch configured music folders on demand; older profiles remain opt-in.
+  final libraryAutoRefresh = ValueNotifier(false);
+  final replayGain = ValueNotifier(const ReplayGainPreferences());
+  final trackResume = ValueNotifier(const TrackResumePreferences());
 
   /// 每 24 小时最多自动检查一次所选通道；不自动下载。
   bool autoCheckUpdates = true;
@@ -307,6 +314,12 @@ class AppSettings {
   }
 
   static void _readUpdatePreferences(Map settingsMap) {
+    _instance.libraryAutoRefresh.value =
+        settingsMap['LibraryAutoRefresh'] == true;
+    _instance.replayGain.value =
+        ReplayGainPreferences.fromJson(settingsMap['ReplayGain']);
+    _instance.trackResume.value =
+        TrackResumePreferences.fromJson(settingsMap['TrackResume']);
     _instance.backgrounds.value =
         BackgroundPreferences.fromMap(settingsMap['Backgrounds']);
     _instance.onlineSources.value =
@@ -455,6 +468,9 @@ class AppSettings {
         "LocalLyricFirst": localLyricFirst,
         "LyricApiUrl": lyricApiUrl,
         "RestoreLastSession": restoreLastSession,
+        "LibraryAutoRefresh": libraryAutoRefresh.value,
+        "ReplayGain": replayGain.value.toJson(),
+        "TrackResume": trackResume.value.toJson(),
         "AutoCheckUpdates": autoCheckUpdates,
         ...updateChannel.toMap(),
         "IgnoredUpdateVersion": ignoredUpdateVersion,

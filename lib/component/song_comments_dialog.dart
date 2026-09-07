@@ -24,6 +24,7 @@ Future<void> showSongCommentsDialog(
 }) async {
   await showAppDialog<void>(
     context: context,
+    dialogBottomInset: 16,
     builder: (_) => SongCommentsDialog(
       audio: audio,
       service: service,

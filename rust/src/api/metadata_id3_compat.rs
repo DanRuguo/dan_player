@@ -25,6 +25,38 @@ pub(super) fn has_empty_text_frame(source: &Path) -> bool {
     })
 }
 
+/// Read each bounded APIC frame independently. An unrelated date/text frame
+/// that Lofty cannot parse must not make a valid embedded image disappear.
+/// This uses the same conservative framing checks as the metadata fallback
+/// and never rewrites tags or reads the MPEG payload.
+pub(super) fn read_picture(source: &Path, width: u32, height: u32) -> Option<Vec<u8>> {
+    let file = fs::File::open(source).ok()?;
+    let raw = RawTag::read(&mut BufReader::new(file)).ok()?;
+    let version = if raw.version == 3 {
+        lofty::id3::v2::Id3v2Version::V3
+    } else {
+        lofty::id3::v2::Id3v2Version::V4
+    };
+    for front_only in [true, false] {
+        for frame in &raw.frames {
+            if &raw.body[frame.start..frame.start + 4] != b"APIC" {
+                continue;
+            }
+            let mut payload = &raw.body[frame.start + 10..frame.end];
+            let Ok(picture) = lofty::id3::v2::AttachedPictureFrame::parse(
+                &mut payload, lofty::id3::v2::FrameFlags::default(), version,
+            ) else { continue; };
+            if (picture.picture.pic_type() == PictureType::CoverFront) != front_only {
+                continue;
+            }
+            if let Some(bytes) = resize_picture(picture.picture.data(), width, height) {
+                return Some(bytes);
+            }
+        }
+    }
+    None
+}
+
 fn unsupported() -> anyhow::Error {
     metadata_message(
         "TAG_LAYOUT_UNSUPPORTED",
@@ -427,6 +459,39 @@ mod tests {
             bytes.extend([0x55; 413]);
         }
         bytes
+    }
+
+    #[test]
+    fn cover_read_ignores_unrelated_empty_and_invalid_date_frames() {
+        for version in [3, 4] {
+            let root = directory();
+            let source = root.join("cover-fixture.mp3");
+            let original = fixture(version);
+            let old_size = syncsafe(&original[6..10]).unwrap();
+            let image = image::RgbaImage::from_pixel(64, 48, image::Rgba([12, 91, 173, 255]));
+            let mut png = Cursor::new(Vec::new());
+            image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+            let mut picture = b"\0image/png\0\x03\0".to_vec();
+            picture.extend_from_slice(png.get_ref());
+            let mut body = original[10..10 + old_size - 32].to_vec();
+            body.extend(frame(version, b"APIC", &picture));
+            let size = body.len();
+            let mut tagged = original[..10].to_vec();
+            tagged[6..10].copy_from_slice(&[
+                ((size >> 21) & 127) as u8, ((size >> 14) & 127) as u8,
+                ((size >> 7) & 127) as u8, (size & 127) as u8,
+            ]);
+            tagged.extend(body);
+            tagged.extend_from_slice(&original[10 + old_size..]);
+            fs::write(&source, &tagged).unwrap();
+            let bytes = _get_picture_by_lofty(&source.to_string_lossy().into_owned(), 96, 96)
+                .expect("an incompatible text frame must not hide a valid embedded cover");
+            let cover = image::load_from_memory(&bytes).unwrap().to_rgba8();
+            assert_eq!(cover.dimensions(), (64, 48));
+            assert_eq!(*cover.get_pixel(0, 0), image::Rgba([12, 91, 173, 255]));
+            assert_eq!(fs::read(&source).unwrap(), tagged, "cover reads never rewrite tags");
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

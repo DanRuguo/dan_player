@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:dan_player/online/online_http_request.dart';
 
 typedef QqSearchHttpClientFactory = HttpClient Function();
 
@@ -62,14 +63,19 @@ class QqPublicSong {
 /// Keep the public endpoint's song IDs, media IDs and metadata together so
 /// search, comments, lyrics and playback refer to the same selected song.
 class QqPublicSearchTransport {
-  QqPublicSearchTransport({QqSearchHttpClientFactory? httpClientFactory})
-      : _httpClientFactory = httpClientFactory ?? HttpClient.new;
+  QqPublicSearchTransport({
+    QqSearchHttpClientFactory? httpClientFactory,
+    this.requestTimeout = const Duration(seconds: 12),
+  })  : assert(requestTimeout > Duration.zero),
+        _httpClientFactory = httpClientFactory ?? HttpClient.new;
 
-  static const _timeout = Duration(seconds: 12);
+  final Duration requestTimeout;
   static const _responseByteLimit = 2 * 1024 * 1024;
   final QqSearchHttpClientFactory _httpClientFactory;
 
-  Future<List<QqPublicSong>> search(String rawQuery, int rawLimit) async {
+  Future<List<QqPublicSong>> search(String rawQuery, int rawLimit,
+      {OnlineHttpCancellation? cancellation}) async {
+    cancellation?.check();
     final query = rawQuery.trim();
     if (query.isEmpty) return const [];
     final limit = rawLimit.clamp(1, 30).toInt();
@@ -82,20 +88,21 @@ class QqPublicSearchTransport {
       'g_tk': '5381',
       't': '0',
     });
-    final client = _httpClientFactory()..connectionTimeout = _timeout;
-    try {
-      final request = await client.getUrl(uri).timeout(_timeout);
-      request.followRedirects = false;
-      request.headers.set(HttpHeaders.userAgentHeader,
-          'Mozilla/5.0 DanPlayer/26.0.4 PublicSearch');
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');
-      final response = await request.close().timeout(_timeout);
-      final payload = await _readJsonResponse(response);
-      return parseQqPublicSearchPayload(payload, limit: limit);
-    } finally {
-      client.close(force: true);
-    }
+    return runBoundedOnlineRequest(
+        createClient: _httpClientFactory,
+        timeout: requestTimeout,
+        cancellation: cancellation,
+        request: (client) async {
+          final request = await client.getUrl(uri);
+          request.followRedirects = false;
+          request.headers.set(HttpHeaders.userAgentHeader,
+              'Mozilla/5.0 DanPlayer/26.0.4 PublicSearch');
+          request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+          request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');
+          final response = await request.close();
+          final payload = await _readJsonResponse(response);
+          return parseQqPublicSearchPayload(payload, limit: limit);
+        });
   }
 
   Future<Object?> _readJsonResponse(HttpClientResponse response) async {
@@ -117,7 +124,7 @@ class QqPublicSearchTransport {
       throw const QqPublicSearchException('QQ音乐搜索响应过大，已停止解析');
     }
     final bytes = BytesBuilder(copy: false);
-    await for (final chunk in response.timeout(_timeout)) {
+    await for (final chunk in response) {
       if (bytes.length + chunk.length > _responseByteLimit) {
         throw const QqPublicSearchException('QQ音乐搜索响应过大，已停止解析');
       }

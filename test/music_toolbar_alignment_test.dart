@@ -90,7 +90,8 @@ List<Finder> _musicButtons() {
   final choices = _buttons(selection);
   return [
     find.byKey(const ValueKey('music-search-action')),
-    find.byKey(const ValueKey('music-shuffle-action')),
+    find.byKey(const ValueKey('playback-mode-shuffle')),
+    find.byKey(const ValueKey('playback-mode-repeat')),
     _buttons(find.byType(AppSortButton<int>)).first,
     for (var i = 0; i < choices.evaluate().length; i++) choices.at(i),
   ];
@@ -211,19 +212,20 @@ void main() {
               scale: scale, brightness: brightness));
           await _settle(tester);
           final controls = _musicButtons();
-          expect(controls, hasLength(5));
+          expect(controls, hasLength(6));
           _checkGeometry(tester, controls);
           final scheme = Theme.of(tester.element(controls.first)).colorScheme;
           await _checkPixels(tester, capture, [
             (button: controls[0], fill: scheme.secondaryContainer),
-            (button: controls[1], fill: scheme.primary),
+            (button: controls[1], fill: scheme.surface),
             (button: controls[2], fill: scheme.surface),
-            (button: controls[3], fill: scheme.primaryContainer),
-            (button: controls[4], fill: scheme.surface),
+            (button: controls[3], fill: scheme.surface),
+            (button: controls[4], fill: scheme.primaryContainer),
+            (button: controls[5], fill: scheme.surface),
           ]);
           expect(tester.getSize(controls[0]).width,
-              lessThan(tester.getSize(controls[1]).width));
-          for (final button in controls.take(3)) {
+              lessThan(tester.getSize(controls[3]).width));
+          for (final button in [controls[0], controls[3]]) {
             expect(
                 tester
                     .widget<ButtonStyleButton>(button)
@@ -281,16 +283,15 @@ void main() {
       _checkGeometry(tester, controls);
       expect(
           tester.widget<ButtonStyleButton>(controls[0]).onPressed, isNotNull);
-      expect(tester.widget<ButtonStyleButton>(controls[1]).onPressed, isNull);
-      expect(tester.widget<ButtonStyleButton>(controls[2]).onPressed, isNull);
+      // Playback has not initialized in this layout-only fixture.
+      expect(tester.widget<IconButton>(controls[1]).onPressed, isNull);
+      expect(tester.widget<IconButton>(controls[2]).onPressed, isNull);
+      expect(tester.widget<ButtonStyleButton>(controls[3]).onPressed, isNull);
       final scheme = Theme.of(tester.element(controls.first)).colorScheme;
       await _checkPixels(tester, capture, [
-        (
-          button: controls[1],
-          fill: Color.alphaBlend(
-              scheme.onSurface.withValues(alpha: .12), scheme.surface)
-        ),
+        (button: controls[1], fill: scheme.surface),
         (button: controls[2], fill: scheme.surface),
+        (button: controls[3], fill: scheme.surface),
       ]);
     }
   });
@@ -307,7 +308,6 @@ void main() {
         view: PlaylistViewMode.circular,
         onViewChanged: (_) {},
         onCreate: () {},
-        onPlayAll: () {},
         onStartSelection: () {},
         onEndSelection: () {},
         onSelectAll: () {},

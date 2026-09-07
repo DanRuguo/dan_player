@@ -352,6 +352,30 @@ void main() {
     expect(reads, 3);
   });
 
+  testWidgets('same-second embedded-cover changes resolve a new fingerprint',
+      (tester) async {
+    final audio = _song('edited-cover')..modifiedNanos = '1000000001';
+    final image =
+        (await tester.runAsync(() async => MemoryImage(await _png(32, 32))))!;
+    var reads = 0;
+    Widget page() => _app(AudioArtwork(
+          audio: audio,
+          placeholder: const Text('missing'),
+          loadArtwork: (_, __) async {
+            reads++;
+            return image;
+          },
+        ));
+    await tester.pumpWidget(page());
+    await _finishImage(tester);
+    audio.modifiedNanos = '1000000002';
+    await tester.pumpWidget(page());
+    await _finishImage(tester);
+    expect(reads, 2);
+    expect(tester.widget<Image>(find.byType(Image)).image, image);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('dispose while pending has no frame polling or late setState',
       (tester) async {
     final pending = Completer<ImageProvider?>();

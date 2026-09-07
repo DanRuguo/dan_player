@@ -30,7 +30,6 @@ void main() {
           canPlay: true,
           onCreate: () {},
           onAddSongs: () {},
-          onPlayAll: () {},
           onStartSelection: () {},
           onEndSelection: () {},
           onSelectAll: () {},
@@ -45,7 +44,7 @@ void main() {
       expect(
           find.descendant(of: view, matching: find.byType(Text)), findsNothing);
       final playRect =
-          tester.getRect(find.byKey(const ValueKey('playlist-play-all')));
+          tester.getRect(find.byKey(const ValueKey('playback-mode-shuffle')));
       expect(tester.getRect(view).center.dy, closeTo(playRect.center.dy, .1));
       expect(tester.getRect(view).height, closeTo(playRect.height, .1));
       await tester.tap(find.byTooltip(ui('圆形封面')));
@@ -62,7 +61,6 @@ void main() {
       hasItems: true,
       canPlay: true,
       onCreate: () {},
-      onPlayAll: () {},
       onStartSelection: () {},
       onEndSelection: () {},
       onSelectAll: () {},

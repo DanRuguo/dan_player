@@ -1,18 +1,25 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_duration_correction.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/library/track_resume_store.dart';
 import 'package:dan_player/src/bass/audio_segment.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_state_store.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
+import 'package:dan_player/play_service/playback_diagnostics.dart';
+import 'package:dan_player/play_service/playback_modes.dart';
+import 'package:dan_player/play_service/replay_gain.dart';
 import 'package:dan_player/play_service/queue_navigation.dart';
 import 'package:dan_player/play_service/queue_edits.dart';
+import 'package:dan_player/play_service/queue_track_identity.dart';
 import 'package:dan_player/play_service/segment_loop.dart';
+import 'package:dan_player/play_service/track_resume_restore.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/src/rust/api/smtc_flutter.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
@@ -21,23 +28,7 @@ import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path_util;
 
-enum PlayMode {
-  /// 顺序播放到播放列表结尾
-  forward,
-
-  /// 循环整个播放列表
-  loop,
-
-  /// 循环播放单曲
-  singleLoop;
-
-  static PlayMode? fromString(String playMode) {
-    for (var value in PlayMode.values) {
-      if (value.name == playMode) return value;
-    }
-    return null;
-  }
-}
+export 'package:dan_player/play_service/playback_modes.dart' show PlayMode;
 
 /// A short-lived guard used while a local file is being removed from disk.
 /// The active BASS stream must be released before Windows can reliably delete
@@ -94,14 +85,34 @@ class PlaybackService extends ChangeNotifier {
   int _lastSessionProgressMs = -30000;
 
   PlaybackService(this.playService) {
-    _playerStateStreamSub = playerStateStream.listen((event) {
+    _playerStateStreamSub = _player.playbackEvents.listen((event) {
       if (_closed) return;
-      if (event == PlayerState.completed) {
+      // The native source remains playable while the next one resolves.
+      // Late events from that old instance cannot settle the newly selected
+      // request, update its statistics, or advance over it (including A-B-A).
+      if (resolvingAudioPath.value != null || isChangingOutput.value) {
+        diagnosticsRevision.value++;
+        return;
+      }
+      if (event.problem != null) _lastProblem = event.problem;
+      diagnosticsRevision.value++;
+      if (event.problem != null && event.reason != null) {
+        PlaybackStatistics.instance.pause();
+        unawaited(_captureTrackResume(force: true));
+        _syncPausedToSystem();
+        showTextOnSnackBar(event.problem.toString(), kind: AppNoticeKind.error);
+      }
+      if (event.reason == PlaybackEndReason.userStop) {
+        PlaybackStatistics.instance.finish(markCompleted: false);
+        _syncPausedToSystem();
+      }
+      if (event.completed) {
         if (segmentLoop.enabled && canUseSegmentLoop) {
           _repeatSegment(resume: true);
           return;
         }
         PlaybackStatistics.instance.finish(markCompleted: true);
+        unawaited(_captureTrackResume(force: true, completed: true));
         // An old track may finish while a user-selected source is still
         // opening. Do not let auto-next replace that newer explicit request.
         if (resolvingAudioPath.value == null) _autoNextAudio();
@@ -127,7 +138,11 @@ class PlaybackService extends ChangeNotifier {
     });
 
     _positionStreamSub = positionStream.listen((progress) {
-      if (_closed) return;
+      if (_closed ||
+          resolvingAudioPath.value != null ||
+          isChangingOutput.value) {
+        return;
+      }
       if (segmentLoop.enabled &&
           playerState == PlayerState.playing &&
           canUseSegmentLoop &&
@@ -136,6 +151,9 @@ class PlaybackService extends ChangeNotifier {
       }
       PlaybackStatistics.instance
           .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
+      if (playerState == PlayerState.playing) {
+        unawaited(_captureTrackResume(positionOverride: progress));
+      }
       final progressMs = (progress * 1000).floor();
       if ((progressMs - _lastSmtcProgressMs).abs() >= 1000) {
         _lastSmtcProgressMs = progressMs;
@@ -154,6 +172,7 @@ class PlaybackService extends ChangeNotifier {
     final features = AppSettings.instance.experience.value;
     final player = BassPlayer()
       ..wasapiExclusive = features.exclusiveOutput
+      ..configureReplayGain(AppSettings.instance.replayGain.value)
       ..setEqGains(AppPreference.instance.playbackPref.eqGains)
       ..setEqEnabled(AppPreference.instance.playbackPref.eqEnabled);
     if (player.supportsPlaybackRate) {
@@ -234,6 +253,7 @@ class PlaybackService extends ChangeNotifier {
       }
     } catch (err, trace) {
       if (_isCurrentSourceRequest(token)) {
+        _recordProblem(err, output: true);
         LOGGER.e('[change output mode] $err', stackTrace: trace);
         showTextOnSnackBar('切换音频输出失败：{0}', arguments: [err]);
       }
@@ -262,19 +282,71 @@ class PlaybackService extends ChangeNotifier {
   void setEqBandGain(int band, double gain) {
     _player.setEqBandGain(band, gain);
     _pref.eqGains = _player.eqGains;
+    diagnosticsRevision.value++;
   }
 
   void applyEqGains(List<double> gains) {
     _player.setEqGains(gains);
     _pref.eqGains = _player.eqGains;
+    diagnosticsRevision.value++;
   }
 
   Audio? nowPlaying;
+  final diagnosticsRevision = ValueNotifier(0);
+  PlaybackProblem? _lastProblem;
+
+  /// A small on-demand snapshot. No path, title, provider identifier, token or
+  /// upstream exception text is included in the default diagnostic export.
+  Map<String, Object?> playbackDiagnostics() => {
+        'schemaVersion': 1,
+        'appVersion': AppSettings.version,
+        'operatingSystem': Platform.operatingSystem,
+        'phase': isChangingOutput.value
+            ? 'changingOutput'
+            : resolvingAudioPath.value != null
+                ? 'loading'
+                : playerState.name,
+        'sourceKind': nowPlaying == null
+            ? null
+            : nowPlaying!.isCueTrack
+                ? 'cue'
+                : nowPlaying!.isOnline
+                    ? 'online'
+                    : 'local',
+        'queueLength': playlist.value.length,
+        'queueIndex': _playlistIndex,
+        'error': _lastProblem?.toSafeJson(),
+        'output': _player.outputDiagnostics(),
+      };
+
+  void _recordProblem(Object error, {bool output = false}) {
+    _lastProblem = error is PlaybackProblem
+        ? error
+        : PlaybackProblem(
+            output
+                ? PlaybackProblemKind.deviceInitialization
+                : error is OnlineMusicException
+                    ? PlaybackProblemKind.sourceUnavailable
+                    : PlaybackProblemKind.unknown,
+            output ? '音频输出操作失败。' : '播放操作失败。');
+    diagnosticsRevision.value++;
+  }
+
+  bool relinkLocalPath(String oldPath, String newPath) {
+    if (_closed) return false;
+    final applied = _player.relinkLocalPath(oldPath, newPath);
+    if (applied) diagnosticsRevision.value++;
+    return applied;
+  }
+
   final ValueNotifier<bool> isBuffering = ValueNotifier(false);
 
   /// Path currently being resolved or opened, for both local and online audio.
   final ValueNotifier<String?> resolvingAudioPath = ValueNotifier(null);
   int _sourceRequestToken = 0;
+  int _manualSeekRevision = 0;
+  bool _resumeStorageErrorReported = false;
+  DateTime? _resumeRetryAfter;
   bool _closed = false;
   Future<void>? _closeFuture;
 
@@ -299,6 +371,7 @@ class PlaybackService extends ChangeNotifier {
 
   final ValueNotifier<List<Audio>> playlist = ValueNotifier([]);
   List<Audio> _playlistBackup = [];
+  ShuffleQueueCycle<Audio>? _shuffleCycle;
   final _queueEditHistory = QueueEditHistory<Audio>();
   final segmentLoop = SegmentLoopController();
 
@@ -410,6 +483,22 @@ class PlaybackService extends ChangeNotifier {
     final kept = playlist.value[current];
     _commitQueueEdit(QueueEdit([kept], 0), [kept]);
     return true;
+  }
+
+  /// Remove equivalent entries without reopening the current occurrence.
+  /// The same edit restores both visible and pre-shuffle order through undo.
+  int deduplicateQueue() {
+    if (!canEditQueue) return 0;
+    final queue = playlist.value;
+    final edit = QueueEdit.deduplicate(queue, _currentQueueIndex,
+        keyOf: queueTrackIdentity);
+    if (edit == null) return 0;
+    final backup = shuffle.value
+        ? QueueEdit.deduplicatedBackup(_playlistBackup, edit.items,
+            keyOf: queueTrackIdentity)
+        : edit.items;
+    _commitQueueEdit(edit, backup);
+    return queue.length - edit.items.length;
   }
 
   Timer? _stateSaveTimer;
@@ -607,12 +696,30 @@ class PlaybackService extends ChangeNotifier {
   ValueNotifier<PlayMode> get playMode => _playMode;
 
   void setPlayMode(PlayMode playMode) {
+    if (_closed || this.playMode.value == playMode) return;
     this.playMode.value = playMode;
     _pref.playMode = playMode;
+    _scheduleModePreferenceSave();
   }
 
-  late final _shuffle = ValueNotifier(false);
+  late final _shuffle = ValueNotifier(_pref.shuffle ?? false);
   ValueNotifier<bool> get shuffle => _shuffle;
+
+  Timer? _modeSaveTimer;
+  Future<void> _modeWrite = Future.value();
+
+  void _scheduleModePreferenceSave() {
+    _modeSaveTimer?.cancel();
+    _modeSaveTimer = Timer(const Duration(milliseconds: 150), () {
+      _modeSaveTimer = null;
+      _writeModePreferences();
+    });
+  }
+
+  void _writeModePreferences() {
+    _modeWrite = _modeWrite.then((_) => AppPreference.instance.save(),
+        onError: (_) => AppPreference.instance.save());
+  }
 
   Timer? _sleepTicker;
   DateTime? _sleepDeadline;
@@ -662,10 +769,21 @@ class PlaybackService extends ChangeNotifier {
 
   double get volumeDsp => _player.volumeDsp;
 
+  ReplayGainTags get replayGainTags => _player.replayGainTags;
+
+  /// Audio application only; the settings surface persists a successful choice.
+  bool configureReplayGain(ReplayGainPreferences preferences) {
+    if (_closed) return false;
+    final applied = _player.configureReplayGain(preferences);
+    if (applied) diagnosticsRevision.value++;
+    return applied;
+  }
+
   /// 修改解码时的音量（不影响 Windows 系统音量）
   void setVolumeDsp(double volume) {
     _player.setVolumeDsp(volume);
     _pref.volumeDsp = volume;
+    diagnosticsRevision.value++;
   }
 
   Stream<double> get positionStream => _player.positionStream;
@@ -681,9 +799,57 @@ class PlaybackService extends ChangeNotifier {
 
   List<double> get frequencySpectrumLevels => _player.frequencySpectrumLevels;
 
+  /// Capture values synchronously before replacing a source. While a source
+  /// is opening the decoder and nowPlaying may briefly describe different
+  /// files, so progress notifications must not create a mixed snapshot.
+  Future<void> _captureTrackResume({
+    bool force = false,
+    bool completed = false,
+    double? positionOverride,
+  }) async {
+    final audio = nowPlaying;
+    final preferences = AppSettings.instance.trackResume.value;
+    if (_closed ||
+        audio == null ||
+        resolvingAudioPath.value != null ||
+        segmentLoop.enabled) {
+      return;
+    }
+    if (!force && _resumeRetryAfter?.isAfter(DateTime.now()) == true) return;
+    final duration = length;
+    if (!preferences.accepts(local: audio.isLocal, duration: duration)) return;
+    final capturedPosition = positionOverride ?? position;
+    final track = audio.path;
+    final stableTrackId = audio.stableTrackId;
+    try {
+      final store = await TrackResumeStore.instance;
+      await store.remember(
+          track: track,
+          stableTrackId: stableTrackId,
+          position: capturedPosition,
+          duration: duration,
+          preferences: preferences,
+          force: force,
+          completed: completed);
+    } catch (error, trace) {
+      _reportResumeStorageError(error, trace);
+    }
+  }
+
+  void _reportResumeStorageError(Object error, StackTrace trace) {
+    // A locked/full disk must not interrupt audio or flood one message per
+    // progress tick. Settings still provide explicit clear/save error output.
+    _resumeRetryAfter = DateTime.now().add(const Duration(seconds: 30));
+    if (_resumeStorageErrorReported) return;
+    _resumeStorageErrorReported = true;
+    LOGGER.w('[track resume] $error', stackTrace: trace);
+  }
+
   /// Resolve/open first; only a successful native source becomes nowPlaying.
-  void _loadAndPlay(int audioIndex, List<Audio> playlist) {
+  void _loadAndPlay(int audioIndex, List<Audio> playlist,
+      {bool allowTrackResume = false}) {
     if (_closed) return;
+    unawaited(_captureTrackResume(force: true));
     segmentLoop.clear();
     if (audioIndex >= 0 &&
         audioIndex < playlist.length &&
@@ -695,14 +861,17 @@ class PlaybackService extends ChangeNotifier {
     OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
     _queueEditHistory.clear();
-    unawaited(_loadAndPlayResolved(token, audioIndex, playlist));
+    unawaited(_loadAndPlayResolved(token, audioIndex, playlist,
+        allowTrackResume: allowTrackResume, seekRevision: _manualSeekRevision));
   }
 
   Future<void> _loadAndPlayResolved(
     int token,
     int audioIndex,
-    List<Audio> playlist,
-  ) async {
+    List<Audio> playlist, {
+    required bool allowTrackResume,
+    required int seekRevision,
+  }) async {
     try {
       if (audioIndex < 0 || audioIndex >= playlist.length) {
         throw RangeError.index(audioIndex, playlist, "audioIndex");
@@ -723,11 +892,38 @@ class PlaybackService extends ChangeNotifier {
               : AudioSegment(
                   target.cueTrack!.startSeconds, target.cueTrack!.endSeconds));
       if (!applied || !_isCurrentSourceRequest(token)) return;
+      if (allowTrackResume && target.isLocal) {
+        try {
+          final preferences = AppSettings.instance.trackResume.value;
+          final nativeDuration = length;
+          if (preferences.accepts(local: true, duration: nativeDuration)) {
+            await restoreRememberedTrackPosition(
+              read: () async => (await TrackResumeStore.instance)
+                  .resumePosition(
+                      track: target.path,
+                      stableTrackId: target.stableTrackId,
+                      duration: nativeDuration,
+                      preferences: preferences),
+              canApply: () =>
+                  _isCurrentSourceRequest(token) &&
+                  seekRevision == _manualSeekRevision &&
+                  AppSettings.instance.trackResume.value == preferences &&
+                  !segmentLoop.enabled,
+              seek: _player.seek,
+            );
+          }
+        } catch (error, trace) {
+          _reportResumeStorageError(error, trace);
+        }
+      }
+      if (!_isCurrentSourceRequest(token)) return;
       if (nowPlaying != null) {
         PlaybackStatistics.instance.finish(markCompleted: false);
       }
-      _playlistIndex = audioIndex;
+      _playlistIndex = queueIndexForTrack(this.playlist.value, target.path,
+          preferredIndex: _loadingPlaylistIndex);
       nowPlaying = target;
+      _lastProblem = null;
       // BASS has successfully opened the real byte stream at this point. Its
       // duration is authoritative when a misleading extension or damaged tag
       // header made the library scanner report zero/a conflicting value. The
@@ -761,16 +957,18 @@ class PlaybackService extends ChangeNotifier {
         playService.desktopLyricService.sendNowPlayingMessage(nowPlaying!);
       });
 
-      _lastSessionProgressMs = 0;
-      _schedulePlaybackStateSave(positionOverride: 0);
+      _lastSessionProgressMs = (position * 1000).floor();
+      _smtc.updateTimeProperties(progress: _lastSessionProgressMs);
+      _schedulePlaybackStateSave(positionOverride: position);
     } catch (err, trace) {
       LOGGER.e("[load and play] $err");
       LOGGER.d("[load and play] trace", stackTrace: trace);
       if (_isCurrentSourceRequest(token)) {
+        _recordProblem(err);
         showTextOnSnackBar(
           err is OnlineMusicException ? err.message : "播放失败：$err",
         );
-        if (nowPlaying == null) {
+        if (playerState != PlayerState.playing) {
           _smtc.updateState(state: SMTCState.paused);
           notifyListeners();
         }
@@ -821,7 +1019,10 @@ class PlaybackService extends ChangeNotifier {
   Future<void> flushPlaybackState() async {
     _stateSaveTimer?.cancel();
     _stateSaveTimer = null;
-    if (!_closed) await _savePlaybackState();
+    if (!_closed) {
+      await _captureTrackResume(force: true);
+      await _savePlaybackState();
+    }
     await _stateWrite;
   }
 
@@ -881,12 +1082,46 @@ class PlaybackService extends ChangeNotifier {
     final hasSavedOccurrence = restoredIndex >= 0;
     // If that occurrence disappeared, start the first surviving item from the
     // beginning, never apply another song's saved progress to it.
-    final index = hasSavedOccurrence ? restoredIndex : 0;
+    var index = hasSavedOccurrence ? restoredIndex : 0;
 
-    playlist.value = queue;
     _playlistBackup = backup.isEmpty ? List.from(queue) : backup;
-    shuffle.value = saved.shuffle;
-    await _loadPaused(index, queue, hasSavedOccurrence ? saved.position : 0.0);
+    final desiredShuffle = _pref.shuffle ?? saved.shuffle;
+    var restoredQueue = queue;
+    if (saved.shuffle && !desiredShuffle) {
+      index = queueOccurrenceIndex(queue, index, _playlistBackup,
+          keyOf: (audio) => audio.path);
+      // A corrupt legacy backup must never discard the saved active entry.
+      if (index >= 0) {
+        restoredQueue = List.of(_playlistBackup);
+      } else {
+        index = hasSavedOccurrence ? restoredIndex : 0;
+      }
+    } else if (!saved.shuffle && desiredShuffle) {
+      final cycle = ShuffleQueueCycle(queue, startIndex: index);
+      _shuffleCycle = cycle;
+      _playlistBackup = cycle.source;
+      restoredQueue = cycle.items;
+      index = 0;
+    }
+    playlist.value = restoredQueue;
+    shuffle.value = desiredShuffle;
+    _pref.shuffle = desiredShuffle;
+    _scheduleModePreferenceSave();
+    var canRestorePosition = hasSavedOccurrence;
+    final restoredTrack = restoredQueue[index];
+    if (restoredTrack.isCueTrack) {
+      Audio? originalCue;
+      for (final audio in saved.cueTracks) {
+        if (audio.path == restoredTrack.path) {
+          originalCue = audio;
+          break;
+        }
+      }
+      canRestorePosition = canRestorePosition &&
+          sameCueResumeSegment(originalCue?.cueTrack, restoredTrack.cueTrack!);
+    }
+    await _loadPaused(
+        index, restoredQueue, canRestorePosition ? saved.position : 0.0);
   }
 
   Future<void> _loadPaused(
@@ -896,6 +1131,7 @@ class PlaybackService extends ChangeNotifier {
     bool resumeAfterLoad = false,
   }) {
     if (_closed) return Future.value();
+    unawaited(_captureTrackResume(force: true));
     _queueEditHistory.clear();
     segmentLoop.clear();
     final token = ++_sourceRequestToken;
@@ -937,8 +1173,10 @@ class PlaybackService extends ChangeNotifier {
               : AudioSegment(
                   target.cueTrack!.startSeconds, target.cueTrack!.endSeconds));
       if (!applied || !_isCurrentSourceRequest(token)) return;
-      _playlistIndex = audioIndex;
+      _playlistIndex = queueIndexForTrack(this.playlist.value, target.path,
+          preferredIndex: _loadingPlaylistIndex);
       nowPlaying = target;
+      _lastProblem = null;
       _observeNativeDuration(target);
       setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
       playService.lyricService.updateLyric();
@@ -983,6 +1221,7 @@ class PlaybackService extends ChangeNotifier {
       });
     } catch (err, trace) {
       if (!_isCurrentSourceRequest(token)) return;
+      _recordProblem(err);
       // A failed/stale restore must never clear a successfully opened newer
       // song. Native source replacement itself is transactional as well.
       LOGGER.e("[restore session] $err", stackTrace: trace);
@@ -1010,7 +1249,7 @@ class PlaybackService extends ChangeNotifier {
   /// 播放当前播放列表的第几项，只能用在播放列表界面
   void playIndexOfPlaylist(int audioIndex) {
     if (audioIndex < 0 || audioIndex >= playlist.value.length) return;
-    _loadAndPlay(audioIndex, playlist.value);
+    _loadAndPlay(audioIndex, playlist.value, allowTrackResume: true);
   }
 
   /// 播放playlist[audioIndex]并设置播放列表为playlist
@@ -1022,32 +1261,41 @@ class PlaybackService extends ChangeNotifier {
     }
 
     if (shuffle.value) {
-      final willPlay = playlist[audioIndex];
-      if (_hasSameAudioPool(_playlistBackup, playlist)) {
-        final indexInCycle = _findAudioByPath(this.playlist.value, willPlay);
+      if (sameQueuePool(_playlistBackup, playlist,
+          keyOf: (audio) => audio.path)) {
+        final backupIndex = queueOccurrenceIndex(
+            playlist, audioIndex, _playlistBackup,
+            keyOf: (audio) => audio.path);
+        final cycle = _shuffleCycle;
+        final indexInCycle = cycle?.appliesTo(
+                    this.playlist.value, _playlistBackup,
+                    sameItem: (left, right) => left.path == right.path) ==
+                true
+            ? cycle!.queueIndex(backupIndex)
+            : queueOccurrenceIndex(playlist, audioIndex, this.playlist.value,
+                keyOf: (audio) => audio.path);
         if (indexInCycle >= 0) {
-          _loadAndPlay(indexInCycle, this.playlist.value);
+          _loadAndPlay(indexInCycle, this.playlist.value,
+              allowTrackResume: true);
           return;
         }
       }
 
-      _buildShuffleCycle(playlist, willPlay);
-      _loadAndPlay(0, this.playlist.value);
+      _buildShuffleCycle(playlist, startIndex: audioIndex);
+      _loadAndPlay(0, this.playlist.value, allowTrackResume: true);
     } else {
       this.playlist.value = List.from(playlist);
       _playlistBackup = List.from(playlist);
-      _loadAndPlay(audioIndex, this.playlist.value);
+      _loadAndPlay(audioIndex, this.playlist.value, allowTrackResume: true);
     }
   }
 
   void shuffleAndPlay(List<Audio> audios) {
-    if (audios.isEmpty) return;
-
-    playlist.value = List.from(audios);
-    playlist.value.shuffle();
-    _playlistBackup = List.from(audios);
-
+    if (_closed || audios.isEmpty) return;
+    _buildShuffleCycle(audios);
     shuffle.value = true;
+    _pref.shuffle = true;
+    _scheduleModePreferenceSave();
 
     _loadAndPlay(0, playlist.value);
   }
@@ -1078,109 +1326,98 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void useShuffle(bool flag) {
-    if (nowPlaying == null) return;
+    if (_closed) return;
+    // Persist an explicit empty-queue choice, even when it is already the
+    // default; a later legacy-session load must not overwrite this action.
+    _pref.shuffle = flag;
+    _scheduleModePreferenceSave();
     if (flag == shuffle.value) return;
     _queueEditHistory.clear();
 
     if (flag) {
-      _buildShuffleCycle(
-        _playlistBackup.isEmpty ? playlist.value : _playlistBackup,
-        nowPlaying!,
-      );
+      final queue = playlist.value;
+      final anchor =
+          _currentQueueIndex >= 0 ? _currentQueueIndex : _navigationIndex;
+      _buildShuffleCycle(queue, startIndex: anchor);
       shuffle.value = true;
     } else {
-      playlist.value = List.from(_playlistBackup);
-      final currentIndex = _findAudioByPath(playlist.value, nowPlaying!);
-      _playlistIndex = currentIndex >= 0 ? currentIndex : 0;
+      final source = _playlistBackup.isEmpty ? playlist.value : _playlistBackup;
+      final currentIndex = _indexInShuffleSource(_currentQueueIndex, source);
+      final pendingIndex = _indexInShuffleSource(_navigationIndex, source);
+      _playlistIndex = currentIndex < 0 ? null : currentIndex;
+      if (resolvingAudioPath.value != null) {
+        _loadingPlaylistIndex = pendingIndex < 0 ? null : pendingIndex;
+      }
+      _shuffleCycle = null;
+      playlist.value = List.of(source);
       shuffle.value = false;
     }
     _schedulePlaybackStateSave();
+    notifyListeners();
   }
 
-  int _findAudioByPath(List<Audio> audios, Audio audio) {
-    return audios.indexWhere((item) => item.path == audio.path);
+  int _indexInShuffleSource(int index, List<Audio> source) {
+    final cycle = _shuffleCycle;
+    if (cycle?.appliesTo(playlist.value, source,
+            sameItem: (left, right) => left.path == right.path) ==
+        true) {
+      return cycle!.sourceIndex(index);
+    }
+    return queueOccurrenceIndex(playlist.value, index, source,
+        keyOf: (audio) => audio.path);
   }
 
-  bool _hasSameAudioPool(List<Audio> left, List<Audio> right) {
-    if (left.length != right.length || left.isEmpty) return false;
-    final leftPaths = left.map((audio) => audio.path).toSet();
-    if (leftPaths.length != left.length) return false;
-    return right.every((audio) => leftPaths.contains(audio.path));
-  }
-
-  void _buildShuffleCycle(List<Audio> source, Audio startAudio) {
-    final cycleSource = List<Audio>.from(source);
-    if (cycleSource.isEmpty) return;
+  void _buildShuffleCycle(List<Audio> source,
+      {int? startIndex, String? avoidFirstPath}) {
+    if (source.isEmpty) return;
     _queueEditHistory.clear();
-
-    final startIndex = _findAudioByPath(cycleSource, startAudio);
-    final start = startIndex >= 0
-        ? cycleSource.removeAt(startIndex)
-        : cycleSource.removeAt(0);
-    cycleSource.shuffle();
-
-    playlist.value = [start, ...cycleSource];
-    _playlistBackup = List<Audio>.from(source);
-    _playlistIndex = 0;
+    final currentSourceIndex =
+        _indexInShuffleSource(_currentQueueIndex, source);
+    final pendingSourceIndex = _indexInShuffleSource(_navigationIndex, source);
+    final cycle = ShuffleQueueCycle<Audio>(source,
+        startIndex: startIndex,
+        avoidFirst: avoidFirstPath == null
+            ? null
+            : (audio) => audio.path == avoidFirstPath);
+    final currentIndex = cycle.queueIndex(currentSourceIndex);
+    _playlistIndex = currentIndex < 0 ? null : currentIndex;
+    if (resolvingAudioPath.value != null) {
+      final pendingIndex = cycle.queueIndex(pendingSourceIndex);
+      _loadingPlaylistIndex = pendingIndex < 0 ? null : pendingIndex;
+    }
+    _shuffleCycle = cycle;
+    _playlistBackup = cycle.source;
+    playlist.value = cycle.items;
   }
 
-  void _nextShuffleAudio() {
-    if (playlist.value.isEmpty) return;
+  bool _advanceQueue({required bool automatic}) {
     final currentIndex = _navigationIndex;
-
-    if (currentIndex < playlist.value.length - 1) {
-      _loadAndPlay(currentIndex + 1, playlist.value);
-      return;
+    final step = nextQueueAdvance(
+        length: playlist.value.length,
+        currentIndex: currentIndex,
+        playMode: playMode.value,
+        shuffle: shuffle.value,
+        automatic: automatic);
+    if (step.index == null) return false;
+    if (step.newShuffleCycle) {
+      final currentPath =
+          currentIndex >= 0 && currentIndex < playlist.value.length
+              ? playlist.value[currentIndex].path
+              : null;
+      final source = _playlistBackup.isEmpty ? playlist.value : _playlistBackup;
+      _buildShuffleCycle(source, avoidFirstPath: currentPath);
     }
-
-    final currentAudio = playlist.value[currentIndex];
-    final source = _playlistBackup.isEmpty ? playlist.value : _playlistBackup;
-    _buildShuffleCycle(source, currentAudio);
-
-    if (playlist.value.length <= 1) {
-      _loadAndPlay(0, playlist.value);
-    } else {
-      _loadAndPlay(1, playlist.value);
-    }
-  }
-
-  bool _nextAudio_forward() {
-    if (playlist.value.isEmpty) return false;
-    final currentIndex = _navigationIndex;
-
-    if (currentIndex < playlist.value.length - 1) {
-      _loadAndPlay(currentIndex + 1, playlist.value);
-      return true;
-    }
-    return false;
-  }
-
-  void _nextAudio_loop() {
-    if (playlist.value.isEmpty) return;
-    if (shuffle.value) {
-      _nextShuffleAudio();
-      return;
-    }
-
-    int newIndex = _navigationIndex + 1;
-    if (newIndex >= playlist.value.length) {
-      newIndex = 0;
-    }
-
-    _loadAndPlay(newIndex, playlist.value);
-  }
-
-  void _nextAudio_singleLoop() {
-    if (playlist.value.isEmpty) return;
-
-    final index = _navigationIndex;
-    _loadAndPlay(index < 0 ? 0 : index, playlist.value);
+    _loadAndPlay(step.index!, playlist.value);
+    return true;
   }
 
   void _syncPausedToSystem() {
+    final token = _sourceRequestToken;
     _smtc.updateState(state: SMTCState.paused);
     playService.desktopLyricService.canSendMessage.then((canSend) {
-      if (canSend) {
+      if (canSend &&
+          _isCurrentSourceRequest(token) &&
+          playerState != PlayerState.playing) {
         playService.desktopLyricService.sendPlayerStateMessage(false);
       }
     });
@@ -1193,26 +1430,11 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
 
-    if (shuffle.value && playMode.value != PlayMode.singleLoop) {
-      _nextShuffleAudio();
-      return;
-    }
-
-    switch (playMode.value) {
-      case PlayMode.forward:
-        if (!_nextAudio_forward()) _syncPausedToSystem();
-        break;
-      case PlayMode.loop:
-        _nextAudio_loop();
-        break;
-      case PlayMode.singleLoop:
-        _nextAudio_singleLoop();
-        break;
-    }
+    if (!_advanceQueue(automatic: true)) _syncPausedToSystem();
   }
 
   /// 手动下一曲时默认循环播放列表
-  void nextAudio() => _nextAudio_loop();
+  void nextAudio() => _advanceQueue(automatic: false);
 
   /// 手动上一曲时默认循环播放列表
   void lastAudio() {
@@ -1233,10 +1455,12 @@ class PlaybackService extends ChangeNotifier {
       PlaybackStatistics.instance
           .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
       _player.pause();
+      unawaited(_captureTrackResume(force: true));
       PlaybackStatistics.instance.pause();
       _syncPausedToSystem();
       unawaited(_savePlaybackState());
     } catch (err) {
+      _recordProblem(err);
       LOGGER.e("[pause] $err");
       showTextOnSnackBar(err.toString());
     }
@@ -1246,19 +1470,31 @@ class PlaybackService extends ChangeNotifier {
   void start() {
     if (_closed) return;
     try {
+      if (nowPlaying == null) return;
       _player.start();
+      if (playerState != PlayerState.playing &&
+          playerState != PlayerState.stalled) {
+        return;
+      }
       final current = nowPlaying;
       if (current != null) {
         PlaybackStatistics.instance
             .start(current, playbackRate: _player.playbackRate);
       }
       _smtc.updateState(state: SMTCState.playing);
+      final token = _sourceRequestToken;
       playService.desktopLyricService.canSendMessage.then((canSend) {
-        if (!canSend) return;
+        if (!canSend ||
+            !_isCurrentSourceRequest(token) ||
+            playerState != PlayerState.playing) {
+          return;
+        }
 
         playService.desktopLyricService.sendPlayerStateMessage(true);
       });
     } catch (err) {
+      _recordProblem(err, output: true);
+      _syncPausedToSystem();
       LOGGER.e("[start]: $err");
       showTextOnSnackBar(err.toString());
     }
@@ -1266,13 +1502,19 @@ class PlaybackService extends ChangeNotifier {
 
   /// 再次播放。在顺序播放完最后一曲时再次按播放时使用。
   /// 与 [start] 的差别在于它会通知重绘组件
-  void playAgain() => _nextAudio_singleLoop();
+  void playAgain() {
+    if (playlist.value.isEmpty) return;
+    final index = _navigationIndex;
+    _loadAndPlay(index < 0 ? 0 : index, playlist.value);
+  }
 
   void seek(double position) {
     if (_closed) return;
+    _manualSeekRevision++;
     segmentLoop.manualSeek(position);
     try {
       _player.seek(position);
+      unawaited(_captureTrackResume(force: true, positionOverride: position));
       _lastSmtcProgressMs = -1000;
       playService.lyricService.findCurrLyricLine();
       _schedulePlaybackStateSave(positionOverride: position);
@@ -1287,6 +1529,7 @@ class PlaybackService extends ChangeNotifier {
   Future<void> close() => _closeFuture ??= _close();
 
   Future<void> _close() async {
+    final resumeWrite = _captureTrackResume(force: true);
     _closed = true;
     _queueEditHistory.clear();
     _sourceRequestToken += 1;
@@ -1296,6 +1539,11 @@ class PlaybackService extends ChangeNotifier {
     resolvingAudioPath.value = null;
     _stateSaveTimer?.cancel();
     _stateSaveTimer = null;
+    if (_modeSaveTimer != null) {
+      _modeSaveTimer!.cancel();
+      _modeSaveTimer = null;
+      _writeModePreferences();
+    }
     final snapshot = _snapshotState();
     cancelSleepTimer();
     if (snapshot != null) {
@@ -1308,6 +1556,8 @@ class PlaybackService extends ChangeNotifier {
     try {
       await Future.wait([
         _stateWrite,
+        _modeWrite,
+        resumeWrite.then((_) => TrackResumeStore.flushIfInitialized()),
         PlaybackStatistics.instance.flush(finishSession: true),
         _playerStateStreamSub.cancel(),
         _positionStreamSub.cancel(),
@@ -1345,5 +1595,6 @@ class PlaybackService extends ChangeNotifier {
     segmentLoop.dispose();
     isBuffering.dispose();
     resolvingAudioPath.dispose();
+    diagnosticsRevision.dispose();
   }
 }

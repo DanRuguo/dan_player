@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/build_index_state_view.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/library_auto_refresh.dart';
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/online/online_library.dart';
@@ -85,7 +87,7 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
       width: 400,
       height: 400,
       child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 150),
+        duration: AppMotion.standard,
         child: selecting
             ? folderSelector(scheme)
             : FutureBuilder(
@@ -114,6 +116,7 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
                       // BASS. A persisted exclusive-output preference must be
                       // prewarmed before the first song tile can be tapped.
                       PlayService.instance.ensurePlaybackInitialized();
+                      LibraryAutoRefresh.instance.start();
                       if (context.mounted) {
                         context.go(app_paths.AUDIOS_PAGE);
                       }

@@ -7,6 +7,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/music_matcher.dart';
@@ -50,7 +51,7 @@ class SetLyricSourceBtn extends StatelessWidget {
             ConnectionState.active => loadingWidget,
             ConnectionState.done => LyricSourceMenuButton(
                 enabled: audio != null,
-                showLocal: audio?.isLocal == true,
+                showLocal: audio?.isLocal == true && audio?.isCueTrack != true,
                 isLocal: isLocal,
                 onChooseDefault: () {
                   showAppDialog<String>(
@@ -146,7 +147,7 @@ class LyricSourceMenuButton extends StatelessWidget {
               },
         tooltip: ui("选择歌词来源"),
         icon: const Icon(Symbols.lyrics),
-        color: scheme.onSecondaryContainer,
+        color: scheme.primary,
       ),
     );
   }
@@ -313,6 +314,30 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       _operationError = null;
     });
     try {
+      if (widget.persistSource == null) {
+        final store = LyricDocumentStore.instance;
+        final revision = store.revisionFor(widget.audio);
+        final service = PlayService.instance.lyricService;
+        final session = service.resolutionGeneration;
+        bool stillCurrent() =>
+            _isSelectionCurrent(generation) &&
+            service.resolutionGeneration == session;
+        final lyric = await Lrc.fromAudioPath(widget.audio);
+        if (!stillCurrent() || _currentTrackPath() != widget.audio.path) {
+          return;
+        }
+        if (lyric == null || lyric.lines.isEmpty) {
+          setState(() => _operationError = () => ui('未找到可用的本地歌词，已保留之前保存的版本。'));
+          return;
+        }
+        await store.select(widget.audio, lyric,
+            source: LyricSource(LyricSourceType.local),
+            expectedRevision: revision,
+            stillCurrent: stillCurrent);
+        if (!_isSelectionCurrent(generation)) return;
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
       await (widget.persistSource ?? persistLyricSource)(
         widget.audio.path,
         LyricSource(LyricSourceType.local),
@@ -349,10 +374,21 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
     });
     var stage =
         0; // Fetch, persist, then apply have different recovery actions.
+    final documentRevision = widget.persistSource == null
+        ? LyricDocumentStore.instance.revisionFor(widget.audio)
+        : null;
+    final session =
+        widget.persistSource == null && widget.currentTrackPath == null
+            ? PlayService.instance.lyricService.resolutionGeneration
+            : null;
+    bool stillCurrent() =>
+        _isSelectionCurrent(generation) &&
+        (session == null ||
+            PlayService.instance.lyricService.resolutionGeneration == session);
     try {
       final lyric =
           await (widget.loadCandidate ?? getLyricForCandidate)(candidate);
-      if (!_isSelectionCurrent(generation)) return;
+      if (!stillCurrent()) return;
       if (_currentTrackPath() != widget.audio.path) {
         _markTrackChanged(() => ui("歌曲已切换，旧歌曲的候选没有应用。"));
         return;
@@ -364,17 +400,23 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       }
       final source = _sourceFor(candidate);
       stage = 1;
-      await (widget.persistSource ?? persistLyricSource)(
-        widget.audio.path,
-        source,
-      );
+      if (widget.persistSource != null) {
+        await widget.persistSource!(widget.audio.path, source);
+      } else {
+        await LyricDocumentStore.instance.select(widget.audio, lyric,
+            source: source,
+            expectedRevision: documentRevision,
+            stillCurrent: stillCurrent);
+      }
       if (!_isSelectionCurrent(generation)) return;
       stage = 2;
-      final applied = (widget.applyCandidate ??
-          PlayService.instance.lyricService.useSpecificLyricForTrack)(
-        widget.audio.path,
-        lyric,
-      );
+      final applied = widget.persistSource == null
+          ? _currentTrackPath() == widget.audio.path
+          : (widget.applyCandidate ??
+              PlayService.instance.lyricService.useSpecificLyricForTrack)(
+              widget.audio.path,
+              lyric,
+            );
       if (!applied) {
         _markTrackChanged(() => ui("歌曲已切换；已保存原歌曲的歌词来源，但没有应用到当前歌曲。"));
         return;
@@ -383,21 +425,23 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       Navigator.of(context).pop();
     } catch (error) {
       if (_isSelectionCurrent(generation)) {
-        final message = stage == 1
-            ? '歌词已获取，但保存来源失败；旧设置已保留，请检查数据目录权限后重试。'
-            : stage == 2
-                ? '歌词来源已保存，但未能应用；请重新打开当前歌曲后重试。'
-                : error is LyricUnavailableException
-                    ? '此来源暂未提供这条录音的可用歌词，请选择其他候选。'
-                    : error is TimeoutException
-                        ? '获取歌词超时，请重试或选择其他候选。'
-                        : error is SocketException ||
-                                error is HandshakeException ||
-                                error is HttpException
-                            ? '连接歌词来源失败，请检查网络或代理后重试。'
-                            : error is FormatException
-                                ? '歌词来源返回的内容无法解析，请重试或选择其他候选。'
-                                : '获取歌词失败，可选择其他候选或重试。';
+        final message = error is StaleLyricRevision
+            ? error.toString()
+            : stage == 1
+                ? '歌词已获取，但保存来源失败；旧设置已保留，请检查数据目录权限后重试。'
+                : stage == 2
+                    ? '歌词来源已保存，但未能应用；请重新打开当前歌曲后重试。'
+                    : error is LyricUnavailableException
+                        ? '此来源暂未提供这条录音的可用歌词，请选择其他候选。'
+                        : error is TimeoutException
+                            ? '获取歌词超时，请重试或选择其他候选。'
+                            : error is SocketException ||
+                                    error is HandshakeException ||
+                                    error is HttpException
+                                ? '连接歌词来源失败，请检查网络或代理后重试。'
+                                : error is FormatException
+                                    ? '歌词来源返回的内容无法解析，请重试或选择其他候选。'
+                                    : '获取歌词失败，可选择其他候选或重试。';
         setState(
             () => _candidateErrors[candidate.identity] = () => ui(message));
       }
@@ -440,7 +484,9 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       };
 
   bool _isCurrentCandidate(SongSearchResult candidate) {
-    final configured = LYRIC_SOURCES[widget.audio.path];
+    final configured =
+        LyricDocumentStore.instance.forAudio(widget.audio)?.source ??
+            LYRIC_SOURCES[widget.audio.path];
     if (configured != null) {
       return configured.matches(
         candidateSource: switch (candidate.source) {
@@ -548,7 +594,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                             color: scheme.secondaryContainer,
                           ),
                         ),
-                      if (widget.audio.isLocal) ...[
+                      if (widget.audio.isLocal && !widget.audio.isCueTrack) ...[
                         ListTile(
                           key: const ValueKey('lyric-source-local'),
                           enabled: !_trackChanged,
@@ -561,7 +607,11 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                                   child:
                                       CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : LYRIC_SOURCES[widget.audio.path]?.source ==
+                              : (LyricDocumentStore.instance
+                                                  .forAudio(widget.audio)
+                                                  ?.source ??
+                                              LYRIC_SOURCES[widget.audio.path])
+                                          ?.source ==
                                       LyricSourceType.local
                                   ? const Icon(Symbols.check_circle)
                                   : null,

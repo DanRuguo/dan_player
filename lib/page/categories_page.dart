@@ -212,8 +212,10 @@ class _CategoriesPageState extends State<CategoriesPage> {
       await _covers.setCover(group, selected);
     } catch (error) {
       if (mounted) {
-        showTextOnSnackBar(ui("无法选择歌单封面：{0}", [ui(error.toString())]),
-            context: context);
+        showTextOnSnackBar("无法选择歌单封面：{0}",
+            arguments: [ui(error.toString())],
+            context: context,
+            kind: AppNoticeKind.error);
       }
     } finally {
       if (mounted) {
@@ -232,8 +234,10 @@ class _CategoriesPageState extends State<CategoriesPage> {
       await _covers.removeCover(group);
     } catch (error) {
       if (mounted) {
-        showTextOnSnackBar(ui("操作失败：{0}", [ui(error.toString())]),
-            context: context);
+        showTextOnSnackBar("操作失败：{0}",
+            arguments: [ui(error.toString())],
+            context: context,
+            kind: AppNoticeKind.error);
       }
     } finally {
       if (mounted) {

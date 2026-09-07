@@ -119,7 +119,7 @@ void main() {
     await tester.tap(find.byKey(ValueKey('playlist-play-${fixture.child.id}')));
     expect(fixture.played.last.index, 0);
     expect(fixture.played.last.queue.length, 2);
-    await tapPlaylistAction(tester, 'playlist-play-all');
+    await playVisiblePlaylistSelection(tester);
     expect(fixture.played.last.index, 0);
     expect(fixture.played.last.queue.length, 4);
     expect(tester.takeException(), isNull);

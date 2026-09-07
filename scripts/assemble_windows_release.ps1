@@ -4,7 +4,7 @@
 Assembles already-built Windows x64 releases into a new portable ZIP.
 .DESCRIPTION
 This script does not build, install, sign, or publish anything. It verifies the
-offline BASS cache, copies the main app and desktop lyrics into a new dist run
+offline BASS cache, copies the shared main app/desktop lyrics release into a new dist run
 directory, adds unmodified Visual Studio app-local CRT files and licence
 notices, then writes payload and ZIP SHA256SUMS files. Existing output folders
 are never replaced or recursively deleted.
@@ -28,8 +28,13 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $repositoryRoot
+. (Join-Path $PSScriptRoot 'support\release_version.ps1')
+$releaseVersion = Get-ReleaseVersionInfo $repositoryRoot
 if (-not $MainReleaseDirectory) { $MainReleaseDirectory = Join-Path $repositoryRoot 'build\windows\x64\runner\Release' }
-if (-not $DesktopLyricReleaseDirectory) { $DesktopLyricReleaseDirectory = Join-Path $repositoryRoot 'third_party\desktop_lyric\build\windows\x64\runner\Release' }
+if ($DesktopLyricReleaseDirectory) {
+    # Parameter retained for existing callers; lyrics now run from the main AOT.
+    Write-Host 'DesktopLyricReleaseDirectory is ignored: packaging uses Dan Player.exe --desktop-lyric and one shared runtime.'
+}
 if (-not $BassCacheRoot) { $BassCacheRoot = Join-Path $workspaceRoot 'tool\bass' }
 if (-not $BassFxCacheRoot) { $BassFxCacheRoot = Join-Path $workspaceRoot 'tool\bass-fx' }
 if (-not $OutputRoot) { $OutputRoot = Join-Path $workspaceRoot 'dist' }
@@ -214,32 +219,24 @@ function Write-PortableZip([string] $Directory, [string] $Destination, [string] 
 }
 
 $MainReleaseDirectory = Resolve-ReleaseDirectory $MainReleaseDirectory 'Dan Player.exe'
-$DesktopLyricReleaseDirectory = Resolve-ReleaseDirectory $DesktopLyricReleaseDirectory 'desktop_lyric.exe'
 if (-not (Test-Path -LiteralPath (Join-Path $MainReleaseDirectory 'rust_lib_dan_player.dll') -PathType Leaf)) {
     throw 'The main release is missing rust_lib_dan_player.dll.'
 }
 # Fail before creating a new dist directory if an incrementally built binary
 # still carries fonts subsetted for an older kernel. This is read-only.
 $fontVerifier = Join-Path $PSScriptRoot 'verify_windows_release_fonts.ps1'
-$desktopProjectRoot = Join-Path $repositoryRoot 'third_party\desktop_lyric'
 & $fontVerifier -ProjectRoot $repositoryRoot -ReleaseDirectory $MainReleaseDirectory
-& $fontVerifier -ProjectRoot $desktopProjectRoot -ReleaseDirectory $DesktopLyricReleaseDirectory
 
 $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
-foreach ($inputDirectory in @($MainReleaseDirectory, $DesktopLyricReleaseDirectory)) {
+foreach ($inputDirectory in @($MainReleaseDirectory)) {
     $inputPrefix = $inputDirectory.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ($OutputRoot.Equals($inputDirectory, [StringComparison]::OrdinalIgnoreCase) -or
         $OutputRoot.StartsWith($inputPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'The output directory must not be inside either release input tree.'
+        throw 'The output directory must not be inside the release input tree.'
     }
 }
 
-$versionLine = Get-Content -LiteralPath (Join-Path $repositoryRoot 'pubspec.yaml') |
-    Where-Object { $_ -match '^version:\s*' } | Select-Object -First 1
-if (-not $versionLine -or $versionLine -notmatch '^version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9]+)?)\s*$') {
-    throw 'A plain semantic version is required in pubspec.yaml for release packaging.'
-}
-$version = $Matches[1]
+$version = $releaseVersion.Version
 $packageStem = 'DanPlayer-{0}-windows-x64' -f $version.Replace('+', '-')
 
 # Assembly is deliberately offline: downloading is an explicit separate step.
@@ -279,22 +276,19 @@ $runName = '{0}-{1}-{2}' -f $packageStem, [DateTime]::UtcNow.ToString('yyyyMMddT
 $releaseDirectory = Join-Path $OutputRoot $runName
 $null = New-Item -ItemType Directory -Path $releaseDirectory
 $payloadDirectory = Join-Path $releaseDirectory $packageStem
-$desktopDirectory = Join-Path $payloadDirectory 'desktop_lyric'
 $null = New-Item -ItemType Directory -Path $payloadDirectory
-$null = New-Item -ItemType Directory -Path $desktopDirectory
 
 try {
     # Build outputs may already have manually staged BASS/helper/CRT files for
     # QA. Always use the separately verified originals for those paths.
-    $mainExclusions = @('BASS', 'desktop_lyric', 'UN4SEEN-notices', 'FONT-INTEGRITY.json') + @($crtFiles.Name)
+    $mainExclusions = @('BASS', 'desktop_lyric', 'desktop_lyric.exe', 'desktop_lyric.pdb', 'DESKTOP-LYRIC-MODE', 'UN4SEEN-notices', 'FONT-INTEGRITY.json') + @($crtFiles.Name)
     Copy-ReleaseTree $MainReleaseDirectory $payloadDirectory $mainExclusions
-    Copy-ReleaseTree $DesktopLyricReleaseDirectory $desktopDirectory (@('FONT-INTEGRITY.json') + @($crtFiles.Name))
+    Write-NewUtf8File (Join-Path $payloadDirectory 'DESKTOP-LYRIC-MODE') "shared-executable-v1`n"
     Copy-Item -LiteralPath (Join-Path $bass.RuntimeDirectory 'BASS') -Destination (Join-Path $payloadDirectory 'BASS') -Recurse
     Copy-FileUnchanged $bassFx.DllPath (Join-Path $payloadDirectory 'BASS\bass_fx.dll')
 
     foreach ($file in $crtFiles) {
         Copy-FileUnchanged $file.FullName (Join-Path $payloadDirectory $file.Name)
-        Copy-FileUnchanged $file.FullName (Join-Path $desktopDirectory $file.Name)
     }
 
     $licenceDirectory = Join-Path $payloadDirectory 'licenses'
@@ -313,6 +307,19 @@ try {
     $validationNotes = Join-Path (Join-Path $repositoryRoot 'docs') ($version + '-validation.md')
     if (Test-Path -LiteralPath $validationNotes -PathType Leaf) {
         Copy-FileUnchanged $validationNotes (Join-Path $payloadDirectory 'VALIDATION.md')
+    }
+    # Keep links in the current validation and feature notes usable offline.
+    foreach ($noteName in @(
+        ($version + '-validation.md'),
+        ($version + '-player-research.md'),
+        ($version + '-computer-use.md'),
+        ('release-' + $version + '.md'),
+        'replay-gain.md'
+    )) {
+        $notePath = Join-Path (Join-Path $repositoryRoot 'docs') $noteName
+        if (Test-Path -LiteralPath $notePath -PathType Leaf) {
+            Copy-FileUnchanged $notePath (Join-Path $payloadDirectory $noteName)
+        }
     }
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\playlist-unification.md') (Join-Path $payloadDirectory 'PLAYLIST-MIGRATION.md')
     Copy-FileUnchanged (Join-Path $repositoryRoot 'docs\release-font-integrity.md') (Join-Path $payloadDirectory 'FONT-INTEGRITY.md')
@@ -344,7 +351,7 @@ Microsoft Visual C++ app-local runtime
 
 The DLLs listed in BUILD-PROVENANCE.json were copied unchanged from the installed
 Visual Studio x64 redistribution directory. Their original Microsoft signatures
-were verified and were not replaced. Copies are placed beside each executable.
+were verified and were not replaced. One copy is placed beside Dan Player.exe.
 Windows 10/11 provide the Universal CRT; no system DLLs are copied from System32.
 
 Redistribution is subject to the applicable Visual Studio licence and REDIST list:
@@ -369,13 +376,16 @@ the verified Visual Studio runtime when rebuilding future application releases.
     $buildProvenance = [ordered]@{
         Product = 'Dan Player'
         Version = $version
+        DisplayVersion = $releaseVersion.DisplayVersion
         Architecture = 'windows-x64'
         AssembledUtc = [DateTime]::UtcNow.ToString('o')
         SourceProject = 'https://github.com/DanRuguo/dan_player'
         SourceRevision = $revision
         WorkingTreeDirty = $workingTreeDirty
         SigningPerformedByAssembler = $false
-        FontIntegrityReports = @('FONT-INTEGRITY.json', 'desktop_lyric/FONT-INTEGRITY.json')
+        DesktopLyricMode = 'shared-executable-v1'
+        DesktopLyricLaunch = 'Dan Player.exe --desktop-lyric (independent process)'
+        FontIntegrityReports = @('FONT-INTEGRITY.json')
         Bass = @($bass.Packages | Select-Object Name, Version, Url, ArchiveSha256, Dll, DllSha256)
         BassFx = $bassFx.Package
         MicrosoftCrt = $crtManifest
@@ -386,8 +396,9 @@ the verified Visual Studio runtime when rebuilding future application releases.
 Dan Player $version - Windows x64 portable package
 
 Extract the entire ZIP into a writable folder, then run "Dan Player.exe".
-Keep BASS, data, and desktop_lyric beside the main executable. The desktop lyrics
-helper includes its own Flutter assets and app-local Microsoft CRT DLLs.
+Keep BASS, data, and DESKTOP-LYRIC-MODE beside the main executable. Desktop lyrics
+run as a separate process using "Dan Player.exe --desktop-lyric", sharing the same
+Flutter assets and app-local Microsoft CRT DLLs with the player.
 
 This assembler does not install software, change Windows settings, sign files,
 or publish a release. Any existing application signatures are preserved.
@@ -413,9 +424,7 @@ Working tree modified: $workingTreeDirty
     # Recheck the actual staged fonts and record exact required codepoints.
     # The final ZIP is checked against these reports below, not just by size.
     $mainFontReport = Join-Path $payloadDirectory 'FONT-INTEGRITY.json'
-    $desktopFontReport = Join-Path $desktopDirectory 'FONT-INTEGRITY.json'
     & $fontVerifier -ProjectRoot $repositoryRoot -ReleaseDirectory $payloadDirectory -ReportPath $mainFontReport
-    & $fontVerifier -ProjectRoot $desktopProjectRoot -ReleaseDirectory $desktopDirectory -ReportPath $desktopFontReport
     $payloadPrefix = $payloadDirectory.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     $payloadChecksums = @(
         foreach ($file in Get-ChildItem -LiteralPath $payloadDirectory -Recurse -File -Force | Sort-Object FullName) {
@@ -429,11 +438,15 @@ Working tree modified: $workingTreeDirty
     Write-PortableZip $payloadDirectory $zipPath $packageStem
     $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
     try {
-        foreach ($requiredEntry in @('Dan Player.exe', 'desktop_lyric/desktop_lyric.exe', 'BASS/basswasapi.dll', 'BASS/bassmix.dll', 'licenses/UN4SEEN/bass.txt', 'licenses/UN4SEEN/bassmix.txt', 'BASS/bass_fx.dll', 'licenses/BASS_FX/bass_fx24-2.4.12.6.zip', 'DESKTOP-EXPERIENCE.md', 'SHA256SUMS')) {
+        foreach ($requiredEntry in @('Dan Player.exe', 'DESKTOP-LYRIC-MODE', 'flutter_windows.dll', 'rust_lib_dan_player.dll', 'data/app.so', 'data/icudtl.dat', 'BASS/basswasapi.dll', 'BASS/bassmix.dll', 'licenses/UN4SEEN/bass.txt', 'licenses/UN4SEEN/bassmix.txt', 'BASS/bass_fx.dll', 'licenses/BASS_FX/bass_fx24-2.4.12.6.zip', 'DESKTOP-EXPERIENCE.md', 'BUILD-PROVENANCE.json', 'SHA256SUMS')) {
             if (-not $zip.GetEntry($packageStem + '/' + $requiredEntry)) { throw "ZIP is missing $requiredEntry" }
         }
         Assert-ZipFontAudit $zip ($packageStem + '/') $mainFontReport
-        Assert-ZipFontAudit $zip ($packageStem + '/desktop_lyric/') $desktopFontReport
+        if (@($zip.Entries | Where-Object {
+            $_.FullName.StartsWith($packageStem + '/desktop_lyric/', [StringComparison]::OrdinalIgnoreCase) -or
+            $_.FullName.Equals($packageStem + '/desktop_lyric.exe', [StringComparison]::OrdinalIgnoreCase)
+        }).Count -gt 0) { throw 'Shared-executable ZIP contains a legacy desktop lyrics helper.' }
+        Assert-ZipEntryHash $zip ($packageStem + '/DESKTOP-LYRIC-MODE') (Get-FileHash -LiteralPath (Join-Path $payloadDirectory 'DESKTOP-LYRIC-MODE') -Algorithm SHA256).Hash
         Assert-ZipEntryHash $zip ($packageStem + '/BASS/bass_fx.dll') $bassFx.Package.DllSha256
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx24-2.4.12.6.zip') $bassFx.Package.ArchiveSha256
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx.txt') $bassFx.Package.NoticeSha256
@@ -445,6 +458,8 @@ Working tree modified: $workingTreeDirty
     Write-Host "Portable release assembled without replacing any previous output: $releaseDirectory"
     [pscustomobject]@{
         Version = $version
+        DisplayVersion = $releaseVersion.DisplayVersion
+        DesktopLyricMode = 'shared-executable-v1'
         OutputDirectory = $releaseDirectory
         PackageDirectory = $payloadDirectory
         ZipPath = $zipPath

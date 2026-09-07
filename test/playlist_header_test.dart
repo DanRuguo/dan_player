@@ -54,7 +54,6 @@ Widget _app({
             canPlay: true,
             onCreate: () => calls.add('create'),
             onAddSongs: () => calls.add('addSongs'),
-            onPlayAll: () => calls.add('play'),
             onStartSelection: () => calls.add('select'),
             onEndSelection: () => calls.add('done'),
             onSelectAll: () => calls.add('all'),
@@ -94,7 +93,7 @@ void main() {
         final cover = tester.getRect(_key('playlist-header-cover'));
         final title = tester.getRect(_key('playlist-header-title'));
         final actions = tester.getRect(find.byType(PlaylistToolbar));
-        final play = tester.getRect(_key('playlist-play-all'));
+        final play = tester.getRect(_key('playback-mode-shuffle'));
         final list = tester.getRect(_key('test-song-list'));
         expect(cover.size, const Size.square(112));
         expect(title.left - cover.right, 20);
@@ -105,9 +104,8 @@ void main() {
         expect(list.top - actions.bottom, inInclusiveRange(0, 24));
         expect(tester.takeException(), isNull);
       }
-      await tester.tap(_key('playlist-play-all'));
       await tester.tap(_key('test-breadcrumb-root'));
-      expect(calls, ['play', 'root']);
+      expect(calls, ['root']);
     });
   }
 

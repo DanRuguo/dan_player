@@ -142,6 +142,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                 ),
                               ),
                               IconButton.filledTonal(
+                                style: IconButton.styleFrom(
+                                    foregroundColor: Theme.of(context)
+                                        .colorScheme
+                                        .onSecondaryContainer),
                                 tooltip: ui("重新核实文件大小与语言"),
                                 onPressed: _scanning ? null : _refreshLibrary,
                                 icon: const Icon(Icons.refresh_rounded),
@@ -157,6 +161,18 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                   .onSurfaceVariant,
                             ),
                           ),
+                          if (stats.storageWarning != null) ...[
+                            const SizedBox(height: 8),
+                            Text(ui(stats.storageWarning!),
+                                style: TextStyle(
+                                    color:
+                                        Theme.of(context).colorScheme.error)),
+                          ],
+                          if (stats.legacyUnassignedCount > 0) ...[
+                            const SizedBox(height: 8),
+                            Text(ui('有 {0} 项旧版统计未明确归属；已保留总数，新的播放分别记录。',
+                                [stats.legacyUnassignedCount])),
+                          ],
                         ],
                       ),
                     ),
@@ -1697,6 +1713,16 @@ class _RankingCard extends StatelessWidget {
                                     style:
                                         Theme.of(context).textTheme.bodySmall,
                                   ),
+                                  if (tracks[index].legacyUnassigned)
+                                    Text(
+                                      ui('旧版未明确归属 · {0} 个候选', [
+                                        tracks[index].candidateTrackIds.length
+                                      ]),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style:
+                                          Theme.of(context).textTheme.bodySmall,
+                                    ),
                                 ],
                               ),
                             ),

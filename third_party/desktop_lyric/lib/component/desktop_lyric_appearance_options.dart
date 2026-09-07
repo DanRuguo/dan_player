@@ -1,4 +1,5 @@
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
+import 'package:desktop_lyric/app_motion.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -256,7 +257,7 @@ class _ColorChoice extends StatelessWidget {
               dimension: 44,
               child: Center(
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
+                  duration: AppMotion.quick,
                   width: 30,
                   height: 30,
                   padding: const EdgeInsets.all(2),

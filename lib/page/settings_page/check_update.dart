@@ -38,7 +38,10 @@ Future<void> checkForUpdateAndPresent(
       return;
     }
     if (update == null) {
-      if (!silent) showTextOnSnackBar(ui("所选通道暂无新版本"));
+      if (!silent) {
+        showTextOnSnackBar("所选通道暂无新版本",
+            context: context, kind: AppNoticeKind.info);
+      }
       return;
     }
     LOGGER.i(
@@ -68,7 +71,10 @@ Future<void> checkForUpdateAndPresent(
   } on UpdateException catch (error, stackTrace) {
     LOGGER.e(error.cause ?? error, stackTrace: stackTrace);
     if (!silent && context.mounted) {
-      showTextOnSnackBar(ui(error.message, error.arguments));
+      showTextOnSnackBar(error.message,
+          arguments: error.arguments,
+          context: context,
+          kind: AppNoticeKind.error);
     }
   } catch (error, stackTrace) {
     LOGGER.e(error, stackTrace: stackTrace);
@@ -181,7 +187,10 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
         settings.autoCheckUpdates = previousAuto;
       }
       LOGGER.e(error, stackTrace: trace);
-      if (mounted) showTextOnSnackBar(ui("更新偏好保存失败，请重试"));
+      if (mounted) {
+        showTextOnSnackBar("更新偏好保存失败，请重试",
+            context: context, kind: AppNoticeKind.error);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

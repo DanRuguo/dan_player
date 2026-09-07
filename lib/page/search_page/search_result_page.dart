@@ -66,15 +66,20 @@ class _SearchResultPageState extends State<SearchResultPage> {
     if (revision == _searchRevision) return;
     _searchRevision = revision;
     final request = ++_libraryRefresh;
-    unawaited(AudioSearchIndex.instance.ensureBuilt().then((_) {
+    final query = searchResult.query;
+    unawaited(AudioSearchIndex.instance.searchAll(query, checkCancelled: () {
+      if (!mounted || request != _libraryRefresh) {
+        throw const _LocalRefreshSuperseded();
+      }
+    }).then((local) {
       if (!mounted || request != _libraryRefresh) return;
-      final index = AudioSearchIndex.instance;
       setState(() {
-        searchResult.audios = index.searchAudios(searchResult.query);
-        searchResult.artists = index.searchArtists(searchResult.query);
-        searchResult.album = index.searchAlbums(searchResult.query);
+        searchResult.audios = local.audios;
+        searchResult.artists = local.artists;
+        searchResult.album = local.albums;
       });
     }).catchError((Object error, StackTrace trace) {
+      if (error is _LocalRefreshSuperseded) return;
       LOGGER.w('[search index refresh] $error', stackTrace: trace);
     }));
   }
@@ -189,6 +194,10 @@ class _SearchResultPageState extends State<SearchResultPage> {
       ),
     );
   }
+}
+
+class _LocalRefreshSuperseded implements Exception {
+  const _LocalRefreshSuperseded();
 }
 
 enum _SearchResultFilter {

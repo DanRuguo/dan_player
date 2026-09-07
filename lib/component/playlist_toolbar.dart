@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'package:dan_player/component/app_action_icon.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -9,6 +10,7 @@ import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/audio_sort_options.dart';
 import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/playlist_view.dart';
+import 'package:dan_player/play_service/playback_service.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
@@ -93,7 +95,6 @@ enum PlaylistSortMode {
 enum _PlaylistToolbarAction {
   create,
   addSongs,
-  playAll,
   select,
   rename,
   editSongs,
@@ -127,7 +128,6 @@ class PlaylistToolbar extends StatefulWidget {
     this.onViewChanged,
     required this.onCreate,
     this.onAddSongs,
-    required this.onPlayAll,
     required this.onStartSelection,
     required this.onEndSelection,
     required this.onSelectAll,
@@ -146,6 +146,7 @@ class PlaylistToolbar extends StatefulWidget {
     this.onImportCue,
     this.onOpenSmartPlaylists,
     this.selectionTools,
+    this.playbackService,
     this.alignment = WrapAlignment.end,
   })  : assert(selectedCount >= 0),
         assert(albumCount >= 0);
@@ -162,7 +163,6 @@ class PlaylistToolbar extends StatefulWidget {
   final ValueChanged<PlaylistViewMode>? onViewChanged;
   final VoidCallback onCreate;
   final VoidCallback? onAddSongs;
-  final VoidCallback onPlayAll;
   final VoidCallback onStartSelection;
   final VoidCallback onEndSelection;
   final VoidCallback onSelectAll;
@@ -181,6 +181,7 @@ class PlaylistToolbar extends StatefulWidget {
   final VoidCallback? onImportCue;
   final VoidCallback? onOpenSmartPlaylists;
   final Widget? selectionTools;
+  final PlaybackService? playbackService;
   final WrapAlignment alignment;
 
   @override
@@ -255,14 +256,6 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
               label: ui('导出 M3U8 歌单'),
               icon: Icons.file_download_outlined,
               onSelected: widget.canPlay ? widget.onExportM3u : null),
-        if (widget.isRoot)
-          _ToolbarMenuItem(
-            value: _PlaylistToolbarAction.playAll,
-            key: const ValueKey('playlist-play-all'),
-            label: ui("播放全部"),
-            icon: AppActionGlyph.play.icon,
-            onSelected: widget.canPlay ? widget.onPlayAll : null,
-          ),
         _ToolbarMenuItem(
           value: _PlaylistToolbarAction.select,
           key: const ValueKey('playlist-start-selection'),
@@ -333,6 +326,8 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
     final epoch = _modeEpoch;
     bool isCurrentMode() => mounted && !widget.selecting && _modeEpoch == epoch;
     return [
+      if (!widget.isRoot)
+        AppPlaybackModeControls(playbackService: widget.playbackService),
       if (widget.isRoot)
         _ToolbarActionButton(
           key: const ValueKey('playlist-create'),
@@ -344,15 +339,6 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
           onPressed: widget.editingEnabled ? widget.onCreate : null,
         )
       else ...[
-        _ToolbarActionButton(
-          key: const ValueKey('playlist-play-all'),
-          label: ui("播放全部"),
-          icon: AppActionGlyph.play.icon,
-          primary: true,
-          reduced: reduced,
-          maxWidth: maxWidth,
-          onPressed: widget.canPlay ? widget.onPlayAll : null,
-        ),
         _ToolbarMenu<_PlaylistToolbarAction>(
           key: const ValueKey('playlist-add-menu'),
           label: ui("添加"),

@@ -6,6 +6,7 @@ import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/lyric/lyric_text_codec.dart';
 import 'package:dan_player/music_matcher.dart';
@@ -122,10 +123,6 @@ Future<bool> showLyricEditorDialog(
   List<CustomLyricSourceChoice>? customLyricChoices,
   OnlineLyricEditorCustomCandidateLoader? customLyricCandidateLoader,
 }) async {
-  if (audio.isCueTrack) {
-    showTextOnSnackBar('CUE 分轨不能写入整轨歌词，可在歌词来源中关联歌曲。');
-    return false;
-  }
   if (audio.isOnline) {
     showTextOnSnackBar("联网音乐的歌词为只读，不能修改");
     return false;
@@ -176,6 +173,8 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   String? loadError;
   String? onlineError;
   int _onlineLoadGeneration = 0;
+  int _documentRevision = 0;
+  Lyric? _originalLyric;
 
   String get sidecarPath => path_util.setExtension(widget.audio.path, ".lrc");
   bool get dirty => controller.text != original;
@@ -193,17 +192,31 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       if (injectedLoader != null) {
         text = await injectedLoader(widget.audio);
       } else {
-        final sidecar = File(sidecarPath);
-        if (await sidecar.exists()) {
-          final bytes = await sidecar.readAsBytes();
-          text = decodeLyricText(bytes);
+        final store = LyricDocumentStore.instance;
+        await store.load();
+        final document = store.forAudio(widget.audio);
+        _documentRevision = document?.revision ?? 0;
+        _originalLyric = document?.original?.toLyric();
+        if (document?.effective != null) {
+          text = document!.editedText ??
+              document.originalText ??
+              _serializeLyric(document.effective!.toLyric());
+        } else if (widget.audio.isCueTrack) {
+          text = '';
         } else {
-          final lyric = await Lrc.fromAudioPath(widget.audio, separator: "┃");
-          text = lyric == null ? "" : _serializeLyric(lyric);
+          final sidecar = File(sidecarPath);
+          if (await sidecar.exists()) {
+            final bytes = await sidecar.readAsBytes();
+            text = decodeLyricText(bytes);
+          } else {
+            final lyric = await Lrc.fromAudioPath(widget.audio, separator: "┃");
+            text = lyric == null ? "" : _serializeLyric(lyric);
+          }
         }
       }
       if (!mounted) return;
       original = text;
+      _originalLyric ??= Lrc.fromLrcText(text, LrcSource.local, separator: '┃');
       controller.text = text;
     } catch (error, trace) {
       LOGGER.e("[lyric editor] load failed: $error", stackTrace: trace);
@@ -321,11 +334,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
     }
     setState(() => saving = true);
     try {
-      await persistEditedLyric(
-        audioPath: widget.audio.path,
-        sidecarPath: sidecarPath,
-        text: text,
-      );
+      await LyricDocumentStore.instance.edit(widget.audio, text,
+          original: _originalLyric,
+          originalText: original,
+          expectedRevision: _documentRevision);
     } catch (error, trace) {
       LOGGER.e("[lyric editor] save failed: $error", stackTrace: trace);
       showTextOnSnackBar("保存歌词失败：{0}", arguments: [error]);
@@ -337,7 +349,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
     try {
       final playback = PlayService.instance.playbackService;
       if (playback.nowPlaying?.path == widget.audio.path) {
-        PlayService.instance.lyricService.useLocalLyric();
+        PlayService.instance.lyricService.updateLyric();
       }
     } catch (error, trace) {
       // The file and source index are already durable. A playback refresh is
@@ -345,7 +357,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       LOGGER.w("[lyric editor] refresh after save failed: $error",
           stackTrace: trace);
     }
-    showTextOnSnackBar("歌词已保存到 {0}", arguments: [sidecarPath]);
+    showTextOnSnackBar("歌词修订已保存并锁定", kind: AppNoticeKind.success);
     if (mounted) Navigator.pop(context, true);
   }
 
@@ -372,6 +384,46 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       ),
     );
     if (discard == true && mounted) Navigator.pop(context, false);
+  }
+
+  Future<void> _exportSidecar() async {
+    final text = controller.text.trim();
+    if (text.isEmpty || Lrc.fromLrcText(text, LrcSource.local) == null) {
+      showTextOnSnackBar('没有识别到有效的 LRC 时间戳');
+      return;
+    }
+    final confirmed = await showAppDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: AppDialogTitle(ui('导出同名 LRC？')),
+        content: Text(
+            ui('将写入下列文件；已有内容会被替换并保留 .bak 备份。应用内修订另行保存。\n{0}', [sidecarPath])),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(ui('取消'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(ui('确认导出'))),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => saving = true);
+    try {
+      await persistEditedLyric(
+          audioPath: widget.audio.path,
+          sidecarPath: sidecarPath,
+          text: text,
+          persistSource: (_, __) async {});
+      showTextOnSnackBar('歌词已保存到 {0}',
+          arguments: [sidecarPath], kind: AppNoticeKind.success);
+    } catch (error) {
+      showTextOnSnackBar('导出歌词失败：{0}',
+          arguments: [error], kind: AppNoticeKind.error);
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
   }
 
   @override
@@ -488,7 +540,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           final summary = Text(
-                            ui("保存为同名 .lrc 文件（UTF-8）"),
+                            ui("保存应用内修订并锁定，保留原始歌词；+500 ms 表示晚显示 500 ms。"),
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: scheme.onSurfaceVariant,
                             ),
@@ -498,6 +550,15 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
+                              if (!widget.audio.isCueTrack)
+                                OutlinedButton.icon(
+                                  key: const ValueKey('lyric-editor-export'),
+                                  onPressed: loading || saving || loadingOnline
+                                      ? null
+                                      : _exportSidecar,
+                                  icon: const Icon(Symbols.save_alt),
+                                  label: Text(ui('导出 LRC…')),
+                                ),
                               OutlinedButton.icon(
                                 key: const ValueKey('lyric-editor-fill-online'),
                                 onPressed: loading || saving || loadingOnline

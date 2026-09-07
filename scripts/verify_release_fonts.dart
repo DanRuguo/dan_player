@@ -223,33 +223,45 @@ Future<File> _safeAsset(Directory assets, String relative) async {
 
 Future<Set<String>> _projectIconFamilies(Directory project) async {
   final result = <String>{};
-  final source = Directory(path.join(project.path, 'lib'));
-  await for (final entry in source.list(recursive: true, followLinks: false)) {
-    if (entry is! File || !entry.path.endsWith('.dart')) continue;
-    final text = await entry.readAsString();
-    if (RegExp(r'\bIcons\.').hasMatch(text)) result.add('MaterialIcons');
-    if (RegExp(r'\bCupertinoIcons\.').hasMatch(text)) {
-      result.add('packages/cupertino_icons/CupertinoIcons');
-    }
-    for (final match in RegExp(r'\bSymbols\.(\w+)').allMatches(text)) {
-      final name = match[1]!;
-      final style = name.endsWith('_rounded')
-          ? 'Rounded'
-          : name.endsWith('_sharp')
-              ? 'Sharp'
-              : 'Outlined';
-      result.add('packages/material_symbols_icons/MaterialSymbols$style');
-    }
-    // Literal custom families are also required, even when omitted from the
-    // manifest. Dynamic IconData is rejected using const_finder above.
-    for (final match in RegExp(r'IconData\([\s\S]*?\)').allMatches(text)) {
-      final literal = match[0]!;
-      final family = RegExp("fontFamily\\s*:\\s*['\"]([^'\"]+)['\"]")
-          .firstMatch(literal)?[1];
-      final package = RegExp("fontPackage\\s*:\\s*['\"]([^'\"]+)['\"]")
-          .firstMatch(literal)?[1];
-      if (family != null) {
-        result.add(package == null ? family : 'packages/$package/$family');
+  final sources = [Directory(path.join(project.path, 'lib'))];
+  final pubspec =
+      await File(path.join(project.path, 'pubspec.yaml')).readAsString();
+  if (RegExp(r'^name:\s*dan_player\s*$', multiLine: true).hasMatch(pubspec) &&
+      RegExp(r'^\s+desktop_lyric:\s*$', multiLine: true).hasMatch(pubspec)) {
+    // The helper entry point now shares the main AOT. const_finder above reads
+    // both entry points; include the local package's family declarations too.
+    sources.add(Directory(
+        path.join(project.path, 'third_party', 'desktop_lyric', 'lib')));
+  }
+  for (final source in sources) {
+    await for (final entry
+        in source.list(recursive: true, followLinks: false)) {
+      if (entry is! File || !entry.path.endsWith('.dart')) continue;
+      final text = await entry.readAsString();
+      if (RegExp(r'\bIcons\.').hasMatch(text)) result.add('MaterialIcons');
+      if (RegExp(r'\bCupertinoIcons\.').hasMatch(text)) {
+        result.add('packages/cupertino_icons/CupertinoIcons');
+      }
+      for (final match in RegExp(r'\bSymbols\.(\w+)').allMatches(text)) {
+        final name = match[1]!;
+        final style = name.endsWith('_rounded')
+            ? 'Rounded'
+            : name.endsWith('_sharp')
+                ? 'Sharp'
+                : 'Outlined';
+        result.add('packages/material_symbols_icons/MaterialSymbols$style');
+      }
+      // Literal custom families are also required, even when omitted from the
+      // manifest. Dynamic IconData is rejected using const_finder above.
+      for (final match in RegExp(r'IconData\([\s\S]*?\)').allMatches(text)) {
+        final literal = match[0]!;
+        final family = RegExp("fontFamily\\s*:\\s*['\"]([^'\"]+)['\"]")
+            .firstMatch(literal)?[1];
+        final package = RegExp("fontPackage\\s*:\\s*['\"]([^'\"]+)['\"]")
+            .firstMatch(literal)?[1];
+        if (family != null) {
+          result.add(package == null ? family : 'packages/$package/$family');
+        }
       }
     }
   }

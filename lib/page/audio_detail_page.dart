@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/album_tile.dart';
 import 'package:dan_player/component/artist_tile.dart';
 import 'package:dan_player/component/app_entrance.dart';
@@ -7,6 +8,7 @@ import 'package:dan_player/component/audio_metadata_dialog.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/component/online_source_display.dart';
+import 'package:dan_player/component/playback_diagnostics_panel.dart';
 import 'package:dan_player/component/song_comments_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_library.dart';
@@ -213,6 +215,8 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                   ],
                 ),
                 const SizedBox(height: 24.0),
+                PlaybackDiagnosticsPanel(audio: audio),
+                const SizedBox(height: 16.0),
                 if (artists.isNotEmpty)
                   _DetailSection(
                     title: ui("艺术家"),
@@ -450,7 +454,7 @@ class _TrackSpectrum extends StatelessWidget {
       builder: (context, _) {
         final active = playback.nowPlaying?.path == audio.path;
         return AnimatedContainer(
-          duration: const Duration(milliseconds: 240),
+          duration: AppMotion.emphasized,
           padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 10.0),
           decoration: BoxDecoration(
             color: Theme.of(context)

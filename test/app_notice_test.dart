@@ -1,4 +1,5 @@
 import 'package:dan_player/utils.dart';
+import 'package:dan_player/component/app_presentation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -48,8 +49,13 @@ void main() {
 
     final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
     expect(snackBar.behavior, SnackBarBehavior.floating);
-    expect(snackBar.backgroundColor, scheme.errorContainer);
-    expect(snackBar.elevation, 8);
+    expect(snackBar.backgroundColor, Colors.transparent);
+    expect(snackBar.width, lessThan(tester.view.physicalSize.width));
+    final bubble = tester
+        .widget<Material>(find.byKey(const ValueKey('app-notice-bubble')));
+    expect(bubble.color, scheme.errorContainer);
+    expect(bubble.elevation, 6);
+    expect(find.byKey(const ValueKey('app-notice-close')), findsOneWidget);
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
     final message = tester.widget<Text>(find.text('网络请求失败'));
     expect(message.style?.color, scheme.onErrorContainer);
@@ -107,6 +113,94 @@ void main() {
     expect(retries, 1);
   });
 
+  testWidgets('hostless notice sizes to content and close dismisses it',
+      (tester) async {
+    await mount(tester);
+    showAppNotice('已保存');
+    await tester.pumpAndSettle();
+    final bubble = find.byKey(const ValueKey('app-notice-bubble'));
+    final short = tester.getSize(bubble);
+    final longText = '这是需要保留完整无障碍语义的歌曲信息。' * 35;
+    final semantics = tester.ensureSemantics();
+    showAppNotice(longText, kind: AppNoticeKind.warning);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(bubble).width, greaterThan(short.width));
+    expect(tester.getSize(bubble).width, lessThanOrEqualTo(800 * .6));
+    expect(find.bySemanticsLabel('注意：$longText'), findsAtLeastNWidgets(1));
+    expect(tester.widget<Text>(find.text(longText)).maxLines,
+        lessThanOrEqualTo(3));
+    await tester.tap(find.byKey(const ValueKey('app-notice-close')));
+    await tester.pumpAndSettle();
+    expect(bubble, findsNothing);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  for (final useHost in [false, true]) {
+    testWidgets('accessible actions stay reachable and run once ($useHost)',
+        (tester) async {
+      var actions = 0;
+      await tester.pumpWidget(MaterialApp(
+        scaffoldMessengerKey: SCAFFOLD_MESSAGER,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(accessibleNavigation: true),
+          child: useHost ? AppPresentationHost(child: child!) : child!,
+        ),
+        home: const Scaffold(body: SizedBox.expand()),
+      ));
+      showAppNotice('已整理队列',
+          duration: const Duration(milliseconds: 50),
+          actionLabel: '撤销', onAction: () {
+        actions++;
+        showAppNotice('已撤销整理');
+      });
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 1));
+      final button =
+          tester.widget<TextButton>(find.widgetWithText(TextButton, '撤销'));
+      expect(button.onPressed, isNotNull);
+      // A double activation while the bubble fades must not repeat an undo.
+      button.onPressed!();
+      button.onPressed!();
+      await tester.pumpAndSettle();
+      expect(actions, 1);
+      expect(find.text('已整理队列'), findsNothing);
+      expect(find.text('已撤销整理'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('app-notice-close')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('app-notice-bubble')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'disposed caller context uses the visible host/fallback ($useHost)',
+        (tester) async {
+      late BuildContext oldContext;
+      await tester.pumpWidget(MaterialApp(
+        scaffoldMessengerKey: SCAFFOLD_MESSAGER,
+        home: Builder(builder: (context) {
+          oldContext = context;
+          return const Scaffold(body: SizedBox.expand());
+        }),
+      ));
+      await tester.pumpWidget(MaterialApp(
+        scaffoldMessengerKey: SCAFFOLD_MESSAGER,
+        builder: useHost
+            ? (context, child) => AppPresentationHost(child: child!)
+            : null,
+        home: const Scaffold(body: SizedBox.expand()),
+      ));
+      expect(oldContext.mounted, isFalse);
+      showAppNotice('异步完成', context: oldContext);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('app-notice-bubble')), findsOneWidget);
+      expect(find.text('异步完成'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const ValueKey('app-notice-close')));
+      await tester.pumpAndSettle();
+    });
+  }
+
   testWidgets('a visible nested messenger wins over the offstage app messenger',
       (tester) async {
     final localKey = GlobalKey<ScaffoldMessengerState>();
@@ -158,7 +252,10 @@ void main() {
     ));
     showAppNotice('网络连接失败，请检查设置后重试', kind: AppNoticeKind.error);
     await tester.pump();
-    final rect = tester.getRect(find.byType(SnackBar));
+    // Material 3's transport Align can occupy the full scaffold width during
+    // entry; the visible, interactive pill itself must remain inside the view.
+    final rect =
+        tester.getRect(find.byKey(const ValueKey('app-notice-bubble')));
     expect(rect.left, greaterThanOrEqualTo(0));
     expect(rect.right, lessThanOrEqualTo(320));
     expect(rect.bottom, lessThanOrEqualTo(240));

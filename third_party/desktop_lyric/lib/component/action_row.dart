@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:desktop_lyric/appearance_controller.dart';
 import 'package:desktop_lyric/appearance_palette_bridge.dart';
+import 'package:desktop_lyric/app_presentation.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
 import 'package:desktop_lyric/desktop_lyric_window_layout.dart';
 import 'package:desktop_lyric/message.dart';
@@ -81,8 +82,8 @@ class ActionRow extends StatelessWidget {
                 send(const ControlEventMessage(ControlEvent.lock));
               } catch (error) {
                 if (!context.mounted) return;
-                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                    SnackBar(content: Text(ui("无法锁定歌词：{0}", [error]))));
+                showPresentationNotice(ui("无法锁定歌词：{0}", [error]),
+                    context: context, kind: AppNoticeKind.error);
               }
             }, key: const ValueKey('desktop-lyric-lock')),
             button(ui("关闭桌面歌词"), Symbols.close,
@@ -132,14 +133,11 @@ class _DesktopLyricAppearanceButtonState
     }
 
     host.isStarting.addListener(startingChanged);
-    final messenger = ScaffoldMessenger.maybeOf(context);
     try {
       await host.open();
     } catch (error) {
-      if (messenger?.mounted == true) {
-        messenger!.showSnackBar(
-            SnackBar(content: Text(ui('无法打开歌词外观窗口：{0}', [error]))));
-      }
+      showPresentationNotice(ui('无法打开歌词外观窗口：{0}', [error]),
+          context: mounted ? context : null, kind: AppNoticeKind.error);
     } finally {
       host.isStarting.removeListener(startingChanged);
       if (mounted) {

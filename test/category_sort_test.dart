@@ -83,7 +83,7 @@ void main() {
     )));
     await tester.pumpAndSettle();
     await _select(tester, 'category-sort-composer');
-    await tester.tap(find.byKey(const ValueKey('category-play-all')));
+    await tester.tap(find.byKey(ValueKey(('sort-track', a.path))));
     expect(played, [a, equal, z, missing]);
     await tester.tap(find.byKey(ValueKey(('sort-track', z.path))));
     expect(start, 2);
@@ -92,7 +92,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('category-add-playlist')));
     expect(added, [z, a, equal, missing]);
     await _select(tester, 'category-sort-library');
-    await tester.tap(find.byKey(const ValueKey('category-play-all')));
+    await tester.tap(find.byKey(ValueKey(('sort-track', missing.path))));
     expect(played, songs);
     expect(songs, [missing, z, a, equal]);
     expect(PlayService.isInitialized, isFalse);
@@ -116,10 +116,10 @@ void main() {
     )));
     await tester.pumpAndSettle();
     await _select(tester, 'category-sort-duration');
-    await tester.tap(find.byKey(const ValueKey('category-play-all')));
+    await tester.tap(find.byKey(ValueKey(('sort-track', fast.path))));
     expect(queue, [fast, slow, unknown]);
     await _select(tester, 'app-sort-direction-descending');
-    await tester.tap(find.byKey(const ValueKey('category-play-all')));
+    await tester.tap(find.byKey(ValueKey(('sort-track', slow.path))));
     expect(queue, [slow, fast, unknown]);
     expect(PlayService.isInitialized, isFalse);
   });
@@ -176,7 +176,7 @@ void main() {
       await tester.pumpAndSettle();
       final heights = [
         for (final key in [
-          'category-play-all',
+          'playback-mode-shuffle',
           'category-add-playlist',
           'category-track-sort'
         ])
@@ -184,10 +184,14 @@ void main() {
       ];
       expect(heights, everyElement(closeTo(heights.first, .01)));
       expect(heights.first, greaterThanOrEqualTo(44));
-      final playButton = tester.widget<FilledButton>(
-          find.byKey(const ValueKey('category-play-all')));
-      expect(playButton.style!.backgroundColor, isNull,
-          reason: 'Primary play action must retain the filled theme color.');
+      final playButton = tester.widget<IconButton>(
+          find.byKey(const ValueKey('playback-mode-shuffle')));
+      expect(
+          playButton.style!.backgroundColor!.resolve({WidgetState.selected}),
+          Theme.of(tester
+                  .element(find.byKey(const ValueKey('playback-mode-shuffle'))))
+              .colorScheme
+              .primaryContainer);
       expect(tester.getSize(find.byType(ListView)).height, greaterThan(80));
       expect(tester.takeException(), isNull);
     });

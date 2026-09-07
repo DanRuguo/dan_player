@@ -1,8 +1,10 @@
+import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/now_playing_bar_metrics.dart';
 import 'dart:async';
 
 import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/adaptive_grid_drag.dart';
@@ -18,6 +20,14 @@ typedef ContentBuilder<T> = Widget Function(BuildContext context, T item,
 
 typedef SortMethod<T> = void Function(List<T> list, SortOrder order);
 typedef ReorderCallback<T> = FutureOr<void> Function(List<T> list);
+
+Object? _selectionIdentity(Object? item) => switch (item) {
+      Audio audio => (Audio, audio.path),
+      Artist artist => (Artist, artist.name),
+      Album album => (Album, album.name),
+      AudioFolder folder => (AudioFolder, folder.path),
+      _ => item,
+    };
 
 class SortMethodDesc<T> {
   IconData icon;
@@ -102,6 +112,18 @@ class MultiSelectController<T> extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A background index reload replaces metadata instances. Keep selections
+  /// by their library identity, rebinding actions to the current objects.
+  void retainCurrentItems(Iterable<T> items) {
+    if (selected.isEmpty) return;
+    final current = {for (final item in items) _selectionIdentity(item): item};
+    replaceSelection([
+      for (final item in selected)
+        if (current.containsKey(_selectionIdentity(item)))
+          current[_selectionIdentity(item)] as T,
+    ]);
+  }
+
   /// Actions follow the displayed order, rather than the order of clicks.
   List<T> selectedInOrder(Iterable<T> items) =>
       items.where(selected.contains).toList(growable: false);
@@ -124,9 +146,9 @@ class MultiSelectController<T> extends ChangeNotifier {
 }
 
 /// `AudiosPage`, `ArtistsPage`, `AlbumsPage`, `FoldersPage`, `FolderDetailPage` 页面的主要组件，
-/// 提供随机播放以及更改排序方式、排序顺序、内容视图的支持。
+/// 提供全局播放模式以及更改排序方式、排序顺序、内容视图的支持。
 ///
-/// `enableShufflePlay` 只能在 `T` 是 `Audio` 时为 `ture`
+/// `enableShufflePlay` 保留原页面配置名，仅显示模式控件，不启动播放。
 ///
 /// `enableSortMethod` 为 `true` 时，`sortMethods` 不可为空且必须包含一个 `SortMethodDesc`
 ///
@@ -319,8 +341,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
       if (!mounted || !identical(controller, widget.multiSelectController)) {
         return;
       }
-      final allowed = widget.contentList.toSet();
-      controller.replaceSelection(controller.selected.where(allowed.contains));
+      controller.retainCurrentItems(widget.contentList);
     });
   }
 
@@ -359,7 +380,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
       actions.add(widget.primaryAction!);
     }
     if (widget.enableShufflePlay) {
-      actions.add(ShufflePlay<T>(contentList: widget.contentList));
+      actions.add(const AppPlaybackModeControls());
     }
     if (widget.enableSortMethod && currSortMethod != null) {
       actions.add(SortMethodComboBox<T>(

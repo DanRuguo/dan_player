@@ -10,6 +10,57 @@ void main() {
       artist: 'Artist',
       album: 'Album');
 
+  test('commit journal failure retains retry without writing native tags twice', () async {
+    final audio = MetadataTestAudio();
+    var writes = 0, records = 0, syncs = 0, clears = 0;
+    final coordinator = AudioMetadataEditCoordinator(
+      write: (_, __) async { writes++; return 'D:/metadata-fixture/new.mp3'; },
+      recordCommit: (_) async { if (++records == 1) throw StateError('Disk busy'); },
+      synchronize: (_, __) async { syncs++; },
+      clearCommit: () async { clears++; });
+    await expectLater(coordinator.apply(audio, edit), throwsA(isA<AudioMetadataEditException>()
+      .having((e) => e.fileWasUpdated, 'native result is truthful', isTrue)));
+    expect(syncs, 0);
+    await coordinator.apply(audio, edit);
+    expect(writes, 1);
+    expect(records, 2);
+    expect(syncs, 1);
+    expect(clears, 1);
+  });
+
+  test('an old form compares no-op against current metadata after reload',
+      () async {
+    final editor = MetadataTestAudio();
+    final current = MetadataTestAudio()..title = 'Changed by refresh';
+    var writes = 0;
+    final coordinator = AudioMetadataEditCoordinator(
+        currentAudio: (_) => current,
+        write: (path, request) async {
+          writes++;
+          return path;
+        },
+        synchronize: (_, __) async {});
+    await coordinator.apply(
+        editor,
+        const AudioMetadataEdit(
+            fileName: 'old.mp3',
+            title: 'Old title',
+            artist: 'Artist',
+            album: 'Album'));
+    expect(writes, 1,
+        reason: 'Saving the old draft must not be mistaken for no change');
+    final unchanged = MetadataTestAudio();
+    await coordinator.apply(
+        unchanged,
+        const AudioMetadataEdit(
+            fileName: 'old.mp3',
+            title: 'Changed by refresh',
+            artist: 'Artist',
+            album: 'Album'));
+    expect(writes, 1);
+    expect(unchanged.title, 'Changed by refresh');
+  });
+
   test('native failure changes no model and leaves no pending sync', () async {
     final audio = MetadataTestAudio();
     var writes = 0;

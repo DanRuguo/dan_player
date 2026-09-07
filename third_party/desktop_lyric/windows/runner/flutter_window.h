@@ -1,5 +1,5 @@
-#ifndef RUNNER_FLUTTER_WINDOW_H_
-#define RUNNER_FLUTTER_WINDOW_H_
+#ifndef DESKTOP_LYRIC_RUNNER_FLUTTER_WINDOW_H_
+#define DESKTOP_LYRIC_RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
@@ -10,6 +10,8 @@
 
 #include "win32_window.h"
 #include "appearance_palette_window.h"
+
+namespace desktop_lyric_runner {
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -35,4 +37,6 @@ class FlutterWindow : public Win32Window {
   std::shared_ptr<PaletteWindowManager> palette_manager_;
 };
 
-#endif  // RUNNER_FLUTTER_WINDOW_H_
+}  // namespace desktop_lyric_runner
+
+#endif  // DESKTOP_LYRIC_RUNNER_FLUTTER_WINDOW_H_

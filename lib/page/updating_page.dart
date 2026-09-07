@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/library_auto_refresh.dart';
+import 'package:dan_player/library/library_health.dart';
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
@@ -66,6 +70,49 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
   StreamSubscription? _subscription;
   Object? _error;
   bool _settled = false;
+  bool _usingCachedIndex = false;
+
+  Stream<IndexActionState> _scan() async* {
+    final index = File('${widget.indexPath.path}/index.json');
+    final roots = <String>[];
+    try {
+      if (await index.exists()) {
+        final raw = jsonDecode(await index.readAsString()) as Map;
+        if (raw['roots'] is List) {
+          roots.addAll((raw['roots'] as List).whereType<String>());
+        }
+        if (roots.isEmpty && raw['folders'] is List) {
+          roots.addAll((raw['folders'] as List)
+              .whereType<Map>()
+              .map((folder) => folder['path'])
+              .whereType<String>());
+        }
+      }
+    } catch (error) {
+      // Root labels are optional health metadata. Leave index recovery to the
+      // existing scanner/loader instead of failing on this auxiliary read.
+      LOGGER.w('[library health roots] $error');
+    }
+    String? failure;
+    try {
+      yield* updateIndex(indexPath: widget.indexPath.path);
+    } catch (error) {
+      failure = '$error';
+      if (!failure.contains('INDEX_SCAN_INCOMPLETE') || !await index.exists()) {
+        rethrow;
+      }
+      // Rust deliberately left the old complete snapshot intact. Open it so
+      // an unplugged source doesn't prevent access to playlists and settings.
+      _usingCachedIndex = true;
+    } finally {
+      try {
+        await LibraryHealthService(widget.indexPath)
+            .recordScan(roots, failure: failure);
+      } catch (error) {
+        LOGGER.w('[library health] $error');
+      }
+    }
+  }
 
   Future<void> whenIndexUpdated() async {
     if (_settled) return;
@@ -80,6 +127,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
         readCustomAudioOrder(),
         readPlaylists(),
         readLyricSources(),
+        LyricDocumentStore.instance.load(),
       ]);
       unawaited(AudioSearchIndex.instance.ensureBuilt());
       unawaited(
@@ -92,9 +140,14 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
       );
       await PlayService.instance.playbackService.restoreLastSessionOnce();
       await WindowsShell.instance.markLibraryReady();
+      LibraryAutoRefresh.instance.start();
       await _subscription?.cancel();
       if (mounted) {
         context.go(app_paths.START_PAGES[AppPreference.instance.startPage]);
+        if (_usingCachedIndex) {
+          showAppNotice(ui('部分音乐来源暂不可访问，已打开上次曲库。可在设置中查看来源状态或重定位目录。'),
+              kind: AppNoticeKind.warning);
+        }
       }
     } catch (error, stackTrace) {
       _showFailure(error, stackTrace);
@@ -114,9 +167,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
   @override
   void initState() {
     super.initState();
-    updateIndexStream = updateIndex(
-      indexPath: widget.indexPath.path,
-    ).asBroadcastStream();
+    updateIndexStream = _scan().asBroadcastStream();
 
     _subscription = updateIndexStream.listen(
       (action) {

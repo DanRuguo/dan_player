@@ -1,7 +1,7 @@
 name: dan_player
 description: Dan Player.
 publish_to: 'none'
-version: 26.0.4
+version: 26.0.5-snapshot.2
 
 environment:
   sdk: '>=3.1.4 <4.0.0'
@@ -45,6 +45,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.2
+  fake_async: ^1.3.3
   integration_test:
     sdk: flutter
   ffigen: ^14.0.1

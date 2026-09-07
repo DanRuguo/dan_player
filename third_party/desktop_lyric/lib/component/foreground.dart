@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:desktop_lyric/appearance_controller.dart';
 import 'package:desktop_lyric/app_motion.dart';
+import 'package:desktop_lyric/app_presentation.dart';
 import 'package:desktop_lyric/component/action_row.dart';
 import 'package:desktop_lyric/component/lyric_line_view.dart';
 import 'package:desktop_lyric/component/now_playing_info.dart';
@@ -116,8 +117,8 @@ class _DesktopLyricForegroundState extends State<DesktopLyricForeground> {
                   .ensureContentMinimum(minimum, vertical: vertical)
                   .catchError((Object error) {
                 if (!context.mounted) return;
-                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                    SnackBar(content: Text(ui("调整歌词窗口失败：{0}", [error]))));
+                showPresentationNotice(ui("调整歌词窗口失败：{0}", [error]),
+                    context: context, kind: AppNoticeKind.error);
               }));
             });
           }

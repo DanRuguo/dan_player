@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:async';
 
 import 'package:dan_player/lyric/lrc.dart';
@@ -218,7 +219,7 @@ class _HorizontalLyricTimelineState extends State<_HorizontalLyricTimeline> {
     if (widget.reducedMotion) return child;
     return AnimatedSwitcher(
       key: const ValueKey('horizontal-lyric-switcher'),
-      duration: const Duration(milliseconds: 220),
+      duration: AppMotion.standard,
       switchInCurve: LyricMotion.curve,
       switchOutCurve: LyricMotion.curve,
       layoutBuilder: (current, previous) => Stack(
@@ -332,7 +333,7 @@ class _HorizontalLyricLineState extends State<_HorizontalLyricLine> {
       // playback time. The finite activity settles even when playback pauses.
       unawaited(_scrollController.animateTo(
         target,
-        duration: const Duration(milliseconds: 64),
+        duration: AppMotion.followSample,
         curve: Curves.linear,
       ));
     }

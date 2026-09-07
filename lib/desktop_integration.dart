@@ -458,7 +458,14 @@ class DesktopIntegration implements Listenable {
       // delay play/pause buttons, tray restoration or exit.
       _preview?.synchronize(
           enabled: _preferences.value.taskbarSongPreview,
-          track: _playback.value.preview,
+          track: _playback.value.preview?.withPlaybackState(
+              playing: _playback.value.playing,
+              buffering: _playback.value.buffering,
+              label: ui(_playback.value.buffering
+                  ? '正在缓冲'
+                  : _playback.value.playing
+                      ? '正在播放'
+                      : '已暂停')),
           scheme: _syncAppearance
               ? _theme.currScheme
               : ColorScheme.fromSeed(seedColor: Colors.teal),

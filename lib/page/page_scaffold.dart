@@ -95,6 +95,10 @@ class PageScaffold extends StatelessWidget {
                       style: menuStyle,
                       menuChildren: foldedColumn,
                       builder: (_, controller, __) => IconButton.filledTonal(
+                        style: IconButton.styleFrom(
+                            foregroundColor: Theme.of(context)
+                                .colorScheme
+                                .onSecondaryContainer),
                         tooltip: ui("更多"),
                         onPressed: () {
                           controller.isOpen

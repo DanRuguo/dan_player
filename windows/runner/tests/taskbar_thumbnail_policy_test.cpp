@@ -43,8 +43,8 @@ int main() {
     const auto peek = p::FitPeekLayout({1440, 720}, client);
     check(peek.canvas.width == client.width && peek.canvas.height == client.height,
           "ordinary Peek canvas matches the full client, not thumbnail size");
-    check(peek.content.width == 640 && peek.content.height == 320,
-          "high-resolution Peek is a readable 640x320 logical card, not desktop-stretched text");
+    check(peek.content.width == 1120 && peek.content.height == 560,
+          "Peek makes use of the restored window without stretching beyond source resolution");
     check(peek.left == (client.width - peek.content.width) / 2 &&
               peek.top == (client.height - peek.content.height) / 2,
           "whole card is centered, never cropped to the client aspect ratio");
@@ -81,7 +81,7 @@ int main() {
   check(!p::FitPeekLayout({2048, 1024}, {1280, 800}).valid(), "oversized source pixel budget rejected");
   for (const auto dpi : {96u, 120u, 144u, 192u, 216u, 288u, 768u}) {
     const auto large = p::FitPeekLayout({1440, 720}, {3840, 2160}, dpi);
-    const int expected_width = std::min(1440, static_cast<int>(640 * dpi / 96));
+    const int expected_width = std::min(1440, static_cast<int>(1120 * dpi / 96));
     check(large.content.width == expected_width && large.content.height == expected_width / 2,
           "DPI-based readability grows only up to the genuinely rasterized source density");
     const auto narrow = p::FitPeekLayout({1440, 720}, {507, 320}, dpi);
@@ -264,5 +264,19 @@ int main() {
   image.Clear();
   check(!image.WritePeekBgra(peek, peek_output.data(), peek_output.size()),
         "disable retires Peek source as well as thumbnail source");
+  check(image.Set(1, 2, {40, 20, 10, 64, 120, 60, 30, 192}) == p::Update::kChanged,
+        "synthetic premultiplied two-tone background");
+  check(image.WritePeekBgra(peek, peek_output.data(), peek_output.size()),
+        "native margins accept vertical gradient without another bitmap");
+  check(pixel(0, 0) == std::array<std::uint8_t, 4>{10, 20, 40, 64} &&
+            pixel(0, 799) == std::array<std::uint8_t, 4>{30, 60, 120, 192},
+        "both margin endpoints preserve RGBA-to-BGRA and alpha");
+  const auto middle = pixel(0, 400);
+  check(middle[0] >= 19 && middle[0] <= 21 && middle[3] >= 127 && middle[3] <= 129 &&
+            middle[0] <= middle[3] && middle[1] <= middle[3] && middle[2] <= middle[3],
+        "interpolated margins remain premultiplied and continuous");
+  const auto composed = p::FitPeekLayout({1280, 800}, {1280, 800});
+  check(composed.content.width == 1120 && composed.content.height == 700,
+        "new independent Peek fills most of a normal restored client");
   std::cout << "PASS: " << count << " thumbnail policy checks (no HWND/Shell).\n";
 }

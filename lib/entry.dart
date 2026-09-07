@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_route_transition.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/app_fonts.dart';
@@ -182,6 +183,7 @@ class Entry extends StatelessWidget {
                   builder: (context, _) {
                     final theme = Provider.of<ThemeProvider>(context);
                     return MaterialApp.router(
+                      themeAnimationDuration: AppMotion.standard,
                       title: "Dan Player",
                       scaffoldMessengerKey: SCAFFOLD_MESSAGER,
                       debugShowCheckedModeBanner: false,

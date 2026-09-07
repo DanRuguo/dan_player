@@ -108,7 +108,7 @@ jobs:
 
       - name: Test native backdrop and desktop integration policies
         run: |
-          cmake --build build/windows/x64 --config Release --target window_resize_policy_test window_corner_region_test window_backdrop_policy_test window_backdrop_updates_test desktop_integration_policy_test taskbar_thumbnail_policy_test taskbar_peek_bitmap_test taskbar_peek_geometry_test desktop_integration_fonts_test desktop_integration_blur_test desktop_integration_paint_test installer_launch_test windows_shell_policy_test
+          cmake --build build/windows/x64 --config Release --target window_resize_policy_test window_corner_region_test window_backdrop_policy_test window_backdrop_updates_test desktop_integration_policy_test taskbar_thumbnail_policy_test taskbar_peek_bitmap_test taskbar_peek_geometry_test desktop_integration_fonts_test desktop_integration_blur_test desktop_integration_paint_test installer_launch_test windows_shell_policy_test desktop_entry_policy_test
           if ($LASTEXITCODE -ne 0) { throw 'Native backdrop tests did not compile.' }
           & .\build\windows\x64\window_tests\Release\window_resize_policy_test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Native window resize policy tests failed.' }
@@ -136,8 +136,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installer verification/handshake tests failed.' }
           & .\build\windows\x64\desktop_tests\Release\windows_shell_policy_test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Windows shell action and instance policy tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\desktop_entry_policy_test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Player/lyric process routing tests failed.' }
 
-      - name: Build desktop lyrics release
+      # Standalone desktop_lyric remains a test harness for native palette
+      # regressions. Distribution uses Dan Player.exe --desktop-lyric.
+      - name: Build desktop lyric test harness
         working-directory: third_party/desktop_lyric
         run: |
           & ..\..\scripts\invalidate_windows_icon_assets.ps1 -ProjectRoot (Get-Location).Path

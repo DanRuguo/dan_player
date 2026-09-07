@@ -15,6 +15,8 @@ Set-StrictMode -Version Latest
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $repositoryRoot
+. (Join-Path $PSScriptRoot 'support\release_version.ps1')
+$null = Get-ReleaseVersionInfo $repositoryRoot
 $flutter = Join-Path $workspaceRoot 'tool\flutter\bin\flutter.bat'
 $pubCache = Join-Path $workspaceRoot 'tool\pub-cache'
 $rustupHome = Join-Path $workspaceRoot 'tool\rustup'
@@ -49,19 +51,8 @@ try {
         Pop-Location
     }
 
-    if (-not $SkipDesktopLyric) {
-        Push-Location (Join-Path $repositoryRoot 'third_party\desktop_lyric')
-        try {
-            if (-not $NoRestore) {
-                & (Join-Path $PSScriptRoot 'prepare_windows_dependencies.ps1') -ProjectRoot (Get-Location).Path -Flutter $flutter
-            }
-            & (Join-Path $PSScriptRoot 'invalidate_windows_icon_assets.ps1') -ProjectRoot (Get-Location).Path
-            & $flutter build windows --release --no-pub
-            if ($LASTEXITCODE -ne 0) { throw 'desktop_lyric release build failed.' }
-            & (Join-Path $PSScriptRoot 'verify_windows_release_fonts.ps1') -ProjectRoot (Get-Location).Path
-        } finally {
-            Pop-Location
-        }
+    if ($SkipDesktopLyric) {
+        Write-Host 'SkipDesktopLyric is retained for compatibility. Desktop lyrics share the main executable and are always included.'
     }
 
     if (-not $SkipSigning) {

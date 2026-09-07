@@ -21,7 +21,7 @@ class _NowPlayingPage_Large extends StatelessWidget {
                     child: ValueListenableBuilder(
                       valueListenable: NOW_PLAYING_VIEW_MODE,
                       builder: (context, value, _) => AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 150),
+                        duration: AppMotion.standard,
                         child: switch (value) {
                           NowPlayingViewMode.onlyMain =>
                             const VerticalLyricView(),
@@ -59,9 +59,7 @@ class _NowPlayingPage_Large extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _NowPlayingShuffleSwitch(),
-                        spacer,
-                        _NowPlayingPlayModeSwitch(),
+                        AppPlaybackModeControls(plain: true),
                         spacer,
                         _NowPlayingVolDspSlider(),
                         spacer,
@@ -129,7 +127,7 @@ class _NowPlayingLargeViewSwitch extends StatelessWidget {
             _ => Symbols.queue_music,
           },
         ),
-        color: scheme.onSecondaryContainer,
+        color: scheme.primary,
       ),
     );
   }

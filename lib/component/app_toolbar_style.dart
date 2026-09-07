@@ -124,10 +124,12 @@ ButtonStyle appToolbarControlStyle(BuildContext context,
                 : states.contains(WidgetState.hovered)
                     ? scheme.surfaceContainerHighest.withValues(alpha: .45)
                     : Colors.transparent),
-    foregroundColor: primary && destructive
-        ? WidgetStateProperty.resolveWith((states) =>
-            states.contains(WidgetState.disabled) ? null : foreground)
-        : null,
+    foregroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.disabled)
+            ? scheme.onSurface.withValues(alpha: .38)
+            : primary
+                ? foreground
+                : scheme.primary),
     overlayColor: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.disabled)) return Colors.transparent;
       final color = primary ? foreground : scheme.primary;

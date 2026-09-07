@@ -19,6 +19,8 @@
 
 #include "appearance_palette_window.h"
 
+using namespace desktop_lyric_runner;
+
 namespace {
 using Clock = std::chrono::steady_clock;
 using Value = flutter::EncodableValue;

@@ -80,8 +80,10 @@ void main() {
       }
       expect(entered, beforeExit,
           reason: 'The route child is not rebuilt each animation frame');
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.byKey(const ValueKey('detail-surface')), findsNothing,
+          reason: 'Returning completes within 260ms instead of the old 420ms');
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('detail-surface')), findsNothing);
       expect(input.text, 'preserved search');
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
@@ -95,7 +97,7 @@ void main() {
     const page = SlideTransitionPage(child: SizedBox());
     expect(page.transitionDuration, AppRouteTransition.enterDuration);
     expect(page.reverseTransitionDuration, AppRouteTransition.exitDuration);
-    expect(page.transitionDuration, const Duration(milliseconds: 420));
+    expect(page.transitionDuration, const Duration(milliseconds: 240));
     expect(page.reverseTransitionDuration, page.transitionDuration);
   });
 

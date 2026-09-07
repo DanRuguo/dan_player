@@ -193,7 +193,9 @@ class AudioDurationCorrectionCoordinator {
 
 final audioDurationCorrections = AudioDurationCorrectionCoordinator(
   lookup: (path) => AudioLibrary.instance.audioByPath[path],
-  persist: AudioLibrary.instance.saveIndex,
-  publish: AudioLibrary.instance.publishDurationChanges,
+  // A successful scan replaces the library instance. Resolve all callbacks at
+  // commit time so a later duration correction cannot save an old whole index.
+  persist: () => AudioLibrary.instance.saveIndex(),
+  publish: () => AudioLibrary.instance.publishDurationChanges(),
   debounce: const Duration(seconds: 2),
 );

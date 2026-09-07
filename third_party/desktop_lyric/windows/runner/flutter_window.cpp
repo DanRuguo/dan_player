@@ -5,7 +5,10 @@
 #include <shellapi.h>
 #include <flutter/standard_method_codec.h>
 
-#include "flutter/generated_plugin_registrant.h"
+#include <screen_retriever_windows/screen_retriever_windows_plugin_c_api.h>
+#include <window_manager/window_manager_plugin.h>
+
+namespace desktop_lyric_runner {
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -27,7 +30,13 @@ bool FlutterWindow::OnCreate() {
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
-  RegisterPlugins(flutter_controller_->engine());
+  // The shared executable also links main-player plugins. Keep the lyric
+  // process restricted to its window/screen plugins; no global hotkeys.
+  auto* registry = flutter_controller_->engine();
+  ScreenRetrieverWindowsPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("ScreenRetrieverWindowsPluginCApi"));
+  WindowManagerPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("WindowManagerPlugin"));
   palette_manager_ = std::make_shared<PaletteWindowManager>(GetHandle(),
       flutter_controller_->engine()->messenger(), project_);
   geometry_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -148,3 +157,5 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
 }
+
+}  // namespace desktop_lyric_runner

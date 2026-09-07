@@ -9,10 +9,9 @@ class AppRouteTransition extends StatefulWidget {
   const AppRouteTransition(
       {super.key, required this.animation, required this.child});
 
-  // Route changes need enough time for the backing fade and the first content
-  // group to read as one motion. Keep both directions identical so popping a
-  // detail page is the literal reverse of entering it, not a faster shortcut.
-  static const enterDuration = Duration(milliseconds: 420);
+  // Both directions share the page-transition tier. Reversing an unfinished
+  // entrance follows the same opacity path without an extra fade or pause.
+  static const enterDuration = AppMotion.emphasized;
   static const exitDuration = enterDuration;
   final Animation<double> animation;
   final Widget child;

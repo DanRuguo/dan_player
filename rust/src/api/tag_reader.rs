@@ -25,7 +25,7 @@ use windows::{
     core::Interface,
     core::HSTRING,
     Storage::{
-        FileProperties::ThumbnailMode,
+        FileProperties::{ThumbnailMode, ThumbnailType},
         StorageFile,
         Streams::{DataReader, IInputStream},
     },
@@ -1543,7 +1543,7 @@ fn is_metadata_transaction_path(path: &Path) -> bool {
 fn _get_picture_by_windows(
     path: &String,
     requested_size: u32,
-) -> Result<Vec<u8>, windows::core::Error> {
+) -> Result<Option<Vec<u8>>, windows::core::Error> {
     let _apartment = ComApartment::multithreaded();
     let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.get()?;
     let thumbnail = file
@@ -1554,6 +1554,13 @@ fn _get_picture_by_windows(
             requested_size.clamp(1, 2048),
         )?
         .get()?;
+
+    // MusicView falls back to the registered player's document icon. That is
+    // not album artwork and must never become a persistent cover thumbnail.
+    if thumbnail.Type()? != ThumbnailType::Image || thumbnail.Size()? > 16 * 1024 * 1024 {
+        thumbnail.Close()?;
+        return Ok(None);
+    }
 
     let size = thumbnail.Size()? as u32;
     let stream: IInputStream = thumbnail.cast()?;
@@ -1566,7 +1573,7 @@ fn _get_picture_by_windows(
     data_reader.Close()?;
     stream.Close()?;
 
-    Ok(buffer)
+    Ok(Some(buffer))
 }
 
 // Keep in sync with Dart ArtworkSize: enough pixels on *both* axes for
@@ -1630,6 +1637,9 @@ fn resize_picture(pic: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
 }
 
 fn _get_picture_by_lofty(path: &String, width: u32, height: u32) -> Option<Vec<u8>> {
+    if let Some(picture) = id3_compat::read_picture(Path::new(path), width, height) {
+        return Some(picture);
+    }
     if let Ok(tagged_file) = read_tagged_file_by_content(path) {
         let tags = ordered_tags(&tagged_file);
         for front_cover_only in [true, false] {
@@ -1658,7 +1668,8 @@ pub fn get_picture_from_path(path: String, width: u32, height: u32) -> Option<Ve
     }
 
     match _get_picture_by_windows(&path, width.max(height)) {
-        Ok(pic) => resize_picture(&pic, width, height),
+        Ok(Some(pic)) => resize_picture(&pic, width, height),
+        Ok(None) => None,
         Err(err) => {
             log_to_dart(format!("fail to get pic: {}", err));
             None
@@ -3017,6 +3028,19 @@ mod tests {
         let resized = resize_picture(encoded.get_ref(), 12, 12).unwrap();
         let decoded = image::load_from_memory(&resized).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (4, 2));
+    }
+
+    #[test]
+    fn cover_windows_file_icon_is_not_album_artwork() {
+        let directory = test_directory("cover_windows_icon");
+        let source = directory.join("no-artwork.wav");
+        write_minimal_wav(&source);
+        let before = fs::read(&source).unwrap();
+        let source_path = source.to_string_lossy().into_owned();
+        assert!(_get_picture_by_windows(&source_path, 96).unwrap().is_none());
+        assert!(get_picture_from_path(source_path, 96, 96).is_none());
+        assert_eq!(fs::read(&source).unwrap(), before);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

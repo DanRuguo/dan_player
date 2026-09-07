@@ -1,14 +1,15 @@
 import 'dart:math' as math;
+import 'package:dan_player/component/app_motion.dart';
 
 import 'package:flutter/material.dart';
 
 /// Motion local to lyric surfaces. Playback time remains the sole clock for
 /// word highlighting; these durations only describe presentation transitions.
 abstract final class LyricMotion {
-  static const lineDuration = Duration(milliseconds: 460);
-  static const scrollDuration = Duration(milliseconds: 620);
-  static const seekScrollDuration = Duration(milliseconds: 320);
-  static const springScrollDuration = Duration(milliseconds: 720);
+  static const lineDuration = AppMotion.lyricLine;
+  static const scrollDuration = AppMotion.lyricScroll;
+  static const seekScrollDuration = AppMotion.emphasized;
+  static const springScrollDuration = AppMotion.lyricSpring;
   static const manualScrollGrace = Duration(seconds: 4);
   static const curve = Cubic(0.22, 0.0, 0.16, 1.0);
   // Start travelling promptly, then spend the final part settling at the line.

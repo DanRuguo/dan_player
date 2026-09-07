@@ -4,9 +4,11 @@ import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/build_index_state_view.dart';
+import 'package:dan_player/component/library_folders_dialog.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/library_health.dart';
 import 'package:dan_player/library/library_refresh.dart';
 import 'package:dan_player/library/library_mutation_gate.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
@@ -17,6 +19,7 @@ import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/page/folders_page.dart' show folderDisplayName;
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/utils.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
@@ -593,6 +596,7 @@ class AudioLibraryEditor extends StatelessWidget {
           showAppDialog(
             context: context,
             barrierDismissible: false,
+            dialogBottomInset: 0,
             builder: (context) => const AudioLibraryEditorDialog(),
           );
         },
@@ -701,7 +705,7 @@ Future<int> _reloadScannedLibrary({
       LibraryRefreshSnapshot.capture(AudioLibrary.instance.audioCollection);
   final directory = indexPath ?? await getAppDataDir();
   try {
-    return await completeLibraryRefresh(
+    final count = await completeLibraryRefresh(
       incremental: incremental,
       before: previous,
       readCommitted: () =>
@@ -725,6 +729,13 @@ Future<int> _reloadScannedLibrary({
         await AudioSearchIndex.instance.ensureBuilt();
       },
     );
+    try {
+      await LibraryHealthService(directory)
+          .recordScan(AudioLibrary.instance.scanRoots);
+    } catch (error) {
+      LOGGER.w('[library health] $error');
+    }
+    return count;
   } catch (_) {
     throw _RefreshSyncFailure();
   }
@@ -829,124 +840,47 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
 
     return PopScope(
       canPop: editing,
-      child: Dialog(
-        insetPadding: EdgeInsets.zero,
-        child: SizedBox(
-          height: 450.0,
-          width: 450.0,
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16.0),
-                  child: AppDialogTitle(
-                    ui("管理文件夹"),
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 18.0,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 150),
-                    child: editing
-                        ? ListView.builder(
-                            itemCount: folders.length,
-                            itemBuilder: (context, i) => ListTile(
-                              title: Text(folders[i], maxLines: 1),
-                              trailing: IconButton(
-                                tooltip: ui("移除"),
-                                color: scheme.error,
-                                onPressed: () {
-                                  if (!editing) return;
-                                  setState(() {
-                                    folders.removeAt(i);
-                                  });
-                                },
-                                icon: const Icon(Symbols.delete),
-                              ),
-                            ),
-                          )
-                        : _indexPath == null
-                            ? Center(child: Text(ui("正在准备扫描")))
-                            : Center(
-                                child: BuildIndexStateView(
-                                  indexPath: _indexPath!,
-                                  folders: folders,
-                                  scan: (selected, directory, _) =>
-                                      LibraryRefreshTask(
-                                    scan: () =>
-                                        buildIndexFromFoldersRecursively(
-                                            folders: selected,
-                                            indexPath: directory.path),
-                                    commit: () => _reloadScannedLibrary(
-                                        indexPath: directory),
-                                  ).stream,
-                                  whenIndexBuilt: () async {
-                                    if (context.mounted) {
-                                      Navigator.pop(context);
-                                    }
-                                  },
-                                  whenIndexFailed: (error, _) {
-                                    if (!mounted) return;
-                                    setState(() {
-                                      editing = true;
-                                    });
-                                    showTextOnSnackBar(
-                                        error is LibraryMutationBusy
-                                            ? "曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试"
-                                            : error is _RefreshSyncFailure
-                                                ? "索引已更新，但界面同步未完成，请重新打开应用"
-                                                : "刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试");
-                                  },
-                                ),
-                              ),
-                  ),
-                ),
-                const SizedBox(height: 16.0),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: !editing
-                          ? null
-                          : () async {
-                              final dirPicker = DirectoryPicker();
-                              dirPicker.title = ui("选择文件夹");
-
-                              final dir = dirPicker.getDirectory();
-                              if (dir == null) return;
-
-                              setState(() {
-                                folders.add(dir.path);
-                              });
-                            },
-                      child: Text(ui("添加")),
-                    ),
-                    const SizedBox(width: 8.0),
-                    TextButton(
-                      onPressed: !editing ? null : () => Navigator.pop(context),
-                      child: Text(ui("取消")),
-                    ),
-                    const SizedBox(width: 8.0),
-                    TextButton(
-                      onPressed: !editing ? null : _confirm,
-                      child: Text(ui("确定")),
-                    ),
-                  ],
-                )
-              ],
-            ),
-          ),
-        ),
+      child: LibraryFoldersDialog(
+        folders: folders,
+        folderName: folderDisplayName,
+        editing: editing,
+        onAdd: () {
+          final dirPicker = DirectoryPicker()..title = ui('选择文件夹');
+          final dir = dirPicker.getDirectory();
+          if (dir == null || !mounted) return;
+          setState(() => folders.add(dir.path));
+        },
+        onRemove: (index) {
+          if (editing) setState(() => folders.removeAt(index));
+        },
+        onCancel: () => Navigator.pop(context),
+        onConfirm: _confirm,
+        progress: _indexPath == null
+            ? null
+            : BuildIndexStateView(
+                indexPath: _indexPath!,
+                folders: folders,
+                scan: (selected, directory, _) => LibraryRefreshTask(
+                  scan: () => buildIndexFromFoldersRecursively(
+                      folders: selected, indexPath: directory.path),
+                  commit: () => _reloadScannedLibrary(indexPath: directory),
+                ).stream,
+                whenIndexBuilt: () async {
+                  if (context.mounted) Navigator.pop(context);
+                },
+                whenIndexFailed: (error, _) {
+                  if (!mounted) return;
+                  setState(() => editing = true);
+                  showTextOnSnackBar(error is LibraryMutationBusy
+                      ? '曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试'
+                      : error is _RefreshSyncFailure
+                          ? '索引已更新，但界面同步未完成，请重新打开应用'
+                          : '刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试');
+                },
+              ),
       ),
     );
   }

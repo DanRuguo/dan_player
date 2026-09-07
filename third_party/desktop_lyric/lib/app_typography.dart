@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:desktop_lyric/app_motion.dart';
 
 abstract final class DesktopLyricTypography {
   static const String fontFamily = "DanPingFangSC";
@@ -32,6 +33,7 @@ abstract final class DesktopLyricTypography {
       colorScheme: scheme,
       iconButtonTheme: IconButtonThemeData(
         style: ButtonStyle(
+          animationDuration: AppMotion.quick,
           overlayColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) {
               return scheme.primary.withValues(alpha: 0.12);

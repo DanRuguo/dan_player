@@ -53,7 +53,8 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
       final store = widget.store ?? await PlaybackBookmarkStore.instance;
       final entries = _audio == null
           ? <PlaybackBookmark>[]
-          : await store.forTrack(_audio!.path);
+          : await store.forTrack(_audio!.path,
+              stableTrackId: _audio!.stableTrackId);
       if (!mounted) return;
       setState(() {
         _store = store;
@@ -75,7 +76,8 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
     });
     try {
       await action(_store!);
-      final entries = await _store!.forTrack(_audio!.path);
+      final entries = await _store!
+          .forTrack(_audio!.path, stableTrackId: _audio!.stableTrackId);
       if (mounted) setState(() => _items = entries);
     } catch (_) {
       if (mounted) setState(() => _error = '书签保存失败，请重试；已有书签已保留');
@@ -101,7 +103,11 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
         ? (end == null ? _time(position) : '${_time(position)} – ${_time(end)}')
         : _name.text.trim();
     await _mutate((store) => store.add(
-        localPath: _audio!.path, label: label, position: position, end: end));
+        localPath: _audio!.path,
+        stableTrackId: _audio!.stableTrackId,
+        label: label,
+        position: position,
+        end: end));
     if (mounted && _error == null) _name.clear();
   }
 

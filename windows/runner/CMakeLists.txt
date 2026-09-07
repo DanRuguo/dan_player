@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES CXX)
 
+# One executable hosts two isolated process roles. Share the existing lyric
+# window implementation, including its owned palette and DPI event bridge.
+set(DESKTOP_LYRIC_RUNNER "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/desktop_lyric/windows/runner")
+
 # Define the application target. To change its name, change BINARY_NAME in the
 # top-level CMakeLists.txt, not the value here, or `flutter run` will no longer
 # work.
@@ -16,6 +20,9 @@ add_executable(${BINARY_NAME} WIN32
   "window_backdrop.cpp"
   "windows_shell.cpp"
   "win32_window.cpp"
+  "${DESKTOP_LYRIC_RUNNER}/flutter_window.cpp"
+  "${DESKTOP_LYRIC_RUNNER}/appearance_palette_window.cpp"
+  "${DESKTOP_LYRIC_RUNNER}/win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
@@ -54,6 +61,13 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# Pure argument/pipe policy regression; never creates HWNDs or a Dart engine.
+add_executable(desktop_entry_policy_test EXCLUDE_FROM_ALL
+  "tests/desktop_entry_policy_test.cpp")
+set_target_properties(desktop_entry_policy_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
 
 add_executable(windows_shell_policy_test EXCLUDE_FROM_ALL
   "tests/windows_shell_policy_test.cpp")

@@ -7,6 +7,8 @@ import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/page/settings_page/background_settings.dart';
 import 'package:dan_player/page/settings_page/music_source_settings.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/replay_gain.dart';
+import 'package:dan_player/play_service/track_resume_preferences.dart';
 import 'package:dan_player/window_backdrop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -79,6 +81,9 @@ void main() {
   late BackgroundPreferences previousBackgrounds;
   late Size previousWindowSize;
   late bool previousMaximized;
+  late bool previousAutoRefresh;
+  late ReplayGainPreferences previousReplayGain;
+  late TrackResumePreferences previousTrackResume;
   var windowCalls = 0;
 
   setUp(() async {
@@ -105,6 +110,9 @@ void main() {
     previousBackgrounds = settings.backgrounds.value;
     previousWindowSize = settings.windowSize;
     previousMaximized = settings.isWindowMaximized;
+    previousAutoRefresh = settings.libraryAutoRefresh.value;
+    previousReplayGain = settings.replayGain.value;
+    previousTrackResume = settings.trackResume.value;
     settings.onlineSources.value = const OnlineSourcePreferences();
     settings.backgrounds.value = const BackgroundPreferences();
   });
@@ -115,6 +123,9 @@ void main() {
     settings.backgrounds.value = previousBackgrounds;
     settings.windowSize = previousWindowSize;
     settings.isWindowMaximized = previousMaximized;
+    settings.libraryAutoRefresh.value = previousAutoRefresh;
+    settings.replayGain.value = previousReplayGain;
+    settings.trackResume.value = previousTrackResume;
     messenger.setMockMethodCallHandler(windowChannel, null);
     messenger.setMockMethodCallHandler(pathChannel, null);
     final resolvedParent = await parent.resolveSymbolicLinks();
@@ -135,11 +146,55 @@ void main() {
     expect(windowCalls, greaterThan(0));
   });
 
+  test(
+      'ReplayGain and folder monitoring survive disk reload and default on old profiles',
+      () async {
+    await occupiedTarget.delete();
+    final settings = AppSettings.instance;
+    const gain = ReplayGainPreferences(
+        mode: ReplayGainMode.album, preventClipping: false);
+    settings.replayGain.value = gain;
+    settings.libraryAutoRefresh.value = true;
+    await settings.saveSettings(throwOnError: true, captureWindowSize: false);
+    settings.replayGain.value = const ReplayGainPreferences();
+    settings.libraryAutoRefresh.value = false;
+    await AppSettings.readFromJson();
+    expect(settings.replayGain.value, gain);
+    expect(settings.libraryAutoRefresh.value, isTrue);
+    final saved =
+        jsonDecode(await target.readAsString()) as Map<String, dynamic>;
+    saved.remove('ReplayGain');
+    saved.remove('LibraryAutoRefresh');
+    await target.writeAsString(jsonEncode(saved));
+    await AppSettings.readFromJson();
+    expect(settings.replayGain.value, const ReplayGainPreferences());
+    expect(settings.libraryAutoRefresh.value, isFalse);
+  });
+
   test('strict save propagates the real FileSystemException', () async {
     await expectLater(AppSettings.instance.saveSettings(throwOnError: true),
         throwsA(isA<FileSystemException>()));
     expect(await occupiedTarget.exists(), isTrue);
     expect(await target.exists(), isFalse);
+  });
+
+  test('per-track resume preferences survive reload and remain opt-in',
+      () async {
+    await occupiedTarget.delete();
+    final settings = AppSettings.instance;
+    const selected = TrackResumePreferences(
+        mode: TrackResumeMode.longAudio, minimumMinutes: 30);
+    settings.trackResume.value = selected;
+    await settings.saveSettings(throwOnError: true, captureWindowSize: false);
+    settings.trackResume.value = const TrackResumePreferences();
+    await AppSettings.readFromJson();
+    expect(settings.trackResume.value, selected);
+    final saved =
+        jsonDecode(await target.readAsString()) as Map<String, dynamic>;
+    saved.remove('TrackResume');
+    await target.writeAsString(jsonEncode(saved));
+    await AppSettings.readFromJson();
+    expect(settings.trackResume.value, const TrackResumePreferences());
   });
 
   testWidgets(

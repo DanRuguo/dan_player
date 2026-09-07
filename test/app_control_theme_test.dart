@@ -1,4 +1,6 @@
 import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/component/app_action_icon.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/ui_layout_options.dart';
 import 'package:dan_player/entry.dart';
@@ -187,6 +189,58 @@ void main() {
             .onSurface);
     expect(key.currentState, same(state));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'action icons match labels through live palette changes and keep filled contrast',
+      (tester) async {
+    final controls = Builder(
+        builder: (context) => Row(children: [
+              IconButton(onPressed: () {}, icon: const Icon(Icons.my_location)),
+              const IconButton(onPressed: null, icon: Icon(Icons.undo)),
+              TextButton.icon(
+                  onPressed: () {},
+                  icon: const Icon(Icons.repeat),
+                  label: const Text('A–B')),
+              AppIconActionButton(
+                  tooltip: 'More',
+                  glyph: AppActionGlyph.moreVertical,
+                  onPressed: () {}),
+              IconButton.filledTonal(
+                  style: appToolbarControlStyle(context,
+                      primary: true, tonal: true, iconOnly: true),
+                  onPressed: () {},
+                  icon: const Icon(Icons.select_all)),
+            ]));
+    for (final (seed, brightness) in [
+      (Colors.teal, Brightness.light),
+      (Colors.deepOrange, Brightness.dark),
+      (Colors.purple, Brightness.light),
+    ]) {
+      await tester
+          .pumpWidget(_host(controls, seed: seed, brightness: brightness));
+      await tester.pumpAndSettle();
+      final scheme =
+          _theme(seed, brightness, danEmbeddedFontFamily).colorScheme;
+      Color? iconColor(IconData data) {
+        final icon = find.byIcon(data);
+        return tester.widget<Icon>(icon).color ??
+            IconTheme.of(tester.element(icon)).color;
+      }
+
+      for (final icon in [
+        Icons.my_location,
+        Icons.repeat,
+        AppActionGlyph.moreVertical.icon
+      ]) {
+        expect(iconColor(icon), scheme.primary);
+      }
+      expect(iconColor(Icons.undo), scheme.onSurface.withValues(alpha: .38));
+      expect(iconColor(Icons.select_all), scheme.onSecondaryContainer);
+      expect(_contrast(iconColor(Icons.select_all)!, scheme.secondaryContainer),
+          greaterThanOrEqualTo(3));
+      expect(tester.takeException(), isNull);
+    }
   });
 
   testWidgets('settings alternatives use shared control with explicit labels',

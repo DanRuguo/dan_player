@@ -22,9 +22,10 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 | 版本 | 适合 | 获取 |
 | --- | --- | --- |
 | **26.0.4** | 日常使用 | [安装器、便携 ZIP 与 SHA256SUMS](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) |
+| **26.0.5-snapshot.2** | 体验新功能的预览版 | [签名便携 ZIP 与 SHA256SUMS](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.2) |
 | 历史版本 | 查看旧版与预览版 | [全部 Release](https://github.com/DanRuguo/dan_player/releases) |
 
-安装器可选择位置、桌面和开始菜单快捷方式；检测到旧版时支持原位升级，手动编辑后的最终路径不会再被自动追加目录。使用便携 ZIP 时，请完整解压后运行 `Dan Player.exe`。包内已包含 BASS 运行库和编译后的 `desktop_lyric` 桌面歌词组件。
+安装器可选择位置、桌面和开始菜单快捷方式；检测到旧版时支持原位升级，手动编辑后的最终路径不会再被自动追加目录。使用便携 ZIP 时，请完整解压后运行 `Dan Player.exe`。包内已包含 BASS 运行库和桌面歌词；26.0.5 预览版由同一 EXE 启动独立歌词进程。
 
 > 自有程序使用 RCEIT.Inc 自签名证书，仍可能出现 Windows 信任或 SmartScreen 提示。26.0.4 更换了签名证书；旧版用户请手动下载本版安装器升级，旧版自动更新的证书校验不会接受新证书。安装器不会自动安装信任证书。
 
@@ -58,6 +59,19 @@ Dan Player 从 Coriander Player 修改而来，提供文件名优先显示、中
 | ![安装位置选择，使用隔离 QA 路径](docs/images/installer-directory-light.png) | ![安装完成页，展示 RCE 与 DanRuguo 标识](docs/images/installer-finished-light.png) |
 
 安装器支持直接编辑最终路径、创建桌面／开始菜单快捷方式和旧版本原位升级。安装器源码、原生安全校验与自动化测试均随项目保存在 [`installer/`](installer/)；Release 额外提供已编译安装包。
+
+## 26.0.5-snapshot.2 预览更新
+
+- 主播放器与桌面歌词共用一个程序入口和运行资源，歌词保留独立进程；修复设置中版本号未同步的问题。
+- 新增稳定曲目身份、目录重定位和曲库健康检查，保护旧统计、缺失歌曲及重复歌单位置，支持迁移快照恢复。
+- 新增歌词校准、锁定、人工修订与历史版本；主窗口、迷你播放器和桌面歌词共用歌曲偏移。
+- 新增播放详情与脱敏诊断，过滤过期播放事件；支持 ReplayGain 曲目／专辑均衡、峰值保护与可选逐曲续播。
+- 智能歌单支持听歌记录筛选和播放次数排序；队列新增搜索与可撤销去重。
+- 随机与循环模式全局同步、可同时启用，按钮只切换模式；美化歌词与文件夹弹窗、居中标题并改善按钮间距。
+- 统一图标主题、紧凑通知及分档动效，加快返回；重做任务栏预览，修复队列留白和分类首曲封面。
+- 支持文件夹自动增量刷新，改进标签同步与备份并发保护，降低大曲库搜索和索引缓存开销。
+
+歌单首页仅保留歌单管理操作，歌曲页继续显示播放模式控件。本次预览发行提供 RCEIT.Inc 签名便携包；正式版下载仍为 26.0.4。详见 [预览更新说明](docs/release-26.0.5-snapshot.2.md)。
 
 ## 26.0.4 更新
 
@@ -189,7 +203,7 @@ flutter build windows --release
 
 本仓库的离线开发环境约定把工具放在仓库外的工作区 `tool/` 下，例如 `<workspace>/tool/flutter`，不会把 Flutter 或缓存写入项目源码目录。
 
-桌面歌词组件位于 `third_party/desktop_lyric`：
+桌面歌词模块位于 `third_party/desktop_lyric`，已编入主程序。其独立项目只作为开发测试壳，必要时可单独构建：
 
 ```powershell
 cd third_party\desktop_lyric
@@ -197,18 +211,18 @@ flutter pub get
 flutter build windows --release
 ```
 
-发布时需要将 `desktop_lyric.exe` 及其运行目录放入播放器目录下的 `desktop_lyric/`，并将 BASS 相关 DLL 放入 `BASS/`。
+26.0.5-snapshot.2 起，桌面歌词由 `Dan Player.exe --desktop-lyric` 运行于独立进程；发布包共用一套 Flutter 资源，不分发独立 `desktop_lyric.exe`。BASS 相关 DLL 仍放在 `BASS/`。
 
-本地完整流程可直接运行 `scripts/build_windows_release.ps1`，依次构建两个程序、签名、校验 BASS 官方运行库并组装便携包，结果写入工作区 `dist/` 下的新目录，不覆盖旧包。已有依赖可用 `-NoRestore`，缓存完整时可加 `-OfflineRuntime`；`-SkipSigning` 生成未签名包，`-SkipPackaging` 仅构建。单独组装已有产物：
+本地完整流程可直接运行 `scripts/build_windows_release.ps1`，依次核对版本、构建统一程序、签名、校验 BASS 官方运行库并组装便携包，结果写入工作区 `dist/` 下的新目录，不覆盖旧包。已有依赖可用 `-NoRestore`，缓存完整时可加 `-OfflineRuntime`；`-SkipSigning` 生成未签名包，`-SkipPackaging` 仅构建。单独组装已有产物：
 
 ```powershell
 .\scripts\prepare_bass_runtime.ps1
 .\scripts\assemble_windows_release.ps1
 ```
 
-便携包包含两个程序各自的 Flutter 资源、BASS、原始签名的 Microsoft x64 CRT 和许可证说明，并生成包内文件清单及 ZIP 的 `SHA256SUMS`。联网播放要求 BASS 2.4.18 或更新版；准备脚本固定官方版本与哈希，下载内容变化会报错，不会默默接受更新。BASS 的商业使用及公开分发需另行核对其许可，DLL 不会被改签成 RCEIT.Inc。
+便携包包含共享 Flutter 资源、BASS、原始签名的 Microsoft x64 CRT 和许可证说明，并生成包内文件清单及 ZIP 的 `SHA256SUMS`。联网播放要求 BASS 2.4.18 或更新版；准备脚本固定官方版本与哈希，下载内容变化会报错，不会默默接受更新。BASS 的商业使用及公开分发需另行核对其许可，DLL 不会被改签成 RCEIT.Inc。
 
-Windows CI 执行分析、测试、两个程序的构建及未签名便携包组装，只上传构建 artifact，不会发布 GitHub Release。发行时提供对应源代码与许可证，并上传 Windows 安装器、便携 ZIP 和校验文件。预览 Release 仅在启用预览更新时参与检查，不更改最新稳定版。安装器的同名 `.exe.sha256` 文件必须在签名之后生成，记录上传资产的文件名，而非本地子目录。
+Windows CI 执行分析、测试、主程序及歌词测试壳构建，再组装未签名便携包；只上传构建 artifact，不会发布 GitHub Release。发行时提供对应源代码与许可证；本次预览仅发布签名便携 ZIP 和校验文件，需手动下载。预览 Release 不更改最新稳定版。提供安装器的版本，其同名 `.exe.sha256` 文件必须在签名之后生成，记录上传资产的文件名，而非本地子目录。
 
 开发测试可在启动进程前设置绝对路径环境变量 `DAN_PLAYER_DATA_DIR`，将索引、设置和缓存隔离到工作区。指定此变量时不会迁移或导入用户原有文档目录曲库；正常启动不设置该变量即可沿用原来的数据。
 

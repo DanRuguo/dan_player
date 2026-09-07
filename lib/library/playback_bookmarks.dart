@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/track_identity.dart';
 import 'package:path/path.dart' as path;
 
 class PlaybackBookmark {
@@ -136,11 +137,36 @@ class PlaybackBookmarkStore {
     _loaded = true;
   }
 
-  Future<List<PlaybackBookmark>> forTrack(String localPath) =>
+  Future<List<PlaybackBookmark>> forTrack(String localPath,
+          {String? stableTrackId}) =>
       _exclusive(() async {
         await _load();
         final key = trackKey(localPath);
-        return List.unmodifiable(_items.where((item) => item.track == key));
+        final legacyIsUnique = stableTrackId == null ||
+            TrackIdentityRegistry.instance.resolvePath(localPath) ==
+                stableTrackId;
+        return List.unmodifiable(_items.where((item) =>
+            (stableTrackId != null && item.track == stableTrackId) ||
+            (legacyIsUnique && item.track == key)));
+      });
+
+  Future<void> relocatePath(String oldPath, String newPath) =>
+      _exclusive(() async {
+        await _load();
+        final before = trackKey(oldPath), after = trackKey(newPath);
+        if (!_items.any((item) => item.track == before)) return;
+        await _save([
+          for (final item in _items)
+            if (item.track == before)
+              PlaybackBookmark(
+                  id: item.id,
+                  track: after,
+                  label: item.label,
+                  positionMs: item.positionMs,
+                  endMs: item.endMs)
+            else
+              item
+        ]);
       });
 
   Future<void> _save(List<PlaybackBookmark> next) async {
@@ -175,13 +201,20 @@ class PlaybackBookmarkStore {
 
   Future<void> add({
     required String localPath,
+    String? stableTrackId,
     required String label,
     required double position,
     double? end,
   }) =>
       _exclusive(() async {
         await _load();
-        final key = trackKey(localPath);
+        final key = stableTrackId ?? trackKey(localPath);
+        if (stableTrackId != null) {
+          if (!TrackIdentityRegistry.isTrackId(stableTrackId)) {
+            throw ArgumentError('Invalid track identity');
+          }
+          await TrackIdentityRegistry.instance.flush();
+        }
         if (!position.isFinite || (end != null && !end.isFinite)) {
           throw ArgumentError('Invalid bookmark position');
         }

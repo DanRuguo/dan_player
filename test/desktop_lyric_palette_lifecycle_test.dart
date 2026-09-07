@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:desktop_lyric/appearance_palette_bridge.dart';
+import 'package:desktop_lyric/app_presentation.dart';
 import 'package:desktop_lyric/component/action_row.dart';
 import 'package:desktop_lyric/component/desktop_lyric_body.dart';
 import 'package:desktop_lyric/component/foreground.dart';
@@ -62,7 +63,7 @@ class _Fixture {
           builder: (context, child) => MediaQuery(
               data: MediaQuery.of(context)
                   .copyWith(textScaler: TextScaler.linear(scale)),
-              child: child!),
+              child: AppPresentationHost(child: child!)),
           home: body
               ? ValueListenableProvider<ThemeChangedMessage>.value(
                   value: source.theme,
@@ -205,9 +206,29 @@ void main() {
         find.byKey(const ValueKey('desktop-appearance-open')));
     expect(button.onPressed, isNotNull);
     expect(find.textContaining('无法打开歌词外观窗口：'), findsOneWidget);
+    expect(find.byKey(const ValueKey('app-notice-bubble')), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
     fixture.bridge.openError = null;
     await fixture.open();
     await fixture.close();
+    expect(tester.takeException(), isNull);
+    await fixture.dispose();
+  });
+
+  testWidgets('startup error remains visible after its trigger is disposed',
+      (tester) async {
+    final fixture = _Fixture(tester);
+    await fixture.mount(body: false);
+    final gate = fixture.bridge.openGate = Completer<void>();
+    await fixture.open();
+    fixture.triggerVisible.value = false;
+    await tester.pumpAndSettle();
+    expect(find.byType(DesktopLyricAppearanceButton), findsNothing);
+    gate.completeError(StateError('synthetic late child startup failure'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('无法打开歌词外观窗口：'), findsOneWidget);
+    expect(find.byKey(const ValueKey('app-notice-bubble')), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
     expect(tester.takeException(), isNull);
     await fixture.dispose();
   });

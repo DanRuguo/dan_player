@@ -600,6 +600,22 @@ class PlaylistTree {
 
   List<Playlist> get allPlaylists => List.unmodifiable(_validatedPlaylists());
 
+  /// Refresh metadata without replacing the live tree, occurrence IDs, user
+  /// edits or saved ordering. Missing files and virtual CUE entries survive.
+  int refreshAudioReferences(Map<String, Audio> audioByPath) {
+    var changed = 0;
+    for (final playlist in allPlaylists) {
+      for (final entry in playlist._entries.whereType<PlaylistAudioEntry>()) {
+        final replacement = audioByPath[entry._path];
+        if (replacement != null && !identical(replacement, entry.audio)) {
+          entry._replace(replacement);
+          changed++;
+        }
+      }
+    }
+    return changed;
+  }
+
   String? get _readOnlyReason =>
       identical(roots, PLAYLISTS) && playlistsReadBlocked
           ? '歌单文件尚未完整读取，当前歌单为只读状态。请恢复有效文件并重新读取后再修改。'

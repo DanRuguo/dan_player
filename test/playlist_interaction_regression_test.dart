@@ -193,14 +193,14 @@ void main() {
             .widget<PlaylistReorderSurface>(find.byType(PlaylistReorderSurface))
             .enabled,
         isFalse);
-    await tapPlaylistAction(tester, 'playlist-play-all');
+    await playVisiblePlaylistSelection(tester);
     expect(fixture.played.last.queue.map((audio) => audio.title),
         ['Alpha', 'Middle', 'Zulu']);
     await _sort(tester, '自定义');
     expect(find.byType(PlaylistReorderHandle), findsNWidgets(3));
     expect(tester.getTopLeft(_row(z.id)).dy,
         lessThan(tester.getTopLeft(_row(a.id)).dy));
-    await tapPlaylistAction(tester, 'playlist-play-all');
+    await playVisiblePlaylistSelection(tester);
     expect(fixture.played.last.queue.map((audio) => audio.title),
         ['Zulu', 'Alpha', 'Middle']);
     expect(fixture.saves, 0,
@@ -223,7 +223,7 @@ void main() {
     await tester
         .tap(find.byKey(ValueKey('playlist-breadcrumb-${fixture.root.id}')));
     await tester.pumpAndSettle();
-    await tapPlaylistAction(tester, 'playlist-play-all');
+    await playVisiblePlaylistSelection(tester);
     expect(fixture.played.last.queue.map((audio) => audio.title),
         ['Parent first', 'Alpha', 'Zulu', 'Parent last']);
     expect(child.entries.map((entry) => entry.audio!.title), ['Zulu', 'Alpha']);

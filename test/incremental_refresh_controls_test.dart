@@ -60,7 +60,7 @@ void main() {
         isNotNull);
     expect(
         tester
-            .widget<TextButton>(find.widgetWithText(TextButton, ui('确定')))
+            .widget<FilledButton>(find.widgetWithText(FilledButton, ui('确定')))
             .onPressed,
         isNotNull);
     await tester.tap(find.text(ui('确定')));

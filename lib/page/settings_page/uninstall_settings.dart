@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/windows_shell.dart';
@@ -25,13 +26,18 @@ class _UninstallSettingsState extends State<UninstallSettings> {
       try {
         await WindowsShell.instance.openAppFolder();
       } catch (_) {
-        showTextOnSnackBar(ui('无法打开程序目录，请稍后重试。'));
+        if (mounted) {
+          showTextOnSnackBar('无法打开程序目录，请稍后重试。',
+              context: context, kind: AppNoticeKind.error);
+        }
       }
       return;
     }
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
+      dialogBottomInset: 24,
       builder: (context) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         icon: const Icon(Symbols.delete_outline),
         title: Text(ui('卸载 Dan Player')),
         content: Text(ui('播放器将保存状态并退出，然后打开本次安装的卸载向导。您的音乐文件、歌单和设置会保留。')),
@@ -51,8 +57,11 @@ class _UninstallSettingsState extends State<UninstallSettings> {
       await WindowsShell.instance.uninstall();
     } catch (error, trace) {
       LOGGER.w('Uninstall handoff: $error', stackTrace: trace);
-      showTextOnSnackBar(ui('无法启动卸载向导，请在 Windows“已安装的应用”中卸载 Dan Player。'));
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        showTextOnSnackBar('无法启动卸载向导，请在 Windows“已安装的应用”中卸载 Dan Player。',
+            context: context, kind: AppNoticeKind.error);
+        setState(() => _busy = false);
+      }
     }
   }
 

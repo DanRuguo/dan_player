@@ -14,7 +14,6 @@ void main() {
     expect(nextPlayFlightPosition(source, target, 1), target.center);
     final midpoint = nextPlayFlightPosition(source, target, .5);
     expect(midpoint.dy, lessThan(source.center.dy - 20));
-    expect(Curves.easeInCubic.transform(.25), lessThan(.25));
 
     const nearTitleBar = Rect.fromLTWH(8, 0, 32, 32);
     for (var step = 0; step <= 20; step++) {
@@ -22,6 +21,33 @@ void main() {
         nextPlayFlightPosition(nearTitleBar, target, step / 20).dy,
         greaterThanOrEqualTo(0),
       );
+    }
+  });
+
+  test('original launch blends into gentle arrival even with a queue far below',
+      () {
+    const source = Rect.fromLTWH(16, 28, 48, 48);
+    for (final target in [
+      const Rect.fromLTWH(580, 520, 44, 44),
+      const Rect.fromLTWH(420, 30, 44, 44),
+      const Rect.fromLTWH(24, 520, 44, 44),
+    ]) {
+      final path = NextPlayFlightPath(source, target);
+      Offset point(double time) =>
+          path.positionAt(nextPlayFlightProgress(time));
+      expect(point(0), source.center);
+      expect(point(1), target.center);
+      final approaching = (point(.80) - point(.75)).distance;
+      final arriving = (point(.95) - point(.90)).distance;
+      expect(approaching / arriving, inInclusiveRange(1.1, 1.8));
+      expect(
+          nextPlayFlightProgress(.1), Curves.easeInCubic.transform(52 / 430));
+      var previous = 0.0;
+      for (var step = 1; step <= 100; step++) {
+        final progress = nextPlayFlightProgress(step / 100);
+        expect(progress, greaterThan(previous));
+        previous = progress;
+      }
     }
   });
 
@@ -98,7 +124,7 @@ void main() {
         ),
         isTrue);
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 440));
+    await tester.pump(const Duration(milliseconds: 530));
     expect(
         find.byKey(const ValueKey('next-play-flight-surface')), findsNothing);
 

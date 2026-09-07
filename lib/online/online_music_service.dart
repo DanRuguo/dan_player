@@ -8,6 +8,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/online/qq_public_search.dart';
+import 'package:dan_player/online/online_http_request.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/utils.dart';
 import 'package:music_api/music_api.dart';
@@ -59,23 +60,25 @@ class OnlineSearchResponse {
   bool get hasPartialFailure => tracks.isNotEmpty && failures.isNotEmpty;
 }
 
-/// Cancels one submitted online search and every active custom-source request
-/// owned by it. Built-in transports are still independently bounded, while the
-/// caller can stop waiting for them immediately when its page/dialog closes.
-class OnlineSearchCancellation {
+/// Cancels one submitted search, including its built-in HTTP clients, custom
+/// sources, and retry waits, without disturbing another search.
+class OnlineSearchCancellation implements OnlineHttpCancellation {
   final CustomMusicSourceCancellation _token = CustomMusicSourceCancellation();
 
   bool get isCancelled => _token.isCancelled;
 
   void cancel() => _token.cancel();
 
+  @override
   void check() {
     if (isCancelled) throw _cancelledOnlineSearch();
   }
 
+  @override
   void Function() onCancel(void Function() listener) =>
       _token.onCancel(listener);
 
+  @override
   Future<T> race<T>(Future<T> operation) async {
     try {
       return await _token.race(operation);
@@ -123,6 +126,7 @@ class OnlineMusicService {
         _neteaseSearchOverride = null,
         _customTransportFactory = CustomMusicSourceTransport.new,
         _customSearchSweepTimeout = const Duration(seconds: 8),
+        _searchRequestTimeout = _requestTimeout,
         _retryDelay = const Duration(milliseconds: 220),
         _httpClientFactory = HttpClient.new;
 
@@ -145,6 +149,7 @@ class OnlineMusicService {
         _customTransportFactory =
             customTransportFactory ?? CustomMusicSourceTransport.new,
         _customSearchSweepTimeout = customSearchSweepTimeout,
+        _searchRequestTimeout = _requestTimeout,
         _retryDelay = retryDelay,
         _httpClientFactory = httpClientFactory ?? HttpClient.new;
 
@@ -153,6 +158,7 @@ class OnlineMusicService {
   OnlineMusicService.forNeteaseTransportTesting({
     required HttpClient Function() httpClientFactory,
     Duration retryDelay = Duration.zero,
+    Duration requestTimeout = _requestTimeout,
   })  : _sourcePreferences =
             (() => const OnlineSourcePreferences(qqEnabled: false)),
         _customProfiles = (() => const []),
@@ -160,6 +166,7 @@ class OnlineMusicService {
         _neteaseSearchOverride = null,
         _customTransportFactory = CustomMusicSourceTransport.new,
         _customSearchSweepTimeout = const Duration(seconds: 8),
+        _searchRequestTimeout = requestTimeout,
         _retryDelay = retryDelay,
         _httpClientFactory = httpClientFactory;
 
@@ -174,6 +181,7 @@ class OnlineMusicService {
   final OnlineProviderSearch? _neteaseSearchOverride;
   final _CustomTransportFactory _customTransportFactory;
   final Duration _customSearchSweepTimeout;
+  final Duration _searchRequestTimeout;
   final Duration _retryDelay;
   final HttpClient Function() _httpClientFactory;
   final Map<String, _ResolvedUrl> _streamCache = {};
@@ -262,11 +270,15 @@ class OnlineMusicService {
               source.id,
               source.label,
               () => switch (source) {
-                    OnlineMusicSource.qq =>
-                      (_qqSearchOverride ?? _searchQq)(query, safeLimit),
-                    OnlineMusicSource.netease => (_neteaseSearchOverride ??
-                        _searchNetease)(query, safeLimit),
-                  }),
+                    OnlineMusicSource.qq => _qqSearchOverride?.call(
+                            query, safeLimit) ??
+                        _searchQq(query, safeLimit, cancellation: cancellation),
+                    OnlineMusicSource.netease =>
+                      _neteaseSearchOverride?.call(query, safeLimit) ??
+                          _searchNetease(query, safeLimit,
+                              cancellation: cancellation),
+                  },
+              cancellation: cancellation),
       ]),
       _searchCustomProfiles(
         customProfiles,
@@ -314,11 +326,16 @@ class OnlineMusicService {
     String displayLabel,
     Future<List<Audio>> Function() search, {
     int maxAttempts = 2,
+    OnlineSearchCancellation? cancellation,
   }) async {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      cancellation?.check();
       try {
-        return _ProviderSearchResult(providerKey, await search());
+        final tracks = await search();
+        cancellation?.check();
+        return _ProviderSearchResult(providerKey, tracks);
       } catch (error, trace) {
+        cancellation?.check();
         final mapped =
             _mapError(error, operation: "搜索", provider: displayLabel);
         final willRetry = mapped.retryable && attempt < maxAttempts;
@@ -331,7 +348,8 @@ class OnlineMusicService {
           return _ProviderSearchResult(providerKey, const [], mapped);
         }
         if (_retryDelay > Duration.zero) {
-          await Future<void>.delayed(_retryDelay);
+          final delay = Future<void>.delayed(_retryDelay);
+          await (cancellation?.race(delay) ?? delay);
         }
       }
     }
@@ -449,11 +467,13 @@ class OnlineMusicService {
     }
   }
 
-  Future<List<Audio>> _searchQq(String query, int limit) async {
+  Future<List<Audio>> _searchQq(String query, int limit,
+      {OnlineSearchCancellation? cancellation}) async {
     try {
       final songs = await QqPublicSearchTransport(
         httpClientFactory: _httpClientFactory,
-      ).search(query, limit);
+        requestTimeout: _searchRequestTimeout,
+      ).search(query, limit, cancellation: cancellation);
       return [for (final song in songs) _qqPublicAudio(song)];
     } on QqPublicSearchException catch (error) {
       throw OnlineMusicException(
@@ -486,8 +506,10 @@ class OnlineMusicService {
     );
   }
 
-  Future<List<Audio>> _searchNetease(String query, int limit) async {
-    final data = await _requestNeteaseSearch(query, limit);
+  Future<List<Audio>> _searchNetease(String query, int limit,
+      {OnlineSearchCancellation? cancellation}) async {
+    final data =
+        await _requestNeteaseSearch(query, limit, cancellation: cancellation);
     _requireBusinessCode(data["code"], expected: 200, provider: "网易云音乐");
     final songs = _listAt(data, const ["result", "songs"]);
     if (songs == null) {
@@ -505,8 +527,8 @@ class OnlineMusicService {
     return tracks;
   }
 
-  Future<Map<String, dynamic>> _requestNeteaseSearch(
-      String query, int limit) async {
+  Future<Map<String, dynamic>> _requestNeteaseSearch(String query, int limit,
+      {OnlineSearchCancellation? cancellation}) async {
     final uri = Uri.https('music.163.com', '/weapi/search/get');
     final form = weApi({
       's': query,
@@ -515,77 +537,79 @@ class OnlineMusicService {
       'offset': 0,
       'csrf_token': '',
     });
-    final client = _httpClientFactory()..connectionTimeout = _requestTimeout;
-    try {
-      final request = await client.postUrl(uri).timeout(_requestTimeout);
-      request.followRedirects = false;
-      request.headers.set(HttpHeaders.userAgentHeader,
-          'Mozilla/5.0 DanPlayer/26.0.4 AnonymousSearch');
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
-      request.headers.contentType = ContentType(
-        'application',
-        'x-www-form-urlencoded',
-        charset: 'utf-8',
-      );
-      request.write(Uri(queryParameters: form).query);
-      final response = await request.close().timeout(_requestTimeout);
-      final contentType = response.headers.contentType?.mimeType;
-      if (response.statusCode == 408 ||
-          response.statusCode == 429 ||
-          response.statusCode >= 500) {
-        throw OnlineMusicException(
-          response.statusCode == 408
-              ? OnlineMusicFailureKind.timeout
-              : OnlineMusicFailureKind.network,
-          '网易云音乐搜索服务暂时不可用（HTTP ${response.statusCode}）',
-          retryable: true,
-          serviceCode: response.statusCode,
-        );
-      }
-      if (response.statusCode != HttpStatus.ok) {
-        throw OnlineMusicException(
-          OnlineMusicFailureKind.api,
-          '网易云音乐搜索失败（HTTP ${response.statusCode}）',
-          serviceCode: response.statusCode,
-        );
-      }
-      if (response.contentLength > _searchResponseByteLimit) {
-        throw const OnlineMusicException(
-          OnlineMusicFailureKind.api,
-          '网易云音乐搜索响应过大，已停止解析',
-        );
-      }
-      final bytes = BytesBuilder(copy: false);
-      await for (final chunk in response.timeout(_requestTimeout)) {
-        if (bytes.length + chunk.length > _searchResponseByteLimit) {
-          throw const OnlineMusicException(
-            OnlineMusicFailureKind.api,
-            '网易云音乐搜索响应过大，已停止解析',
+    return runBoundedOnlineRequest(
+        createClient: _httpClientFactory,
+        timeout: _searchRequestTimeout,
+        cancellation: cancellation,
+        request: (client) async {
+          final request = await client.postUrl(uri);
+          request.followRedirects = false;
+          request.headers.set(HttpHeaders.userAgentHeader,
+              'Mozilla/5.0 DanPlayer/26.0.4 AnonymousSearch');
+          request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+          request.headers
+              .set(HttpHeaders.refererHeader, 'https://music.163.com/');
+          request.headers.contentType = ContentType(
+            'application',
+            'x-www-form-urlencoded',
+            charset: 'utf-8',
           );
-        }
-        bytes.add(chunk);
-      }
-      Object? decoded;
-      try {
-        decoded = jsonDecode(utf8.decode(bytes.takeBytes()));
-      } on FormatException catch (error) {
-        throw OnlineMusicException(
-          OnlineMusicFailureKind.api,
-          '网易云音乐返回了无法解析的响应${contentType == null ? '' : '（$contentType）'}',
-          cause: error,
-        );
-      }
-      if (decoded is! Map) {
-        throw OnlineMusicException(
-          OnlineMusicFailureKind.api,
-          '网易云音乐返回了非对象响应${contentType == null ? '' : '（$contentType）'}',
-        );
-      }
-      return Map<String, dynamic>.from(decoded);
-    } finally {
-      client.close(force: true);
-    }
+          request.write(Uri(queryParameters: form).query);
+          final response = await request.close();
+          final contentType = response.headers.contentType?.mimeType;
+          if (response.statusCode == 408 ||
+              response.statusCode == 429 ||
+              response.statusCode >= 500) {
+            throw OnlineMusicException(
+              response.statusCode == 408
+                  ? OnlineMusicFailureKind.timeout
+                  : OnlineMusicFailureKind.network,
+              '网易云音乐搜索服务暂时不可用（HTTP ${response.statusCode}）',
+              retryable: true,
+              serviceCode: response.statusCode,
+            );
+          }
+          if (response.statusCode != HttpStatus.ok) {
+            throw OnlineMusicException(
+              OnlineMusicFailureKind.api,
+              '网易云音乐搜索失败（HTTP ${response.statusCode}）',
+              serviceCode: response.statusCode,
+            );
+          }
+          if (response.contentLength > _searchResponseByteLimit) {
+            throw const OnlineMusicException(
+              OnlineMusicFailureKind.api,
+              '网易云音乐搜索响应过大，已停止解析',
+            );
+          }
+          final bytes = BytesBuilder(copy: false);
+          await for (final chunk in response) {
+            if (bytes.length + chunk.length > _searchResponseByteLimit) {
+              throw const OnlineMusicException(
+                OnlineMusicFailureKind.api,
+                '网易云音乐搜索响应过大，已停止解析',
+              );
+            }
+            bytes.add(chunk);
+          }
+          Object? decoded;
+          try {
+            decoded = jsonDecode(utf8.decode(bytes.takeBytes()));
+          } on FormatException catch (error) {
+            throw OnlineMusicException(
+              OnlineMusicFailureKind.api,
+              '网易云音乐返回了无法解析的响应${contentType == null ? '' : '（$contentType）'}',
+              cause: error,
+            );
+          }
+          if (decoded is! Map) {
+            throw OnlineMusicException(
+              OnlineMusicFailureKind.api,
+              '网易云音乐返回了非对象响应${contentType == null ? '' : '（$contentType）'}',
+            );
+          }
+          return Map<String, dynamic>.from(decoded);
+        });
   }
 
   Audio? _neteaseAudio(Map song) {

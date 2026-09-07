@@ -8,7 +8,7 @@ void main() {
     final source = File('lib/src/bass/bass_player.dart').readAsStringSync();
     final setSourceStart = source.indexOf('Future<bool> _setSource(');
     final errorMapperStart = source.indexOf(
-      'static FormatException _sourceOpenException',
+      'static PlaybackProblem _sourceOpenException',
       setSourceStart,
     );
 

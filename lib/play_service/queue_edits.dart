@@ -6,6 +6,39 @@ class QueueEdit<T> {
   final List<T> items;
   final int currentIndex;
 
+  /// Keep the active occurrence even if an equivalent item appeared earlier.
+  /// All other retained items stay in their original order; no-op is null.
+  static QueueEdit<T>? deduplicate<T, K>(List<T> items, int current,
+      {required K Function(T) keyOf}) {
+    if (current < -1 || current >= items.length) return null;
+    final activeKey = current < 0 ? null : keyOf(items[current]);
+    final seen = <K>{};
+    final kept = <T>[];
+    var nextCurrent = -1;
+    for (var i = 0; i < items.length; i++) {
+      final key = keyOf(items[i]);
+      if (current >= 0 && key == activeKey && i != current) continue;
+      if (!seen.add(key)) continue;
+      if (i == current) nextCurrent = kept.length;
+      kept.add(items[i]);
+    }
+    return kept.length == items.length ? null : QueueEdit(kept, nextCurrent);
+  }
+
+  /// Shuffle-off restores the old order with exactly the retained objects,
+  /// including the current track when an earlier alias was discarded.
+  static List<T> deduplicatedBackup<T, K>(List<T> backup, List<T> retained,
+      {required K Function(T) keyOf}) {
+    final remaining = {for (final item in retained) keyOf(item): item};
+    final result = <T>[];
+    for (final item in backup) {
+      final key = keyOf(item);
+      if (remaining.containsKey(key)) result.add(remaining.remove(key) as T);
+    }
+    result.addAll(remaining.values);
+    return result;
+  }
+
   /// Insert a batch once, preserving its order and repeated occurrences.
   static QueueEdit<T> insert<T>(List<T> items, int current, List<T> additions,
       {required bool next}) {

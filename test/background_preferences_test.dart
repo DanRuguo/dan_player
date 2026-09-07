@@ -21,7 +21,14 @@ void main() {
     expect(value.needsNativeGlass, isTrue);
     expect(BackgroundPreferences.fromMap(null), value);
     expect(BackgroundPreferences.fromMap('old-settings'), value);
-    expect(AppSettings.version, '26.0.4');
+  });
+
+  test('displayed update version matches both package manifests', () {
+    for (final manifest in ['pubspec.yaml', 'third_party/desktop_lyric/pubspec.yaml']) {
+      final version = RegExp(r'^version:\s*([^\s]+)', multiLine: true)
+          .firstMatch(File(manifest).readAsStringSync())?.group(1);
+      expect(AppSettings.version, version, reason: manifest);
+    }
   });
 
   for (final scene in BackgroundScene.values) {

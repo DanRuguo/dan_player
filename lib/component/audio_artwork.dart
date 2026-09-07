@@ -61,6 +61,7 @@ class _AudioArtworkState extends State<AudioArtwork> {
     final source = (
       audio.path,
       audio.modified,
+      audio.coverFingerprint,
       audio.artworkUrl,
       AudioLibrary.revision,
       widget.revision,

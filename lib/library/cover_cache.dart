@@ -18,6 +18,20 @@ class CoverCacheEntry {
 
 /// Stores resized cover images so Rust does not repeatedly decode embedded art.
 class CoverCache {
+  /// A recent attempted lookup, not a guess based on missing metadata tags.
+  bool hasRecentArtworkMiss(String audioPath) {
+    final hash = stableHash(audioPath);
+    final now = _clock();
+    return _negativeUntil.entries.any((entry) =>
+        entry.key.contains('_${hash}_') && entry.value.isAfter(now));
+  }
+
+  Set<String> get recentArtworkMissHashes {
+    final now = _clock();
+    return {for (final entry in _negativeUntil.entries)
+      if (entry.value.isAfter(now) && entry.key.split('_').length > 2)
+        entry.key.split('_')[1]};
+  }
   CoverCache._(
       {Directory? directory,
       this.maxEntries = 256,
@@ -52,9 +66,9 @@ class CoverCache {
           clock: clock);
 
   static final CoverCache instance = CoverCache._();
-  // v3 uses cover-aware, no-upscale Lanczos thumbnails. Never reuse an old
-  // contain/Triangle thumbnail whose shorter edge is already too small.
-  static const int _schemaVersion = 3;
+  // v4 rejects Windows file-type icons and recovers independently readable
+  // ID3 artwork. Old thumbnails may contain an application icon as false art.
+  static const int _schemaVersion = 4;
 
   final int maxEntries;
   final int maxConcurrentReads;

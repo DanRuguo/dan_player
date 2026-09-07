@@ -126,7 +126,7 @@ void main() {
       PlayService.instance,
       executableExists: (_) => true,
       startProcess: (_, args) async {
-        initial.add(jsonDecode(args.single) as Map<String, dynamic>);
+        initial.add(jsonDecode(args.last) as Map<String, dynamic>);
         return processes[index++];
       },
       saveAppearance: () async {
@@ -313,8 +313,7 @@ void main() {
     expect(PlayService.playbackReady.value, false);
   });
 
-  test(
-      'empty startup sends orientation and 1x clock without lazy BASS initialization',
+  test('same executable lyric startup sends orientation and clock without BASS',
       () async {
     final preferences = AppSettings.instance.experience;
     final original = preferences.value;
@@ -322,10 +321,16 @@ void main() {
         original.copyWith(desktopLyricVertical: true, playbackRate: 1.75);
     final process = _Process();
     List<String>? arguments;
+    String? launchedExecutable;
+    String? checkedExecutable;
     final service = DesktopLyricService(
       PlayService.instance,
-      executableExists: (_) => true,
-      startProcess: (_, args) async {
+      executableExists: (executable) {
+        checkedExecutable = executable;
+        return true;
+      },
+      startProcess: (executable, args) async {
+        launchedExecutable = executable;
         arguments = args;
         return process;
       },
@@ -338,7 +343,11 @@ void main() {
     await service.startDesktopLyric();
     expect(service.isRunning, true);
     expect(PlayService.playbackReady.value, false);
-    final init = json.decode(arguments!.single);
+    expect(checkedExecutable, Platform.resolvedExecutable);
+    expect(launchedExecutable, Platform.resolvedExecutable);
+    expect(arguments, hasLength(2));
+    expect(arguments!.first, '--desktop-lyric');
+    final init = json.decode(arguments!.last);
     expect(init['vertical'], true);
     expect(init['isPlaying'], false);
     final messages = await process.messages();

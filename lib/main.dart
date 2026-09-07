@@ -1,9 +1,13 @@
 import 'dart:io';
 
+import 'package:dan_player/app_launch_mode.dart';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/entry.dart';
+import 'package:dan_player/library/library_data_migration.dart';
+import 'package:dan_player/library/audio_metadata_journal.dart';
+import 'package:dan_player/page/library_migration_recovery.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/online/song_comment_association.dart';
@@ -19,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:desktop_lyric/main.dart' as desktop_lyric;
 
 /// Applies all native window geometry and interaction policy while the runner
 /// window is still hidden. This must complete before [runApp] can submit the
@@ -97,7 +102,19 @@ Future<void> loadPrefFont() async {
   }
 }
 
-Future<void> main() async {
+Future<void> main(List<String> arguments) => dispatchAppLaunch(
+      arguments,
+      startPlayer: _startMainPlayer,
+      startDesktopLyric: desktop_lyric.runDesktopLyric,
+    );
+
+// The native palette creates a second Flutter engine against this executable's
+// root library. Keep its entrypoint visible in the same release AOT bundle.
+@pragma('vm:entry-point')
+Future<void> desktopLyricAppearanceMain(List<String> arguments) =>
+    desktop_lyric.desktopLyricAppearanceMain(arguments);
+
+Future<void> _startMainPlayer() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Artwork is already decoded to physical display buckets. Keep Flutter's
   // decoded cache bounded as a second line of defence for large libraries.
@@ -116,7 +133,33 @@ Future<void> main() async {
 
   await migrateAppData();
 
-  final supportPath = (await getAppDataDir()).path;
+  final dataDirectory = await getAppDataDir();
+  final migration = LibraryDataMigration(dataDirectory);
+  try {
+    await migration.recover();
+    await AudioMetadataJournal(dataDirectory).recover();
+  } catch (error) {
+    await windowManager.ensureInitialized();
+    await windowManager.waitUntilReadyToShow(const WindowOptions(
+        size: Size(760, 520), center: true, title: 'Dan Player · 曲库恢复'));
+    runApp(MaterialApp(
+        theme: ThemeData(useMaterial3: true),
+        home: LibraryMigrationRecovery(
+            migration: migration,
+            error: error,
+            allowRestore: !await AudioMetadataJournal(dataDirectory).hasPending,
+            resume: () async {
+              await AudioMetadataJournal(dataDirectory).recover();
+              await _startPlayer(dataDirectory);
+            })));
+    await showPreparedWindow();
+    return;
+  }
+  await _startPlayer(dataDirectory);
+}
+
+Future<void> _startPlayer(Directory dataDirectory) async {
+  final supportPath = dataDirectory.path;
   if (File("$supportPath\\settings.json").existsSync()) {
     await AppSettings.readFromJson();
     await loadPrefFont();

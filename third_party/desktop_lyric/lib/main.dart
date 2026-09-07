@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:desktop_lyric/appearance_palette_app.dart';
 import 'package:desktop_lyric/appearance_palette_bridge.dart';
+import 'package:desktop_lyric/app_presentation.dart';
+import 'package:desktop_lyric/app_motion.dart';
 
 import 'package:desktop_lyric/app_typography.dart';
 import 'package:desktop_lyric/component/desktop_lyric_body.dart';
@@ -13,7 +15,10 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
-void main(List<String> args) async {
+Future<void> main(List<String> args) => runDesktopLyric(args);
+
+/// Used by the standalone development runner and Dan Player's lyric mode.
+Future<void> runDesktopLyric(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
   DesktopLyricController.initWithArgs(args);
@@ -51,7 +56,7 @@ void main(List<String> args) async {
 }
 
 @pragma('vm:entry-point')
-void desktopLyricAppearanceMain(List<String> arguments) async {
+Future<void> desktopLyricAppearanceMain(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
   final client = DesktopLyricPaletteClient();
   await client.initialize(
@@ -90,6 +95,7 @@ class _DesktopLyricAppState extends State<DesktopLyricApp> {
                     value: DesktopLyricController.instance.theme,
                     child: MaterialApp(
                       debugShowCheckedModeBanner: false,
+                      themeAnimationDuration: AppMotion.standard,
                       themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
                       theme: DesktopLyricTypography.theme(Brightness.light),
                       darkTheme: DesktopLyricTypography.theme(Brightness.dark),
@@ -97,8 +103,9 @@ class _DesktopLyricAppState extends State<DesktopLyricApp> {
                           GlobalMaterialLocalizations.delegates,
                       supportedLocales: supportedLocales,
                       locale: language.locale,
-                      builder: (context, child) => UiLanguageTransition(
-                          child: child ?? const SizedBox.shrink()),
+                      builder: (context, child) => AppPresentationHost(
+                          child: UiLanguageTransition(
+                              child: child ?? const SizedBox.shrink())),
                       home: DesktopLyricPaletteScope(
                           host: _palette, child: const DesktopLyricBody()),
                     ),

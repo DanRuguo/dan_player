@@ -93,9 +93,7 @@ class AppIconActionButton extends StatelessWidget {
           if (states.contains(WidgetState.disabled)) {
             return scheme.onSurface.withValues(alpha: .38);
           }
-          return selected
-              ? scheme.onSecondaryContainer
-              : scheme.onSurfaceVariant;
+          return selected ? scheme.onSecondaryContainer : scheme.primary;
         }),
         backgroundColor: WidgetStateProperty.resolveWith((states) {
           if (selected) return scheme.secondaryContainer;

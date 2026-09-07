@@ -25,8 +25,7 @@ function Test-CodeSigningUsage($Certificate) {
 if (-not $Path -or $Path.Count -eq 0) {
     $Path = @(
         (Join-Path $repositoryRoot 'build\windows\x64\runner\Release\Dan Player.exe'),
-        (Join-Path $repositoryRoot 'build\windows\x64\runner\Release\rust_lib_dan_player.dll'),
-        (Join-Path $repositoryRoot 'third_party\desktop_lyric\build\windows\x64\runner\Release\desktop_lyric.exe')
+        (Join-Path $repositoryRoot 'build\windows\x64\runner\Release\rust_lib_dan_player.dll')
     ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
 }
 

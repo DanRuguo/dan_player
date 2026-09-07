@@ -1,11 +1,13 @@
-#ifndef RUNNER_WIN32_WINDOW_H_
-#define RUNNER_WIN32_WINDOW_H_
+#ifndef DESKTOP_LYRIC_RUNNER_WIN32_WINDOW_H_
+#define DESKTOP_LYRIC_RUNNER_WIN32_WINDOW_H_
 
 #include <windows.h>
 
 #include <functional>
 #include <memory>
 #include <string>
+
+namespace desktop_lyric_runner {
 
 // A class abstraction for a high DPI-aware Win32 Window. Intended to be
 // inherited from by classes that wish to specialize with custom
@@ -103,4 +105,6 @@ class Win32Window {
   HWND child_content_ = nullptr;
 };
 
-#endif  // RUNNER_WIN32_WINDOW_H_
+}  // namespace desktop_lyric_runner
+
+#endif  // DESKTOP_LYRIC_RUNNER_WIN32_WINDOW_H_

@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// Exercise the explicit batch-play flow without using the mode-only header.
+Future<void> playVisiblePlaylistSelection(WidgetTester tester) async {
+  await tapPlaylistAction(tester, 'playlist-start-selection');
+  await tapPlaylistAction(tester, 'playlist-select-all');
+  await tapPlaylistAction(tester, 'playlist-play-selected');
+  await tapPlaylistAction(tester, 'playlist-end-selection');
+}
+
 /// The same three options are inline on wide hosts and in the selector's menu
 /// on narrow hosts. Tests activate the real control in either presentation.
 Future<void> selectPlaylistView(WidgetTester tester, String view) async {

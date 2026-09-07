@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/audio_artwork.dart';
@@ -118,14 +119,7 @@ Offset nextPlayFlightPosition(Rect source, Rect target, double progress) {
   final t = progress.clamp(0.0, 1.0);
   final start = source.center;
   final end = target.center;
-  final distance = (end - start).distance;
-  final lift = math.min(150.0, math.max(44.0, distance * .24));
-  final control = Offset(
-    start.dx + (end.dx - start.dx) * .38,
-    // Keep the arc inside the root overlay when a source sits near the title
-    // bar. The asymmetric x control still guarantees a curve in that case.
-    math.max(8.0, math.min(start.dy, end.dy) - lift),
-  );
+  final control = _flightControlPoint(source, target);
   final inverse = 1 - t;
   return Offset(
     inverse * inverse * start.dx +
@@ -135,6 +129,67 @@ Offset nextPlayFlightPosition(Rect source, Rect target, double progress) {
         2 * inverse * t * control.dy +
         t * t * end.dy,
   );
+}
+
+Offset _flightControlPoint(Rect source, Rect target) {
+  final start = source.center;
+  final end = target.center;
+  final distance = (end - start).distance;
+  final lift = math.min(150.0, math.max(44.0, distance * .24));
+  return Offset(
+    start.dx + (end.dx - start.dx) * .38,
+    // Keep the arc inside the root overlay when a source sits near the title
+    // bar. The asymmetric x control still guarantees a curve in that case.
+    math.max(8.0, math.min(start.dy, end.dy) - lift),
+  );
+}
+
+/// Keep the previous 430 ms animation's first 104 ms, then blend its velocity
+/// into a slower arrival. The Hermite segment joins without a speed jump.
+double nextPlayFlightProgress(double elapsed) {
+  final t = elapsed.clamp(0.0, 1.0);
+  if (t <= _flightLaunchTime) return _previousFlightLaunch(t);
+  const remaining = 1 - _flightLaunchTime;
+  final u = (t - _flightLaunchTime) / remaining;
+  final u2 = u * u;
+  final u3 = u2 * u;
+  return (2 * u3 - 3 * u2 + 1) * _flightLaunchProgress +
+      (u3 - 2 * u2 + u) * _flightLaunchSlope * remaining +
+      (-2 * u3 + 3 * u2) +
+      (u3 - u2) * .8 * remaining;
+}
+
+const _flightLaunchTime = .2;
+double _previousFlightLaunch(double time) =>
+    Curves.easeInCubic.transform(time * 520 / 430);
+final _flightLaunchProgress = _previousFlightLaunch(_flightLaunchTime);
+final _flightLaunchSlope = (_previousFlightLaunch(_flightLaunchTime + .005) -
+        _previousFlightLaunch(_flightLaunchTime - .005)) /
+    .01;
+
+/// Measure the arc once so a long downward flight does not accelerate just
+/// because its final Bezier segment is longer. Frames only query its distance.
+class NextPlayFlightPath {
+  NextPlayFlightPath(this.source, this.target) {
+    final control = _flightControlPoint(source, target);
+    final path = ui.Path()
+      ..moveTo(source.center.dx, source.center.dy)
+      ..quadraticBezierTo(
+          control.dx, control.dy, target.center.dx, target.center.dy);
+    _metric = path.computeMetrics().firstOrNull;
+  }
+
+  final Rect source;
+  final Rect target;
+  late final ui.PathMetric? _metric;
+
+  Offset positionAt(double progress) {
+    if (progress <= 0) return source.center;
+    if (progress >= 1) return target.center;
+    final metric = _metric;
+    return metric?.getTangentForOffset(metric.length * progress)?.position ??
+        source.center;
+  }
 }
 
 class _NextPlayFlight extends StatefulWidget {
@@ -158,13 +213,15 @@ class _NextPlayFlight extends StatefulWidget {
 class _NextPlayFlightState extends State<_NextPlayFlight>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  late final NextPlayFlightPath _path;
 
   @override
   void initState() {
     super.initState();
+    _path = NextPlayFlightPath(widget.source, widget.target);
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 430),
+      duration: const Duration(milliseconds: 520),
     )
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) widget.onFinished();
@@ -217,13 +274,8 @@ class _NextPlayFlightState extends State<_NextPlayFlight>
         animation: _controller,
         child: artwork,
         builder: (context, child) {
-          // Ease-in produces the requested slow departure and fast arrival.
-          final progress = Curves.easeInCubic.transform(_controller.value);
-          final center = nextPlayFlightPosition(
-            widget.source,
-            widget.target,
-            progress,
-          );
+          final progress = nextPlayFlightProgress(_controller.value);
+          final center = _path.positionAt(progress);
           final endSize = math.max(
             8.0,
             math.min(widget.target.width, widget.target.height) * .18,

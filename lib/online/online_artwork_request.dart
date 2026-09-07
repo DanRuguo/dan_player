@@ -164,12 +164,12 @@ class OnlineArtworkRequest {
     if (bytes.isEmpty) throw const FormatException('封面服务器返回了空图片');
 
     final buffer = await ui.ImmutableBuffer.fromUint8List(bytes.takeBytes());
-    _checkCancelled();
-    _requireCurrentCustomProfile(customProfile);
     ui.ImageDescriptor? descriptor;
     ui.Codec? codec;
     ui.Image? decoded;
     try {
+      _checkCancelled();
+      _requireCurrentCustomProfile(customProfile);
       descriptor = await ui.ImageDescriptor.encoded(buffer);
       _checkCancelled();
       _requireCurrentCustomProfile(customProfile);

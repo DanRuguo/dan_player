@@ -1,5 +1,6 @@
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
+import 'package:dan_player/component/lyric_workbench_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_source_view.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
@@ -73,6 +74,8 @@ class LyricViewControls extends StatelessWidget {
         children: [
           SetLyricSourceBtn(),
           SizedBox(height: 8.0),
+          _LyricWorkbenchBtn(),
+          SizedBox(height: 8.0),
           _LyricEditBtn(),
           SizedBox(height: 8.0),
           _LyricAlignSwitchBtn(),
@@ -91,6 +94,22 @@ class LyricViewControls extends StatelessWidget {
   }
 }
 
+class _LyricWorkbenchBtn extends StatelessWidget {
+  const _LyricWorkbenchBtn();
+  @override
+  Widget build(BuildContext context) {
+    final audio = PlayService.instance.playbackService.nowPlaying;
+    return IconButton(
+      key: const ValueKey('lyric-workbench-open'),
+      onPressed:
+          audio == null ? null : () => showLyricWorkbenchDialog(context, audio),
+      tooltip: ui('歌词校准与锁定'),
+      color: Theme.of(context).colorScheme.primary,
+      icon: const Icon(Symbols.tune),
+    );
+  }
+}
+
 class _LyricEditBtn extends StatelessWidget {
   const _LyricEditBtn();
 
@@ -104,7 +123,7 @@ class _LyricEditBtn extends StatelessWidget {
           ? null
           : () => showLyricEditorDialog(context, audio),
       tooltip: audio?.isOnline == true ? ui("联网歌词为只读") : ui("编辑本地歌词"),
-      color: scheme.onSecondaryContainer,
+      color: scheme.primary,
       icon: const Icon(Symbols.edit_document),
     );
   }
@@ -122,7 +141,7 @@ class _LyricAlignSwitchBtn extends StatelessWidget {
     return IconButton(
       onPressed: lyricViewController.switchLyricTextAlign,
       tooltip: ui("切换歌词对齐方向"),
-      color: scheme.onSecondaryContainer,
+      color: scheme.primary,
       icon: Icon(switch (lyricViewController.lyricTextAlign) {
         LyricTextAlign.left => Symbols.format_align_left,
         LyricTextAlign.center => Symbols.format_align_center,
@@ -144,7 +163,7 @@ class _IncreaseFontSizeBtn extends StatelessWidget {
     return IconButton(
       onPressed: lyricViewController.increaseFontSize,
       tooltip: ui("增大歌词字体"),
-      color: scheme.onSecondaryContainer,
+      color: scheme.primary,
       icon: const Icon(Symbols.text_increase),
     );
   }
@@ -162,7 +181,7 @@ class _DecreaseFontSizeBtn extends StatelessWidget {
     return IconButton(
       onPressed: lyricViewController.decreaseFontSize,
       tooltip: ui("减小歌词字体"),
-      color: scheme.onSecondaryContainer,
+      color: scheme.primary,
       icon: const Icon(Symbols.text_decrease),
     );
   }

@@ -20,11 +20,13 @@ class CategoryCover extends StatelessWidget {
   final double size;
   final Widget placeholder;
 
-  Widget _songArtwork() => AudioArtwork(
-        audio: group.audios.first,
-        size: size,
-        placeholder: placeholder,
-      );
+  Widget _songArtwork() => group.coverAudio == null
+      ? placeholder
+      : AudioArtwork(
+          audio: group.coverAudio!,
+          size: size,
+          placeholder: placeholder,
+        );
 
   @override
   Widget build(BuildContext context) {

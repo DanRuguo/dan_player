@@ -1336,7 +1336,6 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             ]),
         onAddSongs:
             current == null ? null : () => unawaited(_addSongs(current)),
-        onPlayAll: () => _play(queue),
         onStartSelection: _startSelection,
         onEndSelection: _clearSelection,
         onSelectAll: () => _selectAll(rows),

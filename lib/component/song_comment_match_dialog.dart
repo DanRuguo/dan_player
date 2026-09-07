@@ -279,6 +279,10 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
                           ),
                           const SizedBox(width: 8),
                           IconButton.filledTonal(
+                            style: IconButton.styleFrom(
+                                foregroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .onSecondaryContainer),
                             key: const ValueKey('song-comment-match-search'),
                             tooltip: ui("搜索候选"),
                             onPressed: _searching ? null : _search,

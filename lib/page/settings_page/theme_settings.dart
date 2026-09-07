@@ -93,7 +93,8 @@ class _ThemeModeControlState extends State<ThemeModeControl> {
                 captureWindowSize: false, throwOnError: true);
           } catch (_) {
             if (mounted) {
-              showTextOnSnackBar(ui('主题模式保存失败，当前选择仅在本次运行生效。'));
+              showTextOnSnackBar('主题模式保存失败，当前选择仅在本次运行生效。',
+                  context: this.context, kind: AppNoticeKind.error);
             }
           }
         },
@@ -160,6 +161,7 @@ class SelectFontCombobox extends StatelessWidget {
           if (context.mounted) {
             final selectedFont = await showAppDialog<InstalledFont>(
               context: context,
+              dialogBottomInset: 0,
               builder: (context) =>
                   FontSelectorDialog(installedFont: installedFont),
             );

@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/track_identity.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
@@ -22,6 +23,9 @@ class TrackPlaybackStatistics {
     this.skippedCount = 0,
     this.listenMilliseconds = 0,
     this.lastPlayedAt = 0,
+    this.legacyUnassigned = false,
+    this.candidateTrackIds = const [],
+    this.legacyIds = const [],
   });
 
   final String id;
@@ -34,6 +38,9 @@ class TrackPlaybackStatistics {
   int skippedCount;
   int listenMilliseconds;
   int lastPlayedAt;
+  bool legacyUnassigned;
+  List<String> candidateTrackIds;
+  List<String> legacyIds;
 
   factory TrackPlaybackStatistics.fromMap(Map map) => TrackPlaybackStatistics(
         id: map["id"]?.toString() ?? "",
@@ -46,6 +53,12 @@ class TrackPlaybackStatistics {
         skippedCount: (map["skippedCount"] as num?)?.toInt() ?? 0,
         listenMilliseconds: (map["listenMilliseconds"] as num?)?.toInt() ?? 0,
         lastPlayedAt: (map["lastPlayedAt"] as num?)?.toInt() ?? 0,
+        legacyUnassigned: map['legacyUnassigned'] == true,
+        candidateTrackIds:
+            (map['candidateTrackIds'] as List?)?.whereType<String>().toList() ??
+                const [],
+        legacyIds: (map['legacyIds'] as List?)?.whereType<String>().toList() ??
+            const [],
       );
 
   Map<String, Object> toMap() => {
@@ -59,6 +72,10 @@ class TrackPlaybackStatistics {
         "skippedCount": skippedCount,
         "listenMilliseconds": listenMilliseconds,
         "lastPlayedAt": lastPlayedAt,
+        if (legacyUnassigned) 'legacyUnassigned': true,
+        if (candidateTrackIds.isNotEmpty)
+          'candidateTrackIds': candidateTrackIds,
+        if (legacyIds.isNotEmpty) 'legacyIds': legacyIds,
       };
 }
 
@@ -97,6 +114,12 @@ class PlaybackStatistics extends ChangeNotifier {
   Timer? _saveTimer;
   Future<void> _writeQueue = Future.value();
   bool _preserveBackup = false;
+  bool _storageWritable = true;
+  int _loadedVersion = 1;
+  String? storageWarning;
+
+  int get legacyUnassignedCount =>
+      tracks.values.where((track) => track.legacyUnassigned).length;
 
   int get totalListenMilliseconds =>
       tracks.values.fold(0, (sum, item) => sum + item.listenMilliseconds);
@@ -146,6 +169,8 @@ class PlaybackStatistics extends ChangeNotifier {
     _playbackRate = 1.0;
     _lastNotifyMilliseconds = 0;
     _preserveBackup = false;
+    _storageWritable = true;
+    storageWarning = null;
     tracks.clear();
     dailyMilliseconds.clear();
     hourlyMilliseconds.fillRange(0, hourlyMilliseconds.length, 0);
@@ -158,11 +183,14 @@ class PlaybackStatistics extends ChangeNotifier {
       final backup = await _file(".bak");
       Object? firstError;
       var loaded = false;
+      String? originalContents;
       for (final file in [target, backup]) {
         if (!await file.exists()) continue;
         try {
-          final decoded = json.decode(await file.readAsString());
+          final contents = await file.readAsString();
+          final decoded = json.decode(contents);
           _restoreSnapshot(decoded);
+          originalContents = contents;
           loaded = true;
           if (file.path == backup.path) {
             _preserveBackup = true;
@@ -177,7 +205,33 @@ class PlaybackStatistics extends ChangeNotifier {
         }
       }
       if (!loaded && firstError != null) throw firstError;
+      if (loaded && _loadedVersion < 2) {
+        // Keep the original v1 bytes independently of the rotating .bak file.
+        // Migration is one statistics-file commit after registry persistence;
+        // an interruption can replay it without duplicating counters.
+        final migrationBackup = File(
+            '${target.parent.path}\\playback_statistics.pre-track-id-v1.json');
+        if (!await migrationBackup.exists()) {
+          final temporary = File('${migrationBackup.path}.tmp');
+          await temporary.writeAsString(originalContents!, flush: true);
+          await temporary.rename(migrationBackup.path);
+        }
+        final previous = snapshot();
+        try {
+          migrateLegacyIdentities(AudioLibrary.instance.audioCollection);
+          await TrackIdentityRegistry.instance.flush();
+          await _write();
+        } catch (_) {
+          tracks.clear();
+          dailyMilliseconds.clear();
+          hourlyMilliseconds.fillRange(0, hourlyMilliseconds.length, 0);
+          _restoreSnapshot(previous);
+          rethrow;
+        }
+      }
     } catch (error, trace) {
+      _storageWritable = false;
+      storageWarning = '听歌统计读取或迁移失败，原始文件已保留。';
       LOGGER.e("[statistics] failed to load: $error", stackTrace: trace);
     }
     notifyListeners();
@@ -187,11 +241,34 @@ class PlaybackStatistics extends ChangeNotifier {
     if (decoded is! Map) {
       throw const FormatException("Statistics root must be an object");
     }
+    final version = decoded['version'] ?? 1;
+    if (version is! int || version < 1 || version > 2) {
+      throw const FormatException('Unsupported statistics version');
+    }
+    _loadedVersion = version;
     final trackMaps = decoded["tracks"];
+    if (trackMaps != null && trackMaps is! List) {
+      throw const FormatException('Statistics tracks must be a list');
+    }
     if (trackMaps is List) {
-      for (final value in trackMaps.whereType<Map>()) {
+      for (final value in trackMaps) {
+        if (value is! Map ||
+            value['id'] is! String ||
+            (value['id'] as String).isEmpty ||
+            tracks.containsKey(value['id'])) {
+          throw const FormatException('Invalid or duplicate statistics track');
+        }
         final item = TrackPlaybackStatistics.fromMap(value);
-        if (item.id.isNotEmpty) tracks[item.id] = item;
+        if ([
+          item.playCount,
+          item.completedCount,
+          item.skippedCount,
+          item.listenMilliseconds,
+          item.lastPlayedAt
+        ].any((count) => count < 0)) {
+          throw const FormatException('Negative statistics counter');
+        }
+        tracks[item.id] = item;
       }
     }
     final days = decoded["days"];
@@ -213,10 +290,92 @@ class PlaybackStatistics extends ChangeNotifier {
     if (audio.isOnline) {
       return "online:${audio.onlineProvider}:${audio.onlineId}";
     }
+    return audio.stableTrackId;
+  }
+
+  static String legacyIdentityFor(Audio audio) {
+    if (audio.isOnline) {
+      return 'online:${audio.onlineProvider}:${audio.onlineId}';
+    }
     String normalize(String value) => value.trim().toLowerCase();
     return "local:${normalize(audio.title)}|${normalize(audio.artist)}|"
         "${normalize(audio.album)}|${audio.duration}";
   }
+
+  /// Exact legacy metadata keys may belong to several physical files. Keep
+  /// ambiguous/unmatched history as a single visible legacy bucket forever;
+  /// losing one candidate later is not evidence of its historical ownership.
+  int migrateLegacyIdentities(Iterable<Audio> library) {
+    if (_activeId != null) {
+      throw StateError('Finish the playback session before identity migration');
+    }
+    final candidates = <String, Set<String>>{};
+    for (final audio in library) {
+      if (audio.isOnline) continue;
+      candidates
+          .putIfAbsent(legacyIdentityFor(audio), () => {})
+          .add(audio.stableTrackId);
+    }
+    final before = [
+      totalPlayCount,
+      totalCompletedCount,
+      totalSkippedCount,
+      totalListenMilliseconds
+    ];
+    var migrated = 0;
+    for (final item in tracks.values.toList()) {
+      if (item.online ||
+          !item.id.startsWith('local:') ||
+          TrackIdentityRegistry.isTrackId(item.id) ||
+          item.legacyUnassigned) {
+        continue;
+      }
+      final matching = candidates[item.id] ?? <String>{};
+      if (matching.length != 1) {
+        item.legacyUnassigned = true;
+        item.candidateTrackIds = matching.toList()..sort();
+        continue;
+      }
+      final id = matching.single;
+      final existing = tracks[id];
+      if (existing == null) {
+        tracks[id] = TrackPlaybackStatistics.fromMap({
+          ...item.toMap(),
+          'id': id,
+          'legacyIds': {...item.legacyIds, item.id}.toList(),
+        });
+      } else {
+        existing
+          ..playCount += item.playCount
+          ..completedCount += item.completedCount
+          ..skippedCount += item.skippedCount
+          ..listenMilliseconds += item.listenMilliseconds
+          ..lastPlayedAt = math.max(existing.lastPlayedAt, item.lastPlayedAt)
+          ..legacyIds =
+              {...existing.legacyIds, ...item.legacyIds, item.id}.toList();
+      }
+      tracks.remove(item.id);
+      migrated++;
+    }
+    final after = [
+      totalPlayCount,
+      totalCompletedCount,
+      totalSkippedCount,
+      totalListenMilliseconds
+    ];
+    if (!listEquals(before, after)) {
+      throw StateError('Statistics identity migration changed totals');
+    }
+    _loadedVersion = 2;
+    return migrated;
+  }
+
+  Map<String, Object?> snapshot() => {
+        'version': _loadedVersion,
+        'tracks': tracks.values.map((item) => item.toMap()).toList(),
+        'days': Map<String, int>.of(dailyMilliseconds),
+        'hours': List<int>.of(hourlyMilliseconds),
+      };
 
   void start(Audio audio, {double playbackRate = 1.0}) {
     final id = identityFor(audio);
@@ -399,7 +558,7 @@ class PlaybackStatistics extends ChangeNotifier {
           : const Duration(seconds: 30),
       () {
         _saveTimer = null;
-        unawaited(_queueWrite());
+        unawaited(_queueWrite().catchError((Object _) {}));
       },
     );
   }
@@ -410,7 +569,7 @@ class PlaybackStatistics extends ChangeNotifier {
   }
 
   Future<void> _queueWrite() {
-    if (!_persist) return Future.value();
+    if (!_persist || !_storageWritable) return Future.value();
     _writeQueue = _writeQueue.then(
       (_) => _write(),
       onError: (_) => _write(),
@@ -420,13 +579,14 @@ class PlaybackStatistics extends ChangeNotifier {
 
   Future<void> _write() async {
     try {
+      await TrackIdentityRegistry.instance.flush();
       final target = await _file();
       final temporary = await _file(".tmp");
       final backup = await _file(".bak");
       await target.parent.create(recursive: true);
       await temporary.writeAsString(
         const JsonEncoder.withIndent("  ").convert({
-          "version": 1,
+          "version": 2,
           "tracks": tracks.values.map((item) => item.toMap()).toList(),
           "days": dailyMilliseconds,
           "hours": hourlyMilliseconds,
@@ -454,6 +614,7 @@ class PlaybackStatistics extends ChangeNotifier {
       }
     } catch (error, trace) {
       LOGGER.e("[statistics] failed to save: $error", stackTrace: trace);
+      rethrow;
     }
   }
 

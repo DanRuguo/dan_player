@@ -5,6 +5,7 @@
 
 #include "resource.h"
 
+namespace desktop_lyric_runner {
 namespace {
 
 /// Window attribute that enables dark mode window decorations.
@@ -16,7 +17,7 @@ namespace {
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
 
-constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+constexpr const wchar_t kWindowClassName[] = L"DAN_PLAYER_DESKTOP_LYRIC_WINDOW";
 
 /// Registry key for app theme preference.
 ///
@@ -302,3 +303,5 @@ void Win32Window::UpdateTheme(HWND const window) {
                           &enable_dark_mode, sizeof(enable_dark_mode));
   }
 }
+
+}  // namespace desktop_lyric_runner

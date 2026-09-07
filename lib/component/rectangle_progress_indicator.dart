@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:async';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -190,8 +191,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
       _highlightBoundary.value = wanted ? 1 : 0;
     } else {
       _highlightBoundary.animateTo(wanted ? 1 : 0,
-          duration: Duration(milliseconds: wanted ? 80 : 100),
-          curve: Curves.easeOutCubic);
+          duration: AppMotion.quick, curve: Curves.easeOutCubic);
     }
   }
 

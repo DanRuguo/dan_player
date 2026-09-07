@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:async';
 
 import 'package:desktop_lyric/ui_language.dart';
@@ -106,11 +107,12 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     super.initState();
     _display = ValueNotifier(_safe(widget.readPosition()));
     _target = _display.value;
-    _smoothing = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 64))
-      ..addListener(() {
-        _display.value = _safe(_from + (_target - _from) * _smoothing.value);
-      });
+    _smoothing =
+        AnimationController(vsync: this, duration: AppMotion.followSample)
+          ..addListener(() {
+            _display.value =
+                _safe(_from + (_target - _from) * _smoothing.value);
+          });
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     widget.hidden?.addListener(_syncActivity);
@@ -267,8 +269,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
             onFocusChange: (focused) => setState(() => _focused = focused),
             child: TweenAnimationBuilder<double>(
               tween: Tween(end: emphasis),
-              duration:
-                  motion ? const Duration(milliseconds: 140) : Duration.zero,
+              duration: motion ? AppMotion.quick : Duration.zero,
               curve: Curves.easeOutCubic,
               builder: (context, emphasis, child) => SliderTheme(
                 data: SliderTheme.of(context).copyWith(

@@ -103,6 +103,7 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
     try {
       final selected = await showAppDialog<Audio>(
           context: context,
+          dialogBottomInset: 16,
           builder: (context) {
             final size = MediaQuery.sizeOf(context);
             final contentWidth =

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dan_player/app_launch_mode.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
@@ -14,7 +15,6 @@ import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/message.dart' as msg;
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as path;
 
 enum DesktopLyricState {
   stopped,
@@ -103,14 +103,10 @@ class DesktopLyricService extends ChangeNotifier {
   Future<void> _launch({required bool recovering}) async {
     if (_disposed || !_desiredActive) return;
 
-    final desktopLyricPath = path.join(
-      path.dirname(Platform.resolvedExecutable),
-      'desktop_lyric',
-      'desktop_lyric.exe',
-    );
-    if (!_executableExists(desktopLyricPath)) {
+    final executable = Platform.resolvedExecutable;
+    if (!_executableExists(executable)) {
       _failPermanently(
-        FileSystemException('找不到桌面歌词组件', desktopLyricPath),
+        FileSystemException('找不到播放器程序，无法启动桌面歌词', executable),
       );
       return;
     }
@@ -128,7 +124,10 @@ class DesktopLyricService extends ChangeNotifier {
     final isDarkMode = currScheme.brightness == Brightness.dark;
 
     try {
-      final processFuture = _startProcess(desktopLyricPath, [
+      // Own a separate process, while sharing the installed executable and
+      // Flutter assets. Its stdin/stdout remain the dedicated lyric protocol.
+      final processFuture = _startProcess(executable, [
+        desktopLyricLaunchArgument,
         json.encode(
           msg.InitArgsMessage(
             playback?.playerState == PlayerState.playing,
@@ -624,13 +623,13 @@ class DesktopLyricService extends ChangeNotifier {
             word.content,
           ),
       ];
-    } else if (line is LrcLine) {
+    } else if (line is UnsyncLyricLine) {
       final split = line.content.split('┃');
       content = split.first;
       final translations =
           split.skip(1).where((part) => part.trim().isNotEmpty);
       translation = translations.isEmpty ? null : translations.join(' / ');
-      length = line.length;
+      length = line is LrcLine ? line.length : Duration.zero;
     } else {
       return;
     }

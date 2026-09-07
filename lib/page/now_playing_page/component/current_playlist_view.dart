@@ -10,7 +10,6 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/app_shape.dart';
-import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/audio_artwork.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -43,6 +42,50 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   double _rowHeight = 0;
   bool _alignQueued = false;
   bool _savingQueue = false;
+  final _searchController = TextEditingController();
+  String _query = '';
+  List<Audio>? _filteredQueue;
+  List<int> _filteredIndices = const [];
+
+  List<int> _visibleIndices(List<Audio> queue) {
+    if (identical(queue, _filteredQueue)) return _filteredIndices;
+    _filteredQueue = queue;
+    final words = _query.toLowerCase().split(RegExp(r'\s+'))
+      ..removeWhere((word) => word.isEmpty);
+    return _filteredIndices = [
+      for (var i = 0; i < queue.length; i++)
+        if (words.isEmpty ||
+            words.every(('${queue[i].displayTitle}\n${queue[i].artist}\n'
+                    '${queue[i].album}')
+                .toLowerCase()
+                .contains))
+          i,
+    ];
+  }
+
+  void _updateQuery(String value) {
+    setState(() {
+      _query = value.trim();
+      _filteredQueue = null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && scrollController.hasClients) scrollController.jumpTo(0);
+    });
+  }
+
+  void _locateCurrent() {
+    if (_query.isNotEmpty) {
+      _searchController.clear();
+      _updateQuery('');
+    }
+    _scheduleAlignment(force: true);
+  }
+
+  void _deduplicateQueue() {
+    final removed = playbackService.deduplicateQueue();
+    showTextOnSnackBar(removed == 0 ? '队列中没有重复歌曲' : '已移除 {0} 个重复项，可撤销整理',
+        arguments: [removed], context: context);
+  }
 
   Future<void> _saveQueue() async {
     if (_savingQueue || playbackService.playlist.value.isEmpty) return;
@@ -98,7 +141,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
       if (!mounted || !scrollController.hasClients) return;
       final latestQueue = playbackService.playlist.value;
       if (latestQueue.isEmpty) return;
-      final target = _alignmentOffset(playbackService.playlistIndex);
+      final visibleIndex =
+          _visibleIndices(latestQueue).indexOf(playbackService.playlistIndex);
+      if (visibleIndex < 0) return;
+      final target = _alignmentOffset(visibleIndex);
       final reduced = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
       if (animate && !reduced) {
         scrollController.animateTo(
@@ -128,6 +174,11 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
 
   void _toNowPlaying() => _scheduleAlignment();
 
+  void _onQueueChanged() {
+    _filteredQueue = null;
+    _scheduleAlignment();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -137,7 +188,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         : playbackService.playlistIndex;
     scrollController = ScrollController();
     playbackService.addListener(_toNowPlaying);
-    playbackService.playlist.addListener(_toNowPlaying);
+    playbackService.playlist.addListener(_onQueueChanged);
   }
 
   @override
@@ -146,10 +197,11 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     final next = _resolvePlaybackService();
     if (identical(next, playbackService)) return;
     playbackService.removeListener(_toNowPlaying);
-    playbackService.playlist.removeListener(_toNowPlaying);
+    playbackService.playlist.removeListener(_onQueueChanged);
     playbackService = next;
     playbackService.addListener(_toNowPlaying);
-    playbackService.playlist.addListener(_toNowPlaying);
+    playbackService.playlist.addListener(_onQueueChanged);
+    _filteredQueue = null;
     _scheduleAlignment(animate: false, force: true);
   }
 
@@ -171,6 +223,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         ]),
         builder: (context, _) {
           final queue = playbackService.playlist.value;
+          final visibleIndices = _visibleIndices(queue);
           final nowPlaying = playbackService.nowPlaying;
           final candidateIndex = playbackService.playlistIndex;
           final currentIndex = nowPlaying != null &&
@@ -197,9 +250,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                         IconButton(
                             key: const ValueKey('queue-locate-current'),
                             tooltip: ui('定位当前歌曲'),
-                            onPressed: currentIndex < 0
-                                ? null
-                                : () => _scheduleAlignment(force: true),
+                            onPressed: currentIndex < 0 ? null : _locateCurrent,
                             icon: const Icon(Symbols.my_location)),
                         IconButton(
                             key: const ValueKey('queue-save-playlist'),
@@ -218,6 +269,14 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                 : playbackService.keepOnlyCurrentQueueItem,
                             icon: const Icon(Symbols.playlist_remove)),
                         IconButton(
+                            key: const ValueKey('queue-deduplicate'),
+                            tooltip: ui('移除重复歌曲（保留当前播放，可撤销）'),
+                            onPressed: queue.length < 2 ||
+                                    !playbackService.canEditQueue
+                                ? null
+                                : _deduplicateQueue,
+                            icon: const Icon(Symbols.layers_clear)),
+                        IconButton(
                             key: const ValueKey('queue-undo-edit'),
                             tooltip: ui('撤销队列整理（最多 10 步；切换歌曲或队列后清空）'),
                             onPressed: playbackService.canUndoQueueEdit
@@ -235,6 +294,46 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                     : Symbols.repeat),
                                 label: const Text('A-B'))),
                       ])),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+                child: TextField(
+                  key: const ValueKey('queue-search'),
+                  controller: _searchController,
+                  maxLength: 160,
+                  onChanged: _updateQuery,
+                  decoration: InputDecoration(
+                    hintText: ui('搜索队列：歌曲、歌手或专辑'),
+                    counterText: '',
+                    isDense: true,
+                    filled: true,
+                    fillColor: scheme.surfaceContainerLow,
+                    prefixIcon: Icon(Symbols.search, color: scheme.primary),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            key: const ValueKey('queue-clear-search'),
+                            tooltip: ui('清除搜索'),
+                            onPressed: () {
+                              _searchController.clear();
+                              _updateQuery('');
+                            },
+                            icon: const Icon(Symbols.close)),
+                    border: OutlineInputBorder(
+                        borderRadius: AppShape.controlRadius,
+                        borderSide: BorderSide(color: scheme.outlineVariant)),
+                  ),
+                ),
+              ),
+              if (_query.isNotEmpty)
+                Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                        ui('找到 {0} / {1} 首 · 搜索不改变队列',
+                            [visibleIndices.length, queue.length]),
+                        key: const ValueKey('queue-search-count'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall)),
               Expanded(
                 child: Container(
                   margin: EdgeInsets.fromLTRB(
@@ -249,24 +348,35 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                   clipBehavior: Clip.antiAlias,
                   child: queue.isEmpty
                       ? const _EmptyPlaylistView()
-                      : AppContentScrollbar(
-                          controller: scrollController,
-                          builder: (context, controller) => ListView.builder(
-                            key: const ValueKey('current-playlist-list'),
-                            controller: controller,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 6),
-                            itemCount: queue.length,
-                            itemExtent: _rowHeight,
-                            itemBuilder: (context, index) => _PlaylistViewItem(
-                              item: queue[index],
-                              index: index,
-                              current: index == currentIndex,
-                              playbackService: playbackService,
-                              onOpenDetails: widget.onOpenDetails,
+                      : visibleIndices.isEmpty
+                          ? Center(
+                              child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Text(ui('队列中没有匹配的歌曲'),
+                                      textAlign: TextAlign.center)))
+                          : _QueueScrollbar(
+                              controller: scrollController,
+                              child: ListView.builder(
+                                key: const ValueKey('current-playlist-list'),
+                                controller: scrollController,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: _QueueScrollbar.edgeInset,
+                                    vertical: 6),
+                                itemCount: visibleIndices.length,
+                                itemExtent: _rowHeight,
+                                itemBuilder: (context, index) =>
+                                    _PlaylistViewItem(
+                                  key: ValueKey(visibleIndices[index]),
+                                  queue: queue,
+                                  item: queue[visibleIndices[index]],
+                                  index: visibleIndices[index],
+                                  current:
+                                      visibleIndices[index] == currentIndex,
+                                  playbackService: playbackService,
+                                  onOpenDetails: widget.onOpenDetails,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
                 ),
               ),
             ],
@@ -279,9 +389,51 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   @override
   void dispose() {
     playbackService.removeListener(_toNowPlaying);
-    playbackService.playlist.removeListener(_toNowPlaying);
+    playbackService.playlist.removeListener(_onQueueChanged);
+    _searchController.dispose();
     scrollController.dispose();
     super.dispose();
+  }
+}
+
+/// Queue rows already leave a small symmetric edge inset. Paint the thumb in
+/// that space instead of reserving the library toolbar's additional 24px lane.
+class _QueueScrollbar extends StatelessWidget {
+  const _QueueScrollbar({required this.controller, required this.child});
+
+  static const edgeInset = 6.0;
+  final ScrollController controller;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: ScrollbarTheme(
+        data: ScrollbarTheme.of(context).copyWith(
+          crossAxisMargin: 0,
+          mainAxisMargin: edgeInset,
+          radius: const Radius.circular(4),
+          thickness: WidgetStateProperty.resolveWith((states) =>
+              states.contains(WidgetState.hovered) ||
+                      states.contains(WidgetState.dragged)
+                  ? edgeInset
+                  : 4.0),
+          thumbColor: WidgetStateProperty.resolveWith((states) =>
+              states.contains(WidgetState.dragged)
+                  ? scheme.primary.withValues(alpha: .95)
+                  : states.contains(WidgetState.hovered)
+                      ? scheme.primary.withValues(alpha: .8)
+                      : scheme.onSurfaceVariant.withValues(alpha: .5)),
+        ),
+        child: Scrollbar(
+            controller: controller,
+            interactive: true,
+            thumbVisibility: true,
+            child: child),
+      ),
+    );
   }
 }
 
@@ -390,6 +542,8 @@ class _EmptyPlaylistView extends StatelessWidget {
 
 class _PlaylistViewItem extends StatelessWidget {
   const _PlaylistViewItem({
+    super.key,
+    required this.queue,
     required this.item,
     required this.index,
     required this.current,
@@ -398,10 +552,19 @@ class _PlaylistViewItem extends StatelessWidget {
   });
 
   final Audio item;
+  final List<Audio> queue;
   final int index;
   final bool current;
   final PlaybackService playbackService;
   final ValueChanged<Audio>? onOpenDetails;
+
+  // An open menu from an older queue must not operate on a shifted occurrence.
+  bool get _stillCurrentQueue =>
+      identical(queue, playbackService.playlist.value);
+
+  void _playOccurrence() {
+    if (_stillCurrentQueue) playbackService.playIndexOfPlaylist(index);
+  }
 
   void _openDetails(BuildContext context) {
     if (onOpenDetails != null) {
@@ -441,7 +604,7 @@ class _PlaylistViewItem extends StatelessWidget {
       consumeOutsideTap: true,
       menuChildren: [
         MenuItemButton(
-          onPressed: () => playbackService.playIndexOfPlaylist(index),
+          onPressed: _playOccurrence,
           leadingIcon: const Icon(Symbols.play_arrow),
           child: Text(ui("播放")),
         ),
@@ -449,14 +612,22 @@ class _PlaylistViewItem extends StatelessWidget {
           onPressed: !current &&
                   playbackService.canEditQueue &&
                   playbackService.nowPlaying != null
-              ? () => playbackService.moveQueueItemNext(index)
+              ? () {
+                  if (_stillCurrentQueue) {
+                    playbackService.moveQueueItemNext(index);
+                  }
+                }
               : null,
           leadingIcon: const Icon(Symbols.playlist_play),
           child: Text(ui('移到下一首')),
         ),
         MenuItemButton(
           onPressed: !current && playbackService.canEditQueue
-              ? () => playbackService.removeQueueItem(index)
+              ? () {
+                  if (_stillCurrentQueue) {
+                    playbackService.removeQueueItem(index);
+                  }
+                }
               : null,
           leadingIcon: const Icon(Symbols.playlist_remove),
           child: Text(ui(current ? '正在播放的歌曲保留在队列中' : '从播放队列移除')),
@@ -500,7 +671,7 @@ class _PlaylistViewItem extends StatelessWidget {
           child: InkWell(
             key: ValueKey('current-playlist-item-$index'),
             borderRadius: AppShape.controlRadius,
-            onTap: () => playbackService.playIndexOfPlaylist(index),
+            onTap: _playOccurrence,
             onSecondaryTapDown: (details) =>
                 controller.open(position: details.localPosition),
             onLongPress: () => controller.open(position: const Offset(16, 28)),
@@ -594,7 +765,7 @@ class _PlaylistViewItem extends StatelessWidget {
                             padding: EdgeInsets.zero,
                             foregroundColor: current
                                 ? scheme.onPrimaryContainer
-                                : scheme.onSurfaceVariant,
+                                : scheme.primary,
                             shape: AppShape.control,
                           ),
                           icon: const Icon(Symbols.info),

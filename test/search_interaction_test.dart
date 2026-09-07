@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dan_player/app_paths.dart' as paths;
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
+import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/page/search_page/search_page.dart';
 import 'package:dan_player/page/search_page/search_result_page.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,32 @@ UnionSearchResult emptyResult(String query) => UnionSearchResult(query)
   ..online = Future.value(const OnlineSearchResponse(tracks: [], failures: {}));
 
 void main() {
+  testWidgets(
+      'early provider failure stays observed and is later shown by results',
+      (tester) async {
+    final service = OnlineMusicService.forTesting(
+      sourcePreferences: () => const OnlineSourcePreferences(
+          qqEnabled: false, neteaseEnabled: false),
+      qqSearch: (_, __) async => throw StateError('Disabled QQ must not run'),
+      neteaseSearch: (_, __) async =>
+          throw StateError('Disabled NetEase must not run'),
+    );
+    final provider = service.search('demo');
+    final result = UnionSearchResult('demo')..online = provider;
+    // Deliberately allow the real all-sources-disabled failure to complete
+    // before navigation creates any FutureBuilder listener.
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(result.online, same(provider));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: SearchResultPage(searchResult: result))));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(onlineSourcesDisabledMessage), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    await expectLater(result.online, throwsA(isA<OnlineMusicException>()));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('mouse search deduplicates Enter and discards a replaced query',
       (tester) async {
     final requests = <String, Completer<UnionSearchResult>>{};

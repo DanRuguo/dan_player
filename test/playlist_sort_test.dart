@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/music_category_fixtures.dart';
+import 'support/playlist_actions.dart';
 
 CategoryTestAudio _ranked(String id, int rank) => CategoryTestAudio(id,
     path: 'D:/sort-fixtures/$id.${rank == 1 ? 'flac' : 'mp3'}',
@@ -100,7 +101,7 @@ Future<void> _choose(WidgetTester tester, String key) async {
 }
 
 Future<void> _play(WidgetTester tester) async {
-  await tester.tap(find.byKey(const ValueKey('playlist-play-all')));
+  await playVisiblePlaylistSelection(tester);
   await tester.pumpAndSettle();
 }
 

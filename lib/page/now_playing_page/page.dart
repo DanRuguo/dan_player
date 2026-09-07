@@ -1,5 +1,7 @@
 // ignore_for_file: camel_case_types, non_constant_identifier_names
 
+import 'package:dan_player/component/app_playback_mode_controls.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/component/scene_background.dart';
@@ -256,7 +258,7 @@ class _NowPlayingMoreAction extends StatelessWidget {
                   }
                 },
                 icon: const Icon(Symbols.more_vert),
-                color: scheme.onSecondaryContainer,
+                color: scheme.primary,
               )),
     );
   }
@@ -277,7 +279,7 @@ class _NowPlayingCommentsAction extends StatelessWidget {
           : ui("歌曲评论"),
       onPressed:
           audio == null ? null : () => showSongCommentsDialog(context, audio),
-      color: scheme.onSecondaryContainer,
+      color: scheme.primary,
       icon: const Icon(Symbols.chat_bubble_outline),
     );
   }
@@ -403,7 +405,7 @@ class _DesktopLyricSwitch extends StatelessWidget {
                           : Symbols.toast,
                   fill: desktopLyricService.isRunning ? 1 : 0,
                 ),
-          color: scheme.onSecondaryContainer,
+          color: scheme.primary,
         );
       },
     );
@@ -485,76 +487,7 @@ class _NowPlayingVolDspSliderState extends State<_NowPlayingVolDspSlider> {
           }
         },
         icon: const Icon(Symbols.volume_up),
-        color: scheme.onSecondaryContainer,
-      ),
-    );
-  }
-}
-
-class _NowPlayingPlayModeSwitch extends StatelessWidget {
-  const _NowPlayingPlayModeSwitch();
-
-  @override
-  Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
-    final playbackService = PlayService.instance.playbackService;
-
-    return ValueListenableBuilder(
-      valueListenable: playbackService.playMode,
-      builder: (context, playMode, _) {
-        late IconData result;
-        if (playMode == PlayMode.forward) {
-          result = Symbols.repeat;
-        } else if (playMode == PlayMode.loop) {
-          result = Symbols.repeat_on;
-        } else {
-          result = Symbols.repeat_one_on;
-        }
-
-        return IconButton(
-          tooltip: ui("播放模式；现在：{0}", [
-            switch (playMode) {
-              PlayMode.forward => ui("顺序播放"),
-              PlayMode.loop => ui("列表循环"),
-              PlayMode.singleLoop => ui("单曲循环")
-            }
-          ]),
-          onPressed: () {
-            if (playMode == PlayMode.forward) {
-              playbackService.setPlayMode(PlayMode.loop);
-            } else if (playMode == PlayMode.loop) {
-              playbackService.setPlayMode(PlayMode.singleLoop);
-            } else {
-              playbackService.setPlayMode(PlayMode.forward);
-            }
-          },
-          icon: Icon(result),
-          color: scheme.onSecondaryContainer,
-        );
-      },
-    );
-  }
-}
-
-class _NowPlayingShuffleSwitch extends StatelessWidget {
-  const _NowPlayingShuffleSwitch();
-
-  @override
-  Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
-    final playbackService = PlayService.instance.playbackService;
-
-    return ValueListenableBuilder(
-      valueListenable: playbackService.shuffle,
-      builder: (context, shuffle, _) => IconButton(
-        tooltip: ui("随机；现在：{0}", [shuffle ? ui("启用") : ui("禁用")]),
-        onPressed: () {
-          playbackService.useShuffle(!shuffle);
-        },
-        icon: Icon(shuffle ? Symbols.shuffle_on : Symbols.shuffle),
-        color: scheme.onSecondaryContainer,
+        color: scheme.primary,
       ),
     );
   }

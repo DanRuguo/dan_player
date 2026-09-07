@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:desktop_lyric/app_motion.dart';
 import 'l10n/ui_catalog.dart';
 
 /// UI language only: never translates track tags, filenames, lyrics or IDs.
@@ -66,8 +67,8 @@ class UiLanguageTransition extends StatefulWidget {
 
 class _UiLanguageTransitionState extends State<UiLanguageTransition>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _fade = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 180), value: 1);
+  late final AnimationController _fade =
+      AnimationController(vsync: this, duration: AppMotion.standard, value: 1);
   @override
   void initState() {
     super.initState();

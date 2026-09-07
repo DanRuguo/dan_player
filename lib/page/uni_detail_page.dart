@@ -9,7 +9,7 @@ import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/page/uni_page_components.dart';
-import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -88,6 +88,7 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
   final List<T> tertiaryContent;
   final ContentBuilder<T> tertiaryContentBuilder;
 
+  /// Legacy page flags now show one shared mode-only control when either is on.
   final bool enablePlayAll;
   final bool enableShufflePlay;
   final bool enableAddAllToPlaylist;
@@ -163,12 +164,8 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
           !identical(expectedController, widget.multiSelectController)) {
         return;
       }
-      final allowed = clear ? <S>{} : widget.secondaryContent.toSet();
-      final retained = expectedController.selected
-          .where(allowed.contains)
-          .toList(growable: false);
-      if (retained.length == expectedController.selected.length) return;
-      expectedController.replaceSelection(retained);
+      expectedController
+          .retainCurrentItems(clear ? <S>[] : widget.secondaryContent);
     });
   }
 
@@ -203,11 +200,8 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
     final visibleSecondaryContent = _visibleSecondaryContent();
 
     final List<Widget> actions = [];
-    if (widget.enablePlayAll) {
-      actions.add(_PlayAll<S>(contentList: visibleSecondaryContent));
-    }
-    if (widget.enableShufflePlay) {
-      actions.add(_ShuffleAll<S>(contentList: visibleSecondaryContent));
+    if (widget.enablePlayAll || widget.enableShufflePlay) {
+      actions.add(const AppPlaybackModeControls());
     }
     if (widget.enableAddAllToPlaylist) {
       actions.add(_AddAll<S>(contentList: visibleSecondaryContent));
@@ -501,40 +495,6 @@ class _VisibleSelectOrClearAll<T> extends StatelessWidget {
       ),
     );
   }
-}
-
-class _PlayAll<T> extends StatelessWidget {
-  const _PlayAll({required this.contentList});
-
-  final List<T> contentList;
-
-  @override
-  Widget build(BuildContext context) => FilledButton(
-        key: const ValueKey('detail-play-all'),
-        onPressed: contentList.isEmpty
-            ? null
-            : () => PlayService.instance.playbackService
-                .play(0, contentList as List<Audio>),
-        style: appToolbarControlStyle(context, primary: true),
-        child: AppToolbarLabel(label: ui("播放全部"), icon: Symbols.play_arrow),
-      );
-}
-
-class _ShuffleAll<T> extends StatelessWidget {
-  const _ShuffleAll({required this.contentList});
-
-  final List<T> contentList;
-
-  @override
-  Widget build(BuildContext context) => OutlinedButton(
-        key: const ValueKey('music-shuffle-action'),
-        onPressed: contentList.isEmpty
-            ? null
-            : () => PlayService.instance.playbackService
-                .shuffleAndPlay(contentList as List<Audio>),
-        style: appToolbarControlStyle(context),
-        child: AppToolbarLabel(label: ui("随机播放"), icon: Symbols.shuffle),
-      );
 }
 
 class _AddAll<T> extends StatelessWidget {

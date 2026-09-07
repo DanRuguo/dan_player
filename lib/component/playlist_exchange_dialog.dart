@@ -33,7 +33,8 @@ Future<PlaylistImportDetails?> importM3uPlaylist(BuildContext context,
             ?.path)();
   } catch (_) {
     if (context.mounted) {
-      showTextOnSnackBar(ui('无法打开文件选择器，请稍后重试。'), context: context);
+      showTextOnSnackBar('无法打开文件选择器，请稍后重试。',
+          context: context, kind: AppNoticeKind.error);
     }
     return null;
   }
@@ -172,7 +173,8 @@ Future<void> exportM3uPlaylist(BuildContext context, List<Audio> audios,
             duration: audio.duration)
   ];
   if (entries.isEmpty) {
-    showTextOnSnackBar(ui('所选歌曲中没有可导出的本地文件。'), context: context);
+    showTextOnSnackBar('所选歌曲中没有可导出的本地文件。',
+        context: context, kind: AppNoticeKind.warning);
     return;
   }
   final relative = await showAppDialog<bool>(
@@ -196,22 +198,26 @@ Future<void> exportM3uPlaylist(BuildContext context, List<Audio> audios,
     // Preserve the exact path whose overwrite the native picker confirmed.
     if (!location.toLowerCase().endsWith('.m3u8')) {
       if (context.mounted) {
-        showTextOnSnackBar(ui('导出文件名请使用 .m3u8 后缀。'), context: context);
+        showTextOnSnackBar('导出文件名请使用 .m3u8 后缀。',
+            context: context, kind: AppNoticeKind.warning);
       }
       return;
     }
     await writeM3uFile(File(location), entries, relative: relative);
     if (context.mounted) {
-      showTextOnSnackBar(ui('M3U8 歌单已导出（{0} 首）。', [entries.length]),
-          context: context);
+      showTextOnSnackBar('M3U8 歌单已导出（{0} 首）。',
+          arguments: [entries.length],
+          context: context,
+          kind: AppNoticeKind.success);
     }
   } catch (error) {
     if (context.mounted) {
       showTextOnSnackBar(
           error is FormatException
-              ? ui(error.message.toString())
-              : ui('导出失败，请检查目标目录与写入权限。'),
-          context: context);
+              ? error.message.toString()
+              : '导出失败，请检查目标目录与写入权限。',
+          context: context,
+          kind: AppNoticeKind.error);
     }
   }
 }

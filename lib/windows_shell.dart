@@ -131,7 +131,8 @@ class WindowsShell {
     if (!PlayService.isInitialized ||
         PlayService.instance.playbackService.nowPlaying == null) {
       await desktop.showWindow();
-      showTextOnSnackBar(ui('请先选择一首歌曲，再使用播放快捷任务。'));
+      showTextOnSnackBar('请先选择一首歌曲，再使用播放快捷任务。',
+          kind: AppNoticeKind.warning);
       return;
     }
     await desktop.dispatchAction(action);

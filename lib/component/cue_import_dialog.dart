@@ -30,7 +30,8 @@ Future<PlaylistImportDetails?> importCuePlaylist(BuildContext context,
             ?.path)();
   } catch (_) {
     if (context.mounted) {
-      showTextOnSnackBar(ui('无法打开文件选择器，请稍后重试。'), context: context);
+      showTextOnSnackBar('无法打开文件选择器，请稍后重试。',
+          context: context, kind: AppNoticeKind.error);
     }
     return null;
   }

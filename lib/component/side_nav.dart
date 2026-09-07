@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 // ignore_for_file: camel_case_types
 
 import 'dart:async';
@@ -341,7 +342,7 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
                   onPointerCancel: (_) => _pointerEnd(),
                   child: Center(
                     child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 120),
+                      duration: AppMotion.quick,
                       width: _dragging || _hovering ? 3 : 1,
                       height: _dragging || _hovering ? 56 : 28,
                       decoration: BoxDecoration(

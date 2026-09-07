@@ -76,7 +76,7 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
                   ),
                   Expanded(
                     child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 150),
+                      duration: AppMotion.standard,
                       child: switch (views[1]) {
                         NowPlayingViewMode.onlyMain => const _NowPlayingInfo(),
                         NowPlayingViewMode.withLyric =>
@@ -119,8 +119,7 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _NowPlayingShuffleSwitch(),
-                _NowPlayingPlayModeSwitch(),
+                AppPlaybackModeControls(plain: true),
                 _NowPlayingVolDspSlider(),
                 PlaybackRateButton(),
                 _DesktopLyricSwitch(),
@@ -161,7 +160,7 @@ class _NowPlayingSmallViewSwitchState
           borderRadius: AppShape.controlRadius,
           type: MaterialType.transparency,
           child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 120),
+            duration: AppMotion.quick,
             // Keep view navigation discoverable without a mouse hover.
             opacity: visible ? 1.0 : 0.7,
             child: InkWell(

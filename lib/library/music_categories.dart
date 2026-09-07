@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:path/path.dart' as path;
 
@@ -63,6 +64,17 @@ class MusicCategoryGroup {
   final int sortOrder;
   final List<Audio> audios;
   final Map<ClassificationEvidence, int> evidenceCounts;
+
+  /// Match the first row on a freshly opened detail page. Albums open in track
+  /// order; other categories retain library order. Do not mutate membership.
+  late final Audio? coverAudio = audios.isEmpty
+      ? null
+      : kind == MusicCategoryKind.album
+          ? audios.reduce((first, next) =>
+              compareAudioSort(next, first, AudioSortField.track) < 0
+                  ? next
+                  : first)
+          : audios.first;
 
   /// Stable persistence identity. It intentionally excludes translated labels,
   /// cover/song order and every presentation-only field.

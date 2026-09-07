@@ -75,6 +75,17 @@ class CacheBackupService {
     if (!await source.exists()) {
       throw const CacheBackupException('The app data directory does not exist');
     }
+    for (final name in const [
+      'metadata_committed.json',
+      'metadata_committed.json.tmp',
+      'library_migration.json',
+      'library_migration.json.migration-tmp',
+    ]) {
+      if (await File(path.join(source.path, name)).exists()) {
+        throw const CacheBackupException(
+            'Complete the pending library/metadata synchronization before backup');
+      }
+    }
     final sourcePath = path.normalize(source.absolute.path);
     final destinationPath = path.normalize(destination.absolute.path);
     if (path.isWithin(sourcePath, destinationPath)) {
@@ -298,7 +309,8 @@ class CacheBackupService {
           throw CacheBackupException(
               'A cache document is damaged: ${path.basename(relative)}');
         }
-        final restored = decoder.convert(decoded);
+        final restored = decoder.convert(decoded,
+            preserveMissing: _preservesMusicReferences(relative));
         await entity.writeAsString(
             json.encode(identical(restored, _dropValue) ? null : restored),
             flush: true);
@@ -375,6 +387,10 @@ class CacheRestoreDestinationPolicy {
     'online_library.json',
     'playback_state.json',
     'playback_statistics.json',
+    'track_identities.json',
+    'lyric_documents.json',
+    'playback_bookmarks.json',
+    'track_resume.json',
   };
   static const _cacheDirectoryMarkers = <String>{
     'covers',
@@ -536,23 +552,30 @@ class _PortablePathEncoder {
     }
   }
 
-  Future<Object?> convert(Object? value) async {
-    if (value is String) return _convertString(value);
+  Future<Object?> convert(Object? value, {bool aliasOnly = false}) async {
+    if (value is String) return _convertString(value, aliasOnly: aliasOnly);
     if (value is List) {
-      return Future.wait<Object?>([for (final item in value) convert(item)]);
+      return Future.wait<Object?>(
+          [for (final item in value) convert(item, aliasOnly: aliasOnly)]);
     }
     if (value is Map) {
       final result = <String, Object?>{};
       for (final entry in value.entries) {
         final convertedKey = await _convertString(entry.key.toString());
-        result[convertedKey] = await convert(entry.value);
+        result[convertedKey] = await convert(entry.value,
+            aliasOnly: aliasOnly || entry.key == 'aliases');
       }
       return result;
     }
     return value;
   }
 
-  Future<String> _convertString(String value) async {
+  Future<String> _convertString(String value, {bool aliasOnly = false}) async {
+    final cue = _cueIdentityParts(value);
+    if (cue != null) {
+      final portableCue = await _convertString(cue.$1, aliasOnly: aliasOnly);
+      return 'cue://track/${Uri.encodeComponent(portableCue)}/${cue.$2}';
+    }
     if (!path.isAbsolute(value)) return value;
     final normalized = path.normalize(value);
     if (_isInsideOrSame(sourceRoot.path, normalized)) {
@@ -568,7 +591,14 @@ class _PortablePathEncoder {
       final relative =
           _portableRelative(path.relative(normalized, from: root.path));
       final known = _songTokensByPath[normalized.toLowerCase()];
-      if (known != null) return known;
+      if (known != null) {
+        if (!aliasOnly) songManifest[known]?.remove('aliasOnly');
+        return known;
+      }
+      if (path.extension(normalized).toLowerCase() == '.cue') {
+        return '${_tokenPrefix}root-file/${root.id}/'
+            '${Uri.encodeComponent(relative)}';
+      }
       // A scan folder can legally contain dots (or even end in an audio-like
       // suffix). Prefer a real directory over extension heuristics so its
       // folder record is not mistaken for a missing song.
@@ -584,6 +614,7 @@ class _PortablePathEncoder {
                   'root': root.id,
                   'relativePath': relative,
                   'name': path.basename(normalized),
+                  if (aliasOnly) 'aliasOnly': true,
                 });
         _songTokensByPath[normalized.toLowerCase()] = token;
         return token;
@@ -597,7 +628,10 @@ class _PortablePathEncoder {
     if (_looksLikeAudioPath(normalized)) {
       final key = normalized.toLowerCase();
       final known = _songTokensByPath[key];
-      if (known != null) return known;
+      if (known != null) {
+        if (!aliasOnly) songManifest[known]?.remove('aliasOnly');
+        return known;
+      }
       final id = _externalCounter++;
       final name = path.basename(normalized);
       int? size;
@@ -611,6 +645,7 @@ class _PortablePathEncoder {
         'root': 'unbound',
         'relativePath': name,
         'name': name,
+        if (aliasOnly) 'aliasOnly': true,
         if (size != null) 'size': size,
       };
       _songTokensByPath[key] = token;
@@ -675,16 +710,19 @@ class _PortablePathDecoder {
   final Set<String> _resolved = {};
   final Set<String> _missing = {};
   final Map<String, String> _resolvedPaths = {};
+  final Set<String> _ambiguous = {};
 
   int get restoredSongs => _resolved.length;
   int get missingSongs => _missing.length;
 
-  Object? convert(Object? value) {
-    if (value is String) return _convertString(value);
+  Object? convert(Object? value, {bool preserveMissing = false}) {
+    if (value is String) {
+      return _convertString(value, preserveMissing: preserveMissing);
+    }
     if (value is List) {
       final result = <Object?>[];
       for (final item in value) {
-        final converted = convert(item);
+        final converted = convert(item, preserveMissing: preserveMissing);
         if (!identical(converted, _dropValue)) result.add(converted);
       }
       return result;
@@ -692,9 +730,11 @@ class _PortablePathDecoder {
     if (value is Map) {
       final result = <String, Object?>{};
       for (final entry in value.entries) {
-        final convertedKey = _convertString(entry.key.toString());
+        final convertedKey = _convertString(entry.key.toString(),
+            preserveMissing: preserveMissing);
         if (identical(convertedKey, _dropValue)) continue;
-        final converted = convert(entry.value);
+        final converted =
+            convert(entry.value, preserveMissing: preserveMissing);
         if (identical(converted, _dropValue)) {
           if (entry.key == 'path' || entry.key == 'audio') return _dropValue;
           continue;
@@ -706,7 +746,14 @@ class _PortablePathDecoder {
     return value;
   }
 
-  Object _convertString(String value) {
+  Object _convertString(String value, {bool preserveMissing = false}) {
+    final cue = _cueIdentityParts(value);
+    if (cue != null) {
+      final restoredCue =
+          _convertString(cue.$1, preserveMissing: preserveMissing);
+      if (restoredCue is! String) return _dropValue;
+      return 'cue://track/${Uri.encodeComponent(path.windows.normalize(restoredCue).toLowerCase())}/${cue.$2}';
+    }
     if (!value.startsWith(_tokenPrefix)) return value;
     if (value.startsWith('${_tokenPrefix}cache/')) {
       final encoded = value.substring('${_tokenPrefix}cache/'.length);
@@ -715,26 +762,66 @@ class _PortablePathDecoder {
       return path.normalize(path.join(destination.path, relative));
     }
     if (value == '${_tokenPrefix}cache') return destination.path;
-    if (value.startsWith('${_tokenPrefix}root-directory/')) {
-      final rest = value.substring('${_tokenPrefix}root-directory/'.length);
+    if (value.startsWith('${_tokenPrefix}root-directory/') ||
+        value.startsWith('${_tokenPrefix}root-file/')) {
+      final isFile = value.startsWith('${_tokenPrefix}root-file/');
+      final prefix = isFile
+          ? '${_tokenPrefix}root-file/'
+          : '${_tokenPrefix}root-directory/';
+      final rest = value.substring(prefix.length);
       final separator = rest.indexOf('/');
       if (separator <= 0) return _dropValue;
       final id = rest.substring(0, separator);
       final relative = Uri.decodeComponent(rest.substring(separator + 1));
       if (!_isSafeRelative(relative)) return _dropValue;
       final root = rootMatches[id];
-      if (root == null) return _dropValue;
-      final directory = path.normalize(path.join(root.path, relative));
-      return Directory(directory).existsSync() ? directory : _dropValue;
+      if (root == null && !preserveMissing) return _dropValue;
+      final location =
+          path.normalize(path.join(root?.path ?? _missingRoot(id), relative));
+      return preserveMissing ||
+              (isFile
+                  ? File(location).existsSync()
+                  : Directory(location).existsSync())
+          ? location
+          : _dropValue;
     }
     if (value.startsWith('${_tokenPrefix}root/')) {
       final id = value.substring('${_tokenPrefix}root/'.length);
-      return rootMatches[id]?.path ?? _dropValue;
+      return rootMatches[id]?.path ??
+          (preserveMissing ? _missingRoot(id) : _dropValue);
     }
     if (value.startsWith('${_tokenPrefix}song/')) {
-      return _resolvedPaths[value] ?? _dropValue;
+      final resolved = _resolvedPaths[value];
+      if (resolved != null) return resolved;
+      if (!preserveMissing) return _dropValue;
+      final descriptor = songs[value];
+      final root = descriptor?['root'];
+      final relative = descriptor?['relativePath'];
+      if (root is! String ||
+          relative is! String ||
+          !_isSafeRelative(relative)) {
+        return _dropValue;
+      }
+      // Keep the row and occurrence position. A missing file is not evidence
+      // that its identity, lyrics, bookmarks or historical counters vanished.
+      return path.normalize(path.join(
+          _ambiguous.contains(value)
+              ? _missingRoot(root)
+              : rootMatches[root]?.path ?? _missingRoot(root),
+          relative));
+    }
+    if (preserveMissing && value.startsWith('${_tokenPrefix}unresolved/')) {
+      final id = value.substring('${_tokenPrefix}unresolved/'.length);
+      if (_isSafeRelative(id)) return path.join(_missingRoot('unresolved'), id);
     }
     return _dropValue;
+  }
+
+  String _missingRoot(String id) {
+    final safeId = RegExp(r'^[a-zA-Z0-9_-]+$').hasMatch(id)
+        ? id
+        : sha256.convert(utf8.encode(id)).toString().substring(0, 16);
+    return path.join(destination.path, 'missing-library', safeId);
   }
 
   void _resolveSongs() {
@@ -760,6 +847,23 @@ class _PortablePathDecoder {
         _resolvedPaths[value] = resolved;
       } else {
         _missing.add(value);
+      }
+    }
+    // A unique filename in the destination does not justify merging two
+    // different original file instances into that one surviving file.
+    final owners = <String, List<String>>{};
+    for (final entry in _resolvedPaths.entries) {
+      if (songs[entry.key]?['aliasOnly'] == true) continue;
+      owners
+          .putIfAbsent(path.normalize(entry.value).toLowerCase(), () => [])
+          .add(entry.key);
+    }
+    for (final tokens in owners.values.where((tokens) => tokens.length > 1)) {
+      for (final token in tokens) {
+        _ambiguous.add(token);
+        _missing.add(token);
+        _resolved.remove(token);
+        _resolvedPaths.remove(token);
       }
     }
   }
@@ -986,6 +1090,7 @@ bool _shouldIncludeCacheEntry(String relative) {
   final segments = portable.toLowerCase().split('/');
   if (segments.any((segment) =>
       segment == 'updates' ||
+      segment == 'library_migrations' ||
       segment.startsWith('.dan-player-restore-') ||
       segment.startsWith('.dan-player-pending-') ||
       segment.startsWith('.dan-player-previous-') ||
@@ -993,12 +1098,54 @@ bool _shouldIncludeCacheEntry(String relative) {
     return false;
   }
   final lower = portable.toLowerCase();
+  if (const {
+    'library_migration.json',
+    'library_migration_last.json',
+    'metadata_committed.json'
+  }.contains(lower)) {
+    return false;
+  }
   return !lower.endsWith('.tmp') &&
+      !lower.endsWith('.migration-tmp') &&
       !lower.endsWith('.partial') &&
       !lower.endsWith('.exe') &&
       !lower.endsWith('.msi') &&
       !lower.endsWith('.msix') &&
       !lower.endsWith('.msixbundle');
+}
+
+bool _preservesMusicReferences(String relative) {
+  var name = path.basename(relative).toLowerCase();
+  if (name.endsWith('.bak')) name = name.substring(0, name.length - 4);
+  return const {
+    'index.json',
+    'playlists.json',
+    'collections.json',
+    'custom_audio_order.json',
+    'playback_state.json',
+    'playback_bookmarks.json',
+    'track_resume.json',
+    'lyric_source.json',
+    'lyric_documents.json',
+    'track_identities.json',
+    'song_comment_associations.json',
+    'playback_statistics.json',
+    'playback_statistics.pre-track-id-v1.json',
+  }.contains(name);
+}
+
+(String, int)? _cueIdentityParts(String value) {
+  const prefix = 'cue://track/';
+  if (!value.startsWith(prefix)) return null;
+  final slash = value.lastIndexOf('/');
+  if (slash <= prefix.length) return null;
+  final number = int.tryParse(value.substring(slash + 1));
+  if (number == null || number < 1 || number > 99) return null;
+  try {
+    return (Uri.decodeComponent(value.substring(prefix.length, slash)), number);
+  } on FormatException {
+    return null;
+  }
 }
 
 String _songToken(String root, String relative) =>

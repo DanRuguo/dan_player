@@ -9,6 +9,8 @@
 #include <memory>
 #include "win32_window.h"
 
+namespace desktop_lyric_runner {
+
 // Stable messages route destruction out of a Dart reply / engine callback.
 constexpr UINT kPaletteCloseMessage = WM_APP + 71;
 constexpr UINT kPaletteShownMessage = WM_APP + 72;
@@ -72,4 +74,5 @@ class PaletteWindowManager : public std::enable_shared_from_this<PaletteWindowMa
   std::shared_ptr<AppearancePaletteWindow> palette_;
   std::unique_ptr<Result> pending_open_;
 };
+}  // namespace desktop_lyric_runner
 #endif

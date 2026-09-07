@@ -5,6 +5,7 @@ import 'package:dan_player/library/cue_sheet.dart';
 import 'package:dan_player/library/cue_track.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/component/audio_tile.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,43 @@ class _CueAudio extends Audio {
 }
 
 void main() {
+  testWidgets('CUE picker failure keeps English error semantics and skips reads',
+      (tester) async {
+    uiLanguage.value = UiLanguage.en;
+    addTearDown(() => uiLanguage.value = UiLanguage.zh);
+    final semantics = tester.ensureSemantics();
+    var read = false;
+    var completed = false;
+    PlaylistImportDetails? result;
+    await tester.pumpWidget(MaterialApp(
+        home: Builder(builder: (context) => Scaffold(
+            body: TextButton(
+                onPressed: () async {
+                  result = await importCuePlaylist(context,
+                      library: [],
+                      pickFile: () => throw StateError('picker unavailable'),
+                      readFile: (_) async {
+                        read = true;
+                        throw StateError('must not read');
+                      });
+                  completed = true;
+                },
+                child: const Text('Import'))))));
+    await tester.tap(find.text('Import'));
+    await tester.pumpAndSettle();
+    expect(completed, isTrue);
+    expect(result, isNull);
+    expect(read, isFalse);
+    expect(find.text(ui('无法打开文件选择器，请稍后重试。')), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    final bubble = find.byKey(const ValueKey('app-notice-bubble'));
+    expect(tester.widget<Material>(bubble).color,
+        Theme.of(tester.element(bubble)).colorScheme.errorContainer);
+    expect(find.bySemanticsLabel(RegExp('Error：')), findsAtLeastNWidgets(1));
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
   testWidgets(
       'CUE track menus expose playlist actions but no whole-file editors or deletion',
       (tester) async {

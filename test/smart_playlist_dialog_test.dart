@@ -163,8 +163,12 @@ void main() {
             .widget<Text>(find.byKey(const ValueKey('smart-result-count')))
             .data,
         '匹配 2 首本地歌曲');
-    await tester.ensureVisible(find.byKey(const ValueKey('smart-play')));
-    await tester.tap(find.byKey(const ValueKey('smart-play')));
+    await tester.ensureVisible(find.byKey(const ValueKey('smart-select')));
+    await tester.tap(find.byKey(const ValueKey('smart-select')));
+    await tester.pumpAndSettle();
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('audio-selection-play')));
+    await tester.tap(find.byKey(const ValueKey('audio-selection-play')));
     await tester.pumpAndSettle();
     expect(played, current);
     expect(identical(played, current), isFalse);

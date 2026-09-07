@@ -259,6 +259,59 @@ int wmain(int argc, wchar_t** argv) {
       Reject([&] { ReadManifest(f.manifest_path); });
     }
   });
+  run("snapshot documents are accepted without widening root ownership", [&] {
+    Fixture f(base / L"snapshot-documents");
+    f.manifest.version = "26.0.5-snapshot.1";
+    for (const auto* name : {L"26.0.5-snapshot.1-validation.md",
+                            L"26.0.5-snapshot.1-player-research.md",
+                            L"26.0.5-snapshot.1-computer-use.md",
+                            L"release-26.0.5-snapshot.1.md", L"replay-gain.md",
+                            L"26.0.5-snapshot.2-validation.md", L"release-26.0.5-snapshot.2.md"}) {
+      Write(f.payload / name, "synthetic bundled documentation");
+      f.manifest.files.push_back({name, Sha256(f.payload / name), fs::file_size(f.payload / name)});
+    }
+    const auto accepted = SerializeManifest(f.manifest);
+    Write(f.manifest_path, accepted);
+    Check(ReadManifest(f.manifest_path).files.size() == 10, "Snapshot documents rejected");
+    const auto hash = f.manifest.files.front().sha256;
+    for (const auto* name : {"personal-notes.md", "replay-gain.md.bak",
+                            "26.0.5-snapshot.3-validation.md", "settings.json",
+                            "docs/replay-gain.md", "../replay-gain.md"}) {
+      Write(f.manifest_path, accepted + hash + "\t1\t" + name + "\n");
+      Reject([&] { ReadManifest(f.manifest_path); });
+      auto unknown = f.manifest;
+      unknown.files.push_back({FromUtf8(name), hash, 1});
+      Reject([&] { SerializeManifest(unknown); });
+    }
+  });
+  run("shared lyric portable layout retains strict identity checks", [&] {
+    Fixture f(base / L"shared-lyrics"); f.Old(true);
+    fs::remove(f.context.target / L"desktop_lyric/desktop_lyric.exe");
+    Check(!IsRecognizedInstallation(f.context.target), "Truncated old layout accepted");
+    const auto marker = f.context.target / L"DESKTOP-LYRIC-MODE";
+    const auto write_checksums = [&](bool with_helper) {
+      std::string sums;
+      for (const auto* name : {L"Dan Player.exe", L"data/app.so", L"DESKTOP-LYRIC-MODE"})
+        sums += Sha256(f.context.target / name) + "  " + ToUtf8(name) + "\n";
+      if (with_helper) sums += Sha256(f.context.target / L"desktop_lyric/desktop_lyric.exe") +
+          "  desktop_lyric/desktop_lyric.exe\n";
+      Write(f.context.target / L"SHA256SUMS", sums);
+    };
+    Write(marker, "shared-executable-v1\n");
+    write_checksums(false);
+    Check(IsRecognizedInstallation(f.context.target), "Shared executable layout rejected");
+    Write(marker, "shared-executable-v2\n");
+    write_checksums(false);
+    Check(!IsRecognizedInstallation(f.context.target), "Unknown layout accepted");
+    Write(marker, "shared-executable-v1\n");
+    write_checksums(false);
+    Write(marker, "shared-executable-v1\r\n");
+    Check(!IsRecognizedInstallation(f.context.target), "Modified layout marker accepted");
+    Write(marker, "shared-executable-v1\n");
+    Write(f.context.target / L"desktop_lyric/desktop_lyric.exe", "mixed helper");
+    write_checksums(true);
+    Check(!IsRecognizedInstallation(f.context.target), "Mixed layout accepted");
+  });
   for (size_t index = 0; index < 5; ++index) {
     run(("injected backup failure " + std::to_string(index)).c_str(), [&] {
       Fixture f(base / (L"backup-fault-" + std::to_wstring(index))); f.Old();

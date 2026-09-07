@@ -7,30 +7,9 @@ import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/page/audio_sort_methods.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/page/uni_page.dart';
-import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
-
-class ShufflePlay<T> extends StatelessWidget {
-  final List<T> contentList;
-  const ShufflePlay({super.key, required this.contentList});
-
-  @override
-  Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    return FilledButton(
-      key: const ValueKey('music-shuffle-action'),
-      onPressed: contentList.isEmpty
-          ? null
-          : () => PlayService.instance.playbackService.shuffleAndPlay(
-                contentList as List<Audio>,
-              ),
-      style: appToolbarControlStyle(context, primary: true),
-      child: AppToolbarLabel(label: ui("随机播放"), icon: Symbols.shuffle),
-    );
-  }
-}
 
 class SortMethodComboBox<T> extends StatelessWidget {
   final List<T> contentList;

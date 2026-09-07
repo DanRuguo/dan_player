@@ -327,6 +327,10 @@ class _OnlineMetadataLookupDialogState
                                       )),
                                       const SizedBox(width: 8),
                                       IconButton.filledTonal(
+                                          style: IconButton.styleFrom(
+                                              foregroundColor: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSecondaryContainer),
                                           key: const ValueKey(
                                               'metadata-lookup-search'),
                                           onPressed: _loading || _applying

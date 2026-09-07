@@ -5,6 +5,8 @@
 #include "palette_window_shape.h"
 #include "win32_window.h"
 
+using desktop_lyric_runner::Win32Window;
+
 namespace {
 
 bool HasRoundedOpaqueRegion(HWND window, UINT dpi) {

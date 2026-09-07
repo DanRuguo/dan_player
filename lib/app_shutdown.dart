@@ -3,6 +3,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/collection.dart';
+import 'package:dan_player/library/library_auto_refresh.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -100,6 +101,11 @@ Future<void> shutdownAndExit({bool throwOnError = false}) =>
         throwOnError: throwOnError);
 
 Future<void> _shutdownAndCloseWindow() async {
+  final libraryStopped = LibraryAutoRefresh.instance
+      .stop()
+      .catchError((Object error, StackTrace trace) {
+    LOGGER.w('[shutdown library watcher] $error', stackTrace: trace);
+  });
   // Quit always bypasses the hide preference. Hide before removing the custom
   // region/DWM preview; otherwise the still-visible parent can flash its native
   // caption. Desktop subscriptions are still removed before audio teardown.
@@ -114,6 +120,9 @@ Future<void> _shutdownAndCloseWindow() async {
   }
 
   try {
+    // The native scanner commits atomically. The window is already hidden,
+    // while event intake stopped synchronously when stop() was called above.
+    await libraryStopped;
     final cleanupTasks = <Future<void>>[
       Future.wait([
         savePlaylists(),
@@ -145,6 +154,7 @@ Future<void> _shutdownAndCloseWindow() async {
     // make the close error/retry controls reachable instead of stranding an
     // invisible player that every subsequent Quit request would ignore.
     DesktopIntegration.instance.restorePresentationAfterFailedShutdown();
+    LibraryAutoRefresh.instance.start();
     try {
       await windowManager.setPreventClose(true);
     } catch (preventError, preventTrace) {

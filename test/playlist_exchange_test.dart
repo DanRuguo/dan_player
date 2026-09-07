@@ -4,6 +4,7 @@ import 'package:dan_player/component/playlist_exchange_dialog.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/playlist_exchange.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -145,7 +146,6 @@ void main() {
       hasItems: false,
       canPlay: false,
       onCreate: () {},
-      onPlayAll: () {},
       onStartSelection: () {},
       onEndSelection: () {},
       onSelectAll: () {},
@@ -162,6 +162,9 @@ void main() {
 
   testWidgets('import picker errors produce a notice without starting a read',
       (tester) async {
+    uiLanguage.value = UiLanguage.en;
+    addTearDown(() => uiLanguage.value = UiLanguage.zh);
+    final semantics = tester.ensureSemantics();
     var finished = false;
     var read = false;
     PlaylistImportDetails? result;
@@ -186,8 +189,14 @@ void main() {
     expect(finished, isTrue);
     expect(result, isNull);
     expect(read, isFalse);
-    expect(find.text('无法打开文件选择器，请稍后重试。'), findsOneWidget);
+    expect(find.text(ui('无法打开文件选择器，请稍后重试。')), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    final bubble = find.byKey(const ValueKey('app-notice-bubble'));
+    expect(tester.widget<Material>(bubble).color,
+        Theme.of(tester.element(bubble)).colorScheme.errorContainer);
+    expect(find.bySemanticsLabel(RegExp('Error：')), findsAtLeastNWidgets(1));
     expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets('export counts supported files and never changes a chosen suffix',

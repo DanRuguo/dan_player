@@ -163,11 +163,13 @@ void main() {
     expect((await fixture.list().toList()).length, 1);
   });
 
-  test('v2 soft thumbnails are not reused by the new cover-aware schema',
-      () async {
+  test('old soft thumbnails and cached file icons are not reused', () async {
     final old = File(path.join(
         fixture.path, 'v2_${CoverCache.stableHash('song')}_1_e0g0_48x48.png'));
     await old.writeAsBytes([0]);
+    final cachedIcon = File(path.join(
+        fixture.path, 'v3_${CoverCache.stableHash('song')}_1_e0g0_48x48.png'));
+    await cachedIcon.writeAsBytes([9]);
     final cache = CoverCache.forTesting(directory: fixture);
     var reads = 0;
     final image = await cache.imageFor(
@@ -180,8 +182,9 @@ void main() {
           return Uint8List.fromList([1, 2, 3]);
         }) as FileImage;
     expect(reads, 1);
-    expect(path.basename(image.file.path), startsWith('v3_'));
+    expect(path.basename(image.file.path), startsWith('v4_'));
     expect(await old.readAsBytes(), [0]);
+    expect(await cachedIcon.readAsBytes(), [9]);
   });
 
   test('a missing image has a short negative cache and retries after expiry',
