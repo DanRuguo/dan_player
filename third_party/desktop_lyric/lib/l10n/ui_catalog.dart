@@ -35,6 +35,7 @@ import 'catalog_replay_gain.dart';
 import 'catalog_library_watch.dart';
 import 'catalog_playback_mode_controls.dart';
 import 'catalog_track_resume.dart';
+import 'catalog_snapshot2_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogSelectionRelease,
@@ -73,4 +74,5 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogQueueTools,
   ...uiCatalogSongCommentCapabilities,
   ...catalogWindowsTasks,
+  ...catalogSnapshot22605,
 });

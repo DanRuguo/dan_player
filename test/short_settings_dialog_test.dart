@@ -53,6 +53,9 @@ void main() {
     await tester.pumpWidget(ChangeNotifierProvider.value(
       value: ThemeProvider.instance,
       child: MaterialApp(
+        // Match the Windows player. Android selection handles can otherwise
+        // float over dialog actions after a text field is scrolled offscreen.
+        theme: ThemeData(platform: TargetPlatform.windows),
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context)
               .copyWith(textScaler: TextScaler.linear(scale)),

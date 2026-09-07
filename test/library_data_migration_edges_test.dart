@@ -15,8 +15,9 @@ void main() {
   Future<dynamic> read(String name) async =>
       jsonDecode(await File(p.join(data.path, name)).readAsString());
   setUp(() async {
-    final base = Directory(Platform.environment['DAN_PLAYER_DATA_DIR'] ??
-        'build/qa-migration-edges');
+    final base = Directory(p.normalize(p.absolute(
+        Platform.environment['DAN_PLAYER_DATA_DIR'] ??
+            p.join('build', 'qa-migration-edges'))));
     await base.create(recursive: true);
     root = await base.createTemp('edge-');
     data = await Directory(p.join(root.path, 'data')).create();

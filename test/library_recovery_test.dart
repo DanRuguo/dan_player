@@ -129,24 +129,48 @@ void main() {
     expect(await fixture('playlists.json.tmp').exists(), isFalse);
   });
 
-  test(
-      'statistics recovery retains the backup and paused restoration adds no play',
-      () async {
-    final valid =
-        jsonEncode({'version': 1, 'tracks': [], 'days': {}, 'hours': []});
-    await fixture('playback_statistics.json').writeAsString('{broken');
-    await fixture('playback_statistics.json.bak').writeAsString(valid);
+  for (final version in [1, 2]) {
+    test(
+        'statistics v$version recovery preserves history and paused restoration adds no play',
+        () async {
+      final valid = jsonEncode(
+          {'version': version, 'tracks': [], 'days': {}, 'hours': []});
+      await fixture('playback_statistics.json').writeAsString('{broken');
+      await fixture('playback_statistics.json.bak').writeAsString(valid);
 
-    final statistics = PlaybackStatistics.instance;
-    await statistics.initialize();
-    statistics.tick(audio, PlayerState.paused);
-    await statistics.flush();
+      final statistics = PlaybackStatistics.instance;
+      await statistics.initialize();
+      expect(statistics.storageWarning, isNull);
+      expect(
+          await fixture('playback_statistics.json.bak').readAsString(), valid,
+          reason:
+              'Recovery must not rotate a corrupt primary over the backup.');
+      statistics.tick(audio, PlayerState.paused);
+      await statistics.flush();
 
-    expect(statistics.totalPlayCount, 0);
-    expect(await fixture('playback_statistics.json.bak').readAsString(), valid);
-    expect(
-        jsonDecode(
-            await fixture('playback_statistics.json').readAsString())['tracks'],
-        isEmpty);
-  });
+      expect(statistics.totalPlayCount, 0);
+      final primary =
+          jsonDecode(await fixture('playback_statistics.json').readAsString())
+              as Map;
+      expect(primary['version'], 2);
+      expect(primary['tracks'], isEmpty);
+      final originalV1 = fixture('playback_statistics.pre-track-id-v1.json');
+      if (version == 1) {
+        // The .bak file is a rotating healthy snapshot. The v1 migration keeps
+        // its original bytes in a separate immutable file before any rewrite.
+        expect(await originalV1.readAsString(), valid);
+        final backup = jsonDecode(
+            await fixture('playback_statistics.json.bak').readAsString());
+        expect(backup, primary);
+        await statistics.initialize();
+        await statistics.flush();
+        expect(await originalV1.readAsString(), valid);
+        expect(statistics.totalPlayCount, 0);
+      } else {
+        expect(await originalV1.exists(), isFalse);
+        expect(await fixture('playback_statistics.json.bak').readAsString(),
+            valid);
+      }
+    });
+  }
 }

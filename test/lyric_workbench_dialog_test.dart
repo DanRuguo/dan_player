@@ -7,6 +7,7 @@ import 'package:dan_player/entry.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
+import 'package:desktop_lyric/ui_language.dart' as locale;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -41,6 +42,7 @@ void main() {
     await store.load();
   });
   tearDown(() async {
+    locale.uiLanguage.value = locale.UiLanguage.zh;
     store.dispose();
     await directory.delete(recursive: true);
   });
@@ -173,6 +175,12 @@ void main() {
       scale: 1.8,
       brightness: Brightness.dark
     ),
+    (
+      name: 'english-narrow-large',
+      size: const Size(400, 700),
+      scale: 2.0,
+      brightness: Brightness.light
+    ),
   ]) {
     testWidgets('production layout and reachable actions: ${scenario.name}',
         (tester) async {
@@ -180,6 +188,9 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
+      final english = scenario.name.startsWith('english');
+      locale.uiLanguage.value =
+          english ? locale.UiLanguage.en : locale.UiLanguage.zh;
       if (scenario.brightness == Brightness.dark) {
         await tester.runAsync(() async {
           await store.setLocked(audio, true,
@@ -195,8 +206,8 @@ void main() {
       await settleSave(tester);
       expect(tester.takeException(), isNull);
 
-      final title = find.text('歌词校准与锁定');
-      final close = find.byTooltip('关闭');
+      final title = find.text(locale.ui('歌词校准与锁定'));
+      final close = find.byTooltip(locale.ui('关闭'));
       final titleRect = tester.getRect(title);
       expect(titleRect.overlaps(tester.getRect(close)), isFalse);
       expect(titleRect.center.dx, closeTo(scenario.size.width / 2, 1));
@@ -204,9 +215,9 @@ void main() {
           tester.widget<Text>(title).style!.fontSize, greaterThanOrEqualTo(22));
       if (scenario.scale > 1) {
         expect(titleRect.top, greaterThan(tester.getRect(close).bottom));
-        expect(titleRect.height, lessThan(64),
+        expect(titleRect.height, lessThan(english ? 128 : 64),
             reason:
-                'The full-width large heading should fit one balanced line.');
+                'The full-width heading should remain balanced and bounded.');
       }
       final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar).first);
       expect(scrollbar.thumbVisibility, isTrue);
@@ -234,11 +245,11 @@ void main() {
       for (final action in [
         find.byKey(const ValueKey('lyric-document-lock')),
         find.byKey(const ValueKey('lyric-document-no-lyrics')),
-        find.text('编辑修订'),
-        find.text('切换歌词来源'),
+        find.text(locale.ui('编辑修订')),
+        find.text(locale.ui('切换歌词来源')),
         if (scenario.brightness == Brightness.dark) ...[
-          find.text('恢复原始歌词'),
-          find.text('恢复之前的版本'),
+          find.text(locale.ui('恢复原始歌词')),
+          find.text(locale.ui('恢复之前的版本')),
         ],
       ]) {
         await tester.ensureVisible(action);
@@ -250,7 +261,7 @@ void main() {
         await _capture(tester, capture, '${scenario.name}-content');
       }
       await tester.pumpWidget(const SizedBox.shrink());
-    });
+    }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
   }
 }
 

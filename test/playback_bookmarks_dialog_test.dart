@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/playback_bookmarks.dart';
+import 'package:dan_player/library/track_identity.dart';
 import 'package:dan_player/page/now_playing_page/component/playback_bookmarks_dialog.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/play_service/segment_loop.dart';
@@ -13,17 +14,28 @@ class _MemoryBookmarks extends PlaybackBookmarkStore {
   _MemoryBookmarks() : super(File('unused-bookmark-widget-fixture.json'));
   final entries = <PlaybackBookmark>[];
   @override
-  Future<List<PlaybackBookmark>> forTrack(String localPath) async =>
-      List.of(entries);
+  Future<List<PlaybackBookmark>> forTrack(String localPath,
+      {String? stableTrackId}) async {
+    final key = PlaybackBookmarkStore.trackKey(localPath);
+    final legacyIsUnique = stableTrackId == null ||
+        TrackIdentityRegistry.instance.resolvePath(localPath) == stableTrackId;
+    return entries
+        .where((item) =>
+            (stableTrackId != null && item.track == stableTrackId) ||
+            (legacyIsUnique && item.track == key))
+        .toList();
+  }
+
   @override
   Future<void> add(
       {required String localPath,
+      String? stableTrackId,
       required String label,
       required double position,
       double? end}) async {
     entries.add(PlaybackBookmark(
         id: '${entries.length}',
-        track: localPath,
+        track: stableTrackId ?? PlaybackBookmarkStore.trackKey(localPath),
         label: label,
         positionMs: (position * 1000).round(),
         endMs: end == null ? null : (end * 1000).round()));
@@ -89,18 +101,28 @@ class _BookmarkPlayback extends ChangeNotifier implements PlaybackService {
 }
 
 void main() {
-  late PlaybackBookmarkStore store;
+  late _MemoryBookmarks store;
   late _BookmarkPlayback service;
   setUp(() async {
     store = _MemoryBookmarks();
     service = _BookmarkPlayback();
     await store.add(
-        localPath: service.nowPlaying!.path, label: 'Opening', position: 7);
+        localPath: service.nowPlaying!.path,
+        stableTrackId: service.nowPlaying!.stableTrackId,
+        label: 'Opening',
+        position: 7);
     await store.add(
         localPath: service.nowPlaying!.path,
+        stableTrackId: service.nowPlaying!.stableTrackId,
         label: 'Chorus',
         position: 20,
         end: 40);
+    final other = CategoryTestAudio('other-bookmark-track');
+    await store.add(
+        localPath: other.path,
+        stableTrackId: other.stableTrackId,
+        label: 'Other track bookmark',
+        position: 12);
   });
   tearDown(() => service.dispose());
 
@@ -111,6 +133,7 @@ void main() {
         home: Scaffold(
             body: PlaybackBookmarksDialog(service: service, store: store))));
     await tester.pumpAndSettle();
+    expect(find.text('Other track bookmark'), findsNothing);
     await tester.tap(find.text('Chorus'));
     expect(service.segmentLoop.enabled, isTrue);
     expect(service.segmentLoop.end, 40);
@@ -121,10 +144,16 @@ void main() {
     await tester.enterText(find.byType(TextField), 'Named position');
     await tester.runAsync(() async {
       await tester.tap(find.byKey(const ValueKey('bookmark-save-position')));
-      await store.forTrack(service.nowPlaying!.path);
+      await store.forTrack(service.nowPlaying!.path,
+          stableTrackId: service.nowPlaying!.stableTrackId);
     });
     await tester.pumpAndSettle();
     expect(find.text('Named position'), findsOneWidget);
+    expect(
+        store.entries
+            .singleWhere((item) => item.label == 'Named position')
+            .track,
+        service.nowPlaying!.stableTrackId);
     await tester.tap(find.byType(PopupMenuButton<String>).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('重命名书签'));

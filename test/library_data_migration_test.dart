@@ -15,8 +15,11 @@ void main() {
   Future<dynamic> read(String name) async =>
       jsonDecode(await File(p.join(data.path, name)).readAsString());
   setUp(() async {
-    final base = Directory(
-        Platform.environment['DAN_PLAYER_DATA_DIR'] ?? 'build/qa-migration');
+    // File.absolute preserves mixed separators on Windows; canonicalize the
+    // fixture root to match the path-mapping contract used by the app.
+    final base = Directory(p.normalize(p.absolute(
+        Platform.environment['DAN_PLAYER_DATA_DIR'] ??
+            p.join('build', 'qa-migration'))));
     await base.create(recursive: true);
     root = await base.createTemp('mapping-');
     data = await Directory(p.join(root.path, 'data')).create();
@@ -221,6 +224,8 @@ void main() {
     final sample = LibraryPathMapping(r'C:\Music', r'D:\Albums');
     expect(sample.apply(r'C:\Musical\track.flac'), r'C:\Musical\track.flac');
     expect(sample.apply(r'c:\MUSIC\track.flac'), r'D:\Albums\track.flac');
+    expect(
+        sample.apply(r'c:/MUSIC\album/../track.flac'), r'D:\Albums\track.flac');
     expect(() => LibraryPathMapping(r'C:\Music', r'C:\Music\new'),
         throwsFormatException);
   });

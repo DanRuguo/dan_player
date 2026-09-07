@@ -180,7 +180,8 @@ void _checkActionTheme(WidgetTester tester, Finder finder) {
       find.descendant(of: finder, matching: find.byType(IconButton));
   final button = tester.widget<IconButton>(iconButton);
   final scheme = _scheme(tester, finder);
-  expect(button.style!.foregroundColor!.resolve({}), scheme.onSurfaceVariant);
+  expect(button.style!.foregroundColor!.resolve({}), scheme.primary,
+      reason: 'action icons follow the same live accent as player controls');
   expect(button.style!.foregroundColor!.resolve({WidgetState.disabled}),
       scheme.onSurface.withValues(alpha: .38));
   expect(tester.getSize(finder).width, 44);

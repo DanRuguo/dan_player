@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 const _longFolder =
     r'J:\Music\ゲーム音楽\2026年・大切にしている音楽コレクション\as9-nine- ARTEISIA オリジナルサウンドトラック\結想は花となる・ハイレゾ音源';
+final _windows = TargetPlatformVariant.only(TargetPlatform.windows);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -131,7 +132,7 @@ void main() {
     expect(find.byTooltip(ui('移除文件夹')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await capture(tester, state.capture, 'folders-single-light');
-  });
+  }, variant: _windows);
 
   testWidgets('draft add and removal do not save and cancel discards edits',
       (tester) async {
@@ -158,7 +159,7 @@ void main() {
     expect(cancelled, 1);
     expect(saved, 0);
     expect(find.byType(LibraryFoldersDialog), findsNothing);
-  });
+  }, variant: _windows);
 
   testWidgets('copy uses the original full path and confirm submits explicitly',
       (tester) async {
@@ -183,7 +184,7 @@ void main() {
     await tester.pump();
     expect(confirmed, 1);
     expect(tester.takeException(), isNull);
-  });
+  }, variant: _windows);
 
   testWidgets('many folders scroll while all save actions remain reachable',
       (tester) async {
@@ -201,7 +202,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(ui('确定')).hitTestable(), findsOneWidget);
     expect(tester.takeException(), isNull);
-  });
+  }, variant: _windows);
 
   for (final size in [const Size(320, 640), const Size(507, 320)]) {
     testWidgets('small window with 200 percent text stays usable at $size',
@@ -215,7 +216,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await capture(tester, state.capture,
           'folders-${size.width.toInt()}x${size.height.toInt()}-200pct');
-    });
+    }, variant: _windows);
   }
 
   testWidgets('scanning locks actions until the owner restores editing',
@@ -230,5 +231,24 @@ void main() {
         tester.widget<TextButton>(find.byType(TextButton)).onPressed, isNull);
     expect(find.byTooltip(ui('移除文件夹')), findsNothing);
     expect(tester.takeException(), isNull);
-  });
+  }, variant: _windows);
+
+  testWidgets('English narrow folder dialog supports 200 percent text',
+      (tester) async {
+    uiLanguage.value = UiLanguage.en;
+    final state = await mount(tester, size: const Size(480, 640), scale: 2);
+    for (final action in ['添加文件夹', '取消', '确定']) {
+      expect(ui(action), isNot(action), reason: 'Use translated controls.');
+      expect(find.text(ui(action)).hitTestable(), findsOneWidget);
+    }
+    for (final text in ['管理文件夹', '添加音乐所在的文件夹，确认后刷新曲库。', '移除仅取消收录，不会删除音乐文件。']) {
+      expect(ui(text), isNot(text), reason: 'Use translated folder guidance.');
+      expect(find.text(ui(text)), findsOneWidget);
+    }
+    expect(tester.widget<SelectableText>(find.byType(SelectableText)).data,
+        _longFolder,
+        reason: 'Changing the UI language must not rewrite media paths.');
+    expect(tester.takeException(), isNull);
+    await capture(tester, state.capture, 'folders-en-480x640-200pct');
+  }, variant: _windows);
 }

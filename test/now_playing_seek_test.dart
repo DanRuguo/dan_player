@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/rectangle_progress_indicator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -159,7 +160,7 @@ void main() {
     expect(_painter(tester).highlightBoundary!.value, 0);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(AppMotion.quick);
     expect(fixture.seeks, [90, 95]);
     expect(_painter(tester).highlightBoundary!.value, 1);
     _seekFocus(tester).focusNode!.unfocus();
@@ -192,7 +193,7 @@ void main() {
     await gesture.moveTo(bar.topLeft + const Offset(330, 40));
     await gesture.moveTo(bar.topLeft + const Offset(301, 40));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(AppMotion.quick);
     expect(_painter(tester).highlightBoundary!.value, 1);
     await gesture.removePointer();
     await tester.pump();
@@ -226,7 +227,7 @@ void main() {
     await gesture.addPointer(location: bar.topLeft + const Offset(40, 40));
     await gesture.moveTo(bar.topLeft + const Offset(41, 40));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(AppMotion.quick);
     expect(_painter(tester).highlightBoundary!.value, 1);
     fixture.positions.add(60);
     await tester.pump();
