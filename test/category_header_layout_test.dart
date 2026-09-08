@@ -80,7 +80,9 @@ void main() {
             .ancestor(of: selector, matching: find.byType(Scrollbar))
             .first);
 
-        expect(find.byType(ChoiceChip), findsNWidgets(7));
+        expect(find.byType(ChoiceChip), findsNWidgets(8));
+        expect(find.byKey(const ValueKey('category-kind-personal')),
+            findsOneWidget);
         expect(selectorRect.width, lessThanOrEqualTo(width - 64));
         expect(selectorRect.height, greaterThanOrEqualTo(44));
         expect(search.left, greaterThanOrEqualTo(24));

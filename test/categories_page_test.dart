@@ -163,7 +163,7 @@ void main() {
   });
 
   for (final width in [1000.0, 1440.0]) {
-    testWidgets('desktop page exposes seven single-row chips at width $width',
+    testWidgets('desktop page exposes eight single-row chips at width $width',
         (tester) async {
       _viewport(tester, width: width);
       await tester.pumpWidget(_host(const CategoriesPage(audios: [])));
