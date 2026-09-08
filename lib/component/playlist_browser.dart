@@ -1252,7 +1252,13 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                       : compact && folder != null
                           ? scheme.surfaceContainerLow
                           : Colors.transparent,
-              borderRadius: AppShape.controlRadius,
+              shape: RoundedRectangleBorder(
+                borderRadius: AppShape.controlRadius,
+                side: _selecting && _isSelected(row)
+                    ? BorderSide(color: scheme.primary, width: 2)
+                    : BorderSide.none,
+              ),
+              borderOnForeground: true,
               child: Semantics(
                 key: ValueKey('playlist-select-${row.id}'),
                 selected: _selecting ? _isSelected(row) : null,
