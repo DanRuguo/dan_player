@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:flutter/gestures.dart';
+import 'package:dan_player/component/audio_tile.dart';
 import 'dart:ui' as drawing;
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/personal_library_dialog.dart';
@@ -27,7 +29,13 @@ import 'support/music_category_fixtures.dart';
 class _Personal extends PersonalLibrary {
   _Personal() : super(File('unused-test-store'));
   @override
-  Future<Map<String, PersonalTrack>> snapshot() async => {};
+  Future<Map<String, PersonalTrack>> snapshot() async => {
+        for (final name in ['Canon', 'Canon · 卡农 · カノン · 캐논', 'Good Time'])
+          CategoryTestAudio(name).stableTrackId: PersonalTrack(
+              rating: name == 'Good Time' ? null : 4,
+              tags: ['Night', 'Chorus', 'Favorite', 'Piano', 'Music'],
+              modifiedAtUtc: DateTime.utc(2026, 9, 9))
+      };
 }
 
 class _Covers extends CategoryCoverStore {
@@ -250,14 +258,14 @@ void main() {
         expect(tester.widget<ChoiceChip>(albums).selected, isTrue);
         expect(find.byType(BookmarkLibraryDialog), findsNothing);
         expect(tester.takeException(), isNull);
-        await tester.pumpWidget(host(PersonalLibraryDialog(
-            embedded: true,
-            store: _Personal(),
-            audios: [
-              CategoryTestAudio('Canon · 卡农 · カノン · 캐논'),
-              CategoryTestAudio('Good Time')
-            ])));
+        await tester.pumpWidget(host(
+            PersonalLibraryDialog(embedded: true, store: _Personal(), audios: [
+          CategoryTestAudio('Canon · 卡农 · カノン · 캐논'),
+          CategoryTestAudio('Good Time'),
+          CategoryTestAudio('Untouched song')
+        ])));
         await tester.pumpAndSettle();
+        expect(find.text('Untouched song'), findsNothing);
         final heights = [
           for (final key in [
             'personal-days-0',
@@ -269,7 +277,12 @@ void main() {
         ];
         expect(heights.every((h) => (h - heights.first).abs() < .1), isTrue);
         expect(tester.takeException(), isNull);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(find.byType(AudioTile).first));
+        await tester.pumpAndSettle();
         await capture(tester, captureKey, 'personal-${language.name}-$large');
+        await mouse.removePointer();
         await tester.tap(find.byKey(const ValueKey('personal-rating-menu')));
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('personal-rating-4')), findsOneWidget);
@@ -278,7 +291,8 @@ void main() {
             tester, captureKey, 'rating-menu-${language.name}-$large');
         await tester.tap(find.byKey(const ValueKey('personal-rating-4')));
         await tester.pumpAndSettle();
-        expect(find.text(ui('没有符合条件的歌曲')), findsOneWidget);
+        expect(find.text('Canon · 卡农 · カノン · 캐논'), findsOneWidget);
+        expect(find.text('Good Time'), findsNothing);
         await tester.tap(find.byKey(const ValueKey('personal-date-range')));
         await tester.pumpAndSettle();
         final dialog = find.byKey(const ValueKey('app-date-range-dialog'));

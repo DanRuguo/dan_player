@@ -381,6 +381,10 @@ void main() {
     expect(
         h.controller.hoverStateFor('folder'), PlaylistDropHoverState.pending);
     expect(find.text('稍作停留移入'), findsOneWidget);
+    await gesture.moveTo(Offset(tester.getRect(zone).right + 4, target.dy));
+    await tester.pump();
+    expect(
+        h.controller.hoverStateFor('folder'), PlaylistDropHoverState.pending);
     await tester.pump(const Duration(milliseconds: 499));
     expect(
         h.controller.hoverStateFor('folder'), PlaylistDropHoverState.pending);

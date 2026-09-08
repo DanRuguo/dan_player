@@ -9,6 +9,9 @@ import 'package:dan_player/component/app_date_range_dialog.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/audio_tile.dart';
+import 'package:dan_player/component/audio_artwork.dart';
+import 'package:dan_player/component/app_sort_button.dart';
+import 'package:dan_player/component/bounded_tag_wrap.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/personal_library.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -87,21 +90,61 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
                           Navigator.pop(context, v.trim());
                       })),
               actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(ui('取消'))),
-                FilledButton(
-                    onPressed: () {
-                      if (input.trim().isNotEmpty)
-                        Navigator.pop(context, input.trim());
-                    },
-                    child: Text(ui('确定')))
+                SizedBox(
+                    width: 400,
+                    child: Builder(builder: (context) {
+                      final available =
+                          math.min(400, MediaQuery.sizeOf(context).width - 128);
+                      final delete = original == null
+                          ? null
+                          : TextButton.icon(
+                              onPressed: () => Navigator.pop(context, ''),
+                              icon: const Icon(Symbols.delete),
+                              label: Text(ui('删除')),
+                              style: TextButton.styleFrom(
+                                  foregroundColor:
+                                      Theme.of(context).colorScheme.error));
+                      final actions = Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          alignment: WrapAlignment.end,
+                          children: [
+                            TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: Text(ui('取消'))),
+                            FilledButton(
+                                onPressed: () {
+                                  if (input.trim().isNotEmpty)
+                                    Navigator.pop(context, input.trim());
+                                },
+                                child: Text(ui('确定')))
+                          ]);
+                      if (available <
+                          340 * MediaQuery.textScalerOf(context).scale(14) / 14)
+                        return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (delete != null)
+                                Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: delete),
+                              Align(
+                                  alignment: Alignment.centerRight,
+                                  child: actions)
+                            ]);
+                      return Row(children: [
+                        if (delete != null) delete,
+                        const Spacer(),
+                        actions
+                      ]);
+                    }))
               ],
             ));
     if (!mounted || value == null) return;
     setState(() {
       if (original != null) _draftTags.remove(original);
-      _draftTags.add(value);
+      if (value.isNotEmpty) _draftTags.add(value);
     });
   }
 
@@ -147,6 +190,11 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
                 Wrap(spacing: 8, runSpacing: 8, children: [
                   for (final stars in [0, 1, 2, 3, 4, 5])
                     ChoiceChip(
+                        labelStyle: TextStyle(
+                            color: Theme.of(context).colorScheme.primary),
+                        checkmarkColor: Theme.of(context).colorScheme.primary,
+                        selectedColor:
+                            Theme.of(context).colorScheme.primaryContainer,
                         label: Text(stars == 0 ? ui('未评分') : '★' * stars),
                         selected: !_mixedRating && (_rating ?? 0) == stars,
                         onSelected: !_ready
@@ -170,10 +218,7 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
                         _EditableTagPill(
                             key: ValueKey(tag),
                             label: tag,
-                            onEdit: !_ready ? null : () => _editTag(tag),
-                            onDelete: !_ready
-                                ? null
-                                : () => setState(() => _draftTags.remove(tag))),
+                            onEdit: !_ready ? null : () => _editTag(tag)),
                       OutlinedButton.icon(
                           onPressed: !_ready || _draftTags.length >= 32
                               ? null
@@ -211,48 +256,21 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
   }
 }
 
-class _EditableTagPill extends StatefulWidget {
-  const _EditableTagPill(
-      {super.key, required this.label, this.onEdit, this.onDelete});
+class _EditableTagPill extends StatelessWidget {
+  const _EditableTagPill({super.key, required this.label, this.onEdit});
   final String label;
-  final VoidCallback? onEdit, onDelete;
+  final VoidCallback? onEdit;
   @override
-  State<_EditableTagPill> createState() => _EditableTagPillState();
-}
-
-class _EditableTagPillState extends State<_EditableTagPill> {
-  bool _hover = false, _focus = false;
-  @override
-  Widget build(BuildContext context) => MouseRegion(
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: Focus(
-            onFocusChange: (v) => setState(() => _focus = v),
-            child: Tooltip(
-                message: widget.label,
-                child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 300),
-                    child: InputChip(
-                      shape: const StadiumBorder(),
-                      label: Text(widget.label,
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                      onPressed: widget.onEdit,
-                      onDeleted: widget.onDelete,
-                      deleteButtonTooltipMessage: ui('删除标签'),
-                      deleteIcon: Opacity(
-                          opacity: _hover ||
-                                  _focus ||
-                                  Theme.of(context).platform ==
-                                      TargetPlatform.android ||
-                                  Theme.of(context).platform ==
-                                      TargetPlatform.iOS
-                              ? 1
-                              : 0,
-                          child: Icon(Symbols.close,
-                              size: 16,
-                              color: Theme.of(context).colorScheme.primary)),
-                    )))),
-      );
+  Widget build(BuildContext context) => Tooltip(
+      message: label,
+      child: OutlinedButton(
+        onPressed: onEdit,
+        style: OutlinedButton.styleFrom(
+            shape: const StadiumBorder(),
+            foregroundColor: Theme.of(context).colorScheme.primary,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
+        child: Text(label, textAlign: TextAlign.center),
+      ));
 }
 
 Future<void> showPersonalLibrary(BuildContext context) => showAppDialog<void>(
@@ -273,6 +291,8 @@ class _PersonalLibraryDialogState extends State<PersonalLibraryDialog> {
   Map<String, PersonalTrack>? _data;
   String? _error;
   int _stars = 0, _days = 0;
+  String _sort = 'date';
+  SortDirection _direction = SortDirection.descending;
   int _loadRevision = 0;
   DateTimeRange? _range;
   final _tag = TextEditingController();
@@ -332,25 +352,33 @@ class _PersonalLibraryDialogState extends State<PersonalLibraryDialog> {
     final until = _range == null
         ? now
         : DateTime(_range!.end.year, _range!.end.month, _range!.end.day + 1);
-    final audios = (widget.audios ?? AudioLibrary.instance.audioCollection)
-        .where((a) {
+    final audios =
+        (widget.audios ?? AudioLibrary.instance.audioCollection).where((a) {
       final item = _data?[a.stableTrackId] ?? const PersonalTrack();
-      return (_stars == 0 || (item.rating != null && item.rating! >= _stars)) &&
+      return (item.rating != null || item.tags.isNotEmpty) &&
+          (_stars == 0 || (item.rating != null && item.rating! >= _stars)) &&
           (_tag.text.trim().isEmpty ||
               item.tags.any((t) =>
                   t.toLowerCase().contains(_tag.text.trim().toLowerCase()))) &&
           (from == null ||
-              (item.firstAddedAtUtc != null &&
-                  !item.firstAddedAtUtc!.isBefore(from) &&
-                  item.firstAddedAtUtc!.isBefore(until)));
+              (item.modifiedAtUtc != null &&
+                  !item.modifiedAtUtc!.isBefore(from) &&
+                  item.modifiedAtUtc!.isBefore(until)));
     }).toList()
-      ..sort((a, b) =>
-          (_data?[b.stableTrackId]?.firstAddedAtUtc?.millisecondsSinceEpoch ??
-                  -1)
-              .compareTo(_data?[a.stableTrackId]
-                      ?.firstAddedAtUtc
-                      ?.millisecondsSinceEpoch ??
-                  -1));
+          ..sort((a, b) {
+            final x = _data?[a.stableTrackId], y = _data?[b.stableTrackId];
+            final order = switch (_sort) {
+              'name' => a.displayTitle
+                  .toLowerCase()
+                  .compareTo(b.displayTitle.toLowerCase()),
+              'rating' => (x?.rating ?? 0).compareTo(y?.rating ?? 0),
+              _ => (x?.modifiedAtUtc?.millisecondsSinceEpoch ?? -1)
+                  .compareTo(y?.modifiedAtUtc?.millisecondsSinceEpoch ?? -1),
+            };
+            return order == 0
+                ? a.displayTitle.compareTo(b.displayTitle)
+                : (_direction == SortDirection.ascending ? order : -order);
+          });
     final rating = MenuAnchor(
       style: const MenuStyle(shape: WidgetStatePropertyAll(AppShape.control)),
       menuChildren: [
@@ -416,6 +444,26 @@ class _PersonalLibraryDialogState extends State<PersonalLibraryDialog> {
                               child: AppToolbarLabel(
                                   label: ui('自选区间'), icon: Symbols.date_range),
                             ),
+                            AppSortButton<String>(
+                                value: _sort,
+                                direction: _direction,
+                                onChanged: (v) => setState(() => _sort = v),
+                                onDirectionChanged: (v) =>
+                                    setState(() => _direction = v),
+                                options: [
+                                  AppSortOption(
+                                      value: 'date',
+                                      label: ui('评定日期'),
+                                      icon: Symbols.schedule),
+                                  AppSortOption(
+                                      value: 'name',
+                                      label: ui('名称'),
+                                      icon: Symbols.sort_by_alpha),
+                                  AppSortOption(
+                                      value: 'rating',
+                                      label: ui('评分'),
+                                      icon: Symbols.star),
+                                ]),
                           ]),
                       if (_range != null)
                         Padding(
@@ -478,41 +526,18 @@ class _PersonalLibraryDialogState extends State<PersonalLibraryDialog> {
                               itemBuilder: (context, i) {
                                 final item = _data?[audios[i].stableTrackId] ??
                                     const PersonalTrack();
-                                final details = [
-                                  item.rating == null
-                                      ? ui('未评分')
-                                      : '★' * item.rating!,
-                                  if (item.tags.isNotEmpty)
-                                    item.tags.join(', '),
-                                  item.firstAddedAtUtc == null
-                                      ? ui('创建时间不可用')
-                                      : MaterialLocalizations.of(context)
-                                          .formatCompactDate(
-                                              item.firstAddedAtUtc!.toLocal()),
-                                  if (item.addedFromCreation) ui('文件创建时间（兜底）'),
-                                ];
                                 return Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          AudioTile(
-                                              playlist: audios, audioIndex: i),
-                                          Padding(
-                                              padding:
-                                                  const EdgeInsets.fromLTRB(
-                                                      72, 0, 16, 6),
-                                              child: Text(details.join(' · '),
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .bodySmall
-                                                      ?.copyWith(
-                                                          color: Theme.of(
-                                                                  context)
-                                                              .colorScheme
-                                                              .onSurfaceVariant))),
-                                        ]));
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Material(
+                                        color: Colors.transparent,
+                                        borderRadius: AppShape.controlRadius,
+                                        clipBehavior: Clip.antiAlias,
+                                        child: AudioTile(
+                                            playlist: audios,
+                                            audioIndex: i,
+                                            content: _PersonalSongContent(
+                                                audio: audios[i],
+                                                item: item))));
                               })),
                 ]));
     if (widget.embedded) return content;
@@ -524,5 +549,65 @@ class _PersonalLibraryDialogState extends State<PersonalLibraryDialog> {
             onPressed: () => Navigator.pop(context), child: Text(ui('关闭')))
       ],
     );
+  }
+}
+
+class _PersonalSongContent extends StatelessWidget {
+  const _PersonalSongContent({required this.audio, required this.item});
+  final Audio audio;
+  final PersonalTrack item;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context), scheme = Theme.of(context).colorScheme;
+    final rating = Text(item.rating == null ? ui('未评分') : '★' * item.rating!,
+        style: theme.textTheme.bodyMedium?.copyWith(color: scheme.primary));
+    final date = Text(
+        item.modifiedAtUtc == null
+            ? ui('评定日期未知')
+            : MaterialLocalizations.of(context)
+                .formatCompactDate(item.modifiedAtUtc!.toLocal()),
+        style: theme.textTheme.bodySmall);
+    final title = Text(audio.displayTitle,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodyLarge);
+    return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        child: LayoutBuilder(builder: (context, constraints) {
+          final wide = constraints.maxWidth >=
+              760 * MediaQuery.textScalerOf(context).scale(14) / 14;
+          final tags = BoundedTagWrap(tags: item.tags);
+          return Row(children: [
+            ClipRRect(
+                borderRadius: AppShape.smallRadius,
+                child: AudioArtwork(
+                    audio: audio,
+                    size: 48,
+                    placeholder: Icon(Symbols.audio_file,
+                        size: 48, color: scheme.primary))),
+            const SizedBox(width: 16),
+            if (wide) ...[
+              Expanded(flex: 3, child: title),
+              const SizedBox(width: 16),
+              SizedBox(width: 100, child: rating),
+              const SizedBox(width: 16),
+              Expanded(flex: 4, child: tags),
+              const SizedBox(width: 16),
+              SizedBox(width: 120, child: date)
+            ] else
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    title,
+                    const SizedBox(height: 6),
+                    Wrap(spacing: 16, runSpacing: 6, children: [rating, date]),
+                    if (item.tags.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      tags
+                    ]
+                  ]))
+          ]);
+        }));
   }
 }

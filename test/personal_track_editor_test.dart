@@ -76,9 +76,9 @@ void main() {
       await tester.enterText(find.byType(TextFormField), 'Chorus');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
-      final chip =
-          tester.widget<InputChip>(find.widgetWithText(InputChip, 'Chorus'));
-      chip.onDeleted!();
+      await tester.tap(find.text('Chorus'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除'));
       await tester.pumpAndSettle();
       expect(find.text('Chorus'), findsNothing);
       await tester.tap(find.text('保存'));

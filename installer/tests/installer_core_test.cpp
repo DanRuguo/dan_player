@@ -163,7 +163,45 @@ int wmain(int argc, wchar_t** argv) {
     transaction.Begin(f.manifest, f.manifest_path);
     f.SimulateInno(transaction);
     transaction.Commit(f.manifest, f.manifest_path);
-    Check(!transaction.pending() && fs::exists(transaction.backup_directory() / L"journal"), "commit/backup retention");
+    Check(!transaction.pending() && !fs::exists(transaction.backup_directory()), "successful install left a backup");
+  });
+  run("repeated upgrades replace files without retained backups", [&] {
+    Fixture f(base / L"repeat"); f.Old();
+    for (int i = 0; i < 3; ++i) {
+      Transaction transaction(f.context, f.registry);
+      transaction.Begin(f.manifest, f.manifest_path); f.SimulateInno(transaction);
+      transaction.Commit(f.manifest, f.manifest_path);
+      Check(!fs::exists(transaction.backup_directory()), "upgrade left backup directory");
+      Check(Read(f.context.target / L"keep-me.txt") == "unrelated user file must survive", "user file changed");
+    }
+    for (const auto& entry : fs::directory_iterator(f.root))
+      Check(entry.path().filename().wstring().find(L".retained-") == std::wstring::npos, "rotated backup created");
+  });
+  run("previous completed backup is cleaned instead of archived", [&] {
+    Fixture f(base / L"old-backup"); f.Old();
+    {
+      Transaction prior(f.context, f.registry);
+      prior.Begin(f.manifest, f.manifest_path); f.SimulateInno(prior);
+      Write(prior.backup_directory() / L"state", "committed");
+    }
+    Transaction transaction(f.context, f.registry);
+    transaction.Begin(f.manifest, f.manifest_path); f.SimulateInno(transaction);
+    transaction.Commit(f.manifest, f.manifest_path);
+    Check(!fs::exists(transaction.backup_directory()), "previous backup retained");
+  });
+  run("cleanup preserves unexpected recovery files", [&] {
+    Fixture f(base / L"cleanup-unknown");
+    {
+      Transaction prior(f.context, f.registry);
+      prior.Begin(f.manifest, f.manifest_path); f.SimulateInno(prior);
+      Write(prior.backup_directory() / L"personal.txt", "preserve");
+      prior.Commit(f.manifest, f.manifest_path);
+      Check(!prior.pending(), "cleanup failure undid commit");
+      Check(Read(prior.backup_directory() / L"personal.txt") == "preserve", "unknown file deleted");
+    }
+    Transaction retry(f.context, f.registry);
+    Reject([&] { retry.Begin(f.manifest, f.manifest_path); });
+    Check(Read(retry.backup_directory() / L"personal.txt") == "preserve", "retry deleted unknown file");
   });
   run("upgrade rollback restores files shortcuts and registration", [&] {
     Fixture f(base / L"upgrade"); f.Old();

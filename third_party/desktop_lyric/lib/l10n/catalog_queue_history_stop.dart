@@ -1,4 +1,9 @@
 const Map<String, List<String>> catalogQueueHistoryStop = {
+  '时间点': ['Time point', '時刻', '시간 지점'],
+  '时间段': ['Time range', '時間範囲', '시간 구간'],
+  '保存所选时间': ['Save selected time', '選択した時間を保存', '선택한 시간 저장'],
+  '评定日期': ['Last rated or tagged', '評価・タグの更新日', '평점·태그 수정일'],
+  '评定日期未知': ['Update date unknown', '更新日不明', '수정일 알 수 없음'],
   "评分和标签仅保存在播放器中，不修改音乐文件。": [
     "Ratings and tags are saved only in the player; music files are unchanged.",
     "評価とタグはプレーヤー内にのみ保存され、音楽ファイルは変更されません。",

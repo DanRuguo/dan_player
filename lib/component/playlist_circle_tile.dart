@@ -28,6 +28,7 @@ class PlaylistCircleGeometry {
 class PlaylistCircleTile extends StatelessWidget {
   const PlaylistCircleTile({
     super.key,
+    this.showTooltip = true,
     required this.entryId,
     required this.title,
     required this.details,
@@ -41,6 +42,7 @@ class PlaylistCircleTile extends StatelessWidget {
   static const minimumWidth = 208.0;
 
   final String entryId;
+  final bool showTooltip;
   final String title;
   final String details;
   final Widget Function(double size) artworkBuilder;
@@ -92,11 +94,18 @@ class PlaylistCircleTile extends StatelessWidget {
           ),
         ]);
         return Column(children: [
-          Tooltip(
-            message: '$title\n$details',
-            triggerMode: TooltipTriggerMode.manual,
-            child: contentWrapper?.call(identity) ?? identity,
-          ),
+          contentWrapper?.call(TooltipVisibility(
+                  visible: showTooltip,
+                  child: Tooltip(
+                      message: '$title\n$details',
+                      triggerMode: TooltipTriggerMode.manual,
+                      child: identity))) ??
+              TooltipVisibility(
+                  visible: showTooltip,
+                  child: Tooltip(
+                      message: '$title\n$details',
+                      triggerMode: TooltipTriggerMode.manual,
+                      child: identity)),
           const SizedBox(height: 8),
           SizedBox(height: 48, child: actions),
         ]);

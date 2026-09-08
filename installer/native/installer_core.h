@@ -106,7 +106,7 @@ LogoFrame EvaluateLogoFrame(uint64_t elapsed_ms, bool reduce_motion);
 
 // The engine never extracts archives. Inno writes its embedded [Files] entries
 // between Begin and Commit; this journal is the explicit rollback supplement.
-// Backups are retained after failure/cancellation/crash and after success.
+// Temporary backups support failure recovery and are removed after success.
 class Transaction {
  public:
   Transaction(Context context, RegistryStore& registry,
@@ -126,6 +126,7 @@ class Transaction {
  private:
   void CheckDestination(const fs::path& path) const;
   void LoadJournal();
+  void CleanupCompletedBackup();
   void WriteJournal();
   void WriteState(const std::string& state);
   void Inject(const char* stage, size_t index) const;

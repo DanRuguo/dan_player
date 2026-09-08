@@ -11,13 +11,19 @@ class PersonalTrack {
       {this.rating,
       this.tags = const [],
       this.firstAddedAtUtc,
+      this.modifiedAtUtc,
       this.addedFromCreation = false});
   final int? rating;
   final List<String> tags;
   final DateTime? firstAddedAtUtc;
+  final DateTime? modifiedAtUtc;
   final bool addedFromCreation;
   factory PersonalTrack.decode(Map value) => PersonalTrack(
       rating: value['rating'] as int?,
+      modifiedAtUtc: value['modified'] == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(value['modified'] as int,
+              isUtc: true),
       addedFromCreation: value['addedFromCreation'] == true,
       tags: List<String>.unmodifiable((value['tags'] as List?) ?? const []),
       firstAddedAtUtc: value['added'] == null
@@ -50,6 +56,10 @@ class PersonalLibrary {
         throw const FormatException('Invalid personal track');
       final item = entry.value as Map;
       final rating = item['rating'], tags = item['tags'], added = item['added'];
+      final modified = item['modified'];
+      if (modified != null &&
+          (modified is! int || modified < 0 || modified > 8640000000000000))
+        throw const FormatException('Invalid personal modification date');
       if ((item['addedFromCreation'] != null &&
               item['addedFromCreation'] is! bool) ||
           (rating != null && (rating is! int || rating < 1 || rating > 5)) ||
@@ -121,11 +131,17 @@ class PersonalLibrary {
           root.putIfAbsent('tracks', () => <String, dynamic>{}) as Map;
       for (final id in ids) {
         final item = Map<String, dynamic>.from(tracks[id] as Map? ?? {});
+        final oldRating = item['rating'];
+        final oldTags = Set<String>.from((item['tags'] as List?) ?? []);
         if (changeRating) item['rating'] = rating;
         if (changeTags)
           item['tags'] = {...((item['tags'] as List?) ?? []), ...addTags}
               .where((t) => !removeTags.contains(t))
               .toList();
+        if (oldRating != item['rating'] ||
+            !setEquals(
+                oldTags, Set<String>.from((item['tags'] as List?) ?? [])))
+          item['modified'] = DateTime.now().toUtc().millisecondsSinceEpoch;
         tracks[id] = item;
       }
     });

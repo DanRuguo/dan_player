@@ -111,6 +111,7 @@ class PlaylistReorderController extends ChangeNotifier {
     final session = _session;
     if (session == null || _surface == null) return;
     session.started = true;
+    Tooltip.dismissAllToolTips();
     session.focusNode.requestFocus();
     _updateHover();
     _notify();
@@ -289,6 +290,12 @@ class PlaylistReorderController extends ChangeNotifier {
   }
 
   _PlaylistReorderDropZoneState? _zoneAt(Offset position) {
+    final previous = _hoveredZone;
+    final rect = previous?._visibleRect;
+    if (previous != null &&
+        rect != null &&
+        _hoverState != PlaylistDropHoverState.rejected &&
+        rect.inflate(8).contains(position)) return previous;
     _PlaylistReorderDropZoneState? best;
     var smallestArea = double.infinity;
     for (final zone in _zones) {
@@ -979,7 +986,9 @@ class _PlaylistReorderDropZoneState extends State<PlaylistReorderDropZone> {
                     : state == PlaylistDropHoverState.ready
                         ? .15
                         : .07),
-            border: Border.all(color: color, width: 1.5),
+            border: Border.all(
+                color: color,
+                width: state == PlaylistDropHoverState.ready ? 2.5 : 1.5),
             borderRadius: AppShape.controlRadius,
           ),
           child: child,

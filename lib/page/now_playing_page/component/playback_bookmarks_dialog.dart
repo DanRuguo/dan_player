@@ -29,6 +29,9 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
   List<PlaybackBookmark> _items = [];
   bool _busy = true;
   String? _error;
+  bool _selectRange = false;
+  double _point = 0;
+  RangeValues _range = const RangeValues(0, 1);
 
   static String _time(double seconds) =>
       Duration(milliseconds: (seconds * 1000).round()).toStringHMMSS();
@@ -41,6 +44,12 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
   @override
   void initState() {
     super.initState();
+    final length = widget.service.length;
+    if (length.isFinite && length > 0) {
+      _point = widget.service.position.clamp(0, length).toDouble();
+      final start = _point.clamp(0, (length - 1).clamp(0, length)).toDouble();
+      _range = RangeValues(start, (start + 10).clamp(start, length).toDouble());
+    }
     _load();
   }
 
@@ -86,17 +95,22 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
     }
   }
 
-  Future<void> _save({bool segment = false}) async {
+  Future<void> _save(
+      {bool segment = false,
+      double? selectedPosition,
+      double? selectedEnd}) async {
     if (!_available) return;
     final service = widget.service;
     final loop = service.segmentLoop;
-    final position = segment ? loop.start : service.position;
-    final end = segment ? loop.end : null;
+    final position =
+        selectedPosition ?? (segment ? loop.start : service.position);
+    final end = selectedEnd ?? (segment ? loop.end : null);
     if (position == null ||
         !position.isFinite ||
         position < 0 ||
         position >= service.length ||
-        (segment && (!loop.hasRange || end! > service.length))) {
+        (end != null &&
+            (!end.isFinite || end > service.length || end - position < 1))) {
       return;
     }
     final label = _name.text.trim().isEmpty
@@ -168,6 +182,57 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                             ? '保存喜欢的位置或 A-B 片段，下次打开这首歌仍可使用。'
                             : '回到这首本地歌曲后，即可跳转或保存书签。')),
                         const SizedBox(height: 16),
+                        Wrap(spacing: 8, runSpacing: 8, children: [
+                          ChoiceChip(
+                              label: Text(ui('时间点')),
+                              selected: !_selectRange,
+                              labelStyle: TextStyle(color: scheme.primary),
+                              checkmarkColor: scheme.primary,
+                              onSelected: canSave
+                                  ? (_) => setState(() => _selectRange = false)
+                                  : null),
+                          ChoiceChip(
+                              label: Text(ui('时间段')),
+                              selected: _selectRange,
+                              labelStyle: TextStyle(color: scheme.primary),
+                              checkmarkColor: scheme.primary,
+                              onSelected: canSave
+                                  ? (_) => setState(() => _selectRange = true)
+                                  : null),
+                        ]),
+                        const SizedBox(height: 8),
+                        Text(
+                            _selectRange
+                                ? '${_time(_range.start)} — ${_time(_range.end)}'
+                                : _time(_point),
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(color: scheme.primary)),
+                        if (service.length.isFinite && service.length > 0)
+                          _selectRange
+                              ? RangeSlider(
+                                  key: const ValueKey('bookmark-range-picker'),
+                                  min: 0,
+                                  max: service.length,
+                                  values: RangeValues(
+                                      _range.start.clamp(0, service.length),
+                                      _range.end.clamp(0, service.length)),
+                                  labels: RangeLabels(
+                                      _time(_range.start), _time(_range.end)),
+                                  onChanged: canSave
+                                      ? (v) => setState(() => _range = v)
+                                      : null)
+                              : Slider(
+                                  key: const ValueKey('bookmark-time-picker'),
+                                  min: 0,
+                                  max: service.length,
+                                  value: _point.clamp(0, service.length),
+                                  label: _time(_point),
+                                  onChanged: canSave
+                                      ? (v) => setState(() => _point = v)
+                                      : null),
+                        const SizedBox(height: 8),
                         TextField(
                             controller: _name,
                             enabled: canSave,
@@ -178,9 +243,29 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                                     borderRadius:
                                         BorderRadius.all(Radius.circular(14))),
                                 counterText: ''),
-                            onSubmitted: canSave ? (_) => _save() : null),
+                            onSubmitted: canSave
+                                ? (_) => _save(
+                                    selectedPosition:
+                                        _selectRange ? _range.start : _point,
+                                    selectedEnd:
+                                        _selectRange ? _range.end : null)
+                                : null),
                         const SizedBox(height: 12),
                         Wrap(spacing: 8, runSpacing: 8, children: [
+                          FilledButton.icon(
+                              key: const ValueKey('bookmark-save-selection'),
+                              onPressed: canSave &&
+                                      (_selectRange
+                                          ? _range.end - _range.start >= 1
+                                          : _point < service.length)
+                                  ? () => _save(
+                                      selectedPosition:
+                                          _selectRange ? _range.start : _point,
+                                      selectedEnd:
+                                          _selectRange ? _range.end : null)
+                                  : null,
+                              icon: const Icon(Symbols.bookmark_add),
+                              label: Text(ui('保存所选时间'))),
                           FilledButton.tonalIcon(
                               key: const ValueKey('bookmark-save-position'),
                               onPressed: canSave ? () => _save() : null,

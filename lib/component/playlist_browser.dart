@@ -804,7 +804,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                 );
           final active = candidates.isNotEmpty || rejected.isNotEmpty;
           return Material(
-            animationDuration: Duration.zero,
+            animationDuration: const Duration(milliseconds: 160),
             color: candidates.isNotEmpty
                 ? scheme.primaryContainer.withValues(alpha: 0.5)
                 : rejected.isNotEmpty
@@ -818,7 +818,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                         ? scheme.error
                         : scheme.primary
                     : Colors.transparent,
-                width: 1.5,
+                width: 2,
               ),
             ),
             child: Stack(
@@ -1024,6 +1024,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                   controller.open(position: details.localPosition),
               onLongPress: () => controller.open(),
               child: PlaylistCircleTile(
+                showTooltip: _draggingId == null,
                 key: ValueKey('playlist-circle-${row.id}'),
                 entryId: row.id,
                 title: row.label,

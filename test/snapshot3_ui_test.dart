@@ -210,6 +210,26 @@ void main() {
               image.dispose();
             });
           }
+          if (page == 'personal') {
+            await tester.ensureVisible(find.text('Night'));
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('Night'));
+            await tester.pumpAndSettle();
+            expect(find.text(ui('删除')).hitTestable(), findsOneWidget);
+            expect(find.text(ui('确定')).hitTestable(), findsOneWidget);
+            expect(tester.takeException(), isNull);
+            if (export.isNotEmpty)
+              await tester.runAsync(() async {
+                final image = await (capture.currentContext!.findRenderObject()
+                        as RenderRepaintBoundary)
+                    .toImage();
+                final data =
+                    await image.toByteData(format: drawing.ImageByteFormat.png);
+                await File('$export/edit-tag-${language.name}-$scenario.png')
+                    .writeAsBytes(data!.buffer.asUint8List());
+                image.dispose();
+              });
+          }
           await tester.pumpWidget(const SizedBox());
         });
       }

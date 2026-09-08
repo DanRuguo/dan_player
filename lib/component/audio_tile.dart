@@ -56,6 +56,7 @@ class AudioTile extends StatefulWidget {
     required this.audioIndex,
     required this.playlist,
     this.focus = false,
+    this.content,
     this.leading,
     this.action,
     this.multiSelectController,
@@ -68,6 +69,7 @@ class AudioTile extends StatefulWidget {
   final int audioIndex;
   final List<Audio> playlist;
   final bool focus;
+  final Widget? content;
   final Widget? leading;
   final Widget? action;
   final MultiSelectController? multiSelectController;
@@ -468,272 +470,284 @@ class _AudioTileState extends State<AudioTile> {
               ),
             ),
             child: InkWell(
-              focusColor: Colors.transparent,
-              borderRadius: AppShape.controlRadius,
-              overlayColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.pressed)) {
-                  return scheme.primary.withValues(alpha: 0.12);
-                }
-                if (states.contains(WidgetState.hovered)) {
-                  return scheme.primary.withValues(alpha: 0.06);
-                }
-                if (states.contains(WidgetState.focused)) {
-                  return scheme.primary.withValues(alpha: 0.08);
-                }
-                return null;
-              }),
-              onTap: () {
-                if (controller.isOpen) {
-                  controller.close();
-                  return;
-                }
+                focusColor: Colors.transparent,
+                borderRadius: AppShape.controlRadius,
+                overlayColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.pressed)) {
+                    return scheme.primary.withValues(alpha: 0.12);
+                  }
+                  if (states.contains(WidgetState.hovered)) {
+                    return scheme.primary.withValues(alpha: 0.06);
+                  }
+                  if (states.contains(WidgetState.focused)) {
+                    return scheme.primary.withValues(alpha: 0.08);
+                  }
+                  return null;
+                }),
+                onTap: () {
+                  if (controller.isOpen) {
+                    controller.close();
+                    return;
+                  }
 
-                if (!selecting) {
-                  if (PlayService
-                          .instance.playbackService.resolvingAudioPath.value ==
-                      audio.path) {
-                    return;
-                  }
-                  PlayService.instance.playbackService
-                      .play(widget.audioIndex, widget.playlist);
-                } else {
-                  if (widget.selection != null) {
-                    widget.selection!.onToggle();
-                    return;
-                  }
-                  if (widget.multiSelectController!.selected.contains(audio)) {
-                    widget.multiSelectController!.unselect(audio);
+                  if (!selecting) {
+                    if (PlayService.instance.playbackService.resolvingAudioPath
+                            .value ==
+                        audio.path) {
+                      return;
+                    }
+                    PlayService.instance.playbackService
+                        .play(widget.audioIndex, widget.playlist);
                   } else {
-                    widget.multiSelectController!.select(audio);
+                    if (widget.selection != null) {
+                      widget.selection!.onToggle();
+                      return;
+                    }
+                    if (widget.multiSelectController!.selected
+                        .contains(audio)) {
+                      widget.multiSelectController!.unselect(audio);
+                    } else {
+                      widget.multiSelectController!.select(audio);
+                    }
                   }
-                }
-              },
-              onLongPress: () {
-                if (selecting) {
-                  return;
-                }
-                HapticFeedback.mediumImpact();
-                controller.open();
-              },
-              onSecondaryTapDown: (details) {
-                if (selecting) {
-                  return;
-                }
+                },
+                onLongPress: () {
+                  if (selecting) {
+                    return;
+                  }
+                  HapticFeedback.mediumImpact();
+                  controller.open();
+                },
+                onSecondaryTapDown: (details) {
+                  if (selecting) {
+                    return;
+                  }
 
-                controller.open(position: details.localPosition);
-              },
-              child: compactGrid
-                  ? MusicGridTileBody(
-                      key: const ValueKey('audio-grid-content'),
-                      title: widget.showSourceLabel && sourceLabel != null
-                          ? '${audio.displayTitle}\n${ui("来源：{0}", [
-                                  sourceLabel
-                                ])}'
-                          : audio.displayTitle,
-                      tooltip: '${audio.displayTitle}\n'
-                          '${audio.isOnline ? ui("联网音乐 · {0}", [
-                                  sourceLabel
-                                ]) : ui("本地音乐")}',
-                      color: textColor,
-                      leading: widget.leading,
-                      // Ink's 1px border is part of its layout padding.
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 7),
-                      artwork: _artwork(audio, placeholder),
-                      contentWrapper: (child) => MusicGridReorderScope.wrap(
-                        context,
-                        item: audio,
-                        label: audio.displayTitle,
-                        child: child,
-                      ),
-                      action: widget.action ??
-                          Builder(
-                            builder: (actionContext) => AppIconActionButton(
-                              key: ValueKey('audio-grid-menu-${audio.path}'),
-                              tooltip: ui("歌曲操作"),
-                              onPressed: selecting
-                                  ? null
-                                  : () => _toggleMenuFromAction(
-                                        controller,
-                                        anchorContext,
-                                        actionContext,
-                                      ),
-                              selected: controller.isOpen,
-                              glyph: AppActionGlyph.moreVertical,
+                  controller.open(position: details.localPosition);
+                },
+                child: widget.content ??
+                    (compactGrid
+                        ? MusicGridTileBody(
+                            key: const ValueKey('audio-grid-content'),
+                            title: widget.showSourceLabel && sourceLabel != null
+                                ? '${audio.displayTitle}\n${ui("来源：{0}", [
+                                        sourceLabel
+                                      ])}'
+                                : audio.displayTitle,
+                            tooltip: '${audio.displayTitle}\n'
+                                '${audio.isOnline ? ui("联网音乐 · {0}", [
+                                        sourceLabel
+                                      ]) : ui("本地音乐")}',
+                            color: textColor,
+                            leading: widget.leading,
+                            // Ink's 1px border is part of its layout padding.
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 7),
+                            artwork: _artwork(audio, placeholder),
+                            contentWrapper: (child) =>
+                                MusicGridReorderScope.wrap(
+                              context,
+                              item: audio,
+                              label: audio.displayTitle,
+                              child: child,
                             ),
-                          ),
-                    )
-                  : Padding(
-                      // Ink adds its 1px border to the padding: 48 + 2*(7+1) = 64.
-                      // Larger accessibility text can grow the real row instead of
-                      // overflowing a fixed-height box or being silently scaled down.
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 7),
-                      child: LayoutBuilder(builder: (context, constraints) {
-                        if (widget.columns &&
-                            AudioColumnsScope.fits(
-                                context, constraints.maxWidth)) {
-                          final composer = classifySongComposer(
-                              composerTag: audio.composer,
-                              artist: audio.artist);
-                          return Row(
-                            key: const ValueKey('audio-columns-row'),
-                            children: [
-                              if (widget.leading != null) widget.leading!,
-                              _artwork(audio, placeholder),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                  child: AudioColumnFields(
-                                      audio: audio,
-                                      title: audio.displayTitle,
-                                      composer: composer.value ?? ui("未知作曲家"),
-                                      album: audio.album,
-                                      titleColor: textColor,
-                                      metadataColor: metadataColor)),
-                              const SizedBox(width: 8),
-                              SizedBox(
-                                  width: 64,
-                                  child: Tooltip(
-                                      message: audio.isOnline
-                                          ? ui("{0} · 联网音乐 · {1}",
-                                              [durationText, sourceLabel])
-                                          : durationText,
-                                      child: Align(
-                                          alignment:
-                                              AlignmentDirectional.centerEnd,
-                                          child: durationLabel))),
-                              const SizedBox(width: 8),
-                              widget.action ??
-                                  defaultListAction(
-                                      'audio-columns-menu-${audio.path}'),
-                            ],
-                          );
-                        }
-                        // Measure only the short, static duration, not every title.
-                        // The colour tween reuses this child; no playback/frame-time
-                        // text measurement or extra artwork request is introduced.
-                        final durationMetrics = TextPainter(
-                          text: TextSpan(
-                            text: durationText,
-                            style: DefaultTextStyle.of(context)
-                                .style
-                                .merge(TextStyle(color: metadataColor)),
-                          ),
-                          textDirection: Directionality.of(context),
-                          textScaler: MediaQuery.textScalerOf(context),
-                          maxLines: 1,
-                        )..layout();
-                        final trailingWidth = durationMetrics.width +
-                            (sourceStatus == null ? 0 : 26);
-                        durationMetrics.dispose();
-                        final needsSeparateDetails = constraints.maxWidth <
-                            48 +
-                                16 +
-                                64 +
-                                8 +
-                                trailingWidth +
-                                (compactAction == null ? 0 : 56) +
-                                (widget.leading == null ? 0 : 64);
-                        // Old fixed-extent hosts still own their row height. Do not
-                        // add another line inside a host that cannot grow at all.
-                        final separateDetails = needsSeparateDetails &&
-                            (!constraints.hasBoundedHeight ||
-                                constraints.maxHeight > 64);
-                        return Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                  key: const ValueKey('audio-tile-main-row'),
-                                  children: [
-                                    if (widget.leading != null)
-                                      Padding(
-                                        padding:
-                                            const EdgeInsets.only(right: 16.0),
-                                        child: widget.leading!,
-                                      ),
-
-                                    /// cover
-                                    _artwork(audio, placeholder),
-                                    const SizedBox(width: 16.0),
-
-                                    /// title, artist and album
-                                    Expanded(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            audio.displayTitle,
-                                            style: TextStyle(
-                                                color: textColor, fontSize: 16),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(width: 4.0),
-                                          Text(
-                                            widget.showSourceLabel &&
-                                                    sourceLabel != null
-                                                ? '${ui("来源：{0}", [
-                                                        sourceLabel
-                                                      ])} · ${audio.artist} - ${audio.album}'
-                                                : "${audio.artist} - ${audio.album}",
-                                            style:
-                                                TextStyle(color: metadataColor),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8.0),
-                                    if (!separateDetails) ...[
-                                      if (sourceStatus != null) ...[
-                                        sourceStatus,
-                                        const SizedBox(width: 8),
-                                      ],
-                                      if (needsSeparateDetails)
-                                        Flexible(
-                                          child: Tooltip(
-                                              message: durationText,
-                                              child: durationLabel),
-                                        )
-                                      else
-                                        durationLabel,
-                                    ],
-                                    if (compactAction != null)
-                                      Padding(
-                                        padding:
-                                            const EdgeInsets.only(left: 8.0),
-                                        child: compactAction,
-                                      ),
-                                  ]),
-                              if (separateDetails)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Row(
-                                    key: const ValueKey(
-                                        'audio-tile-secondary-row'),
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: [
-                                      if (sourceStatus != null) ...[
-                                        sourceStatus,
-                                        const SizedBox(width: 8),
-                                      ],
-                                      Flexible(
-                                        child: Tooltip(
-                                            message: durationText,
-                                            child: durationLabel),
-                                      ),
-                                    ],
+                            action: widget.action ??
+                                Builder(
+                                  builder: (actionContext) =>
+                                      AppIconActionButton(
+                                    key: ValueKey(
+                                        'audio-grid-menu-${audio.path}'),
+                                    tooltip: ui("歌曲操作"),
+                                    onPressed: selecting
+                                        ? null
+                                        : () => _toggleMenuFromAction(
+                                              controller,
+                                              anchorContext,
+                                              actionContext,
+                                            ),
+                                    selected: controller.isOpen,
+                                    glyph: AppActionGlyph.moreVertical,
                                   ),
                                 ),
-                            ]);
-                      }),
-                    ),
-            ),
+                          )
+                        : Padding(
+                            // Ink adds its 1px border to the padding: 48 + 2*(7+1) = 64.
+                            // Larger accessibility text can grow the real row instead of
+                            // overflowing a fixed-height box or being silently scaled down.
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 7),
+                            child:
+                                LayoutBuilder(builder: (context, constraints) {
+                              if (widget.columns &&
+                                  AudioColumnsScope.fits(
+                                      context, constraints.maxWidth)) {
+                                final composer = classifySongComposer(
+                                    composerTag: audio.composer,
+                                    artist: audio.artist);
+                                return Row(
+                                  key: const ValueKey('audio-columns-row'),
+                                  children: [
+                                    if (widget.leading != null) widget.leading!,
+                                    _artwork(audio, placeholder),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                        child: AudioColumnFields(
+                                            audio: audio,
+                                            title: audio.displayTitle,
+                                            composer:
+                                                composer.value ?? ui("未知作曲家"),
+                                            album: audio.album,
+                                            titleColor: textColor,
+                                            metadataColor: metadataColor)),
+                                    const SizedBox(width: 8),
+                                    SizedBox(
+                                        width: 64,
+                                        child: Tooltip(
+                                            message: audio.isOnline
+                                                ? ui("{0} · 联网音乐 · {1}",
+                                                    [durationText, sourceLabel])
+                                                : durationText,
+                                            child: Align(
+                                                alignment: AlignmentDirectional
+                                                    .centerEnd,
+                                                child: durationLabel))),
+                                    const SizedBox(width: 8),
+                                    widget.action ??
+                                        defaultListAction(
+                                            'audio-columns-menu-${audio.path}'),
+                                  ],
+                                );
+                              }
+                              // Measure only the short, static duration, not every title.
+                              // The colour tween reuses this child; no playback/frame-time
+                              // text measurement or extra artwork request is introduced.
+                              final durationMetrics = TextPainter(
+                                text: TextSpan(
+                                  text: durationText,
+                                  style: DefaultTextStyle.of(context)
+                                      .style
+                                      .merge(TextStyle(color: metadataColor)),
+                                ),
+                                textDirection: Directionality.of(context),
+                                textScaler: MediaQuery.textScalerOf(context),
+                                maxLines: 1,
+                              )..layout();
+                              final trailingWidth = durationMetrics.width +
+                                  (sourceStatus == null ? 0 : 26);
+                              durationMetrics.dispose();
+                              final needsSeparateDetails =
+                                  constraints.maxWidth <
+                                      48 +
+                                          16 +
+                                          64 +
+                                          8 +
+                                          trailingWidth +
+                                          (compactAction == null ? 0 : 56) +
+                                          (widget.leading == null ? 0 : 64);
+                              // Old fixed-extent hosts still own their row height. Do not
+                              // add another line inside a host that cannot grow at all.
+                              final separateDetails = needsSeparateDetails &&
+                                  (!constraints.hasBoundedHeight ||
+                                      constraints.maxHeight > 64);
+                              return Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Row(
+                                        key: const ValueKey(
+                                            'audio-tile-main-row'),
+                                        children: [
+                                          if (widget.leading != null)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                  right: 16.0),
+                                              child: widget.leading!,
+                                            ),
+
+                                          /// cover
+                                          _artwork(audio, placeholder),
+                                          const SizedBox(width: 16.0),
+
+                                          /// title, artist and album
+                                          Expanded(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  audio.displayTitle,
+                                                  style: TextStyle(
+                                                      color: textColor,
+                                                      fontSize: 16),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(width: 4.0),
+                                                Text(
+                                                  widget.showSourceLabel &&
+                                                          sourceLabel != null
+                                                      ? '${ui("来源：{0}", [
+                                                              sourceLabel
+                                                            ])} · ${audio.artist} - ${audio.album}'
+                                                      : "${audio.artist} - ${audio.album}",
+                                                  style: TextStyle(
+                                                      color: metadataColor),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8.0),
+                                          if (!separateDetails) ...[
+                                            if (sourceStatus != null) ...[
+                                              sourceStatus,
+                                              const SizedBox(width: 8),
+                                            ],
+                                            if (needsSeparateDetails)
+                                              Flexible(
+                                                child: Tooltip(
+                                                    message: durationText,
+                                                    child: durationLabel),
+                                              )
+                                            else
+                                              durationLabel,
+                                          ],
+                                          if (compactAction != null)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                  left: 8.0),
+                                              child: compactAction,
+                                            ),
+                                        ]),
+                                    if (separateDetails)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: Row(
+                                          key: const ValueKey(
+                                              'audio-tile-secondary-row'),
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.end,
+                                          children: [
+                                            if (sourceStatus != null) ...[
+                                              sourceStatus,
+                                              const SizedBox(width: 8),
+                                            ],
+                                            Flexible(
+                                              child: Tooltip(
+                                                  message: durationText,
+                                                  child: durationLabel),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ]);
+                            }),
+                          ))),
           );
         },
       ),

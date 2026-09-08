@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:dan_player/library/track_identity.dart';
+import 'support/music_category_fixtures.dart';
 import 'package:archive/archive_io.dart';
 import 'package:dan_player/data/cache_backup_service.dart';
 import 'package:dan_player/library/personal_library.dart';
@@ -18,6 +20,33 @@ void main() {
   setUp(() async =>
       root = await Directory.systemTemp.createTemp('dan-snapshot3-test-'));
   tearDown(() async => root.delete(recursive: true));
+
+  test('personal modification date tracks real edits and survives reload',
+      () async {
+    await TrackIdentityRegistry.instance.initialize(directory: root);
+    final audio = CategoryTestAudio('personal-date', online: true);
+    final library = PersonalLibrary(File('${root.path}/personal-date.json'));
+    await library.apply([audio],
+        changeRating: true, rating: 4, changeTags: true, addTags: ['Night']);
+    final first = (await library.snapshot())[audio.stableTrackId]!;
+    expect(first.modifiedAtUtc, isNotNull);
+    await library.apply([audio],
+        changeRating: true,
+        rating: 4,
+        changeTags: true,
+        addTags: ['Night'],
+        removeTags: ['Absent']);
+    expect((await library.snapshot())[audio.stableTrackId]!.modifiedAtUtc,
+        first.modifiedAtUtc);
+    await library.apply([audio], changeTags: true, addTags: ['Day']);
+    final changed =
+        (await PersonalLibrary(File('${root.path}/personal-date.json'))
+            .snapshot())[audio.stableTrackId]!;
+    expect(changed.tags, ['Night', 'Day']);
+    expect(changed.modifiedAtUtc!.isBefore(first.modifiedAtUtc!), false);
+    expect(
+        PersonalTrack.decode({'rating': 3, 'tags': []}).modifiedAtUtc, isNull);
+  });
 
   test(
       'backup preserves path-like personal text without collecting it as an asset',

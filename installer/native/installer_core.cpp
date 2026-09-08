@@ -505,6 +505,47 @@ bool Transaction::HasPendingRecovery() const {
   const auto state = ReadState(backup_directory_);
   return state == "prepared" || state == "restoring";
 }
+void Transaction::CleanupCompletedBackup() {
+  CheckNoReparsePoints(backup_directory_);
+  if (ReadBounded(backup_directory_ / L"owner", 2048) != ToUtf8(context_.target.wstring()))
+    Fail("Unrecognized recovery directory");
+  const auto state = ReadState(backup_directory_);
+  if (state != "committed" && state != "restored" && state != "preparing")
+    Fail("Recovery must finish before cleanup");
+  // Only the transaction's known files are disposable. Never follow links or
+  // discard conflict copies/user files, including in an older recovery folder.
+  std::vector<fs::path> files, directories;
+  for (const auto& entry : fs::recursive_directory_iterator(backup_directory_)) {
+    CheckNoReparsePoints(entry.path());
+    const auto relative = entry.path().lexically_relative(backup_directory_);
+    const auto parent = relative.parent_path().wstring();
+    const auto name = relative.filename().wstring();
+    const bool numbered = !name.empty() && name.find_first_not_of(L"0123456789") == std::wstring::npos;
+    if (entry.is_directory() && parent.empty() && (name == L"files" || name == L"written")) {
+      directories.push_back(entry.path());
+    } else if (entry.is_regular_file() &&
+        ((parent.empty() && (name == L"owner" || name == L"state" || name == L"state.next" || name == L"journal")) ||
+         ((parent == L"files" || parent == L"written") && numbered))) {
+      if (name != L"owner" && name != L"state") files.push_back(entry.path());
+    } else Fail("Recovery folder contains files that must be preserved");
+  }
+  // Keep identity/state until all bulk files have gone so interrupted cleanup
+  // can be retried without rotating another permanent backup directory.
+  for (const auto& file : files) {
+    CheckNoReparsePoints(file);
+    if (!DeleteFileW(file.c_str())) Fail("Cannot clean temporary installation backup");
+  }
+  for (const auto& directory : directories) {
+    CheckNoReparsePoints(directory);
+    if (!RemoveDirectoryW(directory.c_str())) Fail("Cannot clean temporary backup directory");
+  }
+  for (const auto* name : {L"state", L"owner"}) {
+    const auto file = backup_directory_ / name;
+    CheckNoReparsePoints(file);
+    if (fs::exists(file) && !DeleteFileW(file.c_str())) Fail("Cannot clean backup metadata");
+  }
+  if (!RemoveDirectoryW(backup_directory_.c_str())) Fail("Cannot clean backup root");
+}
 void Transaction::Begin(const Manifest& payload, const fs::path& manifest_source) {
   if (pending_) Fail("Transaction already active");
   ValidateTarget(context_);
@@ -512,13 +553,7 @@ void Transaction::Begin(const Manifest& payload, const fs::path& manifest_source
   const auto checked = ReadManifest(manifest_source);
   if (SerializeManifest(checked) != SerializeManifest(payload)) Fail("Payload changed before installation");
   if (HasPendingRecovery()) Fail("A previous installation needs recovery before proceeding");
-  if (fs::exists(backup_directory_)) {
-    const auto owner = ReadBounded(backup_directory_ / L"owner", 2048);
-    if (owner != ToUtf8(context_.target.wstring())) Fail("Unrecognized recovery directory");
-    const auto archive = fs::path(backup_directory_.wstring() + L".retained-" +
-        std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(GetCurrentProcessId()));
-    if (fs::exists(archive) || !MoveFileW(backup_directory_.c_str(), archive.c_str())) Fail("Cannot retain previous backup safely");
-  }
+  if (fs::exists(backup_directory_)) CleanupCompletedBackup();
   fs::create_directories(backup_directory_ / L"files");
   CheckNoReparsePoints(backup_directory_);
   WriteDurable(backup_directory_ / L"owner", ToUtf8(context_.target.wstring()));
@@ -784,5 +819,8 @@ void Transaction::Commit(const Manifest& payload, const fs::path& manifest_sourc
   VerifyInstalled(payload, manifest_source);
   WriteState("committed");
   pending_ = false;
+  // A locked temporary file must not turn an already committed upgrade into
+  // a rollback. The next Begin retries cleanup of the same directory.
+  try { CleanupCompletedBackup(); } catch (const std::exception&) {}
 }
 }  // namespace dan::installer

@@ -1,4 +1,12 @@
 import 'dart:io';
+import 'dart:ui' as drawing;
+import 'package:dan_player/entry.dart';
+import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/app_fonts.dart';
+import 'package:desktop_lyric/ui_language.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/playback_bookmarks.dart';
@@ -101,6 +109,18 @@ class _BookmarkPlayback extends ChangeNotifier implements PlaybackService {
 }
 
 void main() {
+  setUpAll(() async {
+    for (final font in [
+      (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
+      ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
+      (
+        'packages/material_symbols_icons/MaterialSymbolsOutlined',
+        'packages/material_symbols_icons/lib/fonts/MaterialSymbolsOutlined.ttf'
+      )
+    ]) {
+      await (FontLoader(font.$1)..addFont(rootBundle.load(font.$2))).load();
+    }
+  });
   late _MemoryBookmarks store;
   late _BookmarkPlayback service;
   setUp(() async {
@@ -126,6 +146,115 @@ void main() {
   });
   tearDown(() => service.dispose());
 
+  for (final language in UiLanguage.values) {
+    testWidgets('bookmark time controls render ${language.name}',
+        (tester) async {
+      const output = String.fromEnvironment('DAN_BOOKMARK_RENDER');
+      uiLanguage.value = language;
+      addTearDown(() => uiLanguage.value = UiLanguage.zh);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      for (final narrow in [false, true]) {
+        tester.view.physicalSize = Size(narrow ? 380 : 760, narrow ? 640 : 820);
+        final key = GlobalKey();
+        await tester.pumpWidget(RepaintBoundary(
+            key: key,
+            child: UiLanguageScope(
+                child: MaterialApp(
+                    debugShowCheckedModeBanner: false,
+                    theme: Entry(welcome: false).fromSchemeAndFontFamily(
+                        colorScheme: ColorScheme.fromSeed(
+                            seedColor: Colors.teal,
+                            brightness:
+                                narrow ? Brightness.dark : Brightness.light)),
+                    locale: language.locale,
+                    supportedLocales: UiLanguage.values.map((v) => v.locale),
+                    localizationsDelegates:
+                        GlobalMaterialLocalizations.delegates,
+                    builder: (context, child) => MediaQuery(
+                        data: MediaQuery.of(context).copyWith(
+                            textScaler: TextScaler.linear(narrow ? 1.4 : 1)),
+                        child: child!),
+                    home: Scaffold(
+                        body: Builder(
+                            builder: (context) => Center(
+                                child:
+                                    TextButton(onPressed: () => showAppDialog<void>(context: context, builder: (_) => PlaybackBookmarksDialog(service: service, store: store)), child: const Text('open')))))))));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(ui('时间段')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        if (output.isNotEmpty)
+          await tester.runAsync(() async {
+            final image = await (key.currentContext!.findRenderObject()
+                    as RenderRepaintBoundary)
+                .toImage();
+            final data =
+                await image.toByteData(format: drawing.ImageByteFormat.png);
+            final file =
+                File('$output/bookmark-picker-${language.name}-$narrow.png');
+            await file.parent.create(recursive: true);
+            await file.writeAsBytes(data!.buffer.asUint8List());
+            image.dispose();
+          });
+        await tester.ensureVisible(
+            find.byKey(const ValueKey('bookmark-save-selection')));
+        await tester.pumpAndSettle();
+        expect(
+            find.byKey(const ValueKey('bookmark-save-selection')).hitTestable(),
+            findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      }
+    });
+  }
+
+  testWidgets('chooses point and range without seeking or changing A-B',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: PlaybackBookmarksDialog(service: service, store: store))));
+    await tester.pumpAndSettle();
+    tester
+        .widget<Slider>(find.byKey(const ValueKey('bookmark-time-picker')))
+        .onChanged!(37);
+    await tester.pumpAndSettle();
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('bookmark-save-selection')));
+    await tester.tap(find.byKey(const ValueKey('bookmark-save-selection')));
+    await tester.pumpAndSettle();
+    expect(store.entries.last.positionMs, 37000);
+    expect(store.entries.last.endMs, isNull);
+    await tester.ensureVisible(find.text('时间段'));
+    await tester.tap(find.text('时间段'));
+    await tester.pumpAndSettle();
+    tester
+        .widget<RangeSlider>(
+            find.byKey(const ValueKey('bookmark-range-picker')))
+        .onChanged!(const RangeValues(12, 28));
+    await tester.pumpAndSettle();
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('bookmark-save-selection')));
+    await tester.tap(find.byKey(const ValueKey('bookmark-save-selection')));
+    await tester.pumpAndSettle();
+    expect(store.entries.last.positionMs, 12000);
+    expect(store.entries.last.endMs, 28000);
+    expect(service.position, 10);
+    expect(service.segmentLoop.enabled, false);
+    service.changeTrack();
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<FilledButton>(
+                find.byKey(const ValueKey('bookmark-save-selection')))
+            .onPressed,
+        isNull);
+  });
+
   testWidgets(
       'position and A-B recall preserve paused playback and track changes disable actions',
       (tester) async {
@@ -134,14 +263,18 @@ void main() {
             body: PlaybackBookmarksDialog(service: service, store: store))));
     await tester.pumpAndSettle();
     expect(find.text('Other track bookmark'), findsNothing);
+    await tester.ensureVisible(find.text('Chorus'));
     await tester.tap(find.text('Chorus'));
     expect(service.segmentLoop.enabled, isTrue);
     expect(service.segmentLoop.end, 40);
     expect(service.position, 20);
+    await tester.ensureVisible(find.text('Opening'));
     await tester.tap(find.text('Opening'));
     expect(service.segmentLoop.enabled, isFalse);
     expect(service.position, 7);
     await tester.enterText(find.byType(TextField), 'Named position');
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('bookmark-save-position')));
     await tester.runAsync(() async {
       await tester.tap(find.byKey(const ValueKey('bookmark-save-position')));
       await store.forTrack(service.nowPlaying!.path,
@@ -154,6 +287,7 @@ void main() {
             .singleWhere((item) => item.label == 'Named position')
             .track,
         service.nowPlaying!.stableTrackId);
+    await tester.ensureVisible(find.byType(PopupMenuButton<String>).first);
     await tester.tap(find.byType(PopupMenuButton<String>).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('重命名书签'));

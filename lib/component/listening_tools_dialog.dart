@@ -372,7 +372,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
                                                           context)
                                                       .scale(240)))
                                           .floor()),
-                                  mainAxisExtent: 112 +
+                                  mainAxisExtent: 88 +
                                       MediaQuery.textScalerOf(context)
                                               .scale(24) *
                                           4,
@@ -386,7 +386,9 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
                                 selected: _selected.contains(b.id),
                                 title: b.label,
                                 subtitle:
-                                    '${audio?.displayTitle ?? ui("暂不可用／需要重新关联")}\n${_bookmarkTime(b.positionMs)}${b.endMs == null ? '' : ' – ${_bookmarkTime(b.endMs!)}'}',
+                                    audio?.displayTitle ?? ui("暂不可用／需要重新关联"),
+                                time:
+                                    '${_bookmarkTime(b.positionMs)}${b.endMs == null ? '' : ' – ${_bookmarkTime(b.endMs!)}'}',
                                 onTap: _busy
                                     ? null
                                     : () => setState(() {
@@ -416,7 +418,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
                           }))),
         ]);
     final actions = [
-      TextButton.icon(
+      FilledButton.icon(
           onPressed: _busy || _selected.isEmpty
               ? null
               : () => _change((s) => s.removeMany(Set.of(_selected))),
@@ -526,10 +528,11 @@ class _BookmarkCard extends StatelessWidget {
   const _BookmarkCard(
       {required this.title,
       required this.subtitle,
+      required this.time,
       required this.actions,
       required this.selected,
       this.onTap});
-  final String title, subtitle;
+  final String title, subtitle, time;
   final List<Widget> actions;
   final bool selected;
   final VoidCallback? onTap;
@@ -566,11 +569,15 @@ class _BookmarkCard extends StatelessWidget {
                                       Theme.of(context).textTheme.titleMedium)),
                         ])),
                     const SizedBox(height: 6),
-                    Expanded(
-                        child: Text(subtitle,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium)),
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium),
+                    Text(time,
+                        key: ValueKey(('bookmark-time', time)),
+                        maxLines: 1,
+                        style: Theme.of(context).textTheme.bodyMedium),
+                    const Spacer(),
                     Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: actions),
