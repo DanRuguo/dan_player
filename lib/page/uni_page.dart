@@ -21,6 +21,21 @@ typedef ContentBuilder<T> = Widget Function(BuildContext context, T item,
 typedef SortMethod<T> = void Function(List<T> list, SortOrder order);
 typedef ReorderCallback<T> = FutureOr<void> Function(List<T> list);
 
+/// The trailing song menu doubles as the custom-order drag handle.
+class AudioListReorderScope extends InheritedWidget {
+  const AudioListReorderScope(
+      {super.key, required this.index, required super.child});
+  final int index;
+
+  static int? indexOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<AudioListReorderScope>()
+      ?.index;
+
+  @override
+  bool updateShouldNotify(AudioListReorderScope oldWidget) =>
+      index != oldWidget.index;
+}
+
 Object? _selectionIdentity(Object? item) => switch (item) {
       Audio audio => (Audio, audio.path),
       Artist artist => (Artist, artist.name),
@@ -463,12 +478,11 @@ class _UniPageState<T> extends State<UniPage<T>> {
                     currContentView == ContentView.list &&
                     UiLayoutScope.of(context).libraryRowLayout ==
                         LibraryRowLayout.columns &&
-                    AudioColumnsScope.fits(context,
-                        constraints.maxWidth - (enableReorder ? 44 : 0));
+                    AudioColumnsScope.fits(context, constraints.maxWidth);
                 return AudioColumnsScope(
                     enabled: columns,
                     child: Column(children: [
-                      if (columns) AudioColumnsHeader(reorder: enableReorder),
+                      if (columns) const AudioColumnsHeader(),
                       Expanded(
                           // List/reorder widgets own different ScrollPositions.
                           // A stable, page-local storage identity also preserves
@@ -489,7 +503,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
                                                 widget.contentList.length,
                                             itemExtent:
                                                 _fixedRowExtent(context),
-                                            buildDefaultDragHandles: true,
+                                            buildDefaultDragHandles: false,
                                             onReorderItem:
                                                 (oldIndex, newIndex) {
                                               setState(() {
@@ -505,9 +519,8 @@ class _UniPageState<T> extends State<UniPage<T>> {
                                                 KeyedSubtree(
                                               key: ValueKey(
                                                   widget.contentList[i]),
-                                              child: Padding(
-                                                padding: const EdgeInsets.only(
-                                                    right: 44.0),
+                                              child: AudioListReorderScope(
+                                                index: i,
                                                 child: _content(context, i,
                                                     multiSelectController),
                                               ),

@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/playlist_management_dialog.dart';
 import 'package:dan_player/component/audio_columns.dart';
 import 'dart:async';
@@ -966,8 +967,10 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             tooltip: _sortMode(parent) == PlaylistSortMode.custom && !_selecting
                 ? ui("拖动排序 · 点按打开菜单")
                 : ui("歌单项目操作（切到自定义可拖动）"),
-            onPressed: () =>
-                controller.isOpen ? controller.close() : controller.open(),
+            onPressed: _selecting
+                ? null
+                : () =>
+                    controller.isOpen ? controller.close() : controller.open(),
             selected: controller.isOpen,
             glyph: AppActionGlyph.moreVertical,
           );
@@ -1250,18 +1253,10 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                           ? scheme.surfaceContainerLow
                           : Colors.transparent,
               borderRadius: AppShape.controlRadius,
-              child: Row(
-                children: [
-                  if (_selecting)
-                    Checkbox(
-                      key: ValueKey('playlist-select-${row.id}'),
-                      value: _isSelected(row),
-                      onChanged:
-                          _editingBlocked ? null : (_) => _toggleSelection(row),
-                      semanticLabel: ui("选择{0}", [row.label]),
-                    ),
-                  Expanded(child: content),
-                ],
+              child: Semantics(
+                key: ValueKey('playlist-select-${row.id}'),
+                selected: _selecting ? _isSelected(row) : null,
+                child: content,
               ),
             ),
           );
@@ -1375,13 +1370,14 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              FilledButton.tonalIcon(
+              FilledButton(
+                  style: appToolbarControlStyle(context, primary: true),
                   key: const ValueKey('playlist-play-selected'),
                   onPressed: selectedCount > 0
                       ? () => _play(_selectedAudios(rows))
                       : null,
-                  icon: const Icon(Icons.play_arrow),
-                  label: Text(ui('播放所选'))),
+                  child: AppToolbarLabel(
+                      label: ui('播放所选'), icon: Icons.play_arrow)),
               AudioSelectionMenu(
                   selected: _selectedAudios(rows),
                   onInvert: () => _invertSelection(rows),

@@ -621,17 +621,21 @@ void main() {
     await tester.tap(find.byKey(ValueKey('song-${directSource.path}')));
     await tester.pumpAndSettle();
     expect(fixture.played, isEmpty);
+    expect(find.byType(Checkbox), findsNothing);
     expect(
       tester
-          .widget<Checkbox>(find.byKey(ValueKey('playlist-select-${child.id}')))
-          .value,
+          .widget<Semantics>(
+              find.byKey(ValueKey('playlist-select-${child.id}')))
+          .properties
+          .selected,
       isTrue,
     );
     expect(
       tester
-          .widget<Checkbox>(
+          .widget<Semantics>(
               find.byKey(ValueKey('playlist-select-${direct.id}')))
-          .value,
+          .properties
+          .selected,
       isTrue,
     );
     expect(find.byKey(ValueKey('playlist-drag-${direct.id}')), findsNothing);
@@ -673,9 +677,10 @@ void main() {
         findsNothing);
     expect(
       tester
-          .widget<Checkbox>(
+          .widget<Semantics>(
               find.byKey(ValueKey('playlist-select-${secondRoot.id}')))
-          .value,
+          .properties
+          .selected,
       isTrue,
     );
     await tester.tap(find.byKey(const ValueKey('playlist-end-selection')));

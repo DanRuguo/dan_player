@@ -14,7 +14,7 @@ enum MusicCategoryKind {
   bitrate('码率', '个码率区间', '未知码率'),
   duration('时长', '个时长区间', '未知时长'),
   language('语言', '种语言', '未识别'),
-  format('文件格式', '种格式', '未知格式'),
+  format('格式', '种格式', '未知格式'),
   source('来源', '种来源', '未知来源'),
 
   /// Legacy deep-link compatibility only. It is intentionally absent from

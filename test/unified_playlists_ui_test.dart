@@ -379,15 +379,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(
         tester
-            .widget<Checkbox>(
+            .widget<Semantics>(
                 find.byKey(const ValueKey('playlist-select-first-occurrence')))
-            .value,
+            .properties
+            .selected,
         isFalse);
     expect(
         tester
-            .widget<Checkbox>(
+            .widget<Semantics>(
                 find.byKey(const ValueKey('playlist-select-second-occurrence')))
-            .value,
+            .properties
+            .selected,
         isTrue);
     expect(find.text('移除所选（1）'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('playlist-remove-selected')));

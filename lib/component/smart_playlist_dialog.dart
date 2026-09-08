@@ -699,17 +699,18 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                                                       .error))),
                                     if (_editingId == null) ...[
                                       const SizedBox(height: 12),
-                                      FilledButton.icon(
-                                          key: const ValueKey('smart-new'),
-                                          onPressed: _store == null ||
-                                                  _loading ||
-                                                  _rules.length >=
-                                                      SmartPlaylistStore
-                                                          .maxPlaylists
-                                              ? null
-                                              : () => _open(null),
-                                          icon: const Icon(Symbols.add),
-                                          label: Text(ui('新建智能歌单'))),
+                                      Center(
+                                          child: FilledButton.icon(
+                                              key: const ValueKey('smart-new'),
+                                              onPressed: _store == null ||
+                                                      _loading ||
+                                                      _rules.length >=
+                                                          SmartPlaylistStore
+                                                              .maxPlaylists
+                                                  ? null
+                                                  : () => _open(null),
+                                              icon: const Icon(Symbols.add),
+                                              label: Text(ui('新建智能歌单')))),
                                       const SizedBox(height: 12),
                                       if (_store != null &&
                                           !_loading &&

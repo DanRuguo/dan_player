@@ -64,11 +64,12 @@ Widget _page(
   List<SortMethodDesc<Audio>>? methods,
   Audio? locateTo,
   ContentView view = ContentView.table,
+  bool columns = false,
 }) {
   final pref = preference ?? PagePreference(0, SortOrder.ascending, view);
   Widget row(BuildContext context, Audio audio, int index,
           MultiSelectController<Audio>? selection) =>
-      AudioTile(audioIndex: index, playlist: songs);
+      AudioTile(audioIndex: index, playlist: songs, columns: columns);
   Widget detailRow(BuildContext context, Audio audio, int index,
           List<Audio> visible, MultiSelectController<Audio>? selection) =>
       AudioTile(audioIndex: index, playlist: visible);
@@ -200,6 +201,61 @@ void main() {
     expect(find.text('来源：QQ音乐'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  for (final columns in [false, true]) {
+    testWidgets(
+        'custom list columns=$columns reorders and still opens its menu',
+        (tester) async {
+      _viewport(tester);
+      final songs = [
+        _GridAudio('First'),
+        _GridAudio('Second'),
+        _GridAudio('Third')
+      ];
+      final first = songs.first;
+      List<Audio>? saved;
+      final methods = [
+        SortMethodDesc<Audio>(
+          icon: Icons.sort,
+          name: 'Custom',
+          usesSortOrder: false,
+          supportsReorder: true,
+          method: (_, __) {},
+          onReorder: (value) => saved = List.of(value),
+        )
+      ];
+      await tester.pumpWidget(_host(_page('library', songs,
+          methods: methods, view: ContentView.list, columns: columns)));
+      await tester.pumpAndSettle();
+      expect(
+          tester
+              .widget<ReorderableListView>(find.byType(ReorderableListView))
+              .buildDefaultDragHandles,
+          isFalse);
+      final handle = find.byKey(ValueKey('audio-reorder-${first.path}'));
+      final gesture = await tester.startGesture(tester.getCenter(handle),
+          kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      await gesture.moveBy(const Offset(0, 24));
+      await tester.pump(const Duration(milliseconds: 300));
+      await gesture.moveBy(const Offset(0, 80));
+      await tester.pumpAndSettle();
+      await gesture.moveBy(const Offset(0, 80));
+      await tester.pumpAndSettle();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(saved, isNotNull,
+          reason:
+              'drag must persist an order: ${songs.map((s) => s.title).toList()}');
+      expect(songs.map((s) => s.title).toList(), ['Second', 'Third', 'First']);
+      expect(saved, songs);
+      await tester.tap(find.byKey(ValueKey(
+          'audio-${columns ? 'columns' : 'list'}-menu-${first.path}')));
+      await tester.pumpAndSettle();
+      expect(find.text('编辑歌曲信息'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets(
       'custom library order stays in grid and drags from artwork or title',

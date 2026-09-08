@@ -368,6 +368,34 @@ class _AudioTileState extends State<AudioTile> {
               (widget.multiSelectController?.selected.contains(audio) == true);
           final selecting = widget.selection?.enabled ??
               (widget.multiSelectController?.enableMultiSelectView == true);
+          final reorderIndex =
+              selecting ? null : AudioListReorderScope.indexOf(context);
+          Widget defaultListAction(String key) =>
+              Builder(builder: (actionContext) {
+                final button = AppIconActionButton(
+                  key: ValueKey(key),
+                  tooltip:
+                      reorderIndex == null ? ui('歌曲操作') : ui('拖动排序 · 点按打开菜单'),
+                  onPressed: selecting
+                      ? null
+                      : () => _toggleMenuFromAction(
+                          controller, anchorContext, actionContext),
+                  selected: controller.isOpen,
+                  glyph: AppActionGlyph.moreVertical,
+                );
+                return reorderIndex == null
+                    ? button
+                    : ReorderableDragStartListener(
+                        key: ValueKey('audio-reorder-${audio.path}'),
+                        index: reorderIndex,
+                        child: MouseRegion(
+                            cursor: SystemMouseCursors.grab, child: button),
+                      );
+              });
+          final compactAction = widget.action ??
+              (reorderIndex == null
+                  ? null
+                  : defaultListAction('audio-list-menu-${audio.path}'));
           final textColor = widget.focus ? scheme.primary : scheme.onSurface;
           final metadataColor =
               widget.focus ? scheme.primary : scheme.onSurfaceVariant;
@@ -576,22 +604,8 @@ class _AudioTileState extends State<AudioTile> {
                                           child: durationLabel))),
                               const SizedBox(width: 8),
                               widget.action ??
-                                  Builder(
-                                      builder: (actionContext) =>
-                                          AppIconActionButton(
-                                              key: ValueKey(
-                                                  'audio-columns-menu-${audio.path}'),
-                                              tooltip: ui("歌曲操作"),
-                                              onPressed: selecting
-                                                  ? null
-                                                  : () => _toggleMenuFromAction(
-                                                        controller,
-                                                        anchorContext,
-                                                        actionContext,
-                                                      ),
-                                              selected: controller.isOpen,
-                                              glyph:
-                                                  AppActionGlyph.moreVertical)),
+                                  defaultListAction(
+                                      'audio-columns-menu-${audio.path}'),
                             ],
                           );
                         }
@@ -618,7 +632,7 @@ class _AudioTileState extends State<AudioTile> {
                                 64 +
                                 8 +
                                 trailingWidth +
-                                (widget.action == null ? 0 : 56) +
+                                (compactAction == null ? 0 : 56) +
                                 (widget.leading == null ? 0 : 64);
                         // Old fixed-extent hosts still own their row height. Do not
                         // add another line inside a host that cannot grow at all.
@@ -689,11 +703,11 @@ class _AudioTileState extends State<AudioTile> {
                                       else
                                         durationLabel,
                                     ],
-                                    if (widget.action != null)
+                                    if (compactAction != null)
                                       Padding(
                                         padding:
                                             const EdgeInsets.only(left: 8.0),
-                                        child: widget.action!,
+                                        child: compactAction,
                                       ),
                                   ]),
                               if (separateDetails)

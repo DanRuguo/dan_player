@@ -2,6 +2,7 @@
 /// Order: English, Japanese, Korean.
 const Map<String, List<String>> catalogSnapshot2Localization = {
   '语言': ['Language', '言語', '언어'],
+  '格式': ['Format', '形式', '형식'],
   '文件格式': ['File format', 'ファイル形式', '파일 형식'],
   '添加时间': ['Date added', '追加日時', '추가 시간'],
   '修改时间': ['Date modified', '更新日時', '수정 시간'],
