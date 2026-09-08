@@ -403,6 +403,7 @@ class _PlaylistDestinationDialogState extends State<PlaylistDestinationDialog> {
                       ),
                       child: OverflowBar(
                         alignment: MainAxisAlignment.end,
+                        overflowAlignment: OverflowBarAlignment.end,
                         spacing: 8,
                         overflowSpacing: 8,
                         children: [

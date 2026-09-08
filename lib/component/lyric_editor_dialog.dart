@@ -667,6 +667,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                     const SizedBox(height: 16.0),
                     OverflowBar(
                       alignment: MainAxisAlignment.end,
+                      overflowAlignment: OverflowBarAlignment.end,
                       spacing: 12,
                       overflowSpacing: 8,
                       children: [

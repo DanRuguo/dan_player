@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_actions.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -122,39 +123,33 @@ class CoverRepairDialog extends StatelessWidget {
                                           ]))),
                           ])),
                           const SizedBox(height: 12),
-                          Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              alignment: WrapAlignment.center,
-                              children: [
-                                TextButton(
-                                    onPressed: repair.busy
-                                        ? null
-                                        : () => Navigator.of(context).pop(),
-                                    child: Text(ui('关闭'))),
-                                if (repair.busy)
-                                  OutlinedButton(
-                                      onPressed: repair.cancellationRequested
-                                          ? null
-                                          : repair.cancel,
-                                      child: Text(ui(
-                                          repair.cancellationRequested
-                                              ? '正在停止…'
-                                              : '停止后续处理'))),
-                                if (!repair.started)
-                                  FilledButton(
-                                      onPressed: repair.busy
-                                          ? null
-                                          : () => repair.run(),
-                                      child: Text(ui('开始读取'))),
-                                if (repair.targets
-                                    .any((target) => target.retryable))
-                                  OutlinedButton(
-                                      onPressed: repair.busy
-                                          ? null
-                                          : () => repair.run(retryOnly: true),
-                                      child: Text(ui('仅重试失败项'))),
-                              ]),
+                          AppDialogActions(children: [
+                            TextButton(
+                                onPressed: repair.busy
+                                    ? null
+                                    : () => Navigator.of(context).pop(),
+                                child: Text(ui('关闭'))),
+                            if (repair.busy)
+                              OutlinedButton(
+                                  onPressed: repair.cancellationRequested
+                                      ? null
+                                      : repair.cancel,
+                                  child: Text(ui(repair.cancellationRequested
+                                      ? '正在停止…'
+                                      : '停止后续处理'))),
+                            if (!repair.started)
+                              FilledButton(
+                                  onPressed:
+                                      repair.busy ? null : () => repair.run(),
+                                  child: Text(ui('开始读取'))),
+                            if (repair.targets
+                                .any((target) => target.retryable))
+                              OutlinedButton(
+                                  onPressed: repair.busy
+                                      ? null
+                                      : () => repair.run(retryOnly: true),
+                                  child: Text(ui('仅重试失败项'))),
+                          ]),
                         ]),
                       ))),
             ));

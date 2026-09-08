@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_actions.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -172,9 +173,7 @@ class _LibraryFoldersDialogState extends State<LibraryFoldersDialog> {
             Divider(height: 1, color: scheme.outlineVariant),
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Wrap(
-                alignment: WrapAlignment.center,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              child: AppDialogActions(
                 spacing: 12,
                 runSpacing: 8,
                 children: [

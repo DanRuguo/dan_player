@@ -1,3 +1,5 @@
+import 'package:dan_player/component/app_segmented_control.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/library/smart_condition.dart';
 import 'package:dan_player/library/playlist.dart';
@@ -39,17 +41,20 @@ class SmartConditionEditor extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Wrap(spacing: 8, runSpacing: 8, children: [
-                    ChoiceChip(
-                        label: Text(ui('全部满足')),
-                        selected: !value.any,
-                        onSelected: (_) =>
-                            onChanged(SmartCondition.group(value.children))),
-                    ChoiceChip(
-                        label: Text(ui('任一满足')),
-                        selected: value.any,
-                        onSelected: (_) => onChanged(
-                            SmartCondition.group(value.children, any: true))),
-                    TextButton.icon(
+                    AppSegmentedControl<bool>(
+                        value: value.any,
+                        options: [
+                          AppSegmentOption(
+                              value: false,
+                              label: ui('全部满足'),
+                              icon: Icons.done_all),
+                          AppSegmentOption(
+                              value: true, label: ui('任一满足'), icon: Icons.done),
+                        ],
+                        onChanged: (any) => onChanged(
+                            SmartCondition.group(value.children, any: any))),
+                    OutlinedButton.icon(
+                        style: appToolbarControlStyle(context),
                         onPressed: value.leaves >= 32
                             ? null
                             : () => onChanged(SmartCondition.group([
@@ -60,14 +65,16 @@ class SmartConditionEditor extends StatelessWidget {
                         icon: const Icon(Icons.add),
                         label: Text(ui('条件'))),
                     if (depth == 0)
-                      TextButton(
+                      OutlinedButton.icon(
+                          style: appToolbarControlStyle(context),
+                          icon: const Icon(Icons.create_new_folder_outlined),
                           onPressed: value.children.length >= 32
                               ? null
                               : () => onChanged(SmartCondition.group([
                                     ...value.children,
                                     const SmartCondition.group([])
                                   ], any: value.any)),
-                          child: Text(ui('条件组'))),
+                          label: Text(ui('条件组'))),
                   ]),
                   for (var i = 0; i < value.children.length; i++)
                     Padding(

@@ -1,3 +1,5 @@
+import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/smart_match_dialog.dart';
 import 'package:dan_player/library/smart_condition.dart';
@@ -451,6 +453,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
           initiallyExpanded: _newRule,
           maintainState: true,
           tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(top: 12),
           title: Text(ui('筛选规则')),
           children: [
             Focus(
@@ -580,14 +583,16 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
             )
           else
             Wrap(spacing: 8, runSpacing: 8, children: [
-              IconButton(
+              OutlinedButton.icon(
+                  style: appToolbarControlStyle(context),
                   key: const ValueKey('smart-refresh'),
-                  tooltip: ui('刷新'),
+                  label: Text(ui('刷新')),
                   onPressed:
                       _previewing ? null : () => _queuePreview(immediate: true),
                   icon: const Icon(Symbols.refresh)),
-              IconButton(
-                  tooltip: ui('匹配详情'),
+              OutlinedButton.icon(
+                  style: appToolbarControlStyle(context),
+                  label: Text(ui('匹配详情')),
                   onPressed: _previewing || _previewError != null
                       ? null
                       : () => showSmartMatchDetails(
@@ -600,9 +605,10 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
               const AppPlaybackModeControls(),
               AudioSelectionMenu(
                   selected: selected, onAddToPlaylist: _add, onExport: _export),
-              IconButton(
+              OutlinedButton.icon(
+                  style: appToolbarControlStyle(context),
                   key: const ValueKey('smart-select'),
-                  tooltip: ui('多选'),
+                  label: Text(ui('多选')),
                   onPressed: selected.isEmpty
                       ? null
                       : () => setState(() {
@@ -612,14 +618,24 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                               ..addAll(_audios.map((audio) => audio.path));
                           }),
                   icon: const Icon(Symbols.checklist)),
+              OutlinedButton.icon(
+                  style: appToolbarControlStyle(context),
+                  key: const ValueKey('smart-ordinary'),
+                  onPressed:
+                      selected.isEmpty ? null : () => unawaited(_action(_add)),
+                  icon: const Icon(Symbols.playlist_add),
+                  label: Text(ui('加入或新建普通歌单…'))),
             ]),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-              key: const ValueKey('smart-ordinary'),
-              onPressed:
-                  selected.isEmpty ? null : () => unawaited(_action(_add)),
-              icon: const Icon(Symbols.playlist_add),
-              label: Text(ui('加入或新建普通歌单…'))),
+          if (_selecting) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+                style: appToolbarControlStyle(context),
+                key: const ValueKey('smart-ordinary'),
+                onPressed:
+                    selected.isEmpty ? null : () => unawaited(_action(_add)),
+                icon: const Icon(Symbols.playlist_add),
+                label: Text(ui('加入或新建普通歌单…'))),
+          ],
         ]);
   }
 
@@ -845,7 +861,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                   if (_editingId != null)
                     Padding(
                         padding: const EdgeInsets.only(top: 12),
-                        child: Wrap(spacing: 8, runSpacing: 8, children: [
+                        child: AppDialogActions(children: [
                           TextButton(
                               onPressed: _saving ? null : _back,
                               child: Text(ui('取消'))),

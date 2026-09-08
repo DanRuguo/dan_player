@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_actions.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -239,42 +240,38 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
                           ),
                       ])),
                       const SizedBox(height: 12),
-                      Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          alignment: WrapAlignment.center,
-                          children: [
-                            TextButton(
-                                onPressed: batch.busy
-                                    ? null
-                                    : () => Navigator.of(context).pop(),
-                                child: Text(ui('关闭'))),
-                            if (batch.busy)
-                              OutlinedButton(
-                                  onPressed: batch.cancellationRequested
-                                      ? null
-                                      : batch.cancel,
-                                  child: Text(ui(batch.cancellationRequested
-                                      ? '正在停止…'
-                                      : '停止后续处理'))),
-                            if (!batch.previewed)
-                              FilledButton(
-                                  onPressed: batch.busy ? null : _preview,
-                                  child: Text(ui('预览修改'))),
-                            if (batch.previewed &&
-                                batch.count(BatchMetadataStatus.ready) > 0)
-                              FilledButton(
-                                  onPressed:
-                                      batch.busy ? null : () => batch.apply(),
-                                  child: Text(ui('应用预览'))),
-                            if (batch.previewed &&
-                                batch.targets.any((target) => target.retryable))
-                              OutlinedButton(
-                                  onPressed: batch.busy
-                                      ? null
-                                      : () => batch.apply(retryOnly: true),
-                                  child: Text(ui('仅重试失败和待同步项'))),
-                          ]),
+                      AppDialogActions(children: [
+                        TextButton(
+                            onPressed: batch.busy
+                                ? null
+                                : () => Navigator.of(context).pop(),
+                            child: Text(ui('关闭'))),
+                        if (batch.busy)
+                          OutlinedButton(
+                              onPressed: batch.cancellationRequested
+                                  ? null
+                                  : batch.cancel,
+                              child: Text(ui(batch.cancellationRequested
+                                  ? '正在停止…'
+                                  : '停止后续处理'))),
+                        if (!batch.previewed)
+                          FilledButton(
+                              onPressed: batch.busy ? null : _preview,
+                              child: Text(ui('预览修改'))),
+                        if (batch.previewed &&
+                            batch.count(BatchMetadataStatus.ready) > 0)
+                          FilledButton(
+                              onPressed:
+                                  batch.busy ? null : () => batch.apply(),
+                              child: Text(ui('应用预览'))),
+                        if (batch.previewed &&
+                            batch.targets.any((target) => target.retryable))
+                          OutlinedButton(
+                              onPressed: batch.busy
+                                  ? null
+                                  : () => batch.apply(retryOnly: true),
+                              child: Text(ui('仅重试失败和待同步项'))),
+                      ]),
                     ])),
               )));
         });

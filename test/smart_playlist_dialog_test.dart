@@ -1,3 +1,8 @@
+import 'dart:ui' as raster;
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/entry.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -319,4 +324,74 @@ void main() {
       expect(find.byKey(const ValueKey('smart-save')), findsOneWidget);
     });
   }
+  testWidgets(
+      'production editor keeps floating labels clear and toolbar heights aligned',
+      (tester) async {
+    tester.view.physicalSize = const Size(1146, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    for (final font in [
+      (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
+      ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
+      (
+        'packages/material_symbols_icons/MaterialSymbolsOutlined',
+        'packages/material_symbols_icons/lib/fonts/MaterialSymbolsOutlined.ttf'
+      ),
+    ]) {
+      await (FontLoader(font.$1)..addFont(rootBundle.load(font.$2))).load();
+    }
+    final boundary = GlobalKey();
+    await tester.pumpWidget(RepaintBoundary(
+        key: boundary,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: Entry(welcome: false).fromSchemeAndFontFamily(
+              colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+              fontFamily: danEmbeddedFontFamily),
+          home: Scaffold(
+              body: SmartPlaylistsDialog(
+                  loadStore: () async => _Store(),
+                  library: () => [],
+                  evaluate: (_, __) async => [])),
+        )));
+    await tester.pumpAndSettle();
+    await _new(tester);
+    await tester.enterText(find.byKey(const ValueKey('smart-name')), '近期收藏');
+    await tester.pumpAndSettle();
+    final field = find.byKey(const ValueKey('smart-name'));
+    final title = find.text(ui('筛选规则'));
+    final label = find.text(ui('智能歌单名称'));
+    expect(
+        tester.getRect(label).top, greaterThan(tester.getRect(title).bottom));
+    expect(tester.getRect(field).top - tester.getRect(title).bottom,
+        greaterThan(12));
+    const export = String.fromEnvironment('SMART_EDITOR_RENDER_DIR');
+    Future<void> render(String name) async {
+      if (export.isEmpty) return;
+      await tester.runAsync(() async {
+        final image = await (boundary.currentContext!.findRenderObject()
+                as RenderRepaintBoundary)
+            .toImage();
+        final bytes =
+            await image.toByteData(format: raster.ImageByteFormat.png);
+        final file = File('$export/$name.png');
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    }
+
+    await render('smart-fields');
+    await tester.ensureVisible(find.byKey(const ValueKey('smart-ordinary')));
+    await tester.pumpAndSettle();
+    final refresh =
+        tester.getSize(find.byKey(const ValueKey('smart-refresh'))).height;
+    for (final key in ['smart-select', 'smart-ordinary']) {
+      expect(tester.getSize(find.byKey(ValueKey(key))).height, refresh);
+    }
+    expect(tester.takeException(), isNull);
+    await render('smart-actions');
+    await tester.pumpWidget(const SizedBox());
+  });
 }

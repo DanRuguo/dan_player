@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_actions.dart';
 import 'dart:async';
 
 import 'package:dan_player/library/library_refresh.dart';
@@ -83,23 +84,19 @@ class _LibraryRefreshProgressState extends State<LibraryRefreshProgress> {
           Text(description, textAlign: TextAlign.center),
           if (!task.isTerminal) ...[
             const SizedBox(height: 20),
-            Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  if (task.cancelNative != null)
-                    OutlinedButton.icon(
-                        key: const ValueKey('library-cancel-scan'),
-                        onPressed: task.canCancel ? task.requestCancel : null,
-                        icon: const Icon(Symbols.stop_circle),
-                        label: Text(ui('取消扫描'))),
-                  if (widget.onBackground != null)
-                    TextButton.icon(
-                        onPressed: widget.onBackground,
-                        icon: const Icon(Symbols.close),
-                        label: Text(ui('转入后台'))),
-                ]),
+            AppDialogActions(spacing: 12, runSpacing: 12, children: [
+              if (task.cancelNative != null)
+                OutlinedButton.icon(
+                    key: const ValueKey('library-cancel-scan'),
+                    onPressed: task.canCancel ? task.requestCancel : null,
+                    icon: const Icon(Symbols.stop_circle),
+                    label: Text(ui('取消扫描'))),
+              if (widget.onBackground != null)
+                TextButton.icon(
+                    onPressed: widget.onBackground,
+                    icon: const Icon(Symbols.close),
+                    label: Text(ui('转入后台'))),
+            ]),
           ],
         ]);
   }
