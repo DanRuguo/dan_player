@@ -20,6 +20,7 @@ class PlayerExperiencePreferences {
     this.windowAspectRatioLocked = false,
     this.windowAspectRatio = 0,
     this.roundedWindowCorners = true,
+    this.preventSleepDuringPlayback = false,
   });
 
   final bool closeToTray;
@@ -37,6 +38,7 @@ class PlayerExperiencePreferences {
   final bool windowSizeLocked;
   final bool windowAspectRatioLocked;
   final bool roundedWindowCorners;
+  final bool preventSleepDuringPlayback;
 
   /// The normal-window client ratio captured when ratio locking is enabled.
   /// Zero means that the next live application should capture the current
@@ -94,6 +96,7 @@ class PlayerExperiencePreferences {
     bool? windowAspectRatioLocked,
     double? windowAspectRatio,
     bool? roundedWindowCorners,
+    bool? preventSleepDuringPlayback,
   }) {
     var nextWindowSizeLocked = windowSizeLocked ?? this.windowSizeLocked;
     var nextWindowAspectRatioLocked =
@@ -123,6 +126,8 @@ class PlayerExperiencePreferences {
       windowSizeLocked: nextWindowSizeLocked,
       windowAspectRatioLocked: nextWindowAspectRatioLocked,
       roundedWindowCorners: roundedWindowCorners ?? this.roundedWindowCorners,
+      preventSleepDuringPlayback:
+          preventSleepDuringPlayback ?? this.preventSleepDuringPlayback,
       windowAspectRatio: safeWindowAspectRatio(
         windowAspectRatio,
         fallback: this.windowAspectRatio,
@@ -146,6 +151,7 @@ class PlayerExperiencePreferences {
         // constructor from older code temporarily supplied both flags.
         'windowAspectRatioLocked': windowAspectRatioLocked && !windowSizeLocked,
         'roundedWindowCorners': roundedWindowCorners,
+        'preventSleepDuringPlayback': preventSleepDuringPlayback,
         'windowAspectRatio': safeWindowAspectRatio(windowAspectRatio),
       };
 
@@ -175,6 +181,7 @@ class PlayerExperiencePreferences {
       windowAspectRatioLocked: windowAspectRatioLocked,
       roundedWindowCorners:
           flag('roundedWindowCorners', defaults.roundedWindowCorners),
+      preventSleepDuringPlayback: flag('preventSleepDuringPlayback', false),
       windowAspectRatio: safeWindowAspectRatio(value['windowAspectRatio']),
     );
   }
@@ -195,6 +202,7 @@ class PlayerExperiencePreferences {
       windowSizeLocked == other.windowSizeLocked &&
       windowAspectRatioLocked == other.windowAspectRatioLocked &&
       roundedWindowCorners == other.roundedWindowCorners &&
+      preventSleepDuringPlayback == other.preventSleepDuringPlayback &&
       windowAspectRatio == other.windowAspectRatio;
 
   @override
@@ -212,5 +220,6 @@ class PlayerExperiencePreferences {
       windowSizeLocked,
       windowAspectRatioLocked,
       roundedWindowCorners,
+      preventSleepDuringPlayback,
       windowAspectRatio);
 }

@@ -1,6 +1,7 @@
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -166,10 +167,8 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                                         key: const ValueKey(
                                             'lyric-offset-earlier'),
                                         tooltip: ui('提前 500 ms'),
-                                        style: IconButton.styleFrom(
-                                            minimumSize: const Size(44, 44),
-                                            visualDensity:
-                                                VisualDensity.standard),
+                                        style: appToolbarControlStyle(context,
+                                            iconOnly: true),
                                         onPressed: busy
                                             ? null
                                             : () => _saveOffset(
@@ -200,10 +199,8 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                                         key: const ValueKey(
                                             'lyric-offset-later'),
                                         tooltip: ui('延后 500 ms'),
-                                        style: IconButton.styleFrom(
-                                            minimumSize: const Size(44, 44),
-                                            visualDensity:
-                                                VisualDensity.standard),
+                                        style: appToolbarControlStyle(context,
+                                            iconOnly: true),
                                         onPressed: busy
                                             ? null
                                             : () => _saveOffset(

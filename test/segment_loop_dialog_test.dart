@@ -70,6 +70,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('segment-loop-set-b')));
     await tester.pumpAndSettle();
     expect(service.segmentLoop.end, 30);
+    await tester.ensureVisible(find.byType(Switch));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     expect(service.segmentLoop.enabled, isTrue);

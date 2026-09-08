@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/settings_tile.dart';
@@ -79,13 +80,14 @@ class __ArtistSeparatorEditDialogState
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     return Dialog(
-      insetPadding: EdgeInsets.zero,
-      child: SizedBox(
+      insetPadding: const EdgeInsets.all(16),
+      child: AppDialogContent(
         width: 350.0,
-        height: 350.0,
+        maxHeight: 350.0,
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
                 padding: const EdgeInsets.only(bottom: 16.0),
@@ -98,8 +100,9 @@ class __ArtistSeparatorEditDialogState
                   ),
                 ),
               ),
-              Expanded(
+              Flexible(
                 child: ListView(
+                  shrinkWrap: true,
                   children: [
                     for (final separator in separators)
                       _separatorTile(separator),
@@ -125,8 +128,10 @@ class __ArtistSeparatorEditDialogState
                 ),
               ),
               const SizedBox(height: 16.0),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   TextButton(
                     onPressed: editing

@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -435,9 +436,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   }
 
   Widget _editorSurface(ThemeData theme, ColorScheme scheme) => loading
-      ? const Center(child: CircularProgressIndicator())
+      ? const Center(heightFactor: 1, child: CircularProgressIndicator())
       : loadError != null
           ? Center(
+              heightFactor: 1,
               child: Text(
                 loadError!,
                 textAlign: TextAlign.center,
@@ -445,15 +447,14 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
               ),
             )
           : Stack(
-              fit: StackFit.expand,
+              fit: StackFit.loose,
               children: [
                 TextField(
                   key: const ValueKey('lyric-editor-field'),
                   controller: controller,
                   focusNode: focusNode,
-                  expands: true,
                   maxLines: null,
-                  minLines: null,
+                  minLines: 4,
                   readOnly: saving || loadingOnline,
                   keyboardType: TextInputType.multiline,
                   onChanged: (_) => setState(() {}),
@@ -491,9 +492,9 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         if (!didPop && !saving) _cancel();
       },
       child: Dialog(
-        child: SizedBox(
+        child: AppDialogContent(
           width: 900,
-          height: dialogHeight,
+          maxHeight: dialogHeight,
           child: Padding(
             padding: const EdgeInsets.all(20.0),
             child: LayoutBuilder(
@@ -503,6 +504,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                 final compact = constraints.maxHeight < 480 || textScale > 1.7;
                 final editor = _editorSurface(theme, scheme);
                 final column = Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     AppDialogTitle(
@@ -593,6 +595,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                               MediaQuery.textScalerOf(context).scale(14) / 14;
                           if (constraints.maxWidth < 620 * textScale) {
                             return Column(
+                              mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 summary,
@@ -653,14 +656,14 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                       ),
                     const SizedBox(height: 12.0),
                     if (compact)
-                      SizedBox(
-                        height: (constraints.maxHeight * .65)
-                            .clamp(180, 360)
-                            .toDouble(),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                            maxHeight:
+                                (constraints.maxHeight * .65).clamp(0, 360)),
                         child: editor,
                       )
                     else
-                      Expanded(child: editor),
+                      Flexible(child: editor),
                     const SizedBox(height: 16.0),
                     OverflowBar(
                       alignment: MainAxisAlignment.end,
@@ -880,9 +883,9 @@ class _OnlineLyricCandidateDialogState
         if (didPop) _invalidatePending();
       },
       child: Dialog(
-        child: SizedBox(
+        child: AppDialogContent(
           width: 660,
-          height: dialogHeight,
+          maxHeight: dialogHeight,
           child: Padding(
             padding: const EdgeInsets.all(18),
             child: LayoutBuilder(
@@ -902,6 +905,7 @@ class _OnlineLyricCandidateDialogState
                   ),
                 );
                 final column = Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     AppDialogTitle(
@@ -934,14 +938,14 @@ class _OnlineLyricCandidateDialogState
                     ),
                     const SizedBox(height: 14),
                     if (compact)
-                      SizedBox(
-                        height: (constraints.maxHeight * .68)
-                            .clamp(210, 380)
-                            .toDouble(),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                            maxHeight:
+                                (constraints.maxHeight * .68).clamp(0, 380)),
                         child: candidateContent,
                       )
                     else
-                      Expanded(child: candidateContent),
+                      Flexible(child: candidateContent),
                     const SizedBox(height: 12),
                     Align(
                       alignment: AlignmentDirectional.centerEnd,
@@ -1022,6 +1026,7 @@ class _OnlineLyricCandidateDialogState
 
     return Scrollbar(
       child: ListView.separated(
+        shrinkWrap: true,
         key: const ValueKey('online-lyric-candidates'),
         padding: const EdgeInsets.all(10),
         itemCount: response.candidates.length + (failureText.isEmpty ? 0 : 1),
@@ -1136,6 +1141,7 @@ class _OnlineLyricCandidateDialogState
 
     return Scrollbar(
       child: ListView(
+        shrinkWrap: true,
         key: const ValueKey('online-lyric-candidates'),
         children: children,
       ),
@@ -1176,6 +1182,7 @@ class _OnlineLyricCandidateDialogState
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (details.isNotEmpty)
@@ -1224,6 +1231,7 @@ class _OnlineLyricCandidateDialogState
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(ui("来源：{0}", [ui("自定义歌源")])),
@@ -1259,6 +1267,7 @@ class _OnlineCandidateState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
+        heightFactor: 1,
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(

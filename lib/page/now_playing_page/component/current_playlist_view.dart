@@ -1,3 +1,4 @@
+import 'package:dan_player/component/listening_tools_dialog.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/playlist_name_dialog.dart';
@@ -22,10 +23,12 @@ class CurrentPlaylistView extends StatefulWidget {
   const CurrentPlaylistView(
       {super.key,
       this.showTitle = true,
+      this.shrinkWrap = false,
       this.onOpenDetails,
       this.playbackService});
 
   final bool showTitle;
+  final bool shrinkWrap;
   final ValueChanged<Audio>? onOpenDetails;
 
   /// Keeps the production view on the singleton while allowing its shared
@@ -267,6 +270,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                 ? candidateIndex
                 : -1;
             return Column(
+              mainAxisSize:
+                  widget.shrinkWrap ? MainAxisSize.min : MainAxisSize.max,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (widget.showTitle)
@@ -276,11 +281,14 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                   ),
                 Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Wrap(
-                        spacing: 4,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
+                    child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(spacing: 4, children: [
+                          IconButton(
+                              tooltip: ui('收听会话'),
+                              onPressed: () =>
+                                  showNamedQueues(context, playbackService),
+                              icon: const Icon(Symbols.save)),
                           IconButton(
                               key: const ValueKey('queue-locate-current'),
                               tooltip: ui('定位当前歌曲'),
@@ -351,7 +359,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                       ? Symbols.repeat_on
                                       : Symbols.repeat),
                                   label: const Text('A-B'))),
-                        ])),
+                        ]))),
                 QueueStopStatus(playbackService: playbackService),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
@@ -393,7 +401,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall)),
-                Expanded(
+                Flexible(
+                  fit: widget.shrinkWrap ? FlexFit.loose : FlexFit.tight,
                   child: Container(
                     margin: EdgeInsets.fromLTRB(widget.showTitle ? 8 : 0, 4,
                         widget.showTitle ? 8 : 0, 0),
@@ -409,6 +418,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                         ? const _EmptyPlaylistView()
                         : visibleIndices.isEmpty
                             ? Center(
+                                heightFactor: 1,
                                 child: Padding(
                                     padding: const EdgeInsets.all(16),
                                     child: Text(ui('队列中没有匹配的歌曲'),
@@ -416,6 +426,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                             : _QueueScrollbar(
                                 controller: scrollController,
                                 child: ListView.builder(
+                                  shrinkWrap: widget.shrinkWrap,
                                   key: const ValueKey('current-playlist-list'),
                                   controller: scrollController,
                                   padding: const EdgeInsets.symmetric(
@@ -568,6 +579,7 @@ class _EmptyPlaylistView extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Center(
+      heightFactor: 1,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(

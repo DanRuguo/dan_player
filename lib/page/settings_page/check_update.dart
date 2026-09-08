@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:async';
 
@@ -203,6 +204,7 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
     final lastCheck = settings.lastUpdateCheckAt;
     return SettingsSurface(
         child: Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SettingsSwitchTile(
@@ -525,15 +527,16 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
     return PopScope(
         canPop: !_installing,
         child: Dialog(
-          child: SizedBox(
+          child: AppDialogContent(
             width: 720.0,
-            height: maxHeight,
+            maxHeight: maxHeight,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
+                  Flexible(
                     child: Scrollbar(
                       controller: _detailsScroll,
                       thumbVisibility: true,
@@ -541,6 +544,7 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                         key: const ValueKey('update-details-scroll'),
                         controller: _detailsScroll,
                         child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             AppDialogTitle(
@@ -652,7 +656,7 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                   const SizedBox(height: 12.0),
                   Row(
                     children: [
-                      Expanded(
+                      Flexible(
                         child: Scrollbar(
                           controller: _actionsScroll,
                           thumbVisibility: true,

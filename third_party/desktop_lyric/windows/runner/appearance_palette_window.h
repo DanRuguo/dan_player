@@ -92,6 +92,8 @@ class PaletteWindowManager : public std::enable_shared_from_this<PaletteWindowMa
   bool closing_ = false;
   bool palette_closing_ = false;
   bool active_ = false;
+  bool warming_ = false;
+  bool first_warm_cached_ = false;
   bool cache_allowed_ = false;
   Value snapshot_;
   std::unique_ptr<flutter::MethodChannel<Value>> channel_;

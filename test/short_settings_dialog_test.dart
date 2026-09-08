@@ -19,6 +19,8 @@ import 'package:provider/provider.dart';
 
 class _EqualizerPlayback extends Fake implements PlaybackService {
   @override
+  int eqEditRevision = 0;
+  @override
   final eqEnabled = ValueNotifier(false);
   final _gains = List<double>.filled(10, 0);
   bool acceptsEnable = true;

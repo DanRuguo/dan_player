@@ -1,3 +1,4 @@
+import 'package:dan_player/component/eq_presets_dialog.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
@@ -29,6 +30,66 @@ class EqualizerDialog extends StatefulWidget {
 class _EqualizerDialogState extends State<EqualizerDialog> {
   late final playbackService =
       widget.playbackService ?? PlayService.instance.playbackService;
+
+  late final _originalGains = List<double>.of(playbackService.eqGains);
+  late final _originalEnabled = playbackService.eqEnabled.value;
+  late int _ownedRevision;
+  bool _comparingOriginal = false;
+  List<double>? _adjusted;
+  bool? _adjustedEnabled;
+  @override
+  void initState() {
+    super.initState();
+    _originalGains;
+    _originalEnabled;
+    _ownedRevision = playbackService.eqEditRevision;
+  }
+
+  bool _ownsEq() {
+    if (_ownedRevision == playbackService.eqEditRevision) return true;
+    showTextOnSnackBar('EQ 或输出已由其他入口更改，请重新打开对比');
+    return false;
+  }
+
+  void _compare() {
+    if (!_ownsEq()) return;
+    if (!_comparingOriginal) {
+      _adjusted = List.of(playbackService.eqGains);
+      _adjustedEnabled = playbackService.eqEnabled.value;
+    }
+    playbackService
+        .applyEqGains(_comparingOriginal ? _adjusted! : _originalGains);
+    playbackService.setEqEnabled(
+        _comparingOriginal ? _adjustedEnabled! : _originalEnabled);
+    _ownedRevision = playbackService.eqEditRevision;
+    setState(() => _comparingOriginal = !_comparingOriginal);
+  }
+
+  void _finishComparison(bool original) {
+    if (!_ownsEq()) return;
+    playbackService
+        .applyEqGains(original ? _originalGains : (_adjusted ?? gains));
+    playbackService.setEqEnabled(
+        original ? _originalEnabled : (_adjustedEnabled ?? enabled));
+    _ownedRevision = playbackService.eqEditRevision;
+    setState(() {
+      _comparingOriginal = false;
+      _adjusted = null;
+      gains = List.of(playbackService.eqGains);
+      enabled = playbackService.eqEnabled.value;
+    });
+  }
+
+  @override
+  void dispose() {
+    if (_comparingOriginal &&
+        _ownedRevision == playbackService.eqEditRevision &&
+        _adjusted != null) {
+      playbackService.applyEqGains(_adjusted!);
+      playbackService.setEqEnabled(_adjustedEnabled!);
+    }
+    super.dispose();
+  }
 
   static const customPresetName = "自定义";
   static const Map<String, List<double>> presets = {
@@ -65,7 +126,9 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
   }
 
   void _toggleEnabled(bool value) {
+    if (!_ownsEq()) return;
     final applied = playbackService.setEqEnabled(value);
+    _ownedRevision = playbackService.eqEditRevision;
     if (!applied) {
       showTextOnSnackBar("当前输出模式不支持均衡器");
     }
@@ -75,7 +138,9 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
   void _applyPreset(String name) {
     final values = presets[name];
     if (values == null) return;
+    if (!_ownsEq()) return;
     playbackService.applyEqGains(values);
+    _ownedRevision = playbackService.eqEditRevision;
     setState(() {
       gains = List.of(playbackService.eqGains);
       preset = name;
@@ -101,6 +166,34 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              OutlinedButton(
+                  onPressed: () async {
+                    await showEqPresets(context, playbackService);
+                    if (mounted)
+                      setState(() {
+                        _ownedRevision = playbackService.eqEditRevision;
+                        _adjusted = null;
+                        _comparingOriginal = false;
+                        gains = List.of(playbackService.eqGains);
+                        enabled = playbackService.eqEnabled.value;
+                        preset = _matchPreset(gains);
+                      });
+                  },
+                  child: Text(ui('用户预设'))),
+              OutlinedButton(
+                  onPressed: _compare,
+                  child: Text(ui(_comparingOriginal ? '试听当前调节 B' : '试听原设置 A'))),
+              if (_adjusted != null) ...[
+                TextButton(
+                    onPressed: () => _finishComparison(false),
+                    child: Text(ui('保留当前'))),
+                TextButton(
+                    onPressed: () => _finishComparison(true),
+                    child: Text(ui('恢复原设置')))
+              ],
+            ]),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
@@ -149,7 +242,9 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
                       value: gains[band],
                       enabled: enabled,
                       onChanged: (value) {
+                        if (!_ownsEq()) return;
                         playbackService.setEqBandGain(band, value);
+                        _ownedRevision = playbackService.eqEditRevision;
                         setState(() {
                           gains[band] = value;
                           preset = customPresetName;

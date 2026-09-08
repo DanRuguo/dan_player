@@ -155,7 +155,7 @@ void main() {
     expect(migrated.entries.map((e) => e.id).toSet(), hasLength(4));
     expect(migrated.audios.keys, [known.path, missing, remote.path]);
     final saved = await savedStore();
-    expect(saved['version'], 3);
+    expect(saved['version'], 4);
     expect(saved['legacyCollectionsMigrated'], isTrue);
     expect(saved['migratedCollectionKeys'], hasLength(3));
     expect(await fixture('collections.json').readAsString(), source);

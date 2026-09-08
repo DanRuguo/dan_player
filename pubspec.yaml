@@ -1,7 +1,7 @@
 name: dan_player
 description: Dan Player.
 publish_to: 'none'
-version: 26.0.5-snapshot.2
+version: 26.0.5-snapshot.3
 
 environment:
   sdk: '>=3.1.4 <4.0.0'

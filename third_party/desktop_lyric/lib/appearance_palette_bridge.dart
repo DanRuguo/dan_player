@@ -45,6 +45,24 @@ class DesktopLyricPaletteHost {
   bool _dirty = false;
   Future<void>? _opening;
   Completer<void>? _closed;
+  Future<void>? _warming;
+
+  /// One hidden, bounded warm-up after the lyric window's first frame. No
+  /// hover latch, focus, geometry change or persistence is involved.
+  Future<void> prewarm() {
+    if (_disposed || _opening != null) return Future.value();
+    return _warming ??= () async {
+      ++_session;
+      try {
+        await channel.invokeMethod<void>('warm', _snapshot()).timeout(timeout);
+      } catch (_) {
+        // Optional warm-up failure leaves the explicit open path available.
+        await channel
+            .invokeMethod<void>('close', _session)
+            .catchError((Object _) {});
+      }
+    }();
+  }
 
   List<Listenable> get _sources => [
         controller.appearance,
@@ -83,6 +101,8 @@ class DesktopLyricPaletteHost {
   }
 
   Future<void> _open() async {
+    if (_warming != null) await _warming;
+    if (_disposed) return;
     final session = ++_session;
     _editAck = 0;
     final closed = _closed = Completer<void>();

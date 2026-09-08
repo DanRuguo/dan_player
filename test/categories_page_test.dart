@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/audio_tile.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/side_nav.dart';
 import 'package:dan_player/entry.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -127,13 +128,47 @@ void main() {
     expect(PlayService.isInitialized, isFalse);
   });
 
+  testWidgets('album cover action follows theme and shared toolbar geometry',
+      (tester) async {
+    _viewport(tester, width: 1400);
+    final audio = CategoryTestAudio('Cover theme', album: 'Demo album');
+    _library([audio]);
+    final group =
+        MusicCategories([audio]).groups(MusicCategoryKind.album).single;
+    final page = AlbumDetailPage.group(groupId: group.id, initialGroup: group);
+    for (final seed in [Colors.teal, Colors.deepOrange]) {
+      for (final brightness in Brightness.values) {
+        final theme = Entry(welcome: false).fromSchemeAndFontFamily(
+            colorScheme:
+                ColorScheme.fromSeed(seedColor: seed, brightness: brightness));
+        await tester
+            .pumpWidget(MaterialApp(theme: theme, home: Scaffold(body: page)));
+        await tester.pumpAndSettle();
+        final action = find.byWidgetPredicate((widget) =>
+            widget is IconButton && widget.tooltip == '重新读取封面');
+        final button = tester.widget<IconButton>(action);
+        final scheme = theme.colorScheme;
+        expect(button.style!.foregroundColor!.resolve({}), scheme.primary);
+        expect(button.style!.side!.resolve({})!.color,
+            scheme.outlineVariant.withValues(alpha: .7));
+        expect(button.style!.backgroundColor!.resolve({}), Colors.transparent);
+        expect(tester.getSize(action).height,
+            appToolbarControlHeight(tester.element(action)));
+        final material = tester.widget<Material>(
+            find.descendant(of: action, matching: find.byType(Material)).first);
+        expect(material.color, Colors.transparent);
+        expect(tester.takeException(), isNull);
+      }
+    }
+  });
+
   for (final width in [1000.0, 1440.0]) {
     testWidgets('desktop page exposes seven single-row chips at width $width',
         (tester) async {
       _viewport(tester, width: width);
       await tester.pumpWidget(_host(const CategoriesPage(audios: [])));
       await tester.pumpAndSettle();
-      expect(find.byType(ChoiceChip), findsNWidgets(7));
+      expect(find.byType(ChoiceChip), findsNWidgets(8));
       expect(
           find.byKey(const ValueKey('category-kind-composer')), findsNothing);
       expect(
@@ -551,7 +586,7 @@ void main() {
             scale: 2,
             brightness: brightness));
         await tester.pumpAndSettle();
-        expect(find.byType(ChoiceChip), findsNWidgets(7));
+        expect(find.byType(ChoiceChip), findsNWidgets(8));
         expect(find.byKey(const ValueKey('category-kind-menu')), findsNothing);
         final selector = find.byKey(const ValueKey('category-kind-scroll'));
         expect(tester.getSize(selector).height, greaterThanOrEqualTo(44));

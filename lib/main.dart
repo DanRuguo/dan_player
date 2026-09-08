@@ -1,3 +1,4 @@
+import 'package:dan_player/data/snapshot3_upgrade.dart';
 import 'dart:io';
 
 import 'package:dan_player/app_launch_mode.dart';
@@ -138,18 +139,21 @@ Future<void> _startMainPlayer() async {
   try {
     await migration.recover();
     await AudioMetadataJournal(dataDirectory).recover();
+    await Snapshot3Upgrade.prepare(dataDirectory);
   } catch (error) {
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(const WindowOptions(
         size: Size(760, 520), center: true, title: 'Dan Player · 曲库恢复'));
     runApp(MaterialApp(
-        theme: ThemeData(useMaterial3: true),
+        theme: Entry(welcome: false).fromSchemeAndFontFamily(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
         home: LibraryMigrationRecovery(
             migration: migration,
             error: error,
             allowRestore: !await AudioMetadataJournal(dataDirectory).hasPending,
             resume: () async {
               await AudioMetadataJournal(dataDirectory).recover();
+              await Snapshot3Upgrade.prepare(dataDirectory);
               await _startPlayer(dataDirectory);
             })));
     await showPreparedWindow();

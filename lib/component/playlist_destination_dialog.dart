@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:async';
 
 import 'package:dan_player/component/app_presentation.dart';
@@ -247,6 +248,7 @@ class _PlaylistDestinationDialogState extends State<PlaylistDestinationDialog> {
                 padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
                 child: AppContentScrollbar(
                   builder: (context, controller) => ListView.builder(
+                    shrinkWrap: true,
                     key: const ValueKey('playlist-destination-list'),
                     controller: controller,
                     padding: const EdgeInsetsDirectional.only(end: 4),
@@ -281,9 +283,9 @@ class _PlaylistDestinationDialogState extends State<PlaylistDestinationDialog> {
         if (!didPop) _dismiss();
       },
       child: Dialog(
-        child: SizedBox(
+        child: AppDialogContent(
           width: 560,
-          height: dialogHeight,
+          maxHeight: dialogHeight,
           child: Padding(
             padding: const EdgeInsets.all(18),
             child: LayoutBuilder(
@@ -293,6 +295,7 @@ class _PlaylistDestinationDialogState extends State<PlaylistDestinationDialog> {
                 final compact = constraints.maxHeight < 480 || textScale > 1.7;
                 final destinationList = _destinationList(playlists, scheme);
                 final column = Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     AppDialogTitle(
@@ -332,6 +335,7 @@ class _PlaylistDestinationDialogState extends State<PlaylistDestinationDialog> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
+                              mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
@@ -382,14 +386,14 @@ class _PlaylistDestinationDialogState extends State<PlaylistDestinationDialog> {
                       ),
                     const SizedBox(height: 10),
                     if (compact)
-                      SizedBox(
-                        height: (constraints.maxHeight * .62)
-                            .clamp(180, 340)
-                            .toDouble(),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                            maxHeight:
+                                (constraints.maxHeight * .62).clamp(0, 340)),
                         child: destinationList,
                       )
                     else
-                      Expanded(child: destinationList),
+                      Flexible(child: destinationList),
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.only(top: 12),
@@ -499,6 +503,7 @@ class _EmptyPlaylistDestination extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
+        heightFactor: 1,
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(

@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_shape.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -887,6 +888,9 @@ class _CustomSourceEditorDialogState extends State<_CustomSourceEditorDialog> {
             ),
             const SizedBox(height: 14),
             DropdownButtonFormField<CustomMusicSourceProtocol>(
+              borderRadius: AppShape.controlRadius,
+              elevation: 3,
+              dropdownColor: Theme.of(context).colorScheme.surfaceContainerLow,
               key: const ValueKey('custom-source-protocol'),
               initialValue: _protocol,
               isExpanded: true,

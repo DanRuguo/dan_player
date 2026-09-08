@@ -8,6 +8,7 @@ import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/component/cover_repair_dialog.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -164,6 +165,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       enableAddAllToPlaylist: true,
       extraActions: [
         IconButton.outlined(
+          style: appToolbarControlStyle(context, iconOnly: true),
           tooltip: ui('重新读取封面'),
           icon: const Icon(Symbols.image_search),
           onPressed: () => showCoverRepairDialog(context, currentGroup.audios,

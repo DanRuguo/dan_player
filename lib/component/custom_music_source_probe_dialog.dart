@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_dialog_title.dart';
@@ -171,12 +172,13 @@ class _CustomMusicSourceProbeDialogState
         _cancel();
       },
       child: Dialog(
-        child: SizedBox(
+        child: AppDialogContent(
           width: 760,
-          height: math.min(740, MediaQuery.sizeOf(context).height * .88),
+          maxHeight: math.min(740, MediaQuery.sizeOf(context).height * .88),
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 AppDialogTitle(
@@ -193,9 +195,10 @@ class _CustomMusicSourceProbeDialogState
                   ),
                 ),
                 const SizedBox(height: 8),
-                Expanded(
+                Flexible(
                   child: LayoutBuilder(builder: (context, constraints) {
                     return Column(
+                      mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         ConstrainedBox(
@@ -212,6 +215,7 @@ class _CustomMusicSourceProbeDialogState
                               child: Form(
                                 key: _form,
                                 child: Column(
+                                  mainAxisSize: MainAxisSize.min,
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
@@ -234,7 +238,8 @@ class _CustomMusicSourceProbeDialogState
                                               'custom-source-probe-album')),
                                     ]),
                                     const SizedBox(height: 10),
-                                    Text(ui('向此 API 发送查询信息与匹配歌曲标识，仅读取少量响应；不实际播放、不下载整首歌曲。'),
+                                    Text(
+                                        ui('向此 API 发送查询信息与匹配歌曲标识，仅读取少量响应；不实际播放、不下载整首歌曲。'),
                                         style: theme.textTheme.bodySmall),
                                     const SizedBox(height: 4),
                                     Text(
@@ -259,6 +264,7 @@ class _CustomMusicSourceProbeDialogState
                             child: Scrollbar(
                               controller: _resultsScroll,
                               child: ListView.separated(
+                                shrinkWrap: true,
                                 key: const ValueKey(
                                     'custom-source-probe-results'),
                                 controller: _resultsScroll,

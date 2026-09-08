@@ -1,3 +1,4 @@
+import 'catalog_snapshot3.dart';
 // Explicit application UI messages. Original media/user strings are not keys.
 import 'ui_catalog_d.dart';
 import 'ui_catalog_a.dart';
@@ -83,4 +84,5 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...uiCatalogSongCommentCapabilities,
   ...catalogWindowsTasks,
   ...catalogSnapshot22605,
+  ...catalogSnapshot3,
 });

@@ -45,6 +45,7 @@ class SettingsPage extends StatelessWidget {
             const LibraryHealthSettings(),
             const ArtistSeparatorEditor(),
             const RestoreSessionSwitch(),
+            const PreventSleepSwitch(),
             const PlaybackSettings(),
             const ReplayGainSettings(),
             const TrackResumeSettings(),

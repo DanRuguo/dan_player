@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:math' as math;
 
 import 'package:dan_player/app_paths.dart' as app_paths;
@@ -117,11 +118,12 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
               contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
               actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               title: const _QueueDialogTitle(),
-              content: SizedBox(
+              content: AppDialogContent(
                 width: contentWidth,
-                height: contentHeight,
+                maxHeight: contentHeight,
                 child: CurrentPlaylistView(
                   showTitle: false,
+                  shrinkWrap: true,
                   onOpenDetails: (audio) => Navigator.pop(context, audio),
                 ),
               ),

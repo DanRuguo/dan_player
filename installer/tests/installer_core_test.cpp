@@ -266,16 +266,17 @@ int wmain(int argc, wchar_t** argv) {
                             L"26.0.5-snapshot.1-player-research.md",
                             L"26.0.5-snapshot.1-computer-use.md",
                             L"release-26.0.5-snapshot.1.md", L"replay-gain.md",
-                            L"26.0.5-snapshot.2-validation.md", L"release-26.0.5-snapshot.2.md"}) {
+                            L"26.0.5-snapshot.2-validation.md", L"release-26.0.5-snapshot.2.md",
+                            L"26.0.5-snapshot.3-validation.md", L"release-26.0.5-snapshot.3.md"}) {
       Write(f.payload / name, "synthetic bundled documentation");
       f.manifest.files.push_back({name, Sha256(f.payload / name), fs::file_size(f.payload / name)});
     }
     const auto accepted = SerializeManifest(f.manifest);
     Write(f.manifest_path, accepted);
-    Check(ReadManifest(f.manifest_path).files.size() == 10, "Snapshot documents rejected");
+    Check(ReadManifest(f.manifest_path).files.size() == 12, "Snapshot documents rejected");
     const auto hash = f.manifest.files.front().sha256;
     for (const auto* name : {"personal-notes.md", "replay-gain.md.bak",
-                            "26.0.5-snapshot.3-validation.md", "settings.json",
+                            "26.0.5-snapshot.4-validation.md", "settings.json",
                             "docs/replay-gain.md", "../replay-gain.md"}) {
       Write(f.manifest_path, accepted + hash + "\t1\t" + name + "\n");
       Reject([&] { ReadManifest(f.manifest_path); });

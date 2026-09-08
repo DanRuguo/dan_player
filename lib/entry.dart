@@ -159,15 +159,23 @@ class Entry extends StatelessWidget {
         shape: AppShape.surface,
       ),
       listTileTheme: const ListTileThemeData(shape: AppShape.control),
-      popupMenuTheme: const PopupMenuThemeData(shape: AppShape.control),
+      popupMenuTheme: PopupMenuThemeData(
+          shape: AppShape.control,
+          elevation: 3,
+          color: colorScheme.surfaceContainerLow),
       cardTheme: const CardThemeData(shape: AppShape.surface),
       dialogTheme: DialogThemeData(
         backgroundColor: colorScheme.surface,
         shape: AppShape.surface,
       ),
-      menuTheme: const MenuThemeData(
+      menuTheme: MenuThemeData(
         style: MenuStyle(
-          shape: WidgetStatePropertyAll(AppShape.control),
+          elevation: const WidgetStatePropertyAll(3),
+          backgroundColor:
+              WidgetStatePropertyAll(colorScheme.surfaceContainerLow),
+          side: WidgetStatePropertyAll(BorderSide(
+              color: colorScheme.outlineVariant.withValues(alpha: .6))),
+          shape: const WidgetStatePropertyAll(AppShape.control),
         ),
       ),
     ));

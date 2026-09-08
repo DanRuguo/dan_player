@@ -10,9 +10,16 @@ Future<void> showSegmentLoopDialog(
     showAppDialog<void>(
         context: context, builder: (_) => SegmentLoopDialog(service: service));
 
-class SegmentLoopDialog extends StatelessWidget {
+class SegmentLoopDialog extends StatefulWidget {
   const SegmentLoopDialog({super.key, required this.service});
   final PlaybackService service;
+  @override
+  State<SegmentLoopDialog> createState() => _SegmentLoopDialogState();
+}
+
+class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
+  PlaybackService get service => widget.service;
+  bool _roundsValid = true, _intervalValid = true;
 
   static String _time(double? seconds) => seconds == null
       ? '--:--'
@@ -33,7 +40,7 @@ class SegmentLoopDialog extends StatelessWidget {
         final available = service.canUseSegmentLoop;
         return AlertDialog(
           icon: const Icon(Symbols.repeat),
-          title: Text(ui('A-B 片段循环')),
+          title: Text(ui('A-B 片段循环'), textAlign: TextAlign.center),
           content: SizedBox(
               width: 420,
               child: SingleChildScrollView(
@@ -77,11 +84,76 @@ class SegmentLoopDialog extends StatelessWidget {
                           label: Text(ui('标记 B：{0}', [_time(loop.end)]))),
                     ]),
                     const SizedBox(height: 8),
+                    Wrap(spacing: 12, runSpacing: 12, children: [
+                      SizedBox(
+                          width: 170,
+                          child: TextFormField(
+                              initialValue: loop.totalRounds?.toString() ?? '',
+                              decoration:
+                                  InputDecoration(labelText: ui('总次数（留空无限）')),
+                              autovalidateMode:
+                                  AutovalidateMode.onUserInteraction,
+                              validator: (v) => v == null ||
+                                      v.isEmpty ||
+                                      ((int.tryParse(v) ?? 0) >= 2 &&
+                                          (int.tryParse(v) ?? 1000) <= 999)
+                                  ? null
+                                  : ui('请输入 2–999'),
+                              keyboardType: TextInputType.number,
+                              onChanged: (v) {
+                                final n = int.tryParse(v);
+                                setState(() => _roundsValid = v.isEmpty ||
+                                    (n != null && n >= 2 && n <= 999));
+                                if (!_roundsValid) loop.setEnabled(false);
+                                if (v.isEmpty ||
+                                    (n != null && n >= 2 && n <= 999))
+                                  loop.configurePractice(
+                                      rounds: n,
+                                      interval: loop.intervalSeconds);
+                              })),
+                      SizedBox(
+                          width: 170,
+                          child: TextFormField(
+                              initialValue: loop.intervalSeconds.toString(),
+                              decoration: InputDecoration(
+                                  labelText: ui('轮间间隔（0–10 秒）')),
+                              autovalidateMode:
+                                  AutovalidateMode.onUserInteraction,
+                              validator: (v) {
+                                final n = double.tryParse(v ?? '');
+                                return n != null &&
+                                        n.isFinite &&
+                                        n >= 0 &&
+                                        n <= 10
+                                    ? null
+                                    : ui('请输入 0–10 秒');
+                              },
+                              keyboardType: TextInputType.number,
+                              onChanged: (v) {
+                                final n = double.tryParse(v);
+                                setState(() => _intervalValid = n != null &&
+                                    n.isFinite &&
+                                    n >= 0 &&
+                                    n <= 10);
+                                if (!_intervalValid) loop.setEnabled(false);
+                                if (n != null &&
+                                    n.isFinite &&
+                                    n >= 0 &&
+                                    n <= 10)
+                                  loop.configurePractice(
+                                      rounds: loop.totalRounds, interval: n);
+                              })),
+                    ]),
+                    const SizedBox(height: 12),
+                    Text(ui('已完成 {0} 轮', [loop.completedRounds])),
                     SwitchListTile.adaptive(
                         contentPadding: EdgeInsets.zero,
                         title: Text(ui('循环播放此片段')),
                         value: loop.enabled,
-                        onChanged: available && loop.hasRange
+                        onChanged: available &&
+                                loop.hasRange &&
+                                _roundsValid &&
+                                _intervalValid
                             ? service.setSegmentLoopEnabled
                             : null),
                     Text(ui('切换歌曲会清除标记；手动跳到区间外会关闭循环。'),
@@ -128,14 +200,14 @@ class _SegmentPositionState extends State<_SegmentPosition> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(ui('当前位置：{0}', [SegmentLoopDialog._time(value)]),
+              Text(ui('当前位置：{0}', [_SegmentLoopDialogState._time(value)]),
                   style: Theme.of(context).textTheme.titleMedium),
               Slider(
                   key: const ValueKey('segment-loop-position'),
                   value: value,
                   max: maximum,
-                  label: SegmentLoopDialog._time(value),
-                  semanticFormatterCallback: SegmentLoopDialog._time,
+                  label: _SegmentLoopDialogState._time(value),
+                  semanticFormatterCallback: _SegmentLoopDialogState._time,
                   onChanged: widget.available
                       ? (value) => setState(() => _dragPosition = value)
                       : null,

@@ -1,3 +1,4 @@
+import 'package:dan_player/component/personal_library_dialog.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/album_tile.dart';
 import 'package:dan_player/component/artist_tile.dart';
@@ -116,6 +117,10 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                TextButton.icon(
+                    onPressed: () => showPersonalTrackEditor(context, [audio]),
+                    icon: const Icon(Symbols.star),
+                    label: Text(ui("个人评分与标签"))),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final compact = constraints.maxWidth < 700;

@@ -89,7 +89,8 @@ void main() {
                       selected = await importM3uPlaylist(context,
                           library: [],
                           pickFile: () => location,
-                          readFile: (_) async => document);
+                          readFile: (_) async => document,
+                          fileExists: (_) async => false);
                     },
                     child: const Text('Import'))))));
     await tester.tap(find.text('Import'));

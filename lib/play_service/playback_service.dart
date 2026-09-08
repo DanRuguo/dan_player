@@ -1,3 +1,4 @@
+import 'package:dan_player/play_service/named_queue_store.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -88,6 +89,7 @@ class PlaybackService extends ChangeNotifier {
 
   PlaybackService(this.playService) {
     queueStopBoundary.addListener(_onQueueStopChanged);
+    segmentLoop.addListener(_practiceChanged);
     _playerStateStreamSub = _player.playbackEvents.listen((event) {
       if (_closed) return;
       // The native source remains playable while the next one resolves.
@@ -104,6 +106,7 @@ class PlaybackService extends ChangeNotifier {
         if (occurrence != null) {
           queueStopBoundary.failed(occurrence.id, _sourceRequestToken);
         }
+        segmentLoop.setEnabled(false);
         PlaybackStatistics.instance.pause();
         unawaited(_captureTrackResume(force: true));
         _syncPausedToSystem();
@@ -115,7 +118,8 @@ class PlaybackService extends ChangeNotifier {
       }
       if (event.completed) {
         if (segmentLoop.enabled && canUseSegmentLoop) {
-          _repeatSegment(resume: true);
+          if (segmentLoop.targetForPosition(length) != null)
+            _finishPracticeRound();
           return;
         }
         PlaybackStatistics.instance.finish(markCompleted: true);
@@ -163,7 +167,7 @@ class PlaybackService extends ChangeNotifier {
           playerState == PlayerState.playing &&
           canUseSegmentLoop &&
           segmentLoop.targetForPosition(progress) != null) {
-        _repeatSegment();
+        _finishPracticeRound();
       }
       PlaybackStatistics.instance
           .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
@@ -240,11 +244,13 @@ class PlaybackService extends ChangeNotifier {
       showTextOnSnackBar('请等待当前音乐加载完成后再切换输出模式');
       return;
     }
+    segmentLoop.setEnabled(false);
     final token = ++_sourceRequestToken;
     _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
     final occurrence = _currentOccurrence;
     if (occurrence != null) queueStopBoundary.loading(occurrence.id, token);
     isChangingOutput.value = true;
+    eqEditRevision++;
     _player.cancelPendingSource();
     final current = nowPlaying;
     _loadingPlaylistIndex = _playlistIndex;
@@ -289,9 +295,11 @@ class PlaybackService extends ChangeNotifier {
   late final _eqEnabled = ValueNotifier(_player.eqEnabled);
   ValueNotifier<bool> get eqEnabled => _eqEnabled;
 
+  int eqEditRevision = 0;
   List<double> get eqGains => _player.eqGains;
 
   bool setEqEnabled(bool enabled) {
+    eqEditRevision++;
     final applied = _player.setEqEnabled(enabled);
     _eqEnabled.value = _player.eqEnabled;
     _pref.eqEnabled = _player.eqEnabled;
@@ -299,12 +307,14 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void setEqBandGain(int band, double gain) {
+    eqEditRevision++;
     _player.setEqBandGain(band, gain);
     _pref.eqGains = _player.eqGains;
     diagnosticsRevision.value++;
   }
 
   void applyEqGains(List<double> gains) {
+    eqEditRevision++;
     _player.setEqGains(gains);
     _pref.eqGains = _player.eqGains;
     diagnosticsRevision.value++;
@@ -586,12 +596,62 @@ class PlaybackService extends ChangeNotifier {
       length.isFinite &&
       length >= 1;
 
+  Timer? _practiceTimer;
+  DateTime? _practiceDeadline;
+  Duration? _practiceRemaining;
+  int? _practiceToken;
+  void _practiceChanged() {
+    if (!segmentLoop.enabled) {
+      _practiceTimer?.cancel();
+      _practiceTimer = null;
+      _practiceRemaining = null;
+      _practiceDeadline = null;
+    }
+  }
+
+  void _finishPracticeRound() {
+    if (segmentLoop.finished) {
+      pause();
+      try {
+        _player.seek(segmentLoop.end!.clamp(0.0, length - .001));
+      } catch (error, trace) {
+        LOGGER.w('[practice end] $error', stackTrace: trace);
+      }
+      showTextOnSnackBar('练习次数已完成，已暂停');
+    } else if (segmentLoop.intervalSeconds > 0) {
+      pause();
+      _practiceToken = _sourceRequestToken;
+      _practiceRemaining =
+          Duration(milliseconds: (segmentLoop.intervalSeconds * 1000).round());
+      _schedulePracticeInterval();
+    } else {
+      _repeatSegment(resume: true);
+    }
+  }
+
+  void _schedulePracticeInterval() {
+    final remaining = _practiceRemaining;
+    if (remaining == null) return;
+    _practiceTimer?.cancel();
+    _practiceDeadline = DateTime.now().add(remaining);
+    _practiceTimer = Timer(remaining, () {
+      _practiceTimer = null;
+      _practiceRemaining = null;
+      _practiceDeadline = null;
+      if (_closed ||
+          _practiceToken != _sourceRequestToken ||
+          !segmentLoop.enabled ||
+          segmentLoop.finished) return;
+      _repeatSegment(resume: true);
+    });
+  }
+
   void _repeatSegment({bool resume = false}) {
     final start = segmentLoop.start;
     if (start == null || !segmentLoop.enabled || !canUseSegmentLoop) return;
     try {
       _player.seek(start);
-      if (resume) _player.start();
+      if (resume) this.start();
       _lastSmtcProgressMs = -1000;
       playService.lyricService.findCurrLyricLine();
     } catch (error, trace) {
@@ -912,6 +972,7 @@ class PlaybackService extends ChangeNotifier {
       }
 
       cancelSleepTimer();
+      segmentLoop.setEnabled(false);
       queueStopBoundary.sleepExpired();
       stopAfterCurrent.value = false;
       // Invalidate an in-flight open before it can start after the timer.
@@ -1265,6 +1326,104 @@ class PlaybackService extends ChangeNotifier {
   /// Every startup caller waits for the same source-open attempt to settle.
   /// In particular, Windows playback tasks must not run against a queue whose
   /// saved source is still opening in the background.
+  int get playbackSessionToken => _sourceRequestToken;
+  Map<String, dynamic> captureNamedQueue() {
+    if (!canEditQueue || _currentOccurrence == null) throw StateError('请先加载歌曲');
+    final snapshot = <String, dynamic>{
+      'queue': _queueOccurrences.map((e) => e.id.toString()).toList(),
+      'backup': _backupOccurrences.map((e) => e.id.toString()).toList(),
+      'current': _currentOccurrence!.id.toString(),
+      'position': position,
+      'shuffle': shuffle.value,
+      'slots': {
+        for (final e in _queueOccurrences)
+          e.id.toString(): {
+            'track': e.item.stableTrackId,
+            'title': e.item.displayTitle,
+            if (e.item.isCueTrack) 'cue': e.item.toMap()
+          }
+      }
+    };
+    NamedQueueStore.validateSnapshot(snapshot);
+    return snapshot;
+  }
+
+  Map<String, Audio> resolveNamedQueue(Map<String, dynamic> snapshot) {
+    NamedQueueStore.validateSnapshot(snapshot);
+    final byId = {
+      for (final a in [
+        ...AudioLibrary.instance.audioCollection,
+        ...AudioLibrary.instance.onlineAudioCollection,
+        ...PLAYLISTS.expand((p) => p.flattenAudios())
+      ])
+        a.stableTrackId: a
+    };
+    final resolved = <String, Audio>{};
+    for (final entry in (snapshot['slots'] as Map).entries) {
+      final slot = entry.value as Map;
+      final known = byId[slot['track']];
+      if (known != null) {
+        resolved[entry.key as String] = known;
+      } else if (slot['cue'] is Map) {
+        final audio = Audio.fromMap(slot['cue'] as Map);
+        if (audio.stableTrackId == slot['track'])
+          resolved[entry.key as String] = audio;
+      }
+    }
+    return resolved;
+  }
+
+  Future<void> restoreNamedQueue(Map<String, dynamic> snapshot,
+      {required int expectedSession}) async {
+    if (!canEditQueue || expectedSession != _sourceRequestToken)
+      throw StateError('播放会话已改变，请重新预览');
+    final resolved = resolveNamedQueue(snapshot);
+    final queue = (snapshot['queue'] as List)
+        .where(resolved.containsKey)
+        .cast<String>()
+        .toList();
+    if (queue.isEmpty) throw StateError('会话中的歌曲暂不可用');
+    final current = queue.indexOf(snapshot['current']);
+    final occurrences = {
+      for (final id in queue) id: QueueOccurrence(resolved[id]!)
+    };
+    pause();
+    cancelSleepTimer();
+    cancelQueueStop();
+    segmentLoop.clear();
+    _queueOccurrences = [for (final id in queue) occurrences[id]!];
+    _backupOccurrences = [
+      for (final id in snapshot['backup'] as List)
+        if (occurrences[id] != null) occurrences[id]!
+    ];
+    _shuffleCycle = null;
+    shuffle.value = snapshot['shuffle'] as bool;
+    _pref.shuffle = shuffle.value;
+    _scheduleModePreferenceSave();
+    _publishQueue();
+    await _loadPaused(current < 0 ? 0 : current, playlist.value,
+        current < 0 ? 0 : (snapshot['position'] as num).toDouble());
+  }
+
+  void seekPrecisely(double target, int expectedSession) {
+    if (!canEditQueue ||
+        expectedSession != _sourceRequestToken ||
+        nowPlaying == null ||
+        !length.isFinite ||
+        !target.isFinite ||
+        target < 0 ||
+        target >= length) throw StateError('歌曲已改变或当前无法定位');
+    _practiceTimer?.cancel();
+    _practiceTimer = null;
+    _practiceRemaining = null;
+    _manualSeekRevision++;
+    segmentLoop.manualSeek(target);
+    _player.seek(target);
+    _lastSmtcProgressMs = -1000;
+    playService.lyricService.findCurrLyricLine();
+    _schedulePlaybackStateSave(positionOverride: target);
+  }
+
   Future<void> restoreLastSessionOnce() =>
       _sessionRestoreFuture ??= _restoreLastSession();
 
@@ -1504,6 +1663,9 @@ class PlaybackService extends ChangeNotifier {
           open: () async => true,
           seek: () {
             _manualSeekRevision++;
+            _practiceTimer?.cancel();
+            _practiceTimer = null;
+            _practiceRemaining = null;
             segmentLoop.manualSeek(position);
             _player.seek(position);
             playService.lyricService.findCurrLyricLine();
@@ -1759,6 +1921,12 @@ class PlaybackService extends ChangeNotifier {
   /// 暂停
   void pause() {
     if (_closed) return;
+    if (_practiceTimer != null) {
+      _practiceRemaining = _practiceDeadline!.difference(DateTime.now());
+      if (_practiceRemaining!.isNegative) _practiceRemaining = Duration.zero;
+      _practiceTimer?.cancel();
+      _practiceTimer = null;
+    }
     try {
       PlaybackStatistics.instance
           .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
@@ -1776,6 +1944,11 @@ class PlaybackService extends ChangeNotifier {
 
   /// 恢复播放
   void start() {
+    if (_practiceRemaining != null && segmentLoop.enabled) {
+      _schedulePracticeInterval();
+      return;
+    }
+    if (segmentLoop.finished) segmentLoop.setEnabled(false);
     queueStopBoundary.resumeAdvance();
     if (_closed) return;
     try {
@@ -1820,6 +1993,9 @@ class PlaybackService extends ChangeNotifier {
   void seek(double position) {
     if (_closed) return;
     _manualSeekRevision++;
+    _practiceTimer?.cancel();
+    _practiceTimer = null;
+    _practiceRemaining = null;
     segmentLoop.manualSeek(position);
     try {
       _player.seek(position);
@@ -1903,6 +2079,8 @@ class PlaybackService extends ChangeNotifier {
     stopAfterCurrent.dispose();
     queueStopBoundary.removeListener(_onQueueStopChanged);
     queueStopBoundary.dispose();
+    _practiceTimer?.cancel();
+    segmentLoop.removeListener(_practiceChanged);
     segmentLoop.dispose();
     isBuffering.dispose();
     resolvingAudioPath.dispose();

@@ -376,6 +376,49 @@ class LyricDocumentStore extends ChangeNotifier {
         return next;
       });
 
+  Future<Set<String>> selectLocalBatch(
+          List<({Audio audio, Lyric lyric, int revision})> entries,
+          {bool keepOffset = true}) =>
+      _exclusive(() async {
+        await _load();
+        if (entries.length > 16) throw ArgumentError('歌词提交每组最多 16 首');
+        await _persistIdentity();
+        final next = Map<String, LyricDocument>.of(_documents);
+        final conflicts = <String>{};
+        for (final entry in entries) {
+          final audio = entry.audio, id = audio.stableTrackId;
+          final old = next[id] ?? LyricDocument(trackId: id, path: audio.path);
+          if (audio.isOnline ||
+              audio.isCueTrack ||
+              old.revision != entry.revision ||
+              old.locked ||
+              old.edited != null ||
+              old.noLyrics) {
+            conflicts.add(id);
+            continue;
+          }
+          final map = old.toJson()
+            ..['original'] = LyricSnapshot.capture(entry.lyric).toJson()
+            ..['edited'] = null
+            ..['editedText'] = null
+            ..['originalText'] = null
+            ..['source'] = null
+            ..['locked'] = true
+            ..['noLyrics'] = false
+            ..['offsetMs'] = keepOffset ? old.offsetMs : 0
+            ..['revision'] = old.revision + 1;
+          if (old.effective != null)
+            map['history'] = [
+              ...old.history,
+              old.toJson(includeHistory: false)
+            ];
+          next[id] = LyricDocument.fromJson(map);
+        }
+        if (next.entries.any((e) => !identical(_documents[e.key], e.value)))
+          await _write(next);
+        return conflicts;
+      });
+
   Future<LyricDocument> select(Audio audio, Lyric lyric,
           {LyricSource? source,
           int? expectedRevision,

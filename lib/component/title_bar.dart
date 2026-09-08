@@ -289,7 +289,7 @@ class _OpenDrawerBtn extends StatelessWidget {
       onPressed: Scaffold.of(context).openDrawer,
       icon: const AppEntrance(
         identity: 'title-drawer',
-        child: Icon(Symbols.side_navigation),
+        child: Icon(Symbols.menu),
       ),
     );
   }

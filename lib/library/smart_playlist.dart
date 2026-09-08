@@ -1,3 +1,6 @@
+import 'package:dan_player/library/smart_condition.dart';
+import 'package:dan_player/library/personal_library.dart';
+import 'package:dan_player/library/playlist.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -27,6 +30,7 @@ class SmartPlaylist {
       {required this.id,
       required this.name,
       this.query = '',
+      this.condition,
       this.artist = '',
       this.album = '',
       this.formats = '',
@@ -37,6 +41,7 @@ class SmartPlaylist {
       this.maxResults,
       this.sort = SmartPlaylistSort.name});
   final String id, name, query, artist, album, formats;
+  final SmartCondition? condition;
   final int? minSeconds, maxSeconds;
   final SmartPlaylistSort sort;
   final SmartPlaylistHistory history;
@@ -53,6 +58,11 @@ class SmartPlaylist {
       sort == SmartPlaylistSort.leastPlayed;
 
   String? validate() {
+    try {
+      if (condition != null) SmartCondition.fromJson(condition!.toJson());
+    } catch (_) {
+      return '分组条件无效：最多两层、32 条条件，请检查日期和取值。';
+    }
     if (id.isEmpty ||
         id.length > 100 ||
         name.trim().isEmpty ||
@@ -80,6 +90,7 @@ class SmartPlaylist {
 
   Map<String, Object?> toJson() => {
         'id': id,
+        if (condition != null) 'condition': condition!.toJson(),
         'name': name,
         'query': query,
         'artist': artist,
@@ -105,6 +116,9 @@ class SmartPlaylist {
     }
     final value = SmartPlaylist(
         id: raw['id'],
+        condition: raw['condition'] == null
+            ? null
+            : SmartCondition.fromJson(raw['condition']),
         name: raw['name'],
         query: raw['query'],
         artist: raw['artist'],
@@ -134,6 +148,14 @@ class SmartPlaylist {
       DateTime? now}) async {
     final failure = validate();
     if (failure != null) throw FormatException(failure);
+    final personal = condition == null
+        ? <String, PersonalTrack>{}
+        : await (await PersonalLibrary.instance).snapshot();
+    final members = <String, Set<String>>{
+      if (condition != null)
+        for (final p in playlistTree.allPlaylists)
+          p.id: p.flattenAudios().map((a) => a.stableTrackId).toSet()
+    };
     final words = query
         .toLowerCase()
         .trim()
@@ -179,6 +201,10 @@ class SmartPlaylist {
       }
       final audio = snapshot[index];
       if (!audio.isLocal) continue;
+      if (condition != null &&
+          condition!.evaluate(audio.stableTrackId,
+                  personal[audio.stableTrackId], members) !=
+              RuleTruth.yes) continue;
       final uncertain = recorder != null &&
           uncertainHistory.contains(recorder.identityFor(audio));
       final playback = playbackOf(audio);
@@ -325,8 +351,12 @@ class SmartPlaylistStore {
           throw const FormatException('Smart playlist file too large');
         }
         final json = jsonDecode(utf8.decode(bytes));
+        if (json is Map && json['version'] is int && json['version'] > 2) {
+          throw UnsupportedError(
+              'Smart playlists were created by a newer version');
+        }
         if (json is! Map ||
-            json['version'] != 1 ||
+            ![1, 2].contains(json['version']) ||
             json['playlists'] is! List ||
             (json['playlists'] as List).length > maxPlaylists) {
           throw const FormatException('Invalid smart playlist file');
@@ -339,6 +369,8 @@ class SmartPlaylistStore {
         _items = next;
         _recovered = candidate.path != file.path;
         return;
+      } on UnsupportedError {
+        rethrow;
       } catch (error) {
         failure = error;
       }
@@ -376,7 +408,7 @@ class SmartPlaylistStore {
 
   Future<void> _save(List<SmartPlaylist> next) async {
     final bytes = utf8.encode(jsonEncode({
-      'version': 1,
+      'version': 2,
       'playlists': next.map((item) => item.toJson()).toList()
     }));
     if (bytes.length > maxBytes) {

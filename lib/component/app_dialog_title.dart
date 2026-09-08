@@ -44,7 +44,13 @@ class AppDialogTitle extends StatelessWidget {
     }
     return Row(
       children: [
-        SizedBox(width: sideExtent, child: Center(child: leading)),
+        SizedBox(
+            width: sideExtent,
+            child: Center(
+                child: IconTheme.merge(
+                    data: IconThemeData(
+                        color: Theme.of(context).colorScheme.primary),
+                    child: leading ?? const SizedBox.shrink()))),
         Expanded(child: content),
         SizedBox(width: sideExtent, child: Center(child: trailing)),
       ],

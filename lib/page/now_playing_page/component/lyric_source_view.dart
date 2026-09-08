@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:async';
 import 'dart:io';
@@ -531,12 +532,13 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
     final height =
         (MediaQuery.sizeOf(context).height - 48).clamp(320, 680).toDouble();
     return Dialog(
-      child: SizedBox(
+      child: AppDialogContent(
         width: 620,
-        height: height,
+        maxHeight: height,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               AppDialogTitle(
@@ -551,12 +553,14 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                 ),
               ),
               const SizedBox(height: 12),
-              Expanded(
+              Flexible(
                   child: CustomScrollView(
+                shrinkWrap: true,
                 key: const ValueKey('lyric-source-scroll'),
                 slivers: [
                   SliverToBoxAdapter(
                       child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
@@ -726,6 +730,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
         title:
             Text(candidate.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (details.isNotEmpty)

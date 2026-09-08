@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_sort_button.dart';
@@ -99,22 +100,25 @@ class _PlaylistSongPickerState extends State<PlaylistSongPicker> {
     UiLanguageScope.watch(context);
     final matches = _matches;
     return Dialog(
-      child: SizedBox(
+      child: AppDialogContent(
         width: 588,
-        height: (MediaQuery.sizeOf(context).height * .7).clamp(240, 700),
+        maxHeight: (MediaQuery.sizeOf(context).height * .7).clamp(240, 700),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // One lazy viewport lets even the title and search controls move
               // out of the way in a short window; only the actions stay fixed.
-              Expanded(
+              Flexible(
                   child: CustomScrollView(
+                shrinkWrap: true,
                 key: const ValueKey('playlist-song-picker-scroll'),
                 slivers: [
                   SliverToBoxAdapter(
                       child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       AppDialogTitle(
@@ -172,6 +176,7 @@ class _PlaylistSongPickerState extends State<PlaylistSongPicker> {
                             );
                           }
                           return Column(
+                            mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               search,

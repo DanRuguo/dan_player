@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:typed_data';
 
@@ -276,17 +277,19 @@ class _OnlineMetadataLookupDialogState
         _artworkRequest?.cancel();
       },
       child: Dialog(
-        child: SizedBox(
+        child: AppDialogContent(
           width: 740,
-          height: (MediaQuery.sizeOf(context).height - 64).clamp(300, 700),
+          maxHeight: (MediaQuery.sizeOf(context).height - 64).clamp(300, 700),
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
+                  Flexible(
                     child: LayoutBuilder(builder: (context, constraints) {
                       return Column(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           // Controls keep their own viewport when results
@@ -305,6 +308,7 @@ class _OnlineMetadataLookupDialogState
                                 primary: false,
                                 padding: const EdgeInsets.only(right: 12),
                                 child: Column(
+                                  mainAxisSize: MainAxisSize.min,
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
@@ -395,11 +399,12 @@ class _OnlineMetadataLookupDialogState
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Expanded(
+                          Flexible(
                               child: Scrollbar(
                             controller: _resultsScroll,
                             thumbVisibility: true,
                             child: ListView.builder(
+                              shrinkWrap: true,
                               key: const ValueKey('metadata-lookup-results'),
                               controller: _resultsScroll,
                               primary: false,

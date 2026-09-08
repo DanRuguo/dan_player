@@ -138,9 +138,10 @@ class _CueImportDialogState extends State<CueImportDialog> {
                   const SizedBox(height: 8),
                   Text(ui('只保存分轨引用，不拆分或修改音频文件；保留 CUE 和源文件以便重新导入。')),
                   const SizedBox(height: 8),
-                  SizedBox(
-                      height: (_audios!.length * 66.0).clamp(66, 230),
+                  ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 230),
                       child: ListView.builder(
+                          shrinkWrap: true,
                           itemCount: _audios!.length,
                           itemBuilder: (_, i) {
                             final audio = _audios![i];

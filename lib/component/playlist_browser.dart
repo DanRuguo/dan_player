@@ -1,3 +1,5 @@
+import 'package:dan_player/component/playlist_management_dialog.dart';
+import 'package:dan_player/component/audio_columns.dart';
 import 'dart:async';
 import 'package:dan_player/component/now_playing_bar_metrics.dart';
 
@@ -96,7 +98,10 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   PlaylistTree? _cachedTree;
   final _selectedEntries = <String>{};
   bool _selecting = false;
-  late PlaylistViewMode _view = widget.initialView ??
+  late PlaylistViewMode _view = PlaylistViewMode.values
+          .where((v) => v.name == widget.initialPlaylist?.presentation['view'])
+          .firstOrNull ??
+      widget.initialView ??
       PlaylistViewMode.resolve(null, legacy: widget.initialContentView.name);
   final Map<String, String> _testSortModes = {};
   final _reorderController = PlaylistReorderController();
@@ -134,12 +139,21 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     if (oldWidget.initialPlaylist?.id != widget.initialPlaylist?.id) {
       _reorderController.cancel();
       _current = widget.initialPlaylist;
+      _view = PlaylistViewMode.values
+              .where((v) => v.name == _current?.presentation['view'])
+              .firstOrNull ??
+          widget.initialView ??
+          PlaylistViewMode.resolve(null,
+              legacy: widget.initialContentView.name);
       _clearSelection();
     }
     if (oldWidget.initialView != widget.initialView ||
         oldWidget.initialContentView != widget.initialContentView) {
       _reorderController.cancel();
-      _view = widget.initialView ??
+      _view = PlaylistViewMode.values
+              .where((v) => v.name == _current?.presentation['view'])
+              .firstOrNull ??
+          widget.initialView ??
           PlaylistViewMode.resolve(null,
               legacy: widget.initialContentView.name);
     }
@@ -164,7 +178,14 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     if (callback != null) {
       callback(playlist);
     } else {
-      setState(() => _current = playlist);
+      setState(() {
+        _current = playlist;
+        _view = PlaylistViewMode.values
+                .where((v) => v.name == playlist?.presentation['view'])
+                .firstOrNull ??
+            widget.initialView ??
+            PlaylistViewMode.list;
+      });
     }
   }
 
@@ -217,6 +238,15 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         library:
             List.of(widget.library ?? AudioLibrary.instance.audioCollection));
     if (imported == null || !mounted || _editingBlocked) return;
+    if (imported.targetId != null) {
+      await _edit(() {
+        final target = _tree.findPlaylist(imported.targetId!);
+        if (target == null) throw StateError('目标歌单已移除');
+        appendPlaylistOccurrences(target, imported.audios,
+            expectedSnapshot: imported.expectedSnapshot!);
+      });
+      return;
+    }
     Playlist? created;
     await _edit(() => created =
         _tree.createPlaylistFromAudios(imported.name, imported.audios));
@@ -1039,19 +1069,23 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                         ? _toggleSelection(row)
                         : _play(queue, queueIndex),
                     rowAction) ??
-                AudioTile(
-                  key: ValueKey('playlist-audio-${row.id}'),
-                  audioIndex: queueIndex,
-                  playlist: queue,
-                  action: rowAction,
-                  selection: AudioTileSelection(
-                    enabled: _selecting,
-                    selected: _isSelected(row),
-                    onToggle: () => _toggleSelection(row),
-                    onStart: () => _startSelection(row),
-                  ),
-                  additionalMenuItems: menuItems,
-                );
+                AudioColumnsScope(
+                    enabled: true,
+                    configuration: _current?.presentation,
+                    child: AudioTile(
+                      columns: true,
+                      key: ValueKey('playlist-audio-${row.id}'),
+                      audioIndex: queueIndex,
+                      playlist: queue,
+                      action: rowAction,
+                      selection: AudioTileSelection(
+                        enabled: _selecting,
+                        selected: _isSelected(row),
+                        onToggle: () => _toggleSelection(row),
+                        onStart: () => _startSelection(row),
+                      ),
+                      additionalMenuItems: menuItems,
+                    ));
             content = _view == PlaylistViewMode.grid
                 ? widget.trackBuilder != null
                     ? wrapGridIdentity(track)
@@ -1307,6 +1341,26 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         view: _view,
         onCreate: () => unawaited(_create(current)),
         onImportM3u: _importM3u,
+        onTrash: widget.tree != null
+            ? null
+            : () async {
+                await showPlaylistTrash(context);
+                if (mounted) setState(() {});
+              },
+        onPresentation: current == null || widget.tree != null
+            ? null
+            : () async {
+                await showPlaylistPresentation(context, current);
+                if (mounted)
+                  setState(() {
+                    _view = PlaylistViewMode.values
+                            .where(
+                                (v) => v.name == current.presentation['view'])
+                            .firstOrNull ??
+                        widget.initialView ??
+                        PlaylistViewMode.list;
+                  });
+              },
         onImportCue: _importCue,
         onOpenSmartPlaylists: () => unawaited(showSmartPlaylists(context,
             library: () =>
@@ -1345,8 +1399,15 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
           if (_view == view) return;
           _reorderController.cancel();
           setState(() => _view = view);
-          widget.onViewChanged?.call(view);
-          if (view != PlaylistViewMode.circular) {
+          if (current != null && widget.tree == null) {
+            unawaited(_edit(() => current.presentation = {
+                  ...current.presentation,
+                  'view': view.name
+                }));
+          } else {
+            widget.onViewChanged?.call(view);
+          }
+          if (current == null && view != PlaylistViewMode.circular) {
             widget.onContentViewChanged?.call(view == PlaylistViewMode.list
                 ? ContentView.list
                 : ContentView.table);

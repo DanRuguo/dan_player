@@ -106,6 +106,8 @@ enum _PlaylistToolbarAction {
   exportM3u,
   importCue,
   smartPlaylists,
+  trash,
+  presentation,
 }
 
 /// Compact, descriptor-only playlist actions. No playback/library singleton is
@@ -145,6 +147,8 @@ class PlaylistToolbar extends StatefulWidget {
     this.onExportM3u,
     this.onImportCue,
     this.onOpenSmartPlaylists,
+    this.onTrash,
+    this.onPresentation,
     this.selectionTools,
     this.playbackService,
     this.alignment = WrapAlignment.end,
@@ -180,6 +184,7 @@ class PlaylistToolbar extends StatefulWidget {
   final VoidCallback? onExportM3u;
   final VoidCallback? onImportCue;
   final VoidCallback? onOpenSmartPlaylists;
+  final VoidCallback? onTrash, onPresentation;
   final Widget? selectionTools;
   final PlaybackService? playbackService;
   final WrapAlignment alignment;
@@ -228,6 +233,18 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
   }
 
   List<_ToolbarMenuItem<_PlaylistToolbarAction>?> _moreItems() => [
+        if (widget.onTrash != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.trash,
+              label: ui('歌单回收站'),
+              icon: Icons.restore_from_trash,
+              onSelected: widget.onTrash),
+        if (widget.onPresentation != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.presentation,
+              label: ui('此歌单的视图与列'),
+              icon: Icons.view_column_outlined,
+              onSelected: widget.onPresentation),
         if (widget.onImportM3u != null)
           _ToolbarMenuItem(
               value: _PlaylistToolbarAction.importM3u,

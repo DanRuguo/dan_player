@@ -299,6 +299,29 @@ struct DesktopIntegrationController::Impl
   std::int64_t revision = 0;
   std::string reason;
 
+  HANDLE power_request = nullptr;
+  DWORD SetPlaybackPower(bool enabled) {
+    if (!enabled) {
+      DWORD error = ERROR_SUCCESS;
+      if (power_request) {
+        if (!PowerClearRequest(power_request, PowerRequestSystemRequired)) error = GetLastError();
+        CloseHandle(power_request); power_request = nullptr;
+      }
+      return error;
+    }
+    if (power_request) return ERROR_SUCCESS;
+    REASON_CONTEXT playback_reason{};
+    playback_reason.Version = POWER_REQUEST_CONTEXT_VERSION;
+    playback_reason.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
+    playback_reason.Reason.SimpleReasonString = const_cast<LPWSTR>(L"Dan Player audio playback");
+    HANDLE handle = PowerCreateRequest(&playback_reason);
+    if (handle == INVALID_HANDLE_VALUE) return GetLastError();
+    if (!PowerSetRequest(handle, PowerRequestSystemRequired)) {
+      const DWORD error = GetLastError(); CloseHandle(handle); return error;
+    }
+    power_request = handle;
+    return ERROR_SUCCESS;
+  }
   ~Impl() { Dispose(); }
 
   void Connect(flutter::FlutterEngine* engine, std::weak_ptr<Impl> weak) {
@@ -331,6 +354,13 @@ struct DesktopIntegrationController::Impl
     const auto* args = call.arguments()
                            ? std::get_if<EncodableMap>(call.arguments())
                            : nullptr;
+    if (method == "setPowerRequest") {
+      bool enabled = false;
+      if (!args || !ReadBool(*args, "enabled", &enabled)) { result->Error("INVALID_ARGUMENT", "enabled must be bool"); return; }
+      const auto error = SetPlaybackPower(enabled);
+      if (error != ERROR_SUCCESS) result->Error("POWER_REQUEST_FAILED", std::to_string(error)); else result->Success();
+      return;
+    }
     if (method == "configure") {
       bool controls = true;
       if (!args || !ReadBool(*args, "taskbarControls", &controls)) {
@@ -1420,6 +1450,7 @@ struct DesktopIntegrationController::Impl
     // Make the terminal state visible before any API which can pump messages.
     // Reentrant destroy/Explorer callbacks must not resurrect Shell resources.
     disposed = true;
+    SetPlaybackPower(false);
     active = false;
     ClearThumbnail();
     const bool had_tray = std::exchange(tray_available, false);

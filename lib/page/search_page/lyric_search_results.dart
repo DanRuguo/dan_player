@@ -232,6 +232,7 @@ class LyricSearchPreview extends StatelessWidget {
             Flexible(
                 child: AppContentScrollbar(
                     builder: (context, controller) => ListView.builder(
+                        shrinkWrap: true,
                         controller: controller,
                         padding: const EdgeInsets.all(20),
                         itemCount: song.lines.length,

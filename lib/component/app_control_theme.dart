@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/app_input_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_motion.dart';
 
@@ -9,6 +10,15 @@ ThemeData applyAppControlTheme(ThemeData theme) {
   final label = theme.textTheme.labelLarge ?? const TextStyle();
   final segmentStyle = theme.segmentedButtonTheme.style ?? const ButtonStyle();
   return theme.copyWith(
+    inputDecorationTheme: appInputTheme(scheme),
+    menuButtonTheme: MenuButtonThemeData(
+        style: (theme.menuButtonTheme.style ?? const ButtonStyle()).copyWith(
+      iconColor: WidgetStateProperty.resolveWith((states) =>
+          states.contains(WidgetState.disabled)
+              ? scheme.onSurface.withValues(alpha: .38)
+              : scheme.primary),
+      animationDuration: AppMotion.quick,
+    )),
     textButtonTheme: TextButtonThemeData(
         style: (theme.textButtonTheme.style ?? const ButtonStyle())
             .copyWith(animationDuration: AppMotion.quick)),

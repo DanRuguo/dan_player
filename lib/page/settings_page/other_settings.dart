@@ -1,3 +1,4 @@
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:convert';
 import 'dart:async';
@@ -42,6 +43,9 @@ class _RestoreSessionSwitchState extends State<RestoreSessionSwitch> {
     UiLanguageScope.watch(context);
     return SettingsSwitchTile(
       title: Text(ui("恢复上次播放会话")),
+      subtitle: Text(ui(settings.restoreLastSession
+          ? '下次启动恢复队列与播放位置，保持暂停。'
+          : '下次启动不恢复上次播放队列。')),
       icon: Symbols.history,
       value: settings.restoreLastSession,
       onChanged: (value) async {
@@ -899,6 +903,55 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
                   }
                 },
               ),
+      ),
+    );
+  }
+}
+
+String preventSleepStatusText(bool enabled, String nativeStatus) {
+  if (!enabled) return ui('已关闭 · 使用系统休眠设置');
+  if (nativeStatus == '已生效') return ui('已开启 · 播放中，防休眠已生效');
+  if (nativeStatus.startsWith('电源请求失败')) return ui('未生效 · 请重新切换开关');
+  return ui('已开启 · 等待播放');
+}
+
+class PreventSleepSwitch extends StatelessWidget {
+  const PreventSleepSwitch({super.key});
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return ValueListenableBuilder(
+      valueListenable: AppSettings.instance.experience,
+      builder: (context, pref, _) => ValueListenableBuilder(
+        valueListenable: DesktopIntegration.instance.powerRequestStatus,
+        builder: (context, status, _) => SettingsSwitchTile(
+          icon: Symbols.bedtime,
+          title: Text(ui('播放时防止自动休眠')),
+          subtitle:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(ui('播放时保持电脑唤醒；暂停后恢复自动休眠。屏幕仍可熄灭。')),
+            const SizedBox(height: 4),
+            Text(
+                preventSleepStatusText(pref.preventSleepDuringPlayback, status),
+                style: TextStyle(
+                    color: status.startsWith('电源请求失败') &&
+                            pref.preventSleepDuringPlayback
+                        ? Theme.of(context).colorScheme.error
+                        : Theme.of(context).colorScheme.primary)),
+          ]),
+          value: pref.preventSleepDuringPlayback,
+          onChanged: (v) async {
+            AppSettings.instance.experience.value =
+                pref.copyWith(preventSleepDuringPlayback: v);
+            try {
+              await AppSettings.instance.saveSettings(throwOnError: true);
+            } catch (_) {
+              if (context.mounted)
+                showPresentationNotice(ui('设置保存失败，本次会话仍保留当前选择'),
+                    context: context, kind: AppNoticeKind.error);
+            }
+          },
+        ),
       ),
     );
   }

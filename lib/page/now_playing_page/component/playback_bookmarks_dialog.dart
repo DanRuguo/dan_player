@@ -214,12 +214,10 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                               padding: const EdgeInsets.symmetric(vertical: 16),
                               child: Text(ui('还没有书签，先保存一个喜欢的位置吧。'))),
                         if (_items.isNotEmpty)
-                          SizedBox(
-                              height: (_items.length *
-                                      78.0 *
-                                      MediaQuery.textScalerOf(context).scale(1))
-                                  .clamp(0.0, 240.0),
+                          ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 240),
                               child: ListView.separated(
+                                  shrinkWrap: true,
                                   itemCount: _items.length,
                                   separatorBuilder: (_, __) =>
                                       const SizedBox(height: 6),

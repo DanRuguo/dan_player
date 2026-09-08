@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import 'app_typography.dart';
+import 'app_input_theme.dart';
 import 'appearance_palette_bridge.dart';
 import 'component/desktop_lyric_appearance_options.dart';
 import 'component/desktop_lyric_taskbar_options.dart';
@@ -40,6 +41,7 @@ class DesktopLyricAppearanceApp extends StatelessWidget {
                 themeAnimationDuration: Duration.zero,
                 theme: base.copyWith(
                     colorScheme: scheme,
+                    inputDecorationTheme: appInputTheme(scheme),
                     textTheme: textTheme,
                     // The base theme's resolver closes over its blue seed;
                     // changing only colorScheme does not update that closure.

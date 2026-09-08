@@ -57,11 +57,17 @@ class _AudiosPageState extends State<AudiosPage> {
         multiSelectController: multiSelectController,
         columns: AudioColumnsScope.of(context),
       ),
-      primaryAction: FilledButton.tonal(
-        key: const ValueKey('music-search-action'),
-        onPressed: () => context.push(app_paths.SEARCH_PAGE),
-        style: appToolbarControlStyle(context, primary: true, tonal: true),
-        child: AppToolbarLabel(label: ui("搜索"), icon: Symbols.search),
+      primaryAction: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          FilledButton.tonal(
+            key: const ValueKey('music-search-action'),
+            onPressed: () => context.push(app_paths.SEARCH_PAGE),
+            style: appToolbarControlStyle(context, primary: true, tonal: true),
+            child: AppToolbarLabel(label: ui("搜索"), icon: Symbols.search),
+          ),
+        ],
       ),
       enableShufflePlay: true,
       enableSortMethod: true,

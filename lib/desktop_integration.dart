@@ -261,6 +261,8 @@ class DesktopIntegration implements Listenable {
         _onError = onError;
 
   static final instance = DesktopIntegration._();
+  final powerRequestStatus = ValueNotifier<String>('未请求');
+  bool? _sentPower;
   final DesktopNativeAdapter _native;
   final DesktopWindowAdapter _window;
   final DesktopPlaybackAdapter _playback;
@@ -502,6 +504,19 @@ class DesktopIntegration implements Listenable {
           _sentLanguage = language;
         }
         final snapshot = _playback.value;
+        final power = _preferences.value.preventSleepDuringPlayback &&
+            snapshot.ready &&
+            snapshot.playing &&
+            !snapshot.buffering;
+        if (_sentPower != power) {
+          _sentPower = power;
+          try {
+            await _invoke('setPowerRequest', {'enabled': power});
+            powerRequestStatus.value = power ? '已生效' : '未请求';
+          } catch (error) {
+            powerRequestStatus.value = '电源请求失败：$error';
+          }
+        }
         if (!_closed && _sentPlayback != snapshot) {
           await _invoke('updatePlayback', snapshot.toMap());
           _sentPlayback = snapshot;

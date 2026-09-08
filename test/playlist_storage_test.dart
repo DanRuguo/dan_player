@@ -84,6 +84,44 @@ void main() {
     return root;
   }
 
+  test('trash survives reload and restores nested views and order', () async {
+    final root = createNested();
+    root.presentation = {
+      'columns': ['album'],
+      'widths': {'album': 180}
+    };
+    final snapshot = root.toMap();
+    playlistTree.removeEntries(parent: null, entryIds: [root.id]);
+    await savePlaylists();
+    await readPlaylists();
+    expect(PLAYLISTS, isEmpty);
+    expect(playlistTrash.single['playlist'], snapshot);
+    final restored = restorePlaylistTrash(playlistTrash.single['id'] as String);
+    expect(restored.toMap(), snapshot);
+    expect(playlistTrash, isEmpty);
+    await savePlaylists();
+    await readPlaylists();
+    expect(PLAYLISTS.single.toMap(), snapshot);
+    expect(playlistTrash, isEmpty);
+  });
+
+  test('invalid trash date recovers whole backup before the dialog can crash',
+      () async {
+    final root = createNested();
+    playlistTree.removeEntries(parent: null, entryIds: [root.id]);
+    await savePlaylists();
+    final original = await fixture('playlists.json').readAsString();
+    await fixture('playlists.json.bak').writeAsString(original);
+    final damaged = jsonDecode(original) as Map;
+    damaged['trash'][0]['deletedAt'] = 8640000000000001;
+    await fixture('playlists.json').writeAsString(jsonEncode(damaged));
+    await readPlaylists();
+    expect(playlistsReadBlocked, isFalse);
+    expect(playlistTrash.single['deletedAt'],
+        (jsonDecode(original) as Map)['trash'][0]['deletedAt']);
+    expect(await fixture('playlists.json.bak').readAsString(), original);
+  });
+
   test(
       'legacy load is read-only, then migration preserves the original as backup',
       () async {
@@ -108,7 +146,7 @@ void main() {
     expect(await fixture('playlists.json.bak').readAsString(), legacy);
     final saved =
         jsonDecode(await fixture('playlists.json').readAsString()) as Map;
-    expect(saved['version'], 3);
+    expect(saved['version'], 4);
     expect(saved['playlists'].single['version'], 3);
     expect(saved['playlists'].single['id'], root.id);
     PLAYLISTS.clear();

@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_shape.dart';
 import 'dart:async';
 
 import 'package:dan_player/app_settings.dart';
@@ -142,6 +143,9 @@ class TrackResumeSettingsPanel extends StatelessWidget {
       if (preferences.mode == TrackResumeMode.longAudio) ...[
         const SizedBox(height: 12),
         DropdownButtonFormField<int>(
+          borderRadius: AppShape.controlRadius,
+          elevation: 3,
+          dropdownColor: Theme.of(context).colorScheme.surfaceContainerLow,
           key: const ValueKey('track-resume-minimum'),
           initialValue: preferences.minimumMinutes,
           isExpanded: true,

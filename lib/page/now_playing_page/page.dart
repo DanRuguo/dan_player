@@ -1,3 +1,4 @@
+import 'package:dan_player/component/listening_tools_dialog.dart';
 // ignore_for_file: camel_case_types, non_constant_identifier_names
 
 import 'package:dan_player/component/app_playback_mode_controls.dart';
@@ -137,6 +138,10 @@ class _NowPlayingMoreAction extends StatelessWidget {
       listenable: OnlineLibrary.instance,
       builder: (context, _) => MenuAnchor(
           menuChildren: [
+            MenuItemButton(
+                onPressed: () => showPreciseSeek(context, playbackService),
+                leadingIcon: const Icon(Symbols.schedule),
+                child: Text(ui('精确定位'))),
             MenuItemButton(
               onPressed: () => showEqualizerDialog(context),
               leadingIcon: const Icon(Symbols.equalizer),

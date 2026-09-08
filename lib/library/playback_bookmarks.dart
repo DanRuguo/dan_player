@@ -254,6 +254,15 @@ class PlaybackBookmarkStore {
         ]);
       });
 
+  Future<List<PlaybackBookmark>> all() => _exclusive(() async {
+        await _load();
+        return List.unmodifiable(_items);
+      });
+  Future<void> removeMany(Set<String> ids) => _exclusive(() async {
+        await _load();
+        await _save(_items.where((item) => !ids.contains(item.id)).toList());
+      });
+
   Future<void> remove(String id) => _exclusive(() async {
         await _load();
         await _save(_items.where((item) => item.id != id).toList());

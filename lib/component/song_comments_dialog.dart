@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -305,75 +306,79 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
         insetPadding: const EdgeInsets.all(16),
         shape: AppShape.surface,
         clipBehavior: Clip.antiAlias,
-        child: SizedBox(
+        child: AppDialogContent(
           width: 720,
-          height: math.min(availableHeight, 720),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-              child: AppDialogTitle(
-                ui("歌曲评论"),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleLarge,
-                trailing: IconButton(
-                  key: const ValueKey('song-comments-close'),
-                  tooltip: ui("关闭评论"),
-                  constraints:
-                      const BoxConstraints(minWidth: 44, minHeight: 44),
-                  onPressed: _dismiss,
-                  icon: const Icon(Symbols.close),
+          maxHeight: math.min(availableHeight, 720),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                  child: AppDialogTitle(
+                    ui("歌曲评论"),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleLarge,
+                    trailing: IconButton(
+                      key: const ValueKey('song-comments-close'),
+                      tooltip: ui("关闭评论"),
+                      constraints:
+                          const BoxConstraints(minWidth: 44, minHeight: 44),
+                      onPressed: _dismiss,
+                      icon: const Icon(Symbols.close),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            if (_target != null && _availableSorts.length > 1)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(children: [
-                  for (final sort in _availableSorts) ...[
-                    if (sort != _availableSorts.first) const SizedBox(width: 8),
-                    Expanded(
-                        child: Semantics(
-                      selected: _sort == sort,
-                      child: TextButton(
-                        key: ValueKey('song-comments-${sort.name}'),
-                        onPressed: () => _select(sort),
-                        style: TextButton.styleFrom(
-                          minimumSize: const Size(44, 44),
-                          visualDensity: VisualDensity.standard,
-                          shape: AppShape.control,
-                          foregroundColor: _sort == sort
-                              ? scheme.onSecondaryContainer
-                              : scheme.onSurface,
-                          backgroundColor: _sort == sort
-                              ? scheme.secondaryContainer
-                              : Colors.transparent,
-                        ),
-                        child: Text(ui(sort.label)),
-                      ),
-                    )),
-                  ],
-                ]),
-              ),
-            if (widget.audio.isLocal) _associationPanel(context),
-            Expanded(
-                child: ListView.builder(
-              key: PageStorageKey(
-                  'song-comments-list-${_target?.identity ?? 'unavailable'}-${_sort.name}'),
-              controller: tab.scroll,
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              scrollCacheExtent: const ScrollCacheExtent.pixels(160),
-              itemCount: tab.comments.length + 2,
-              itemBuilder: (context, index) {
-                if (index == 0) return _intro(context, tab);
-                if (index == tab.comments.length + 1) {
-                  return _footer(context, tab);
-                }
-                return _CommentCard(comment: tab.comments[index - 1]);
-              },
-            )),
-          ]),
+                if (_target != null && _availableSorts.length > 1)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(children: [
+                      for (final sort in _availableSorts) ...[
+                        if (sort != _availableSorts.first)
+                          const SizedBox(width: 8),
+                        Expanded(
+                            child: Semantics(
+                          selected: _sort == sort,
+                          child: TextButton(
+                            key: ValueKey('song-comments-${sort.name}'),
+                            onPressed: () => _select(sort),
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(44, 44),
+                              visualDensity: VisualDensity.standard,
+                              shape: AppShape.control,
+                              foregroundColor: _sort == sort
+                                  ? scheme.onSecondaryContainer
+                                  : scheme.onSurface,
+                              backgroundColor: _sort == sort
+                                  ? scheme.secondaryContainer
+                                  : Colors.transparent,
+                            ),
+                            child: Text(ui(sort.label)),
+                          ),
+                        )),
+                      ],
+                    ]),
+                  ),
+                if (widget.audio.isLocal) _associationPanel(context),
+                Flexible(
+                    child: ListView.builder(
+                  shrinkWrap: true,
+                  key: PageStorageKey(
+                      'song-comments-list-${_target?.identity ?? 'unavailable'}-${_sort.name}'),
+                  controller: tab.scroll,
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                  scrollCacheExtent: const ScrollCacheExtent.pixels(160),
+                  itemCount: tab.comments.length + 2,
+                  itemBuilder: (context, index) {
+                    if (index == 0) return _intro(context, tab);
+                    if (index == tab.comments.length + 1) {
+                      return _footer(context, tab);
+                    }
+                    return _CommentCard(comment: tab.comments[index - 1]);
+                  },
+                )),
+              ]),
         ),
       ),
     );
@@ -381,36 +386,39 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
 
   Widget _intro(BuildContext context, _CommentTab tab) => Padding(
         padding: const EdgeInsets.only(bottom: 16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SelectableText('${widget.audio.title} · ${widget.audio.artist}',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 6),
-          Text(_target == null
-              ? ui("只按你确认的平台歌曲 ID 关联，不会仅凭同名歌曲自动猜测。")
-              : ui("来源：{0} · 只读 · 按平台歌曲 ID 精确匹配", [
-                  onlineSourceDisplayLabel(
-                    provider: _target!.provider,
-                    fallback: _target!.sourceLabel,
-                  )
-                ])),
-          if (_target != null) ...[
-            if (_availableSorts.length == 1) ...[
-              const SizedBox(height: 4),
-              Text(ui('按来源默认顺序显示；仅在来源支持时提供热门或最新分类。')),
-            ],
-            const SizedBox(height: 4),
-            Text(ui("评论由平台用户发表；不加载头像、图片或音频。"),
-                style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            if (tab.loaded) ...[
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SelectableText('${widget.audio.title} · ${widget.audio.artist}',
+                  style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 6),
-              Text(ui("已显示 {0} 条{1}", [
-                tab.comments.length,
-                tab.total == null ? '' : ui(' · 平台统计 {0} 条', [tab.total])
-              ])),
-            ],
-          ],
-        ]),
+              Text(_target == null
+                  ? ui("只按你确认的平台歌曲 ID 关联，不会仅凭同名歌曲自动猜测。")
+                  : ui("来源：{0} · 只读 · 按平台歌曲 ID 精确匹配", [
+                      onlineSourceDisplayLabel(
+                        provider: _target!.provider,
+                        fallback: _target!.sourceLabel,
+                      )
+                    ])),
+              if (_target != null) ...[
+                if (_availableSorts.length == 1) ...[
+                  const SizedBox(height: 4),
+                  Text(ui('按来源默认顺序显示；仅在来源支持时提供热门或最新分类。')),
+                ],
+                const SizedBox(height: 4),
+                Text(ui("评论由平台用户发表；不加载头像、图片或音频。"),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                if (tab.loaded) ...[
+                  const SizedBox(height: 6),
+                  Text(ui("已显示 {0} 条{1}", [
+                    tab.comments.length,
+                    tab.total == null ? '' : ui(' · 平台统计 {0} 条', [tab.total])
+                  ])),
+                ],
+              ],
+            ]),
       );
 
   Widget _associationPanel(BuildContext context) {
@@ -428,56 +436,59 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-              association == null
-                  ? ui("评论来源：尚未关联")
-                  : ui("评论来源：{0}{1}", [
-                      ui(association.mode.label),
-                      _target == null
-                          ? ''
-                          : ' · ${onlineSourceDisplayLabel(
-                              provider: _target!.provider,
-                              fallback: _target!.sourceLabel,
-                            )}'
-                    ]),
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Wrap(spacing: 8, runSpacing: 8, children: [
-              FilledButton.tonalIcon(
-                key: const ValueKey('song-comments-choose-association'),
-                onPressed: _associationBusy ? null : _chooseAssociation,
-                icon: const Icon(Symbols.search),
-                label: Text(ui("选择关联歌曲")),
-              ),
-              Tooltip(
-                message: lyricIdentity == null
-                    ? ui("当前歌词不是带平台 ID 的 QQ音乐或网易云来源")
-                    : ui("评论来源会随以后选择的联网歌词变化"),
-                child: OutlinedButton.icon(
-                  key: const ValueKey('song-comments-follow-lyric'),
-                  onPressed: _associationBusy || lyricIdentity == null
-                      ? null
-                      : _followLyric,
-                  icon: const Icon(Symbols.lyrics),
-                  label: Text(ui("跟随联网歌词")),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  association == null
+                      ? ui("评论来源：尚未关联")
+                      : ui("评论来源：{0}{1}", [
+                          ui(association.mode.label),
+                          _target == null
+                              ? ''
+                              : ' · ${onlineSourceDisplayLabel(
+                                  provider: _target!.provider,
+                                  fallback: _target!.sourceLabel,
+                                )}'
+                        ]),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-              ),
-              if (association != null)
-                TextButton.icon(
-                  key: const ValueKey('song-comments-remove-association'),
-                  onPressed: _associationBusy ? null : _removeAssociation,
-                  icon: const Icon(Symbols.link_off),
-                  label: Text(ui("解除关联")),
-                ),
-            ]),
-            if (_associationError != null) ...[
-              const SizedBox(height: 8),
-              Text(_associationError!(), style: TextStyle(color: scheme.error)),
-            ],
-          ]),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  FilledButton.tonalIcon(
+                    key: const ValueKey('song-comments-choose-association'),
+                    onPressed: _associationBusy ? null : _chooseAssociation,
+                    icon: const Icon(Symbols.search),
+                    label: Text(ui("选择关联歌曲")),
+                  ),
+                  Tooltip(
+                    message: lyricIdentity == null
+                        ? ui("当前歌词不是带平台 ID 的 QQ音乐或网易云来源")
+                        : ui("评论来源会随以后选择的联网歌词变化"),
+                    child: OutlinedButton.icon(
+                      key: const ValueKey('song-comments-follow-lyric'),
+                      onPressed: _associationBusy || lyricIdentity == null
+                          ? null
+                          : _followLyric,
+                      icon: const Icon(Symbols.lyrics),
+                      label: Text(ui("跟随联网歌词")),
+                    ),
+                  ),
+                  if (association != null)
+                    TextButton.icon(
+                      key: const ValueKey('song-comments-remove-association'),
+                      onPressed: _associationBusy ? null : _removeAssociation,
+                      icon: const Icon(Symbols.link_off),
+                      label: Text(ui("解除关联")),
+                    ),
+                ]),
+                if (_associationError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_associationError!(),
+                      style: TextStyle(color: scheme.error)),
+                ],
+              ]),
         ),
       ),
     );
@@ -502,23 +513,27 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
       );
     }
     if (tab.error != null) {
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Semantics(
-            liveRegion: true,
-            child: Text(tab.error!(),
-                style: TextStyle(color: Theme.of(context).colorScheme.error))),
-        const SizedBox(height: 8),
-        FilledButton.tonalIcon(
-          key: const ValueKey('song-comments-retry'),
-          style: FilledButton.styleFrom(
-              minimumSize: const Size(44, 44),
-              visualDensity: VisualDensity.standard,
-              shape: AppShape.control),
-          onPressed: _load,
-          icon: const Icon(Symbols.refresh),
-          label: Text(ui("重试")),
-        ),
-      ]);
+      return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+                liveRegion: true,
+                child: Text(tab.error!(),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error))),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              key: const ValueKey('song-comments-retry'),
+              style: FilledButton.styleFrom(
+                  minimumSize: const Size(44, 44),
+                  visualDensity: VisualDensity.standard,
+                  shape: AppShape.control),
+              onPressed: _load,
+              icon: const Icon(Symbols.refresh),
+              label: Text(ui("重试")),
+            ),
+          ]);
     }
     if (tab.comments.isEmpty) return Text(ui("平台暂未返回这首歌曲的评论。"));
     if (tab.repeatedPage) return Text(ui("平台返回了重复页面，已停止继续请求。"));
@@ -562,27 +577,30 @@ class _CommentCard extends StatelessWidget {
             border: Border.all(color: scheme.outlineVariant)),
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SelectableText(comment.author,
-                style: TextStyle(
-                    color: scheme.onSurface, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Wrap(spacing: 12, runSpacing: 4, children: [
-              if (date != null)
-                Text(date, style: TextStyle(color: scheme.onSurfaceVariant)),
-              Text(ui("{0} 赞", [comment.likeCount]),
-                  style: TextStyle(color: scheme.onSurfaceVariant)),
-            ]),
-            const SizedBox(height: 10),
-            SelectableText(comment.content),
-            for (final reply in comment.replies) ...[
-              const SizedBox(height: 10),
-              SelectableText(
-                  ui("引用 / 回复 · {0}\n{1}", [reply.author, reply.content]),
-                  style: TextStyle(color: scheme.onSurfaceVariant)),
-            ],
-          ]),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(comment.author,
+                    style: TextStyle(
+                        color: scheme.onSurface, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Wrap(spacing: 12, runSpacing: 4, children: [
+                  if (date != null)
+                    Text(date,
+                        style: TextStyle(color: scheme.onSurfaceVariant)),
+                  Text(ui("{0} 赞", [comment.likeCount]),
+                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                ]),
+                const SizedBox(height: 10),
+                SelectableText(comment.content),
+                for (final reply in comment.replies) ...[
+                  const SizedBox(height: 10),
+                  SelectableText(
+                      ui("引用 / 回复 · {0}\n{1}", [reply.author, reply.content]),
+                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                ],
+              ]),
         ),
       ),
     );

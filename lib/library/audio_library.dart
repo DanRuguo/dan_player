@@ -1,3 +1,4 @@
+import 'package:dan_player/library/personal_library.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:isolate';
@@ -140,6 +141,8 @@ class AudioLibrary {
       final indexFile = File(indexPath);
       if (!await indexFile.exists() && !await File("$indexPath.bak").exists()) {
         _instance ??= AudioLibrary._([]);
+        await (await PersonalLibrary.instance)
+            .observeCommitted(const {}, DateTime.now().toUtc());
         return;
       }
 
@@ -182,6 +185,14 @@ class AudioLibrary {
       }
       // Publish the new library only after the durable identities exist.
       await TrackIdentityRegistry.instance.flush();
+      await (await PersonalLibrary.instance).observeCommitted(
+          {
+            for (final a in folders.expand((f) => f.audios))
+              a.stableTrackId: a.created
+          },
+          await indexFile.exists()
+              ? await indexFile.lastModified()
+              : await File('$indexPath.bak').lastModified());
       // Online add/remove can publish while identity persistence is awaiting
       // I/O. Snapshot it in the same synchronous turn as replacing the library.
       final onlineAudios = List<Audio>.from(instance.onlineAudioCollection);

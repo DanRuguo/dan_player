@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:dan_player/library/playlist.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -14,7 +17,9 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 class PlaylistImportDetails {
-  const PlaylistImportDetails(this.name, this.audios);
+  const PlaylistImportDetails(this.name, this.audios,
+      {this.targetId, this.expectedSnapshot});
+  final String? targetId, expectedSnapshot;
   final String name;
   final List<Audio> audios;
 }
@@ -22,7 +27,8 @@ class PlaylistImportDetails {
 Future<PlaylistImportDetails?> importM3uPlaylist(BuildContext context,
     {required List<Audio> library,
     FutureOr<String?> Function()? pickFile,
-    Future<M3uDocument> Function(File)? readFile}) async {
+    Future<M3uDocument> Function(File)? readFile,
+    Future<bool> Function(String)? fileExists}) async {
   String? location;
   try {
     location = await (pickFile ??
@@ -43,15 +49,23 @@ Future<PlaylistImportDetails?> importM3uPlaylist(BuildContext context,
   return showAppDialog<PlaylistImportDetails>(
       context: context,
       builder: (_) => M3uImportDialog(
-          file: selectedFile, library: library, readFile: readFile));
+          file: selectedFile,
+          library: library,
+          readFile: readFile,
+          fileExists: fileExists));
 }
 
 class M3uImportDialog extends StatefulWidget {
   const M3uImportDialog(
-      {super.key, required this.file, required this.library, this.readFile});
+      {super.key,
+      required this.file,
+      required this.library,
+      this.readFile,
+      this.fileExists});
   final File file;
   final List<Audio> library;
   final Future<M3uDocument> Function(File)? readFile;
+  final Future<bool> Function(String)? fileExists;
   @override
   State<M3uImportDialog> createState() => _M3uImportDialogState();
 }
@@ -62,6 +76,14 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
   M3uDocument? _document;
   List<Audio>? _audios;
   String? _error;
+  String? _targetId, _targetSnapshot, _sourceHash;
+  bool _missingOnly = true, _submitting = false;
+  int _missing = 0;
+  List<Audio> get _additions => _targetSnapshot == null
+      ? _audios ?? []
+      : playlistMergeAdditions(
+          Playlist.fromMap(jsonDecode(_targetSnapshot!) as Map), _audios ?? [],
+          missingOnly: _missingOnly);
   @override
   void initState() {
     super.initState();
@@ -70,10 +92,32 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
 
   Future<void> _load() async {
     try {
+      if (widget.readFile == null &&
+          await widget.file.length() > 2 * 1024 * 1024) {
+        throw const FormatException('歌单文件超过 2 MiB');
+      }
+      final sourceHash = widget.readFile == null
+          ? sha256.convert(await widget.file.readAsBytes()).toString()
+          : null;
       final document = await (widget.readFile ?? readM3uFile)(widget.file);
       final audios = await resolveM3uEntries(document, widget.library);
+      if (sourceHash != null &&
+          sourceHash !=
+              sha256.convert(await widget.file.readAsBytes()).toString())
+        throw const FormatException('源文件已改变，请重新预览。');
+      var missing = 0;
+      for (var i = 0; i < audios.length; i += 64) {
+        final end = (i + 64).clamp(0, audios.length);
+        final states = await Future.wait(audios.sublist(i, end).map((a) =>
+            widget.fileExists?.call(a.localFilePath) ??
+            File(a.localFilePath).exists()));
+        missing += states.where((exists) => !exists).length;
+        if (!mounted) return;
+      }
       if (mounted) {
         setState(() {
+          _sourceHash = sourceHash;
+          _missing = missing;
           _document = document;
           _audios = audios;
         });
@@ -87,12 +131,30 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_submitting || _audios == null) return;
     final name = _name.text.trim();
-    if (name.isEmpty || name.length > 120 || _audios?.isNotEmpty != true) {
-      return;
+    if (name.isEmpty || name.length > 120) return;
+    setState(() => _submitting = true);
+    try {
+      if (_sourceHash != null &&
+          _sourceHash !=
+              sha256.convert(await widget.file.readAsBytes()).toString())
+        throw StateError('源文件已改变，请重新打开预览');
+      if (_targetId != null) {
+        final current = playlistTree.findPlaylist(_targetId!);
+        if (current == null || jsonEncode(current.toMap()) != _targetSnapshot)
+          throw StateError('目标歌单已改变，请重新选择目标以更新预览');
+      }
+      if (mounted)
+        Navigator.of(context).pop(PlaylistImportDetails(
+            name, List.unmodifiable(_additions),
+            targetId: _targetId, expectedSnapshot: _targetSnapshot));
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
-    Navigator.of(context).pop(PlaylistImportDetails(name, _audios!));
   }
 
   @override
@@ -113,6 +175,49 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                DropdownButtonFormField<String>(
+                    borderRadius: AppShape.controlRadius,
+                    elevation: 3,
+                    dropdownColor:
+                        Theme.of(context).colorScheme.surfaceContainerLow,
+                    initialValue: '',
+                    isExpanded: true,
+                    decoration: InputDecoration(labelText: ui('导入目标')),
+                    items: [
+                      DropdownMenuItem(value: '', child: Text(ui('新建歌单'))),
+                      for (final target in playlistTree.allPlaylists)
+                        DropdownMenuItem(
+                            value: target.id,
+                            child: Text(target.name,
+                                overflow: TextOverflow.ellipsis))
+                    ],
+                    onChanged: _submitting
+                        ? null
+                        : (id) => setState(() {
+                              _targetId = id == '' ? null : id;
+                              _targetSnapshot = _targetId == null
+                                  ? null
+                                  : jsonEncode(playlistTree
+                                      .findPlaylist(_targetId!)!
+                                      .toMap());
+                              _error = null;
+                            })),
+                if (_targetId != null) ...[
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(ui('仅补充缺少的出现次数')),
+                      subtitle: Text(ui('关闭后全部追加，保留现有顺序。')),
+                      value: _missingOnly,
+                      onChanged: _submitting
+                          ? null
+                          : (v) => setState(() => _missingOnly = v)),
+                  Text(ui('现有 {0} 项，将新增 {1} 项', [
+                    (jsonDecode(_targetSnapshot!)['entries'] as List).length,
+                    _additions.length
+                  ])),
+                ],
+                const SizedBox(height: 12),
                 Focus(
                     onFocusChange: HotkeysHelper.onFocusChanges,
                     child: TextField(
@@ -133,7 +238,8 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
                 else if (_document == null)
                   const Center(child: CircularProgressIndicator())
                 else ...[
-                  Text(ui('将导入 {0} 个本地歌曲引用，保留顺序与重复项。', [_audios!.length])),
+                  Text(ui('将导入 {0} 个本地歌曲引用，保留顺序与重复项。', [_additions.length])),
+                  Text(ui('暂不可用 {0} 项：保留引用', [_missing])),
                   if (_document!.skipped > 0)
                     Padding(
                         padding: const EdgeInsets.only(top: 8),
@@ -150,7 +256,8 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
             child: Text(ui('取消'))),
         FilledButton(
             key: const ValueKey('m3u-import-confirm'),
-            onPressed: _audios?.isNotEmpty == true &&
+            onPressed: !_submitting &&
+                    _audios?.isNotEmpty == true &&
                     _name.text.trim().isNotEmpty &&
                     _name.text.trim().length <= 120
                 ? _submit

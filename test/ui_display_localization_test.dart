@@ -19,6 +19,8 @@ import 'support/song_comments_fixtures.dart';
 
 class _EqualizerPlayback extends Fake implements PlaybackService {
   @override
+  int eqEditRevision = 0;
+  @override
   final eqEnabled = ValueNotifier(true);
   final gains = List<double>.filled(10, 1);
   var applications = 0;

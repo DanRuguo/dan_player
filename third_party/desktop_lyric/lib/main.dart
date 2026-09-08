@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:desktop_lyric/appearance_palette_app.dart';
 import 'package:desktop_lyric/appearance_palette_bridge.dart';
@@ -74,10 +75,23 @@ class DesktopLyricApp extends StatefulWidget {
 }
 
 class _DesktopLyricAppState extends State<DesktopLyricApp> {
+  Timer? _paletteWarmup;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _paletteWarmup = Timer(const Duration(milliseconds: 900), () {
+        if (mounted) unawaited(_palette.prewarm());
+      });
+    });
+  }
+
   late final DesktopLyricPaletteHost _palette =
       DesktopLyricPaletteHost.instance;
   @override
   void dispose() {
+    _paletteWarmup?.cancel();
     _palette.dispose();
     widget.binding?.dispose();
     super.dispose();

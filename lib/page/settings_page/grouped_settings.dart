@@ -84,6 +84,9 @@ class _GroupedSettingsState extends State<GroupedSettings> {
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
+                      dropdownColor:
+                          Theme.of(context).colorScheme.surfaceContainerLow,
+                      elevation: 3,
                       key: const ValueKey('settings-category-picker'),
                       value: _selected,
                       isExpanded: true,

@@ -1,3 +1,8 @@
+import 'package:dan_player/component/app_dialog_content.dart';
+import 'package:dan_player/component/smart_match_dialog.dart';
+import 'package:dan_player/library/smart_condition.dart';
+import 'package:dan_player/library/personal_library.dart';
+import 'package:dan_player/component/smart_condition_editor.dart';
 import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'dart:async';
 
@@ -77,6 +82,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
   List<SmartPlaylist> _rules = [];
   String? _editingId;
   bool _newRule = false;
+  SmartCondition? _condition;
   SmartPlaylistSort _sort = SmartPlaylistSort.name;
   SmartPlaylistHistory _history = SmartPlaylistHistory.any;
   List<Audio> _audios = [];
@@ -96,6 +102,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
   void initState() {
     super.initState();
     _libraryChanges.addListener(_libraryChanged);
+    PersonalLibrary.changes.addListener(_libraryChanged);
     _statistics.addListener(_statisticsChanged);
     unawaited(_load());
   }
@@ -125,6 +132,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
     _debounce?.cancel();
     _historyRefresh?.cancel();
     _generation++;
+    _condition = rule?.condition;
     _name.text = rule?.name ?? '';
     _query.text = rule?.query ?? '';
     _artist.text = rule?.artist ?? '';
@@ -224,6 +232,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
 
   SmartPlaylist _draft({bool forPreview = false}) => SmartPlaylist(
       id: _editingId!,
+      condition: _condition,
       name: forPreview && _name.text.trim().isEmpty
           ? 'preview'
           : _name.text.trim(),
@@ -459,6 +468,10 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                     _field('formats', '文件格式', _formats,
                         hint: '例如 flac, mp3；留空不限'),
                     DropdownButtonFormField<SmartPlaylistHistory>(
+                      borderRadius: AppShape.controlRadius,
+                      elevation: 3,
+                      dropdownColor:
+                          Theme.of(context).colorScheme.surfaceContainerLow,
                       key: ValueKey('smart-history-$_editingId'),
                       initialValue: _history,
                       isExpanded: true,
@@ -485,6 +498,10 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                       _field('history-days', '最近多少天', _historyDays,
                           number: true),
                     DropdownButtonFormField<SmartPlaylistSort>(
+                      borderRadius: AppShape.controlRadius,
+                      elevation: 3,
+                      dropdownColor:
+                          Theme.of(context).colorScheme.surfaceContainerLow,
                       key: ValueKey('smart-sort-$_editingId'),
                       initialValue: _sort,
                       isExpanded: true,
@@ -511,6 +528,14 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                         number: true, hint: '排序后取前 N 首；留空不限'),
                   ])
                     SizedBox(width: width, child: field),
+                  SizedBox(
+                      width: constraints.maxWidth,
+                      child: SmartConditionEditor(
+                          value: _condition ?? const SmartCondition.group([]),
+                          onChanged: (v) {
+                            setState(() => _condition = v);
+                            _queuePreview();
+                          })),
                   if (_draft(forPreview: true).usesPlaybackHistory)
                     Text(ui(
                         '使用本机听歌记录；相同标题、歌手、专辑及时长的副本共享记录。天数按最近 N×24 小时计算，未播放也包含在“最近未播放”中。')),
@@ -522,65 +547,80 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
 
   Widget _actions() {
     final selected = _selected;
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (_selecting)
-        AudioSelectionToolbar(
-          selected: selected,
-          hasItems: !_previewing && _audios.isNotEmpty,
-          allVisibleSelected:
-              _audios.isNotEmpty && selected.length == _audios.length,
-          onToggleAll: () => setState(() {
-            if (selected.length == _audios.length) {
-              _selectedPaths.clear();
-            } else {
-              _selectedPaths.addAll(_audios.map((a) => a.path));
-            }
-          }),
-          onInvert: () => setState(() {
-            final next = _audios
-                .where((a) => !_selectedPaths.contains(a.path))
-                .map((a) => a.path)
-                .toSet();
-            _selectedPaths
-              ..clear()
-              ..addAll(next);
-          }),
-          onExit: () => setState(() => _selecting = false),
-          onPlay: _play,
-          onAddToPlaylist: _add,
-          onExport: _export,
-        )
-      else
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          IconButton(
-              key: const ValueKey('smart-refresh'),
-              tooltip: ui('刷新'),
+    return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_selecting)
+            AudioSelectionToolbar(
+              selected: selected,
+              hasItems: !_previewing && _audios.isNotEmpty,
+              allVisibleSelected:
+                  _audios.isNotEmpty && selected.length == _audios.length,
+              onToggleAll: () => setState(() {
+                if (selected.length == _audios.length) {
+                  _selectedPaths.clear();
+                } else {
+                  _selectedPaths.addAll(_audios.map((a) => a.path));
+                }
+              }),
+              onInvert: () => setState(() {
+                final next = _audios
+                    .where((a) => !_selectedPaths.contains(a.path))
+                    .map((a) => a.path)
+                    .toSet();
+                _selectedPaths
+                  ..clear()
+                  ..addAll(next);
+              }),
+              onExit: () => setState(() => _selecting = false),
+              onPlay: _play,
+              onAddToPlaylist: _add,
+              onExport: _export,
+            )
+          else
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              IconButton(
+                  key: const ValueKey('smart-refresh'),
+                  tooltip: ui('刷新'),
+                  onPressed:
+                      _previewing ? null : () => _queuePreview(immediate: true),
+                  icon: const Icon(Symbols.refresh)),
+              IconButton(
+                  tooltip: ui('匹配详情'),
+                  onPressed: _previewing || _previewError != null
+                      ? null
+                      : () => showSmartMatchDetails(
+                          context,
+                          _draft(forPreview: true),
+                          List<Audio>.of(widget.library?.call() ??
+                              AudioLibrary.instance.audioCollection),
+                          _audios.map((a) => a.path).toSet()),
+                  icon: const Icon(Icons.fact_check_outlined)),
+              const AppPlaybackModeControls(),
+              AudioSelectionMenu(
+                  selected: selected, onAddToPlaylist: _add, onExport: _export),
+              IconButton(
+                  key: const ValueKey('smart-select'),
+                  tooltip: ui('多选'),
+                  onPressed: selected.isEmpty
+                      ? null
+                      : () => setState(() {
+                            _selecting = true;
+                            _selectedPaths
+                              ..clear()
+                              ..addAll(_audios.map((audio) => audio.path));
+                          }),
+                  icon: const Icon(Symbols.checklist)),
+            ]),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+              key: const ValueKey('smart-ordinary'),
               onPressed:
-                  _previewing ? null : () => _queuePreview(immediate: true),
-              icon: const Icon(Symbols.refresh)),
-          const AppPlaybackModeControls(),
-          AudioSelectionMenu(
-              selected: selected, onAddToPlaylist: _add, onExport: _export),
-          IconButton(
-              key: const ValueKey('smart-select'),
-              tooltip: ui('多选'),
-              onPressed: selected.isEmpty
-                  ? null
-                  : () => setState(() {
-                        _selecting = true;
-                        _selectedPaths
-                          ..clear()
-                          ..addAll(_audios.map((audio) => audio.path));
-                      }),
-              icon: const Icon(Symbols.checklist)),
-        ]),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(
-          key: const ValueKey('smart-ordinary'),
-          onPressed: selected.isEmpty ? null : () => unawaited(_action(_add)),
-          icon: const Icon(Symbols.playlist_add),
-          label: Text(ui('加入或新建普通歌单…'))),
-    ]);
+                  selected.isEmpty ? null : () => unawaited(_action(_add)),
+              icon: const Icon(Symbols.playlist_add),
+              label: Text(ui('加入或新建普通歌单…'))),
+        ]);
   }
 
   @override
@@ -590,12 +630,12 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
         canPop: !_saving,
         child: Dialog(
           insetPadding: const EdgeInsets.all(16),
-          child: SizedBox(
+          child: AppDialogContent(
             width: 920,
-            height: MediaQuery.sizeOf(context).height * .88,
+            maxHeight: MediaQuery.sizeOf(context).height * .88,
             child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Column(children: [
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
                   AppDialogTitle(ui(_editingId == null ? '智能歌单' : '智能歌单预览'),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -613,15 +653,17 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                           icon: const Icon(Symbols.close))),
                   const SizedBox(height: 8),
                   if (_saving) const LinearProgressIndicator(),
-                  Expanded(
+                  Flexible(
                       child: AbsorbPointer(
                           absorbing: _saving,
                           child: CustomScrollView(
+                            shrinkWrap: true,
                             key: const ValueKey('smart-scroll'),
                             controller: _scroll,
                             slivers: [
                               SliverToBoxAdapter(
                                   child: Column(
+                                      mainAxisSize: MainAxisSize.min,
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
@@ -823,6 +865,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
     _generation++;
     _debounce?.cancel();
     _libraryChanges.removeListener(_libraryChanged);
+    PersonalLibrary.changes.removeListener(_libraryChanged);
     _statistics.removeListener(_statisticsChanged);
     for (final controller in [
       _name,

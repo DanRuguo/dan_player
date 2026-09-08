@@ -1,3 +1,5 @@
+import 'package:dan_player/data/protected_json_store.dart';
+import 'package:dan_player/data/snapshot3_upgrade.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -56,17 +58,18 @@ class CacheBackupService {
   Future<CacheBackupResult> exportBackup({
     required Directory source,
     required File destination,
-  }) async {
-    try {
-      final result = await Isolate.run(() => _exportBackupOnWorker(
-          source.absolute.path, destination.absolute.path));
-      return CacheBackupResult(fileCount: result[0], songCount: result[1]);
-    } on CacheBackupException {
-      rethrow;
-    } catch (error) {
-      throw CacheBackupException('Could not create backup: $error');
-    }
-  }
+  }) =>
+      ProtectedJsonStore.withSnapshot(() async {
+        try {
+          final result = await Isolate.run(() => _exportBackupOnWorker(
+              source.absolute.path, destination.absolute.path));
+          return CacheBackupResult(fileCount: result[0], songCount: result[1]);
+        } on CacheBackupException {
+          rethrow;
+        } catch (error) {
+          throw CacheBackupException('Could not create backup: $error');
+        }
+      });
 
   static Future<List<int>> _exportBackupOnWorker(
       String sourceDirectory, String destinationFile) async {
@@ -311,6 +314,11 @@ class CacheBackupService {
         }
         final restored = decoder.convert(decoded,
             preserveMissing: _preservesMusicReferences(relative));
+        final documentName =
+            path.basename(relative).replaceFirst(RegExp(r'\.bak$'), '');
+        if (['personal_library.json', 'named_queues.json', 'eq_presets.json']
+            .contains(documentName))
+          Snapshot3Upgrade.validateDocument(documentName, restored);
         await entity.writeAsString(
             json.encode(identical(restored, _dropValue) ? null : restored),
             flush: true);
@@ -391,6 +399,10 @@ class CacheRestoreDestinationPolicy {
     'lyric_documents.json',
     'playback_bookmarks.json',
     'track_resume.json',
+    'personal_library.json',
+    'named_queues.json',
+    'eq_presets.json',
+    'smart_playlists.json',
   };
   static const _cacheDirectoryMarkers = <String>{
     'covers',
@@ -562,6 +574,10 @@ class _PortablePathEncoder {
       final result = <String, Object?>{};
       for (final entry in value.entries) {
         final convertedKey = await _convertString(entry.key.toString());
+        if (const {'tags', 'label', 'name', 'backup'}.contains(entry.key)) {
+          result[convertedKey] = entry.value;
+          continue;
+        }
         result[convertedKey] = await convert(entry.value,
             aliasOnly: aliasOnly || entry.key == 'aliases');
       }
@@ -734,7 +750,9 @@ class _PortablePathDecoder {
             preserveMissing: preserveMissing);
         if (identical(convertedKey, _dropValue)) continue;
         final converted =
-            convert(entry.value, preserveMissing: preserveMissing);
+            const {'tags', 'label', 'name', 'backup'}.contains(entry.key)
+                ? entry.value
+                : convert(entry.value, preserveMissing: preserveMissing);
         if (identical(converted, _dropValue)) {
           if (entry.key == 'path' || entry.key == 'audio') return _dropValue;
           continue;
@@ -1125,6 +1143,10 @@ bool _preservesMusicReferences(String relative) {
     'playback_state.json',
     'playback_bookmarks.json',
     'track_resume.json',
+    'personal_library.json',
+    'named_queues.json',
+    'eq_presets.json',
+    'smart_playlists.json',
     'lyric_source.json',
     'lyric_documents.json',
     'track_identities.json',
@@ -1212,7 +1234,8 @@ bool _containsAbsolutePath(Object? value) {
   if (value is Map) {
     return value.entries.any((entry) =>
         _containsAbsolutePath(entry.key.toString()) ||
-        _containsAbsolutePath(entry.value));
+        (!const {'tags', 'label', 'name', 'backup'}.contains(entry.key) &&
+            _containsAbsolutePath(entry.value)));
   }
   return false;
 }

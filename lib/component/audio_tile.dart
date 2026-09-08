@@ -1,3 +1,4 @@
+import 'package:dan_player/component/personal_library_dialog.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_action_icon.dart';
 import 'package:dan_player/component/app_entrance.dart';
@@ -198,6 +199,10 @@ class _AudioTileState extends State<AudioTile> {
       fallback: audio.sourceLabel,
     );
     final common = <Widget>[
+      MenuItemButton(
+          onPressed: () => showPersonalTrackEditor(context, [audio]),
+          leadingIcon: const Icon(Symbols.star),
+          child: Text(ui("个人评分与标签"))),
       MenuItemButton(
         onPressed: () => showCoverRepairDialog(context, [audio]),
         leadingIcon: const Icon(Symbols.image_search),
@@ -537,7 +542,9 @@ class _AudioTileState extends State<AudioTile> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 7),
                       child: LayoutBuilder(builder: (context, constraints) {
-                        if (widget.columns) {
+                        if (widget.columns &&
+                            AudioColumnsScope.fits(
+                                context, constraints.maxWidth)) {
                           final composer = classifySongComposer(
                               composerTag: audio.composer,
                               artist: audio.artist);
@@ -549,6 +556,7 @@ class _AudioTileState extends State<AudioTile> {
                               const SizedBox(width: 16),
                               Expanded(
                                   child: AudioColumnFields(
+                                      audio: audio,
                                       title: audio.displayTitle,
                                       composer: composer.value ?? ui("未知作曲家"),
                                       album: audio.album,

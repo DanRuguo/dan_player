@@ -171,7 +171,9 @@ bool IsPayloadNamespace(const fs::path& relative) {
          first == L"26.0.5-snapshot.1-computer-use.md" ||
          first == L"release-26.0.5-snapshot.1.md" || first == L"replay-gain.md" ||
          first == L"26.0.5-snapshot.2-validation.md" ||
-         first == L"release-26.0.5-snapshot.2.md";
+         first == L"release-26.0.5-snapshot.2.md" ||
+         first == L"26.0.5-snapshot.3-validation.md" ||
+         first == L"release-26.0.5-snapshot.3.md";
 }
 uint64_t Number(const std::string& value) {
   if (value.empty() || !std::all_of(value.begin(), value.end(), ::isdigit)) Fail("Invalid numeric field");

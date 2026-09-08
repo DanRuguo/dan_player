@@ -13,6 +13,10 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/page/page_scaffold.dart';
+import 'package:dan_player/page/personal_library_page.dart';
+import 'package:dan_player/library/personal_library.dart';
+import 'package:dan_player/library/playback_bookmarks.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -29,6 +33,8 @@ class CategoriesPage extends StatefulWidget {
     this.classificationScanner,
     this.coverStore,
     this.pickCover,
+    this.personalStore,
+    this.bookmarkStore,
   });
 
   final MusicCategoryKind initialCategory;
@@ -37,6 +43,8 @@ class CategoriesPage extends StatefulWidget {
   final MusicClassificationScanner? classificationScanner;
   final CategoryCoverStore? coverStore;
   final PlaylistImagePicker? pickCover;
+  final PersonalLibrary? personalStore;
+  final PlaybackBookmarkStore? bookmarkStore;
 
   @override
   State<CategoriesPage> createState() => _CategoriesPageState();
@@ -54,6 +62,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
   bool _classifying = false;
   bool _classificationsReady = false;
   String _query = '';
+  bool _personal = false;
   late CategoryCoverStore _covers =
       widget.coverStore ?? CategoryCoverStore.shared;
   MusicCategories? _lastCoverReconciliationSnapshot;
@@ -156,6 +165,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
     _invalidateClassifications();
     if (categoryChanged) {
       _kind = widget.initialCategory;
+      _personal = false;
       _query = '';
       _search.clear();
     }
@@ -163,13 +173,14 @@ class _CategoriesPageState extends State<CategoriesPage> {
   }
 
   void _chooseKind(MusicCategoryKind kind) {
-    if (_kind == kind) return;
+    if (_kind == kind && !_personal) return;
     setState(() {
       if (kind == MusicCategoryKind.duration &&
           _snapshotLibraryRevision != AudioLibrary.revision) {
         _snapshot = null;
       }
       _kind = kind;
+      _personal = false;
       _query = '';
       _search.clear();
     });
@@ -252,6 +263,23 @@ class _CategoriesPageState extends State<CategoriesPage> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final selector = _CategorySelector(
+      selected: _personal ? null : _kind,
+      onSelected: _chooseKind,
+      onPersonal: () => setState(() => _personal = true),
+    );
+    if (_personal) {
+      return PageScaffold(
+        title: ui('分类'),
+        subtitle: ui('共 {0} 首歌曲', [_audios.length]),
+        actions: const [],
+        responsiveActions: selector,
+        body: PersonalLibraryPanel(
+            audios: widget.audios,
+            personalStore: widget.personalStore,
+            bookmarkStore: widget.bookmarkStore),
+      );
+    }
     final scheme = Theme.of(context).colorScheme;
     final existingSnapshot = _snapshot;
     final categories = existingSnapshot ??
@@ -304,10 +332,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
       subtitle: ui("{0} 首歌曲 · {1} {2}",
           [_audios.length, groups.length, ui(_kind.countLabel)]),
       actions: const [],
-      responsiveActions: _CategorySelector(
-        selected: _kind,
-        onSelected: _chooseKind,
-      ),
+      responsiveActions: selector,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -598,10 +623,14 @@ IconData categoryIcon(MusicCategoryKind kind) => switch (kind) {
     };
 
 class _CategorySelector extends StatefulWidget {
-  const _CategorySelector({required this.selected, required this.onSelected});
+  const _CategorySelector(
+      {required this.selected,
+      required this.onSelected,
+      required this.onPersonal});
 
-  final MusicCategoryKind selected;
+  final MusicCategoryKind? selected;
   final ValueChanged<MusicCategoryKind> onSelected;
+  final VoidCallback onPersonal;
 
   @override
   State<_CategorySelector> createState() => _CategorySelectorState();
@@ -609,6 +638,7 @@ class _CategorySelector extends StatefulWidget {
 
 class _CategorySelectorState extends State<_CategorySelector> {
   final _scroll = ScrollController();
+  final _personalKey = GlobalKey();
   final _chipKeys = {
     for (final kind in MusicCategoryKind.browsableValues) kind: GlobalKey(),
   };
@@ -629,7 +659,9 @@ class _CategorySelectorState extends State<_CategorySelector> {
   void _revealSelected() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final selectedContext = _chipKeys[widget.selected]?.currentContext;
+      final selectedContext = widget.selected == null
+          ? _personalKey.currentContext
+          : _chipKeys[widget.selected]?.currentContext;
       if (selectedContext != null) {
         Scrollable.ensureVisible(selectedContext, alignment: .5);
       }
@@ -673,6 +705,22 @@ class _CategorySelectorState extends State<_CategorySelector> {
                   ),
                 ),
               ],
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                key: _personalKey,
+                constraints: const BoxConstraints(minHeight: 44),
+                child: ChoiceChip(
+                  key: const ValueKey('category-kind-personal'),
+                  avatar: const Icon(Symbols.bookmarks, size: 18),
+                  label: Text(ui('个人整理')),
+                  selected: widget.selected == null,
+                  showCheckmark: false,
+                  visualDensity: VisualDensity.standard,
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  shape: AppShape.control,
+                  onSelected: (_) => widget.onPersonal(),
+                ),
+              ),
             ],
           ),
         ),

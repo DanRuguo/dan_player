@@ -1,3 +1,4 @@
+import 'app_input_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/app_motion.dart';
 
@@ -26,6 +27,7 @@ abstract final class DesktopLyricTypography {
     );
 
     return ThemeData(
+      inputDecorationTheme: appInputTheme(scheme),
       useMaterial3: true,
       brightness: brightness,
       fontFamily: fontFamily,

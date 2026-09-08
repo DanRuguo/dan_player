@@ -12,6 +12,7 @@ import 'package:dan_player/utils.dart';
 import 'package:path/path.dart' as path_util;
 
 List<Playlist> PLAYLISTS = [];
+final List<Map<String, dynamic>> playlistTrash = [];
 Future<void> _playlistWriteQueue = Future.value();
 Future<void>? _playlistReadOperation;
 bool _preservePlaylistBackup = false;
@@ -120,6 +121,9 @@ Future<void> _readPlaylists() async {
     PLAYLISTS
       ..clear()
       ..addAll(loaded.roots);
+    playlistTrash
+      ..clear()
+      ..addAll(loaded.trash);
     _migratedCollectionKeys
       ..clear()
       ..addAll(loaded.migratedCollectionKeys);
@@ -173,7 +177,8 @@ Future<void> savePlaylists() {
     // Capture the requested state before joining the write queue. A rapid
     // second edit must not change the first save's backup snapshot.
     contents = json.encode({
-      'version': 3,
+      'version': 4,
+      'trash': playlistTrash,
       'playlists': PLAYLISTS.map((item) => item._toMap()).toList(),
       'migratedCollectionKeys': _migratedCollectionKeys.toList(),
       'legacyCollectionsMigrated': _legacyCollectionsMigrated,
@@ -340,6 +345,7 @@ class Playlist {
   final String id;
   String name;
   String? imagePath;
+  Map<String, dynamic> presentation = {};
   int createdAt;
   int modifiedAt = 0;
 
@@ -497,6 +503,7 @@ class Playlist {
         'id': id,
         'name': name,
         'imagePath': imagePath,
+        if (presentation.isNotEmpty) 'presentation': presentation,
         'createdAt': createdAt,
         'modifiedAt': modifiedAt,
         if (legacyCollectionId != null)
@@ -901,6 +908,26 @@ class PlaylistTree {
             .where((entry) => requested.contains(entry.id))
             .map((entry) => entry.childPlaylist)
             .toList();
+    if (identical(roots, PLAYLISTS) && detached.isNotEmpty) {
+      final additions = [
+        for (final node in detached)
+          <String, dynamic>{
+            'id': _newPlaylistId('trash_'),
+            'parent': parent?.id,
+            'index': parent == null
+                ? roots.indexOf(node)
+                : parent._entries.indexWhere((e) => e.id == node.id),
+            'deletedAt': DateTime.now().toUtc().millisecondsSinceEpoch,
+            'playlist': node._toMap()
+          }
+      ];
+      if (playlistTrash.length + additions.length > 100 ||
+          utf8.encode(jsonEncode([...playlistTrash, ...additions])).length >
+              10 * 1024 * 1024) {
+        throw StateError('歌单回收站已满，请先管理回收站。');
+      }
+      playlistTrash.addAll(additions);
+    }
     if (parent == null) {
       roots.removeWhere((playlist) => requested.contains(playlist.id));
     } else {
@@ -1087,9 +1114,11 @@ class _PlaylistStore {
     this.roots, {
     Set<String>? migratedCollectionKeys,
     this.legacyCollectionsMigrated = false,
+    this.trash = const [],
   }) : migratedCollectionKeys = migratedCollectionKeys ?? <String>{};
 
   final List<Playlist> roots;
+  final List<Map<String, dynamic>> trash;
   final Set<String> migratedCollectionKeys;
   bool legacyCollectionsMigrated;
 }
@@ -1099,7 +1128,7 @@ _PlaylistStore _decodePlaylistStore(Object? value) {
   final migratedKeys = <String>{};
   var migrated = false;
   if (value is Map) {
-    if (value['version'] != 3) {
+    if (![3, 4].contains(value['version'])) {
       throw const FormatException('无法读取此版本的统一歌单文件');
     }
     nodes = value['playlists'];
@@ -1130,7 +1159,30 @@ _PlaylistStore _decodePlaylistStore(Object? value) {
     final sourceKey = playlist.legacyCollectionKey;
     if (sourceKey != null) migratedKeys.add(sourceKey);
   }
+  final trash = <Map<String, dynamic>>[];
+  if (value is Map && value['trash'] != null) {
+    final raw = value['trash'];
+    if (raw is! List ||
+        raw.length > 100 ||
+        utf8.encode(jsonEncode(raw)).length > 10 * 1024 * 1024)
+      throw const FormatException('Invalid playlist trash');
+    final trashIds = <String>{};
+    for (final entry in raw) {
+      if (entry is! Map ||
+          entry['id'] is! String ||
+          !trashIds.add(entry['id']) ||
+          entry['index'] is! int ||
+          entry['deletedAt'] is! int ||
+          (entry['deletedAt'] as int).abs() > 8640000000000000 ||
+          entry['playlist'] is! Map ||
+          (entry['parent'] != null && entry['parent'] is! String))
+        throw const FormatException('Invalid playlist trash entry');
+      Playlist.fromMap(entry['playlist']);
+      trash.add(Map<String, dynamic>.from(entry));
+    }
+  }
   return _PlaylistStore(roots,
+      trash: trash,
       migratedCollectionKeys: migratedKeys,
       legacyCollectionsMigrated: migrated);
 }
@@ -1319,6 +1371,8 @@ class _PlaylistDecoder {
       legacyCollectionKey:
           _readPlaylistOptionalString(map['legacyCollectionKey']),
     ).._parent = parent;
+    if (map['presentation'] is Map)
+      playlist.presentation = Map<String, dynamic>.from(map['presentation']);
     if (!treeFormat) {
       final legacy = map['audios'];
       if (legacy is! List) throw const FormatException('旧歌单 audios 必须是列表');
@@ -1397,4 +1451,111 @@ class _PlaylistDecoder {
     }
     return AudioLibrary.instance.audioByPath[savedPath] ?? Audio.fromMap(item);
   }
+}
+
+/// Restore a frozen subtree with deterministic conflict mapping. Only the
+/// canonical tree and its trash change; the caller awaits the single save.
+Playlist restorePlaylistTrash(String id) {
+  if (playlistsReadBlocked) throw StateError('歌单资料处于保护状态');
+  final record = playlistTrash.firstWhere((r) => r['id'] == id);
+  final raw = Map<String, dynamic>.from(
+      jsonDecode(jsonEncode(record['playlist'])) as Map);
+  final tree = playlistTree;
+  final used = <String>{
+    for (final p in tree.allPlaylists) ...[p.id, ...p.entries.map((e) => e.id)]
+  };
+  String claim(String previous) {
+    var candidate = previous;
+    var number = 1;
+    while (!used.add(candidate)) {
+      candidate = '${previous}_restored${number++}';
+    }
+    return candidate;
+  }
+
+  final legacy = {for (final p in tree.allPlaylists) p.legacyCollectionKey};
+  void mapIds(Map value) {
+    value['id'] = claim(value['id'] as String);
+    if (legacy.contains(value['legacyCollectionKey'])) {
+      value.remove('legacyCollectionKey');
+      value.remove('legacyCollectionId');
+    }
+    for (final entry in value['entries'] as List) {
+      if (entry['type'] == 'playlist') {
+        mapIds(entry['playlist'] as Map);
+        entry['id'] = entry['playlist']['id'];
+      } else {
+        entry['id'] = claim(entry['id'] as String);
+      }
+    }
+  }
+
+  mapIds(raw);
+  final restored = Playlist.fromMap(raw);
+  var parent = record['parent'] == null
+      ? null
+      : tree.findPlaylist(record['parent'] as String);
+  final subtreeDepth = PlaylistTree([restored])
+      .allPlaylists
+      .map((p) => p.pathFromRoot.length)
+      .fold(1, max);
+  if ((parent?.pathFromRoot.length ?? 0) + subtreeDepth > PlaylistTree.maxDepth)
+    parent = null;
+  final siblings = parent == null
+      ? PLAYLISTS
+      : parent.entries
+          .whereType<PlaylistChildEntry>()
+          .map((e) => e.childPlaylist);
+  final names = siblings.map((p) => p.name).toSet();
+  final originalName = restored.name;
+  var suffix = 1;
+  while (names.contains(restored.name)) {
+    restored.name = '$originalName (${suffix++})';
+  }
+  final index = (record['index'] as int)
+      .clamp(0, parent?.entries.length ?? PLAYLISTS.length);
+  if (parent == null) {
+    PLAYLISTS.insert(index, restored);
+  } else {
+    restored._parent = parent;
+    parent._entries.insert(index, PlaylistChildEntry._(restored));
+    parent._touch();
+  }
+  playlistTrash.remove(record);
+  return restored;
+}
+
+List<Audio> playlistMergeAdditions(Playlist target, List<Audio> incoming,
+    {required bool missingOnly}) {
+  final counts = <String, int>{};
+  if (missingOnly) {
+    for (final e in target.entries.whereType<PlaylistAudioEntry>()) {
+      counts.update(e.audio.stableTrackId, (n) => n + 1, ifAbsent: () => 1);
+    }
+  }
+  final added = <Audio>[];
+  for (final audio in incoming) {
+    final key = audio.stableTrackId;
+    final left = counts[key] ?? 0;
+    if (left > 0) {
+      counts[key] = left - 1;
+    } else {
+      added.add(audio);
+    }
+  }
+  return added;
+}
+
+void appendPlaylistOccurrences(Playlist target, List<Audio> incoming,
+    {required String expectedSnapshot}) {
+  if (playlistsReadBlocked ||
+      jsonEncode(target.toMap()) != expectedSnapshot ||
+      playlistTree.findPlaylist(target.id) != target)
+    throw StateError('歌单已改变，请重新预览');
+  final additions = [
+    for (final audio in incoming)
+      PlaylistAudioEntry._(_newPlaylistId('pe_'), audio)
+  ];
+  target._entries.addAll(additions);
+  target._touch();
 }

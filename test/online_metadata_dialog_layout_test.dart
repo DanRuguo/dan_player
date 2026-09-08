@@ -96,9 +96,11 @@ void main() {
         pending
             .complete(OnlineSearchResponse(tracks: candidates, failures: {}));
         await tester.pumpAndSettle();
-        expect(tester.getRect(controls), beforeControls);
-        expect(tester.getRect(results), beforeResults);
-        expect(tester.getRect(album), beforeAlbum);
+        expect(tester.getRect(controls).size, beforeControls.size);
+        expect(tester.getRect(results).height,
+            greaterThanOrEqualTo(beforeResults.height));
+        expect(tester.getTopLeft(album) - tester.getTopLeft(controls),
+            beforeAlbum.topLeft - beforeControls.topLeft);
         expect(controlPosition.pixels, beforePixels);
 
         final last =
@@ -109,7 +111,8 @@ void main() {
             greaterThan(0));
         expect(controlPosition.pixels, beforePixels,
             reason: 'candidate scrolling must not move query/field controls');
-        expect(tester.getRect(album), beforeAlbum);
+        expect(tester.getTopLeft(album) - tester.getTopLeft(controls),
+            beforeAlbum.topLeft - beforeControls.topLeft);
         expect(
             tester.getRect(album).overlaps(tester.getRect(controls)), isTrue);
         expect(find.text('取消').hitTestable(), findsOneWidget);

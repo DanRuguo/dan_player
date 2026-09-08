@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:io';
 import 'package:dan_player/src/rust/api/installed_font.dart';
@@ -208,19 +209,20 @@ class FontSelectorDialog extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Dialog(
       insetPadding: EdgeInsets.zero,
-      child: SizedBox(
-        width: 350.0,
-        height: 400,
+      child: AppDialogContent(
+        width: 350,
+        maxHeight: 400,
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
+              Flexible(
                 child: Material(
                   type: MaterialType.transparency,
                   child: CustomScrollView(
+                    shrinkWrap: true,
                     key: const ValueKey('font-selector-scroll'),
                     // The header must share the finite scrolling area: long
                     // font names at 200% cannot consume the pinned cancel row.

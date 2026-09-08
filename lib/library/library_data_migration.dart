@@ -77,6 +77,7 @@ Object? remapLibraryDocument(Object? value, LibraryPathMapping mapping) {
         'album',
         'name',
         'composer',
+        'tags',
         'album_artist',
       }.contains(key)
           ? entry.value
@@ -134,6 +135,10 @@ class LibraryDataMigration {
     'playback_statistics.pre-track-id-v1.json',
     'playback_bookmarks.json',
     'track_resume.json',
+    'personal_library.json',
+    'named_queues.json',
+    'eq_presets.json',
+    'smart_playlists.json',
     'lyric_source.json',
     'lyric_documents.json',
     'song_comment_associations.json',

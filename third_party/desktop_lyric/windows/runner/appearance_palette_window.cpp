@@ -417,8 +417,11 @@ void PaletteWindowManager::Handle(const flutter::MethodCall<Value>& call,
     if (!closing_) result->Success();
     return;
   }
-  if (call.method_name() != "open") { result->NotImplemented(); return; }
+  if (call.method_name() != "open" && call.method_name() != "warm") { result->NotImplemented(); return; }
   if (active_) { result->Error("already_open", "A palette is already open"); return; }
+  warming_ = call.method_name() == "warm";
+  if (warming_ && palette_) { warming_ = false; result->Success(); return; }
+  if (!warming_) first_warm_cached_ = false;
   const auto bounds = PaletteBounds(owner_);
   if (!bounds) { result->Error("monitor_unavailable", "Could not read the owner's monitor"); return; }
   session_ = session;
@@ -455,6 +458,15 @@ void PaletteWindowManager::ShowFirstFrameOnPalette(int64_t session) {
   if (closing_ || palette_closing_ || !active_ || !palette_ || session != session_) return;
   auto palette = palette_;
   const auto latest_revision = Integer(Field(&snapshot_, "revision"));
+  if (warming_) {
+    warming_ = false;
+    ConfigureOwnerTimer(kPaletteReadyTimer, 0);
+    if (pending_open_) { pending_open_->Success(); pending_open_.reset(); }
+    cache_allowed_ = true;
+    first_warm_cached_ = true;
+    CloseOnPalette(session, false);
+    return;
+  }
   if (pending_open_ && prepared_revision_ != latest_revision) {
     const auto bounds = PaletteBounds(owner_);
     if (!bounds) { CloseOnPalette(session, true); return; }
@@ -514,7 +526,10 @@ void PaletteWindowManager::CloseOnPalette(int64_t session, bool notify) {
     palette->Suspend();
     if (!closing_ && palette_ == palette && !active_) {
       cache_deadline_ = GetTickCount64() + kPaletteCacheMilliseconds;
-      ConfigureOwnerTimer(kPaletteCacheTimer, kPaletteCacheMilliseconds);
+      // Retain the single prewarmed engine until its first real presentation.
+      // Subsequent closes use the normal bounded idle cache.
+      ConfigureOwnerTimer(kPaletteCacheTimer,
+                          first_warm_cached_ ? 0 : kPaletteCacheMilliseconds);
     }
   } else {
     auto palette = std::exchange(palette_, nullptr);

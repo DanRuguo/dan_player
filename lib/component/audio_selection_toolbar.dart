@@ -1,3 +1,5 @@
+import 'package:dan_player/component/local_lyric_batch_dialog.dart';
+import 'package:dan_player/component/personal_library_dialog.dart';
 import 'dart:async';
 
 import 'package:dan_player/component/app_toolbar_style.dart';
@@ -175,6 +177,10 @@ class AudioSelectionMenu extends StatelessWidget {
             _notice(context, ui('已复制 {0} 个本地文件路径', [paths.length]));
           }
         }, enabled: selected.any((audio) => !audio.isOnline)),
+        item('personal-tags', '个人评分与标签', Symbols.star,
+            (audios) => showPersonalTrackEditor(context, audios)),
+        item('local-lyrics', '批量关联本地歌词', Symbols.lyrics,
+            (audios) => showLocalLyricBatch(context, audios)),
         item('edit-tags', '批量编辑标签', Symbols.edit_note,
             (audios) => showBatchAudioMetadataDialog(context, audios)),
         item('reread-covers', '重新读取封面', Symbols.image_search,

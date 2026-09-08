@@ -244,14 +244,17 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
+                Flexible(
                     child: CustomScrollView(
+                  shrinkWrap: true,
                   key: const ValueKey('song-comment-match-scroll'),
                   slivers: [
                     SliverToBoxAdapter(
                         child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         AppDialogTitle(ui("为本地歌曲关联评论"),
@@ -356,6 +359,7 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
                     if (_selected != null)
                       SliverToBoxAdapter(
                           child: Column(
+                              mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                             const SizedBox(height: 10),
