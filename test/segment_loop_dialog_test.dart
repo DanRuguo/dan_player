@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/ui_language.dart';
 import 'dart:async';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/page/now_playing_page/component/segment_loop_dialog.dart';
@@ -91,6 +92,31 @@ void main() {
         isNull);
     expect(tester.takeException(), isNull);
   });
+
+  for (final language in UiLanguage.values) {
+    testWidgets('A-B paired controls align in ${language.code}',
+        (tester) async {
+      uiLanguage.value = language;
+      addTearDown(() => uiLanguage.value = UiLanguage.zh);
+      final service = _SegmentPlayback();
+      addTearDown(service.dispose);
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(body: SegmentLoopDialog(service: service))));
+      await tester.pumpAndSettle();
+      final a =
+          tester.getRect(find.byKey(const ValueKey('segment-loop-set-a')));
+      final b =
+          tester.getRect(find.byKey(const ValueKey('segment-loop-set-b')));
+      final fields = find.byType(TextFormField);
+      final first = tester.getRect(fields.at(0));
+      final second = tester.getRect(fields.at(1));
+      expect(a.width, b.width);
+      expect(a.left, first.left);
+      expect(b.right, second.right);
+      expect(first.top, second.top);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('A-B dialog scrolls with large text in a small window',
       (tester) async {

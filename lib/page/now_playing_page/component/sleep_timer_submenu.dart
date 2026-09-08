@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -53,7 +54,7 @@ class SleepTimerSubmenu extends StatelessWidget {
                 onPressed: () => service.startSleepTimer(
                   Duration(minutes: minutes),
                 ),
-                leadingIcon: const Icon(Symbols.timer),
+                leadingIcon: SleepPresetIcon(minutes: minutes),
                 child: Text(ui("{0} 分钟后", [minutes])),
               ),
             const Divider(),
@@ -93,4 +94,53 @@ class SleepTimerSubmenu extends StatelessWidget {
       },
     );
   }
+}
+
+/// One timer outline with a different hand position for each duration.
+class SleepPresetIcon extends StatelessWidget {
+  const SleepPresetIcon({super.key, required this.minutes});
+  final int minutes;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = IconTheme.of(context);
+    final size = theme.size ?? 24;
+    return ExcludeSemantics(
+        child: SizedBox.square(
+      dimension: size,
+      child: CustomPaint(
+          painter: _SleepPresetPainter(
+              minutes, theme.color ?? Theme.of(context).colorScheme.primary)),
+    ));
+  }
+}
+
+class _SleepPresetPainter extends CustomPainter {
+  const _SleepPresetPainter(this.minutes, this.color);
+  final int minutes;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 24, size.height / 24);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+    const center = Offset(12, 14);
+    canvas.drawCircle(center, 8, paint);
+    canvas.drawLine(const Offset(10, 2), const Offset(14, 2), paint);
+    canvas.drawLine(const Offset(12, 2), const Offset(12, 4), paint);
+    canvas.drawLine(const Offset(18.5, 5.5), const Offset(20, 4), paint);
+    final angle = minutes / 120 * 2 * math.pi - math.pi / 2;
+    canvas.drawLine(
+        center, center + Offset(math.cos(angle), math.sin(angle)) * 4.8, paint);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_SleepPresetPainter oldDelegate) =>
+      oldDelegate.minutes != minutes || oldDelegate.color != color;
 }

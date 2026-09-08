@@ -549,7 +549,7 @@ class _PlaylistHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleLarge?.copyWith(
-                    color: scheme.onSurface,
+                    color: scheme.primary,
                     fontWeight: FontWeight.w700,
                   ),
                 ),

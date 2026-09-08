@@ -243,6 +243,56 @@ void main() {
     }
   });
 
+  testWidgets('search and category chips follow live player theme colors',
+      (tester) async {
+    final colors = <String, List<Color>>{};
+    final controls = Builder(
+        builder: (context) => Wrap(children: [
+              FilledButton.tonal(
+                  style: appToolbarControlStyle(context,
+                      primary: true, tonal: true),
+                  onPressed: () {},
+                  child: const AppToolbarLabel(
+                      label: 'Search QA', icon: Icons.search)),
+              ChoiceChip(
+                  label: const Text('Selected QA'),
+                  avatar: const Icon(Icons.person),
+                  selected: true,
+                  showCheckmark: false,
+                  onSelected: (_) {}),
+              ChoiceChip(
+                  label: const Text('Unselected QA'),
+                  avatar: const Icon(Icons.album),
+                  selected: false,
+                  showCheckmark: false,
+                  onSelected: (_) {}),
+            ]));
+    for (final brightness in Brightness.values) {
+      colors.clear();
+      for (final seed in [Colors.amber, Colors.blue, Colors.purple]) {
+        await tester
+            .pumpWidget(_host(controls, seed: seed, brightness: brightness));
+        await tester.pumpAndSettle();
+        for (final label in ['Search QA', 'Selected QA', 'Unselected QA']) {
+          final color = DefaultTextStyle.of(tester.element(find.text(label)))
+              .style
+              .color!;
+          (colors[label] ??= []).add(color);
+        }
+        for (final icon in [Icons.search, Icons.person, Icons.album]) {
+          final finder = find.byIcon(icon);
+          final color = tester.widget<Icon>(finder).color ??
+              IconTheme.of(tester.element(finder)).color!;
+          (colors[icon.toString()] ??= []).add(color);
+        }
+      }
+      for (final entry in colors.entries) {
+        expect(entry.value.toSet().length, 3,
+            reason: '${entry.key} must follow each palette in $brightness');
+      }
+    }
+  });
+
   testWidgets('settings alternatives use shared control with explicit labels',
       (tester) async {
     uiLanguage.value = UiLanguage.en;

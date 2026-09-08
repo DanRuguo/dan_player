@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/utils.dart';
@@ -39,14 +40,15 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
         final loop = service.segmentLoop;
         final available = service.canUseSegmentLoop;
         return AlertDialog(
-          icon: const Icon(Symbols.repeat),
+          icon: Icon(Symbols.repeat,
+              color: Theme.of(context).colorScheme.primary),
           title: Text(ui('A-B 片段循环'), textAlign: TextAlign.center),
           content: SizedBox(
-              width: 420,
+              width: 480,
               child: SingleChildScrollView(
                   child: Column(
                       mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                     Text(service.nowPlaying?.displayTitle ?? ui('尚未选择歌曲'),
                         maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -60,9 +62,10 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                         service: service,
                         available: available),
                     const SizedBox(height: 12),
-                    Wrap(spacing: 8, runSpacing: 8, children: [
+                    _SegmentControlPair(children: [
                       OutlinedButton.icon(
                           key: const ValueKey('segment-loop-set-a'),
+                          style: appToolbarControlStyle(context),
                           onPressed: available
                               ? () => loop.setStart(
                                   service.position, service.length)
@@ -71,6 +74,7 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                           label: Text(ui('标记 A：{0}', [_time(loop.start)]))),
                       OutlinedButton.icon(
                           key: const ValueKey('segment-loop-set-b'),
+                          style: appToolbarControlStyle(context),
                           onPressed: available
                               ? () {
                                   if (!loop.setEnd(
@@ -83,14 +87,13 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                           icon: const Icon(Symbols.last_page),
                           label: Text(ui('标记 B：{0}', [_time(loop.end)]))),
                     ]),
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 12, runSpacing: 12, children: [
-                      SizedBox(
-                          width: 170,
+                    const SizedBox(height: 20),
+                    _SegmentControlPair(children: [
+                      _PracticeField(
+                          label: ui('总次数（留空无限）'),
                           child: TextFormField(
                               initialValue: loop.totalRounds?.toString() ?? '',
-                              decoration:
-                                  InputDecoration(labelText: ui('总次数（留空无限）')),
+                              decoration: const InputDecoration(),
                               autovalidateMode:
                                   AutovalidateMode.onUserInteraction,
                               validator: (v) => v == null ||
@@ -111,12 +114,11 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                                       rounds: n,
                                       interval: loop.intervalSeconds);
                               })),
-                      SizedBox(
-                          width: 170,
+                      _PracticeField(
+                          label: ui('轮间间隔（0–10 秒）'),
                           child: TextFormField(
                               initialValue: loop.intervalSeconds.toString(),
-                              decoration: InputDecoration(
-                                  labelText: ui('轮间间隔（0–10 秒）')),
+                              decoration: const InputDecoration(),
                               autovalidateMode:
                                   AutovalidateMode.onUserInteraction,
                               validator: (v) {
@@ -145,10 +147,10 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                               })),
                     ]),
                     const SizedBox(height: 12),
-                    Text(ui('已完成 {0} 轮', [loop.completedRounds])),
                     SwitchListTile.adaptive(
                         contentPadding: EdgeInsets.zero,
                         title: Text(ui('循环播放此片段')),
+                        subtitle: Text(ui('已完成 {0} 轮', [loop.completedRounds])),
                         value: loop.enabled,
                         onChanged: available &&
                                 loop.hasRange &&
@@ -204,6 +206,7 @@ class _SegmentPositionState extends State<_SegmentPosition> {
                   style: Theme.of(context).textTheme.titleMedium),
               Slider(
                   key: const ValueKey('segment-loop-position'),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
                   value: value,
                   max: maximum,
                   label: _SegmentLoopDialogState._time(value),
@@ -221,4 +224,64 @@ class _SegmentPositionState extends State<_SegmentPosition> {
       },
     );
   }
+}
+
+class _SegmentControlPair extends StatelessWidget {
+  const _SegmentControlPair({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) =>
+      LayoutBuilder(builder: (context, constraints) {
+        const gap = 12.0;
+        final minimumWidth = MediaQuery.textScalerOf(context).scale(220);
+        final columns = constraints.maxWidth >= minimumWidth * 2 + gap ? 2 : 1;
+        final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+        double labelHeight = 0;
+        if (columns == 2) {
+          for (final child in children.whereType<_PracticeField>()) {
+            final painter = TextPainter(
+              text: TextSpan(
+                  text: child.label,
+                  style: Theme.of(context).textTheme.bodySmall),
+              textDirection: Directionality.of(context),
+              textScaler: MediaQuery.textScalerOf(context),
+            )..layout(maxWidth: width);
+            if (painter.height > labelHeight) labelHeight = painter.height;
+            painter.dispose();
+          }
+        }
+        return Wrap(spacing: gap, runSpacing: 16, children: [
+          for (final child in children)
+            SizedBox(
+                width: width,
+                child: child is _PracticeField && labelHeight > 0
+                    ? _PracticeField(
+                        label: child.label,
+                        labelHeight: labelHeight,
+                        child: child.child)
+                    : child),
+        ]);
+      });
+}
+
+class _PracticeField extends StatelessWidget {
+  const _PracticeField(
+      {required this.label, required this.child, this.labelHeight});
+  final double? labelHeight;
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        label: label,
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SizedBox(
+              height: labelHeight,
+              child: Text(label, style: Theme.of(context).textTheme.bodySmall)),
+          const SizedBox(height: 8),
+          child,
+        ]),
+      );
 }

@@ -104,8 +104,16 @@ void main() {
           await tester.tap(find.byType(SubmenuButton));
           await tester.pumpAndSettle();
           expect(find.byType(Checkbox), findsNothing);
+          expect(
+              tester
+                  .widgetList<SleepPresetIcon>(find.byType(SleepPresetIcon))
+                  .map((icon) => icon.minutes),
+              SleepTimerSubmenu.presets);
+          for (final element in find.byType(SleepPresetIcon).evaluate()) {
+            expect(IconTheme.of(element).color, theme.colorScheme.primary);
+          }
           final current = find.byIcon(Symbols.music_note);
-          final timer = find.byIcon(Symbols.timer).first;
+          final timer = find.byType(SleepPresetIcon).first;
           expect(tester.getCenter(current).dx,
               closeTo(tester.getCenter(timer).dx, .1));
           expect(IconTheme.of(tester.element(current)).color,

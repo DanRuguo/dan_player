@@ -237,7 +237,7 @@ class _QueueDialogTitle extends StatelessWidget {
       builder: (context, queue, _) => AppDialogTitle(
         ui('播放列表'),
         style: theme.textTheme.titleLarge?.copyWith(
-          color: scheme.onSurface,
+          color: scheme.primary,
           fontWeight: FontWeight.w700,
         ),
         leading: Container(
