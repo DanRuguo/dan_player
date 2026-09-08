@@ -361,7 +361,7 @@ void main() {
                       child: Padding(
                           padding: const EdgeInsets.all(16),
                           child: CurrentPlaylistView(
-                              playbackService: playback))))),
+                              immersive: true, playbackService: playback))))),
         ));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull,

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_action_list_tile.dart';
@@ -11,11 +13,9 @@ import 'package:dan_player/play_service/named_queue_store.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/play_service/seek_target.dart';
-import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 Future<String?> _name(
     BuildContext context, String title, String initial) async {
@@ -233,6 +233,11 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
   void initState() {
     super.initState();
     _load();
+    AudioLibrary.changes.addListener(_libraryChanged);
+  }
+
+  void _libraryChanged() {
+    if (mounted) setState(_resolveBookmarks);
   }
 
   Future<void> _load() async {
@@ -298,12 +303,22 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
       setState(() => _error = ui('书签超出当前有效时长'));
       return;
     }
-    await PlayService.instance.playbackService.playAudioAt(audio,
+    final service = PlayService.instance.playbackService;
+    final played = await service.playAudioAt(audio,
         position: item.position, stillCurrent: () => mounted);
+    if (played &&
+        mounted &&
+        item.end != null &&
+        service.nowPlaying?.stableTrackId == audio.stableTrackId) {
+      service.segmentLoop.setStart(item.position, service.length);
+      service.segmentLoop.setEnd(item.end!, service.length);
+      service.setSegmentLoopEnabled(true);
+    }
   }
 
   @override
   void dispose() {
+    AudioLibrary.changes.removeListener(_libraryChanged);
     _search.dispose();
     super.dispose();
   }
@@ -311,9 +326,10 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
   @override
   Widget build(BuildContext context) {
     final visible = _items
-        .where((b) => '${b.label} ${_audio(b)?.displayTitle ?? ''}'
-            .toLowerCase()
-            .contains(_search.text.toLowerCase()))
+        .where((b) =>
+            '${b.label} ${_audio(b)?.displayTitle ?? ''} ${_audio(b)?.artist ?? ''}'
+                .toLowerCase()
+                .contains(_search.text.toLowerCase()))
         .toList();
     final content = Column(
         mainAxisSize: widget.embedded ? MainAxisSize.max : MainAxisSize.min,
@@ -340,55 +356,64 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
           Flexible(
               fit: widget.embedded ? FlexFit.tight : FlexFit.loose,
-              child: ListView(shrinkWrap: !widget.embedded, children: [
-                for (final b in visible)
-                  Builder(builder: (context) {
-                    final audio = _audio(b);
-                    return AppActionListTile(
-                        leading: Checkbox(
-                            value: _selected.contains(b.id),
-                            onChanged: _busy
-                                ? null
-                                : (v) => setState(() {
-                                      if (v!) {
-                                        _selected.add(b.id);
-                                      } else {
-                                        _selected.remove(b.id);
-                                      }
-                                    })),
-                        title: b.label,
-                        subtitle:
-                            '${audio?.displayTitle ?? ui("暂不可用／需要重新关联")}\n${_bookmarkTime(b.positionMs)}${b.endMs == null ? '' : ' – ${_bookmarkTime(b.endMs!)}'}',
-                        onTap: audio == null
-                            ? null
-                            : () {
-                                final router = GoRouter.of(context);
-                                if (!widget.embedded) Navigator.pop(context);
-                                router.push(app_paths.AUDIO_DETAIL_PAGE,
-                                    extra: audio);
-                              },
-                        actions: [
-                          IconButton(
-                              tooltip: ui('从书签播放'),
-                              onPressed: _busy || audio == null
-                                  ? null
-                                  : () => _play(b, audio),
-                              icon: const Icon(Icons.play_arrow)),
-                          IconButton(
-                              tooltip: ui('重命名'),
-                              onPressed: _busy
-                                  ? null
-                                  : () async {
-                                      final name =
-                                          await _name(context, '重命名', b.label);
-                                      if (name != null && mounted)
-                                        await _change(
-                                            (s) => s.rename(b.id, name));
-                                    },
-                              icon: const Icon(Icons.edit_outlined))
-                        ]);
-                  })
-              ])),
+              child: visible.isEmpty
+                  ? Center(heightFactor: 2, child: Text(ui('没有匹配的书签')))
+                  : LayoutBuilder(
+                      builder: (context, constraints) => GridView.builder(
+                          shrinkWrap: !widget.embedded,
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: math.max(
+                                      1,
+                                      (constraints.maxWidth /
+                                              math.max(
+                                                  240,
+                                                  MediaQuery.textScalerOf(
+                                                          context)
+                                                      .scale(240)))
+                                          .floor()),
+                                  mainAxisExtent: 112 +
+                                      MediaQuery.textScalerOf(context)
+                                              .scale(24) *
+                                          4,
+                                  crossAxisSpacing: 12,
+                                  mainAxisSpacing: 12),
+                          itemCount: visible.length,
+                          itemBuilder: (context, index) {
+                            final b = visible[index];
+                            final audio = _audio(b);
+                            return _BookmarkCard(
+                                selected: _selected.contains(b.id),
+                                title: b.label,
+                                subtitle:
+                                    '${audio?.displayTitle ?? ui("暂不可用／需要重新关联")}\n${_bookmarkTime(b.positionMs)}${b.endMs == null ? '' : ' – ${_bookmarkTime(b.endMs!)}'}',
+                                onTap: _busy
+                                    ? null
+                                    : () => setState(() {
+                                          if (!_selected.add(b.id))
+                                            _selected.remove(b.id);
+                                        }),
+                                actions: [
+                                  IconButton(
+                                      tooltip: ui('从书签播放'),
+                                      onPressed: _busy || audio == null
+                                          ? null
+                                          : () => _play(b, audio),
+                                      icon: const Icon(Icons.play_arrow)),
+                                  IconButton(
+                                      tooltip: ui('重命名'),
+                                      onPressed: _busy
+                                          ? null
+                                          : () async {
+                                              final name = await _name(
+                                                  context, '重命名', b.label);
+                                              if (name != null && mounted)
+                                                await _change((s) =>
+                                                    s.rename(b.id, name));
+                                            },
+                                      icon: const Icon(Icons.edit_outlined))
+                                ]);
+                          }))),
         ]);
     final actions = [
       TextButton.icon(
@@ -494,5 +519,62 @@ class _PreciseSeekDialogState extends State<PreciseSeekDialog> {
                   : null,
               child: Text(ui('定位')))
         ]);
+  }
+}
+
+class _BookmarkCard extends StatelessWidget {
+  const _BookmarkCard(
+      {required this.title,
+      required this.subtitle,
+      required this.actions,
+      required this.selected,
+      this.onTap});
+  final String title, subtitle;
+  final List<Widget> actions;
+  final bool selected;
+  final VoidCallback? onTap;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: selected ? scheme.secondaryContainer : scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+          borderRadius: AppShape.controlRadius,
+          side: BorderSide(
+              color: selected
+                  ? scheme.primary
+                  : scheme.outlineVariant.withValues(alpha: .5),
+              width: selected ? 2 : 1)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+          onTap: onTap,
+          child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                        height: MediaQuery.textScalerOf(context).scale(24) * 2,
+                        child: Row(children: [
+                          Icon(Icons.bookmark_outline, color: scheme.primary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Text(title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium)),
+                        ])),
+                    const SizedBox(height: 6),
+                    Expanded(
+                        child: Text(subtitle,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyMedium)),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: actions),
+                  ]))),
+    );
   }
 }

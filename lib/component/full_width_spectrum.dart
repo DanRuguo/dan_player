@@ -26,6 +26,16 @@ class FullWidthSpectrum extends StatelessWidget {
   }
 }
 
+class LyricPageSpectrum extends StatelessWidget {
+  const LyricPageSpectrum({super.key, required this.height});
+  final double height;
+  @override
+  Widget build(BuildContext context) =>
+      RenderingPreferencesScope.of(context).lyricSpectrum
+          ? FullWidthSpectrum(height: height)
+          : const SizedBox.shrink();
+}
+
 /// The real spectrum view, separated from the player singleton so rendering
 /// and subscription lifetimes can also be tested without opening native audio.
 /// Samples are already smoothed by BASS; this view never fabricates frequencies

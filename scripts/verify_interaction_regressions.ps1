@@ -16,6 +16,7 @@ if (-not $ReceiptPath) { $ReceiptPath = Join-Path (Split-Path -Parent $ProjectRo
 # isolated fixtures and widget layouts, never the installed player or GUI input.
 $regressionTests = @(
     'test/snapshot3_data_test.dart',
+    'test/personal_track_editor_test.dart',
     'test/adaptive_dialog_content_test.dart',
     'test/personal_library_ui_polish_test.dart',
     'test/playlist_storage_test.dart',

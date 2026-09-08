@@ -221,9 +221,28 @@ void main() {
                     matching: find.byType(Scrollable))
                 .last);
         expect(find.text('Good Time · Chorus'), findsOneWidget);
+        expect(find.byType(Checkbox), findsNothing);
+        await tester.ensureVisible(find.text('Good Time · Chorus'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Good Time · Chorus'));
+        await tester.pumpAndSettle();
+        final selectedCard = tester
+            .widgetList<Material>(find.byType(Material))
+            .where((m) =>
+                m.shape is RoundedRectangleBorder &&
+                (m.shape! as RoundedRectangleBorder).side.width == 2);
+        expect(selectedCard, isNotEmpty);
         expect(tester.takeException(), isNull);
         await capture(
             tester, captureKey, 'category-bookmarks-${language.name}-$large');
+        if (large) {
+          final rename = find.byTooltip(ui('重命名')).last;
+          await tester.ensureVisible(rename);
+          await tester.pumpAndSettle();
+          expect(rename.hitTestable(), findsOneWidget);
+          await capture(
+              tester, captureKey, 'bookmark-actions-${language.name}');
+        }
         final albums = find.byKey(const ValueKey('category-kind-album'));
         await tester.ensureVisible(albums);
         await tester.tap(albums);

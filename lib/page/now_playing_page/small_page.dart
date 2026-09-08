@@ -82,7 +82,7 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
                         NowPlayingViewMode.withLyric =>
                           const VerticalLyricView(),
                         NowPlayingViewMode.withPlaylist =>
-                          const CurrentPlaylistView(),
+                          const CurrentPlaylistView(immersive: true),
                       },
                     ),
                   ),
@@ -95,14 +95,13 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
             ),
           ),
           const SizedBox(height: 8.0),
-          const QueueStopStatus(),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: AppEntrance(
               identity: 'now-playing-slider',
               order: 1,
               child: SpectrumProgressSection(
-                spectrum: FullWidthSpectrum(height: 24),
+                spectrum: LyricPageSpectrum(height: 24),
                 progress: _NowPlayingSlider(),
               ),
             ),

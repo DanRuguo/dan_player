@@ -70,7 +70,7 @@ class SleepTimerSubmenu extends StatelessWidget {
                   ? null
                   : service.stopAfterQueueRound,
               leadingIcon: const Icon(Symbols.stop_circle),
-              child: Text(ui('播完设置时这轮队列后停止')),
+              child: Text(ui('播完当前队列后停止')),
             ),
             if (service.queueStopBoundary.active)
               MenuItemButton(

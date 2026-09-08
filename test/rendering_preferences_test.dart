@@ -1,4 +1,5 @@
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/page/settings_page/interface_settings.dart';
 import 'package:dan_player/page/settings_page/rendering_settings.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -30,6 +31,27 @@ void main() {
       expect(
           value.hashCode, RenderingPreferences.fromMap(value.toMap()).hashCode);
     }
+  });
+
+  testWidgets('lyrics spectrum can be disabled without creating audio',
+      (tester) async {
+    final prefs =
+        ValueNotifier(const RenderingPreferences(lyricSpectrum: false));
+    addTearDown(prefs.dispose);
+    expect(
+        RenderingPreferences.fromMap(prefs.value.toMap()).lyricSpectrum, false);
+    expect(
+        RenderingPreferences.fromMap({'lyricSpectrum': 'false'}).lyricSpectrum,
+        true);
+    await tester.pumpWidget(RenderingPreferencesScope(
+        preferences: prefs,
+        child: const MaterialApp(
+            home: SpectrumProgressSection(
+                spectrum: LyricPageSpectrum(height: 42),
+                progress: Text('progress')))));
+    expect(find.byType(FullWidthSpectrum), findsNothing);
+    expect(find.text('progress'), findsOneWidget);
+    expect(PlayService.isInitialized, false);
   });
 
   test('opt-out bypasses visibility but never paused or detached lifecycle',
@@ -89,7 +111,9 @@ void main() {
             ))),
       )));
       expect(find.text(translateUi('不可见时暂停视觉更新', language)), findsOneWidget);
-      final toggle = find.byType(Switch);
+      final toggle = find.descendant(
+          of: find.byKey(const ValueKey('pause-hidden-visuals')),
+          matching: find.byType(Switch));
       await tester.ensureVisible(toggle);
       await tester.tap(toggle);
       await tester.pumpAndSettle();
@@ -113,7 +137,8 @@ void main() {
       })),
     )));
     final toggle = find.descendant(
-        of: find.byType(RenderingSettings), matching: find.byType(Switch));
+        of: find.byKey(const ValueKey('pause-hidden-visuals')),
+        matching: find.byType(Switch));
     await tester.ensureVisible(toggle);
     await tester.tap(toggle);
     await tester.pumpAndSettle();

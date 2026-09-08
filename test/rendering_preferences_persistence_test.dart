@@ -91,6 +91,6 @@ void main() {
     await AppSettings.instance
         .saveSettings(throwOnError: true, captureWindowSize: false);
     expect(jsonDecode(await settingsFile.readAsString())['Rendering'],
-        {'pauseWhenHidden': false});
+        {'pauseWhenHidden': false, 'lyricSpectrum': true});
   });
 }

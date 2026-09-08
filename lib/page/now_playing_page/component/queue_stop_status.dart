@@ -26,7 +26,7 @@ class QueueStopStatus extends StatelessWidget {
         if (label == null) return const SizedBox.shrink();
         final scheme = Theme.of(context).colorScheme;
         final blocked = service.queueStopBlockedReason;
-        final text = ui('停止目标：{0}', [label]);
+        final text = ui('播放完此曲后停止：{0}', [label]);
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           child: Row(children: [

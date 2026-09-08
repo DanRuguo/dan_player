@@ -28,7 +28,7 @@ class _NowPlayingPage_Large extends StatelessWidget {
                           NowPlayingViewMode.withLyric =>
                             const VerticalLyricView(),
                           NowPlayingViewMode.withPlaylist =>
-                            const CurrentPlaylistView(),
+                            const CurrentPlaylistView(immersive: true),
                         },
                       ),
                     ),
@@ -38,12 +38,11 @@ class _NowPlayingPage_Large extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16.0),
-          const QueueStopStatus(),
           const AppEntrance(
             identity: 'now-playing-slider',
             order: 1,
             child: SpectrumProgressSection(
-              spectrum: FullWidthSpectrum(height: 32),
+              spectrum: LyricPageSpectrum(height: 32),
               progress: _NowPlayingSlider(),
             ),
           ),

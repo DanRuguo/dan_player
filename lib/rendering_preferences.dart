@@ -5,18 +5,25 @@ import 'package:flutter/widgets.dart';
 /// override accessibility animation preferences and the platform scheduler.
 @immutable
 class RenderingPreferences {
-  const RenderingPreferences({this.pauseWhenHidden = true});
+  const RenderingPreferences(
+      {this.pauseWhenHidden = true, this.lyricSpectrum = true});
 
   final bool pauseWhenHidden;
+  final bool lyricSpectrum;
 
-  RenderingPreferences copyWith({bool? pauseWhenHidden}) =>
+  RenderingPreferences copyWith({bool? pauseWhenHidden, bool? lyricSpectrum}) =>
       RenderingPreferences(
         pauseWhenHidden: pauseWhenHidden ?? this.pauseWhenHidden,
+        lyricSpectrum: lyricSpectrum ?? this.lyricSpectrum,
       );
 
-  Map<String, Object> toMap() => {'pauseWhenHidden': pauseWhenHidden};
+  Map<String, Object> toMap() =>
+      {'pauseWhenHidden': pauseWhenHidden, 'lyricSpectrum': lyricSpectrum};
 
   factory RenderingPreferences.fromMap(Object? value) => RenderingPreferences(
+        lyricSpectrum: value is Map && value['lyricSpectrum'] is bool
+            ? value['lyricSpectrum'] as bool
+            : true,
         pauseWhenHidden: value is Map && value['pauseWhenHidden'] is bool
             ? value['pauseWhenHidden'] as bool
             : true,
@@ -41,10 +48,12 @@ class RenderingPreferences {
 
   @override
   bool operator ==(Object other) =>
-      other is RenderingPreferences && pauseWhenHidden == other.pauseWhenHidden;
+      other is RenderingPreferences &&
+      pauseWhenHidden == other.pauseWhenHidden &&
+      lyricSpectrum == other.lyricSpectrum;
 
   @override
-  int get hashCode => pauseWhenHidden.hashCode;
+  int get hashCode => Object.hash(pauseWhenHidden, lyricSpectrum);
 }
 
 /// A listenable lets stream/timer owners apply a change synchronously even

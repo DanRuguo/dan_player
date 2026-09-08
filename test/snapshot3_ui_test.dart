@@ -25,7 +25,11 @@ import 'package:flutter_test/flutter_test.dart';
 class _Personal extends PersonalLibrary {
   _Personal() : super(File('unused-test-store'));
   @override
-  Future<Map<String, PersonalTrack>> snapshot() async => {};
+  Future<Map<String, PersonalTrack>> snapshot() async => {
+        Audio.fromMap({'path': r'J:\synthetic\Canon.wav'}).stableTrackId:
+            const PersonalTrack(
+                rating: 4, tags: ['Night', 'Chorus · 副歌 · サビ · 후렴', 'Favorite'])
+      };
 }
 
 class _Eq extends EqPresetStore {

@@ -22,7 +22,6 @@ import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/online/song_comments.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/page/now_playing_page/component/current_playlist_view.dart';
-import 'package:dan_player/page/now_playing_page/component/queue_stop_status.dart';
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/playback_bookmarks_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/detail_transport_button.dart';

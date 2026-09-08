@@ -23,11 +23,13 @@ class CurrentPlaylistView extends StatefulWidget {
   const CurrentPlaylistView(
       {super.key,
       this.showTitle = true,
+      this.immersive = false,
       this.shrinkWrap = false,
       this.onOpenDetails,
       this.playbackService});
 
   final bool showTitle;
+  final bool immersive;
   final bool shrinkWrap;
   final ValueChanged<Audio>? onOpenDetails;
 
@@ -277,6 +279,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                 if (widget.showTitle)
                   _PlaylistHeader(
                     count: queue.length,
+                    immersive: widget.immersive,
                     currentIndex: currentIndex,
                   ),
                 Padding(
@@ -342,7 +345,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                               key: const ValueKey('queue-stop-after-round'),
                               tooltip: ui(
                                   playbackService.queueStopBlockedReason ??
-                                      '播完设置时这轮队列后停止'),
+                                      '播完当前队列后停止'),
                               onPressed: queue.isEmpty ||
                                       playbackService.queueStopBlockedReason !=
                                           null
@@ -372,7 +375,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                       hintText: ui('搜索队列：歌曲、歌手或专辑'),
                       counterText: '',
                       isDense: true,
-                      filled: true,
+                      filled: !widget.immersive,
+                      enabledBorder: widget.immersive ? InputBorder.none : null,
+                      focusedBorder: widget.immersive ? InputBorder.none : null,
                       fillColor: scheme.surfaceContainerLow,
                       prefixIcon: Icon(Symbols.search, color: scheme.primary),
                       suffixIcon: _query.isEmpty
@@ -407,10 +412,14 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                     margin: EdgeInsets.fromLTRB(widget.showTitle ? 8 : 0, 4,
                         widget.showTitle ? 8 : 0, 0),
                     decoration: BoxDecoration(
-                      color: scheme.surfaceContainerLow.withValues(alpha: .78),
+                      color: widget.immersive
+                          ? Colors.transparent
+                          : scheme.surfaceContainerLow.withValues(alpha: .78),
                       borderRadius: AppShape.surfaceRadius,
                       border: Border.all(
-                        color: scheme.outlineVariant.withValues(alpha: .52),
+                        color: widget.immersive
+                            ? Colors.transparent
+                            : scheme.outlineVariant.withValues(alpha: .52),
                       ),
                     ),
                     clipBehavior: Clip.antiAlias,
@@ -438,6 +447,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                       _PlaylistViewItem(
                                     key: ValueKey(visibleIndices[index]),
                                     queue: queue,
+                                    immersive: widget.immersive,
                                     item: queue[visibleIndices[index]],
                                     index: visibleIndices[index],
                                     current:
@@ -509,7 +519,11 @@ class _QueueScrollbar extends StatelessWidget {
 }
 
 class _PlaylistHeader extends StatelessWidget {
-  const _PlaylistHeader({required this.count, required this.currentIndex});
+  const _PlaylistHeader(
+      {required this.count,
+      required this.currentIndex,
+      required this.immersive});
+  final bool immersive;
 
   final int count;
   final int currentIndex;
@@ -531,11 +545,14 @@ class _PlaylistHeader extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: scheme.primaryContainer.withValues(alpha: .78),
+              color: immersive
+                  ? Colors.transparent
+                  : scheme.primaryContainer.withValues(alpha: .78),
               borderRadius: AppShape.controlRadius,
             ),
             child: Icon(Symbols.queue_music,
-                size: 22, color: scheme.onPrimaryContainer),
+                size: 22,
+                color: immersive ? scheme.primary : scheme.onPrimaryContainer),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -619,6 +636,7 @@ class _PlaylistViewItem extends StatelessWidget {
     required this.item,
     required this.index,
     required this.current,
+    required this.immersive,
     required this.playbackService,
     this.onOpenDetails,
   });
@@ -627,6 +645,7 @@ class _PlaylistViewItem extends StatelessWidget {
   final List<Audio> queue;
   final int index;
   final bool current;
+  final bool immersive;
   final PlaybackService playbackService;
   final ValueChanged<Audio>? onOpenDetails;
 
@@ -652,12 +671,15 @@ class _PlaylistViewItem extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final titleStyle = theme.textTheme.bodyLarge?.copyWith(
-      color: current ? scheme.onPrimaryContainer : scheme.onSurface,
+      color: current
+          ? (immersive ? scheme.primary : scheme.onPrimaryContainer)
+          : scheme.onSurface,
       fontWeight: current ? FontWeight.w700 : FontWeight.w600,
     );
     final metadataStyle = theme.textTheme.bodyMedium?.copyWith(
       color: current
-          ? scheme.onPrimaryContainer.withValues(alpha: .78)
+          ? (immersive ? scheme.primary : scheme.onPrimaryContainer)
+              .withValues(alpha: .78)
           : scheme.onSurfaceVariant,
     );
     final durationText = Duration(seconds: item.duration).toStringHMMSS();
@@ -747,7 +769,7 @@ class _PlaylistViewItem extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: TweenAnimationBuilder<Color?>(
           tween: ColorTween(
-            end: current
+            end: current && !immersive
                 ? scheme.primaryContainer.withValues(alpha: .82)
                 : Colors.transparent,
           ),

@@ -1,4 +1,34 @@
 const Map<String, List<String>> catalogQueueHistoryStop = {
+  "评分和标签仅保存在播放器中，不修改音乐文件。": [
+    "Ratings and tags are saved only in the player; music files are unchanged.",
+    "評価とタグはプレーヤー内にのみ保存され、音楽ファイルは変更されません。",
+    "평점과 태그는 플레이어에만 저장되며 음악 파일은 변경되지 않습니다."
+  ],
+  "所选歌曲评分不同，未修改时各自保留。": [
+    "Selected tracks have different ratings. Leave unchanged to keep each rating.",
+    "選択した曲の評価は異なります。変更しなければ各曲の評価を保持します。",
+    "선택한 곡의 평점이 다릅니다. 변경하지 않으면 각 평점을 유지합니다."
+  ],
+  "仅将新增或删除的标签应用到所选歌曲，其余标签保留。": [
+    "Only tag additions and removals apply to selected tracks; other tags are kept.",
+    "追加・削除したタグのみを選択した曲に適用し、他のタグは保持します。",
+    "추가하거나 삭제한 태그만 선택한 곡에 적용하며 다른 태그는 유지합니다."
+  ],
+  "添加标签": ["Add tag", "タグを追加", "태그 추가"],
+  "编辑标签": ["Edit tag", "タグを編集", "태그 편집"],
+  "标签名称": ["Tag name", "タグ名", "태그 이름"],
+  "删除标签": ["Delete tag", "タグを削除", "태그 삭제"],
+  "歌词页实时频谱": [
+    "Live spectrum on lyrics page",
+    "歌詞ページのリアルタイムスペクトラム",
+    "가사 페이지 실시간 스펙트럼"
+  ],
+  "在歌词详情页播放条上显示频谱音柱；关闭后保留进度条。": [
+    "Show spectrum bars above the lyrics page playback bar. The progress bar remains when disabled.",
+    "歌詞ページの再生バー上にスペクトラムを表示します。オフにしてもシークバーは表示されます。",
+    "가사 페이지 재생 바 위에 스펙트럼을 표시합니다. 꺼도 진행 바는 유지됩니다."
+  ],
+  "没有匹配的书签": ["No matching bookmarks", "一致するブックマークはありません", "일치하는 북마크가 없습니다"],
   '撤销队列整理 · Ctrl+Z': [
     'Undo queue edit · Ctrl+Z',
     'キュー編集を元に戻す · Ctrl+Z',
@@ -10,13 +40,13 @@ const Map<String, List<String>> catalogQueueHistoryStop = {
     '대기열 편집 다시 실행 · Ctrl+Y / Ctrl+Shift+Z'
   ],
   '播完此条后停止': ['Stop after this queue entry', 'この項目の再生後に停止', '이 항목 재생 후 중지'],
-  '播完设置时这轮队列后停止': [
-    'Stop after the current queue round',
-    '設定時のキューの末尾で停止',
-    '설정 시점의 대기열 끝에서 중지'
+  '播完当前队列后停止': [
+    'Stop after the current queue',
+    '現在のキューの再生後に停止',
+    '현재 대기열 재생 후 중지'
   ],
   '取消停止目标': ['Cancel stop target', '停止対象を解除', '중지 대상 취소'],
-  '停止目标：{0}': ['Stop after: {0}', '停止対象：{0}', '중지 대상: {0}'],
+  '播放完此曲后停止：{0}': ['Stop after: {0}', 'この曲の再生後に停止：{0}', '이 곡 재생 후 중지: {0}'],
   '请先关闭 A-B 循环，再设置停止目标': [
     'Turn off A-B repeat before setting a stop target',
     '停止対象を設定するには A-B リピートを解除してください',

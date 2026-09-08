@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'dart:math' as math;
@@ -29,11 +30,14 @@ class PersonalTrackEditor extends StatefulWidget {
 }
 
 class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
-  final _add = TextEditingController(), _remove = TextEditingController();
-  bool _ratingChanged = false, _tagsChanged = false, _saving = false;
+  bool _saving = false, _ratingChanged = false, _mixedRating = false;
   int? _rating;
   String? _error;
   Map<String, PersonalTrack>? _before;
+  final Set<String> _initialTags = {}, _draftTags = {};
+  bool get _tagsChanged => !setEquals(_initialTags, _draftTags);
+  bool get _ready => _before != null && !_saving;
+
   @override
   void initState() {
     super.initState();
@@ -44,22 +48,63 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
     try {
       final data =
           await (widget.store ?? await PersonalLibrary.instance).snapshot();
-      if (mounted)
-        setState(() {
-          _before = data;
-          _error = null;
-        });
+      if (!mounted) return;
+      final records = widget.targets
+          .map((a) => data[a.stableTrackId] ?? const PersonalTrack())
+          .toList();
+      setState(() {
+        _before = data;
+        _rating = records.firstOrNull?.rating;
+        _mixedRating = records.any((r) => r.rating != _rating);
+        _initialTags.clear();
+        _initialTags.addAll(records.expand((r) => r.tags));
+        _draftTags
+          ..clear()
+          ..addAll(_initialTags);
+        _error = null;
+      });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
   }
 
-  List<String> _tags(String text) => text
-      .split(RegExp('[,，;；]'))
-      .map((s) => s.trim())
-      .where((s) => s.isNotEmpty)
-      .toSet()
-      .toList();
+  Future<void> _editTag([String? original]) async {
+    var input = original ?? '';
+    final value = await showAppDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+              title: AppDialogTitle(ui(original == null ? '添加标签' : '编辑标签')),
+              content: SizedBox(
+                  width: 320,
+                  child: TextFormField(
+                      initialValue: input,
+                      onChanged: (value) => input = value,
+                      autofocus: true,
+                      maxLength: 80,
+                      decoration: InputDecoration(labelText: ui('标签名称')),
+                      onFieldSubmitted: (v) {
+                        if (v.trim().isNotEmpty)
+                          Navigator.pop(context, v.trim());
+                      })),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(ui('取消'))),
+                FilledButton(
+                    onPressed: () {
+                      if (input.trim().isNotEmpty)
+                        Navigator.pop(context, input.trim());
+                    },
+                    child: Text(ui('确定')))
+              ],
+            ));
+    if (!mounted || value == null) return;
+    setState(() {
+      if (original != null) _draftTags.remove(original);
+      _draftTags.add(value);
+    });
+  }
+
   Future<void> _save() async {
     setState(() {
       _saving = true;
@@ -71,8 +116,8 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
           changeRating: _ratingChanged,
           rating: _rating,
           changeTags: _tagsChanged,
-          addTags: _tags(_add.text),
-          removeTags: _tags(_remove.text));
+          addTags: _draftTags.difference(_initialTags).toList(),
+          removeTags: _initialTags.difference(_draftTags).toList());
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) setState(() => _error = '${ui("保存失败，草稿已保留")}: $e');
@@ -82,98 +127,131 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
   }
 
   @override
-  void dispose() {
-    _add.dispose();
-    _remove.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: AppDialogTitle(ui('个人评分与标签')),
-        content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-                child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return AlertDialog(
+      title: AppDialogTitle(ui('个人评分与标签')),
+      content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+              child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                Text(ui('评分和标签仅保存在播放器中，不修改音乐文件。')),
+                const SizedBox(height: 20),
+                Text(ui('修改评分'),
+                    style: Theme.of(context).textTheme.titleMedium),
+                if (_mixedRating) Text(ui('所选歌曲评分不同，未修改时各自保留。')),
+                const SizedBox(height: 10),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  for (final stars in [0, 1, 2, 3, 4, 5])
+                    ChoiceChip(
+                        label: Text(stars == 0 ? ui('未评分') : '★' * stars),
+                        selected: !_mixedRating && (_rating ?? 0) == stars,
+                        onSelected: !_ready
+                            ? null
+                            : (_) => setState(() {
+                                  _rating = stars == 0 ? null : stars;
+                                  _ratingChanged = true;
+                                  _mixedRating = false;
+                                }))
+                ]),
+                const SizedBox(height: 20),
+                Text(ui('修改个人标签'),
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 10),
+                Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                  Text(ui('只保存到播放器资料，不修改音乐文件。未勾选的字段保持不变。')),
-                  const SizedBox(height: 12),
-                  CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(ui('修改评分')),
-                      value: _ratingChanged,
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(() => _ratingChanged = v!)),
-                  Wrap(spacing: 6, runSpacing: 6, children: [
-                    for (final stars in [0, 1, 2, 3, 4, 5])
-                      ChoiceChip(
-                          label: Text(stars == 0 ? ui('未评分') : '★' * stars),
-                          selected: (_rating ?? 0) == stars,
-                          onSelected: _saving
+                      for (final tag in _draftTags)
+                        _EditableTagPill(
+                            key: ValueKey(tag),
+                            label: tag,
+                            onEdit: !_ready ? null : () => _editTag(tag),
+                            onDelete: !_ready
+                                ? null
+                                : () => setState(() => _draftTags.remove(tag))),
+                      OutlinedButton.icon(
+                          onPressed: !_ready || _draftTags.length >= 32
                               ? null
-                              : (_) => setState(() {
-                                    _rating = stars == 0 ? null : stars;
-                                    _ratingChanged = true;
-                                  }))
-                  ]),
-                  CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(ui('修改个人标签')),
-                      value: _tagsChanged,
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(() => _tagsChanged = v!)),
-                  TextField(
-                      controller: _add,
-                      enabled: !_saving,
-                      decoration: InputDecoration(labelText: ui('添加标签（逗号分隔）')),
-                      onChanged: (_) => setState(() => _tagsChanged = true)),
+                              : () => _editTag(),
+                          icon: const Icon(Symbols.add),
+                          label: Text(ui('添加标签'))),
+                    ]),
+                if (widget.targets.length > 1) ...[
                   const SizedBox(height: 12),
-                  TextField(
-                      controller: _remove,
-                      enabled: !_saving,
-                      decoration: InputDecoration(labelText: ui('移除标签（逗号分隔）')),
-                      onChanged: (_) => setState(() => _tagsChanged = true)),
-                  const SizedBox(height: 16),
-                  Text(ui('变更预览'),
-                      style: Theme.of(context).textTheme.titleMedium),
-                  if (_before == null && _error == null)
-                    const LinearProgressIndicator(),
-                  if (_before != null)
-                    ...widget.targets.take(30).map((a) {
-                      final old =
-                          _before![a.stableTrackId] ?? const PersonalTrack();
-                      final next = {...old.tags, ..._tags(_add.text)}
-                        ..removeAll(_tags(_remove.text));
-                      return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Text(
-                              '${a.displayTitle}\n${old.rating ?? "—"} ★ → ${_ratingChanged ? (_rating ?? "—") : (old.rating ?? "—")} ★ · ${old.tags.join(", ")} → ${_tagsChanged ? next.join(", ") : old.tags.join(", ")}'));
-                    }),
-                  if (widget.targets.length > 30)
-                    Text(ui('共 {0} 首歌曲', [widget.targets.length])),
-                  if (_error != null)
-                    SelectableText(_error!,
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.error)),
-                ]))),
-        actions: [
-          TextButton(
-              onPressed: _saving ? null : () => Navigator.pop(context),
-              child: Text(ui('取消'))),
-          if (_before == null)
-            TextButton(onPressed: _load, child: Text(ui('重试'))),
-          FilledButton(
-              onPressed: _saving ||
-                      _before == null ||
-                      (!_ratingChanged && !_tagsChanged)
-                  ? null
-                  : _save,
-              child: Text(ui('保存')))
-        ],
+                  Text(ui('仅将新增或删除的标签应用到所选歌曲，其余标签保留。'))
+                ],
+                if (_before == null && _error == null)
+                  const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: LinearProgressIndicator()),
+                if (_error != null)
+                  Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(_error!,
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.error))),
+              ]))),
+      actions: [
+        TextButton(
+            onPressed: _saving ? null : () => Navigator.pop(context),
+            child: Text(ui('取消'))),
+        if (_before == null)
+          TextButton(onPressed: _saving ? null : _load, child: Text(ui('重试'))),
+        FilledButton(
+            onPressed:
+                !_ready || (!_ratingChanged && !_tagsChanged) ? null : _save,
+            child: Text(ui('保存')))
+      ],
+    );
+  }
+}
+
+class _EditableTagPill extends StatefulWidget {
+  const _EditableTagPill(
+      {super.key, required this.label, this.onEdit, this.onDelete});
+  final String label;
+  final VoidCallback? onEdit, onDelete;
+  @override
+  State<_EditableTagPill> createState() => _EditableTagPillState();
+}
+
+class _EditableTagPillState extends State<_EditableTagPill> {
+  bool _hover = false, _focus = false;
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: Focus(
+            onFocusChange: (v) => setState(() => _focus = v),
+            child: Tooltip(
+                message: widget.label,
+                child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 300),
+                    child: InputChip(
+                      shape: const StadiumBorder(),
+                      label: Text(widget.label,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      onPressed: widget.onEdit,
+                      onDeleted: widget.onDelete,
+                      deleteButtonTooltipMessage: ui('删除标签'),
+                      deleteIcon: Opacity(
+                          opacity: _hover ||
+                                  _focus ||
+                                  Theme.of(context).platform ==
+                                      TargetPlatform.android ||
+                                  Theme.of(context).platform ==
+                                      TargetPlatform.iOS
+                              ? 1
+                              : 0,
+                          child: Icon(Symbols.close,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.primary)),
+                    )))),
       );
 }
 
