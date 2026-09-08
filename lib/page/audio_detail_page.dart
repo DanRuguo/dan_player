@@ -117,10 +117,6 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextButton.icon(
-                    onPressed: () => showPersonalTrackEditor(context, [audio]),
-                    icon: const Icon(Symbols.star),
-                    label: Text(ui("个人评分与标签"))),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final compact = constraints.maxWidth < 700;
@@ -415,11 +411,21 @@ class _HeroInfo extends StatelessWidget {
                 icon: const Icon(Symbols.chat_bubble_outline),
                 label: Text(ui("歌曲评论")),
               ),
+              OutlinedButton.icon(
+                onPressed: () => showPersonalTrackEditor(context, [audio]),
+                icon: const Icon(Symbols.star),
+                label: Text(ui("个人评分与标签")),
+              ),
             ] else ...[
               OutlinedButton.icon(
                 onPressed: () => showSongCommentsDialog(context, audio),
                 icon: const Icon(Symbols.chat_bubble_outline),
                 label: Text(ui("歌曲评论")),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => showPersonalTrackEditor(context, [audio]),
+                icon: const Icon(Symbols.star),
+                label: Text(ui("个人评分与标签")),
               ),
               OutlinedButton.icon(
                 onPressed: onToggleLibrary,
