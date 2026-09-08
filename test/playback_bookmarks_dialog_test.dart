@@ -120,6 +120,13 @@ void main() {
     ]) {
       await (FontLoader(font.$1)..addFont(rootBundle.load(font.$2))).load();
     }
+    final korean = File('C:/Windows/Fonts/malgun.ttf');
+    if (await korean.exists()) {
+      final bytes = await korean.readAsBytes();
+      await (FontLoader('Malgun Gothic')
+            ..addFont(Future.value(ByteData.sublistView(bytes))))
+          .load();
+    }
   });
   late _MemoryBookmarks store;
   late _BookmarkPlayback service;
