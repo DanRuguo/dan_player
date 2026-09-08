@@ -504,9 +504,9 @@ void main() {
         .widget<PlaylistReorderSurface>(find.byType(PlaylistReorderSurface))
         .controller;
     await tapPlaylistAction(tester, 'playlist-start-selection');
-    final checkbox =
+    final selectionItem =
         find.byKey(ValueKey('playlist-select-${children.first.id}'));
-    await tester.tap(checkbox);
+    await tester.tap(selectionItem);
     await _settle(tester, 'playlist select item');
     final scroll = _playlistScroll(tester);
     scroll.jumpTo(420);
@@ -530,7 +530,7 @@ void main() {
     }
     scroll.jumpTo(0);
     await tester.pump();
-    expect(tester.widget<Checkbox>(checkbox).value, isTrue);
+    expect(tester.widget<Semantics>(selectionItem).properties.selected, isTrue);
     await tapPlaylistAction(tester, 'playlist-end-selection');
     final surface = tester
         .widget<PlaylistReorderSurface>(find.byType(PlaylistReorderSurface));
