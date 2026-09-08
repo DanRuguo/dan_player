@@ -149,10 +149,14 @@ void main() {
         contentBuilder: (_, item, index, selection) => ListTile(
           key: ValueKey('library-$item'),
           title: Text('Song $item'),
-          trailing: IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.more_vert),
-          ),
+          trailing: Builder(builder: (context) {
+            final button =
+                IconButton(onPressed: () {}, icon: const Icon(Icons.more_vert));
+            final index = AudioListReorderScope.indexOf(context);
+            return index == null
+                ? button
+                : ReorderableDragStartListener(index: index, child: button);
+          }),
         ),
         enableShufflePlay: false,
         enableSortMethod: false,

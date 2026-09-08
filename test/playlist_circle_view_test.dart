@@ -287,8 +287,9 @@ void main() {
     await tester.pump();
     expect(
         tester
-            .widget<Checkbox>(_key('playlist-select-${children.first.id}'))
-            .value,
+            .widget<Semantics>(_key('playlist-select-${children.first.id}'))
+            .properties
+            .selected,
         isTrue);
     expect(fixture.views, isEmpty);
     expect(fixture.saves, 0);
