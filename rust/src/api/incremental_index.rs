@@ -1,5 +1,6 @@
 //! Read-only media discovery; only the caller commits a complete index result.
 use super::*;
+use crate::index_scan::ScanControl;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,14 +100,25 @@ fn collect(
     visited: &mut HashSet<PathBuf>,
     directories: &mut BTreeMap<String, u64>,
     files: &mut Vec<DiscoveredFile>,
+    control: &ScanControl,
+    progress: &mut impl FnMut(f64),
 ) -> anyhow::Result<()> {
+    control.check()?;
     // Canonical identity prevents overlapping roots/junction loops. Persist
     // the user's original path spelling, not a device-path alias.
     let canonical = directory.canonicalize()?;
     if !visited.insert(canonical) {
         return Ok(());
     }
-    let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        control.check()?;
+        entries.push(entry?);
+    }
+    if visited.len() == 1 || visited.len() % 64 == 0 {
+        progress(0.0);
+        control.check()?;
+    }
     entries.sort_by_key(|entry| entry.file_name());
     let modified = fs::metadata(directory)?
         .modified()?
@@ -115,9 +127,17 @@ fn collect(
         .as_secs();
     directories.insert(directory.to_string_lossy().into_owned(), modified);
     for entry in entries {
+        control.check()?;
         let kind = entry.file_type()?;
         if kind.is_dir() {
-            collect(&entry.path(), visited, directories, files)?;
+            collect(
+                &entry.path(),
+                visited,
+                directories,
+                files,
+                control,
+                progress,
+            )?;
         } else if kind.is_file() && is_supported_audio_path(&entry.path()) {
             files.push(DiscoveredFile {
                 fingerprint: Fingerprint::read(&entry.path())?,
@@ -131,13 +151,33 @@ fn collect(
 /// Exact unchanged JSON is reused. All directory enumeration/stat errors abort
 /// before the caller writes anything; only successfully enumerated absence
 /// removes songs. Roots themselves remain registered even when empty.
+#[cfg(test)]
 pub(super) fn refresh(
     previous: Option<&serde_json::Value>,
     selected_roots: &[String],
     force: bool,
     reader: &(impl Fn(&Path) -> Option<serde_json::Value> + Sync),
+    progress: impl FnMut(f64),
+) -> anyhow::Result<serde_json::Value> {
+    refresh_cancellable(
+        previous,
+        selected_roots,
+        force,
+        reader,
+        &ScanControl::default(),
+        progress,
+    )
+}
+
+pub(super) fn refresh_cancellable(
+    previous: Option<&serde_json::Value>,
+    selected_roots: &[String],
+    force: bool,
+    reader: &(impl Fn(&Path) -> Option<serde_json::Value> + Sync),
+    control: &ScanControl,
     mut progress: impl FnMut(f64),
 ) -> anyhow::Result<serde_json::Value> {
+    control.check()?;
     let roots = roots(&serde_json::json!({"roots": selected_roots}))?;
     let mut old = HashMap::<String, &serde_json::Value>::new();
     let mut old_order = HashMap::<String, usize>::new();
@@ -147,6 +187,7 @@ pub(super) fn refresh(
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("INDEX_SCHEMA_INVALID|曲库文件夹记录无效"))?;
         for (folder_index, folder) in folders.iter().enumerate() {
+            control.check()?;
             let path = folder["path"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("INDEX_SCHEMA_INVALID|曲库文件夹缺少路径"))?;
@@ -155,6 +196,7 @@ pub(super) fn refresh(
                 .as_array()
                 .ok_or_else(|| anyhow::anyhow!("INDEX_SCHEMA_INVALID|曲库歌曲记录无效"))?;
             for (audio_index, audio) in audios.iter().enumerate() {
+                control.check()?;
                 let path = audio["path"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("INDEX_SCHEMA_INVALID|曲库歌曲缺少路径"))?;
@@ -169,7 +211,19 @@ pub(super) fn refresh(
     let mut directories = BTreeMap::new();
     let mut visited = HashSet::new();
     for root in &roots {
-        collect(Path::new(root), &mut visited, &mut directories, &mut files).map_err(|error| {
+        control.check()?;
+        collect(
+            Path::new(root),
+            &mut visited,
+            &mut directories,
+            &mut files,
+            control,
+            &mut progress,
+        )
+        .map_err(|error| {
+            if error.to_string().contains("INDEX_SCAN_CANCELLED|") {
+                return error;
+            }
             anyhow::anyhow!(
                 "INDEX_SCAN_INCOMPLETE|未能完整读取音乐文件夹；旧索引未覆盖：{}",
                 error
@@ -177,7 +231,9 @@ pub(super) fn refresh(
         })?;
     }
     progress(0.15);
+    control.check()?;
     let results: Vec<anyhow::Result<serde_json::Value>> = files.par_iter().map(|file| {
+        control.check()?;
         let previous = old.get(&path_key(&file.path)).copied();
         if !force && previous.is_some_and(|value| file.fingerprint.matches(value)
             && value["metadata_pending"] != true
@@ -190,7 +246,9 @@ pub(super) fn refresh(
         // Readability failures are not missing/bad metadata. Fail the entire
         // refresh; a metadata parser miss itself preserves the prior record.
         fs::File::open(&file.path).map_err(|error| anyhow::anyhow!("INDEX_SCAN_INCOMPLETE|歌曲暂时不可读取；旧索引未覆盖：{}", error))?;
+        control.check()?;
         let read = reader(&file.path);
+        control.check()?;
         anyhow::ensure!(Fingerprint::read(&file.path)? == file.fingerprint,
             "INDEX_SCAN_INCOMPLETE|扫描期间歌曲发生变化，请重试；旧索引未覆盖");
         let reliable = read.as_ref().is_some_and(|value| value["by"].is_string());
@@ -215,6 +273,7 @@ pub(super) fn refresh(
     }).collect();
     let mut grouped = BTreeMap::<String, Vec<serde_json::Value>>::new();
     for (index, (file, result)) in files.iter().zip(results).enumerate() {
+        control.check()?;
         let audio = result?;
         let folder = file.path.parent().unwrap().to_string_lossy().into_owned();
         grouped.entry(folder).or_default().push(audio);
@@ -260,6 +319,7 @@ pub(super) fn refresh(
     output["roots"] = serde_json::json!(roots);
     output["folders"] = serde_json::json!(folders);
     progress(1.0);
+    control.check()?;
     Ok(output)
 }
 
@@ -268,6 +328,89 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use std::time::SystemTime;
+
+    #[test]
+    fn cancel_during_directory_enumeration_never_reads_tags_or_changes_index() {
+        let f = Fixture::new();
+        for i in 0..128 {
+            f.file(&format!("dir-{i:03}/song.mp3"));
+        }
+        let old_index = f.0.join("index.json");
+        fs::write(&old_index, b"previous complete index").unwrap();
+        let id = crate::index_scan::create().unwrap();
+        let task = crate::index_scan::ScanLease::begin(Some(id.clone())).unwrap();
+        let mut batches = 0;
+        let result = refresh_cancellable(
+            None,
+            &f.roots(),
+            true,
+            &|_| panic!("cancelled enumeration must not dispatch tag reads"),
+            &task.control,
+            |progress| {
+                if progress == 0.0 {
+                    batches += 1;
+                    if batches == 2 {
+                        crate::index_scan::cancel(&id);
+                    }
+                }
+            },
+        );
+        assert_eq!(batches, 2);
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .starts_with("INDEX_SCAN_CANCELLED|"));
+        assert!(task.control.begin_commit().is_err());
+        assert_eq!(fs::read(old_index).unwrap(), b"previous complete index");
+    }
+
+    #[test]
+    fn cancel_during_tag_read_or_final_progress_prevents_commit() {
+        for final_progress in [false, true] {
+            let f = Fixture::new();
+            f.file("song.mp3");
+            let id = crate::index_scan::create().unwrap();
+            let task = crate::index_scan::ScanLease::begin(Some(id.clone())).unwrap();
+            let reads = AtomicUsize::new(0);
+            let result = refresh_cancellable(
+                None,
+                &f.roots(),
+                true,
+                &|path| {
+                    reads.fetch_add(1, Ordering::Relaxed);
+                    if !final_progress {
+                        crate::index_scan::cancel(&id);
+                    }
+                    Some(tags(path))
+                },
+                &task.control,
+                |progress| {
+                    if final_progress && progress == 1.0 {
+                        crate::index_scan::cancel(&id);
+                    }
+                },
+            );
+            assert_eq!(reads.load(Ordering::Relaxed), 1);
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .starts_with("INDEX_SCAN_CANCELLED|"));
+            assert!(task.control.begin_commit().is_err());
+            drop(task);
+            assert_eq!(cancelled_task_state(&id), "finished");
+            assert_eq!(
+                f.scan(None, true, &AtomicUsize::new(0))["folders"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+
+    fn cancelled_task_state(id: &str) -> String {
+        crate::index_scan::cancel(id)
+    }
 
     struct Fixture(PathBuf);
     impl Fixture {
@@ -571,9 +714,15 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn case_only_filename_change_refreshes_spelling_without_rereading_tags() {
-        let f = Fixture::new(); let path = f.file("actual.mp3"); let calls = AtomicUsize::new(0);
+        let f = Fixture::new();
+        let path = f.file("actual.mp3");
+        let calls = AtomicUsize::new(0);
         let mut first = f.scan(None, true, &calls);
-        first["folders"][0]["audios"][0]["path"] = path.with_file_name("ACTUAL.mp3").to_string_lossy().into_owned().into();
+        first["folders"][0]["audios"][0]["path"] = path
+            .with_file_name("ACTUAL.mp3")
+            .to_string_lossy()
+            .into_owned()
+            .into();
         calls.store(0, Ordering::Relaxed);
         let second = f.scan(Some(&first), false, &calls);
         assert_eq!(songs(&second)[0]["path"], path.to_string_lossy().as_ref());
@@ -582,9 +731,16 @@ mod tests {
 
     #[test]
     fn unchanged_incremental_preserves_old_folder_and_song_order() {
-        let f = Fixture::new(); f.file("a.mp3"); f.file("z.mp3"); f.file("b/song.mp3");
-        let calls = AtomicUsize::new(0); let mut first = f.scan(None, true, &calls);
-        first["folders"][0]["audios"].as_array_mut().unwrap().reverse();
+        let f = Fixture::new();
+        f.file("a.mp3");
+        f.file("z.mp3");
+        f.file("b/song.mp3");
+        let calls = AtomicUsize::new(0);
+        let mut first = f.scan(None, true, &calls);
+        first["folders"][0]["audios"]
+            .as_array_mut()
+            .unwrap()
+            .reverse();
         first["folders"].as_array_mut().unwrap().reverse();
         first["folders"][0]["custom"] = "preserve".into();
         calls.store(0, Ordering::Relaxed);

@@ -58,6 +58,7 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
     this.multiSelectController,
     this.multiSelectViewActions,
     this.enableMultiSelectAddToPlaylist = false,
+    this.extraActions = const [],
   }) : assert(!enableMultiSelectAddToPlaylist || multiSelectController != null);
 
   final PagePreference pref;
@@ -101,6 +102,7 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
   final MultiSelectController<S>? multiSelectController;
   final List<Widget>? multiSelectViewActions;
   final bool enableMultiSelectAddToPlaylist;
+  final List<Widget> extraActions;
 
   @override
   State<UniDetailPage<P, S, T>> createState() => _UniDetailPageState<P, S, T>();
@@ -200,6 +202,7 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
     final visibleSecondaryContent = _visibleSecondaryContent();
 
     final List<Widget> actions = [];
+    actions.addAll(widget.extraActions);
     if (widget.enablePlayAll || widget.enableShufflePlay) {
       actions.add(const AppPlaybackModeControls());
     }

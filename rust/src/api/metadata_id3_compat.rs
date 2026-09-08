@@ -44,8 +44,12 @@ pub(super) fn read_picture(source: &Path, width: u32, height: u32) -> Option<Vec
             }
             let mut payload = &raw.body[frame.start + 10..frame.end];
             let Ok(picture) = lofty::id3::v2::AttachedPictureFrame::parse(
-                &mut payload, lofty::id3::v2::FrameFlags::default(), version,
-            ) else { continue; };
+                &mut payload,
+                lofty::id3::v2::FrameFlags::default(),
+                version,
+            ) else {
+                continue;
+            };
             if (picture.picture.pic_type() == PictureType::CoverFront) != front_only {
                 continue;
             }
@@ -251,6 +255,7 @@ fn equal_remainder(left: &mut impl Read, right: &mut impl Read, size: u64) -> io
     Ok(left.read(&mut a[..1])? == 0 && right.read(&mut b[..1])? == 0)
 }
 
+#[cfg(test)]
 pub(super) fn try_write(
     source: &Path,
     target: &Path,
@@ -259,6 +264,19 @@ pub(super) fn try_write(
     album: &str,
     picture_path: Option<&str>,
 ) -> anyhow::Result<bool> {
+    try_write_expected(source, target, title, artist, album, picture_path, None)
+}
+
+pub(super) fn try_write_expected(
+    source: &Path,
+    target: &Path,
+    title: &str,
+    artist: &str,
+    album: &str,
+    picture_path: Option<&str>,
+    expected_fingerprint: Option<&str>,
+) -> anyhow::Result<bool> {
+    check_metadata_fingerprint(source, expected_fingerprint)?;
     let properties = match stream_properties(source) {
         Ok(Some(properties)) => properties,
         _ => return Ok(false),
@@ -384,6 +402,7 @@ pub(super) fn try_write(
     // Close our readers before the Windows rename transaction.
     drop(original);
     drop(verified);
+    check_metadata_fingerprint(source, expected_fingerprint)?;
     replace_with_rollback(source, target, &mut temporary)?;
     Ok(true)
 }
@@ -478,8 +497,10 @@ mod tests {
             let size = body.len();
             let mut tagged = original[..10].to_vec();
             tagged[6..10].copy_from_slice(&[
-                ((size >> 21) & 127) as u8, ((size >> 14) & 127) as u8,
-                ((size >> 7) & 127) as u8, (size & 127) as u8,
+                ((size >> 21) & 127) as u8,
+                ((size >> 14) & 127) as u8,
+                ((size >> 7) & 127) as u8,
+                (size & 127) as u8,
             ]);
             tagged.extend(body);
             tagged.extend_from_slice(&original[10 + old_size..]);
@@ -489,7 +510,11 @@ mod tests {
             let cover = image::load_from_memory(&bytes).unwrap().to_rgba8();
             assert_eq!(cover.dimensions(), (64, 48));
             assert_eq!(*cover.get_pixel(0, 0), image::Rgba([12, 91, 173, 255]));
-            assert_eq!(fs::read(&source).unwrap(), tagged, "cover reads never rewrite tags");
+            assert_eq!(
+                fs::read(&source).unwrap(),
+                tagged,
+                "cover reads never rewrite tags"
+            );
             fs::remove_dir_all(root).unwrap();
         }
     }

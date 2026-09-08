@@ -6,6 +6,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/cover_cache.dart';
+import 'package:dan_player/library/album_identity.dart';
 import 'package:dan_player/library/cue_track.dart';
 import 'package:dan_player/library/track_identity.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
@@ -169,7 +170,6 @@ class AudioLibrary {
         }
       }
 
-      final onlineAudios = List<Audio>.from(instance.onlineAudioCollection);
       final roots = indexJson['roots'];
       if (roots != null &&
           (roots is! List || roots.any((root) => root is! String))) {
@@ -182,6 +182,9 @@ class AudioLibrary {
       }
       // Publish the new library only after the durable identities exist.
       await TrackIdentityRegistry.instance.flush();
+      // Online add/remove can publish while identity persistence is awaiting
+      // I/O. Snapshot it in the same synchronous turn as replacing the library.
+      final onlineAudios = List<Audio>.from(instance.onlineAudioCollection);
       _instance = AudioLibrary._(folders)
         .._scanRoots = roots == null ? null : List<String>.from(roots)
         ..onlineAudioCollection = onlineAudios;
@@ -218,13 +221,16 @@ class AudioLibrary {
             .add(audio);
       }
 
-      /// 如果albumCollection中有audio.album指向的album，putIfAbsent会返回该album。
-      /// 随后往这个album里添加该audio。
-      ///
-      /// 如果没有，创建一个名字为audio.album的空艺术家，并将audio.album与之相连。
-      /// 随后往这个album里添加该audio。
+      // Browsing, search and legacy Album extras share one release identity.
+      final identity = audio.albumIdentity;
       albumCollection
-          .putIfAbsent(audio.album, () => Album(name: audio.album))
+          .putIfAbsent(
+              identity.id,
+              () => Album(
+                    name: identity.displayTitle,
+                    groupId: identity.id,
+                    albumArtist: identity.displayOwner,
+                  ))
           .works
           .add(audio);
     }
@@ -233,8 +239,8 @@ class AudioLibrary {
     for (Artist artist in artistCollection.values) {
       for (Audio audio in artist.works) {
         artist.albumsMap.putIfAbsent(
-          audio.album,
-          () => albumCollection[audio.album]!,
+          audio.albumIdentity.id,
+          () => albumCollection[audio.albumIdentity.id]!,
         );
       }
     }
@@ -265,6 +271,11 @@ class AudioLibrary {
   /// revision so visible lists and duration sorts refresh without rebuilding
   /// every derived collection after a player-side correction.
   void publishDurationChanges() {
+    revision++;
+    changes.value = revision;
+  }
+
+  void publishArtworkChanges() {
     revision++;
     changes.value = revision;
   }
@@ -388,6 +399,8 @@ class Audio {
   List<String> splitedArtists;
 
   String album;
+
+  AlbumIdentity get albumIdentity => AlbumIdentity(album, albumArtist, artist);
 
   /// Explicit source tags; never inferred from the performer or file name.
   String? composer;
@@ -866,6 +879,8 @@ class Artist {
 
 class Album {
   String name;
+  final String? groupId;
+  final String? albumArtist;
 
   /// 参与的艺术家
   Map<String, Artist> artistsMap = {};
@@ -877,5 +892,7 @@ class Album {
   /// 200*200
   Future<ImageProvider?> get cover => works.first.mediumCover;
 
-  Album({required this.name});
+  /// Nullable identity preserves old route payloads; ambiguous legacy works
+  /// are explicitly disambiguated by AlbumDetailPage.
+  Album({required this.name, this.groupId, this.albumArtist});
 }

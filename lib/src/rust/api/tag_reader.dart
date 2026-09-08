@@ -6,9 +6,20 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `_get_lyric_from_lofty`, `_get_lyric_from_lrc_file`, `_get_picture_by_lofty`, `_get_picture_by_windows`, `_update_index_below_1_1_0`, `ensure_tag`, `new_with_path`, `read_by_lofty`, `read_by_win_music_properties`, `read_from_folder_recursively`, `read_from_folder`, `read_from_path`, `sanitize_file_name`, `to_json_value`, `to_json_value`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AudioFolder`, `Audio`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `_get_lyric_from_lofty`, `_get_lyric_from_lrc_file`, `_get_picture_by_lofty`, `_get_picture_by_windows`, `apply_tag_values`, `artist_from_tags_with_source`, `capture`, `check_metadata_fingerprint`, `copy_of`, `cover_decode_dimensions`, `disarm`, `ensure_tag`, `first_tag_text_with_source`, `is_edited_metadata_key`, `is_metadata_transaction_path`, `is_supported_audio_path`, `metadata_error`, `metadata_io_error`, `metadata_is_missing`, `metadata_message`, `move_file_without_replacing`, `multiset_contains`, `multithreaded`, `needs_classification_backfill`, `needs_duration_backfill`, `new_with_path`, `normalize_decoded_id3_flags`, `ordered_tags`, `panic_payload_to_string`, `path`, `preserve_legacy_language_frames`, `probe_tagged_audio`, `read_by_lofty`, `read_by_win_music_properties`, `read_from_path`, `read_index_json`, `read_tagged_file_by_content`, `replace_with_rollback`, `reserve_transaction_path`, `resize_picture`, `same_existing_file`, `sanitize_file_name`, `save_edited_primary_tag`, `sibling_path`, `text_from_tag`, `text_looks_misdecoded`, `to_json_value`, `unused_transaction_path`, `verify_metadata_edit`, `verify`, `write_index_json`, `write_metadata_with_expectation`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AudioPropertiesSnapshot`, `Audio`, `ComApartment`, `PreservedMetadata`, `PreservedTag`, `TransactionPath`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `drop`, `drop`, `eq`, `fmt`, `fmt`, `from`
+
+/// Prepare a unique cancellation identity before dispatching a native scan.
+String createIndexScanTask() =>
+    RustLib.instance.api.crateApiTagReaderCreateIndexScanTask();
+
+/// Returns cancelling, committing, or finished; never interrupts a commit.
+String cancelIndexScanTask({required String taskId}) =>
+    RustLib.instance.api.crateApiTagReaderCancelIndexScanTask(taskId: taskId);
+
+void releaseIndexScanTask({required String taskId}) =>
+    RustLib.instance.api.crateApiTagReaderReleaseIndexScanTask(taskId: taskId);
 
 Future<String> updateAudioMetadata(
         {required String path,
@@ -16,14 +27,16 @@ Future<String> updateAudioMetadata(
         required String title,
         required String artist,
         required String album,
-        String? picturePath}) =>
+        String? picturePath,
+        String? expectedFingerprint}) =>
     RustLib.instance.api.crateApiTagReaderUpdateAudioMetadata(
         path: path,
         fileName: fileName,
         title: title,
         artist: artist,
         album: album,
-        picturePath: picturePath);
+        picturePath: picturePath,
+        expectedFingerprint: expectedFingerprint);
 
 /// for Flutter
 /// 如果无法通过 Lofty 获取则通过 Windows 获取
@@ -41,25 +54,19 @@ Future<String?> getLyricFromPath({required String path}) =>
 /// for Flutter
 /// 扫描给定路径下所有子文件夹（包括自己）的音乐文件并把索引保存在 index_path/index.json。
 Stream<IndexActionState> buildIndexFromFoldersRecursively(
-        {required List<String> folders, required String indexPath}) =>
+        {required List<String> folders,
+        required String indexPath,
+        String? taskId}) =>
     RustLib.instance.api.crateApiTagReaderBuildIndexFromFoldersRecursively(
-        folders: folders, indexPath: indexPath);
+        folders: folders, indexPath: indexPath, taskId: taskId);
 
-/// for Flutter
-/// 读取 index_path/index.json，检查更新。不可能重新读取被修改的文件夹下所有的音乐标签，这样太耗时。
-///
-/// [LOWEST_VERSION] 指定可以继承的 index 的最低版本。
-/// 如果 index version < [LOWEST_VERSION] 或者是 index 根本没有 version 再或者格式不符合要求，就转到
-/// [_update_index_below_1_1_0] 更新 index；
-/// 如果 index version >= [LOWEST_VERSION] 则进行更新。
-///
-/// 如果文件夹不存在，删除记录。
-/// 如果文件夹被修改（再次读取到的 modified > 记录的 modified），就更新它。没有则跳过它
-/// 1. 遍历该文件夹索引，判断文件是否存在，不存在则删除记录
-/// 2. 遍历该文件夹索引，如果文件被修改（再次读取到的 modified > 记录的 modified），重新读取标签；没有则跳过它
-/// 3. 遍历该文件夹，添加新增（读取到的 created > 记录的 latest）的音乐文件
-Stream<IndexActionState> updateIndex({required String indexPath}) =>
-    RustLib.instance.api.crateApiTagReaderUpdateIndex(indexPath: indexPath);
+/// Read-only recursive discovery plus size/nanosecond-time change detection.
+/// The complete result is committed atomically; failed enumeration leaves the
+/// old index intact. Full rebuilding is available through the separate API.
+Stream<IndexActionState> updateIndex(
+        {required String indexPath, String? taskId}) =>
+    RustLib.instance.api
+        .crateApiTagReaderUpdateIndex(indexPath: indexPath, taskId: taskId);
 
 class IndexActionState {
   /// completed / total

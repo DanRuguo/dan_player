@@ -101,6 +101,21 @@ class CategoryCoverStore extends ChangeNotifier {
     return result;
   }
 
+  Future<ImageProvider?> reread(MusicCategoryGroup group) async {
+    await load();
+    final id = coverIdFor(group);
+    if (id == null) return null;
+    _providers.remove(id);
+    final image = await _images.reloadImage(id);
+    _providers[id] = Future.value(image);
+    while (_providers.length > 256) {
+      _providers.remove(_providers.keys.first);
+    }
+    _revision++;
+    notifyListeners();
+    return image;
+  }
+
   Future<void> load() {
     if (_loaded) return Future<void>.value();
     final pending = _loadOperation;
@@ -133,8 +148,8 @@ class CategoryCoverStore extends ChangeNotifier {
         }
         final value = jsonDecode(await candidate.readAsString());
         final decoded = _decode(value);
-        _discardedRecordKeys
-            .addAll(await _discardMissingManagedImages(directory, decoded));
+        // A missing/unreadable managed image is not permission to erase a
+        // manual choice. Targeted reread can recover it after restoration.
         loaded = decoded;
         recovered = path.equals(candidate.path, backup.path);
         break;
@@ -385,25 +400,6 @@ class CategoryCoverStore extends ChangeNotifier {
       result[record.key] = record;
     }
     return result;
-  }
-
-  static Future<Set<String>> _discardMissingManagedImages(
-      Directory dataDirectory,
-      Map<String, _CategoryCoverRecord> records) async {
-    final root = path.normalize(
-        path.join(dataDirectory.absolute.path, _managedDirectoryName));
-    final missingKeys = <String>{};
-    for (final entry in records.entries) {
-      final id = entry.value.imageId;
-      final candidate = path.normalize(path.join(root, id));
-      if (!path.isWithin(root, candidate) ||
-          await FileSystemEntity.type(candidate, followLinks: false) !=
-              FileSystemEntityType.file) {
-        missingKeys.add(entry.key);
-      }
-    }
-    records.removeWhere((key, _) => missingKeys.contains(key));
-    return missingKeys;
   }
 
   static Future<Set<String>> _readPersistedImageIds(

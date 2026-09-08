@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <optional>
 #include <utility>
+#include <chrono>
+#include <cstdio>
 #include "palette_window_shape.h"
 
 namespace desktop_lyric_runner {
@@ -86,8 +88,14 @@ bool AppearancePaletteWindow::OnCreate() {
   *alive_ = true;
   UpdateRoundedRegion();
   const RECT frame = GetClientArea();
+  const auto engine_started = std::chrono::steady_clock::now();
   controller_ = std::make_unique<flutter::FlutterViewController>(
       frame.right - frame.left, frame.bottom - frame.top, project_);
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - engine_started).count();
+  std::fprintf(stderr, "[palette] engine initialization=%lldms platform_thread=%lu owner_thread=%lu\n",
+      static_cast<long long>(elapsed), GetCurrentThreadId(),
+      GetWindowThreadProcessId(owner_, nullptr));
   if (!*alive_ || !IsWindow(owner_) || !IsWindow(GetHandle()) ||
       !controller_->engine() || !controller_->view()) {
     controller_.reset();
@@ -216,7 +224,13 @@ PaletteWindowManager::PaletteWindowManager(HWND owner,
       "dan_player/desktop_lyric_palette", &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler([this](const auto& call, auto result) {
     auto keep_alive = shared_from_this();
-    Handle(call, std::move(result));
+    auto name = call.method_name();
+    auto args = call.arguments() ? std::make_shared<Value>(*call.arguments()) : nullptr;
+    auto reply = OwnerReply(std::shared_ptr<Result>(std::move(result)));
+    OnPalette([keep_alive, name, args, reply] {
+      keep_alive->Handle(flutter::MethodCall<Value>(name,
+          args ? std::make_unique<Value>(*args) : nullptr), reply);
+    });
   });
 }
 
@@ -225,17 +239,161 @@ PaletteWindowManager::~PaletteWindowManager() {
 }
 
 void PaletteWindowManager::Shutdown() {
-  if (closing_) return;
-  closing_ = true;
+  if (shutdown_requested_.exchange(true)) return;
+  KillTimer(owner_, kPaletteCacheTimer);
+  KillTimer(owner_, kPaletteReadyTimer);
   channel_->SetMethodCallHandler(nullptr);
-  Close(session_, false);
-  EvictCache();
   channel_.reset();
+  {
+    std::lock_guard<std::mutex> lock(owner_tasks_mutex_);
+    owner_tasks_.clear();
+  }
+  auto self = shared_from_this();
+  OnPalette([self] {
+    self->closing_ = true;
+    self->CloseOnPalette(self->session_, false);
+    self->EvictCacheOnPalette();
+
+  });
+}
+
+void PaletteWindowManager::OnPalette(std::function<void()> task) {
+  auto self = shared_from_this();
+  runner_.Post([self, task = std::move(task)] {
+    task();
+    // Includes failed creation, early close, stale timer/reply and cache expiry.
+    // Retire only after any engine is destroyed and all queued work is drained.
+    if (!self->active_ && !self->palette_) self->runner_.Retire();
+  });
+}
+
+void PaletteWindowManager::OnOwner(std::function<void()> task) {
+  if (shutdown_requested_) return;
+  std::lock_guard<std::mutex> lock(owner_tasks_mutex_);
+  if (shutdown_requested_ || !IsWindow(owner_)) return;
+  owner_tasks_.push_back(std::move(task));
+  if (!PostMessage(owner_, kPaletteDispatchMessage, 0, 0)) owner_tasks_.clear();
+}
+
+void PaletteWindowManager::ConfigureOwnerTimer(UINT_PTR timer, UINT milliseconds) {
+  const auto session = session_;
+  auto weak = weak_from_this();
+  // SetTimer requires the calling thread to own the HWND. Keep all owner timer
+  // creation/cancellation beside its messenger, never on the palette thread.
+  OnOwner([weak, timer, milliseconds, session] {
+    auto self = weak.lock();
+    if (!self) return;
+    if (!milliseconds) { KillTimer(self->owner_, timer); return; }
+    if (SetTimer(self->owner_, timer, milliseconds, nullptr)) return;
+    self->OnPalette([self, timer, session] {
+      if (session != self->session_) return;
+      if (timer == kPaletteCacheTimer) {
+        self->EvictCacheOnPalette();
+      } else if (self->pending_open_) {
+        self->pending_open_->Error("timer_failed", "Could not monitor appearance startup");
+        self->pending_open_.reset();
+        self->CloseOnPalette(session, true);
+      }
+    });
+  });
+}
+
+void PaletteWindowManager::DrainOwnerTasks() {
+  std::deque<std::function<void()>> tasks;
+  {
+    std::lock_guard<std::mutex> lock(owner_tasks_mutex_);
+    tasks.swap(owner_tasks_);
+  }
+  for (auto& task : tasks) { if (!shutdown_requested_) task(); }
+}
+
+std::shared_ptr<PaletteWindowManager::Result> PaletteWindowManager::OwnerReply(
+    std::shared_ptr<Result> reply) {
+  auto weak = weak_from_this();
+  return std::make_shared<flutter::MethodResultFunctions<Value>>(
+      [weak, reply](const Value* value) {
+        auto copy = value ? std::make_shared<Value>(*value) : nullptr;
+        if (auto self = weak.lock()) self->OnOwner([reply, copy] {
+          if (copy) reply->Success(*copy); else reply->Success();
+        });
+      },
+      [weak, reply](const std::string& code, const std::string& message, const Value* details) {
+        auto copy = details ? std::make_shared<Value>(*details) : nullptr;
+        if (auto self = weak.lock()) self->OnOwner([reply, code, message, copy] {
+          if (copy) reply->Error(code, message, *copy); else reply->Error(code, message);
+        });
+      },
+      [weak, reply] {
+        if (auto self = weak.lock()) self->OnOwner([reply] { reply->NotImplemented(); });
+      });
+}
+
+void PaletteWindowManager::InvokeOwner(const std::string& method,
+    std::unique_ptr<Value> arguments, std::unique_ptr<Result> result) {
+  auto weak = weak_from_this();
+  auto args = std::shared_ptr<Value>(std::move(arguments));
+  auto reply = std::shared_ptr<Result>(std::move(result));
+  OnOwner([weak, method, args, reply] {
+    auto self = weak.lock();
+    if (!self || self->shutdown_requested_ || !self->channel_) return;
+    std::unique_ptr<Result> forward;
+    if (reply) forward = std::make_unique<flutter::MethodResultFunctions<Value>>(
+        [weak, reply](const Value* value) {
+          auto copy = value ? std::make_shared<Value>(*value) : nullptr;
+          if (auto manager = weak.lock(); manager && !manager->shutdown_requested_) {
+            manager->OnPalette([reply, copy] {
+              if (copy) reply->Success(*copy); else reply->Success();
+            });
+          }
+        },
+        [weak, reply](const std::string& code, const std::string& message, const Value* details) {
+          auto copy = details ? std::make_shared<Value>(*details) : nullptr;
+          if (auto manager = weak.lock(); manager && !manager->shutdown_requested_) {
+            manager->OnPalette([reply, code, message, copy] {
+              if (copy) reply->Error(code, message, *copy); else reply->Error(code, message);
+            });
+          }
+        },
+        [weak, reply] {
+          if (auto manager = weak.lock(); manager && !manager->shutdown_requested_) {
+            manager->OnPalette([reply] { reply->NotImplemented(); });
+          }
+        });
+    self->channel_->InvokeMethod(method, args ? std::make_unique<Value>(*args) : nullptr,
+                                std::move(forward));
+  });
+}
+
+void PaletteWindowManager::Close(int64_t session, bool notify) {
+  auto self = shared_from_this();
+  OnPalette([self, session, notify] { self->CloseOnPalette(session, notify); });
+}
+void PaletteWindowManager::ShowFirstFrame(int64_t session) {
+  auto self = shared_from_this();
+  OnPalette([self, session] { self->ShowFirstFrameOnPalette(session); });
+}
+void PaletteWindowManager::EvictCache() {
+  auto self = shared_from_this();
+  OnPalette([self] {
+    if (GetTickCount64() >= self->cache_deadline_) self->EvictCacheOnPalette();
+
+  });
+}
+void PaletteWindowManager::ReadyTimedOut() {
+  auto self = shared_from_this();
+  OnPalette([self] {
+    // A timer message queued for a prior session may arrive after reopen.
+    if (!self->pending_open_ || GetTickCount64() < self->ready_deadline_) return;
+    self->ConfigureOwnerTimer(kPaletteReadyTimer, 0);
+    self->pending_open_->Error("ready_timeout", "The appearance window did not produce a first frame");
+    self->pending_open_.reset();
+    self->CloseOnPalette(self->session_, true);
+  });
 }
 
 void PaletteWindowManager::Handle(const flutter::MethodCall<Value>& call,
-                                  std::unique_ptr<Result> result) {
-  if (closing_) { result->Error("closed", "Palette owner is closing"); return; }
+                                  std::shared_ptr<Result> result) {
+  if (closing_ || shutdown_requested_) { result->Error("closed", "Palette owner is closing"); return; }
   if (call.method_name() == "close") {
     const auto session = Integer(call.arguments());
     result->Success();
@@ -264,13 +422,15 @@ void PaletteWindowManager::Handle(const flutter::MethodCall<Value>& call,
   const auto bounds = PaletteBounds(owner_);
   if (!bounds) { result->Error("monitor_unavailable", "Could not read the owner's monitor"); return; }
   session_ = session;
-  KillTimer(owner_, kPaletteCacheTimer);
+  ConfigureOwnerTimer(kPaletteCacheTimer, 0);
   active_ = true;
   cache_allowed_ = false;
   palette_closing_ = false;
   snapshot_ = *call.arguments();
   prepared_revision_ = Integer(Field(&snapshot_, "revision"));
   pending_open_ = std::move(result);
+  ready_deadline_ = GetTickCount64() + kPaletteReadyMilliseconds;
+  ConfigureOwnerTimer(kPaletteReadyTimer, kPaletteReadyMilliseconds);
   if (palette_) {
     auto palette = palette_;
     palette->Present(session, snapshot_, *bounds);
@@ -287,24 +447,27 @@ void PaletteWindowManager::Handle(const flutter::MethodCall<Value>& call,
   if (!created) {
     pending_open_->Error("create_failed", "Could not create the appearance window");
     pending_open_.reset();
-    Close(session_, false);
+    CloseOnPalette(session_, false);
   }
 }
 
-void PaletteWindowManager::ShowFirstFrame(int64_t session) {
+void PaletteWindowManager::ShowFirstFrameOnPalette(int64_t session) {
   if (closing_ || palette_closing_ || !active_ || !palette_ || session != session_) return;
   auto palette = palette_;
   const auto latest_revision = Integer(Field(&snapshot_, "revision"));
   if (pending_open_ && prepared_revision_ != latest_revision) {
     const auto bounds = PaletteBounds(owner_);
-    if (!bounds) { Close(session); return; }
+    if (!bounds) { CloseOnPalette(session, true); return; }
     prepared_revision_ = latest_revision;
     palette->Present(session, snapshot_, *bounds);
     return;
   }
   palette->ShowFirstFrame();
   if (closing_ || palette_closing_ || palette_ != palette || session != session_) return;
-  if (pending_open_) { pending_open_->Success(); pending_open_.reset(); }
+  if (pending_open_) {
+    ConfigureOwnerTimer(kPaletteReadyTimer, 0);
+    pending_open_->Success(); pending_open_.reset();
+  }
 }
 
 void PaletteWindowManager::HandleChild(const flutter::MethodCall<Value>& call,
@@ -335,12 +498,13 @@ void PaletteWindowManager::HandleChild(const flutter::MethodCall<Value>& call,
         if (Alive(weak)) reply->Error(code, message);
       },
       [weak, reply]() { if (Alive(weak)) reply->NotImplemented(); });
-  channel_->InvokeMethod(call.method_name(), std::make_unique<Value>(*call.arguments()),
+  InvokeOwner(call.method_name(), std::make_unique<Value>(*call.arguments()),
                          std::move(response));
 }
 
-void PaletteWindowManager::Close(int64_t session, bool notify) {
+void PaletteWindowManager::CloseOnPalette(int64_t session, bool notify) {
   if (!palette_ || !active_ || session != session_) return;
+  ConfigureOwnerTimer(kPaletteReadyTimer, 0);
   palette_closing_ = true;
   active_ = false;
   const bool reuse = !closing_ && cache_allowed_ && !pending_open_ &&
@@ -348,8 +512,10 @@ void PaletteWindowManager::Close(int64_t session, bool notify) {
   if (reuse) {
     auto palette = palette_;
     palette->Suspend();
-    if (!closing_ && palette_ == palette && !active_ &&
-        !SetTimer(owner_, kPaletteCacheTimer, kPaletteCacheMilliseconds, nullptr)) EvictCache();
+    if (!closing_ && palette_ == palette && !active_) {
+      cache_deadline_ = GetTickCount64() + kPaletteCacheMilliseconds;
+      ConfigureOwnerTimer(kPaletteCacheTimer, kPaletteCacheMilliseconds);
+    }
   } else {
     auto palette = std::exchange(palette_, nullptr);
     palette->Destroy();
@@ -365,12 +531,12 @@ void PaletteWindowManager::Close(int64_t session, bool notify) {
                             PtInRect(&owner_bounds, cursor);
     flutter::EncodableMap closed{{Value("session"), Value(session)},
                                 {Value("ownerHover"), Value(over_owner)}};
-    channel_->InvokeMethod("closed", std::make_unique<Value>(closed));
+    InvokeOwner("closed", std::make_unique<Value>(closed));
   }
 }
 
-void PaletteWindowManager::EvictCache() {
-  KillTimer(owner_, kPaletteCacheTimer);
+void PaletteWindowManager::EvictCacheOnPalette() {
+  ConfigureOwnerTimer(kPaletteCacheTimer, 0);
   if (active_) return;
   auto palette = std::exchange(palette_, nullptr);
   if (palette) palette->Destroy();

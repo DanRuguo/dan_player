@@ -174,6 +174,30 @@ void main() {
     await fixture.dispose();
   });
 
+  testWidgets('cold opening retains a live loading animation until first frame',
+      (tester) async {
+    final fixture = _Fixture(tester);
+    await fixture.mount(body: false);
+    final gate = fixture.bridge.openGate = Completer<void>();
+    await fixture.open();
+    await tester.pump(const Duration(milliseconds: 40));
+    final loading = find.byType(CircularProgressIndicator);
+    expect(loading, findsOneWidget);
+    final paint =
+        find.descendant(of: loading, matching: find.byType(CustomPaint));
+    final before = tester.widget<CustomPaint>(paint.first).painter!;
+    await tester.pump(const Duration(milliseconds: 120));
+    final after = tester.widget<CustomPaint>(paint.first).painter!;
+    expect(after.shouldRepaint(before), isTrue);
+    expect(fixture.bridge.host.isStarting.value, isTrue);
+    expect(fixture.native.operations, isEmpty);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    await fixture.close();
+    await fixture.dispose();
+  });
+
   testWidgets('repeated opening reuses one child and fresh snapshots on reopen',
       (tester) async {
     final fixture = _Fixture(tester);

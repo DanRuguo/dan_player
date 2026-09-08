@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/painting.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path_util;
 
 class CoverCacheEntry {
@@ -22,16 +22,19 @@ class CoverCache {
   bool hasRecentArtworkMiss(String audioPath) {
     final hash = stableHash(audioPath);
     final now = _clock();
-    return _negativeUntil.entries.any((entry) =>
-        entry.key.contains('_${hash}_') && entry.value.isAfter(now));
+    return _negativeUntil.entries.any(
+        (entry) => entry.key.contains('_${hash}_') && entry.value.isAfter(now));
   }
 
   Set<String> get recentArtworkMissHashes {
     final now = _clock();
-    return {for (final entry in _negativeUntil.entries)
-      if (entry.value.isAfter(now) && entry.key.split('_').length > 2)
-        entry.key.split('_')[1]};
+    return {
+      for (final entry in _negativeUntil.entries)
+        if (entry.value.isAfter(now) && entry.key.split('_').length > 2)
+          entry.key.split('_')[1]
+    };
   }
+
   CoverCache._(
       {Directory? directory,
       this.maxEntries = 256,
@@ -84,6 +87,8 @@ class CoverCache {
   final Queue<Completer<void>> _readWaiters = Queue();
   int _activeReads = 0;
   final Map<String, int> _generations = {};
+  final ValueNotifier<int> changes = ValueNotifier(0);
+  int generationFor(String audioPath) => _generations[audioPath] ?? 0;
   int _epoch = 0;
 
   int get cachedProviderCount => _ready.length;
@@ -164,7 +169,9 @@ class CoverCache {
     final existing = _inflight[key];
     if (existing != null) return existing;
 
-    final request = _loadOrCreate(key, produce);
+    late final Future<ImageProvider?> request;
+    request = _loadOrCreate(key, produce)
+        .then((image) => identical(_inflight[key], request) ? image : null);
     _inflight[key] = request;
     request.then<void>((image) {
       if (!identical(_inflight[key], request)) return;
@@ -291,24 +298,34 @@ class CoverCache {
     _generations[audioPath] = (_generations[audioPath] ?? 0) + 1;
     final hash = stableHash(audioPath);
     _inflight.removeWhere((key, _) => key.contains("_${hash}_"));
+    final evicted = <Future<ImageProvider?>>[
+      for (final entry in _ready.entries)
+        if (entry.key.contains("_${hash}_")) entry.value,
+    ];
     _ready.removeWhere((key, _) => key.contains("_${hash}_"));
     _negativeUntil.removeWhere((key, _) => key.contains("_${hash}_"));
+    for (final future in evicted) {
+      await (await future)?.evict();
+    }
 
     try {
       final dir = await _cacheDir();
       await for (final entity in dir.list()) {
         if (entity is! File) continue;
         final name = path_util.basename(entity.path);
+        if (name.contains('_e${_epoch}g${_generations[audioPath]}_')) continue;
         if (!name.contains("_${hash}_") && !name.startsWith("${hash}_")) {
           continue;
         }
         try {
+          await FileImage(entity).evict();
           await entity.delete();
         } catch (_) {}
       }
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
     }
+    changes.value++;
   }
 
   Future<void> clear() async {

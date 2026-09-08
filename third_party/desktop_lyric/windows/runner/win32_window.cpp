@@ -2,6 +2,8 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <atomic>
+#include <mutex>
 
 #include "resource.h"
 
@@ -28,7 +30,7 @@ constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
 constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
 
 // The number of Win32Window objects that currently exist.
-static int g_active_window_count = 0;
+static std::atomic<int> g_active_window_count{0};
 
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 
@@ -63,10 +65,8 @@ class WindowClassRegistrar {
 
   // Returns the singleton registrar instance.
   static WindowClassRegistrar* GetInstance() {
-    if (!instance_) {
-      instance_ = new WindowClassRegistrar();
-    }
-    return instance_;
+    static WindowClassRegistrar instance;
+    return &instance;
   }
 
   // Returns the name of the window class, registering the class if it hasn't
@@ -80,15 +80,11 @@ class WindowClassRegistrar {
  private:
   WindowClassRegistrar() = default;
 
-  static WindowClassRegistrar* instance_;
-
-  bool class_registered_ = false;
+  std::once_flag registration_;
 };
 
-WindowClassRegistrar* WindowClassRegistrar::instance_ = nullptr;
-
 const wchar_t* WindowClassRegistrar::GetWindowClass() {
-  if (!class_registered_) {
+  std::call_once(registration_, [] {
     WNDCLASS window_class{};
     window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
     window_class.lpszClassName = kWindowClassName;
@@ -102,14 +98,14 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
     RegisterClass(&window_class);
-    class_registered_ = true;
-  }
+  });
   return kWindowClassName;
 }
 
 void WindowClassRegistrar::UnregisterWindowClass() {
-  UnregisterClass(kWindowClassName, nullptr);
-  class_registered_ = false;
+  // Main lyrics and the lazy palette now create windows on different platform
+  // threads. Retain this one process-wide class until OS process cleanup; an
+  // unregister/create race would otherwise invalidate the other thread.
 }
 
 Win32Window::Win32Window() {

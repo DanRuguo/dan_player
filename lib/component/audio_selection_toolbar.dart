@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
+import 'package:dan_player/component/batch_audio_metadata_dialog.dart';
+import 'package:dan_player/component/cover_repair_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/utils.dart';
@@ -173,6 +175,10 @@ class AudioSelectionMenu extends StatelessWidget {
             _notice(context, ui('已复制 {0} 个本地文件路径', [paths.length]));
           }
         }, enabled: selected.any((audio) => !audio.isOnline)),
+        item('edit-tags', '批量编辑标签', Symbols.edit_note,
+            (audios) => showBatchAudioMetadataDialog(context, audios)),
+        item('reread-covers', '重新读取封面', Symbols.image_search,
+            (audios) => showCoverRepairDialog(context, audios)),
         if (onInvert != null) ...[
           const Divider(),
           MenuItemButton(

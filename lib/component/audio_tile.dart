@@ -15,6 +15,7 @@ import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/component/readable_ellipsis_text.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/component/cover_repair_dialog.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
@@ -197,6 +198,11 @@ class _AudioTileState extends State<AudioTile> {
       fallback: audio.sourceLabel,
     );
     final common = <Widget>[
+      MenuItemButton(
+        onPressed: () => showCoverRepairDialog(context, [audio]),
+        leadingIcon: const Icon(Symbols.image_search),
+        child: Text(ui('重新读取封面')),
+      ),
       MenuItemButton(
         onPressed: () {
           PlayService.instance.playbackService.addToNext(audio);

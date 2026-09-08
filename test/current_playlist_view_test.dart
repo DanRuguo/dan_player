@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:ui' as raster;
+import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/entry.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
@@ -5,9 +9,13 @@ import 'package:dan_player/page/now_playing_page/component/current_playlist_view
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/play_service/queue_edits.dart';
 import 'package:dan_player/play_service/queue_track_identity.dart';
+import 'package:dan_player/play_service/queue_stop_boundary.dart';
 import 'package:dan_player/play_service/segment_loop.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -17,6 +25,7 @@ import 'support/music_category_fixtures.dart';
 class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   _QueuePlayback(List<Audio> audios, {this.selectedIndex = 0})
       : playlist = ValueNotifier(List<Audio>.from(audios)),
+        entries = [for (final audio in audios) QueueOccurrence(audio)],
         nowPlaying = audios.isEmpty ? null : audios[selectedIndex];
 
   @override
@@ -29,7 +38,46 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   int? lastPlayed;
   int? lastRemoved;
   int? lastMoved;
-  final history = QueueEditHistory<Audio>();
+  List<QueueOccurrence<Audio>> entries;
+  final history = QueueEditHistory<QueueOccurrence<Audio>>();
+  @override
+  final queueStopBoundary = QueueStopBoundary();
+  @override
+  final playMode = ValueNotifier(PlayMode.loop);
+  @override
+  int? queueOccurrenceId(int index) =>
+      index >= 0 && index < entries.length ? entries[index].id : null;
+  @override
+  String? get queueStopTargetLabel {
+    final index =
+        entries.indexWhere((entry) => entry.id == queueStopBoundary.target);
+    return index < 0
+        ? null
+        : '${index + 1} · ${entries[index].item.displayTitle}';
+  }
+
+  @override
+  String? get queueStopBlockedReason => !canEditQueue
+      ? '歌曲正在加载，请稍后重试'
+      : segmentLoop.enabled
+          ? '请先关闭 A-B 循环，再设置停止目标'
+          : playMode.value == PlayMode.singleLoop
+              ? '请先关闭单曲循环，再设置停止目标'
+              : null;
+  @override
+  bool stopAfterQueueItem(int index) {
+    if (queueStopBlockedReason != null || queueOccurrenceId(index) == null) {
+      return false;
+    }
+    queueStopBoundary.arm(queueOccurrenceId(index)!);
+    return true;
+  }
+
+  @override
+  bool stopAfterQueueRound() => stopAfterQueueItem(entries.length - 1);
+  @override
+  void cancelQueueStop() =>
+      queueStopBoundary.cancel(QueueStopCancelReason.userCancelled);
   @override
   double get position => 47.25;
   @override
@@ -43,31 +91,54 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
 
   @override
   bool get canUndoQueueEdit =>
-      canEditQueue &&
-      history.canUndo(playlist.value, playlist.value, selectedIndex);
+      canEditQueue && history.canUndo(entries, entries, selectedIndex);
+  @override
+  bool get canRedoQueueEdit =>
+      canEditQueue && history.canRedo(entries, entries, selectedIndex);
+  @override
+  String queueHistoryReason({bool redo = false}) => !canEditQueue
+      ? '歌曲正在加载，请稍后重试'
+      : redo
+          ? '没有可重做的队列操作'
+          : '没有可撤销的队列操作';
 
-  void commit(QueueEdit<Audio> edit) {
-    history.record(QueueSnapshot(playlist.value, playlist.value, selectedIndex),
+  void commit(QueueEdit<QueueOccurrence<Audio>> edit) {
+    history.record(QueueSnapshot(entries, entries, selectedIndex),
         QueueSnapshot(edit.items, edit.items, edit.currentIndex));
     selectedIndex = edit.currentIndex;
-    playlist.value = edit.items;
+    entries = edit.items;
+    playlist.value = [for (final entry in entries) entry.item];
+    queueStopBoundary.retain(entries.map((entry) => entry.id));
     notifyListeners();
   }
 
   @override
   bool undoQueueEdit() {
     if (!canEditQueue) return false;
-    final state = history.undo(playlist.value, playlist.value, selectedIndex);
+    final state = history.undo(entries, entries, selectedIndex);
     if (state == null) return false;
     selectedIndex = state.currentIndex;
-    playlist.value = state.items;
+    entries = state.items;
+    playlist.value = [for (final entry in entries) entry.item];
+    notifyListeners();
+    return true;
+  }
+
+  @override
+  bool redoQueueEdit() {
+    if (!canEditQueue) return false;
+    final state = history.redo(entries, entries, selectedIndex);
+    if (state == null) return false;
+    entries = state.items;
+    selectedIndex = state.currentIndex;
+    playlist.value = [for (final entry in entries) entry.item];
     notifyListeners();
     return true;
   }
 
   @override
   bool removeQueueItem(int index) {
-    final edit = QueueEdit.remove(playlist.value, selectedIndex, index);
+    final edit = QueueEdit.remove(entries, selectedIndex, index);
     if (edit == null || !canEditQueue) return false;
     lastRemoved = index;
     commit(edit);
@@ -76,7 +147,7 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
 
   @override
   bool moveQueueItemNext(int index) {
-    final edit = QueueEdit.moveNext(playlist.value, selectedIndex, index);
+    final edit = QueueEdit.moveNext(entries, selectedIndex, index);
     if (edit == null || !canEditQueue) return false;
     lastMoved = index;
     commit(edit);
@@ -85,7 +156,7 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
 
   @override
   bool keepOnlyCurrentQueueItem() {
-    commit(QueueEdit([nowPlaying!], 0));
+    commit(QueueEdit([entries[selectedIndex]], 0));
     return true;
   }
 
@@ -93,8 +164,8 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   int deduplicateQueue() {
     if (!canEditQueue) return 0;
     final before = playlist.value;
-    final edit =
-        QueueEdit.deduplicate(before, selectedIndex, keyOf: queueTrackIdentity);
+    final edit = QueueEdit.deduplicate(entries, selectedIndex,
+        keyOf: (entry) => queueTrackIdentity(entry.item));
     if (edit == null) return 0;
     commit(edit);
     return before.length - edit.items.length;
@@ -119,6 +190,8 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
     resolvingAudioPath.dispose();
     isChangingOutput.dispose();
     segmentLoop.dispose();
+    queueStopBoundary.dispose();
+    playMode.dispose();
     super.dispose();
   }
 
@@ -147,28 +220,199 @@ Widget _host(_QueuePlayback playback,
     );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    for (final font in [
+      (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
+      ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
+      (
+        'packages/material_symbols_icons/MaterialSymbolsOutlined',
+        'packages/material_symbols_icons/lib/fonts/MaterialSymbolsOutlined.ttf'
+      ),
+    ]) {
+      await (FontLoader(font.$1)..addFont(rootBundle.load(font.$2))).load();
+    }
+    final windowsDirectory = Platform.environment['WINDIR'];
+    if (windowsDirectory != null) {
+      final font = File('$windowsDirectory/Fonts/malgun.ttf');
+      if (await font.exists()) {
+        await (FontLoader('Malgun Gothic')
+              ..addFont(
+                  Future.value(ByteData.sublistView(await font.readAsBytes()))))
+            .load();
+      }
+    }
+  });
   setUp(() => uiLanguage.value = UiLanguage.zh);
   tearDown(() => uiLanguage.value = UiLanguage.zh);
 
+  testWidgets('queue keyboard undo redo yields to the focused text editor',
+      (tester) async {
+    final playback = _QueuePlayback(
+        [CategoryTestAudio('first'), CategoryTestAudio('second')]);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(_host(playback));
+    await tester.pumpAndSettle();
+    playback.removeQueueItem(1);
+    await tester.pumpAndSettle();
+    Future<void> shortcut(LogicalKeyboardKey key, {bool shift = false}) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(key);
+      if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await shortcut(LogicalKeyboardKey.keyZ);
+    expect(playback.playlist.value, hasLength(2));
+    await shortcut(LogicalKeyboardKey.keyY);
+    expect(playback.playlist.value, hasLength(1));
+    await shortcut(LogicalKeyboardKey.keyZ);
+    await shortcut(LogicalKeyboardKey.keyZ, shift: true);
+    expect(playback.playlist.value, hasLength(1));
+    await tester.enterText(find.byKey(const ValueKey('queue-search')), 'first');
+    await tester.pump(const Duration(seconds: 1));
+    await shortcut(LogicalKeyboardKey.keyZ);
+    expect(playback.playlist.value, hasLength(1),
+        reason: 'Text undo must not restore the queue');
+    await shortcut(LogicalKeyboardKey.keyY);
+    expect(playback.playlist.value, hasLength(1));
+    expect(playback.position, 47.25);
+    expect(playback.lastPlayed, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('queue menu sets exact duplicate and blocked modes explain stop',
+      (tester) async {
+    final audio = CategoryTestAudio('Same song');
+    final playback =
+        _QueuePlayback([audio, CategoryTestAudio('middle'), audio]);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(_host(playback));
+    await tester.pumpAndSettle();
+    await tester
+        .longPress(find.byKey(const ValueKey('current-playlist-item-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-stop-after-item-2')));
+    await tester.pumpAndSettle();
+    expect(playback.queueStopBoundary.target, playback.queueOccurrenceId(2));
+    expect(playback.queueStopBoundary.target,
+        isNot(playback.queueOccurrenceId(0)));
+    expect(find.byKey(const ValueKey('queue-stop-target')), findsOneWidget);
+    playback.moveQueueItemNext(2);
+    await tester.pumpAndSettle();
+    expect(playback.queueStopTargetLabel, '2 · Same song');
+    playback.playMode.value = PlayMode.singleLoop;
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<IconButton>(
+                find.byKey(const ValueKey('queue-stop-after-round')))
+            .onPressed,
+        isNull);
+    expect(find.textContaining('请先关闭单曲循环'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('queue-cancel-stop')));
+    await tester.pumpAndSettle();
+    expect(playback.queueStopBoundary.active, isFalse);
+    expect(playback.lastPlayed, isNull);
+    expect(playback.position, 47.25);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('render updated queue history and stop controls', (tester) async {
+    const output = String.fromEnvironment('DAN_PLAYER_UPDATE_RENDER_DIR');
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final playback = _QueuePlayback([
+      CategoryTestAudio('Moonlit road · 夜空の向こうへ · 밤하늘 너머',
+          artist: 'Dan Orchestra', album: 'Night suite'),
+      CategoryTestAudio('The very last song of the original queue · 冬日的回声',
+          artist: 'Dan Orchestra'),
+      CategoryTestAudio('Appended later'),
+    ]);
+    addTearDown(playback.dispose);
+    playback.stopAfterQueueItem(1);
+    playback.removeQueueItem(2);
+    playback.undoQueueEdit();
+    for (final language in UiLanguage.values) {
+      uiLanguage.value = language;
+      for (final narrow in [false, true]) {
+        final size = Size(narrow ? 340 : 600, narrow ? 730 : 590);
+        tester.view.physicalSize = size;
+        final key = GlobalKey();
+        await tester.pumpWidget(MaterialApp(
+          debugShowCheckedModeBanner: false,
+          locale: language.locale,
+          supportedLocales: [for (final item in UiLanguage.values) item.locale],
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          theme: Entry(welcome: false).fromSchemeAndFontFamily(
+              colorScheme: ColorScheme.fromSeed(
+                  seedColor: Colors.teal,
+                  brightness: narrow ? Brightness.dark : Brightness.light)),
+          home: RepaintBoundary(
+              key: key,
+              child: Scaffold(
+                  body: MediaQuery(
+                      data: MediaQueryData(
+                          size: size,
+                          textScaler: TextScaler.linear(narrow ? 1.6 : 1)),
+                      child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: CurrentPlaylistView(
+                              playbackService: playback))))),
+        ));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull,
+            reason: '${language.name} / narrow $narrow');
+        expect(find.byKey(const ValueKey('queue-stop-target')), findsOneWidget);
+        final redo = tester
+            .widget<IconButton>(find.byKey(const ValueKey('queue-redo-edit')));
+        expect(redo.onPressed, isNotNull);
+        if (output.isNotEmpty) {
+          await tester.runAsync(() async {
+            final boundary = key.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary;
+            final image = await boundary.toImage();
+            try {
+              final bytes =
+                  (await image.toByteData(format: raster.ImageByteFormat.png))!
+                      .buffer
+                      .asUint8List();
+              final destination = File(
+                  '$output/queue-${language.name}-${narrow ? 'narrow-dark' : 'wide-light'}.png');
+              await destination.parent.create(recursive: true);
+              await destination.writeAsBytes(bytes, flush: true);
+            } finally {
+              image.dispose();
+            }
+          });
+        }
+      }
+    }
+  });
+
   testWidgets('queue rows have symmetric edges and thumb drag stays usable',
       (tester) async {
-    final queue = List.generate(60, (index) => CategoryTestAudio('Track $index'));
+    final queue =
+        List.generate(60, (index) => CategoryTestAudio('Track $index'));
     final playback = _QueuePlayback(queue);
     addTearDown(playback.dispose);
     for (final width in [280.0, 520.0]) {
       await tester.pumpWidget(_host(playback, width: width));
       await tester.pumpAndSettle();
       final bounds = tester.getRect(find.byType(Scrollbar));
-      final row = tester.getRect(
-          find.byKey(const ValueKey('current-playlist-item-0')));
+      final row =
+          tester.getRect(find.byKey(const ValueKey('current-playlist-item-0')));
       expect(row.left - bounds.left, closeTo(6, .01));
       expect(bounds.right - row.right, closeTo(6, .01));
       expect(tester.takeException(), isNull);
     }
     final scrollbar = find.byType(Scrollbar);
     final bounds = tester.getRect(scrollbar);
-    final list = tester.widget<ListView>(
-        find.byKey(const ValueKey('current-playlist-list')));
+    final list = tester
+        .widget<ListView>(find.byKey(const ValueKey('current-playlist-list')));
     final controller = list.controller!;
     final details = tester.getRect(find.byIcon(Symbols.info).first);
     expect(details.right, lessThanOrEqualTo(bounds.right - 14),
@@ -185,9 +429,11 @@ void main() {
     await mouse.removePointer();
     // Filtering after thumb movement still resolves the original occurrence,
     // rather than its row number in the shortened visible list.
-    await tester.enterText(find.byKey(const ValueKey('queue-search')), 'Track 53');
+    await tester.enterText(
+        find.byKey(const ValueKey('queue-search')), 'Track 53');
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('current-playlist-item-53')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('current-playlist-item-53')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('current-playlist-item-53')));
     await tester.pumpAndSettle();
     expect(playback.lastPlayed, 53);
@@ -219,8 +465,8 @@ void main() {
               child: AppContentRegion(
                 key: const ValueKey('queue-content-panel'),
                 child: Navigator(
-                    onGenerateRoute: (_) => MaterialPageRoute<void>(
-                        builder: (context) {
+                    onGenerateRoute: (_) =>
+                        MaterialPageRoute<void>(builder: (context) {
                           pageContext = context;
                           return const SizedBox.expand();
                         })),
@@ -254,8 +500,8 @@ void main() {
     await tester.pumpAndSettle();
     final surface = find.descendant(
         of: find.byType(AlertDialog),
-        matching: find.byWidgetPredicate(
-            (widget) => widget is Material && widget.type == MaterialType.card));
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Material && widget.type == MaterialType.card));
     // Reproduce the packaged edge case: the painted dialog already ends
     // exactly 8px above a one-line notice. Its own 16px outside inset is not
     // another required separation. Include a shell's nested Navigator and DPI.
@@ -263,7 +509,8 @@ void main() {
     tester.view.physicalSize = Size(1500, (dialogHeight + 128 + 60) * dpi);
     await tester.pumpAndSettle();
     final beforeSurface = tester.getRect(surface);
-    final panel = tester.getRect(find.byKey(const ValueKey('queue-content-panel')));
+    final panel =
+        tester.getRect(find.byKey(const ValueKey('queue-content-panel')));
     expect(panel.bottom - beforeSurface.bottom, closeTo(64, .01));
     final undo = find.byKey(const ValueKey('queue-undo-edit'));
     final before = tester.getRect(undo);
@@ -276,8 +523,10 @@ void main() {
     expect(playback.playlist.value, hasLength(3));
     expect(find.byKey(const ValueKey('app-notice-bubble')), findsOneWidget);
     await tester.pumpAndSettle();
-    expect(tester.getRect(find.byKey(const ValueKey('app-notice-bubble'))).top -
-        beforeSurface.bottom, closeTo(8, .01));
+    expect(
+        tester.getRect(find.byKey(const ValueKey('app-notice-bubble'))).top -
+            beforeSurface.bottom,
+        closeTo(8, .01));
     // A click at the previously observed coordinates must reach Undo while
     // the notice is still visible, reproducing the packaged QA interaction.
     await tester.tapAt(before.center);

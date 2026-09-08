@@ -117,6 +117,16 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (palette_manager_ && message == kPaletteDispatchMessage) {
+    auto manager = palette_manager_;
+    manager->DrainOwnerTasks();
+    return 0;
+  }
+  if (palette_manager_ && message == WM_TIMER && wparam == kPaletteReadyTimer) {
+    auto manager = palette_manager_;
+    manager->ReadyTimedOut();
+    return 0;
+  }
   if (palette_manager_ && message == WM_TIMER && wparam == kPaletteCacheTimer) {
     auto manager = palette_manager_;
     manager->EvictCache();

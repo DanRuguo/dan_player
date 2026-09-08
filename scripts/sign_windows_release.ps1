@@ -3,13 +3,17 @@ param(
     [string[]] $Path,
     [string] $Subject = 'CN=RCEIT.Inc',
     [string] $Thumbprint = $env:RCEIT_SIGNING_THUMBPRINT,
-    [string] $TimestampServer
+    [string] $TimestampServer,
+    [switch] $ForceResign,
+    [string] $ReceiptDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'support/signature_integrity.ps1')
+if (-not $ReceiptDirectory) { $ReceiptDirectory = Join-Path (Split-Path -Parent $repositoryRoot) 'tool/release-signatures' }
 
 function Test-CodeSigningUsage($Certificate) {
     foreach ($extension in $Certificate.Extensions) {
@@ -70,6 +74,17 @@ foreach ($candidate in $Path) {
         throw "Refusing to Authenticode-sign unsupported file type: $resolvedPath"
     }
 
+    $receiptPath = Join-Path $ReceiptDirectory ((Get-TextSha256 ($resolvedPath.ToLowerInvariant())) + '.json')
+    $receipt = Read-LocalValidationReceipt $receiptPath
+    $beforeHash = (Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256).Hash
+    $integrity = Get-AuthenticodeIntegrity $resolvedPath $certificate.Thumbprint ([bool]$TimestampServer)
+    $afterVerifyHash = (Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256).Hash
+    if ($afterVerifyHash -cne $beforeHash) { throw 'Artifact changed during signature verification.' }
+    if (-not $ForceResign -and (Test-SignatureReceipt $receipt $beforeHash $certificate.Thumbprint $TimestampServer $integrity)) {
+        Write-Host "Reusing content-verified signature: $resolvedPath ($($integrity.TrustCode))"
+        continue
+    }
+
     $signingParameters = @{
         FilePath      = $resolvedPath
         Certificate   = $certificate
@@ -80,13 +95,19 @@ foreach ($candidate in $Path) {
     }
 
     $null = Set-AuthenticodeSignature @signingParameters
-    $signature = Get-AuthenticodeSignature -LiteralPath $resolvedPath
-    if (-not $signature.SignerCertificate -or
-        $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint -or
-        $signature.Status -in @('HashMismatch', 'NotSigned', 'NotSupportedFileFormat', 'Incompatible')) {
+    $signedHash = (Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256).Hash
+    $integrity = Get-AuthenticodeIntegrity $resolvedPath $certificate.Thumbprint ([bool]$TimestampServer)
+    if (-not $integrity.Accepted -or (Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256).Hash -cne $signedHash) {
         throw "The signature could not be verified on $resolvedPath"
     }
+    Write-LocalValidationReceipt $receiptPath ([ordered]@{
+        Schema=1; Verified=$true; Path=$resolvedPath;
+        Sha256=$signedHash;
+        Thumbprint=$certificate.Thumbprint; TimestampServer=[string]$TimestampServer;
+        TimestampThumbprint=$integrity.TimestampThumbprint; TrustCode=$integrity.TrustCode;
+        VerifiedAt=[DateTime]::UtcNow.ToString('o')
+    })
 
     Write-Host "Signed: $resolvedPath"
-    Write-Host "  Local trust status: $($signature.Status)"
+    Write-Host "  Verified trust status: $($integrity.Status) / $($integrity.TrustCode)"
 }

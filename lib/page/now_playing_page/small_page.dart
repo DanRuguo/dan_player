@@ -95,6 +95,7 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
             ),
           ),
           const SizedBox(height: 8.0),
+          const QueueStopStatus(),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: AppEntrance(

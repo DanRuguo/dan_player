@@ -229,6 +229,20 @@ class BackgroundImageStore {
     return request;
   }
 
+  /// Evict only reconstructable provider/decoded state, retaining the managed
+  /// original and all references even if it is temporarily unreadable.
+  Future<ImageProvider?> reloadImage(String id) async {
+    final old = _images.remove(id);
+    if (old != null) await (await old)?.evict();
+    final image = await _readImage(id);
+    if (image != null) await image.evict();
+    _images[id] = Future.value(image);
+    while (_images.length > 6) {
+      _images.remove(_images.keys.first);
+    }
+    return image;
+  }
+
   Future<ImageProvider?> _readImage(String id) async {
     try {
       final directory = await _directory();

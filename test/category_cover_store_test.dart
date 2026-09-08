@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/library/music_categories.dart';
+import 'package:dan_player/library/cover_repair.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
@@ -79,6 +80,37 @@ void main() {
     expect(reversed.persistenceKey, normal.persistenceKey);
     expect(jsonDecode(normal.persistenceKey),
         [1, MusicCategoryKind.artist.name, normal.id]);
+  });
+
+  test(
+      'targeted manual cover reread preserves preference through corrupt and restored bytes',
+      () async {
+    final album = group('Repair album', kind: MusicCategoryKind.album);
+    final first = store();
+    final selected = await source('repair-source.png', 0xff336688);
+    await first.setCover(album, selected.path);
+    final id = first.coverIdFor(album)!;
+    final managed = File(path.join(data.path, 'category-covers', id));
+    final original = await managed.readAsBytes();
+    final before =
+        await File(path.join(data.path, 'category_covers.json')).readAsString();
+    final prime = CoverRepair(const [], album: album, covers: first);
+    addTearDown(prime.dispose);
+    await prime.run();
+    expect(prime.targets.single.status, CoverRepairStatus.success);
+    await managed.writeAsBytes([1, 2, 3], flush: true);
+    final repair = CoverRepair(const [], album: album, covers: first);
+    addTearDown(repair.dispose);
+    await repair.run();
+    expect(repair.targets.single.status, CoverRepairStatus.failed);
+    expect(first.coverIdFor(album), id);
+    await managed.writeAsBytes(original, flush: true);
+    await repair.run(retryOnly: true);
+    expect(repair.targets.single.status, CoverRepairStatus.success);
+    expect(
+        await File(path.join(data.path, 'category_covers.json')).readAsString(),
+        before);
+    expect(await selected.exists(), isTrue);
   });
 
   test('managed copy persists and survives deleting the selected original',
@@ -226,7 +258,8 @@ void main() {
     final recovered = store();
     await recovered.load();
     expect(recovered.readError, isNull);
-    expect(recovered.hasCover(missing), isFalse);
+    expect(recovered.coverIdFor(missing), missingId);
+    expect(await recovered.reread(missing), isNull);
     expect(recovered.hasCover(healthy), isTrue);
     for (final name in [
       'category_covers.json',
@@ -235,7 +268,7 @@ void main() {
       final saved =
           jsonDecode(await File(path.join(data.path, name)).readAsString())
               as Map;
-      expect(saved['covers'], isNot(contains(missing.persistenceKey)));
+      expect(saved['covers'], contains(missing.persistenceKey));
     }
 
     await recovered.removeCover(healthy);

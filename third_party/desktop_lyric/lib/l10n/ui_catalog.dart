@@ -12,6 +12,7 @@ import 'catalog_rendering.dart';
 import 'catalog_snapshot1.dart';
 import 'catalog_metadata_editor.dart';
 import 'catalog_incremental_library.dart';
+import 'catalog_scan_cancellation.dart';
 import 'catalog_updates.dart';
 import 'catalog_song_deletion.dart';
 import 'catalog_snapshot2_localization.dart';
@@ -26,6 +27,7 @@ import 'catalog_api_release.dart';
 import 'catalog_playlist_exchange.dart';
 import 'catalog_lyric_lookup_fix.dart';
 import 'catalog_queue_undo.dart';
+import 'catalog_queue_history_stop.dart';
 import 'catalog_smart_playlist_dialog.dart';
 import 'catalog_cue_release.dart';
 import 'catalog_taskbar_preview.dart';
@@ -36,14 +38,19 @@ import 'catalog_library_watch.dart';
 import 'catalog_playback_mode_controls.dart';
 import 'catalog_track_resume.dart';
 import 'catalog_snapshot2_2605.dart';
+import 'catalog_lyric_search_2605.dart';
+import 'catalog_batch_a_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
+  ...catalogLyricSearch2605,
+  ...catalogBatchA2605,
   ...catalogSelectionRelease,
   ...catalogPlayerRelease,
   ...catalogApiRelease,
   ...catalogPlaylistExchange,
   ...catalogLyricLookupFix,
   ...catalogQueueUndo,
+  ...catalogQueueHistoryStop,
   ...catalogSmartPlaylistDialog,
   ...catalogCueRelease,
   ...catalogTaskbarPreview,
@@ -66,6 +73,7 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogSnapshot1,
   ...catalogMetadataEditor,
   ...catalogIncrementalLibrary,
+  ...catalogScanCancellation,
   ...catalogUpdates,
   ...uiCatalogSongDeletion,
   ...catalogSnapshot2Localization,

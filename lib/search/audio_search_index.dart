@@ -75,7 +75,7 @@ class AudioSearchIndex {
       ],
       albums: [
         for (final album in library.albumCollection.values)
-          _NameEntry(album, album.name)
+          _NameEntry(album, '${album.name}\n${album.albumArtist ?? ''}')
       ],
     );
   }
@@ -104,8 +104,8 @@ class AudioSearchIndex {
     final artistEntries =
         await _buildNamesChunked(artists, (artist) => artist.name, revision);
     if (AudioLibrary.searchRevision != revision) return;
-    final albumEntries =
-        await _buildNamesChunked(albums, (album) => album.name, revision);
+    final albumEntries = await _buildNamesChunked(albums,
+        (album) => '${album.name}\n${album.albumArtist ?? ''}', revision);
     if (AudioLibrary.searchRevision == revision) {
       _commit(
         revision: revision,

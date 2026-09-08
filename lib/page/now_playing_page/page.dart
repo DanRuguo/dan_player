@@ -20,6 +20,7 @@ import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/online/song_comments.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/page/now_playing_page/component/current_playlist_view.dart';
+import 'package:dan_player/page/now_playing_page/component/queue_stop_status.dart';
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/playback_bookmarks_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/detail_transport_button.dart';
@@ -312,13 +313,17 @@ class _SleepTimerSubmenu extends StatelessWidget {
       listenable: Listenable.merge([
         service.sleepTimerRemaining,
         service.stopAfterCurrent,
+        service,
+        service.queueStopBoundary,
+        service.segmentLoop,
+        service.playMode,
       ]),
       builder: (context, _) {
         final remaining = service.sleepTimerRemaining.value;
         final stopAfter = service.stopAfterCurrent.value;
         return SubmenuButton(
           leadingIcon: Icon(
-            remaining != null || stopAfter
+            remaining != null || stopAfter || service.queueStopBoundary.active
                 ? Symbols.bedtime
                 : Symbols.bedtime_off,
           ),
@@ -335,10 +340,23 @@ class _SleepTimerSubmenu extends StatelessWidget {
             CheckboxMenuButton(
               value: stopAfter,
               onChanged: (value) {
-                service.stopAfterCurrent.value = value ?? false;
+                service.setStopAfterCurrent(value ?? false);
               },
               child: Text(ui("播完当前歌曲后停止")),
             ),
+            MenuItemButton(
+              onPressed: service.playlist.value.isEmpty ||
+                      service.queueStopBlockedReason != null
+                  ? null
+                  : service.stopAfterQueueRound,
+              leadingIcon: const Icon(Symbols.stop_circle),
+              child: Text(ui('播完设置时这轮队列后停止')),
+            ),
+            if (service.queueStopBoundary.active)
+              MenuItemButton(
+                  onPressed: service.cancelQueueStop,
+                  leadingIcon: const Icon(Symbols.close),
+                  child: Text(ui('取消停止目标'))),
             if (remaining != null) const Divider(),
             if (remaining != null)
               MenuItemButton(

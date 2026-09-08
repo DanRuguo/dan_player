@@ -1,6 +1,7 @@
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/cover_cache.dart';
 import 'package:flutter/material.dart';
 
 typedef AudioArtworkLoader = Future<ImageProvider?> Function(
@@ -40,6 +41,24 @@ class _AudioArtworkState extends State<AudioArtwork> {
   Future<ImageProvider?>? _future;
 
   @override
+  void initState() {
+    super.initState();
+    CoverCache.instance.changes.addListener(_coverChanged);
+  }
+
+  void _coverChanged() {
+    final previous = _requestKey;
+    _resolve();
+    if (mounted && previous != _requestKey) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    CoverCache.instance.changes.removeListener(_coverChanged);
+    super.dispose();
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _resolve();
@@ -63,6 +82,7 @@ class _AudioArtworkState extends State<AudioArtwork> {
       audio.modified,
       audio.coverFingerprint,
       audio.artworkUrl,
+      CoverCache.instance.generationFor(audio.localFilePath),
       AudioLibrary.revision,
       widget.revision,
     );

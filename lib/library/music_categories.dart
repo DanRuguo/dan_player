@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:dan_player/library/album_identity.dart';
 
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/app_settings.dart';
@@ -188,11 +189,12 @@ class MusicCategories {
     final building = <String, _GroupBuilder>{};
     for (final audio in _audios) {
       if (kind == MusicCategoryKind.album) {
-        final name = _tagName(audio.album);
+        final identity = audio.albumIdentity;
+        final name = identity.title;
         // Album artist is the release identity, NOT a per-track performer.
         // Without that tag, keep unrelated performers' releases separate.
-        final owner = _tagName(audio.albumArtist) ?? _tagName(audio.artist);
-        final key = jsonEncode([kind.name, name, owner]);
+        final owner = identity.owner;
+        final key = identity.id;
         building
             .putIfAbsent(
               key,
@@ -286,13 +288,7 @@ class MusicCategories {
     return MusicCategories(tracks).groups(MusicCategoryKind.album).single;
   }
 
-  static String? _tagName(String? value) {
-    final name = value?.trim();
-    if (name == null || name.isEmpty || name.toUpperCase() == 'UNKNOWN') {
-      return null;
-    }
-    return name;
-  }
+  static String? _tagName(String? value) => normalizedMusicTag(value);
 
   static List<String?> _personNames(String? value, Pattern separator) {
     final names = <String>{};

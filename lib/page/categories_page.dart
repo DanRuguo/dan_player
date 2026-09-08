@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/category_cover.dart';
+import 'package:dan_player/component/cover_repair_dialog.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/playlist_create_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -475,6 +476,14 @@ class _CategoryGrid extends StatelessWidget {
                           useRootOverlay: true,
                           consumeOutsideTap: true,
                           menuChildren: [
+                            if (group.kind == MusicCategoryKind.album)
+                              MenuItemButton(
+                                onPressed: () => showCoverRepairDialog(
+                                    context, group.audios,
+                                    album: group, covers: covers),
+                                leadingIcon: const Icon(Icons.refresh),
+                                child: Text(ui('重新读取封面')),
+                              ),
                             MenuItemButton(
                               key:
                                   ValueKey(('category-change-cover', group.id)),

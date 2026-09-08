@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dan_player/search/lyric_search_index.dart';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -76,9 +77,18 @@ class LyricService extends ChangeNotifier {
   void _useRawFuture(Future<Lyric?> raw, {int offsetMs = 0}) {
     currLyricFuture.ignore();
     final token = _lyricToken + 1;
+    final audio = _getNowPlaying();
     _rawResolvedLyric = null;
     currLyricFuture = raw.then((value) {
-      if (_isCurrent(token)) _rawResolvedLyric = value;
+      if (_isCurrent(token)) {
+        _rawResolvedLyric = value;
+        if (_resolveDefaultForTesting == null &&
+            audio != null &&
+            value is Lrc &&
+            value.source == LrcSource.local) {
+          LyricSearchIndex.instance.rememberLoadedLocal(audio, value);
+        }
+      }
       return value == null || offsetMs == 0
           ? value
           : LyricSnapshot.capture(value).toLyric(offsetMs: offsetMs);

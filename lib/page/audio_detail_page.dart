@@ -101,7 +101,7 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
         if (AudioLibrary.instance.artistCollection[name] != null)
           AudioLibrary.instance.artistCollection[name]!,
     ];
-    final album = AudioLibrary.instance.albumCollection[audio.album];
+    final album = AudioLibrary.instance.albumCollection[audio.albumIdentity.id];
     final trackStats = PlaybackStatistics
         .instance.tracks[PlaybackStatistics.instance.identityFor(audio)];
 

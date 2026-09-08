@@ -38,6 +38,7 @@ class _NowPlayingPage_Large extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16.0),
+          const QueueStopStatus(),
           const AppEntrance(
             identity: 'now-playing-slider',
             order: 1,

@@ -1,9 +1,10 @@
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
-import 'package:dan_player/component/build_index_state_view.dart';
+import 'package:dan_player/component/library_refresh_progress.dart';
 import 'package:dan_player/component/library_folders_dialog.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
@@ -11,11 +12,8 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/library_health.dart';
 import 'package:dan_player/library/library_refresh.dart';
 import 'package:dan_player/library/library_mutation_gate.dart';
-import 'package:dan_player/src/rust/api/tag_reader.dart';
-import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/playlist.dart';
-import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -628,6 +626,11 @@ class _RefreshAudioLibraryTileState extends State<RefreshAudioLibraryTile> {
         await widget.onRefresh!(incremental);
         return;
       }
+      final existing = LibraryRefreshTask.active.value;
+      if (existing != null) {
+        await _showTask(existing);
+        return;
+      }
       final folders = AudioLibrary.instance.scanRoots;
       if (folders.isEmpty) {
         showTextOnSnackBar("当前没有可刷新的音乐文件夹");
@@ -637,28 +640,32 @@ class _RefreshAudioLibraryTileState extends State<RefreshAudioLibraryTile> {
           LibraryRefreshSnapshot.capture(AudioLibrary.instance.audioCollection);
       final indexPath = await getAppDataDir();
       if (!mounted) return;
-      final task = LibraryRefreshTask(
-        scan: () => incremental
-            ? updateIndex(indexPath: indexPath.path)
-            : buildIndexFromFoldersRecursively(
-                folders: folders, indexPath: indexPath.path),
+      final task = LibraryRefreshTask.native(
+        incremental: incremental,
+        folders: folders,
+        indexPath: indexPath,
         commit: () => _reloadScannedLibrary(
             incremental: incremental, before: before, indexPath: indexPath),
       );
-      await showAppDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => _RefreshAudioLibraryDialog(
-            folders: folders,
-            indexPath: indexPath,
-            incremental: incremental,
-            task: task),
-      );
+      await _showTask(task);
     } catch (_) {
       if (mounted) showTextOnSnackBar("刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试");
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _showTask(LibraryRefreshTask task) async {
+    var dialogOpen = true;
+    unawaited(task.completed.then((_) {
+      if (!dialogOpen) _reportRefreshOutcome(task);
+    }));
+    await showAppDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _RefreshAudioLibraryDialog(task: task));
+    dialogOpen = false;
+    if (task.isTerminal) _reportRefreshOutcome(task);
   }
 
   @override
@@ -670,24 +677,32 @@ class _RefreshAudioLibraryTileState extends State<RefreshAudioLibraryTile> {
       icon: Symbols.sync,
       action: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 320),
-        child: Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            FilledButton.tonalIcon(
-              key: const ValueKey('library-refresh-incremental'),
-              icon: const Icon(Symbols.sync),
-              label: Text(ui("增量刷新")),
-              onPressed: _busy ? null : () => _refresh(true),
-            ),
-            FilledButton.tonalIcon(
-              key: const ValueKey('library-refresh-full'),
-              icon: const Icon(Symbols.refresh),
-              label: Text(ui("完整刷新")),
-              onPressed: _busy ? null : () => _refresh(false),
-            ),
-          ],
+        child: ValueListenableBuilder<LibraryRefreshTask?>(
+          valueListenable: LibraryRefreshTask.active,
+          builder: (context, task, _) => task != null
+              ? FilledButton.tonalIcon(
+                  icon: const Icon(Symbols.progress_activity),
+                  label: Text(ui('查看扫描进度')),
+                  onPressed: _busy ? null : () => _refresh(task.incremental))
+              : Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.tonalIcon(
+                      key: const ValueKey('library-refresh-incremental'),
+                      icon: const Icon(Symbols.sync),
+                      label: Text(ui("增量刷新")),
+                      onPressed: _busy ? null : () => _refresh(true),
+                    ),
+                    FilledButton.tonalIcon(
+                      key: const ValueKey('library-refresh-full'),
+                      icon: const Icon(Symbols.refresh),
+                      label: Text(ui("完整刷新")),
+                      onPressed: _busy ? null : () => _refresh(false),
+                    ),
+                  ],
+                ),
         ),
       ),
     );
@@ -695,6 +710,24 @@ class _RefreshAudioLibraryTileState extends State<RefreshAudioLibraryTile> {
 }
 
 class _RefreshSyncFailure implements Exception {}
+
+void _reportRefreshOutcome(LibraryRefreshTask task) {
+  if (!task.takeCompletionNotice()) return;
+  if (task.phase == LibraryRefreshPhase.cancelled) {
+    showTextOnSnackBar('扫描已取消，原曲库未改变');
+  } else if (task.error != null) {
+    showTextOnSnackBar(task.error is LibraryMutationBusy
+        ? '曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试'
+        : task.error is _RefreshSyncFailure
+            ? '索引已更新，但界面同步未完成，请重新打开应用'
+            : '刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试');
+  } else if (task.pendingMetadata == 0) {
+    showTextOnSnackBar('音乐库已刷新');
+  } else {
+    showTextOnSnackBar('音乐库已刷新，{0}首暂时保留原信息或文件名，下次刷新会重试',
+        arguments: [task.pendingMetadata]);
+  }
+}
 
 Future<int> _reloadScannedLibrary({
   bool incremental = false,
@@ -716,11 +749,10 @@ Future<int> _reloadScannedLibrary({
         await AudioLibrary.initFromIndex();
         AudioLibrary.instance
             .replaceOnlineAudios(OnlineLibrary.instance.audios);
-        await Future.wait([
-          readCustomAudioOrder(),
-          readPlaylists(),
-          readLyricSources(),
-        ]);
+        // The progress dialog can be closed while scanning. Rebind live
+        // objects so a late reload cannot replace playlist or lyric edits
+        // that the user made while the native task was running.
+        playlistTree.refreshAudioReferences(AudioLibrary.instance.audioByPath);
         if (PlayService.isInitialized) {
           PlayService.instance.playbackService.refreshAudioReferences(
             AudioLibrary.instance.audioByPath,
@@ -743,56 +775,34 @@ Future<int> _reloadScannedLibrary({
 
 class _RefreshAudioLibraryDialog extends StatelessWidget {
   const _RefreshAudioLibraryDialog({
-    required this.folders,
-    required this.indexPath,
-    required this.incremental,
     required this.task,
   });
 
-  final List<String> folders;
-  final Directory indexPath;
-  final bool incremental;
   final LibraryRefreshTask task;
 
   Future<void> _finish(BuildContext context) async {
-    final pending = task.pendingMetadata;
     if (context.mounted) Navigator.pop(context);
-    if (pending == 0) {
-      showTextOnSnackBar("音乐库已刷新");
-    } else {
-      showTextOnSnackBar("音乐库已刷新，{0}首暂时保留原信息或文件名，下次刷新会重试",
-          arguments: [pending]);
-    }
+    _reportRefreshOutcome(task);
   }
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return PopScope(
-      canPop: false,
+      canPop: true,
       child: AlertDialog(
         scrollable: true,
-        title: AppDialogTitle(ui(incremental ? "增量刷新" : "完整刷新"),
+        title: AppDialogTitle(ui(task.incremental ? "增量刷新" : "完整刷新"),
             leading: const Icon(Symbols.sync)),
         content: SizedBox(
           width: 440,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text(ui("按路径、大小和修改时间检查；旧索引首次可能需要补读，内容变化但大小和时间均未变时请使用完整刷新")),
             const SizedBox(height: 16),
-            BuildIndexStateView(
-              indexPath: indexPath,
-              folders: folders,
-              incremental: incremental,
-              scan: (_, __, ___) => task.stream,
-              whenIndexBuilt: () => _finish(context),
-              whenIndexFailed: (error, _) {
-                if (context.mounted) Navigator.pop(context);
-                showTextOnSnackBar(error is LibraryMutationBusy
-                    ? "曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试"
-                    : error is _RefreshSyncFailure
-                        ? "索引已更新，但界面同步未完成，请重新打开应用"
-                        : "刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试");
-              },
+            LibraryRefreshProgress(
+              task: task,
+              onSettled: (_) => _finish(context),
+              onBackground: () => Navigator.pop(context),
             ),
           ]),
         ),
@@ -816,6 +826,7 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
   final folders = List<String>.from(AudioLibrary.instance.scanRoots);
 
   Directory? _indexPath;
+  LibraryRefreshTask? _task;
   bool editing = true;
 
   Future<void> _confirm() async {
@@ -827,7 +838,18 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
     try {
       final directory = await widget.loadIndexPath();
       if (!mounted) return;
-      setState(() => _indexPath = directory);
+      final task = LibraryRefreshTask.native(
+          folders: folders,
+          indexPath: directory,
+          incremental: false,
+          commit: () => _reloadScannedLibrary(indexPath: directory));
+      unawaited(task.completed.then((_) {
+        if (!mounted) _reportRefreshOutcome(task);
+      }));
+      setState(() {
+        _indexPath = directory;
+        _task = task;
+      });
     } catch (error, trace) {
       LOGGER.e('[library folder] index directory unavailable',
           error: error, stackTrace: trace);
@@ -842,7 +864,7 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
     UiLanguageScope.watch(context);
 
     return PopScope(
-      canPop: editing,
+      canPop: true,
       child: LibraryFoldersDialog(
         folders: folders,
         folderName: folderDisplayName,
@@ -858,27 +880,23 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
         },
         onCancel: () => Navigator.pop(context),
         onConfirm: _confirm,
-        progress: _indexPath == null
+        progress: _indexPath == null || _task == null
             ? null
-            : BuildIndexStateView(
-                indexPath: _indexPath!,
-                folders: folders,
-                scan: (selected, directory, _) => LibraryRefreshTask(
-                  scan: () => buildIndexFromFoldersRecursively(
-                      folders: selected, indexPath: directory.path),
-                  commit: () => _reloadScannedLibrary(indexPath: directory),
-                ).stream,
-                whenIndexBuilt: () async {
-                  if (context.mounted) Navigator.pop(context);
-                },
-                whenIndexFailed: (error, _) {
+            : LibraryRefreshProgress(
+                key: ObjectKey(_task),
+                task: _task!,
+                onBackground: () => Navigator.pop(context),
+                onSettled: (task) {
                   if (!mounted) return;
-                  setState(() => editing = true);
-                  showTextOnSnackBar(error is LibraryMutationBusy
-                      ? '曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试'
-                      : error is _RefreshSyncFailure
-                          ? '索引已更新，但界面同步未完成，请重新打开应用'
-                          : '刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试');
+                  _reportRefreshOutcome(task);
+                  if (task.phase == LibraryRefreshPhase.completed) {
+                    Navigator.pop(context);
+                  } else {
+                    setState(() {
+                      editing = true;
+                      _task = null;
+                    });
+                  }
                 },
               ),
       ),

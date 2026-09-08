@@ -25,6 +25,8 @@ class AudioMetadataEdit {
     required this.artist,
     required this.album,
     this.picturePath,
+    this.expectedFingerprint,
+    this.preserveEmptyValues = false,
   });
 
   final String fileName;
@@ -32,6 +34,8 @@ class AudioMetadataEdit {
   final String artist;
   final String album;
   final String? picturePath;
+  final String? expectedFingerprint;
+  final bool preserveEmptyValues;
 }
 
 class AudioMetadataEditException implements Exception {
@@ -161,12 +165,24 @@ class AudioMetadataEditCoordinator {
       await previous;
       final picture = request.picturePath?.trim();
       final edit = AudioMetadataEdit(
-        fileName: request.fileName.trim(),
-        title: request.title.trim(),
-        artist:
-            request.artist.trim().isEmpty ? 'UNKNOWN' : request.artist.trim(),
-        album: request.album.trim().isEmpty ? 'UNKNOWN' : request.album.trim(),
+        fileName: request.preserveEmptyValues
+            ? request.fileName
+            : request.fileName.trim(),
+        title:
+            request.preserveEmptyValues ? request.title : request.title.trim(),
+        artist: request.preserveEmptyValues
+            ? request.artist
+            : request.artist.trim().isEmpty
+                ? 'UNKNOWN'
+                : request.artist.trim(),
+        album: request.preserveEmptyValues
+            ? request.album
+            : request.album.trim().isEmpty
+                ? 'UNKNOWN'
+                : request.album.trim(),
         picturePath: picture == null || picture.isEmpty ? null : picture,
+        expectedFingerprint: request.expectedFingerprint,
+        preserveEmptyValues: request.preserveEmptyValues,
       );
       final pending = _pending[audio];
       if (pending != null) {
@@ -268,6 +284,7 @@ final _metadataEdits = AudioMetadataEditCoordinator(
       artist: edit.artist,
       album: edit.album,
       picturePath: edit.picturePath,
+      expectedFingerprint: edit.expectedFingerprint,
     );
   },
   synchronize: synchronizeAudioMetadataEdit,

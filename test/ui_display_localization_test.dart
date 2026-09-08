@@ -117,7 +117,7 @@ void main() {
     final state = tester.state(find.byType(SearchResultPage));
     for (final language in [UiLanguage.en, UiLanguage.ja, UiLanguage.ko]) {
       await _language(tester, language);
-      const categories = ['所有', '总乐库', '联网', '艺术家', '专辑'];
+      const categories = ['所有', '总乐库', '联网', '艺术家', '专辑', '歌词'];
       final tabBar = find.byType(TabBar);
       final tabLabels =
           find.descendant(of: tabBar, matching: find.byType(Text));
@@ -126,6 +126,9 @@ void main() {
       expect(tester.widgetList<Text>(tabLabels).map((text) => text.data),
           categories.map(ui));
       for (final source in categories) {
+        await tester.ensureVisible(
+            find.descendant(of: tabBar, matching: find.text(ui(source))));
+        await tester.pumpAndSettle();
         expect(
             find
                 .descendant(of: tabBar, matching: find.text(ui(source)))

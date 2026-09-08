@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/src/rust/api/tag_reader.dart';
+import 'package:dan_player/library/library_refresh.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -37,6 +38,11 @@ class _BuildIndexStateViewState extends State<BuildIndexStateView> {
   Object? _error;
   late final List<String> _folders = List<String>.unmodifiable(widget.folders);
   bool _settled = false;
+  LibraryRefreshTask? _nativeTask;
+
+  void _phaseChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
@@ -77,16 +83,29 @@ class _BuildIndexStateViewState extends State<BuildIndexStateView> {
     _subscription?.cancel();
   }
 
-  Stream<IndexActionState> _scan() =>
-      widget.scan?.call(_folders, widget.indexPath, widget.incremental) ??
-      (widget.incremental
-          ? updateIndex(indexPath: widget.indexPath.path)
-          : buildIndexFromFoldersRecursively(
-              folders: _folders, indexPath: widget.indexPath.path));
+  Stream<IndexActionState> _scan() {
+    if (widget.scan != null) {
+      return widget.scan!(_folders, widget.indexPath, widget.incremental);
+    }
+    final task = LibraryRefreshTask.native(
+        folders: _folders,
+        indexPath: widget.indexPath,
+        incremental: widget.incremental,
+        commit: () async {
+          if (!mounted || _settled) return 0;
+          await widget.whenIndexBuilt();
+          _settled = true;
+          return 0;
+        });
+    _nativeTask = task;
+    task.addListener(_phaseChanged);
+    return task.stream;
+  }
 
   @override
   void dispose() {
     _settled = true;
+    _nativeTask?.removeListener(_phaseChanged);
     _subscription?.cancel();
     super.dispose();
   }
@@ -107,14 +126,27 @@ class _BuildIndexStateViewState extends State<BuildIndexStateView> {
         const SizedBox(height: 8.0),
         Text(
           _error != null
-              ? ui("刷新失败：{0}", [_error])
-              : (_action?.message.isNotEmpty == true
-                  ? _action!.message
-                  : ui("正在准备扫描")),
+              ? (_error is LibraryScanCancelled
+                  ? ui('扫描已取消')
+                  : ui("刷新失败：{0}", [_error]))
+              : _nativeTask?.phase == LibraryRefreshPhase.cancelling
+                  ? ui('正在取消扫描')
+                  : (_action?.message == 'INDEX_PHASE_COMMITTING'
+                      ? ui('正在提交曲库')
+                      : _action?.message.isNotEmpty == true
+                          ? _action!.message
+                          : ui("正在准备扫描")),
           style: TextStyle(color: scheme.onSurface),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
+        if (_nativeTask != null && !_nativeTask!.isTerminal) ...[
+          const SizedBox(height: 12),
+          OutlinedButton(
+              onPressed:
+                  _nativeTask!.canCancel ? _nativeTask!.requestCancel : null,
+              child: Text(ui('取消扫描'))),
+        ],
       ],
     );
   }

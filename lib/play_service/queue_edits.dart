@@ -99,6 +99,16 @@ class QueueSnapshot<T> {
 
 /// Bounded in-memory undo for edits within one open track occurrence. Source
 /// changes, queue replacement and physical deletion must call [clear].
+enum QueueHistoryInvalidation {
+  contextChanged,
+  sourceChanged,
+  queueReplaced,
+  physicalDeletion,
+  capacity,
+  shuffleChanged,
+  closed
+}
+
 class QueueEditHistory<T> {
   QueueEditHistory({this.maxEntries = 10, this.maxRetainedItems = 400000})
       : assert(maxEntries > 0),
@@ -108,12 +118,20 @@ class QueueEditHistory<T> {
   final int maxRetainedItems;
   final List<({QueueSnapshot<T> before, QueueSnapshot<T> after})> _entries = [];
   int _retainedItems = 0;
+  int _cursor = 0;
+  QueueHistoryInvalidation? invalidation;
 
-  int get length => _entries.length;
+  int get length => _cursor;
+  int get redoLength => _entries.length - _cursor;
+  int get retainedItems => _retainedItems;
 
   bool canUndo(List<T> items, List<T> backup, int currentIndex) =>
-      _entries.isNotEmpty &&
-      _entries.last.after.matches(items, backup, currentIndex);
+      _cursor > 0 &&
+      _entries[_cursor - 1].after.matches(items, backup, currentIndex);
+
+  bool canRedo(List<T> items, List<T> backup, int currentIndex) =>
+      _cursor < _entries.length &&
+      _entries[_cursor].before.matches(items, backup, currentIndex);
 
   bool record(QueueSnapshot<T> before, QueueSnapshot<T> after) {
     if (before.matches(after.items, after.backup, after.currentIndex)) {
@@ -129,34 +147,49 @@ class QueueEditHistory<T> {
       return false;
     }
     if (_entries.isNotEmpty &&
-        !canUndo(before.items, before.backup, before.currentIndex)) {
+        !(canUndo(before.items, before.backup, before.currentIndex) ||
+            canRedo(before.items, before.backup, before.currentIndex))) {
       clear();
+    }
+    while (_entries.length > _cursor) {
+      final discarded = _entries.removeLast();
+      _retainedItems -= _size(discarded.before) + _size(discarded.after);
     }
     final retained = _size(before) + _size(after);
     // Large queues remain editable without retaining an unbounded old copy.
     if (retained > maxRetainedItems) {
-      clear();
+      clear(QueueHistoryInvalidation.capacity);
       return false;
     }
     while (_entries.isNotEmpty &&
         (_entries.length >= maxEntries ||
             _retainedItems + retained > maxRetainedItems)) {
       final oldest = _entries.removeAt(0);
+      _cursor--;
       _retainedItems -= _size(oldest.before) + _size(oldest.after);
     }
     _entries.add((before: before, after: after));
+    _cursor++;
     _retainedItems += retained;
+    invalidation = null;
     return true;
   }
 
   QueueSnapshot<T>? undo(List<T> items, List<T> backup, int currentIndex) {
     if (!canUndo(items, backup, currentIndex)) {
-      clear();
+      if (_cursor > 0) clear();
       return null;
     }
-    final entry = _entries.removeLast();
-    _retainedItems -= _size(entry.before) + _size(entry.after);
+    final entry = _entries[--_cursor];
     return entry.before;
+  }
+
+  QueueSnapshot<T>? redo(List<T> items, List<T> backup, int currentIndex) {
+    if (!canRedo(items, backup, currentIndex)) {
+      if (redoLength > 0) clear();
+      return null;
+    }
+    return _entries[_cursor++].after;
   }
 
   /// Metadata refreshes and file renames update retained references as well.
@@ -171,9 +204,13 @@ class QueueEditHistory<T> {
     }
   }
 
-  void clear() {
+  void clear(
+      [QueueHistoryInvalidation reason =
+          QueueHistoryInvalidation.contextChanged]) {
     _entries.clear();
     _retainedItems = 0;
+    _cursor = 0;
+    invalidation = reason;
   }
 
   int _size(QueueSnapshot<T> state) => state.items.length + state.backup.length;

@@ -230,6 +230,10 @@ class LyricDocumentStore extends ChangeNotifier {
   final Directory? _directory;
   final Future<void> Function() _persistIdentity;
   final Map<String, LyricDocument> _documents = {};
+
+  /// Derived consumers invalidate only documents successfully committed to disk.
+  final changes = ValueNotifier<Set<String>>(const {});
+  Iterable<LyricDocument> get documents => _documents.values;
   bool _loaded = false;
   bool _recoveredBackup = false;
   Future<void> _pending = Future.value();
@@ -238,6 +242,12 @@ class LyricDocumentStore extends ChangeNotifier {
 
   LyricDocument? forAudio(Audio audio) => _documents[audio.stableTrackId];
   int revisionFor(Audio audio) => forAudio(audio)?.revision ?? 0;
+
+  @override
+  void dispose() {
+    changes.dispose();
+    super.dispose();
+  }
 
   Future<T> _exclusive<T>(Future<T> Function() work) {
     final result = _pending.then((_) => work());
@@ -309,9 +319,14 @@ class LyricDocumentStore extends ChangeNotifier {
         await file.rename(backup.path);
       }
       await temporary.rename(file.path);
+      final changed = <String>{
+        for (final id in {..._documents.keys, ...next.keys})
+          if (!identical(_documents[id], next[id])) id,
+      };
       _documents
         ..clear()
         ..addAll(next);
+      if (changed.isNotEmpty) changes.value = changed;
       _recoveredBackup = false;
       // A session may have changed during the atomic rename. Keep its saved
       // track document, but do not interrupt the replacement playback session.

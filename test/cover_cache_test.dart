@@ -158,7 +158,8 @@ void main() {
         produce: () async => Uint8List.fromList([4, 5, 6]));
     expect(await current, isA<FileImage>());
     oldBytes.complete(Uint8List.fromList([1, 2, 3]));
-    expect(await old, isA<MemoryImage>());
+    expect(await old, isNull,
+        reason: 'a stale decode must not repaint an already invalidated source');
     expect(cache.cachedProviderCount, 1);
     expect((await fixture.list().toList()).length, 1);
   });

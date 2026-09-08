@@ -4,6 +4,7 @@ import 'package:dan_player/component/playlist_name_dialog.dart';
 import 'package:dan_player/component/playlist_ui_actions.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/page/now_playing_page/component/segment_loop_dialog.dart';
+import 'package:dan_player/page/now_playing_page/component/queue_stop_status.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -12,6 +13,7 @@ import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/audio_artwork.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -85,6 +87,33 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     final removed = playbackService.deduplicateQueue();
     showTextOnSnackBar(removed == 0 ? '队列中没有重复歌曲' : '已移除 {0} 个重复项，可撤销整理',
         arguments: [removed], context: context);
+  }
+
+  KeyEventResult _queueShortcut(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        !HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused?.widget is EditableText ||
+        focused?.findAncestorWidgetOfExactType<EditableText>() != null) {
+      return KeyEventResult.ignored;
+    }
+    final redo = event.logicalKey == LogicalKeyboardKey.keyY ||
+        event.logicalKey == LogicalKeyboardKey.keyZ &&
+            HardwareKeyboard.instance.isShiftPressed;
+    final undo = event.logicalKey == LogicalKeyboardKey.keyZ && !redo;
+    if (!undo && !redo) return KeyEventResult.ignored;
+    if (redo
+        ? playbackService.canRedoQueueEdit
+        : playbackService.canUndoQueueEdit) {
+      redo ? playbackService.redoQueueEdit() : playbackService.undoQueueEdit();
+    } else {
+      showTextOnSnackBar(playbackService.queueHistoryReason(redo: redo),
+          context: context);
+    }
+    return KeyEventResult.handled;
   }
 
   Future<void> _saveQueue() async {
@@ -210,178 +239,209 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
-    return Material(
-      type: MaterialType.transparency,
-      child: ListenableBuilder(
-        listenable: Listenable.merge([
-          playbackService,
-          playbackService.playlist,
-          playbackService.resolvingAudioPath,
-          playbackService.isChangingOutput,
-          playbackService.segmentLoop,
-          OnlineLibrary.instance,
-        ]),
-        builder: (context, _) {
-          final queue = playbackService.playlist.value;
-          final visibleIndices = _visibleIndices(queue);
-          final nowPlaying = playbackService.nowPlaying;
-          final candidateIndex = playbackService.playlistIndex;
-          final currentIndex = nowPlaying != null &&
-                  candidateIndex >= 0 &&
-                  candidateIndex < queue.length &&
-                  queue[candidateIndex].path == nowPlaying.path
-              ? candidateIndex
-              : -1;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (widget.showTitle)
-                _PlaylistHeader(
-                  count: queue.length,
-                  currentIndex: currentIndex,
-                ),
-              Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        IconButton(
-                            key: const ValueKey('queue-locate-current'),
-                            tooltip: ui('定位当前歌曲'),
-                            onPressed: currentIndex < 0 ? null : _locateCurrent,
-                            icon: const Icon(Symbols.my_location)),
-                        IconButton(
-                            key: const ValueKey('queue-save-playlist'),
-                            tooltip: ui('将队列保存为歌单'),
-                            onPressed: queue.isEmpty || _savingQueue
-                                ? null
-                                : _saveQueue,
-                            icon: const Icon(Symbols.playlist_add)),
-                        IconButton(
-                            key: const ValueKey('queue-keep-current'),
-                            tooltip: ui('仅保留当前歌曲'),
-                            onPressed: currentIndex < 0 ||
-                                    queue.length <= 1 ||
-                                    !playbackService.canEditQueue
-                                ? null
-                                : playbackService.keepOnlyCurrentQueueItem,
-                            icon: const Icon(Symbols.playlist_remove)),
-                        IconButton(
-                            key: const ValueKey('queue-deduplicate'),
-                            tooltip: ui('移除重复歌曲（保留当前播放，可撤销）'),
-                            onPressed: queue.length < 2 ||
-                                    !playbackService.canEditQueue
-                                ? null
-                                : _deduplicateQueue,
-                            icon: const Icon(Symbols.layers_clear)),
-                        IconButton(
-                            key: const ValueKey('queue-undo-edit'),
-                            tooltip: ui('撤销队列整理（最多 10 步；切换歌曲或队列后清空）'),
-                            onPressed: playbackService.canUndoQueueEdit
-                                ? playbackService.undoQueueEdit
-                                : null,
-                            icon: const Icon(Symbols.undo)),
-                        Tooltip(
-                            message: ui('A-B 片段循环'),
-                            child: TextButton.icon(
-                                key: const ValueKey('queue-segment-loop'),
-                                onPressed: () => showSegmentLoopDialog(
-                                    context, playbackService),
-                                icon: Icon(playbackService.segmentLoop.enabled
-                                    ? Symbols.repeat_on
-                                    : Symbols.repeat),
-                                label: const Text('A-B'))),
-                      ])),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-                child: TextField(
-                  key: const ValueKey('queue-search'),
-                  controller: _searchController,
-                  maxLength: 160,
-                  onChanged: _updateQuery,
-                  decoration: InputDecoration(
-                    hintText: ui('搜索队列：歌曲、歌手或专辑'),
-                    counterText: '',
-                    isDense: true,
-                    filled: true,
-                    fillColor: scheme.surfaceContainerLow,
-                    prefixIcon: Icon(Symbols.search, color: scheme.primary),
-                    suffixIcon: _query.isEmpty
-                        ? null
-                        : IconButton(
-                            key: const ValueKey('queue-clear-search'),
-                            tooltip: ui('清除搜索'),
-                            onPressed: () {
-                              _searchController.clear();
-                              _updateQuery('');
-                            },
-                            icon: const Icon(Symbols.close)),
-                    border: OutlineInputBorder(
-                        borderRadius: AppShape.controlRadius,
-                        borderSide: BorderSide(color: scheme.outlineVariant)),
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _queueShortcut,
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListenableBuilder(
+          listenable: Listenable.merge([
+            playbackService,
+            playbackService.playlist,
+            playbackService.resolvingAudioPath,
+            playbackService.isChangingOutput,
+            playbackService.segmentLoop,
+            playbackService.playMode,
+            playbackService.queueStopBoundary,
+            OnlineLibrary.instance,
+          ]),
+          builder: (context, _) {
+            final queue = playbackService.playlist.value;
+            final visibleIndices = _visibleIndices(queue);
+            final nowPlaying = playbackService.nowPlaying;
+            final candidateIndex = playbackService.playlistIndex;
+            final currentIndex = nowPlaying != null &&
+                    candidateIndex >= 0 &&
+                    candidateIndex < queue.length &&
+                    queue[candidateIndex].path == nowPlaying.path
+                ? candidateIndex
+                : -1;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (widget.showTitle)
+                  _PlaylistHeader(
+                    count: queue.length,
+                    currentIndex: currentIndex,
                   ),
-                ),
-              ),
-              if (_query.isNotEmpty)
                 Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                        ui('找到 {0} / {1} 首 · 搜索不改变队列',
-                            [visibleIndices.length, queue.length]),
-                        key: const ValueKey('queue-search-count'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall)),
-              Expanded(
-                child: Container(
-                  margin: EdgeInsets.fromLTRB(
-                      widget.showTitle ? 8 : 0, 4, widget.showTitle ? 8 : 0, 0),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerLow.withValues(alpha: .78),
-                    borderRadius: AppShape.surfaceRadius,
-                    border: Border.all(
-                      color: scheme.outlineVariant.withValues(alpha: .52),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          IconButton(
+                              key: const ValueKey('queue-locate-current'),
+                              tooltip: ui('定位当前歌曲'),
+                              onPressed:
+                                  currentIndex < 0 ? null : _locateCurrent,
+                              icon: const Icon(Symbols.my_location)),
+                          IconButton(
+                              key: const ValueKey('queue-save-playlist'),
+                              tooltip: ui('将队列保存为歌单'),
+                              onPressed: queue.isEmpty || _savingQueue
+                                  ? null
+                                  : _saveQueue,
+                              icon: const Icon(Symbols.playlist_add)),
+                          IconButton(
+                              key: const ValueKey('queue-keep-current'),
+                              tooltip: ui('仅保留当前歌曲'),
+                              onPressed: currentIndex < 0 ||
+                                      queue.length <= 1 ||
+                                      !playbackService.canEditQueue
+                                  ? null
+                                  : playbackService.keepOnlyCurrentQueueItem,
+                              icon: const Icon(Symbols.playlist_remove)),
+                          IconButton(
+                              key: const ValueKey('queue-deduplicate'),
+                              tooltip: ui('移除重复歌曲（保留当前播放，可撤销）'),
+                              onPressed: queue.length < 2 ||
+                                      !playbackService.canEditQueue
+                                  ? null
+                                  : _deduplicateQueue,
+                              icon: const Icon(Symbols.layers_clear)),
+                          IconButton(
+                              key: const ValueKey('queue-undo-edit'),
+                              tooltip: ui(playbackService.canUndoQueueEdit
+                                  ? '撤销队列整理 · Ctrl+Z'
+                                  : playbackService.queueHistoryReason()),
+                              onPressed: playbackService.canUndoQueueEdit
+                                  ? playbackService.undoQueueEdit
+                                  : null,
+                              icon: const Icon(Symbols.undo)),
+                          IconButton(
+                              key: const ValueKey('queue-redo-edit'),
+                              tooltip: ui(playbackService.canRedoQueueEdit
+                                  ? '重做队列整理 · Ctrl+Y / Ctrl+Shift+Z'
+                                  : playbackService.queueHistoryReason(
+                                      redo: true)),
+                              onPressed: playbackService.canRedoQueueEdit
+                                  ? playbackService.redoQueueEdit
+                                  : null,
+                              icon: const Icon(Symbols.redo)),
+                          IconButton(
+                              key: const ValueKey('queue-stop-after-round'),
+                              tooltip: ui(
+                                  playbackService.queueStopBlockedReason ??
+                                      '播完设置时这轮队列后停止'),
+                              onPressed: queue.isEmpty ||
+                                      playbackService.queueStopBlockedReason !=
+                                          null
+                                  ? null
+                                  : playbackService.stopAfterQueueRound,
+                              icon: const Icon(Symbols.stop_circle)),
+                          Tooltip(
+                              message: ui('A-B 片段循环'),
+                              child: TextButton.icon(
+                                  key: const ValueKey('queue-segment-loop'),
+                                  onPressed: () => showSegmentLoopDialog(
+                                      context, playbackService),
+                                  icon: Icon(playbackService.segmentLoop.enabled
+                                      ? Symbols.repeat_on
+                                      : Symbols.repeat),
+                                  label: const Text('A-B'))),
+                        ])),
+                QueueStopStatus(playbackService: playbackService),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+                  child: TextField(
+                    key: const ValueKey('queue-search'),
+                    controller: _searchController,
+                    maxLength: 160,
+                    onChanged: _updateQuery,
+                    decoration: InputDecoration(
+                      hintText: ui('搜索队列：歌曲、歌手或专辑'),
+                      counterText: '',
+                      isDense: true,
+                      filled: true,
+                      fillColor: scheme.surfaceContainerLow,
+                      prefixIcon: Icon(Symbols.search, color: scheme.primary),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              key: const ValueKey('queue-clear-search'),
+                              tooltip: ui('清除搜索'),
+                              onPressed: () {
+                                _searchController.clear();
+                                _updateQuery('');
+                              },
+                              icon: const Icon(Symbols.close)),
+                      border: OutlineInputBorder(
+                          borderRadius: AppShape.controlRadius,
+                          borderSide: BorderSide(color: scheme.outlineVariant)),
                     ),
                   ),
-                  clipBehavior: Clip.antiAlias,
-                  child: queue.isEmpty
-                      ? const _EmptyPlaylistView()
-                      : visibleIndices.isEmpty
-                          ? Center(
-                              child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Text(ui('队列中没有匹配的歌曲'),
-                                      textAlign: TextAlign.center)))
-                          : _QueueScrollbar(
-                              controller: scrollController,
-                              child: ListView.builder(
-                                key: const ValueKey('current-playlist-list'),
+                ),
+                if (_query.isNotEmpty)
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                          ui('找到 {0} / {1} 首 · 搜索不改变队列',
+                              [visibleIndices.length, queue.length]),
+                          key: const ValueKey('queue-search-count'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall)),
+                Expanded(
+                  child: Container(
+                    margin: EdgeInsets.fromLTRB(widget.showTitle ? 8 : 0, 4,
+                        widget.showTitle ? 8 : 0, 0),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerLow.withValues(alpha: .78),
+                      borderRadius: AppShape.surfaceRadius,
+                      border: Border.all(
+                        color: scheme.outlineVariant.withValues(alpha: .52),
+                      ),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: queue.isEmpty
+                        ? const _EmptyPlaylistView()
+                        : visibleIndices.isEmpty
+                            ? Center(
+                                child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Text(ui('队列中没有匹配的歌曲'),
+                                        textAlign: TextAlign.center)))
+                            : _QueueScrollbar(
                                 controller: scrollController,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: _QueueScrollbar.edgeInset,
-                                    vertical: 6),
-                                itemCount: visibleIndices.length,
-                                itemExtent: _rowHeight,
-                                itemBuilder: (context, index) =>
-                                    _PlaylistViewItem(
-                                  key: ValueKey(visibleIndices[index]),
-                                  queue: queue,
-                                  item: queue[visibleIndices[index]],
-                                  index: visibleIndices[index],
-                                  current:
-                                      visibleIndices[index] == currentIndex,
-                                  playbackService: playbackService,
-                                  onOpenDetails: widget.onOpenDetails,
+                                child: ListView.builder(
+                                  key: const ValueKey('current-playlist-list'),
+                                  controller: scrollController,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: _QueueScrollbar.edgeInset,
+                                      vertical: 6),
+                                  itemCount: visibleIndices.length,
+                                  itemExtent: _rowHeight,
+                                  itemBuilder: (context, index) =>
+                                      _PlaylistViewItem(
+                                    key: ValueKey(visibleIndices[index]),
+                                    queue: queue,
+                                    item: queue[visibleIndices[index]],
+                                    index: visibleIndices[index],
+                                    current:
+                                        visibleIndices[index] == currentIndex,
+                                    playbackService: playbackService,
+                                    onOpenDetails: widget.onOpenDetails,
+                                  ),
                                 ),
                               ),
-                            ),
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -420,8 +480,8 @@ class _QueueScrollbar extends StatelessWidget {
                       states.contains(WidgetState.dragged)
                   ? edgeInset
                   : 4.0),
-          thumbColor: WidgetStateProperty.resolveWith((states) =>
-              states.contains(WidgetState.dragged)
+          thumbColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.dragged)
                   ? scheme.primary.withValues(alpha: .95)
                   : states.contains(WidgetState.hovered)
                       ? scheme.primary.withValues(alpha: .8)
@@ -622,6 +682,24 @@ class _PlaylistViewItem extends StatelessWidget {
           child: Text(ui('移到下一首')),
         ),
         MenuItemButton(
+          key: ValueKey('queue-stop-after-item-$index'),
+          onPressed: playbackService.queueStopBlockedReason == null
+              ? () {
+                  if (_stillCurrentQueue) {
+                    playbackService.stopAfterQueueItem(index);
+                  }
+                }
+              : null,
+          leadingIcon: const Icon(Symbols.stop_circle),
+          child: Text(ui('播完此条后停止')),
+        ),
+        if (playbackService.queueOccurrenceId(index) ==
+            playbackService.queueStopBoundary.target)
+          MenuItemButton(
+              onPressed: playbackService.cancelQueueStop,
+              leadingIcon: const Icon(Symbols.close),
+              child: Text(ui('取消停止目标'))),
+        MenuItemButton(
           onPressed: !current && playbackService.canEditQueue
               ? () {
                   if (_stillCurrentQueue) {
@@ -752,6 +830,15 @@ class _PlaylistViewItem extends StatelessWidget {
                           ),
                         ),
                       ],
+                      if (playbackService.queueStopBoundary.active &&
+                          playbackService.queueOccurrenceId(index) ==
+                              playbackService.queueStopBoundary.target)
+                        Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: Tooltip(
+                                message: ui('播完此条后停止'),
+                                child: Icon(Symbols.stop_circle,
+                                    size: 18, color: scheme.primary))),
                       if (showDetails) ...[
                         const SizedBox(width: 2),
                         IconButton(

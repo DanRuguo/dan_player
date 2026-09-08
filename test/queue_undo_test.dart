@@ -1,7 +1,60 @@
 import 'package:dan_player/play_service/queue_edits.dart';
+import 'package:dan_player/play_service/queue_track_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+      'redo shares its budget, preserves occurrence identity and truncates branches',
+      () {
+    final first = QueueOccurrence('same');
+    final active = QueueOccurrence('same');
+    final history = QueueEditHistory<QueueOccurrence<String>>(
+        maxEntries: 2, maxRetainedItems: 28);
+    var state = QueueSnapshot([first, active], [first, active], 1);
+    void apply(List<QueueOccurrence<String>> items, int index) {
+      final next = QueueSnapshot(items, items, index);
+      expect(history.record(state, next), isTrue);
+      state = next;
+    }
+
+    apply([active], 0);
+    final budget = history.retainedItems;
+    state = history.undo(state.items, state.backup, state.currentIndex)!;
+    expect(history.retainedItems, budget,
+        reason: 'Undo and redo share retained snapshots');
+    expect(history.redoLength, 1);
+    expect(history.canRedo(state.items, state.backup, 0), isFalse,
+        reason: 'The other same-song occurrence cannot restore this session');
+    state = history.redo(state.items, state.backup, state.currentIndex)!;
+    expect(state.items.single.id, active.id);
+    state = history.undo(state.items, state.backup, state.currentIndex)!;
+    apply([first, active, QueueOccurrence('new')], 1);
+    expect(history.redoLength, 0);
+    expect(history.redo(state.items, state.backup, state.currentIndex), isNull);
+    expect(history.retainedItems, lessThanOrEqualTo(28));
+    history.clear(QueueHistoryInvalidation.physicalDeletion);
+    expect(history.length + history.redoLength, 0);
+    expect(history.invalidation, QueueHistoryInvalidation.physicalDeletion);
+  });
+
+  test(
+      'metadata mapping updates both undo and redo without resurrecting old paths',
+      () {
+    final history = QueueEditHistory<String>();
+    final a = QueueSnapshot(['a', 'b'], ['a', 'b'], 0);
+    final b = QueueSnapshot(['a', 'b', 'c'], ['a', 'b', 'c'], 0);
+    final c = QueueSnapshot(['a', 'c'], ['a', 'c'], 0);
+    history.record(a, b);
+    history.record(b, c);
+    history.undo(c.items, c.backup, 0);
+    history.mapItems((item) => '$item-renamed');
+    var state = history.redo(['a-renamed', 'b-renamed', 'c-renamed'],
+        ['a-renamed', 'b-renamed', 'c-renamed'], 0)!;
+    expect(state.items, ['a-renamed', 'c-renamed']);
+    state = history.undo(state.items, state.backup, 0)!;
+    state = history.undo(state.items, state.backup, 0)!;
+    expect(state.items, ['a-renamed', 'b-renamed']);
+  });
   test(
       'undo restores move, remove and keep edits with an exact duplicate index',
       () {

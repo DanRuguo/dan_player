@@ -200,9 +200,9 @@ void main() {
     tester.view.physicalSize = const Size(800, 700);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
-    final bytes = await tester.runAsync(_png);
+    final bytes = (await tester.runAsync(_png))!;
     final source = File(path.join(fixture.path, 'will-disappear.png'))
-      ..writeAsBytesSync(bytes!, flush: true);
+      ..writeAsBytesSync(bytes, flush: true);
     final audio = CategoryTestAudio('Fallback song', artist: 'Fallback artist');
     final group =
         MusicCategories([audio]).groups(MusicCategoryKind.artist).single;
@@ -212,6 +212,9 @@ void main() {
         () => File(path.join(fixture.path, 'category-covers', id)).delete());
     final recovered = CategoryCoverStore(dataDirectory: () async => fixture);
     await tester.runAsync(recovered.load);
+    // Complete real file I/O outside the widget clock before the fallback is
+    // painted. A pending fake-zone future cannot be awaited from runAsync.
+    await tester.runAsync(() => recovered.imageFor(group));
 
     await tester.pumpWidget(MaterialApp(
       theme: ThemeData(platform: TargetPlatform.windows),
@@ -226,11 +229,25 @@ void main() {
     await tester.pump();
 
     final cover = find.byKey(ValueKey(('category-cover', group.id)));
-    expect(recovered.hasCover(group), isFalse);
+    expect(recovered.coverIdFor(group), id,
+        reason: 'an unavailable image must not erase the manual choice');
     expect(find.descendant(of: cover, matching: find.byType(AudioArtwork)),
         findsOneWidget);
     expect(
         find.byKey(ValueKey(('category-custom-cover', group.persistenceKey))),
+        findsOneWidget);
+    await tester.runAsync(() async {
+      await File(path.join(fixture.path, 'category-covers', id))
+          .writeAsBytes(bytes, flush: true);
+      expect(await recovered.reread(group), isA<FileImage>());
+    });
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(recovered.coverIdFor(group), id);
+    expect(find.descendant(of: cover, matching: find.byType(ArtworkImage)),
+        findsOneWidget);
+    expect(find.descendant(of: cover, matching: find.byType(AudioArtwork)),
         findsNothing);
     expect(tester.takeException(), isNull);
   });

@@ -5,6 +5,9 @@ import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/page/uni_detail_page.dart';
 import 'package:dan_player/page/categories_page.dart';
 import 'package:dan_player/library/music_categories.dart';
+import 'package:dan_player/library/category_cover_store.dart';
+import 'package:dan_player/library/cover_cache.dart';
+import 'package:dan_player/component/cover_repair_dialog.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -40,6 +43,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   void initState() {
     super.initState();
     _classificationRevision = AudioLibrary.classificationRevision;
+    CategoryCoverStore.shared.load();
   }
 
   @override
@@ -56,9 +60,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return ValueListenableBuilder<int>(
-      valueListenable: AudioLibrary.changes,
-      builder: (context, _, __) => _buildPage(context),
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        AudioLibrary.changes,
+        CategoryCoverStore.shared,
+        CoverCache.instance.changes
+      ]),
+      builder: (context, _) => _buildPage(context),
     );
   }
 
@@ -115,9 +123,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     return UniDetailPage<String, Audio, MusicCategoryGroup>(
       pref: AppPreference.instance.albumDetailPagePref,
       primaryContent: currentGroup.id,
-      primaryPic: currentGroup.audios.first.coverForDisplay(
-          size: 200, devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
-      backgroundPic: currentGroup.audios.first.cover,
+      primaryPic: CategoryCoverStore.shared.hasCover(currentGroup)
+          ? CategoryCoverStore.shared.imageFor(currentGroup)
+          : currentGroup.coverAudio!.coverForDisplay(
+              size: 200,
+              devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
+      backgroundPic: CategoryCoverStore.shared.hasCover(currentGroup)
+          ? CategoryCoverStore.shared.imageFor(currentGroup)
+          : currentGroup.coverAudio!.cover,
       picShape: PicShape.rrect,
       title: currentGroup.title,
       subtitle: [
@@ -149,6 +162,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       enablePlayAll: true,
       enableShufflePlay: true,
       enableAddAllToPlaylist: true,
+      extraActions: [
+        IconButton.outlined(
+          tooltip: ui('重新读取封面'),
+          icon: const Icon(Symbols.image_search),
+          onPressed: () => showCoverRepairDialog(context, currentGroup.audios,
+              album: currentGroup),
+        )
+      ],
       enableSortMethod: true,
       enableSortOrder: true,
       enableSecondaryContentViewSwitch: true,

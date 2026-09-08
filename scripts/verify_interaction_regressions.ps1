@@ -1,11 +1,17 @@
 [CmdletBinding()]
 param(
     [string] $ProjectRoot = (Split-Path -Parent $PSScriptRoot),
-    [string] $Flutter = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool\flutter\bin\flutter.bat')
+    [string] $Flutter = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'tool\flutter\bin\flutter.bat'),
+    [ValidateSet('Development', 'Integration', 'Release')] [string] $Scope = 'Release',
+    [string[]] $TestFile,
+    [switch] $NoReuse,
+    [string] $ReceiptPath
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'support/validation_receipt.ps1')
+if (-not $ReceiptPath) { $ReceiptPath = Join-Path (Split-Path -Parent $ProjectRoot) 'tool/validation/flutter-checks.json' }
 # Small release gate, separate from CI's full Flutter suite. These tests use
 # isolated fixtures and widget layouts, never the installed player or GUI input.
 $regressionTests = @(
@@ -84,8 +90,21 @@ $regressionTests = @(
     'test/uni_detail_responsive_language_test.dart',
     'test/uni_page_locate_responsive_test.dart',
     'test/playlist_circle_readonly_test.dart',
-    'test/unified_playlists_ui_test.dart'
+    'test/unified_playlists_ui_test.dart',
+    'test/current_playlist_view_test.dart',
+    'test/queue_undo_test.dart',
+    'test/queue_stop_boundary_test.dart',
+    'test/guarded_playback_seek_test.dart'
 )
+if ($Scope -eq 'Development') {
+    if (-not $TestFile -or $TestFile.Count -eq 0) { throw 'Development validation requires explicit -TestFile coverage.' }
+    $regressionTests = $TestFile
+} elseif ($Scope -eq 'Integration') {
+    $regressionTests = @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'test') -Recurse -File -Filter '*_test.dart' | ForEach-Object {
+        $_.FullName.Substring(([IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/')).Length + 1).Replace('\', '/')
+    })
+} elseif ($TestFile) { throw '-TestFile is only allowed with Development; a release gate cannot silently narrow its required checks.' }
+$regressionTests = @($regressionTests | Sort-Object -Unique)
 Push-Location $ProjectRoot
 try {
     foreach ($regressionTest in $regressionTests) {
@@ -93,10 +112,27 @@ try {
             throw "Required interaction regression is missing: $regressionTest"
         }
     }
-    & $Flutter test --no-pub --reporter expanded @regressionTests
+    $inputs = Get-ValidationInputs $ProjectRoot
+    $toolchain = Get-ValidationToolchain $Flutter
+    $receipt = Read-LocalValidationReceipt $ReceiptPath
+    if (-not $NoReuse -and (Test-ValidationReceipt $receipt $inputs $toolchain $regressionTests)) {
+        Write-Host "Reusing verified $($regressionTests.Count)-test coverage from $($receipt.CompletedAt); source content $($inputs.Hash), revision $($inputs.Revision)."
+        return
+    }
+    if ($Scope -eq 'Integration') { & $Flutter test --no-pub --reporter expanded }
+    else {
+        if (($regressionTests -join ' ').Length -gt 6000) { throw 'Selected test arguments exceed the Windows batch limit; use Integration scope or a smaller explicit batch.' }
+        & $Flutter test --no-pub --reporter expanded @regressionTests
+    }
     if ($LASTEXITCODE -ne 0) {
         throw 'Interaction regression gate failed. Release compilation is blocked.'
     }
+    $after = Get-ValidationInputs $ProjectRoot
+    if ($after.Hash -cne $inputs.Hash) { throw 'Source changed during validation; result cannot be reused or released.' }
+    Write-LocalValidationReceipt $ReceiptPath ([ordered]@{
+        Schema=1; Passed=$true; Scope=$Scope; Inputs=$inputs; Toolchain=$toolchain;
+        Tests=$regressionTests; CompletedAt=[DateTime]::UtcNow.ToString('o')
+    })
 } finally {
     Pop-Location
 }

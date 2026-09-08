@@ -60,7 +60,11 @@ import '../scripts/support/sfnt_font.dart';
 // This fixture never loads settings/library files, launches playback, captures
 // desktop pixels, downloads art, or reads audio. PNG export is explicit opt-in;
 // ordinary tests only exercise the production widgets with in-memory inputs.
-const _export = bool.fromEnvironment('DAN_PLAYER_EXPORT_PUBLIC_UI');
+const _updateRenderDirectory =
+    String.fromEnvironment('DAN_PLAYER_UPDATE_RENDER_DIR');
+const _selectedPage = String.fromEnvironment('DAN_PLAYER_PUBLIC_UI_PAGE');
+const _export = bool.fromEnvironment('DAN_PLAYER_EXPORT_PUBLIC_UI') ||
+    _updateRenderDirectory != '';
 const _seed = Color(0xFF287B84);
 const _layout = UiLayoutPreferences(libraryRowLayout: LibraryRowLayout.columns);
 const _titles = [
@@ -595,7 +599,9 @@ Future<void> _exportImage(
         .buffer
         .asUint8List();
     expect(bytes.length, greaterThan(10000));
-    final destination = File('docs/images/$name.png');
+    final directory =
+        _updateRenderDirectory.isEmpty ? 'docs/images' : _updateRenderDirectory;
+    final destination = File('$directory/$name.png');
     await destination.parent.create(recursive: true);
     await destination.writeAsBytes(bytes, flush: true);
   } finally {
@@ -655,6 +661,7 @@ void main() {
   });
 
   for (final scenario in _showcaseCases) {
+    if (_selectedPage.isNotEmpty && scenario.page != _selectedPage) continue;
     final page = scenario.page;
     final brightness = scenario.brightness;
     final size = scenario.size;

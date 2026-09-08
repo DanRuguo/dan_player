@@ -33,6 +33,7 @@ use windows::{
 };
 
 use crate::frb_generated::StreamSink;
+use crate::index_scan::ScanLease;
 
 use super::logger::log_to_dart;
 
@@ -169,6 +170,23 @@ pub struct IndexActionState {
     pub message: String,
 }
 
+/// Prepare a unique cancellation identity before dispatching a native scan.
+#[flutter_rust_bridge::frb(sync)]
+pub fn create_index_scan_task() -> anyhow::Result<String> {
+    crate::index_scan::create()
+}
+
+/// Returns cancelling, committing, or finished; never interrupts a commit.
+#[flutter_rust_bridge::frb(sync)]
+pub fn cancel_index_scan_task(task_id: String) -> String {
+    crate::index_scan::cancel(&task_id)
+}
+
+#[flutter_rust_bridge::frb(sync)]
+pub fn release_index_scan_task(task_id: String) {
+    crate::index_scan::release(&task_id);
+}
+
 pub fn update_audio_metadata(
     path: String,
     file_name: String,
@@ -176,6 +194,7 @@ pub fn update_audio_metadata(
     artist: String,
     album: String,
     picture_path: Option<String>,
+    expected_fingerprint: Option<String>,
 ) -> anyhow::Result<String> {
     let _edit_guard = METADATA_EDIT_LOCK.lock().map_err(|_| {
         metadata_message(
@@ -184,6 +203,7 @@ pub fn update_audio_metadata(
         )
     })?;
     let old_path = PathBuf::from(&path);
+    check_metadata_fingerprint(&old_path, expected_fingerprint.as_deref())?;
     let source_metadata = fs::metadata(&old_path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
             metadata_io_error("TAG_SOURCE_MISSING", "音频文件不存在", error)
@@ -204,8 +224,14 @@ pub fn update_audio_metadata(
         ));
     }
 
-    let sanitized_name = sanitize_file_name(&file_name)
-        .map_err(|error| metadata_error("TAG_INVALID_FILENAME", "文件名无效", error))?;
+    // A batch edit keeps the exact existing basename, including legal leading
+    // spaces. Validate only a name the user actually wants to change.
+    let sanitized_name = if old_path.file_name() == Some(std::ffi::OsStr::new(&file_name)) {
+        file_name.clone()
+    } else {
+        sanitize_file_name(&file_name)
+            .map_err(|error| metadata_error("TAG_INVALID_FILENAME", "文件名无效", error))?
+    };
     let extension = old_path
         .extension()
         .map(|value| value.to_string_lossy().to_string())
@@ -239,13 +265,14 @@ pub fn update_audio_metadata(
         ));
     }
 
-    write_metadata_safely(
+    write_metadata_with_expectation(
         &old_path,
         &new_path,
         &title,
         &artist,
         &album,
         picture_path.as_deref(),
+        expected_fingerprint.as_deref(),
     )?;
 
     Ok(new_path.to_string_lossy().to_string())
@@ -355,6 +382,18 @@ fn ensure_tag(tagged_file: &mut lofty::file::TaggedFile, tag_type: TagType) -> a
     anyhow::bail!("audio format does not support writable tags");
 }
 
+fn check_metadata_fingerprint(source: &Path, expected: Option<&str>) -> anyhow::Result<()> {
+    if let Some(expected) = expected {
+        let actual = super::metadata_preflight::metadata_fingerprint(source)?;
+        anyhow::ensure!(
+            actual == expected,
+            "TAG_SOURCE_CHANGED|预览后文件发生变化，已跳过修改"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 fn write_metadata_safely(
     source_path: &Path,
     target_path: &Path,
@@ -363,10 +402,39 @@ fn write_metadata_safely(
     album: &str,
     picture_path: Option<&str>,
 ) -> anyhow::Result<()> {
+    write_metadata_with_expectation(
+        source_path,
+        target_path,
+        title,
+        artist,
+        album,
+        picture_path,
+        None,
+    )
+}
+
+fn write_metadata_with_expectation(
+    source_path: &Path,
+    target_path: &Path,
+    title: &str,
+    artist: &str,
+    album: &str,
+    picture_path: Option<&str>,
+    expected_fingerprint: Option<&str>,
+) -> anyhow::Result<()> {
+    check_metadata_fingerprint(source_path, expected_fingerprint)?;
     // Probe from bytes rather than the extension. This prevents a transcoded or
     // misnamed file from being handed to a writer for an unrelated container.
     if id3_compat::has_empty_text_frame(source_path)
-        && id3_compat::try_write(source_path, target_path, title, artist, album, picture_path)?
+        && id3_compat::try_write_expected(
+            source_path,
+            target_path,
+            title,
+            artist,
+            album,
+            picture_path,
+            expected_fingerprint,
+        )?
     {
         return Ok(());
     }
@@ -374,13 +442,14 @@ fn write_metadata_safely(
         Ok(file) => file,
         Err(error) => {
             if error.to_string().starts_with("TAG_PARSE_UNSUPPORTED|")
-                && id3_compat::try_write(
+                && id3_compat::try_write_expected(
                     source_path,
                     target_path,
                     title,
                     artist,
                     album,
                     picture_path,
+                    expected_fingerprint,
                 )
                 .map_err(|failure| {
                     if failure.to_string().starts_with("TAG_") {
@@ -476,8 +545,15 @@ fn write_metadata_safely(
             // occurred: discard the invalid temporary output before trying the
             // exact same bounded, plain-ID3 path used for parser limitations.
             drop(temporary);
-            if id3_compat::try_write(source_path, target_path, title, artist, album, picture_path)?
-            {
+            if id3_compat::try_write_expected(
+                source_path,
+                target_path,
+                title,
+                artist,
+                album,
+                picture_path,
+                expected_fingerprint,
+            )? {
                 return Ok(());
             }
             return Err(error);
@@ -497,12 +573,13 @@ fn write_metadata_safely(
         expected_front_picture.as_ref(),
     )?;
 
+    check_metadata_fingerprint(source_path, expected_fingerprint)?;
     replace_with_rollback(source_path, target_path, &mut temporary)?;
 
     Ok(())
 }
 
-fn probe_tagged_audio(path: &Path, error_code: &str) -> anyhow::Result<TaggedFile> {
+pub(crate) fn probe_tagged_audio(path: &Path, error_code: &str) -> anyhow::Result<TaggedFile> {
     let mut file = fs::File::open(path)
         .map_err(|error| metadata_io_error("TAG_SOURCE_UNREADABLE", "无法读取音频文件", error))?;
     // Lofty's MPEG sync search may misidentify an ASF header as MPEG even
@@ -1739,14 +1816,17 @@ pub fn get_lyric_from_path(path: String) -> Option<String> {
 pub fn build_index_from_folders_recursively(
     folders: Vec<String>,
     index_path: String,
+    task_id: Option<String>,
     sink: StreamSink<IndexActionState>,
 ) -> Result<(), io::Error> {
+    let task = ScanLease::begin(task_id).map_err(io::Error::other)?;
+    task.control.check().map_err(io::Error::other)?;
     let _guard = INDEX_REFRESH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let path = PathBuf::from(index_path).join("index.json");
     let previous = read_index_json(&path).ok();
-    let index = incremental_index::refresh(
+    let index = incremental_index::refresh_cancellable(
         previous
             .as_ref()
             .map(|(index, _)| index)
@@ -1754,6 +1834,7 @@ pub fn build_index_from_folders_recursively(
         &folders,
         true,
         &|path| Audio::read_from_path(path).map(|audio| audio.to_json_value()),
+        &task.control,
         |progress| {
             let _ = sink.add(IndexActionState {
                 progress,
@@ -1762,6 +1843,11 @@ pub fn build_index_from_folders_recursively(
         },
     )
     .map_err(io::Error::other)?;
+    task.control.begin_commit().map_err(io::Error::other)?;
+    let _ = sink.add(IndexActionState {
+        progress: 1.0,
+        message: "INDEX_PHASE_COMMITTING".into(),
+    });
     write_index_json(
         &path,
         &index,
@@ -1883,7 +1969,13 @@ fn retain_confirmed_index_paths(
 /// Read-only recursive discovery plus size/nanosecond-time change detection.
 /// The complete result is committed atomically; failed enumeration leaves the
 /// old index intact. Full rebuilding is available through the separate API.
-pub fn update_index(index_path: String, sink: StreamSink<IndexActionState>) -> anyhow::Result<()> {
+pub fn update_index(
+    index_path: String,
+    task_id: Option<String>,
+    sink: StreamSink<IndexActionState>,
+) -> anyhow::Result<()> {
+    let task = ScanLease::begin(task_id)?;
+    task.control.check()?;
     let _guard = INDEX_REFRESH_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -1898,11 +1990,12 @@ pub fn update_index(index_path: String, sink: StreamSink<IndexActionState>) -> a
         &previous
     };
     let roots = incremental_index::roots(previous)?;
-    let index = incremental_index::refresh(
+    let index = incremental_index::refresh_cancellable(
         Some(previous),
         &roots,
         previous["version"].as_u64() != Some(INDEX_VERSION),
         &|path| Audio::read_from_path(path).map(|audio| audio.to_json_value()),
+        &task.control,
         |progress| {
             let _ = sink.add(IndexActionState {
                 progress,
@@ -1910,12 +2003,62 @@ pub fn update_index(index_path: String, sink: StreamSink<IndexActionState>) -> a
             });
         },
     )?;
+    task.control.begin_commit()?;
+    let _ = sink.add(IndexActionState {
+        progress: 1.0,
+        message: "INDEX_PHASE_COMMITTING".into(),
+    });
     write_index_json(&path, &index, recovered)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn metadata_unchanged_basename_keeps_legal_leading_space() {
+        let directory = test_directory("metadata_unchanged_basename");
+        let source = directory.join(" source.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        let result = update_audio_metadata(
+            source.to_string_lossy().into_owned(),
+            " source.mp3".into(),
+            "Changed title".into(),
+            "Artist".into(),
+            "Album".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(PathBuf::from(result), source);
+        assert!(source.is_file());
+        assert!(!directory.join("source.mp3").exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn metadata_preview_fingerprint_rejects_changed_source_before_writing() {
+        let directory = test_directory("metadata_fingerprint");
+        let source = directory.join("source.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&source);
+        let expected = super::super::metadata_preflight::metadata_fingerprint(&source).unwrap();
+        let mut externally_changed = fs::read(&source).unwrap();
+        externally_changed.extend_from_slice(b"external edit");
+        fs::write(&source, &externally_changed).unwrap();
+        let error = update_audio_metadata(
+            source.to_string_lossy().into_owned(),
+            "source.mp3".into(),
+            "New".into(),
+            "Artist".into(),
+            "Album".into(),
+            None,
+            Some(expected),
+        )
+        .unwrap_err();
+        assert!(error.to_string().starts_with("TAG_SOURCE_CHANGED|"));
+        assert_eq!(fs::read(&source).unwrap(), externally_changed);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
     // Explicitly opt-in: only a marker-bearing, workspace-local copy folder is
     // accepted. No production music path is ever passed to a writer here.
     #[test]
@@ -1991,6 +2134,7 @@ mod tests {
                 "QA 独立副本测试".into(),
                 "QA Artist".into(),
                 "QA Album".into(),
+                None,
                 None,
             );
             let code = result
@@ -2528,6 +2672,7 @@ mod tests {
             "Artist".into(),
             "Album".into(),
             None,
+            None,
         )
         .unwrap();
         assert!(result.ends_with("SOURCE.MP3"));
@@ -2742,6 +2887,7 @@ mod tests {
             "New".to_string(),
             "Artist".to_string(),
             "Album".to_string(),
+            None,
             None,
         )
         .unwrap_err()

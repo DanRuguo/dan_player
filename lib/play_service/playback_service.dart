@@ -18,6 +18,8 @@ import 'package:dan_player/play_service/replay_gain.dart';
 import 'package:dan_player/play_service/queue_navigation.dart';
 import 'package:dan_player/play_service/queue_edits.dart';
 import 'package:dan_player/play_service/queue_track_identity.dart';
+import 'package:dan_player/play_service/queue_stop_boundary.dart';
+import 'package:dan_player/play_service/guarded_playback_seek.dart';
 import 'package:dan_player/play_service/segment_loop.dart';
 import 'package:dan_player/play_service/track_resume_restore.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
@@ -85,6 +87,7 @@ class PlaybackService extends ChangeNotifier {
   int _lastSessionProgressMs = -30000;
 
   PlaybackService(this.playService) {
+    queueStopBoundary.addListener(_onQueueStopChanged);
     _playerStateStreamSub = _player.playbackEvents.listen((event) {
       if (_closed) return;
       // The native source remains playable while the next one resolves.
@@ -97,6 +100,10 @@ class PlaybackService extends ChangeNotifier {
       if (event.problem != null) _lastProblem = event.problem;
       diagnosticsRevision.value++;
       if (event.problem != null && event.reason != null) {
+        final occurrence = _currentOccurrence;
+        if (occurrence != null) {
+          queueStopBoundary.failed(occurrence.id, _sourceRequestToken);
+        }
         PlaybackStatistics.instance.pause();
         unawaited(_captureTrackResume(force: true));
         _syncPausedToSystem();
@@ -113,6 +120,15 @@ class PlaybackService extends ChangeNotifier {
         }
         PlaybackStatistics.instance.finish(markCompleted: true);
         unawaited(_captureTrackResume(force: true, completed: true));
+        final occurrence = _currentOccurrence;
+        if (occurrence != null &&
+            queueStopBoundary.complete(occurrence.id, _sourceRequestToken)) {
+          stopAfterCurrent.value = false;
+          _syncPausedToSystem();
+          _schedulePlaybackStateSave();
+          showTextOnSnackBar('已播完停止目标，本次停止已完成');
+          return;
+        }
         // An old track may finish while a user-selected source is still
         // opening. Do not let auto-next replace that newer explicit request.
         if (resolvingAudioPath.value == null) _autoNextAudio();
@@ -225,6 +241,9 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
     final token = ++_sourceRequestToken;
+    _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
+    final occurrence = _currentOccurrence;
+    if (occurrence != null) queueStopBoundary.loading(occurrence.id, token);
     isChangingOutput.value = true;
     _player.cancelPendingSource();
     final current = nowPlaying;
@@ -372,8 +391,116 @@ class PlaybackService extends ChangeNotifier {
   final ValueNotifier<List<Audio>> playlist = ValueNotifier([]);
   List<Audio> _playlistBackup = [];
   ShuffleQueueCycle<Audio>? _shuffleCycle;
-  final _queueEditHistory = QueueEditHistory<Audio>();
+  final _queueEditHistory = QueueEditHistory<QueueOccurrence<Audio>>();
+  List<QueueOccurrence<Audio>> _queueOccurrences = [];
+  List<QueueOccurrence<Audio>> _backupOccurrences = [];
+  final queueStopBoundary = QueueStopBoundary();
   final segmentLoop = SegmentLoopController();
+
+  QueueOccurrence<Audio>? get _currentOccurrence {
+    final index = _currentQueueIndex;
+    return index >= 0 && index < _queueOccurrences.length
+        ? _queueOccurrences[index]
+        : null;
+  }
+
+  int? queueOccurrenceId(int index) =>
+      index >= 0 && index < _queueOccurrences.length
+          ? _queueOccurrences[index].id
+          : null;
+
+  String? get queueStopTargetLabel {
+    final index = _queueOccurrences
+        .indexWhere((item) => item.id == queueStopBoundary.target);
+    return index < 0
+        ? null
+        : '${index + 1} · ${_queueOccurrences[index].item.displayTitle}';
+  }
+
+  String? get queueStopBlockedReason => !canEditQueue
+      ? '歌曲正在加载，请稍后重试'
+      : segmentLoop.enabled
+          ? '请先关闭 A-B 循环，再设置停止目标'
+          : playMode.value == PlayMode.singleLoop
+              ? '请先关闭单曲循环，再设置停止目标'
+              : null;
+
+  bool stopAfterQueueItem(int index) {
+    final blocked = queueStopBlockedReason;
+    if (blocked != null) {
+      showTextOnSnackBar(blocked);
+      return false;
+    }
+    final id = queueOccurrenceId(index);
+    if (id == null) return false;
+    stopAfterCurrent.value = false;
+    queueStopBoundary.arm(id);
+    return true;
+  }
+
+  bool stopAfterQueueRound() => stopAfterQueueItem(playlist.value.length - 1);
+  void cancelQueueStop() =>
+      queueStopBoundary.cancel(QueueStopCancelReason.userCancelled);
+
+  void setStopAfterCurrent(bool enabled) {
+    if (enabled && queueStopBlockedReason != null) {
+      showTextOnSnackBar(queueStopBlockedReason!);
+      return;
+    }
+    if (enabled) cancelQueueStop();
+    stopAfterCurrent.value = enabled;
+  }
+
+  void _onQueueStopChanged() {
+    final reason = queueStopBoundary.lastCancellation;
+    if (reason != null && !_closed) {
+      showTextOnSnackBar(switch (reason) {
+        QueueStopCancelReason.removed => '停止目标已被移除，本次停止已取消',
+        QueueStopCancelReason.sourceReplaced => '播放来源已替换，本次停止已取消',
+        QueueStopCancelReason.manuallyPassed => '已手动越过停止目标，本次停止已取消',
+        QueueStopCancelReason.targetFailed => '停止目标播放失败，本次停止已取消',
+        QueueStopCancelReason.sleepTimer => '睡眠定时已到，本次停止目标已取消',
+        QueueStopCancelReason.userCancelled => '已取消本次停止目标',
+      });
+    }
+    if (!_closed) notifyListeners();
+  }
+
+  void _publishQueue() {
+    _playlistBackup = [for (final entry in _backupOccurrences) entry.item];
+    playlist.value = [for (final entry in _queueOccurrences) entry.item];
+    queueStopBoundary.retain(_queueOccurrences.map((entry) => entry.id));
+  }
+
+  void _replaceQueue(List<Audio> items, {List<Audio>? backup}) {
+    _queueEditHistory.clear(QueueHistoryInvalidation.queueReplaced);
+    queueStopBoundary.cancel(QueueStopCancelReason.sourceReplaced);
+    _queueOccurrences = [for (final item in items) QueueOccurrence(item)];
+    _backupOccurrences = backup == null
+        ? List.of(_queueOccurrences)
+        : _mapQueueOrder(backup, _queueOccurrences);
+    _publishQueue();
+  }
+
+  List<QueueOccurrence<Audio>> _mapQueueOrder(
+      List<Audio> items, List<QueueOccurrence<Audio>> source) {
+    final buckets = <Object, List<QueueOccurrence<Audio>>>{};
+    for (final entry in source) {
+      (buckets[queueTrackIdentity(entry.item)] ??= []).add(entry);
+    }
+    final used = <Object, int>{};
+    return [
+      for (final item in items)
+        () {
+          final key = queueTrackIdentity(item);
+          final offset = used.update(key, (n) => n + 1, ifAbsent: () => 0);
+          final bucket = buckets[key];
+          return bucket != null && offset < bucket.length
+              ? bucket[offset].withItem(item)
+              : QueueOccurrence(item);
+        }()
+    ];
+  }
 
   bool get canEditQueue =>
       !_closed &&
@@ -388,22 +515,49 @@ class PlaybackService extends ChangeNotifier {
   bool get canUndoQueueEdit =>
       canEditQueue &&
       _queueEditHistory.canUndo(
-          playlist.value, _playlistBackup, _currentQueueIndex);
+          _queueOccurrences, _backupOccurrences, _currentQueueIndex);
 
-  void _applyQueueSnapshot(QueueSnapshot<Audio> snapshot) {
+  bool get canRedoQueueEdit =>
+      canEditQueue &&
+      _queueEditHistory.canRedo(
+          _queueOccurrences, _backupOccurrences, _currentQueueIndex);
+
+  String queueHistoryReason({bool redo = false}) {
+    if (!canEditQueue) return '歌曲正在加载，请稍后重试';
+    return switch (_queueEditHistory.invalidation) {
+      QueueHistoryInvalidation.capacity => '队列过大，当前操作不能撤销或重做',
+      QueueHistoryInvalidation.physicalDeletion => '文件已删除，队列历史已清空',
+      QueueHistoryInvalidation.sourceChanged => '已切换播放出现项，队列历史已清空',
+      QueueHistoryInvalidation.queueReplaced => '播放队列已替换，队列历史已清空',
+      QueueHistoryInvalidation.shuffleChanged => '随机顺序已改变，队列历史已清空',
+      QueueHistoryInvalidation.contextChanged ||
+      QueueHistoryInvalidation.closed =>
+        '播放上下文已改变，队列历史已清空',
+      null => redo ? '没有可重做的队列操作' : '没有可撤销的队列操作',
+    };
+  }
+
+  void _applyQueueSnapshot(QueueSnapshot<QueueOccurrence<Audio>> snapshot) {
     _playlistIndex = snapshot.currentIndex < 0 ? null : snapshot.currentIndex;
-    _playlistBackup = snapshot.backup;
-    playlist.value = snapshot.items;
+    _backupOccurrences = snapshot.backup;
+    _queueOccurrences = snapshot.items;
+    _shuffleCycle = null;
+    _publishQueue();
     _schedulePlaybackStateSave();
     notifyListeners();
   }
 
-  void _commitQueueEdit(QueueEdit<Audio> edit, List<Audio> backup) {
-    final before =
-        QueueSnapshot(playlist.value, _playlistBackup, _currentQueueIndex);
+  void _commitQueueEdit(QueueEdit<QueueOccurrence<Audio>> edit,
+      List<QueueOccurrence<Audio>> backup) {
+    final before = QueueSnapshot(
+        _queueOccurrences, _backupOccurrences, _currentQueueIndex);
     final after = QueueSnapshot(edit.items, backup, edit.currentIndex);
-    _queueEditHistory.record(before, after);
+    final recorded = _queueEditHistory.record(before, after);
     _applyQueueSnapshot(after);
+    if (!recorded &&
+        _queueEditHistory.invalidation == QueueHistoryInvalidation.capacity) {
+      showTextOnSnackBar(queueHistoryReason());
+    }
   }
 
   /// Restore only queue membership/order. The active decoder, seek position,
@@ -411,9 +565,18 @@ class PlaybackService extends ChangeNotifier {
   bool undoQueueEdit() {
     if (!canEditQueue) return false;
     final previous = _queueEditHistory.undo(
-        playlist.value, _playlistBackup, _currentQueueIndex);
+        _queueOccurrences, _backupOccurrences, _currentQueueIndex);
     if (previous == null) return false;
     _applyQueueSnapshot(previous);
+    return true;
+  }
+
+  bool redoQueueEdit() {
+    if (!canEditQueue) return false;
+    final next = _queueEditHistory.redo(
+        _queueOccurrences, _backupOccurrences, _currentQueueIndex);
+    if (next == null) return false;
+    _applyQueueSnapshot(next);
     return true;
   }
 
@@ -441,6 +604,9 @@ class PlaybackService extends ChangeNotifier {
   bool setSegmentLoopEnabled(bool enabled) {
     if (!canUseSegmentLoop) return false;
     segmentLoop.setEnabled(enabled);
+    if (segmentLoop.enabled && queueStopBoundary.active) {
+      showTextOnSnackBar('停止目标已保留；请关闭 A-B 循环以继续前进');
+    }
     if (segmentLoop.enabled) _repeatSegment();
     return segmentLoop.enabled;
   }
@@ -451,14 +617,14 @@ class PlaybackService extends ChangeNotifier {
     final queue = playlist.value;
     final current = queueIndexForTrack(queue, nowPlaying?.path,
         preferredIndex: _playlistIndex);
-    final edit = QueueEdit.remove(queue, current, index);
+    final edit = QueueEdit.remove(_queueOccurrences, current, index);
     if (edit == null) return false;
     final backup = shuffle.value
-        ? List<Audio>.from(_playlistBackup)
-        : List<Audio>.from(edit.items);
+        ? List<QueueOccurrence<Audio>>.from(_backupOccurrences)
+        : List<QueueOccurrence<Audio>>.from(edit.items);
     if (shuffle.value) {
       final removed =
-          backup.indexWhere((item) => item.path == queue[index].path);
+          backup.indexWhere((item) => item.id == _queueOccurrences[index].id);
       if (removed >= 0) backup.removeAt(removed);
     }
     _commitQueueEdit(edit, backup);
@@ -469,9 +635,9 @@ class PlaybackService extends ChangeNotifier {
     if (!canEditQueue) return false;
     final current = queueIndexForTrack(playlist.value, nowPlaying?.path,
         preferredIndex: _playlistIndex);
-    final edit = QueueEdit.moveNext(playlist.value, current, index);
+    final edit = QueueEdit.moveNext(_queueOccurrences, current, index);
     if (edit == null) return false;
-    _commitQueueEdit(edit, shuffle.value ? _playlistBackup : edit.items);
+    _commitQueueEdit(edit, shuffle.value ? _backupOccurrences : edit.items);
     return true;
   }
 
@@ -480,7 +646,7 @@ class PlaybackService extends ChangeNotifier {
     final current = queueIndexForTrack(playlist.value, nowPlaying!.path,
         preferredIndex: _playlistIndex);
     if (current < 0 || playlist.value.length <= 1) return false;
-    final kept = playlist.value[current];
+    final kept = _queueOccurrences[current];
     _commitQueueEdit(QueueEdit([kept], 0), [kept]);
     return true;
   }
@@ -490,12 +656,13 @@ class PlaybackService extends ChangeNotifier {
   int deduplicateQueue() {
     if (!canEditQueue) return 0;
     final queue = playlist.value;
-    final edit = QueueEdit.deduplicate(queue, _currentQueueIndex,
-        keyOf: queueTrackIdentity);
+    final edit = QueueEdit.deduplicate(_queueOccurrences, _currentQueueIndex,
+        keyOf: (entry) => queueTrackIdentity(entry.item));
     if (edit == null) return 0;
     final backup = shuffle.value
-        ? QueueEdit.deduplicatedBackup(_playlistBackup, edit.items,
-            keyOf: queueTrackIdentity)
+        ? _backupOccurrences
+            .where((entry) => edit.items.contains(entry))
+            .toList()
         : edit.items;
     _commitQueueEdit(edit, backup);
     return queue.length - edit.items.length;
@@ -506,32 +673,32 @@ class PlaybackService extends ChangeNotifier {
   Future<void>? _sessionRestoreFuture;
 
   void replaceAudioReference(String oldPath, Audio audio) {
-    _queueEditHistory.mapItems((item) => item.path == oldPath ? audio : item);
-    List<Audio> replaceIn(List<Audio> list) => [
-          for (final item in list) item.path == oldPath ? audio : item,
-        ];
+    QueueOccurrence<Audio> replace(QueueOccurrence<Audio> entry) =>
+        entry.item.path == oldPath ? entry.withItem(audio) : entry;
+    _queueEditHistory.mapItems(replace);
 
     if (nowPlaying?.path == oldPath) {
       nowPlaying = audio;
     }
-    playlist.value = replaceIn(playlist.value);
-    _playlistBackup = replaceIn(_playlistBackup);
+    _queueOccurrences = _queueOccurrences.map(replace).toList();
+    _backupOccurrences = _backupOccurrences.map(replace).toList();
+    _publishQueue();
     _schedulePlaybackStateSave();
     notifyListeners();
   }
 
   void refreshAudioReferences(Map<String, Audio> audioByPath) {
-    _queueEditHistory.mapItems((item) => audioByPath[item.path] ?? item);
-    List<Audio> refresh(List<Audio> list) => [
-          for (final item in list) audioByPath[item.path] ?? item,
-        ];
+    QueueOccurrence<Audio> refresh(QueueOccurrence<Audio> entry) =>
+        entry.withItem(audioByPath[entry.item.path] ?? entry.item);
+    _queueEditHistory.mapItems(refresh);
 
     final nowPlayingPath = nowPlaying?.path;
     if (nowPlayingPath != null) {
       nowPlaying = audioByPath[nowPlayingPath] ?? nowPlaying;
     }
-    playlist.value = refresh(playlist.value);
-    _playlistBackup = refresh(_playlistBackup);
+    _queueOccurrences = _queueOccurrences.map(refresh).toList();
+    _backupOccurrences = _backupOccurrences.map(refresh).toList();
+    _publishQueue();
     if (nowPlayingPath != null) {
       final refreshedIndex = queueIndexForTrack(
         playlist.value,
@@ -611,25 +778,22 @@ class PlaybackService extends ChangeNotifier {
   /// deleted song was active, keep the queue moving at the same logical slot.
   void commitAudioDeletion(PlaybackAudioDeletionTicket ticket) {
     if (ticket._resolved) return;
-    _queueEditHistory.clear();
+    _queueEditHistory.clear(QueueHistoryInvalidation.physicalDeletion);
     ticket._resolved = true;
     if (_sameAudioPath(_deletingAudioPath, ticket.path)) {
       _deletingAudioPath = null;
     }
 
-    final filtered = [
-      for (final audio in playlist.value)
-        if (!path_util.equals(audio.path, ticket.path) &&
-            !path_util.equals(audio.localFilePath, ticket.path))
-          audio,
-    ];
-    _playlistBackup = [
-      for (final audio in _playlistBackup)
-        if (!path_util.equals(audio.path, ticket.path) &&
-            !path_util.equals(audio.localFilePath, ticket.path))
-          audio,
-    ];
-    playlist.value = filtered;
+    final oldCurrent = _currentOccurrence?.id;
+    bool keep(QueueOccurrence<Audio> entry) =>
+        !path_util.equals(entry.item.path, ticket.path) &&
+        !path_util.equals(entry.item.localFilePath, ticket.path);
+    _queueOccurrences = _queueOccurrences.where(keep).toList();
+    _backupOccurrences = _backupOccurrences.where(keep).toList();
+    _playlistIndex =
+        _queueOccurrences.indexWhere((entry) => entry.id == oldCurrent);
+    _publishQueue();
+    final filtered = playlist.value;
 
     final stillDisplaysDeletedSource =
         _sameAudioPath(nowPlaying?.path, ticket.path);
@@ -698,6 +862,9 @@ class PlaybackService extends ChangeNotifier {
   void setPlayMode(PlayMode playMode) {
     if (_closed || this.playMode.value == playMode) return;
     this.playMode.value = playMode;
+    if (playMode == PlayMode.singleLoop && queueStopBoundary.active) {
+      showTextOnSnackBar('停止目标已保留；请关闭单曲循环以继续前进');
+    }
     _pref.playMode = playMode;
     _scheduleModePreferenceSave();
   }
@@ -745,7 +912,21 @@ class PlaybackService extends ChangeNotifier {
       }
 
       cancelSleepTimer();
-      if (playerState == PlayerState.playing) pause();
+      queueStopBoundary.sleepExpired();
+      stopAfterCurrent.value = false;
+      // Invalidate an in-flight open before it can start after the timer.
+      if (resolvingAudioPath.value != null) {
+        _sourceRequestToken++;
+        OnlineMusicService.instance.cancelPendingStreamResolution();
+        _player.cancelPendingSource();
+        resolvingAudioPath.value = null;
+        isBuffering.value = false;
+        _loadingPlaylistIndex = null;
+      }
+      if (playerState == PlayerState.playing ||
+          playerState == PlayerState.stalled) {
+        pause();
+      }
     });
   }
 
@@ -848,29 +1029,44 @@ class PlaybackService extends ChangeNotifier {
   /// Resolve/open first; only a successful native source becomes nowPlaying.
   void _loadAndPlay(int audioIndex, List<Audio> playlist,
       {bool allowTrackResume = false}) {
-    if (_closed) return;
+    unawaited(_beginLoadAndPlay(audioIndex, playlist,
+        allowTrackResume: allowTrackResume));
+  }
+
+  Future<bool> _beginLoadAndPlay(int audioIndex, List<Audio> playlist,
+      {bool allowTrackResume = false,
+      double? initialPosition,
+      bool Function()? stillCurrent}) async {
+    if (_closed || stillCurrent?.call() == false) return false;
     unawaited(_captureTrackResume(force: true));
     segmentLoop.clear();
     if (audioIndex >= 0 &&
         audioIndex < playlist.length &&
         _sameAudioPath(
             _deletingAudioPath, playlist[audioIndex].localFilePath)) {
-      return;
+      return false;
     }
     final token = ++_sourceRequestToken;
     OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
-    _queueEditHistory.clear();
-    unawaited(_loadAndPlayResolved(token, audioIndex, playlist,
-        allowTrackResume: allowTrackResume, seekRevision: _manualSeekRevision));
+    _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
+    final occurrence = queueOccurrenceId(audioIndex);
+    if (occurrence != null) queueStopBoundary.loading(occurrence, token);
+    return _loadAndPlayResolved(token, audioIndex, playlist,
+        allowTrackResume: allowTrackResume,
+        seekRevision: _manualSeekRevision,
+        initialPosition: initialPosition,
+        stillCurrent: stillCurrent);
   }
 
-  Future<void> _loadAndPlayResolved(
+  Future<bool> _loadAndPlayResolved(
     int token,
     int audioIndex,
     List<Audio> playlist, {
     required bool allowTrackResume,
     required int seekRevision,
+    double? initialPosition,
+    bool Function()? stillCurrent,
   }) async {
     try {
       if (audioIndex < 0 || audioIndex >= playlist.length) {
@@ -884,14 +1080,16 @@ class PlaybackService extends ChangeNotifier {
           ? (await OnlineMusicService.instance.resolveStreamUrl(target))
               .toString()
           : target.localFilePath;
-      if (!_isCurrentSourceRequest(token)) return;
+      if (!_isCurrentSourceRequest(token) || stillCurrent?.call() == false) {
+        return false;
+      }
       final applied = await _player.setSource(source,
           isUrl: target.isOnline,
           segment: target.cueTrack == null
               ? null
               : AudioSegment(
                   target.cueTrack!.startSeconds, target.cueTrack!.endSeconds));
-      if (!applied || !_isCurrentSourceRequest(token)) return;
+      if (!applied || !_isCurrentSourceRequest(token)) return false;
       if (allowTrackResume && target.isLocal) {
         try {
           final preferences = AppSettings.instance.trackResume.value;
@@ -916,7 +1114,7 @@ class PlaybackService extends ChangeNotifier {
           _reportResumeStorageError(error, trace);
         }
       }
-      if (!_isCurrentSourceRequest(token)) return;
+      if (!_isCurrentSourceRequest(token)) return false;
       if (nowPlaying != null) {
         PlaybackStatistics.instance.finish(markCompleted: false);
       }
@@ -931,9 +1129,32 @@ class PlaybackService extends ChangeNotifier {
       _observeNativeDuration(target);
       setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);
 
+      final started = await guardedPlaybackSeek(
+        isCurrent: () =>
+            _isCurrentSourceRequest(token) && stillCurrent?.call() != false,
+        open: () async => applied,
+        seek: () {
+          if (initialPosition == null) return;
+          if (!initialPosition.isFinite ||
+              initialPosition < 0 ||
+              initialPosition >= length) {
+            throw const FormatException('歌词位置超出歌曲时长');
+          }
+          _player.seek(initialPosition);
+        },
+        start: _player.start,
+      );
+      if (!started) {
+        // setSource already committed this paused source. Keep its identity
+        // truthful even when a lyric revision invalidates the requested seek.
+        if (_isCurrentSourceRequest(token)) {
+          playService.lyricService.updateLyric();
+          _syncPausedToSystem();
+          notifyListeners();
+        }
+        return false;
+      }
       playService.lyricService.updateLyric();
-
-      _player.start();
       PlaybackStatistics.instance
           .start(nowPlaying!, playbackRate: _player.playbackRate);
       notifyListeners();
@@ -960,10 +1181,13 @@ class PlaybackService extends ChangeNotifier {
       _lastSessionProgressMs = (position * 1000).floor();
       _smtc.updateTimeProperties(progress: _lastSessionProgressMs);
       _schedulePlaybackStateSave(positionOverride: position);
+      return true;
     } catch (err, trace) {
       LOGGER.e("[load and play] $err");
       LOGGER.d("[load and play] trace", stackTrace: trace);
       if (_isCurrentSourceRequest(token)) {
+        final occurrence = queueOccurrenceId(audioIndex);
+        if (occurrence != null) queueStopBoundary.failed(occurrence, token);
         _recordProblem(err);
         showTextOnSnackBar(
           err is OnlineMusicException ? err.message : "播放失败：$err",
@@ -973,6 +1197,7 @@ class PlaybackService extends ChangeNotifier {
           notifyListeners();
         }
       }
+      return false;
     } finally {
       if (_isCurrentSourceRequest(token)) {
         isBuffering.value = false;
@@ -1103,7 +1328,7 @@ class PlaybackService extends ChangeNotifier {
       restoredQueue = cycle.items;
       index = 0;
     }
-    playlist.value = restoredQueue;
+    _replaceQueue(restoredQueue, backup: _playlistBackup);
     shuffle.value = desiredShuffle;
     _pref.shuffle = desiredShuffle;
     _scheduleModePreferenceSave();
@@ -1132,9 +1357,11 @@ class PlaybackService extends ChangeNotifier {
   }) {
     if (_closed) return Future.value();
     unawaited(_captureTrackResume(force: true));
-    _queueEditHistory.clear();
+    _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
     segmentLoop.clear();
     final token = ++_sourceRequestToken;
+    final occurrence = queueOccurrenceId(audioIndex);
+    if (occurrence != null) queueStopBoundary.loading(occurrence, token);
     OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
     return _loadPausedResolved(
@@ -1249,7 +1476,50 @@ class PlaybackService extends ChangeNotifier {
   /// 播放当前播放列表的第几项，只能用在播放列表界面
   void playIndexOfPlaylist(int audioIndex) {
     if (audioIndex < 0 || audioIndex >= playlist.value.length) return;
+    queueStopBoundary.manualJump(_queueOccurrences.map((e) => e.id).toList(),
+        _navigationIndex, audioIndex);
     _loadAndPlay(audioIndex, playlist.value, allowTrackResume: true);
+  }
+
+  /// Lyrics-search result activation: only this source request may seek/start.
+  /// It does not put an awaited seek behind a later unrelated song selection.
+  Future<bool> playAudioAt(Audio audio,
+      {required double position, bool Function()? stillCurrent}) async {
+    if (_closed ||
+        !position.isFinite ||
+        position < 0 ||
+        stillCurrent?.call() == false) {
+      return false;
+    }
+    if (canEditQueue && nowPlaying?.stableTrackId == audio.stableTrackId) {
+      final token = _sourceRequestToken;
+      if (position >= length) return false;
+      try {
+        if (!_isCurrentSourceRequest(token) || stillCurrent?.call() == false) {
+          return false;
+        }
+        final started = await guardedPlaybackSeek(
+          isCurrent: () =>
+              _isCurrentSourceRequest(token) && stillCurrent?.call() != false,
+          open: () async => true,
+          seek: () {
+            _manualSeekRevision++;
+            segmentLoop.manualSeek(position);
+            _player.seek(position);
+            playService.lyricService.findCurrLyricLine();
+            _lastSmtcProgressMs = -1000;
+            _schedulePlaybackStateSave(positionOverride: position);
+          },
+          start: start,
+        );
+        return started && playerState == PlayerState.playing;
+      } catch (_) {
+        return false;
+      }
+    }
+    _replaceQueue([audio]);
+    return _beginLoadAndPlay(0, playlist.value,
+        initialPosition: position, stillCurrent: stillCurrent);
   }
 
   /// 播放playlist[audioIndex]并设置播放列表为playlist
@@ -1275,24 +1545,27 @@ class PlaybackService extends ChangeNotifier {
             : queueOccurrenceIndex(playlist, audioIndex, this.playlist.value,
                 keyOf: (audio) => audio.path);
         if (indexInCycle >= 0) {
+          queueStopBoundary.manualJump(
+              _queueOccurrences.map((e) => e.id).toList(),
+              _navigationIndex,
+              indexInCycle);
           _loadAndPlay(indexInCycle, this.playlist.value,
               allowTrackResume: true);
           return;
         }
       }
 
-      _buildShuffleCycle(playlist, startIndex: audioIndex);
+      _buildShuffleCycle(playlist, startIndex: audioIndex, replaceQueue: true);
       _loadAndPlay(0, this.playlist.value, allowTrackResume: true);
     } else {
-      this.playlist.value = List.from(playlist);
-      _playlistBackup = List.from(playlist);
+      _replaceQueue(playlist);
       _loadAndPlay(audioIndex, this.playlist.value, allowTrackResume: true);
     }
   }
 
   void shuffleAndPlay(List<Audio> audios) {
     if (_closed || audios.isEmpty) return;
-    _buildShuffleCycle(audios);
+    _buildShuffleCycle(audios, replaceQueue: true);
     shuffle.value = true;
     _pref.shuffle = true;
     _scheduleModePreferenceSave();
@@ -1311,16 +1584,17 @@ class PlaybackService extends ChangeNotifier {
   /// With an empty queue, match the existing single-track play-next behavior.
   bool enqueueAudios(List<Audio> audios, {bool next = false}) {
     if (!canEditQueue || audios.isEmpty) return false;
-    final additions = List<Audio>.of(audios);
+    final additions = [for (final audio in audios) QueueOccurrence(audio)];
     if (playlist.value.isEmpty) {
-      play(0, additions);
+      play(0, audios);
       return true;
     }
-    final edit = QueueEdit.insert(playlist.value, _navigationIndex, additions,
+    final edit = QueueEdit.insert(
+        _queueOccurrences, _navigationIndex, additions,
         next: next);
     final backup = shuffle.value
-        ? [..._playlistBackup, ...additions]
-        : List<Audio>.of(edit.items);
+        ? [..._backupOccurrences, ...additions]
+        : List<QueueOccurrence<Audio>>.of(edit.items);
     _commitQueueEdit(edit, backup);
     return true;
   }
@@ -1332,7 +1606,7 @@ class PlaybackService extends ChangeNotifier {
     _pref.shuffle = flag;
     _scheduleModePreferenceSave();
     if (flag == shuffle.value) return;
-    _queueEditHistory.clear();
+    _queueEditHistory.clear(QueueHistoryInvalidation.shuffleChanged);
 
     if (flag) {
       final queue = playlist.value;
@@ -1349,7 +1623,10 @@ class PlaybackService extends ChangeNotifier {
         _loadingPlaylistIndex = pendingIndex < 0 ? null : pendingIndex;
       }
       _shuffleCycle = null;
-      playlist.value = List.of(source);
+      _queueOccurrences = _playlistBackup.isEmpty
+          ? List.of(_queueOccurrences)
+          : List.of(_backupOccurrences);
+      _publishQueue();
       shuffle.value = false;
     }
     _schedulePlaybackStateSave();
@@ -1357,6 +1634,15 @@ class PlaybackService extends ChangeNotifier {
   }
 
   int _indexInShuffleSource(int index, List<Audio> source) {
+    if (index >= 0 && index < _queueOccurrences.length) {
+      final order = identical(source, playlist.value)
+          ? _queueOccurrences
+          : identical(source, _playlistBackup)
+              ? _backupOccurrences
+              : _mapQueueOrder(source, _queueOccurrences);
+      return order
+          .indexWhere((entry) => entry.id == _queueOccurrences[index].id);
+    }
     final cycle = _shuffleCycle;
     if (cycle?.appliesTo(playlist.value, source,
             sameItem: (left, right) => left.path == right.path) ==
@@ -1368,9 +1654,15 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _buildShuffleCycle(List<Audio> source,
-      {int? startIndex, String? avoidFirstPath}) {
+      {int? startIndex, String? avoidFirstPath, bool replaceQueue = false}) {
     if (source.isEmpty) return;
-    _queueEditHistory.clear();
+    if (replaceQueue) _replaceQueue(source);
+    _queueEditHistory.clear(QueueHistoryInvalidation.shuffleChanged);
+    final sourceOccurrences = identical(source, _playlistBackup)
+        ? _backupOccurrences
+        : identical(source, playlist.value)
+            ? _queueOccurrences
+            : _mapQueueOrder(source, _queueOccurrences);
     final currentSourceIndex =
         _indexInShuffleSource(_currentQueueIndex, source);
     final pendingSourceIndex = _indexInShuffleSource(_navigationIndex, source);
@@ -1386,8 +1678,11 @@ class PlaybackService extends ChangeNotifier {
       _loadingPlaylistIndex = pendingIndex < 0 ? null : pendingIndex;
     }
     _shuffleCycle = cycle;
-    _playlistBackup = cycle.source;
-    playlist.value = cycle.items;
+    _backupOccurrences = List.of(sourceOccurrences);
+    _queueOccurrences = [
+      for (final index in cycle.sourceIndices) sourceOccurrences[index]
+    ];
+    _publishQueue();
   }
 
   bool _advanceQueue({required bool automatic}) {
@@ -1399,6 +1694,11 @@ class PlaybackService extends ChangeNotifier {
         shuffle: shuffle.value,
         automatic: automatic);
     if (step.index == null) return false;
+    if (!automatic) {
+      queueStopBoundary.manualJump(_queueOccurrences.map((e) => e.id).toList(),
+          currentIndex, step.index!,
+          adjacent: true);
+    }
     if (step.newShuffleCycle) {
       final currentPath =
           currentIndex >= 0 && currentIndex < playlist.value.length
@@ -1424,8 +1724,13 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _autoNextAudio() {
+    if (!queueStopBoundary.canAdvanceAutomatically) {
+      _syncPausedToSystem();
+      return;
+    }
     if (stopAfterCurrent.value) {
       stopAfterCurrent.value = false;
+      queueStopBoundary.suspendAdvance();
       _syncPausedToSystem();
       return;
     }
@@ -1445,6 +1750,9 @@ class PlaybackService extends ChangeNotifier {
       newIndex = playlist.value.length - 1;
     }
 
+    queueStopBoundary.manualJump(
+        _queueOccurrences.map((e) => e.id).toList(), _navigationIndex, newIndex,
+        adjacent: true);
     _loadAndPlay(newIndex, playlist.value);
   }
 
@@ -1468,6 +1776,7 @@ class PlaybackService extends ChangeNotifier {
 
   /// 恢复播放
   void start() {
+    queueStopBoundary.resumeAdvance();
     if (_closed) return;
     try {
       if (nowPlaying == null) return;
@@ -1531,7 +1840,7 @@ class PlaybackService extends ChangeNotifier {
   Future<void> _close() async {
     final resumeWrite = _captureTrackResume(force: true);
     _closed = true;
-    _queueEditHistory.clear();
+    _queueEditHistory.clear(QueueHistoryInvalidation.closed);
     _sourceRequestToken += 1;
     OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
@@ -1592,6 +1901,8 @@ class PlaybackService extends ChangeNotifier {
     _shuffle.dispose();
     sleepTimerRemaining.dispose();
     stopAfterCurrent.dispose();
+    queueStopBoundary.removeListener(_onQueueStopChanged);
+    queueStopBoundary.dispose();
     segmentLoop.dispose();
     isBuffering.dispose();
     resolvingAudioPath.dispose();
