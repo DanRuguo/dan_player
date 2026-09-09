@@ -406,6 +406,10 @@ void main() {
       try {
         final lyrics = await api.lyrics(track);
         stdout.writeln('KUGOU LIVE lyric: ${lyrics.lyric.length} characters');
+      } on LyricUnavailableException {
+        // Instrumental recordings may legitimately have no lyric candidate;
+        // this must not prevent the independent media availability check.
+        stdout.writeln('KUGOU LIVE lyric: no usable lyric for this recording');
       } on CustomMusicSourceException catch (error) {
         stdout.writeln(
             'KUGOU LIVE lyric: ${error.kind.name} / HTTP ${error.statusCode}');

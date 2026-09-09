@@ -1,5 +1,7 @@
 # 自定义歌源 API 接入
 
+[返回项目说明](../README.md) · [go-music-api 配置示例](examples/go-music-api-jamendo.json)
+
 Dan Player 的自定义歌源使用显式能力声明。搜索只返回歌曲候选；播放或下载地址在用户选择歌曲后才解析。接口均为 `GET`，响应须为 UTF-8。下面的通用 v1 契约允许对象包在 `data` 字段中；网易云增强 API 等专用协议由对应适配器解析，不能只换地址当作通用 v1。
 
 ## Dan Player 通用 v1
@@ -119,7 +121,7 @@ Dan Player 的自定义歌源使用显式能力声明。搜索只返回歌曲候
 
 - `legacy-lyrics`：LRC API 的歌词协议；名称仅用于配置兼容，界面显示为普通第三方 API。内置 LRC API 可改名、改地址、停用或删除。
 - `kugou-v1`：独立实现的酷狗协议适配，参考 ZeroBit 的歌词、封面取用方式及 ECHO 的音源解析方式。搜索、歌词、歌曲信息、播放和下载分别使用可编辑的端点；评论没有默认端点，不宣称支持。
-- `netease-api-v1`：连接自行部署的网易云 Node.js API / 增强版。设置中“添加内置预设 → 网易云增强 API”可添加完整可编辑配置，默认关闭，地址 `http://127.0.0.1:3000/` 需要对应的真实服务。实际协议适配及联网结果见 发布前接入记录。
+- `netease-api-v1`：连接自行部署的网易云 Node.js API / 增强版。设置中“添加内置预设 → 网易云增强 API”可添加完整可编辑配置，默认关闭，地址 `http://127.0.0.1:3000/` 需要对应的真实服务。
 - `go-music-api-v1`：连接用户自行部署的 [`go-music-api` 固定提交](https://github.com/guohuiyuan/go-music-api/tree/bacdfbe6cf6a5ba7331463d2039e3aac915c627f) 兼容服务，默认使用完整路径 `/api/v1/music/search`、`/api/v1/music/lyric`、`/api/v1/music/cover` 与 `/api/v1/music/stream`；最后一个端点同时用于播放和下载代理。Dan Player 不提供或代理该服务器。
 - 通用 v1 配置声明下载能力即可尝试实际解析，不再强制接口重复提供 `downloadAllowed: true`。搜索或解析返回 `downloadAllowed: false`、`canDownload: false`、要求登录或拒绝访问时仍会停止。`go-music-api-v1` 使用自托管流代理；它不需要额外的解析授权 JSON。
 - `go-music-api-v1` 的歌词需要该来源搜索结果中保存的不透明歌曲身份，不能仅凭任意本地歌曲的标题和艺术家查询。

@@ -28,6 +28,7 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
   PlaybackBookmarkStore? _store;
   List<PlaybackBookmark> _items = [];
   bool _busy = true;
+  bool _newerVersion = false;
   String? _error;
   bool _selectRange = false;
   double _point = 0;
@@ -57,6 +58,7 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
     setState(() {
       _busy = true;
       _error = null;
+      _newerVersion = false;
     });
     try {
       final store = widget.store ?? await PlaybackBookmarkStore.instance;
@@ -69,8 +71,15 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
         _store = store;
         _items = entries;
       });
-    } catch (_) {
-      if (mounted) setState(() => _error = '无法读取书签，请重试');
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _newerVersion = error is UnsupportedError;
+          _error = _newerVersion
+              ? '书签由更新版本创建，请更新播放器后再打开。'
+              : '无法读取书签，请重试';
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -287,7 +296,7 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                           const SizedBox(height: 12),
                           Text(ui(_error!),
                               style: TextStyle(color: scheme.error)),
-                          if (_store == null)
+                          if (_store == null && !_newerVersion)
                             TextButton(
                                 onPressed: _busy ? null : _load,
                                 child: Text(ui('重试'))),

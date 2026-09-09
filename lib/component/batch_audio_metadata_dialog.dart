@@ -98,18 +98,43 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
             padding: const EdgeInsets.all(12),
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: Icon(icon, color: scheme.primary),
-                  title: Text(ui(label)),
-                  subtitle: Text(
-                      enabled
-                          ? ui('设置为以下值')
-                          : '${ui('不修改')} · ${mixed ? ui('多个值') : controller.text.isEmpty ? ui('空值') : controller.text}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis),
-                  value: enabled,
-                  onChanged: widget.batch.busy ? null : setEnabled),
+              InkWell(
+                  onTap: widget.batch.busy ? null : () => setEnabled(!enabled),
+                  borderRadius: AppShape.smallRadius,
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Icon(icon, color: scheme.primary, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child: Text(ui(label),
+                                  key: ValueKey('batch-label-$label'),
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium)),
+                          const SizedBox(width: 8),
+                          Semantics(
+                              label: ui(label),
+                              child: Switch.adaptive(
+                                  key: ValueKey('batch-toggle-$label'),
+                                  value: enabled,
+                                  onChanged:
+                                      widget.batch.busy ? null : setEnabled)),
+                        ]),
+                        Padding(
+                            padding: const EdgeInsets.only(left: 32),
+                            child: Tooltip(
+                                message: mixed ? ui('多个值') : controller.text,
+                                child: Text(
+                                    enabled
+                                        ? ui('设置为以下值')
+                                        : '${ui('不修改')} · ${mixed ? ui('多个值') : controller.text.isEmpty ? ui('空值') : controller.text}',
+                                    key: ValueKey('batch-summary-$label'),
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis))),
+                      ])),
               if (enabled)
                 Padding(
                     padding: const EdgeInsets.only(top: 8),

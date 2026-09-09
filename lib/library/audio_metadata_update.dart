@@ -194,8 +194,11 @@ class AudioMetadataEditCoordinator {
       }
       // A form can outlive an automatic library reload. Compare against the
       // current model while preserving the user's requested field values.
+      // Fingerprinted batch edits were compared with the actual file during
+      // preview. A stale library cache cannot prove that their write is a no-op.
       final current = _currentAudio?.call(audio.path) ?? audio;
-      if (path_util.basename(current.path) == edit.fileName &&
+      if (edit.expectedFingerprint == null &&
+          path_util.basename(current.path) == edit.fileName &&
           current.title == edit.title &&
           current.artist == edit.artist &&
           current.album == edit.album &&

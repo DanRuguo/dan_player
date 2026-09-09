@@ -229,6 +229,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
   List<PlaybackBookmark> _items = [];
   String? _error;
   bool _busy = true;
+  bool _canRetryLoad = false;
   @override
   void initState() {
     super.initState();
@@ -241,6 +242,12 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _canRetryLoad = false;
+    });
     try {
       final items =
           await (widget.store ?? await PlaybackBookmarkStore.instance).all();
@@ -253,7 +260,14 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
           _resolveBookmarks();
         });
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) {
+        setState(() {
+          _canRetryLoad = e is! UnsupportedError;
+          _error = e is UnsupportedError
+              ? '书签由更新版本创建，请更新播放器后再打开。'
+              : '无法读取书签，请重试';
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -325,6 +339,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
 
   @override
   Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
     final visible = _items
         .where((b) =>
             '${b.label} ${_audio(b)?.displayTitle ?? ''} ${_audio(b)?.artist ?? ''}'
@@ -352,8 +367,11 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
           const SizedBox(height: 12),
           if (_busy) const LinearProgressIndicator(),
           if (_error != null)
-            Text(_error!,
+            Text(ui(_error!),
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          if (_canRetryLoad)
+            TextButton(
+                onPressed: _busy ? null : _load, child: Text(ui('重试'))),
           Flexible(
               fit: widget.embedded ? FlexFit.tight : FlexFit.loose,
               child: visible.isEmpty

@@ -31,6 +31,11 @@ const Map<String, List<String>> catalogPlayerRelease = {
     'ブックマークを読み込めません。再試行してください。',
     '북마크를 읽지 못했습니다. 다시 시도하세요.'
   ],
+  '书签由更新版本创建，请更新播放器后再打开。': [
+    'These bookmarks were created by a newer version. Update the player to open them.',
+    'このブックマークは新しいバージョンで作成されました。プレーヤーを更新してから開いてください。',
+    '더 최신 버전에서 만든 북마크입니다. 플레이어를 업데이트한 후 열어 주세요.',
+  ],
   '书签保存失败，请重试；已有书签已保留': [
     'Could not save. Existing bookmarks were preserved. Please retry.',
     '保存できませんでした。既存のブックマークは保持されています。再試行してください。',

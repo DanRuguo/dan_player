@@ -19,7 +19,7 @@ Windows x64 音乐播放器，基于 Flutter、Rust 与 BASS，支持本地曲�
 | --- | --- |
 | ![歌单](docs/images/playlists-dark-wide.png) | ![设置](docs/images/settings-light-wide.png) |
 
-预览使用实际界面组件与虚构数据。
+预览使用实际界面组件与虚构数据。[更多界面与功能预览](docs/images/README.md) 包含明暗主题、宽窄窗口和歌词等示例。
 
 ![音乐统计排行](docs/images/statistics-rankings-light.png)
 
@@ -45,7 +45,7 @@ Release 提供安装器、便携 ZIP 和校验文件。安装器支持原位升�
 
 遇到问题时，请在反馈中注明播放器版本、界面语言、窗口大小或显示缩放、复现步骤，以及相关截图。播放问题可附脱敏诊断；请不要上传私人音乐文件、凭据或完整个人目录。
 
-自定义歌源见 [接口说明](docs/custom-music-source-api.md) 和 [配置示例](docs/examples/)。
+自定义歌源见 [接口说明](docs/custom-music-source-api.md) 和 [go-music-api 配置示例](docs/examples/go-music-api-jamendo.json)。示例中的服务地址需要替换为自己部署的地址。
 
 ## 源码与构建
 

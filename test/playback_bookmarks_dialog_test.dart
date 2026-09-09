@@ -3,6 +3,7 @@ import 'dart:ui' as drawing;
 import 'package:dan_player/entry.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/component/listening_tools_dialog.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
@@ -64,6 +65,21 @@ class _MemoryBookmarks extends PlaybackBookmarkStore {
   @override
   Future<void> remove(String id) async =>
       entries.removeWhere((item) => item.id == id);
+}
+
+class _UnreadableBookmarks extends _MemoryBookmarks {
+  _UnreadableBookmarks(this.failure);
+  final Object failure;
+  int reads = 0;
+  @override
+  Future<List<PlaybackBookmark>> forTrack(String localPath,
+      {String? stableTrackId}) => _fail();
+  @override
+  Future<List<PlaybackBookmark>> all() => _fail();
+  Future<List<PlaybackBookmark>> _fail() async {
+    reads++;
+    throw failure;
+  }
 }
 
 class _BookmarkPlayback extends ChangeNotifier implements PlaybackService {
@@ -152,6 +168,55 @@ void main() {
         position: 12);
   });
   tearDown(() => service.dispose());
+
+  testWidgets('both bookmark views explain newer versions in all four languages',
+      (tester) async {
+    addTearDown(() => uiLanguage.value = UiLanguage.zh);
+    const message = '书签由更新版本创建，请更新播放器后再打开。';
+    for (final language in UiLanguage.values) {
+      uiLanguage.value = language;
+      if (language != UiLanguage.zh) expect(ui(message), isNot(message));
+      for (final library in [false, true]) {
+        final unavailable = _UnreadableBookmarks(
+            UnsupportedError('Bookmarks were created by a newer version'));
+        await tester.pumpWidget(MaterialApp(
+            key: ValueKey((language, library)),
+            home: Scaffold(
+                body: library
+                    ? BookmarkLibraryDialog(embedded: true, store: unavailable)
+                    : PlaybackBookmarksDialog(
+                        service: service, store: unavailable))));
+        await tester.pumpAndSettle();
+        expect(find.text(ui(message)), findsOneWidget);
+        expect(find.text(ui('重试')), findsNothing);
+        expect(find.byType(LinearProgressIndicator), findsNothing);
+        expect(unavailable.reads, 1);
+        expect(tester.takeException(), isNull);
+      }
+    }
+  });
+
+  testWidgets('ordinary bookmark read failures retain retry in both views',
+      (tester) async {
+    for (final library in [false, true]) {
+      final unavailable = _UnreadableBookmarks(const FormatException('broken'));
+      await tester.pumpWidget(MaterialApp(
+          key: ValueKey(library),
+          home: Scaffold(
+              body: library
+                  ? BookmarkLibraryDialog(embedded: true, store: unavailable)
+                  : PlaybackBookmarksDialog(
+                      service: service, store: unavailable))));
+      await tester.pumpAndSettle();
+      expect(find.text(ui('无法读取书签，请重试')), findsOneWidget);
+      await tester.ensureVisible(find.text(ui('重试')));
+      await tester.tap(find.text(ui('重试')));
+      await tester.pumpAndSettle();
+      expect(unavailable.reads, 2);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(tester.takeException(), isNull);
+    }
+  });
 
   for (final language in UiLanguage.values) {
     testWidgets('bookmark time controls render ${language.name}',

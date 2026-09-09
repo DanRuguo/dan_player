@@ -164,10 +164,11 @@ void main() {
     addTearDown(batch.dispose);
     final key = await mount(tester, BatchAudioMetadataDialog(batch: batch));
     for (final enabled in [(true, false), (false, true), (true, true)]) {
-      final controls = find.byType(SwitchListTile);
+      final controls = find.byWidgetPredicate((widget) =>
+          widget is Switch && widget.key.toString().contains('batch-toggle-'));
       for (var i = 0; i < 2; i++) {
         final desired = i == 0 ? enabled.$1 : enabled.$2;
-        if (tester.widget<SwitchListTile>(controls.at(i)).value != desired) {
+        if (tester.widget<Switch>(controls.at(i)).value != desired) {
           await tester.tap(controls.at(i));
           await tester.pumpAndSettle();
         }
@@ -184,6 +185,48 @@ void main() {
   }, variant: _windows);
 
   for (final language in UiLanguage.values) {
+    testWidgets(
+        'common field content aligns with unequal metadata ${language.name}',
+        (tester) async {
+      final songs = [
+        CategoryTestAudio('Short title',
+            artist: '秋山裕和',
+            album:
+                '美少女万華鏡 –呪われし伝説の少女– Original Soundtrack / Extended Album Edition',
+            path: '$_root/short.flac'),
+        CategoryTestAudio('A much longer song title — とても長い曲名と追加の説明',
+            artist: '秋山裕和',
+            album:
+                '美少女万華鏡 –呪われし伝説の少女– Original Soundtrack / Extended Album Edition',
+            path: '$_root/long.flac'),
+      ];
+      final batch = batchFor(songs);
+      addTearDown(batch.dispose);
+      final key = await mount(tester, BatchAudioMetadataDialog(batch: batch),
+          language: language, dark: language == UiLanguage.ko);
+      for (final part in ['label', 'summary', 'toggle', 'common']) {
+        final artist = tester.getRect(find.byKey(ValueKey('batch-$part-艺术家')));
+        final album = tester.getRect(find.byKey(ValueKey('batch-$part-专辑')));
+        expect(artist.top, album.top,
+            reason: '$part must start at the same height');
+        if (part != 'summary') expect(artist.bottom, album.bottom);
+      }
+      final shortSummary =
+          tester.getRect(find.byKey(const ValueKey('batch-summary-艺术家')));
+      final longSummary =
+          tester.getRect(find.byKey(const ValueKey('batch-summary-专辑')));
+      expect(longSummary.height, greaterThan(shortSummary.height));
+      await capture(tester, key, 'metadata-unequal-${language.name}');
+      await tester.tap(find.byKey(const ValueKey('batch-toggle-专辑')));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await capture(
+          tester, key, 'metadata-unequal-album-edit-${language.name}');
+    }, variant: _windows);
+  }
+
+  for (final language in UiLanguage.values) {
     testWidgets('batch draft editing controls ${language.name}',
         (tester) async {
       final batch = batchFor(audios());
@@ -193,7 +236,7 @@ void main() {
           scale: language == UiLanguage.zh ? 1 : 1.4,
           dark: language == UiLanguage.ko,
           language: language);
-      await tester.tap(find.byType(SwitchListTile).first);
+      await tester.tap(find.byKey(const ValueKey('batch-toggle-艺术家')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'Demo Artist');
       final titleToggle = find.byTooltip(ui('修改此曲标题')).first;

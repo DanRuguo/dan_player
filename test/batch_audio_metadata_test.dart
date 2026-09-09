@@ -20,6 +20,42 @@ MetadataFileSnapshot snapshot(Audio audio,
         reason: 'unsupported');
 
 void main() {
+  test('disk preview changes are written even when the cache matches the draft',
+      () async {
+    final audio = CategoryTestAudio('track', artist: 'Cached artist');
+    var diskArtist = 'Externally changed artist';
+    var writes = 0;
+    final coordinator = AudioMetadataEditCoordinator(
+        currentAudio: (_) => audio,
+        write: (path, edit) async {
+          writes++;
+          expect(edit.expectedFingerprint, '100_1');
+          diskArtist = edit.artist;
+          return path;
+        },
+        synchronize: (_, __) async {});
+    final batch = BatchAudioMetadata([audio],
+        currentAudio: (_) => audio,
+        inspect: (_) async => MetadataFileSnapshot(
+            fingerprint: '100_1',
+            title: audio.title,
+            artist: diskArtist,
+            album: audio.album),
+        apply: coordinator.apply);
+    addTearDown(batch.dispose);
+
+    await batch.preview(BatchMetadataDraft(artist: audio.artist));
+    expect(batch.targets.single.status, BatchMetadataStatus.ready);
+    await batch.apply();
+
+    expect(writes, 1,
+        reason: 'The disk snapshot, not the cached model, determines changes');
+    expect(diskArtist, 'Cached artist');
+    expect(batch.targets.single.status, BatchMetadataStatus.success);
+    await batch.apply();
+    expect(writes, 1, reason: 'A successful target must not be written again');
+  });
+
   test('native file identity deduplicates aliases and hard links', () async {
     final a = CategoryTestAudio('a'), alias = CategoryTestAudio('alias');
     var writes = 0;

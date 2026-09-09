@@ -107,6 +107,9 @@ class PlaybackBookmarkStore {
           throw const FormatException('Bookmark file is too large');
         }
         final data = jsonDecode(await candidate.readAsString());
+        if (data is Map && data['version'] is int && data['version'] > 1) {
+          throw UnsupportedError('Bookmarks were created by a newer version');
+        }
         if (data is! Map ||
             data['version'] != 1 ||
             data['bookmarks'] is! List) {
@@ -129,6 +132,9 @@ class PlaybackBookmarkStore {
         _loaded = true;
         _recoveredBackup = candidate.path != file.path;
         return;
+      } on UnsupportedError {
+        // A downgrade must not restore an older backup over newer user data.
+        rethrow;
       } catch (error) {
         failure = error;
       }

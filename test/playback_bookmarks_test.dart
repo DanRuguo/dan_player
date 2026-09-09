@@ -108,4 +108,41 @@ void main() {
     expect(restored.single.label, 'Practice');
     expect(restored.single.position, 2.5);
   });
+
+  test('newer bookmark data blocks reads and writes despite an older backup',
+      () async {
+    final backup = File('${file.path}.bak');
+    final newer = jsonEncode({
+      'version': 2,
+      'bookmarks': [],
+      'futureData': {'keep': 'newer-version contents'}
+    });
+    final older = jsonEncode({
+      'version': 1,
+      'bookmarks': [
+        {
+          'id': 'older',
+          'track': 'song.flac',
+          'label': 'Older bookmark',
+          'positionMs': 1000
+        }
+      ]
+    });
+    await file.writeAsString(newer);
+    await backup.writeAsString(older);
+    final before = await file.readAsBytes();
+    final backupBefore = await backup.readAsBytes();
+    final store = PlaybackBookmarkStore(file);
+
+    await expectLater(store.all(), throwsUnsupportedError);
+    await expectLater(store.forTrack('song.flac'), throwsUnsupportedError);
+    await expectLater(
+        store.add(localPath: 'song.flac', label: 'New', position: 2),
+        throwsUnsupportedError);
+    await expectLater(store.remove('older'), throwsUnsupportedError);
+
+    expect(await file.readAsBytes(), before);
+    expect(await backup.readAsBytes(), backupBefore);
+    expect(await File('${file.path}.tmp').exists(), isFalse);
+  });
 }
