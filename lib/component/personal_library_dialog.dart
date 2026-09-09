@@ -16,6 +16,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/personal_library.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
+import 'now_playing_bar_metrics.dart';
 
 Future<void> showPersonalTrackEditor(
         BuildContext context, List<Audio> targets) =>
@@ -521,6 +522,11 @@ class _PersonalLibraryDialogState extends State<PersonalLibraryDialog> {
                                   textAlign: TextAlign.center,
                                   style: Theme.of(context).textTheme.bodyLarge))
                           : ListView.builder(
+                              padding: EdgeInsets.only(
+                                  bottom: widget.embedded
+                                      ? NowPlayingBarMetrics.reservedSpace(
+                                          context)
+                                      : 0),
                               shrinkWrap: !widget.embedded,
                               itemCount: audios.length,
                               itemBuilder: (context, i) {

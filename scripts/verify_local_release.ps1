@@ -90,19 +90,7 @@ $sourcePairs = @{
     'Dan Player.exe' = 'build\windows\x64\runner\Release\Dan Player.exe'
     'rust_lib_dan_player.dll' = 'build\windows\x64\runner\Release\rust_lib_dan_player.dll'
     'data\app.so' = 'build\windows\x64\runner\Release\data\app.so'
-    'DESKTOP-EXPERIENCE.md' = 'docs\desktop-experience-26.0.3.md'
-    'SETTINGS-BACKGROUNDS.md' = 'docs\settings-backgrounds.md'
-    'LYRIC-EXPERIENCE.md' = 'docs\lyric-experience-26.0.3.md'
-    'VALIDATION.md' = ('docs\' + $receipt.Version + '-validation.md')
-    'CLASSIFICATION.md' = 'docs\library-categories.md'
-    'classification-readonly-qa.md' = 'docs\classification-readonly-qa.md'
-    'TASKBAR-LYRICS.md' = 'docs\taskbar-lyrics-feasibility.md'
-    'INTERACTION-FIXES.md' = 'docs\interaction-regression-20260830.md'
-    'OWNED-LYRIC-WINDOW.md' = 'docs\desktop-lyric-owned-palette.md'
-    'ui-polish-26.0.3.md' = 'docs\ui-polish-26.0.3.md'
-    'lyric-emphasis-spectrum-notes.md' = 'docs\lyric-emphasis-spectrum-notes.md'
-    'online-sources.md' = 'docs\online-sources.md'
-    'song-comments-notes.md' = 'docs\song-comments-notes.md'
+
 }
 if (-not $sharedExecutable) {
     $sourcePairs['desktop_lyric\desktop_lyric.exe'] = 'third_party\desktop_lyric\build\windows\x64\runner\Release\desktop_lyric.exe'

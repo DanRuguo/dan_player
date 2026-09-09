@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/statistics_bar_row.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
@@ -251,48 +252,23 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     sliver: SliverToBoxAdapter(
                       child: _SectionCard(
                         title: ui("占用空间最多"),
-                        child: Column(
-                          children: [
-                            for (final file in library.largestFiles)
-                              Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 7),
-                                child: LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final title = Tooltip(
-                                      message: file.path,
-                                      child: Text(
-                                        file.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    );
-                                    final size =
-                                        Text(formatLibraryBytes(file.bytes));
-                                    return constraints.maxWidth /
-                                                _statisticsTextScale(context) <
-                                            360
-                                        ? Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              title,
-                                              const SizedBox(height: 4),
-                                              size
-                                            ],
-                                          )
-                                        : Row(
-                                            children: [
-                                              Expanded(child: title),
-                                              const SizedBox(width: 12),
-                                              Flexible(child: size),
-                                            ],
-                                          );
-                                  },
-                                ),
-                              ),
-                          ],
-                        ),
+                        child: Column(children: [
+                          for (final file in library.largestFiles)
+                            StatisticsBarRow(
+                              label: file.title,
+                              detail: file.path,
+                              valueLabel: formatLibraryBytes(file.bytes),
+                              valueColumnWidth: StatisticsBarRow.measureValues(
+                                  context,
+                                  library.largestFiles.map((file) =>
+                                      formatLibraryBytes(file.bytes))),
+                              value: file.bytes.toDouble(),
+                              maximum: library.largestFiles.fold<double>(
+                                  0,
+                                  (largest, file) =>
+                                      math.max(largest, file.bytes.toDouble())),
+                            ),
+                        ]),
                       ),
                     ),
                   ),
@@ -308,13 +284,16 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           _RankingCard(
                             title: ui("播放最多"),
                             tracks: topPlay,
-                            value: (item) => "${item.playCount} 次",
+                            value: (item) => ui("{0} 次", [item.playCount]),
+                            magnitude: (item) => item.playCount.toDouble(),
                           ),
                           _RankingCard(
                             title: ui("收听最久"),
                             tracks: topTime,
                             value: (item) => _formatListeningDuration(
                                 item.listenMilliseconds),
+                            magnitude: (item) =>
+                                item.listenMilliseconds.toDouble(),
                           ),
                         ]
                             .indexed
@@ -324,7 +303,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                   child: entry.$2,
                                 ))
                             .toList();
-                        return constraints.maxWidth >= 800
+                        return constraints.maxWidth /
+                                    _statisticsTextScale(context) >=
+                                800
                             ? Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -407,7 +388,7 @@ class _ListeningBehavior extends StatelessWidget {
       _BehaviorMetric(
         icon: Symbols.play_circle,
         label: ui("播放次数"),
-        value: '${statistics.totalPlayCount} 次',
+        value: ui('{0} 次', [statistics.totalPlayCount]),
         detail: ui("{0} 首有记录 · 恢复播放不重复计次", [statistics.tracks.length]),
       ),
       _BehaviorMetric(
@@ -421,7 +402,11 @@ class _ListeningBehavior extends StatelessWidget {
     return Card.filled(
       key: const ValueKey('listening-behavior'),
       margin: EdgeInsets.zero,
-      shape: AppShape.surface,
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+          borderRadius: AppShape.controlRadius,
+          side:
+              BorderSide(color: scheme.outlineVariant.withValues(alpha: .55))),
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -1633,15 +1618,23 @@ class _SectionCard extends StatelessWidget {
     UiLanguageScope.watch(context);
     return Card.filled(
       margin: EdgeInsets.zero,
-      shape: AppShape.surface,
+      shape: RoundedRectangleBorder(
+          borderRadius: AppShape.controlRadius,
+          side: BorderSide(
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: .55))),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
       child: Padding(
-        padding: const EdgeInsets.all(18.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               title,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
                     fontWeight: FontWeight.bold,
                   ),
             ),
@@ -1655,109 +1648,41 @@ class _SectionCard extends StatelessWidget {
 }
 
 class _RankingCard extends StatelessWidget {
-  const _RankingCard({
-    required this.title,
-    required this.tracks,
-    required this.value,
-  });
-
+  const _RankingCard(
+      {required this.title,
+      required this.tracks,
+      required this.value,
+      required this.magnitude});
   final String title;
   final List<TrackPlaybackStatistics> tracks;
   final String Function(TrackPlaybackStatistics) value;
-
+  final double Function(TrackPlaybackStatistics) magnitude;
   @override
   Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
+    final maximum = tracks.fold<double>(
+        0, (maxValue, track) => math.max(maxValue, magnitude(track)));
     return _SectionCard(
-      title: title,
-      child: tracks.isEmpty
-          ? Padding(
-              padding: const EdgeInsets.symmetric(vertical: 28.0),
-              child: Center(child: Text(ui("播放歌曲后会在这里生成排行"))),
-            )
-          : Column(
-              children: [
-                for (var index = 0; index < tracks.length; index++)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final textScale =
-                            MediaQuery.textScalerOf(context).scale(14) / 14;
-                        final compact =
-                            constraints.maxWidth / math.max(1, textScale) < 360;
-                        final track = Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 15,
-                              child: Padding(
-                                padding: const EdgeInsets.all(3),
-                                child: FittedBox(child: Text('${index + 1}')),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    tracks[index].title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  Text(
-                                    '${tracks[index].artist} · '
-                                    '${tracks[index].online ? '联网' : '本地'}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
-                                  ),
-                                  if (tracks[index].legacyUnassigned)
-                                    Text(
-                                      ui('旧版未明确归属 · {0} 个候选', [
-                                        tracks[index].candidateTrackIds.length
-                                      ]),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        );
-                        return compact
-                            ? Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  track,
-                                  Padding(
-                                    padding:
-                                        const EdgeInsets.only(left: 42, top: 6),
-                                    child: Text(value(tracks[index])),
-                                  ),
-                                ],
-                              )
-                            : Row(
-                                children: [
-                                  Expanded(flex: 2, child: track),
-                                  const SizedBox(width: 12),
-                                  Flexible(
-                                    child: Text(
-                                      value(tracks[index]),
-                                      textAlign: TextAlign.right,
-                                    ),
-                                  ),
-                                ],
-                              );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-    );
+        title: title,
+        child: tracks.isEmpty
+            ? Padding(
+                padding: const EdgeInsets.symmetric(vertical: 28),
+                child: Center(child: Text(ui("播放歌曲后会在这里生成排行"))))
+            : Column(children: [
+                for (final (index, track) in tracks.indexed)
+                  StatisticsBarRow(
+                      label: track.title,
+                      detail:
+                          '${track.artist} · ${ui(track.online ? "联网" : "本地")}'
+                          '${track.legacyUnassigned ? " · ${ui('旧版未明确归属 · {0} 个候选', [
+                                  track.candidateTrackIds.length
+                                ])}" : ""}',
+                      rank: index + 1,
+                      valueColumnWidth: StatisticsBarRow.measureValues(
+                          context, tracks.map(value)),
+                      valueLabel: value(track),
+                      value: magnitude(track),
+                      maximum: maximum),
+              ]));
   }
 }
 

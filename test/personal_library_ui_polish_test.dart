@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:dan_player/page/personal_library_page.dart';
 import 'package:flutter/gestures.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'dart:ui' as drawing;
@@ -35,6 +36,16 @@ class _Personal extends PersonalLibrary {
               rating: name == 'Good Time' ? null : 4,
               tags: ['Night', 'Chorus', 'Favorite', 'Piano', 'Music'],
               modifiedAtUtc: DateTime.utc(2026, 9, 9))
+      };
+}
+
+class _ManyPersonal extends PersonalLibrary {
+  _ManyPersonal() : super(File('unused-many-personal'));
+  @override
+  Future<Map<String, PersonalTrack>> snapshot() async => {
+        for (var i = 0; i < 24; i++)
+          CategoryTestAudio('Row $i').stableTrackId:
+              PersonalTrack(rating: 4, modifiedAtUtc: DateTime.utc(2026, 9, 9))
       };
 }
 
@@ -110,6 +121,34 @@ void main() {
       '/settings'
     ]);
   });
+  testWidgets(
+      'personal song viewport extends behind floating bar with scroll clearance',
+      (tester) async {
+    tester.view.physicalSize = const Size(1000, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: PersonalLibraryPanel(personalStore: _ManyPersonal(), audios: [
+      for (var i = 0; i < 24; i++) CategoryTestAudio('Row $i')
+    ]))));
+    await tester.pumpAndSettle();
+    final list = find.byType(ListView);
+    expect(tester.getBottomRight(list).dy, 800);
+    final padding = tester.widget<ListView>(list).padding as EdgeInsets;
+    expect(padding.bottom, greaterThanOrEqualTo(80));
+    final scroll = tester
+        .state<ScrollableState>(
+            find.descendant(of: list, matching: find.byType(Scrollable)).first)
+        .position;
+    scroll.jumpTo(scroll.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(tester.getBottomRight(find.byType(AudioTile).last).dy,
+        lessThanOrEqualTo(800 - padding.bottom));
+    expect(tester.takeException(), isNull);
+  });
+
   for (final viewport in [const Size(380, 560), const Size(900, 420)]) {
     testWidgets('date range remains usable at $viewport', (tester) async {
       tester.view.physicalSize = viewport;

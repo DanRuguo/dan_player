@@ -12,7 +12,7 @@ function Assert-Policy([bool] $Condition, [string] $Message) {
     $script:checks++
 }
 
-$documents = Get-WindowsCiImpact $repo @('README.md', 'docs/release-26.0.5-snapshot.2.md')
+$documents = Get-WindowsCiImpact $repo @('README.md', 'docs/custom-music-source-api.md')
 Assert-Policy ($documents.Profile -eq 'documents') 'Documents must still have a lightweight successful check path.'
 $business = Get-WindowsCiImpact $repo @('test/queue_undo_test.dart')
 Assert-Policy ($business.Profile -eq 'business' -and 'test/queue_undo_test.dart' -cin $business.Tests) 'Dart fixture changes must retain their affected test.'

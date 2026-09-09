@@ -158,6 +158,37 @@ void main() {
     await capture(tester, key, 'metadata-mixed-light');
   }, variant: _windows);
 
+  for (final language in UiLanguage.values) {
+    testWidgets('batch draft editing controls ${language.name}',
+        (tester) async {
+      final batch = batchFor(audios());
+      addTearDown(batch.dispose);
+      final key = await mount(tester, BatchAudioMetadataDialog(batch: batch),
+          width: language == UiLanguage.zh ? 960 : 480,
+          scale: language == UiLanguage.zh ? 1 : 1.4,
+          dark: language == UiLanguage.ko,
+          language: language);
+      await tester.tap(find.byType(SwitchListTile).first);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'Demo Artist');
+      final titleToggle = find.byTooltip(ui('修改此曲标题')).first;
+      await tester.ensureVisible(titleToggle);
+      await tester.tap(titleToggle);
+      await tester.pumpAndSettle();
+      final titleField = find.byWidgetPredicate((widget) =>
+          widget is TextField && widget.decoration?.labelText == ui('标题'));
+      await tester.ensureVisible(titleField);
+      await tester.enterText(titleField, 'Edited demo title');
+      await tester.pumpAndSettle();
+      await capture(tester, key, 'metadata-edit-${language.name}');
+      await tester.tap(find.text(ui('预览修改')));
+      await tester.pumpAndSettle();
+      expect(batch.targets.first.edit?.title, 'Edited demo title');
+      expect(batch.targets.first.edit?.artist, 'Demo Artist');
+      expect(tester.takeException(), isNull);
+    }, variant: _windows);
+  }
+
   for (final narrow in [false, true]) {
     testWidgets(
         'production batch metadata preview ${narrow ? 'english narrow 200 percent' : 'dark long paths'}',

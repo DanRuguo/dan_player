@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -76,26 +77,53 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
     }
   }
 
-  Widget _commonField(String label, TextEditingController controller,
-          bool enabled, ValueChanged<bool> setEnabled, bool mixed) =>
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: Text(ui(label)),
-            subtitle: Text(enabled
-                ? ui('设置为以下值')
-                : '${ui('不修改')} · ${mixed ? ui('多个值') : controller.text.isEmpty ? ui('空值') : controller.text}'),
-            value: enabled,
-            onChanged: widget.batch.busy ? null : setEnabled),
-        if (enabled)
-          TextField(
-              controller: controller,
-              enabled: !widget.batch.busy,
-              decoration: InputDecoration(
-                  hintText: mixed ? ui('多个值') : null,
-                  helperText: ui('空白不会清除标签'),
-                  border: const OutlineInputBorder())),
-      ]);
+  Widget _commonField(
+      BuildContext context,
+      String label,
+      IconData icon,
+      TextEditingController controller,
+      bool enabled,
+      ValueChanged<bool> setEnabled,
+      bool mixed) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card.filled(
+        margin: EdgeInsets.zero,
+        color: scheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+            borderRadius: AppShape.controlRadius,
+            side: BorderSide(
+                color: enabled ? scheme.primary : scheme.outlineVariant)),
+        child: Padding(
+            padding: const EdgeInsets.all(12),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: Icon(icon, color: scheme.primary),
+                  title: Text(ui(label)),
+                  subtitle: Text(
+                      enabled
+                          ? ui('设置为以下值')
+                          : '${ui('不修改')} · ${mixed ? ui('多个值') : controller.text.isEmpty ? ui('空值') : controller.text}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                  value: enabled,
+                  onChanged: widget.batch.busy ? null : setEnabled),
+              if (enabled)
+                Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: TextField(
+                        controller: controller,
+                        enabled: !widget.batch.busy,
+                        decoration: InputDecoration(
+                            labelText: ui(label),
+                            prefixIcon: Icon(icon),
+                            hintText: mixed ? ui('多个值') : null,
+                            helperText: ui('空白不会清除标签'),
+                            helperMaxLines: 2))),
+            ])));
+  }
+
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
@@ -131,25 +159,58 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
                       Flexible(
                           child: ListView(shrinkWrap: true, children: [
                         if (!batch.previewed) ...[
-                          _commonField(
-                              '艺术家',
-                              _artist,
-                              _setArtist,
-                              (value) => setState(() => _setArtist = value),
-                              batch.commonValue((audio) => audio.artist) ==
-                                  null),
-                          _commonField(
-                              '专辑',
-                              _album,
-                              _setAlbum,
-                              (value) => setState(() => _setAlbum = value),
-                              batch.commonValue((audio) => audio.album) ==
-                                  null),
+                          LayoutBuilder(builder: (context, constraints) {
+                            final fields = [
+                              _commonField(
+                                  context,
+                                  '艺术家',
+                                  Symbols.person,
+                                  _artist,
+                                  _setArtist,
+                                  (value) => setState(() => _setArtist = value),
+                                  batch.commonValue((audio) => audio.artist) ==
+                                      null),
+                              _commonField(
+                                  context,
+                                  '专辑',
+                                  Symbols.album,
+                                  _album,
+                                  _setAlbum,
+                                  (value) => setState(() => _setAlbum = value),
+                                  batch.commonValue((audio) => audio.album) ==
+                                      null),
+                            ];
+                            return constraints.maxWidth /
+                                        MediaQuery.textScalerOf(context)
+                                            .scale(1) >=
+                                    640
+                                ? Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                        Expanded(child: fields[0]),
+                                        const SizedBox(width: 12),
+                                        Expanded(child: fields[1])
+                                      ])
+                                : Column(children: [
+                                    fields[0],
+                                    const SizedBox(height: 12),
+                                    fields[1]
+                                  ]);
+                          }),
                           Padding(
                               padding: const EdgeInsets.symmetric(vertical: 12),
-                              child: Text(ui('逐首标题'),
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium)),
+                              child: Row(children: [
+                                Icon(Symbols.queue_music,
+                                    color: scheme.primary, size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                    child: Text(ui('逐首标题'),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(color: scheme.primary)))
+                              ])),
                         ] else
                           Padding(
                               padding: const EdgeInsets.only(bottom: 12),
@@ -167,41 +228,80 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(target.audio.displayTitle,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleSmall),
-                                    const SizedBox(height: 4),
-                                    SelectableText(target.path,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall),
+                                    Row(children: [
+                                      DecoratedBox(
+                                          decoration: BoxDecoration(
+                                              color: scheme.primaryContainer,
+                                              borderRadius:
+                                                  AppShape.smallRadius),
+                                          child: Padding(
+                                              padding: const EdgeInsets.all(10),
+                                              child: Icon(Symbols.music_note,
+                                                  color:
+                                                      scheme.onPrimaryContainer,
+                                                  size: 22))),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                          child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                            Text(target.audio.displayTitle,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .titleSmall),
+                                            const SizedBox(height: 4),
+                                            Tooltip(
+                                                message: target.path,
+                                                child: SelectableText(
+                                                    target.path,
+                                                    maxLines: 1,
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodySmall
+                                                        ?.copyWith(
+                                                            color: scheme
+                                                                .onSurfaceVariant))),
+                                          ])),
+                                      if (!batch.previewed) ...[
+                                        const SizedBox(width: 8),
+                                        Tooltip(
+                                            message: ui('修改此曲标题'),
+                                            child: Switch.adaptive(
+                                                value: _titleEdits
+                                                    .contains(target.trackId),
+                                                onChanged: batch.busy ||
+                                                        !target.audio
+                                                            .canEditLocalFile
+                                                    ? null
+                                                    : (value) => setState(() {
+                                                          if (value) {
+                                                            _titleEdits.add(
+                                                                target.trackId);
+                                                          } else {
+                                                            _titleEdits.remove(
+                                                                target.trackId);
+                                                          }
+                                                        }))),
+                                      ],
+                                    ]),
                                     if (!batch.previewed) ...[
-                                      CheckboxListTile(
-                                          contentPadding: EdgeInsets.zero,
-                                          title: Text(ui('修改此曲标题')),
-                                          value: _titleEdits
-                                              .contains(target.trackId),
-                                          onChanged: batch.busy ||
-                                                  !target.audio.canEditLocalFile
-                                              ? null
-                                              : (value) => setState(() {
-                                                    if (value == true) {
-                                                      _titleEdits
-                                                          .add(target.trackId);
-                                                    } else {
-                                                      _titleEdits.remove(
-                                                          target.trackId);
-                                                    }
-                                                  })),
                                       if (_titleEdits.contains(target.trackId))
-                                        TextField(
-                                            controller: _titles[target.trackId],
-                                            enabled: !batch.busy,
-                                            decoration: InputDecoration(
-                                                labelText: ui('标题'),
-                                                border:
-                                                    const OutlineInputBorder())),
+                                        Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 14),
+                                            child: TextField(
+                                                controller:
+                                                    _titles[target.trackId],
+                                                enabled: !batch.busy,
+                                                decoration: InputDecoration(
+                                                    labelText: ui('标题'),
+                                                    prefixIcon: const Icon(
+                                                        Symbols.title),
+                                                    border:
+                                                        const OutlineInputBorder()))),
                                       if (!target.audio.canEditLocalFile)
                                         Text(ui(target.audio.isOnline
                                             ? '联网歌曲不能写入本地标签'

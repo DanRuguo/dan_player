@@ -35,8 +35,8 @@ class _PersonalLibraryPanelState extends State<PersonalLibraryPanel> {
       onChanged: (value) => setState(() => _bookmarks = value),
     );
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-          8, 0, 8, NowPlayingBarMetrics.reservedSpace(context)),
+      padding: EdgeInsets.fromLTRB(8, 0, 8,
+          _bookmarks ? NowPlayingBarMetrics.reservedSpace(context) : 0),
       child: _bookmarks
           ? BookmarkLibraryDialog(
               embedded: true, store: widget.bookmarkStore, header: tabs)
