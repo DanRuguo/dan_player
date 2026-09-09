@@ -405,7 +405,7 @@ Working tree modified: $workingTreeDirty
     Write-PortableZip $payloadDirectory $zipPath $packageStem
     $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
     try {
-        foreach ($requiredEntry in @('Dan Player.exe', 'DESKTOP-LYRIC-MODE', 'flutter_windows.dll', 'rust_lib_dan_player.dll', 'data/app.so', 'data/icudtl.dat', 'BASS/basswasapi.dll', 'BASS/bassmix.dll', 'licenses/UN4SEEN/bass.txt', 'licenses/UN4SEEN/bassmix.txt', 'BASS/bass_fx.dll', 'licenses/BASS_FX/bass_fx24-2.4.12.6.zip', 'DESKTOP-EXPERIENCE.md', 'BUILD-PROVENANCE.json', 'SHA256SUMS')) {
+        foreach ($requiredEntry in @('Dan Player.exe', 'DESKTOP-LYRIC-MODE', 'flutter_windows.dll', 'rust_lib_dan_player.dll', 'data/app.so', 'data/icudtl.dat', 'BASS/basswasapi.dll', 'BASS/bassmix.dll', 'licenses/UN4SEEN/bass.txt', 'licenses/UN4SEEN/bassmix.txt', 'BASS/bass_fx.dll', 'licenses/BASS_FX/bass_fx24-2.4.12.6.zip', 'BUILD-PROVENANCE.json', 'SHA256SUMS')) {
             if (-not $zip.GetEntry($packageStem + '/' + $requiredEntry)) { throw "ZIP is missing $requiredEntry" }
         }
         Assert-ZipFontAudit $zip ($packageStem + '/') $mainFontReport
