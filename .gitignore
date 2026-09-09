@@ -36,6 +36,14 @@ migrate_working_dir/
 /tool/
 /dist/
 
+# Machine-local notes and disposable validation output; keep source fixtures.
+/DEVELOPMENT.md
+/.migration/
+/.migrate_work/
+/coverage/
+/installer/build/
+/.pytest_cache/
+
 # Symbolication related
 app.*.symbols
 
