@@ -31,6 +31,20 @@ Release 提供安装器、便携 ZIP 和校验文件。安装器支持原位升�
 
 `Space` 播放／暂停，`Ctrl + Left/Right` 切歌，`Left/Right` 跳转 5 秒，`Ctrl + M` 切换迷你播放器，`F11` 全屏，`F1` 查看快捷键。
 
+### 曲库与个人整理
+
+导入音乐文件或文件夹后，可从音乐、分类和歌单页浏览。歌单支持嵌套组织、拖动排序和移入其他歌单；多选项以加粗边框突出显示。
+
+“分类 → 个人整理 → 歌曲”只显示评过分或添加过个人标签的歌曲，支持日期、评分、标签筛选和排序。个人评分与标签保存在播放器资料中，不写入音乐文件；“编辑信息”和“批量编辑标签”用于修改文件中的音乐元数据，保存前请核对变更预览。
+
+播放书签可保存单个时间点或时间段，在“全库书签”集中查找、播放和编辑。歌词详情页支持沉浸队列；可在设置的外观部分关闭播放条频谱音柱，保留进度条。播放详情将输出链路、音频处理和诊断状态分组展示，并支持导出脱敏诊断。
+
+### 数据与反馈
+
+设置中的“备份与恢复”提供本地资料备份入口。升级程序与备份个人资料是不同操作，安装目录中的程序文件不能替代曲库、歌单和设置备份。
+
+遇到问题时，请在反馈中注明播放器版本、界面语言、窗口大小或显示缩放、复现步骤，以及相关截图。播放问题可附脱敏诊断；请不要上传私人音乐文件、凭据或完整个人目录。
+
 自定义歌源见 [接口说明](docs/custom-music-source-api.md) 和 [配置示例](docs/examples/)。
 
 ## 源码与构建
@@ -45,15 +59,43 @@ Release 提供安装器、便携 ZIP 和校验文件。安装器支持原位升�
 | `scripts/` | 构建、校验与发布脚本 |
 | `docs/` | 接口说明、示例和界面图片 |
 
-需要 Flutter、Rust 和 Visual Studio 桌面 C++ 工作负载。依赖版本以锁文件为准。
+需要 Flutter、Rust 和 Visual Studio 桌面 C++ 工作负载。Dart 约束见 `pubspec.yaml`，依赖解析结果见 `pubspec.lock` 与 `rust/Cargo.lock`。
+
+### 调试与测试
+
+在仓库根目录执行，使用独立资料目录，避免调试影响日常曲库和设置：
 
 ```powershell
+$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-data/readme-debug'))
 flutter pub get
-flutter test
-.\scripts\build_windows_release.ps1
+flutter run -d windows
 ```
 
-构建脚本验证运行库后组装发布包；`-SkipSigning` 生成未签名产物。测试时将 `DAN_PLAYER_DATA_DIR` 设置为独立绝对路径，隔离曲库和设置。签名私钥、个人资料和本机开发记录不进入仓库。
+运行播放器需要准备 BASS 运行库；相关脚本为 `scripts/prepare_bass_runtime.ps1` 与 `scripts/prepare_bass_fx_runtime.ps1`。本机 SDK、运行库缓存和签名配置的实际路径集中记录在源码仓库外的 `DEVELOPMENT.md`。
+
+修改后优先运行对应组件测试；以下命令示例覆盖统计和详情排版：
+
+```powershell
+flutter test test/statistics_visualization_test.dart test/detail_diagnostics_layout_test.dart --no-pub
+.\scripts\verify_interaction_regressions.ps1
+```
+
+界面预览使用真实 Flutter 组件和隔离的虚构资料。`scripts/render_public_ui.ps1` 生成公开页面预览；渲染测试覆盖语言、窗口宽度和文字缩放，不能代替真实设备上的音频输出与 Windows 桌面集成检查。
+
+### 构建与发布
+
+本项目发布脚本使用工作区布局：源码在 `dan_player/`，同级 `tool/` 放置 Flutter、Rust 工具链和缓存，`dist/` 接收产物。`build_windows_release.ps1` 会检查依赖、运行发布门禁、构建 Windows 程序并校验字体与运行库。
+
+```powershell
+# 使用上述工作区布局，在源码仓库运行；无签名证书时：
+.\scripts\build_windows_release.ps1 -SkipSigning
+```
+
+`-SkipPackaging` 跳过便携包组装；`-NoRestore` 使用已恢复的依赖。正式签名需要单独配置证书。安装器由 `scripts/build_windows_installer.ps1` 构建，便携包和安装器分别通过 `verify_local_release.ps1`、`verify_windows_installer.ps1` 核验。
+
+发布前核对源码提交、测试收据、产物 SHA-256 和签名；预览版保持 prerelease，不替换稳定版 Latest。发布包包含所需许可证，不附带历史开发笔记。
+
+README 维护对用户和开发者有用的长期信息；本机路径、调试状态、当前产物和实测结果只维护在本地 `DEVELOPMENT.md`。签名私钥、个人资料、工具缓存、临时日志与历史 QA 不进入源码仓库。
 
 ## 许可证
 
