@@ -1,34 +1,69 @@
 <div align="center">
 
-# Dan Player
+<p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/images/RCE_logo_white.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/images/RCE_logo_transparent.png">
+    <img src="assets/images/RCE_logo_transparent.png" alt="RCE 品牌标志" width="128">
+  </picture>
+</p>
 
-**为你的本地音乐收藏而设计。**
+<h1>Dan Player</h1>
 
-面向 Windows x64 的音乐播放器，兼顾曲库整理、歌词体验与桌面交互。<br>
-以本地收听为核心，也支持联网音乐与自定义歌源。
+<p><strong>为你的本地音乐收藏而设计。</strong></p>
 
-[**下载稳定版**](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) · [体验预览版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.3) · [更新记录](https://github.com/DanRuguo/dan_player/releases) · [问题反馈](https://github.com/DanRuguo/dan_player/issues)
+<p>面向 Windows x64 的音乐播放器，兼顾曲库整理、歌词体验与桌面交互。<br>
+以本地收听为核心，也支持联网音乐与自定义歌源。</p>
 
-<sub>Windows x64 · Flutter / Rust / BASS · 中文 / English / 日本語 / 한국어</sub>
+<p align="center">
+  <a href="https://github.com/DanRuguo/dan_player/releases/latest"><img src="https://img.shields.io/github/v/release/DanRuguo/dan_player?style=flat&amp;labelColor=374151&amp;label=stable&amp;logo=github&amp;logoColor=white&amp;color=2563EB" alt="最新稳定版"></a>
+  <a href="https://github.com/DanRuguo/dan_player/releases"><img src="https://img.shields.io/github/v/release/DanRuguo/dan_player?style=flat&amp;labelColor=374151&amp;include_prereleases=true&amp;filter=v%2A-snapshot.%2A&amp;sort=semver&amp;label=preview&amp;color=D97706" alt="最新 snapshot 预览版"></a>
+  <a href="https://github.com/DanRuguo/dan_player/releases"><img src="https://img.shields.io/github/downloads/DanRuguo/dan_player/total?style=flat&amp;labelColor=374151&amp;label=downloads&amp;color=059669" alt="GitHub Release 附件下载量"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/DanRuguo/dan_player?style=flat&amp;labelColor=374151&amp;label=license&amp;color=64748B" alt="项目许可证"></a>
+</p>
+
+<p align="center">
+  <a href="#download"><img src="https://img.shields.io/badge/platform-Windows%20x64-0078D4?style=flat&amp;labelColor=374151" alt="平台：Windows x64"></a>
+  <a href="#development"><img src="https://img.shields.io/badge/Flutter-UI-02569B?style=flat&amp;labelColor=374151&amp;logo=flutter&amp;logoColor=white" alt="Flutter：界面"></a>
+  <a href="#development"><img src="https://img.shields.io/badge/Rust-Bridge-B45309?style=flat&amp;labelColor=374151&amp;logo=rust&amp;logoColor=white" alt="Rust：原生桥接"></a>
+  <a href="https://www.un4seen.com/bass.html"><img src="https://img.shields.io/badge/BASS-Audio-6750A4?style=flat&amp;labelColor=374151" alt="BASS：音频播放"></a>
+</p>
+
+<p>
+  <a href="https://github.com/DanRuguo/dan_player/releases/latest"><strong>下载稳定版</strong></a> ·
+  <a href="https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.3">体验预览版</a> ·
+  <a href="https://github.com/DanRuguo/dan_player/releases">更新记录</a> ·
+  <a href="https://github.com/DanRuguo/dan_player/issues/new/choose">问题反馈</a>
+</p>
+
+<p>
+  <strong>简体中文</strong> ·
+  <a href="README.en.md">English</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.ko.md">한국어</a>
+</p>
 
 </div>
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/library-dark-wide.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/library-light-wide.png">
     <img src="docs/images/library-light-wide.png" alt="Dan Player 音乐主页：本地曲库与播放控制，使用虚构演示数据" width="1200">
   </picture>
 </p>
 
 <p align="center">
-  <a href="#下载与安装">下载与安装</a> ·
-  <a href="#功能">功能</a> ·
-  <a href="#界面一览">界面一览</a> ·
-  <a href="#开始使用">开始使用</a> ·
-  <a href="#开发与构建">开发与构建</a>
+  <a href="#download">下载与安装</a> ·
+  <a href="#features">功能</a> ·
+  <a href="#screenshots">界面一览</a> ·
+  <a href="#quick-start">开始使用</a> ·
+  <a href="#development">开发与构建</a>
 </p>
 
 <a id="安装与使用"></a>
+
+<a id="download"></a>
 
 ## 下载与安装
 
@@ -42,6 +77,7 @@
 > **下载与签名说明**：自有程序使用 RCEIT.Inc 自签名证书，Windows 仍可能显示信任提示；安装器不会自动安装信任证书。旧签名版本请手动下载新安装器升级。预览版不替换稳定版 Latest；升级前建议通过播放器的“备份与恢复”保存个人资料。
 
 <a id="下载校验"></a>
+<a id="download-verification"></a>
 
 <details>
 <summary><strong>核对下载文件的 SHA-256</strong></summary>
@@ -55,6 +91,8 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 摘要一致表示文件内容与发布资产相符，不等同于 Windows 对签名证书的信任。请始终核对下载来源，不要通过关闭系统安全功能来处理来源不明的文件。
 
 </details>
+
+<a id="features"></a>
 
 ## 功能
 
@@ -72,6 +110,8 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 以上以当前仓库的功能为准，部分能力属于 26.0.5 预览版；已发布安装包的具体范围请查看对应 [Release 更新说明](https://github.com/DanRuguo/dan_player/releases)。
 
 联网音乐与自定义歌源可作为本地曲库的补充。自定义服务按实际声明的能力提供检索、歌词等功能，接入方式见 [自定义歌源 API](docs/custom-music-source-api.md)。
+
+<a id="screenshots"></a>
 
 ## 界面一览
 
@@ -92,6 +132,8 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 ![音乐统计与歌曲排行，使用虚构演示数据](docs/images/statistics-rankings-light.png)
 
 <sub>图片均复用仓库内的生产控件渲染资源，使用虚构曲目与隔离资料；用于展示界面，不代表实时音频或原生桌面效果测试。更多明暗主题、宽窄窗口和功能示例见 <a href="docs/images/README.md">界面图库</a>。</sub>
+
+<a id="quick-start"></a>
 
 ## 开始使用
 
@@ -117,11 +159,16 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 </details>
 
+<a id="documentation"></a>
+
 ## 文档与反馈
 
 [界面图库](docs/images/README.md) · [自定义歌源 API](docs/custom-music-source-api.md) · [go-music-api 配置示例](docs/examples/go-music-api-jamendo.json) · [全部发行版本](https://github.com/DanRuguo/dan_player/releases)
 
 配置示例中的服务地址需要替换为自己部署的地址。遇到问题时，请先查看 [已有 Issues](https://github.com/DanRuguo/dan_player/issues)，再通过 [反馈模板](https://github.com/DanRuguo/dan_player/issues/new/choose) 提交播放器版本、复现步骤，以及相关界面语言、窗口大小或显示缩放。播放问题可附脱敏诊断；请不要上传私人音乐文件、凭据或完整个人目录。
+
+<a id="源码与构建"></a>
+<a id="development"></a>
 
 ## 开发与构建
 
@@ -178,8 +225,12 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 
 仅维护必要的长期文档。本机开发笔记、历史 QA、临时日志、工具缓存、个人资料和签名私钥不进入源码仓库；公开界面资源集中在 `docs/images/`，随资源变更同步维护引用。
 
+<a id="license"></a>
+
 ## 许可证与致谢
 
 本项目按 [LICENSE](LICENSE) 分发；第三方组件保留各自许可，BASS 的使用与分发须遵守其官方许可。
 
 Dan Player 基于 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) 修改，感谢原作者提供的播放器基础、曲库结构和歌词体验。同时感谢 [desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge) 及 [Flutter](https://flutter.dev/) 与 Material Design。
+
+<sub>徽章由 <a href="https://shields.io/">Shields.io</a> 提供。下载量统计 Release 附件的下载次数，不等于用户数或安装量；技术徽章仅说明使用的技术，不声明最低支持版本。</sub>
