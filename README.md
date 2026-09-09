@@ -1,63 +1,134 @@
+<div align="center">
+
 # Dan Player
 
-Windows x64 音乐播放器，基于 Flutter、Rust 与 BASS，支持本地曲库、联网音乐、桌面歌词和四语言界面。
+**为你的本地音乐收藏而设计。**
 
-[稳定版 26.0.4](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) · [候选版 26.0.5-snapshot.3](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.3) · [更新记录](https://github.com/DanRuguo/dan_player/releases) · [反馈](https://github.com/DanRuguo/dan_player/issues)
+面向 Windows x64 的音乐播放器，兼顾曲库整理、歌词体验与桌面交互。<br>
+以本地收听为核心，也支持联网音乐与自定义歌源。
 
-![音乐主页](docs/images/library-light-wide.png)
+[**下载稳定版**](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) · [体验预览版](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.3) · [更新记录](https://github.com/DanRuguo/dan_player/releases) · [问题反馈](https://github.com/DanRuguo/dan_player/issues)
 
-## 功能
+<sub>Windows x64 · Flutter / Rust / BASS · 中文 / English / 日本語 / 한국어</sub>
 
-- 本地与联网播放，CUE 分轨、均衡器、响度均衡、逐曲续播和 A–B 循环。
-- 艺术家、专辑、格式、文件夹分类；嵌套歌单、智能歌单、M3U8 导入导出。
-- 个人评分、标签、播放书签、曲库健康检查与回收站。
-- 歌词匹配、编辑、校准，桌面歌词与迷你播放器。
-- 随封面变色的明暗主题，中文、英语、日语、韩语界面。
-- 听歌时段、曲库构成、文件占用和歌曲排行可视化。
+</div>
 
-| 歌单 | 设置 |
-| --- | --- |
-| ![歌单](docs/images/playlists-dark-wide.png) | ![设置](docs/images/settings-light-wide.png) |
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/library-dark-wide.png">
+    <img src="docs/images/library-light-wide.png" alt="Dan Player 音乐主页：本地曲库与播放控制，使用虚构演示数据" width="1200">
+  </picture>
+</p>
 
-预览使用实际界面组件与虚构数据。[更多界面与功能预览](docs/images/README.md) 包含明暗主题、宽窄窗口和歌词等示例。
+<p align="center">
+  <a href="#下载与安装">下载与安装</a> ·
+  <a href="#功能">功能</a> ·
+  <a href="#界面一览">界面一览</a> ·
+  <a href="#开始使用">开始使用</a> ·
+  <a href="#开发与构建">开发与构建</a>
+</p>
 
-![音乐统计排行](docs/images/statistics-rankings-light.png)
+<a id="安装与使用"></a>
 
-## 安装与使用
+## 下载与安装
 
-Release 提供安装器、便携 ZIP 和校验文件。安装器支持原位升级，成功后清理临时回滚资料；便携包完整解压后运行 `Dan Player.exe`。桌面歌词由同一程序启动独立进程。
+| 版本 | 适用场景 | 下载 |
+| --- | --- | --- |
+| **26.0.4 · 稳定版** | 日常收听，优先选择正式发行版本 | [安装器、便携 ZIP 与校验文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) |
+| **26.0.5-snapshot.3 · 预览版** | 体验个人整理、全库书签等新功能，作为正式版前的候选预览 | [安装器、便携 ZIP 与校验文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.3) |
 
-自有程序使用 RCEIT.Inc 自签名证书，Windows 可能显示信任提示；安装器不会自动安装信任证书。旧签名版本升级请手动下载新安装器。
+**安装版**运行安装器，支持原位升级；**便携版**完整解压 ZIP 后运行 `Dan Player.exe`，不要只复制一个 EXE。26.0.5 预览版的桌面歌词由同一程序启动独立进程。
 
-`Space` 播放／暂停，`Ctrl + Left/Right` 切歌，`Left/Right` 跳转 5 秒，`Ctrl + M` 切换迷你播放器，`F11` 全屏，`F1` 查看快捷键。
+> **下载与签名说明**：自有程序使用 RCEIT.Inc 自签名证书，Windows 仍可能显示信任提示；安装器不会自动安装信任证书。旧签名版本请手动下载新安装器升级。预览版不替换稳定版 Latest；升级前建议通过播放器的“备份与恢复”保存个人资料。
 
-### 下载校验
+<a id="下载校验"></a>
 
-从同一发布页下载程序和 `SHA256SUMS`，计算安装器或 ZIP 的 SHA-256，与校验文件及 GitHub 资产摘要核对。以下文件名请替换为实际下载文件名：
+<details>
+<summary><strong>核对下载文件的 SHA-256</strong></summary>
+
+从同一 Release 下载程序及 `SHA256SUMS` 校验文件，计算安装器或 ZIP 的 SHA-256，与校验文件及 GitHub 资产摘要核对。将下面的占位文件名替换为实际下载文件名：
 
 ```powershell
 Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA256
 ```
 
-摘要一致表示文件内容与发布资产相符。程序的签名说明见上文；校验摘要不等同于 Windows 对证书的信任。公开说明只保留操作方法和验证范围，本机路径、私人文件名与逐轮调试日志不作为使用文档发布。
+摘要一致表示文件内容与发布资产相符，不等同于 Windows 对签名证书的信任。请始终核对下载来源，不要通过关闭系统安全功能来处理来源不明的文件。
 
-### 曲库与个人整理
+</details>
 
-导入音乐文件或文件夹后，可从音乐、分类和歌单页浏览。歌单支持嵌套组织、拖动排序和移入其他歌单；多选项以加粗边框突出显示。
+## 功能
 
-“分类 → 个人整理 → 歌曲”只显示评过分或添加过个人标签的歌曲，支持日期、评分、标签筛选和排序。个人评分与标签保存在播放器资料中，不写入音乐文件；“编辑信息”和“批量编辑标签”用于修改文件中的音乐元数据，保存前请核对变更预览。
+从找到一首歌，到整理整套收藏，常用操作都围绕同一份曲库展开。
 
-播放书签可保存单个时间点或时间段，在“全库书签”集中查找、播放和编辑。歌词详情页支持沉浸队列；可在设置的外观部分关闭播放条频谱音柱，保留进度条。播放详情将输出链路、音频处理和诊断状态分组展示，并支持导出脱敏诊断。
+| 方向 | 主要能力 |
+| --- | --- |
+| **曲库与检索** | 按艺术家、专辑、格式和文件夹浏览；搜索歌曲，批量整理元数据，检查曲库健康。 |
+| **歌单与队列** | 嵌套歌单、拖动排序、智能条件与 M3U8 导入导出；队列保存、撤销，以及歌单回收。 |
+| **歌词与阅读** | 歌词匹配、编辑、修订、锁定和时间校准；全文检索、桌面歌词与迷你播放器。 |
+| **播放与定位** | CUE 分轨、均衡器与响度均衡、逐曲续播、A–B 循环；保存时间点或片段，并在全库书签中集中管理。 |
+| **个人音乐资料** | 个人评分、标签与筛选；查看听歌时段、歌曲排行、曲库构成和文件占用。 |
+| **Windows 桌面体验** | 随封面变化的配色、明暗主题、四语言界面；快捷键、迷你窗口、任务栏预览与播放诊断。 |
 
-### 数据与反馈
+以上以当前仓库的功能为准，部分能力属于 26.0.5 预览版；已发布安装包的具体范围请查看对应 [Release 更新说明](https://github.com/DanRuguo/dan_player/releases)。
 
-设置中的“备份与恢复”提供本地资料备份入口。升级程序与备份个人资料是不同操作，安装目录中的程序文件不能替代曲库、歌单和设置备份。
+联网音乐与自定义歌源可作为本地曲库的补充。自定义服务按实际声明的能力提供检索、歌词等功能，接入方式见 [自定义歌源 API](docs/custom-music-source-api.md)。
 
-遇到问题时，请在反馈中注明播放器版本、界面语言、窗口大小或显示缩放、复现步骤，以及相关截图。播放问题可附脱敏诊断；请不要上传私人音乐文件、凭据或完整个人目录。
+## 界面一览
 
-自定义歌源见 [接口说明](docs/custom-music-source-api.md) 和 [go-music-api 配置示例](docs/examples/go-music-api-jamendo.json)。示例中的服务地址需要替换为自己部署的地址。
+### 整理收藏，也保留自己的使用习惯
 
-## 源码与构建
+| 歌单与收藏 | 外观与设置 |
+| --- | --- |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/playlists-dark-wide.png"><img src="docs/images/playlists-light-wide.png" alt="歌单页面，展示收藏与列表组织" width="600"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark-wide.png"><img src="docs/images/settings-light-wide.png" alt="设置页面，展示主题与分组设置" width="600"></picture> |
+
+### 找到想听的歌曲，专注眼前的歌词
+
+| 歌曲搜索 | 迷你播放器与歌词 |
+| --- | --- |
+| ![歌曲搜索界面，使用虚构曲目](docs/images/feature-search-dark.png) | ![迷你播放器与歌词，使用虚构演示内容](docs/images/feature-mini-lyrics-dark.png) |
+
+### 从收听记录重新认识自己的曲库
+
+![音乐统计与歌曲排行，使用虚构演示数据](docs/images/statistics-rankings-light.png)
+
+<sub>图片均复用仓库内的生产控件渲染资源，使用虚构曲目与隔离资料；用于展示界面，不代表实时音频或原生桌面效果测试。更多明暗主题、宽窄窗口和功能示例见 <a href="docs/images/README.md">界面图库</a>。</sub>
+
+## 开始使用
+
+**添加音乐。** 导入音乐文件或文件夹后，在音乐、分类和歌单页浏览；使用嵌套歌单与拖动排序组织收藏。
+
+**整理个人偏好。** 26.0.5 预览版可进入“分类 → 个人整理 → 歌曲”，查看评过分或添加过个人标签的歌曲，并按日期、评分、标签筛选。个人评分和标签保存在播放器资料中，**不会写入音乐文件**；“编辑信息”和“批量编辑标签”则会修改文件元数据，保存前请核对变更预览。
+
+**记住喜欢的片段。** 在正在播放页面的“更多 → 播放书签”中保存当前位置或 A–B 片段，再到“分类 → 个人整理 → 全库书签”集中查找。全库书签中的播放按钮从保存的起点播放；恢复片段循环时，在对应歌曲的“播放书签”中选择该 A–B 书签。
+
+**备份自己的资料。** 设置中的“备份与恢复”用于保存播放器资料。程序升级与资料备份是不同操作，安装目录中的程序文件不能替代曲库、歌单与设置备份。
+
+<details>
+<summary><strong>常用快捷键</strong></summary>
+
+| 按键 | 操作 |
+| --- | --- |
+| `Space` | 播放／暂停 |
+| `Ctrl + Left` / `Ctrl + Right` | 上一首／下一首 |
+| `Left` / `Right` | 后退／前进 5 秒 |
+| `Ctrl + M` | 切换迷你播放器 |
+| `F11` | 切换全屏 |
+| `F1` | 查看快捷键 |
+
+</details>
+
+## 文档与反馈
+
+[界面图库](docs/images/README.md) · [自定义歌源 API](docs/custom-music-source-api.md) · [go-music-api 配置示例](docs/examples/go-music-api-jamendo.json) · [全部发行版本](https://github.com/DanRuguo/dan_player/releases)
+
+配置示例中的服务地址需要替换为自己部署的地址。遇到问题时，请先查看 [已有 Issues](https://github.com/DanRuguo/dan_player/issues)，再通过 [反馈模板](https://github.com/DanRuguo/dan_player/issues/new/choose) 提交播放器版本、复现步骤，以及相关界面语言、窗口大小或显示缩放。播放问题可附脱敏诊断；请不要上传私人音乐文件、凭据或完整个人目录。
+
+## 开发与构建
+
+基于 **Flutter、Rust 与 BASS**。需要 Flutter、Rust 和 Visual Studio 桌面 C++ 工作负载；Dart 约束见 [pubspec.yaml](pubspec.yaml)，依赖版本以 [pubspec.lock](pubspec.lock) 与 [rust/Cargo.lock](rust/Cargo.lock) 为准。Windows 持续集成入口见 [Windows CI](.github/workflows/windows_ci.yml)。
+
+<details>
+<summary><strong>源码结构、调试与定向检查</strong></summary>
 
 | 目录 | 用途 |
 | --- | --- |
@@ -69,11 +140,7 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 | `scripts/` | 构建、校验与发布脚本 |
 | `docs/` | 接口说明、示例和界面图片 |
 
-需要 Flutter、Rust 和 Visual Studio 桌面 C++ 工作负载。Dart 约束见 `pubspec.yaml`，依赖解析结果见 `pubspec.lock` 与 `rust/Cargo.lock`。
-
-### 调试与测试
-
-在仓库根目录执行，使用独立资料目录，避免调试影响日常曲库和设置：
+在仓库根目录执行，使用独立资料目录，避免调试影响日常曲库与设置：
 
 ```powershell
 $env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-data/readme-debug'))
@@ -81,45 +148,38 @@ flutter pub get
 flutter run -d windows
 ```
 
-运行播放器需要准备 BASS 运行库；相关脚本为 `scripts/prepare_bass_runtime.ps1` 与 `scripts/prepare_bass_fx_runtime.ps1`。本机 SDK、运行库缓存和签名配置的实际路径集中记录在源码仓库外的 `DEVELOPMENT.md`。
+运行前需准备 BASS 运行库，相关脚本为 `scripts/prepare_bass_runtime.ps1` 与 `scripts/prepare_bass_fx_runtime.ps1`。本机 SDK、运行库缓存和签名配置路径只记录在源码仓库外的 `DEVELOPMENT.md`。
 
-修改后优先运行对应组件测试；以下命令示例覆盖统计和详情排版：
+按模块集中验证，只运行与改动有关的检查；不要每增加一个功能就完整回归、构建和签名。例如统计与详情布局改动可运行：
 
 ```powershell
 flutter test test/statistics_visualization_test.dart test/detail_diagnostics_layout_test.dart --no-pub
-.\scripts\verify_interaction_regressions.ps1
 ```
 
-界面预览使用真实 Flutter 组件和隔离的虚构资料。`scripts/render_public_ui.ps1` 生成公开页面预览；渲染测试覆盖语言、窗口宽度和文字缩放，不能代替真实设备上的音频输出与 Windows 桌面集成检查。
+集成收尾使用 `scripts/verify_interaction_regressions.ps1`。UI 改动须使用真实 Flutter 控件渲染核对；公开图片通过 `scripts/render_public_ui.ps1` 与隔离虚构资料生成，覆盖语言、窗口宽度和文字缩放。控件渲染不替代真实音频设备与 Windows 桌面集成检查。
 
-### 构建与发布
+</details>
 
-本项目发布脚本使用工作区布局：源码在 `dan_player/`，同级 `tool/` 放置 Flutter、Rust 工具链和缓存，`dist/` 接收产物。`build_windows_release.ps1` 会检查依赖、运行发布门禁、构建 Windows 程序并校验字体与运行库。
+<details>
+<summary><strong>Windows 构建与发行</strong></summary>
+
+现有发布脚本使用工作区布局：源码在 `dan_player/`，同级 `tool/` 放置工具链和缓存，`dist/` 接收产物。`build_windows_release.ps1` 检查依赖、运行发布门禁、构建 Windows 程序并校验字体与运行库。
 
 ```powershell
 # 使用上述工作区布局，在源码仓库运行；无签名证书时：
 .\scripts\build_windows_release.ps1 -SkipSigning
 ```
 
-`-SkipPackaging` 跳过便携包组装；`-NoRestore` 使用已恢复的依赖。正式签名需要单独配置证书。安装器由 `scripts/build_windows_installer.ps1` 构建，便携包和安装器分别通过 `verify_local_release.ps1`、`verify_windows_installer.ps1` 核验。
+`-SkipPackaging` 跳过便携包组装；`-NoRestore` 使用已恢复的依赖。正式签名需要单独配置证书。安装器使用 `scripts/build_windows_installer.ps1`，便携包和安装器分别由 `verify_local_release.ps1`、`verify_windows_installer.ps1` 核验。
 
-发布前核对源码提交、测试收据、产物 SHA-256 和签名；预览版保持 prerelease，不替换稳定版 Latest。发布包包含所需许可证，不附带历史开发笔记。
+同一代码状态复用已通过的检查与构建产物，失败只重试必要阶段；签名后核对源码提交、测试收据、产物 SHA-256 与签名，再执行必要的 GitHub 发布流程。预览版保持 prerelease，不替换稳定版 Latest，不以省略校验来精简流程。
 
-README 维护对用户和开发者有用的长期信息；本机路径、调试状态、当前产物和实测结果只维护在本地 `DEVELOPMENT.md`。签名私钥、个人资料、工具缓存、临时日志与历史 QA 不进入源码仓库。
+</details>
 
-## 许可证
+仅维护必要的长期文档。本机开发笔记、历史 QA、临时日志、工具缓存、个人资料和签名私钥不进入源码仓库；公开界面资源集中在 `docs/images/`，随资源变更同步维护引用。
 
-本项目按 [LICENSE](LICENSE) 分发。第三方组件保留各自许可；BASS 的使用与分发须遵守其官方许可。
+## 许可证与致谢
 
-## 致谢
+本项目按 [LICENSE](LICENSE) 分发；第三方组件保留各自许可，BASS 的使用与分发须遵守其官方许可。
 
-Dan Player 基于开源项目 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) 修改，感谢原作者提供的播放器基础、曲库结构和歌词体验。
-
-同时感谢以下项目和组件：
-
-- [Ferry-200/desktop_lyric](https://github.com/Ferry-200/desktop_lyric)：桌面歌词组件基础。
-- [music_api_dart](https://github.com/Ferry-200/music_api_dart)：在线音乐信息和歌词匹配。
-- [BASS](https://www.un4seen.com/bass.html)：音频播放能力。
-- [Lofty](https://crates.io/crates/lofty)：音频标签读取与写入。
-- [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge)：Flutter 与 Rust 交互。
-- [Flutter](https://flutter.dev/) 和 Material Design：桌面 UI 基础。
+Dan Player 基于 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) 修改，感谢原作者提供的播放器基础、曲库结构和歌词体验。同时感谢 [desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge) 及 [Flutter](https://flutter.dev/) 与 Material Design。
