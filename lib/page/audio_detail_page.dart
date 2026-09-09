@@ -166,10 +166,8 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                   child: _TrackSpectrum(audio: audio),
                 ),
                 const SizedBox(height: 20.0),
-                Wrap(
-                  spacing: 12.0,
-                  runSpacing: 12.0,
-                  children: [
+                LayoutBuilder(builder: (context, constraints) {
+                  final specs = <Widget>[
                     _SpecCard(
                       icon: Symbols.schedule,
                       label: ui("时长"),
@@ -213,31 +211,60 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                               .toStringHMMSS(),
                         ]),
                       ),
-                  ],
-                ),
+                  ];
+                  final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+                  final columns = (constraints.maxWidth / (180 * scale))
+                      .floor()
+                      .clamp(1, specs.length);
+                  final width =
+                      (constraints.maxWidth - (columns - 1) * 12) / columns;
+                  return Wrap(spacing: 12, runSpacing: 12, children: [
+                    for (final spec in specs)
+                      SizedBox(width: width, child: spec)
+                  ]);
+                }),
                 const SizedBox(height: 24.0),
                 PlaybackDiagnosticsPanel(audio: audio),
                 const SizedBox(height: 16.0),
-                if (artists.isNotEmpty)
-                  _DetailSection(
-                    title: ui("艺术家"),
-                    child: Wrap(
-                      spacing: 8.0,
-                      runSpacing: 8.0,
-                      children: [
-                        for (final artist in artists)
-                          SizedBox(
-                              width: 320, child: ArtistTile(artist: artist)),
-                      ],
-                    ),
-                  )
-                else
-                  _DetailSection(title: ui("艺术家"), child: Text(audio.artist)),
-                if (album != null)
-                  _DetailSection(
-                      title: ui("专辑"), child: AlbumTile(album: album))
-                else
-                  _DetailSection(title: ui("专辑"), child: Text(audio.album)),
+                LayoutBuilder(builder: (context, constraints) {
+                  final related = <Widget>[
+                    if (artists.isNotEmpty)
+                      _DetailSection(
+                        title: ui("艺术家"),
+                        child: Wrap(
+                          spacing: 8.0,
+                          runSpacing: 8.0,
+                          children: [
+                            for (final artist in artists)
+                              SizedBox(
+                                  width: 320,
+                                  child: ArtistTile(artist: artist)),
+                          ],
+                        ),
+                      )
+                    else
+                      _DetailSection(
+                          title: ui("艺术家"), child: Text(audio.artist)),
+                    if (album != null)
+                      _DetailSection(
+                          title: ui("专辑"), child: AlbumTile(album: album))
+                    else
+                      _DetailSection(title: ui("专辑"), child: Text(audio.album)),
+                  ];
+                  return constraints.maxWidth /
+                              MediaQuery.textScalerOf(context).scale(1) >=
+                          700
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                              Expanded(child: related[0]),
+                              const SizedBox(width: 12),
+                              Expanded(child: related[1])
+                            ])
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: related);
+                }),
                 if (audio.isOnline)
                   _DetailSection(
                     title: ui("联网标识"),
@@ -457,37 +484,34 @@ class _TrackSpectrum extends StatelessWidget {
   final Audio audio;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PlaybackReadyBuilder(
+      waitingBuilder: (context) => _content(context, false),
+      readyBuilder: (context) {
+        final playback = PlayService.instance.playbackService;
+        return ListenableBuilder(
+            listenable: playback,
+            builder: (context, _) =>
+                _content(context, playback.nowPlaying?.path == audio.path));
+      });
+
+  Widget _content(BuildContext context, bool active) {
     UiLanguageScope.watch(context);
-    final playback = PlayService.instance.playbackService;
-    return ListenableBuilder(
-      listenable: playback,
-      builder: (context, _) {
-        final active = playback.nowPlaying?.path == audio.path;
-        return AnimatedContainer(
-          duration: AppMotion.emphasized,
-          padding: const EdgeInsets.fromLTRB(16.0, 12.0, 16.0, 10.0),
-          decoration: BoxDecoration(
+    return AnimatedContainer(
+        duration: AppMotion.emphasized,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        decoration: BoxDecoration(
             color: Theme.of(context)
                 .colorScheme
                 .primaryContainer
-                .withValues(alpha: active ? 0.45 : 0.20),
-            borderRadius: AppShape.surfaceRadius,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(active ? ui("实时频谱") : ui("播放这首歌以显示实时频谱")),
-              const SizedBox(height: 6.0),
-              if (active)
-                const FullWidthSpectrum(height: 64.0)
-              else
-                const SizedBox(height: 64.0),
-            ],
-          ),
-        );
-      },
-    );
+                .withValues(alpha: active ? .45 : .20),
+            borderRadius: AppShape.surfaceRadius),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(ui(active ? '实时频谱' : '播放这首歌以显示实时频谱')),
+          if (active) ...[
+            const SizedBox(height: 6),
+            const FullWidthSpectrum(height: 64)
+          ],
+        ]));
   }
 }
 
@@ -508,13 +532,18 @@ class _SpecCard extends StatelessWidget {
         constraints: const BoxConstraints(minWidth: 160, maxWidth: 320),
         padding: const EdgeInsets.all(14.0),
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: AppShape.surfaceRadius,
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          border: Border.all(
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: .6)),
+          borderRadius: AppShape.controlRadius,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon),
+            Icon(icon, color: Theme.of(context).colorScheme.primary),
             const SizedBox(width: 10.0),
             Flexible(
               child: Column(
@@ -553,14 +582,24 @@ class _DetailSection extends StatelessWidget {
     return AppEntrance(
       identity: ('audio-section', title),
       order: 4,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12.0),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: AppShape.controlRadius,
+            border: Border.all(
+                color: Theme.of(context)
+                    .colorScheme
+                    .outlineVariant
+                    .withValues(alpha: .6))),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
                     fontWeight: FontWeight.bold,
                   ),
             ),

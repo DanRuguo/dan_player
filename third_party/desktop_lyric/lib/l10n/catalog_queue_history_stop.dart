@@ -1,4 +1,9 @@
 const Map<String, List<String>> catalogQueueHistoryStop = {
+  '开启': ['On', 'オン', '켜짐'],
+  '音频输出': ['Audio output', '音声出力', '오디오 출력'],
+  '音频处理': ['Audio processing', '音声処理', '오디오 처리'],
+  '状态与诊断': ['Status and diagnostics', '状態と診断', '상태 및 진단'],
+  '检测与隐私说明': ['Measurement and privacy notes', '検出とプライバシーについて', '측정 및 개인정보 안내'],
   '时间点': ['Time point', '時刻', '시간 지점'],
   '时间段': ['Time range', '時間範囲', '시간 구간'],
   '保存所选时间': ['Save selected time', '選択した時間を保存', '선택한 시간 저장'],

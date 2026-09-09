@@ -19,6 +19,7 @@ $regressionTests = @(
     'test/personal_track_editor_test.dart',
     'test/bounded_tag_wrap_test.dart',
     'test/statistics_visualization_test.dart',
+    'test/detail_diagnostics_layout_test.dart',
     'test/adaptive_dialog_content_test.dart',
     'test/personal_library_ui_polish_test.dart',
     'test/playlist_storage_test.dart',

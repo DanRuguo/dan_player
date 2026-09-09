@@ -158,6 +158,31 @@ void main() {
     await capture(tester, key, 'metadata-mixed-light');
   }, variant: _windows);
 
+  testWidgets('common fields stay equal height with either editor open',
+      (tester) async {
+    final batch = batchFor(audios());
+    addTearDown(batch.dispose);
+    final key = await mount(tester, BatchAudioMetadataDialog(batch: batch));
+    for (final enabled in [(true, false), (false, true), (true, true)]) {
+      final controls = find.byType(SwitchListTile);
+      for (var i = 0; i < 2; i++) {
+        final desired = i == 0 ? enabled.$1 : enabled.$2;
+        if (tester.widget<SwitchListTile>(controls.at(i)).value != desired) {
+          await tester.tap(controls.at(i));
+          await tester.pumpAndSettle();
+        }
+      }
+      final artist =
+          tester.getRect(find.byKey(const ValueKey('batch-common-艺术家')));
+      final album =
+          tester.getRect(find.byKey(const ValueKey('batch-common-专辑')));
+      expect(artist.top, album.top);
+      expect(artist.bottom, album.bottom);
+      await capture(
+          tester, key, 'metadata-aligned-${enabled.$1}-${enabled.$2}');
+    }
+  }, variant: _windows);
+
   for (final language in UiLanguage.values) {
     testWidgets('batch draft editing controls ${language.name}',
         (tester) async {

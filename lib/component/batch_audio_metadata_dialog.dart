@@ -87,6 +87,7 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
       bool mixed) {
     final scheme = Theme.of(context).colorScheme;
     return Card.filled(
+        key: ValueKey('batch-common-$label'),
         margin: EdgeInsets.zero,
         color: scheme.surfaceContainerLow,
         shape: RoundedRectangleBorder(
@@ -184,14 +185,15 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
                                         MediaQuery.textScalerOf(context)
                                             .scale(1) >=
                                     640
-                                ? Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
+                                ? IntrinsicHeight(
+                                    child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
                                         Expanded(child: fields[0]),
                                         const SizedBox(width: 12),
                                         Expanded(child: fields[1])
-                                      ])
+                                      ]))
                                 : Column(children: [
                                     fields[0],
                                     const SizedBox(height: 12),
