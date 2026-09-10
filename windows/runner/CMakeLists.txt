@@ -54,7 +54,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
-target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib" "comctl32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib" "uuid.lib"
   "gdi32.lib" "advapi32.lib" "bcrypt.lib" "crypt32.lib" "wintrust.lib" "version.lib" "propsys.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
@@ -191,6 +191,20 @@ set_target_properties(desktop_integration_policy_test PROPERTIES
 
 add_executable(window_resize_policy_test EXCLUDE_FROM_ALL
   "tests/window_resize_policy_test.cpp"
+)
+
+add_executable(window_resize_bridge_test EXCLUDE_FROM_ALL
+  "tests/window_resize_bridge_test.cpp"
+)
+target_compile_definitions(window_resize_bridge_test PRIVATE "NOMINMAX")
+target_link_libraries(window_resize_bridge_test PRIVATE "user32.lib" "comctl32.lib")
+if(MSVC)
+  target_compile_options(window_resize_bridge_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(window_resize_bridge_test PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/window_tests"
 )
 
 add_executable(window_corner_region_test EXCLUDE_FROM_ALL

@@ -9,6 +9,7 @@
 #include "installer_launcher.h"
 #include "window_backdrop.h"
 #include "window_resize_policy.h"
+#include "window_resize_bridge.h"
 #include "window_teardown.h"
 #include "windows_shell.h"
 #include "../../third_party/desktop_lyric/windows/runner/window_chrome_policy.h"
@@ -80,6 +81,9 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  resize_bridge_ = std::make_unique<window_resize::ChildResizeBridge>(
+      GetHandle(), flutter_controller_->view()->GetNativeWindow());
+  if (!resize_bridge_->attached()) return false;
   backdrop_controller_ = std::make_unique<WindowBackdropController>(
       GetHandle(), flutter_controller_->engine());
   desktop_controller_ = std::make_unique<DesktopIntegrationController>(
@@ -104,6 +108,7 @@ void FlutterWindow::OnDestroy() {
   installer_launcher_.reset();
   desktop_controller_.reset();
   backdrop_controller_.reset();
+  resize_bridge_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

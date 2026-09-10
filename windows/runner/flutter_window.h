@@ -12,6 +12,7 @@ class WindowBackdropController;
 class DesktopIntegrationController;
 class InstallerLauncherController;
 class WindowsShellController;
+namespace window_resize { class ChildResizeBridge; }
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -33,6 +34,7 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+  std::unique_ptr<window_resize::ChildResizeBridge> resize_bridge_;
 
   // Declared after the engine so the MethodChannel is destroyed before its
   // messenger, including on partially initialized window teardown.
