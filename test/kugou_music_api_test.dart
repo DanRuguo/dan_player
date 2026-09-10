@@ -11,6 +11,34 @@ import 'package:flutter_test/flutter_test.dart';
 const _hash = 'abcdef1234567890abcdef1234567890';
 
 void main() {
+  test('metadata portraits never replace song artwork', () async {
+    await _server((server) async {
+      server.listen((request) async {
+        await _json(request, {
+          'status': 1,
+          'data': request.uri.path == '/api/search'
+              ? {
+                  'info': [_song()]
+                }
+              : {
+                  'songname': 'Updated title',
+                  'imgurl':
+                      'http://singerimg.kugou.com/uploadpic/softhead/{size}/portrait.jpg',
+                },
+        });
+      });
+      final profile = _profile(server);
+      final api = KugouMusicApi(profile);
+      final searched = (await api.search('哈基米泰曼波')).tracks.single;
+      final detailed = await api.metadata(searched);
+      expect(detailed.title, 'Updated title');
+      expect(detailed.artworkUrl, searched.artworkUrl);
+      expect(detailed.onlineId, searched.onlineId);
+      final withoutCover = await api.metadata(_audio(profile));
+      expect(withoutCover.artworkUrl, isNull);
+    });
+  });
+
   test(
       'verbose 25-song search pages fit while oversized responses stay bounded',
       () async {

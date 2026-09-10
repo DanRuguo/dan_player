@@ -375,19 +375,26 @@ class KugouMusicApi {
         ? group.first as Map
         : const {};
     final groupTrans = groupFirst['trans_param'];
-    final candidate = _text(row['imgurl'] ??
-            row['image'] ??
-            row['cover'] ??
-            row['album_img']) ??
-        (trans is Map ? _text(trans['union_cover']) : null) ??
-        (groupTrans is Map ? _text(groupTrans['union_cover']) : null);
-    var uri = _safeUri(candidate?.replaceAll('{size}', '500'));
-    if (uri?.scheme == 'http' &&
-        (uri!.host.endsWith('.kugou.com') ||
-            uri.host.endsWith('.kugoucdn.com'))) {
-      uri = uri.replace(scheme: 'https');
+    for (final candidate in [
+      row['album_img'],
+      if (trans is Map) trans['union_cover'],
+      row['imgurl'],
+      row['image'],
+      row['cover'],
+      if (groupTrans is Map) groupTrans['union_cover'],
+    ]) {
+      var uri = _safeUri(_text(candidate)?.replaceAll('{size}', '500'));
+      // song/info can return a singer portrait in imgurl, not album artwork.
+      // Reject it so metadata enrichment retains the search result's cover.
+      if (uri == null || uri.host == 'singerimg.kugou.com') continue;
+      if (uri.scheme == 'http' &&
+          (uri.host.endsWith('.kugou.com') ||
+              uri.host.endsWith('.kugoucdn.com'))) {
+        uri = uri.replace(scheme: 'https');
+      }
+      return uri.toString();
     }
-    return uri?.toString();
+    return null;
   }
 
   Future<T> _run<T>(
