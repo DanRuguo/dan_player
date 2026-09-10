@@ -1,3 +1,4 @@
+import 'package:dan_player/component/artwork_handoff.dart';
 import 'dart:ui';
 
 import 'package:dan_player/app_preference.dart';
@@ -298,6 +299,7 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                               key: const ValueKey('uni-detail-header-scroll'),
                               primary: false,
                               child: _UniDetailPageHeader(
+                                key: ValueKey(widget.primaryContent),
                                 pic: widget.primaryPic,
                                 backgroundPic: widget.backgroundPic,
                                 picShape: widget.picShape,
@@ -524,6 +526,7 @@ enum PicShape { oval, rrect }
 
 class _UniDetailPageHeader extends StatelessWidget {
   const _UniDetailPageHeader({
+    super.key,
     required this.pic,
     required this.backgroundPic,
     required this.picShape,
@@ -601,22 +604,22 @@ class _UniDetailPageHeader extends StatelessWidget {
       final cover = SizedBox.square(
         key: const ValueKey('uni-detail-cover'),
         dimension: coverSize,
-        child: FutureBuilder<ImageProvider?>(
-          future: pic,
-          builder: (context, snapshot) {
-            final placeholder = Icon(Symbols.broken_image,
-                size: coverSize, color: scheme.onSurface);
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.data == null) return placeholder;
+        child: ArtworkHandoff(
+          artworkKey: pic,
+          loadArtwork: () => pic,
+          placeholder: Icon(Symbols.broken_image,
+              size: coverSize, color: scheme.onSurface),
+          loading: const Center(child: CircularProgressIndicator()),
+          imageBuilder: (provider) {
             final image = Image(
-                image: snapshot.data!,
+                image: provider,
+                gaplessPlayback: true,
                 width: coverSize,
                 height: coverSize,
                 fit: BoxFit.cover,
                 filterQuality: FilterQuality.high,
-                errorBuilder: (_, __, ___) => placeholder);
+                errorBuilder: (_, __, ___) => Icon(Symbols.broken_image,
+                    size: coverSize, color: scheme.onSurface));
             return picShape == PicShape.oval
                 ? ClipOval(child: image)
                 : ClipRRect(borderRadius: AppShape.surfaceRadius, child: image);
@@ -630,14 +633,15 @@ class _UniDetailPageHeader extends StatelessWidget {
             Positioned.fill(
                 child: ColoredBox(color: scheme.surfaceContainerHighest)),
             Positioned.fill(
-              child: FutureBuilder<ImageProvider?>(
-                future: backgroundPic,
-                builder: (context, snapshot) => snapshot.data == null
-                    ? const SizedBox.shrink()
-                    : Image(
-                        image: snapshot.data!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+              child: ArtworkHandoff(
+                artworkKey: backgroundPic,
+                loadArtwork: () => backgroundPic,
+                placeholder: const SizedBox.expand(),
+                imageBuilder: (provider) => Image(
+                    image: provider,
+                    gaplessPlayback: true,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.expand()),
               ),
             ),
             Positioned.fill(

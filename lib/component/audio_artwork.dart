@@ -1,3 +1,4 @@
+import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -19,6 +20,7 @@ class AudioArtwork extends StatefulWidget {
     this.loading,
     this.revision,
     this.loadArtwork,
+    this.retainWhileLoading = false,
   });
 
   final Audio audio;
@@ -31,13 +33,16 @@ class AudioArtwork extends StatefulWidget {
   /// bounded local cache / network codec pipeline.
   final AudioArtworkLoader? loadArtwork;
 
+  /// Playback surfaces hand off between tracks; unrelated library rows must
+  /// instead show their own placeholder when their source changes.
+  final bool retainWhileLoading;
+
   @override
   State<AudioArtwork> createState() => _AudioArtworkState();
 }
 
 class _AudioArtworkState extends State<AudioArtwork> {
   Object? _requestKey;
-  Object? _sourceKey;
   Future<ImageProvider?>? _future;
 
   @override
@@ -89,7 +94,6 @@ class _AudioArtworkState extends State<AudioArtwork> {
     final request = (source, target);
     if (_requestKey == request) return;
     _requestKey = request;
-    _sourceKey = source;
     _future = Future<ImageProvider?>.sync(() => widget.loadArtwork == null
         ? audio.artworkForSize(target)
         : widget.loadArtwork!(audio, target));
@@ -98,25 +102,19 @@ class _AudioArtworkState extends State<AudioArtwork> {
   @override
   Widget build(BuildContext context) => SizedBox.square(
         dimension: widget.size,
-        child: FutureBuilder<ImageProvider?>(
-          key: ValueKey(_sourceKey),
-          future: _future,
-          builder: (context, snapshot) {
-            // A DPR/size upgrade keeps its already visible image until the
-            // sharper one arrives. A different source gets a fresh builder.
-            if (snapshot.data != null) {
-              return Image(
-                image: snapshot.data!,
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.high,
-                gaplessPlayback: true,
-                errorBuilder: (_, __, ___) => widget.placeholder,
-              );
-            }
-            return snapshot.connectionState == ConnectionState.done
-                ? widget.placeholder
-                : widget.loading ?? widget.placeholder;
-          },
+        child: ArtworkHandoff(
+          key: ValueKey(widget.retainWhileLoading ? null : widget.audio.path),
+          artworkKey: _requestKey!,
+          loadArtwork: () => _future!,
+          placeholder: widget.placeholder,
+          loading: widget.loading,
+          imageBuilder: (provider) => Image(
+            image: provider,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.high,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => widget.placeholder,
+          ),
         ),
       );
 }

@@ -585,6 +585,7 @@ class __NowPlayingInfoState extends State<_NowPlayingInfo> {
                                 borderRadius: AppShape.surfaceRadius,
                                 child: AudioArtwork(
                                   audio: nowPlaying,
+                                  retainWhileLoading: true,
                                   size: size,
                                   placeholder: placeholder,
                                   loading: loadingWidget,

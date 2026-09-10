@@ -6,7 +6,6 @@
 #include <mutex>
 
 #include "resource.h"
-#include "window_chrome_policy.h"
 
 namespace desktop_lyric_runner {
 namespace {
@@ -134,16 +133,12 @@ bool Win32Window::Create(const std::wstring& title,
 
   HWND window = CreateWindow(
       window_class, title.c_str(),
-      static_cast<DWORD>(window_chrome::CustomTitleBarStyle(WS_OVERLAPPEDWINDOW)),
+      WS_OVERLAPPEDWINDOW,
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
-    return false;
-  }
-
-  if (!window_chrome::InitializeCustomTitleBar(window)) {
     return false;
   }
 
@@ -175,9 +170,6 @@ LRESULT CALLBACK Win32Window::WndProc(HWND const window,
                                       UINT const message,
                                       WPARAM const wparam,
                                       LPARAM const lparam) noexcept {
-  if (message == WM_STYLECHANGING) {
-    window_chrome::KeepCustomTitleBar(wparam, lparam);
-  }
   if (message == WM_NCCREATE) {
     auto window_struct = reinterpret_cast<CREATESTRUCT*>(lparam);
     SetWindowLongPtr(window, GWLP_USERDATA,

@@ -9,6 +9,8 @@ import 'package:desktop_lyric/app_scrollbar.dart';
 import 'package:desktop_lyric/app_typography.dart';
 import 'package:desktop_lyric/component/desktop_lyric_body.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
+import 'package:desktop_lyric/desktop_lyric_theme_transition.dart';
+import 'package:desktop_lyric/message.dart';
 import 'package:desktop_lyric/desktop_lyric_window_layout.dart';
 import 'package:desktop_lyric/desktop_lyric_window_binding.dart';
 import 'package:flutter/material.dart';
@@ -112,6 +114,7 @@ class _DesktopLyricAppState extends State<DesktopLyricApp> {
                       scrollBehavior: const AppScrollBehavior(),
                       debugShowCheckedModeBanner: false,
                       themeAnimationDuration: AppMotion.standard,
+                      themeAnimationCurve: AppMotion.standardCurve,
                       themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
                       theme: DesktopLyricTypography.theme(Brightness.light),
                       darkTheme: DesktopLyricTypography.theme(Brightness.dark),
@@ -119,9 +122,21 @@ class _DesktopLyricAppState extends State<DesktopLyricApp> {
                           GlobalMaterialLocalizations.delegates,
                       supportedLocales: supportedLocales,
                       locale: language.locale,
-                      builder: (context, child) => AppPresentationHost(
-                          child: UiLanguageTransition(
-                              child: child ?? const SizedBox.shrink())),
+                      builder: (context, child) =>
+                          ValueListenableBuilder<ThemeChangedMessage>(
+                        valueListenable: DesktopLyricController.instance.theme,
+                        child: AppPresentationHost(
+                            child: UiLanguageTransition(
+                                child: child ?? const SizedBox.shrink())),
+                        builder: (context, colors, child) =>
+                            DesktopLyricThemeTransition(
+                          colors: colors,
+                          child: child,
+                          builder: (context, current, child) =>
+                              Provider<ThemeChangedMessage>.value(
+                                  value: current, child: child!),
+                        ),
+                      ),
                       home: DesktopLyricPaletteScope(
                           host: _palette, child: const DesktopLyricBody()),
                     ),

@@ -2,35 +2,31 @@
 #define DAN_PLAYER_WINDOW_CHROME_POLICY_H_
 
 #include <windows.h>
+#include <optional>
 
 namespace window_chrome {
 
-// The app paints its own title bar. NCCALCSIZE alone only moves the client
-// edge: DWM can still paint caption buttons over an extended acrylic frame.
-// Keep sizing, system-menu and minimize/maximize capabilities, but never the
-// native caption, including when a plugin restores saved fullscreen styles.
-constexpr LONG_PTR CustomTitleBarStyle(LONG_PTR style) {
-  return style & ~static_cast<LONG_PTR>(WS_CAPTION);
-}
-
-// Windows adds WS_CAPTION to a new overlapped HWND even when CreateWindow's
-// requested style omits it. Remove it while the window is still hidden, before
-// Flutter/plugins save any normal-window style for later fullscreen restore.
-inline bool InitializeCustomTitleBar(HWND window) {
-  SetLastError(ERROR_SUCCESS);
-  const auto previous = SetWindowLongPtrW(window, GWL_STYLE,
-      CustomTitleBarStyle(GetWindowLongPtrW(window, GWL_STYLE)));
-  if (previous == 0 && GetLastError() != ERROR_SUCCESS) return false;
-  return SetWindowPos(window, nullptr, 0, 0, 0, 0,
-      SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
-      SWP_NOOWNERZORDER | SWP_NOACTIVATE) != FALSE;
-}
-
-inline void KeepCustomTitleBar(WPARAM wparam, LPARAM lparam) {
-  if (wparam == GWL_STYLE && lparam != 0) {
-    auto* styles = reinterpret_cast<STYLESTRUCT*>(lparam);
-    styles->styleNew = static_cast<DWORD>(CustomTitleBarStyle(styles->styleNew));
+// window_manager 0.5.2's hidden title bar keeps eight physical pixels on the
+// restored window's sides/bottom and zero or one on top. These exposed insets
+// can be painted separately from Flutter on both Windows 10 and 11. Consume
+// only this exact plugin calculation, without changing WS_CAPTION or native
+// window capabilities. Maximized work-area and fullscreen calculations stay
+// owned by the plugin; a normal title bar does not return a handled zero.
+inline bool CorrectWindowManagerHiddenFrame(
+    const RECT& proposed, RECT& calculated,
+    std::optional<LRESULT> plugin_result, bool maximized) {
+  if (!plugin_result.has_value() || *plugin_result != 0 || maximized) {
+    return false;
   }
+  const LONG top_inset = calculated.top - proposed.top;
+  if (calculated.left - proposed.left != 8 ||
+      proposed.right - calculated.right != 8 ||
+      proposed.bottom - calculated.bottom != 8 ||
+      (top_inset != 0 && top_inset != 1)) {
+    return false;
+  }
+  calculated = proposed;
+  return true;
 }
 
 }  // namespace window_chrome

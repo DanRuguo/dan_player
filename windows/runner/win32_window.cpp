@@ -4,7 +4,6 @@
 #include <flutter_windows.h>
 
 #include "resource.h"
-#include "../../third_party/desktop_lyric/windows/runner/window_chrome_policy.h"
 #include "window_teardown.h"
 
 namespace {
@@ -146,17 +145,12 @@ bool Win32Window::Create(const std::wstring& title,
       // paint over that child while DWM/Flutter are presenting different frames.
       // This only changes GDI clipping, not native resize/snap/fullscreen styles.
       window_class, title.c_str(),
-      static_cast<DWORD>(window_chrome::CustomTitleBarStyle(
-          WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN)),
+      WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
-    return false;
-  }
-
-  if (!window_chrome::InitializeCustomTitleBar(window)) {
     return false;
   }
 
@@ -174,9 +168,6 @@ LRESULT CALLBACK Win32Window::WndProc(HWND const window,
                                       UINT const message,
                                       WPARAM const wparam,
                                       LPARAM const lparam) noexcept {
-  if (message == WM_STYLECHANGING) {
-    window_chrome::KeepCustomTitleBar(wparam, lparam);
-  }
   if (message == WM_NCCREATE) {
     auto window_struct = reinterpret_cast<CREATESTRUCT*>(lparam);
     SetWindowLongPtr(window, GWLP_USERDATA,

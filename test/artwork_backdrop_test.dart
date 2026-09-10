@@ -150,7 +150,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('pending track changes clear the old art and ignore late errors',
+  testWidgets('pending track changes retain the rendered art and ignore late errors',
       (tester) async {
     final cover = (await tester.runAsync(() => _cover(Colors.teal)))!;
     final pending = Completer<ImageProvider?>();
@@ -163,8 +163,8 @@ void main() {
       artworkKey: 'waiting-track',
       loadArtwork: () => pending.future,
     ));
-    expect(find.byType(Image), findsNothing,
-        reason: 'FutureBuilder must not reuse data from the prior track.');
+    expect(find.byType(Image), findsOneWidget,
+        reason: 'Keep the rendered frame until the new artwork is ready.');
     await tester.pumpWidget(_app(
       artworkKey: 'final-track',
       loadArtwork: () async => null,

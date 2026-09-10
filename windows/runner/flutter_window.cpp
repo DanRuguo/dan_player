@@ -1,6 +1,5 @@
 #include "flutter_window.h"
 
-#include <dwmapi.h>
 #include <windowsx.h>
 
 #include <optional>
@@ -12,37 +11,9 @@
 #include "window_resize_policy.h"
 #include "window_teardown.h"
 #include "windows_shell.h"
+#include "../../third_party/desktop_lyric/windows/runner/window_chrome_policy.h"
 
 namespace {
-
-// Windows 11 exposes this read-only attribute starting with build 22000. Use a
-// feature probe instead of a version check so the runner remains correct even
-// when built with an older Windows SDK.
-constexpr DWORD kDwmwaVisibleFrameBorderThickness = 37;
-
-// window_manager 0.5.2 keeps an eight-pixel non-client area on the restored
-// window's left, right and bottom edges. On Windows 10 DWM paints that area in
-// the system accent color. See leanflutter/window_manager#483.
-constexpr LONG kWindowManagerResizeInset = 8;
-
-bool HasWindows11FrameAttributes(HWND window) {
-  UINT visible_border_thickness = 0;
-  return SUCCEEDED(DwmGetWindowAttribute(
-      window, kDwmwaVisibleFrameBorderThickness,
-      &visible_border_thickness, sizeof(visible_border_thickness)));
-}
-
-bool IsWindowManagerHiddenFrameCalculation(const RECT& proposed_client_rect,
-                                           const RECT& calculated_client_rect) {
-  const LONG top_inset = calculated_client_rect.top - proposed_client_rect.top;
-  return calculated_client_rect.left - proposed_client_rect.left ==
-             kWindowManagerResizeInset &&
-         proposed_client_rect.right - calculated_client_rect.right ==
-             kWindowManagerResizeInset &&
-         proposed_client_rect.bottom - calculated_client_rect.bottom ==
-             kWindowManagerResizeInset &&
-         (top_inset == 0 || top_inset == 1);
-}
 
 std::optional<LRESULT> HitTestNativeResizeBorder(HWND window, LPARAM lparam) {
   const LONG_PTR style = GetWindowLongPtr(window, GWL_STYLE);
@@ -96,11 +67,6 @@ bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
     return false;
   }
-
-  // DWMWA_BORDER_COLOR cannot hide the visible frame on Windows 10; the
-  // attribute is Windows 11-only. Leave the Windows 11 message path completely
-  // untouched and enable the custom-frame fallback only on legacy DWM.
-  uses_legacy_dwm_frame_ = !HasWindows11FrameAttributes(GetHandle());
 
   RECT frame = GetClientArea();
 
@@ -171,7 +137,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   std::optional<RECT> proposed_client_rect;
-  if (uses_legacy_dwm_frame_ && message == WM_NCCALCSIZE && wparam == TRUE &&
+  if (message == WM_NCCALCSIZE && wparam == TRUE &&
       lparam != 0) {
     proposed_client_rect =
         reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam)->rgrc[0];
@@ -184,21 +150,12 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                                                       lparam);
 
     if (proposed_client_rect.has_value()) {
-      if (result.has_value() && *result == 0) {
-        auto* parameters = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
-        if (IsWindowManagerHiddenFrameCalculation(*proposed_client_rect,
-                                                  parameters->rgrc[0])) {
-          // Consume the standard frame. WS_THICKFRAME remains set, preserving
-          // DWM shadow, maximize/snap behavior and system window animations.
-          // WM_NCHITTEST below restores mouse and touch resizing.
-          parameters->rgrc[0] = *proposed_client_rect;
-          legacy_custom_frame_active_ = true;
-          return 0;
-        }
-      } else if (!result.has_value()) {
-        // A normal title bar lets DefWindowProc calculate the non-client area.
-        legacy_custom_frame_active_ = false;
-      }
+      auto* parameters = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+      // Retain native caption/sizing styles and system animation behavior.
+      // WM_NCHITTEST below supplies the client-edge resize affordance.
+      window_chrome::CorrectWindowManagerHiddenFrame(
+          *proposed_client_rect, parameters->rgrc[0], result,
+          IsZoomed(hwnd) != FALSE);
     }
 
     if (result) {
@@ -206,8 +163,8 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     }
   }
 
-  // window_manager's hidden title bar relies on cached non-client hit regions
-  // on Windows 11. Supply the same DPI-aware edge/corner result on every
+  // The hidden title bar now consumes non-client resize insets. Supply the
+  // same DPI-aware edge/corner result on every
   // supported Windows version. The plugin already returns HTNOWHERE when size
   // lock is active; WS_THICKFRAME/IsZoomed keep fullscreen and maximized modes
   // out of this fallback as well.

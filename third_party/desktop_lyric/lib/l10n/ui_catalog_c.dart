@@ -555,6 +555,21 @@ const Map<String, List<String>> uiCatalogC = {
     "扇形の大きさは実際のバイト数を示し、形式はファイル拡張子で分類します。",
     "부채꼴 크기는 실제 바이트 수를 기준으로 하며 형식은 파일 확장자로 분류합니다."
   ],
+  "无扩展名": ["No extension", "拡張子なし", "확장자 없음"],
+  " · 缺失 {0} 首": [" · {0} missing", " · {0} 曲が見つかりません", " · {0}곡 누락"],
+  " · 不可读 {0} 首": [" · {0} unreadable", " · {0} 曲が読み取り不可", " · {0}곡 읽기 불가"],
+  " 缺失 {0} 首，无权限/不可读 {1} 首未计入空间。": [
+    " {0} missing and {1} unreadable songs are excluded from storage. ",
+    "見つからない {0} 曲と権限不足・読み取り不可の {1} 曲は容量に含まれません。",
+    " 누락된 {0}곡과 권한이 없거나 읽을 수 없는 {1}곡은 용량에서 제외됩니다. "
+  ],
+  "环图与粗条按实际字节数划分，细条对照源文件数量；格式按扩展名分组。": [
+    "The ring and thick bars compare actual bytes; thin bars compare source file counts. Formats are grouped by extension.",
+    "円グラフと太いバーは実際のバイト数、細いバーは元ファイル数の割合です。形式は拡張子で分類します。",
+    "원형 차트와 굵은 막대는 실제 바이트 비율을, 가는 막대는 원본 파일 수 비율을 비교합니다. 형식은 확장자로 구분합니다."
+  ],
+  "源文件数量": ["Source file count", "元ファイル数", "원본 파일 수"],
+  "暂无分类数据": ["No category data yet", "分類データはまだありません", "아직 분류 데이터가 없습니다"],
   "{0} 个源文件": ["{0} source files", "元ファイル {0} 件", "원본 파일 {0}개"],
   "暂无可核实文件": [
     "No files available to verify",

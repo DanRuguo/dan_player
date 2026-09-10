@@ -25,6 +25,9 @@ constexpr wchar_t kPersonalizationKey[] =
 // Numeric IDs keep the runner buildable with an older SDK. Their availability
 // is determined by DWM's HRESULT, never a manifest-dependent version check.
 constexpr DWORD kUseImmersiveDarkMode = 20;
+constexpr DWORD kWindowCornerPreference = 33;
+constexpr int kSquareCorners = 1;  // DWMWCP_DONOTROUND.
+constexpr int kSystemRoundedCorners = 2;  // DWMWCP_ROUND; system radius.
 constexpr DWORD kBorderColor = 34;
 constexpr COLORREF kNoBorderColor = 0xFFFFFFFE;
 constexpr DWORD kSystemBackdropType = 38;
@@ -245,18 +248,35 @@ struct WindowBackdropController::Impl {
     }
   }
 
-  bool RestoreFrame(window_backdrop::Backend backend) const {
-    // The old one-pixel top glass extension exposed a white DWM line on Win10.
-    // AccentPolicy blur covers the HWND without a glass extension. Keep the
-    // Flutter client origin unchanged so title-bar spacing remains symmetric.
-    const MARGINS margins = backend == window_backdrop::Backend::kSystemAcrylic
-                                ? MARGINS{-1, -1, -1, -1}
-                                : MARGINS{0, 0, 0, 0};
+  bool RestoreFrame() const {
+    // The system backdrop and legacy accent policy already cover the HWND.
+    // Extending glass across the client area also exposes DWM caption buttons
+    // through Flutter's transparent title bar. Keep the normal caption style
+    // for system transitions, but do not extend native frame decorations into
+    // the client surface. Zero margins also avoid the old Win10 white top line.
+    const MARGINS margins{0, 0, 0, 0};
     const HRESULT result = DwmExtendFrameIntoClientArea(window, &margins);
     // Independent capability probe: this works on early Win11 too, even when
     // the newer Desktop Acrylic attribute is unavailable. Win10 ignores it.
     DwmSetWindowAttribute(window, kBorderColor, &kNoBorderColor,
                           sizeof(kNoBorderColor));
+    // A full custom client area prevents DWM's default rounding heuristic.
+    // Opt into the system radius on Win11. The plugin's caption-bearing
+    // fullscreen needs an explicit square preference; Win10 ignores this API.
+    // Do not clip with a custom region: it disables system corner rendering.
+    RECT bounds{};
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    bool square = IsZoomed(window) != FALSE;
+    if (GetWindowRect(window, &bounds) &&
+        GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST),
+                        &monitor)) {
+      square = window_backdrop::UsesSquareSystemCorners(
+          static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE)), square,
+          bounds, monitor.rcMonitor);
+    }
+    const int corners = square ? kSquareCorners : kSystemRoundedCorners;
+    DwmSetWindowAttribute(window, kWindowCornerPreference,
+                          &corners, sizeof(corners));
     return SUCCEEDED(result);
   }
 
@@ -272,7 +292,7 @@ struct WindowBackdropController::Impl {
       SetAccent(kAccentDisabled, 0);
     }
     system_backdrop_owned = true;
-    if (!RestoreFrame(window_backdrop::Backend::kSystemAcrylic)) {
+    if (!RestoreFrame()) {
       DisableSystemBackdrop();
       return false;
     }
@@ -287,13 +307,13 @@ struct WindowBackdropController::Impl {
       return false;
     }
     DisableSystemBackdrop();
-    return RestoreFrame(window_backdrop::Backend::kLegacyBlur);
+    return RestoreFrame();
   }
 
   void ApplySolid(COLORREF color) {
     SetAccent(kAccentSolid, ToAbgr(color, 0xFF));
     DisableSystemBackdrop();
-    RestoreFrame(window_backdrop::Backend::kSolid);
+    RestoreFrame();
   }
 
   bool HasNativeFailure() const {
@@ -312,7 +332,7 @@ struct WindowBackdropController::Impl {
     // Restore the app's explicit preference without resetting the blur policy.
     SetDarkMode();
     if (!plan.apply_effect) {
-      if (plan.apply_frame && !RestoreFrame(state->selection.backend) &&
+      if (plan.apply_frame && !RestoreFrame() &&
           state->selection.available()) {
         // A failed compositor restore must not leave Dart claiming that its
         // transparent chrome is backed by working glass.

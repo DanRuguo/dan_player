@@ -112,7 +112,7 @@ void main() {
   });
 
   for (final brightness in Brightness.values) {
-    for (final width in [320.0, 800.0, 1440.0]) {
+    for (final width in [320.0, 800.0, 1680.0]) {
       for (final textScale in [1.0, 2.0]) {
         testWidgets(
             'folder charts fit $brightness at $width, ${textScale}x text',
@@ -165,7 +165,7 @@ void main() {
           ];
           expect(chartSizes[1], chartSizes.first);
           expect(chartSizes[2], chartSizes.first);
-          if (width == 1440 && textScale == 1) {
+          if (width == 1680 && textScale == 1) {
             final heights = [
               for (final name in ['language', 'format', 'folder'])
                 tester.getSize(_card(name)).height
@@ -301,6 +301,10 @@ void main() {
     expect(find.descendant(of: _card('folder'), matching: find.text('0.0%')),
         findsNWidgets(3));
     expect(find.text('暂无可核实字节'), findsOneWidget);
+    final formatBars = tester.widgetList<FractionallySizedBox>(find.descendant(
+        of: _card('format'), matching: find.byType(FractionallySizedBox)));
+    // A readable empty file still contributes to file count, not byte usage.
+    expect(formatBars.map((bar) => bar.widthFactor), [0.0, 1.0]);
     expect(find.textContaining('NaN'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -308,7 +312,7 @@ void main() {
 
   testWidgets('empty distribution cards are equal-height in a wide row',
       (tester) async {
-    _size(tester, const Size(1440, 1000));
+    _size(tester, const Size(1680, 1000));
     final statistics = PlaybackStatistics.inMemory();
     addTearDown(statistics.dispose);
     final scanner = LibraryStatisticsScanner(

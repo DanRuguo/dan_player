@@ -845,6 +845,12 @@ const _distributionColors = [
   Color(0xff5c7f99),
 ];
 
+Color _distributionColor(BuildContext context, int index) => Color.lerp(
+      _distributionColors[index % _distributionColors.length],
+      Theme.of(context).colorScheme.primary,
+      .4,
+    )!;
+
 double _statisticsTextScale(BuildContext context) =>
     math.max(1, MediaQuery.textScalerOf(context).scale(14) / 14);
 
@@ -1006,7 +1012,7 @@ class _LibraryDistributionsState extends State<_LibraryDistributions> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns =
-            constraints.maxWidth / _statisticsTextScale(context) >= 1080
+            constraints.maxWidth / _statisticsTextScale(context) >= 1560
                 ? 3
                 : 1;
         final contentWidth =
@@ -1077,19 +1083,20 @@ class _LanguageCard extends StatelessWidget {
             availableWidth: contentWidth,
             slices: [
               for (final language in SongLanguage.values)
-                _DistributionSlice(
-                  label: ui(language.label),
-                  value: stats?.languageCounts[language] ?? 0,
-                  amount: ui("{0} 首", [stats?.languageCounts[language] ?? 0]),
-                  detail: language == SongLanguage.unknown
-                      ? ui("缺乏可靠语言信息")
-                      : ui("标签 {0} · 歌词 {1} · 推断 {2}", [
-                          stats?.taggedLanguageCounts[language] ?? 0,
-                          stats?.lyricLanguageCounts[language] ?? 0,
-                          stats?.metadataInferredCount(language) ?? 0
-                        ]),
-                  color: _distributionColors[language.index],
-                ),
+                if ((stats?.languageCounts[language] ?? 0) > 0)
+                  _DistributionSlice(
+                    label: ui(language.label),
+                    value: stats?.languageCounts[language] ?? 0,
+                    amount: ui("{0} 首", [stats?.languageCounts[language] ?? 0]),
+                    detail: language == SongLanguage.unknown
+                        ? ui("缺乏可靠语言信息")
+                        : ui("标签 {0} · 歌词 {1} · 推断 {2}", [
+                            stats?.taggedLanguageCounts[language] ?? 0,
+                            stats?.lyricLanguageCounts[language] ?? 0,
+                            stats?.metadataInferredCount(language) ?? 0
+                          ]),
+                    color: _distributionColor(context, language.index),
+                  ),
             ],
             centerValue: stats == null ? '—' : '${stats.totalTracks}',
             centerLabel: stats?.totalTracks == 0 ? ui("尚未添加歌曲") : ui("首曲目"),
@@ -1118,6 +1125,8 @@ class _StorageFormatCard extends StatelessWidget {
     UiLanguageScope.watch(context);
     final stats = snapshot;
     final formats = stats?.formats ?? const <FormatStorageUsage>[];
+    final sourceFileCount =
+        formats.fold(0, (sum, format) => sum + format.fileCount);
     // Keep uncommon extensions legible without an unbounded legend.
     final visible = formats.take(7).toList();
     if (formats.length > 7) {
@@ -1136,7 +1145,7 @@ class _StorageFormatCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            ui("扇区按实际字节数划分；格式按文件扩展名分组。"),
+            ui("环图与粗条按实际字节数划分，细条对照源文件数量；格式按扩展名分组。"),
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -1146,12 +1155,14 @@ class _StorageFormatCard extends StatelessWidget {
             slices: [
               for (var index = 0; index < visible.length; index++)
                 _DistributionSlice(
-                  label: visible[index].format,
+                  label: ui(visible[index].format),
                   value: visible[index].bytes,
                   amount: formatLibraryBytes(visible[index].bytes),
                   detail: ui("{0} 个源文件", [visible[index].fileCount]),
-                  color:
-                      _distributionColors[index % _distributionColors.length],
+                  comparisonValue: sourceFileCount == 0
+                      ? 0
+                      : visible[index].fileCount / sourceFileCount,
+                  color: _distributionColor(context, index),
                 ),
             ],
             centerValue:
@@ -1259,18 +1270,18 @@ class _FolderStorageCard extends StatelessWidget {
                   detail: ui("{0} · 已核实 {1} 首{2}{3}", [
                     byCount
                         ? formatLibraryBytes(entries[index].bytes)
-                        : '${entries[index].fileCount} 首',
+                        : ui("{0} 首", [entries[index].fileCount]),
                     entries[index].measuredFileCount,
                     entries[index].missingFileCount == 0
                         ? ''
-                        : ' · 缺失 ${entries[index].missingFileCount} 首',
+                        : ui(" · 缺失 {0} 首", [entries[index].missingFileCount]),
                     entries[index].inaccessibleFileCount == 0
                         ? ''
-                        : ' · 不可读 ${entries[index].inaccessibleFileCount} 首'
+                        : ui(" · 不可读 {0} 首",
+                            [entries[index].inaccessibleFileCount])
                   ]),
                   percentage: distribution!.percentageOf(entries[index]),
-                  color:
-                      _distributionColors[index % _distributionColors.length],
+                  color: _distributionColor(context, index),
                 ),
             ],
             centerValue: stats == null
@@ -1298,7 +1309,10 @@ class _FolderStorageCard extends StatelessWidget {
                 [
                   stats == null
                       ? ''
-                      : ' 缺失 ${stats.missingLocalTracks} 首，无权限/不可读 ${stats.inaccessibleLocalTracks} 首未计入空间。'
+                      : ui(" 缺失 {0} 首，无权限/不可读 {1} 首未计入空间。", [
+                          stats.missingLocalTracks,
+                          stats.inaccessibleLocalTracks
+                        ])
                 ]),
             key: const ValueKey('statistics-folder-scope'),
             style: subdued,
@@ -1318,6 +1332,7 @@ class _DistributionSlice {
     required this.color,
     this.tooltip,
     this.percentage,
+    this.comparisonValue,
   });
 
   final String label;
@@ -1327,6 +1342,7 @@ class _DistributionSlice {
   final Color color;
   final String? tooltip;
   final double? percentage;
+  final double? comparisonValue;
 }
 
 class _DistributionView extends StatelessWidget {
@@ -1350,13 +1366,16 @@ class _DistributionView extends StatelessWidget {
     final total = slices.fold(0, (sum, item) => sum + item.value);
     final textScale = _statisticsTextScale(context);
     final side = math.min(
-      196.0 * textScale,
+      (slices.length <= 2 ? 132.0 : 176.0) * textScale,
       math.max(1.0, availableWidth),
     );
     final horizontal = availableWidth / textScale >= 510;
     final legendWidth =
         horizontal ? availableWidth - side - 24 : availableWidth;
-    final compactLegend = legendWidth / textScale < 280;
+    final legendColumns =
+        slices.length > 4 && legendWidth / textScale >= 720 ? 2 : 1;
+    final rowWidth = (legendWidth - (legendColumns - 1) * 16) / legendColumns;
+    final compactLegend = rowWidth / textScale < 340;
     final chart = Semantics(
       label:
           '$centerLabel $centerValue。${slices.map((item) => '${item.label} ${item.amount}').join('，')}',
@@ -1377,11 +1396,11 @@ class _DistributionView extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(40),
+              padding: const EdgeInsets.all(32),
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: SizedBox(
-                  width: math.max(1.0, side - 80),
+                  width: math.max(1.0, side - 64),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -1412,78 +1431,28 @@ class _DistributionView extends StatelessWidget {
         ),
       ),
     );
-    final legend = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (slices.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text(ui("没有可用于分布统计的本地文件"), textAlign: TextAlign.center),
-          ),
-        for (final slice in slices)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 7),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 5),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: slice.color,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const SizedBox.square(dimension: 10),
-                  ),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (slice.tooltip == null)
-                        Text(slice.label)
-                      else
-                        Tooltip(
-                            message: slice.tooltip!, child: Text(slice.label)),
-                      Text(slice.detail,
-                          style: Theme.of(context).textTheme.bodySmall),
-                      if (compactLegend) ...[
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 4,
-                          children: [
-                            Text(slice.amount),
-                            Text(
-                              '${(slice.percentage ?? (total == 0 ? 0.0 : 100 * slice.value / total)).toStringAsFixed(1)}%',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                if (!compactLegend) ...[
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(slice.amount, textAlign: TextAlign.right),
-                        Text(
-                          '${(slice.percentage ?? (total == 0 ? 0.0 : 100 * slice.value / total)).toStringAsFixed(1)}%',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
+    final legend = KeyedSubtree(
+      key: ValueKey('statistics-legend-$chartId'),
+      child: _EqualHeightRows(
+        columns: legendColumns,
+        spacing: legendColumns == 1 ? 0 : 16,
+        children: [
+          if (slices.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(ui("暂无分类数据"), textAlign: TextAlign.center),
             ),
-          ),
-      ],
+          for (var index = 0; index < slices.length; index++)
+            _DistributionComparisonRow(
+              key: ValueKey('statistics-comparison-$chartId-$index'),
+              slice: slices[index],
+              fraction: (slices[index].percentage ??
+                      (total == 0 ? 0.0 : 100 * slices[index].value / total)) /
+                  100,
+              compact: compactLegend,
+            ),
+        ],
+      ),
     );
     return horizontal
         ? Row(
@@ -1500,6 +1469,131 @@ class _DistributionView extends StatelessWidget {
               legend,
             ],
           );
+  }
+}
+
+/// The ring and each comparison bar share the same denominator and colour.
+/// Long folder names keep a full-path tooltip; counts and percentages have
+/// their own line when text scaling leaves insufficient room beside the name.
+class _DistributionComparisonRow extends StatelessWidget {
+  const _DistributionComparisonRow({
+    super.key,
+    required this.slice,
+    required this.fraction,
+    required this.compact,
+  });
+
+  final _DistributionSlice slice;
+  final double fraction;
+  final bool compact;
+
+  Widget _bar(BuildContext context, double value, {bool secondary = false}) =>
+      ClipRRect(
+        borderRadius: BorderRadius.circular(5),
+        child: SizedBox(
+          height: secondary ? 5 : 8,
+          child: ColoredBox(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: .09),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: value.clamp(0.0, 1.0),
+                heightFactor: 1,
+                child: ColoredBox(
+                  color: secondary
+                      ? slice.color.withValues(alpha: .58)
+                      : slice.color,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final percentage = '${(fraction * 100).toStringAsFixed(1)}%';
+    final label = Tooltip(
+      message: slice.tooltip ?? slice.label,
+      child: Text(slice.label, maxLines: 2, overflow: TextOverflow.ellipsis),
+    );
+    final amount = Wrap(
+      spacing: 12,
+      runSpacing: 2,
+      alignment: compact ? WrapAlignment.start : WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text(slice.amount,
+            style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.primary, fontWeight: FontWeight.w600)),
+        Text(percentage, style: theme.textTheme.bodySmall),
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: DecoratedBox(
+                decoration:
+                    BoxDecoration(color: slice.color, shape: BoxShape.circle),
+                child: const SizedBox.square(dimension: 10),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(child: label),
+            if (!compact) ...[
+              const SizedBox(width: 16),
+              Expanded(child: amount),
+            ],
+          ]),
+          if (compact) ...[
+            const SizedBox(height: 4),
+            amount,
+          ],
+          const SizedBox(height: 7),
+          Semantics(
+            label: '${slice.label} ${slice.amount} $percentage',
+            child: _bar(context, fraction),
+          ),
+          const SizedBox(height: 5),
+          if (slice.comparisonValue == null)
+            Text(slice.detail,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant))
+          else
+            Tooltip(
+              message: ui("源文件数量"),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 2,
+                    alignment: WrapAlignment.spaceBetween,
+                    children: [
+                      Text(slice.detail, style: theme.textTheme.bodySmall),
+                      Text(
+                          '${(slice.comparisonValue! * 100).toStringAsFixed(1)}%',
+                          style: theme.textTheme.bodySmall),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Semantics(
+                    label: '${ui("源文件数量")} ${slice.detail}',
+                    child:
+                        _bar(context, slice.comparisonValue!, secondary: true),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 

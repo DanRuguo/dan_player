@@ -6,7 +6,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/compact_lyric_view.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/library/audio_library.dart';
-import 'package:dan_player/library/artwork_size.dart';
+import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/player_shortcut_preferences.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -31,9 +31,6 @@ class CompactPlayer extends StatefulWidget {
 }
 
 class _CompactPlayerState extends State<CompactPlayer> {
-  Object? _coverKey;
-  Future<ImageProvider?>? _coverFuture;
-
   WindowModeController get _controller =>
       widget.controller ?? WindowModeController.instance;
 
@@ -63,7 +60,7 @@ class _CompactPlayerState extends State<CompactPlayer> {
     String title = 'Dan Player',
     String? artist,
     Object? trackIdentity,
-    ImageProvider? cover,
+    Audio? audio,
     Future<Lyric?>? lyricFuture,
     double position = 0,
     double duration = 0,
@@ -78,7 +75,7 @@ class _CompactPlayerState extends State<CompactPlayer> {
         title: title,
         artist: artist,
         trackIdentity: trackIdentity,
-        cover: cover,
+        audio: audio,
         lyricFuture: lyricFuture,
         position: position,
         duration: duration,
@@ -116,66 +113,46 @@ class _CompactPlayerState extends State<CompactPlayer> {
             ]),
             builder: (context, _) {
               final audio = playback.nowPlaying;
-              final target = ArtworkSize.forDisplay(
-                logicalWidth: 80,
-                logicalHeight: 80,
-                devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
-              );
-              final coverKey = (
-                audio?.path,
-                audio?.modified,
-                audio?.artworkUrl,
-                AudioLibrary.revision,
-                target
-              );
-              if (_coverKey != coverKey) {
-                _coverKey = coverKey;
-                _coverFuture = audio?.artworkForSize(target);
-              }
-              return FutureBuilder<ImageProvider?>(
-                key: ValueKey(audio?.path),
-                future: _coverFuture,
-                builder: (context, cover) => StreamBuilder<PlayerState>(
-                  stream: playback.playerStateStream,
-                  initialData: playback.playerState,
-                  builder: (context, state) => StreamBuilder<double>(
-                    stream: playback.positionStream,
-                    initialData: playback.position,
-                    builder: (context, position) {
-                      final playing = state.data == PlayerState.playing;
-                      return _view(
-                        title: audio?.displayTitle ?? 'Dan Player',
-                        artist: audio?.artist ?? ui("尚未选择歌曲"),
-                        // Every load gets a new lyric future, even when the next
-                        // queue occurrence has the same audio path. Cancelling a
-                        // pending seek also on a source change is conservative:
-                        // an old drag must never seek the newly loaded session.
-                        trackIdentity: audio == null
-                            ? null
-                            : (audio.path, lyricService.currLyricFuture),
-                        cover: cover.data,
-                        lyricFuture: lyricService.currLyricFuture,
-                        position: position.data ?? 0,
-                        duration: playback.length,
-                        isPlaying: playing,
-                        isBuffering: playback.isBuffering.value,
-                        onPrevious: playback.playlist.value.isEmpty
-                            ? null
-                            : playback.lastAudio,
-                        onPlayPause: audio == null
-                            ? null
-                            : playing
-                                ? playback.pause
-                                : state.data == PlayerState.completed
-                                    ? playback.playAgain
-                                    : playback.start,
-                        onNext: playback.playlist.value.isEmpty
-                            ? null
-                            : playback.nextAudio,
-                        onSeek: audio == null ? null : playback.seek,
-                      );
-                    },
-                  ),
+              return StreamBuilder<PlayerState>(
+                stream: playback.playerStateStream,
+                initialData: playback.playerState,
+                builder: (context, state) => StreamBuilder<double>(
+                  stream: playback.positionStream,
+                  initialData: playback.position,
+                  builder: (context, position) {
+                    final playing = state.data == PlayerState.playing;
+                    return _view(
+                      title: audio?.displayTitle ?? 'Dan Player',
+                      artist: audio?.artist ?? ui("尚未选择歌曲"),
+                      // Every load gets a new lyric future, even when the next
+                      // queue occurrence has the same audio path. Cancelling a
+                      // pending seek also on a source change is conservative:
+                      // an old drag must never seek the newly loaded session.
+                      trackIdentity: audio == null
+                          ? null
+                          : (audio.path, lyricService.currLyricFuture),
+                      audio: audio,
+                      lyricFuture: lyricService.currLyricFuture,
+                      position: position.data ?? 0,
+                      duration: playback.length,
+                      isPlaying: playing,
+                      isBuffering: playback.isBuffering.value,
+                      onPrevious: playback.playlist.value.isEmpty
+                          ? null
+                          : playback.lastAudio,
+                      onPlayPause: audio == null
+                          ? null
+                          : playing
+                              ? playback.pause
+                              : state.data == PlayerState.completed
+                                  ? playback.playAgain
+                                  : playback.start,
+                      onNext: playback.playlist.value.isEmpty
+                          ? null
+                          : playback.nextAudio,
+                      onSeek: audio == null ? null : playback.seek,
+                    );
+                  },
                 ),
               );
             },
@@ -199,6 +176,7 @@ class CompactPlayerView extends StatefulWidget {
     this.artist,
     this.trackIdentity,
     this.cover,
+    this.audio,
     this.lyricFuture,
     this.position = 0,
     this.duration = 0,
@@ -221,6 +199,7 @@ class CompactPlayerView extends StatefulWidget {
   final String? artist;
   final Object? trackIdentity;
   final ImageProvider? cover;
+  final Audio? audio;
   final Future<Lyric?>? lyricFuture;
   final double position;
   final double duration;
@@ -435,14 +414,23 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
               dimension: 80,
               child: ClipRRect(
                 borderRadius: AppShape.controlRadius,
-                child: widget.cover == null
-                    ? _coverPlaceholder(scheme)
-                    : Image(
-                        image: widget.cover!,
-                        fit: BoxFit.cover,
-                        filterQuality: FilterQuality.high,
-                        errorBuilder: (_, __, ___) => _coverPlaceholder(scheme),
-                      ),
+                child: widget.audio != null
+                    ? AudioArtwork(
+                        audio: widget.audio!,
+                        size: 80,
+                        retainWhileLoading: true,
+                        placeholder: _coverPlaceholder(scheme),
+                      )
+                    : widget.cover == null
+                        ? _coverPlaceholder(scheme)
+                        : Image(
+                            image: widget.cover!,
+                            gaplessPlayback: true,
+                            fit: BoxFit.cover,
+                            filterQuality: FilterQuality.high,
+                            errorBuilder: (_, __, ___) =>
+                                _coverPlaceholder(scheme),
+                          ),
               ),
             ),
           ),

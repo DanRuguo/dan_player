@@ -5,6 +5,17 @@
 
 namespace window_backdrop {
 
+inline bool UsesSquareSystemCorners(DWORD style, bool maximized,
+                                    const RECT& bounds, const RECT& monitor) {
+  // window_manager fullscreen removes these resize capabilities but leaves
+  // WS_CAPTION set, so DWM does not infer square corners for it. A fixed-size
+  // mini window must retain rounding unless it actually covers the monitor.
+  return maximized ||
+      ((style & (WS_THICKFRAME | WS_MAXIMIZEBOX)) == 0 &&
+       bounds.left == monitor.left && bounds.top == monitor.top &&
+       bounds.right == monitor.right && bounds.bottom == monitor.bottom);
+}
+
 enum class RefreshKind { kEnvironment, kFrame, kComposition };
 
 // Requests coalesce monotonically while the controller waits for its posted

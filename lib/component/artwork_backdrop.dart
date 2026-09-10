@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:dan_player/component/background_image_motion.dart';
+import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:flutter/foundation.dart';
@@ -68,30 +69,14 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
     _artwork = Future<ImageProvider?>.sync(widget.loadArtwork);
   }
 
-  Widget _image(ImageProvider provider) {
+  ImageProvider _sample(ImageProvider provider, ArtworkSize? size) {
     final source =
         provider is ArtworkImageProvider ? provider.source : provider;
-    Widget image(ImageProvider sampled) => Image(
-          image: sampled,
-          fit: BoxFit.cover,
-          alignment: Alignment.topCenter,
-          filterQuality: FilterQuality.low,
-          excludeFromSemantics: true,
-          errorBuilder: (_, __, ___) => const SizedBox.expand(),
-        );
-    if (!widget.displaySized) {
-      // ResizeImage cannot compose with another getTargetSize decode policy.
-      return image(ResizeImage(source,
-          width: 512, height: 512, policy: ResizeImagePolicy.fit));
+    if (size == null) {
+      return ResizeImage(source,
+          width: 512, height: 512, policy: ResizeImagePolicy.fit);
     }
-    return LayoutBuilder(builder: (context, constraints) {
-      final size = ArtworkSize.forDisplay(
-        logicalWidth: constraints.maxWidth,
-        logicalHeight: constraints.maxHeight,
-        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
-      );
-      return image(ArtworkImageProvider(source, size));
-    });
+    return ArtworkImageProvider(source, size);
   }
 
   @override
@@ -110,62 +95,79 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                 child: RepaintBoundary(
                   child: ColoredBox(
                     color: scheme.surface,
-                    child: FutureBuilder<ImageProvider?>(
-                      future: _artwork,
-                      builder: (context, snapshot) {
-                        // FutureBuilder can retain the previous snapshot while
-                        // waiting for a new future. Never show that stale art.
-                        final provider =
-                            snapshot.connectionState == ConnectionState.done &&
-                                    !snapshot.hasError
-                                ? snapshot.data
-                                : null;
-                        if (provider == null) return const SizedBox.expand();
-
-                        return Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            BackgroundImageMotion(
-                              enabled: widget.motion,
-                              isPlaying: widget.isPlaying,
-                              isVisible: widget.isVisible,
-                              hidden: widget.hidden,
-                              child: ImageFiltered(
-                                imageFilter: ui.ImageFilter.blur(
-                                  sigmaX: widget.blur.clamp(0, 100),
-                                  sigmaY: widget.blur.clamp(0, 100),
-                                  tileMode: ui.TileMode.clamp,
-                                ),
-                                child: _image(provider),
-                              ),
-                            ),
-                            if (widget.opacity != null)
-                              ColoredBox(
-                                color: scheme.surface.withValues(
-                                  alpha: widget.opacity!.clamp(0, 1),
-                                ),
-                              )
-                            else
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      scheme.surface.withValues(
-                                          alpha: isDark ? 0.78 : 0.82),
-                                      scheme.surface.withValues(
-                                          alpha: isDark ? 0.88 : 0.91),
-                                      scheme.surface.withValues(alpha: 0.97),
-                                    ],
-                                    stops: const [0, 0.55, 1],
+                    child: LayoutBuilder(builder: (context, constraints) {
+                      final size = widget.displaySized
+                          ? ArtworkSize.forDisplay(
+                              logicalWidth: constraints.maxWidth,
+                              logicalHeight: constraints.maxHeight,
+                              devicePixelRatio:
+                                  MediaQuery.devicePixelRatioOf(context),
+                            )
+                          : null;
+                      return ArtworkHandoff(
+                        artworkKey: (widget.artworkKey, size),
+                        loadArtwork: () async {
+                          final provider = await _artwork;
+                          return provider == null
+                              ? null
+                              : _sample(provider, size);
+                        },
+                        placeholder: const SizedBox.expand(),
+                        imageBuilder: (provider) {
+                          return Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              BackgroundImageMotion(
+                                enabled: widget.motion,
+                                isPlaying: widget.isPlaying,
+                                isVisible: widget.isVisible,
+                                hidden: widget.hidden,
+                                child: ImageFiltered(
+                                  imageFilter: ui.ImageFilter.blur(
+                                    sigmaX: widget.blur.clamp(0, 100),
+                                    sigmaY: widget.blur.clamp(0, 100),
+                                    tileMode: ui.TileMode.clamp,
+                                  ),
+                                  child: Image(
+                                    image: provider,
+                                    fit: BoxFit.cover,
+                                    alignment: Alignment.topCenter,
+                                    filterQuality: FilterQuality.low,
+                                    excludeFromSemantics: true,
+                                    gaplessPlayback: true,
+                                    errorBuilder: (_, __, ___) =>
+                                        const SizedBox.expand(),
                                   ),
                                 ),
                               ),
-                          ],
-                        );
-                      },
-                    ),
+                              if (widget.opacity != null)
+                                ColoredBox(
+                                  color: scheme.surface.withValues(
+                                    alpha: widget.opacity!.clamp(0, 1),
+                                  ),
+                                )
+                              else
+                                DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        scheme.surface.withValues(
+                                            alpha: isDark ? 0.78 : 0.82),
+                                        scheme.surface.withValues(
+                                            alpha: isDark ? 0.88 : 0.91),
+                                        scheme.surface.withValues(alpha: 0.97),
+                                      ],
+                                      stops: const [0, 0.55, 1],
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
+                      );
+                    }),
                   ),
                 ),
               ),

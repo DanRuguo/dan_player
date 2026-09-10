@@ -160,7 +160,8 @@ class _DesktopLyricAppearanceButtonState
           key: const ValueKey('desktop-appearance-open'),
           tooltip: error == null ? ui('歌词外观') : ui('歌词外观\n{0}', [ui(error)]),
           onPressed: _opening ? null : _open,
-          color: Color(theme.primary),
+          color: Color(
+              context.watch<ThemeChangedMessage?>()?.primary ?? theme.primary),
           style: IconButton.styleFrom(
               minimumSize: const Size(44, 44),
               visualDensity: VisualDensity.standard,
@@ -175,7 +176,9 @@ class _DesktopLyricAppearanceButtonState
                               ? .75
                               : null,
                       strokeWidth: 2,
-                      color: Color(theme.primary)))
+                      color: Color(
+                          context.watch<ThemeChangedMessage?>()?.primary ??
+                              theme.primary)))
               : Icon(Symbols.palette, size: widget.iconSize),
         ),
       ),

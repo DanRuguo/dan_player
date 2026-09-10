@@ -494,6 +494,16 @@ Future<ArtworkSize> _decode(ImageProvider provider) async {
 
 Future<void> _finishImage(WidgetTester tester) async {
   await tester.pump();
+  // Artwork now commits only after decoding; its preparatory stream can exist
+  // before an Image widget is mounted. Let real codecs finish outside fake time.
+  await tester.runAsync(() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (PaintingBinding.instance.imageCache.pendingImageCount > 0 &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+  });
+  await tester.pump();
   final image = find.byType(Image);
   if (image.evaluate().isNotEmpty) {
     final provider = tester.widget<Image>(image.first).image;

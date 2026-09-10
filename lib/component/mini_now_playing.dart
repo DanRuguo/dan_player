@@ -317,28 +317,14 @@ class _NowPlayingCover extends StatelessWidget {
       );
     }
 
-    return AnimatedSwitcher(
-      duration: AppMotion.standard,
-      switchInCurve: AppMotion.standardCurve,
-      switchOutCurve: Curves.easeInCubic,
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: ScaleTransition(
-          scale: animation.drive(
-            Tween<double>(begin: 0.96, end: 1.0),
-          ),
-          child: child,
-        ),
-      ),
-      child: ClipRRect(
-        key: ValueKey('cover-${nowPlaying!.path}'),
-        borderRadius: AppShape.smallRadius,
-        child: AudioArtwork(
-          audio: nowPlaying!,
-          size: 52,
-          placeholder: const _CoverPlaceholder(),
-          loading: const _CoverLoading(),
-        ),
+    return ClipRRect(
+      borderRadius: AppShape.smallRadius,
+      child: AudioArtwork(
+        audio: nowPlaying!,
+        size: 52,
+        retainWhileLoading: true,
+        placeholder: const _CoverPlaceholder(),
+        loading: const _CoverLoading(),
       ),
     );
   }

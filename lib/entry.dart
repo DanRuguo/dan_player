@@ -192,6 +192,7 @@ class Entry extends StatelessWidget {
                     final theme = Provider.of<ThemeProvider>(context);
                     return MaterialApp.router(
                       themeAnimationDuration: AppMotion.standard,
+                      themeAnimationCurve: AppMotion.standardCurve,
                       title: "Dan Player",
                       scaffoldMessengerKey: SCAFFOLD_MESSAGER,
                       debugShowCheckedModeBanner: false,

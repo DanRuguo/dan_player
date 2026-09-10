@@ -123,8 +123,9 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                     final cover = AppEntrance(
                       identity: 'audio-detail-cover',
                       child: _DetailCover(
-                        key: ValueKey(artworkKey),
+                        key: ValueKey(audio.path),
                         audio: audio,
+                        revision: artworkKey,
                         size: compact ? 180 : 240,
                       ),
                     );
@@ -323,8 +324,10 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
 }
 
 class _DetailCover extends StatelessWidget {
-  const _DetailCover({super.key, required this.audio, required this.size});
+  const _DetailCover(
+      {super.key, required this.audio, required this.size, this.revision});
   final Audio audio;
+  final Object? revision;
   final double size;
 
   @override
@@ -348,6 +351,8 @@ class _DetailCover extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: AudioArtwork(
         audio: audio,
+        revision: revision,
+        retainWhileLoading: true,
         size: size,
         placeholder: Icon(Symbols.music_note, size: size * 0.45),
         loading: const Center(child: CircularProgressIndicator()),

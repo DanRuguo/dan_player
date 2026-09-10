@@ -342,6 +342,29 @@ void CheckEnvironmentChanges(Checks& checks) {
 
 int main() {
   Checks checks;
+  const RECT screen{0, 0, 2560, 1440};
+  const RECT ordinary{100, 100, 1380, 856};
+  const RECT work_area{0, 0, 2560, 1392};
+  const DWORD normal = WS_OVERLAPPEDWINDOW;
+  const DWORD fullscreen = normal & ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
+  using window_backdrop::UsesSquareSystemCorners;
+  checks.Check("normal window requests system rounding",
+      !UsesSquareSystemCorners(normal, false, ordinary, screen));
+  checks.Check("maximized work area has square corners",
+      UsesSquareSystemCorners(normal, true, work_area, screen));
+  checks.Check("caption-bearing plugin fullscreen has square corners",
+      UsesSquareSystemCorners(fullscreen, false, screen, screen));
+  checks.Check("restored ordinary window requests rounding again",
+      !UsesSquareSystemCorners(normal, false, ordinary, screen));
+  checks.Check("fixed-size mini retains system rounding",
+      !UsesSquareSystemCorners(fullscreen, false, ordinary, screen));
+  checks.Check("a resizable screen-sized window is not plugin fullscreen",
+      !UsesSquareSystemCorners(normal, false, screen, screen));
+  checks.Check("fixed-size work area is not full monitor",
+      !UsesSquareSystemCorners(fullscreen, false, work_area, screen));
+  const RECT second_screen{-1920, -120, 0, 960};
+  checks.Check("fullscreen works on a negative-origin secondary display",
+      UsesSquareSystemCorners(fullscreen, false, second_screen, second_screen));
   CheckRequestMerging(checks);
   CheckRefreshPlans(checks);
   CheckMoveAndResize(checks);

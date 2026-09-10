@@ -62,8 +62,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-      'empty statistics and all language categories fit a narrow window',
+  testWidgets('empty statistics omit zero language rows in a narrow window',
       (tester) async {
     tester.view.physicalSize = const Size(320, 900);
     tester.view.devicePixelRatio = 1;
@@ -81,13 +80,10 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    expect(find.text('中文'), findsOneWidget);
-    expect(find.text('英文'), findsOneWidget);
-    expect(find.text('日文'), findsOneWidget);
-    expect(find.text('韩文'), findsOneWidget);
-    expect(find.text('其他语言'), findsOneWidget);
-    expect(find.text('未识别'), findsOneWidget);
-    expect(find.text('0.0%'), findsNWidgets(6));
+    final languageCard = find.byKey(const ValueKey('statistics-language-card'));
+    expect(find.descendant(of: languageCard, matching: find.text('暂无分类数据')),
+        findsOneWidget);
+    expect(find.text('0.0%'), findsNothing);
     expect(tester.takeException(), isNull);
 
     await tester.scrollUntilVisible(

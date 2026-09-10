@@ -6,6 +6,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import 'app_typography.dart';
+import 'desktop_lyric_theme_transition.dart';
+import 'message.dart';
 import 'app_input_theme.dart';
 import 'app_scrollbar.dart';
 import 'appearance_palette_bridge.dart';
@@ -22,84 +24,89 @@ class DesktopLyricAppearanceApp extends StatelessWidget {
   Widget build(BuildContext context) => UiLanguageScope(
         child: ListenableBuilder(
             listenable: client,
-            builder: (context, _) {
-              final colors = client.theme.value;
-              final brightness =
-                  client.isDarkMode.value ? Brightness.dark : Brightness.light;
-              final base = DesktopLyricTypography.theme(brightness);
-              final scheme = base.colorScheme.copyWith(
-                  primary: Color(colors.primary),
-                  surface: Color(colors.surfaceContainer),
-                  surfaceContainer: Color(colors.surfaceContainer),
-                  onSurface: Color(colors.onSurface));
-              final textTheme = base.textTheme.apply(
-                  fontFamily: client.fontFamily,
-                  fontFamilyFallback: client.fontFamilyFallback);
-              return MaterialApp(
-                scrollBehavior: const AppScrollBehavior(),
-                debugShowCheckedModeBanner: false,
-                // A hidden warm panel must paint the new cover theme on its
-                // first frame, not interpolate from the previous song's theme.
-                themeAnimationDuration: Duration.zero,
-                theme: base.copyWith(
-                    colorScheme: scheme,
-                    inputDecorationTheme: appInputTheme(scheme),
-                    textTheme: textTheme,
-                    // The base theme's resolver closes over its blue seed;
-                    // changing only colorScheme does not update that closure.
-                    iconButtonTheme: IconButtonThemeData(
-                        style: base.iconButtonTheme.style!.copyWith(
-                            overlayColor:
-                                WidgetStateProperty.resolveWith((states) {
-                      if (states.contains(WidgetState.disabled)) {
-                        return Colors.transparent;
-                      }
-                      if (states.contains(WidgetState.pressed)) {
-                        return scheme.primary.withValues(alpha: .12);
-                      }
-                      if (states.contains(WidgetState.hovered)) {
-                        return scheme.primary.withValues(alpha: .08);
-                      }
-                      if (states.contains(WidgetState.focused)) {
-                        return scheme.primary.withValues(alpha: .10);
-                      }
-                      return null;
-                    }))),
-                    // Tooltip consumes a complete style, not the surrounding
-                    // TextTheme. Pair its foreground with an explicit surface.
-                    tooltipTheme: base.tooltipTheme.copyWith(
-                        textStyle: textTheme.bodySmall!.copyWith(
-                            color: scheme.onSurface,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500),
-                        decoration: BoxDecoration(
-                            color: scheme.surfaceContainer,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color:
-                                    scheme.onSurface.withValues(alpha: .12))))),
-                locale: uiLanguage.value.locale,
-                localizationsDelegates: GlobalMaterialLocalizations.delegates,
-                supportedLocales: UiLanguage.values.map((e) => e.locale),
-                builder: (context, child) => TickerMode(
-                    enabled: client.active,
-                    child: ExcludeFocus(
-                        excluding: !client.active,
-                        child: UiLanguageTransition(
-                            key: ValueKey(client.presentationId),
-                            child: child ?? const SizedBox.shrink()))),
-                home: CallbackShortcuts(
-                    bindings: {
-                      const SingleActivator(LogicalKeyboardKey.escape): () =>
-                          unawaited(client.close()),
-                    },
-                    child: Focus(
-                        autofocus: true,
-                        child:
-                            DesktopLyricAppearancePanel(controller: client))),
-              );
-            }),
+            builder: (context, _) => DesktopLyricThemeTransition(
+                  // Reused native panels must start each presentation at the
+                  // newest palette, including forced frames while still hidden.
+                  key: ValueKey(client.presentationId),
+                  colors: client.theme.value,
+                  enabled: client.active,
+                  builder: (context, colors, _) => _themedApp(context, colors),
+                )),
       );
+
+  Widget _themedApp(BuildContext context, ThemeChangedMessage colors) {
+    final brightness =
+        client.isDarkMode.value ? Brightness.dark : Brightness.light;
+    final base = DesktopLyricTypography.theme(brightness);
+    final scheme = base.colorScheme.copyWith(
+        primary: Color(colors.primary),
+        surface: Color(colors.surfaceContainer),
+        surfaceContainer: Color(colors.surfaceContainer),
+        onSurface: Color(colors.onSurface));
+    final textTheme = base.textTheme.apply(
+        fontFamily: client.fontFamily,
+        fontFamilyFallback: client.fontFamilyFallback);
+    return MaterialApp(
+      scrollBehavior: const AppScrollBehavior(),
+      debugShowCheckedModeBanner: false,
+      // The explicit colour clock above already supplies each
+      // intermediate theme; do not interpolate a second time.
+      themeAnimationDuration: Duration.zero,
+      theme: base.copyWith(
+          colorScheme: scheme,
+          inputDecorationTheme: appInputTheme(scheme),
+          textTheme: textTheme,
+          // The base theme's resolver closes over its blue seed;
+          // changing only colorScheme does not update that closure.
+          iconButtonTheme: IconButtonThemeData(
+              style: base.iconButtonTheme.style!.copyWith(
+                  overlayColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return Colors.transparent;
+            }
+            if (states.contains(WidgetState.pressed)) {
+              return scheme.primary.withValues(alpha: .12);
+            }
+            if (states.contains(WidgetState.hovered)) {
+              return scheme.primary.withValues(alpha: .08);
+            }
+            if (states.contains(WidgetState.focused)) {
+              return scheme.primary.withValues(alpha: .10);
+            }
+            return null;
+          }))),
+          // Tooltip consumes a complete style, not the surrounding
+          // TextTheme. Pair its foreground with an explicit surface.
+          tooltipTheme: base.tooltipTheme.copyWith(
+              textStyle: textTheme.bodySmall!.copyWith(
+                  color: scheme.onSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500),
+              decoration: BoxDecoration(
+                  color: scheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: scheme.onSurface.withValues(alpha: .12))))),
+      locale: uiLanguage.value.locale,
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: UiLanguage.values.map((e) => e.locale),
+      builder: (context, child) => TickerMode(
+          enabled: client.active,
+          child: ExcludeFocus(
+              excluding: !client.active,
+              child: UiLanguageTransition(
+                  key: ValueKey(client.presentationId),
+                  child: child ?? const SizedBox.shrink()))),
+      home: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () =>
+                unawaited(client.close()),
+          },
+          child: Focus(
+              autofocus: true,
+              child: DesktopLyricAppearancePanel(controller: client))),
+    );
+  }
 }
 
 /// The same options/model as main-player settings, in an opaque own surface.
@@ -109,15 +116,15 @@ class DesktopLyricAppearancePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final colors = controller.theme.value;
-    final primary = Color(colors.primary);
-    final foreground = Color(colors.onSurface);
+    final colors = Theme.of(context).colorScheme;
+    final primary = colors.primary;
+    final foreground = colors.onSurface;
     return ClipRRect(
       key: const ValueKey('desktop-appearance-rounded-surface'),
       borderRadius: BorderRadius.circular(16),
       child: Scaffold(
         key: const ValueKey('desktop-appearance-dialog'),
-        backgroundColor: Color(colors.surfaceContainer),
+        backgroundColor: colors.surfaceContainer,
         body: SafeArea(
             child: Column(children: [
           Padding(
