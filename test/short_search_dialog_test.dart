@@ -49,13 +49,19 @@ void main() {
     });
   }
 
+  Finder viewportFor(String key) {
+    final compact = find.byKey(const ValueKey('metadata-lookup-compact'));
+    return key.startsWith('metadata-lookup-') && compact.evaluate().isNotEmpty
+        ? compact
+        : find.byKey(ValueKey(key));
+  }
+
   Future<void> scrollTo(
       WidgetTester tester, String scrollKey, Finder item) async {
     await tester.scrollUntilVisible(item, 60,
         scrollable: find
             .descendant(
-                of: find.byKey(ValueKey(scrollKey)),
-                matching: find.byType(Scrollable))
+                of: viewportFor(scrollKey), matching: find.byType(Scrollable))
             .first,
         maxScrolls: 500);
     await tester.pumpAndSettle();
@@ -64,9 +70,8 @@ void main() {
 
   Future<void> tapInViewport(
       WidgetTester tester, String scrollKey, Finder item) async {
-    final visible = tester
-        .getRect(item)
-        .intersect(tester.getRect(find.byKey(ValueKey(scrollKey))));
+    final visible =
+        tester.getRect(item).intersect(tester.getRect(viewportFor(scrollKey)));
     expect(visible.isEmpty, isFalse);
     await tester.tapAt(visible.center);
     await tester.pumpAndSettle();

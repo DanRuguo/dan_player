@@ -1,3 +1,5 @@
+import 'package:dan_player/component/app_content_transition.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/page/settings_page/grouped_settings.dart';
 import 'package:dan_player/page/settings_page/page.dart';
@@ -33,11 +35,13 @@ class _EditorState extends State<_Editor> {
       TextField(key: ValueKey('editor-${widget.label}'), controller: _text);
 }
 
-Widget _host(List<SettingsSection> sections, {double scale = 1}) => MaterialApp(
+Widget _host(List<SettingsSection> sections,
+        {double scale = 1, bool reduced = true}) =>
+    MaterialApp(
       home: MediaQuery(
         data: MediaQueryData(
             textScaler: TextScaler.linear(scale),
-            disableAnimations: true,
+            disableAnimations: reduced,
             size: const Size(1000, 700)),
         child: Scaffold(
             body: AppEntranceScope(child: GroupedSettings(sections: sections))),
@@ -77,6 +81,32 @@ Future<void> _select(WidgetTester tester, String id) async {
 }
 
 void main() {
+  testWidgets(
+      'animated section switches retain drafts without duplicate editors',
+      (tester) async {
+    var mounts = 0;
+    await tester
+        .pumpWidget(_host(_sections(first: () => mounts++), reduced: false));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const ValueKey('editor-one')), 'Keep this draft');
+    for (final id in ['two', 'one']) {
+      await tester.tap(find.byKey(ValueKey('settings-category-$id')));
+      await tester.pump();
+      final fade = tester.widget<FadeTransition>(find
+          .descendant(
+              of: find.byType(AppContentTransition),
+              matching: find.byType(FadeTransition))
+          .first);
+      expect(fade.opacity.value, 0);
+      await tester.pump(AppMotion.standard);
+      expect(fade.opacity.value, 1);
+      expect(tester.takeException(), isNull);
+    }
+    expect(mounts, 1);
+    expect(find.text('Keep this draft'), findsOneWidget);
+  });
+
   testWidgets('touch scrolling reaches settings below the fold',
       (tester) async {
     await tester.pumpWidget(_host(_sections()));

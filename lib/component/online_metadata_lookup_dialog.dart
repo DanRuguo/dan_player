@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:typed_data';
@@ -81,6 +82,7 @@ class _OnlineMetadataLookupDialogState
   late final _query = TextEditingController(text: widget.query);
   final _controlsScroll = ScrollController();
   final _resultsScroll = ScrollController();
+  final _compactScroll = ScrollController();
   List<Audio> _results = [];
   Audio? _selected;
   bool _loading = false;
@@ -258,6 +260,7 @@ class _OnlineMetadataLookupDialogState
     _query.dispose();
     _controlsScroll.dispose();
     _resultsScroll.dispose();
+    _compactScroll.dispose();
     super.dispose();
   }
 
@@ -266,6 +269,111 @@ class _OnlineMetadataLookupDialogState
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final selectedHasCover = _selected?.artworkUrl?.isNotEmpty == true;
+    final controls = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppDialogTitle(ui("联网查找歌曲信息与封面"),
+            style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+              child: TextField(
+            key: const ValueKey('metadata-lookup-query'),
+            controller: _query,
+            enabled: !_applying,
+            onSubmitted: (_) => _search(),
+            decoration: InputDecoration(
+                labelText: ui("歌曲名 / 艺术家"), border: AppShape.inputBorder),
+          )),
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+              style: IconButton.styleFrom(
+                  foregroundColor:
+                      Theme.of(context).colorScheme.onSecondaryContainer),
+              key: const ValueKey('metadata-lookup-search'),
+              onPressed: _loading || _applying ? null : _search,
+              tooltip: ui("搜索"),
+              icon: const Icon(Symbols.search)),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          FilterChip(
+              label: Text(ui("标题")),
+              selected: _title,
+              onSelected:
+                  _applying ? null : (value) => setState(() => _title = value)),
+          FilterChip(
+              label: Text(ui("艺术家")),
+              selected: _artist,
+              onSelected: _applying
+                  ? null
+                  : (value) => setState(() => _artist = value)),
+          FilterChip(
+              label: Text(ui("专辑")),
+              selected: _album,
+              onSelected:
+                  _applying ? null : (value) => setState(() => _album = value)),
+          FilterChip(
+              label: Text(ui("封面")),
+              tooltip: selectedHasCover ? ui("填入候选封面") : ui("候选未提供封面"),
+              selected: _cover && selectedHasCover,
+              onSelected: _applying || !selectedHasCover
+                  ? null
+                  : (value) => setState(() => _cover = value)),
+        ]),
+        const SizedBox(height: 6),
+        Text(ui("选中候选结果后仅填入编辑器；点击“保存”才会写入本地文件。")),
+        if (_error != null || _partialFailures.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(_error ?? _onlineFailureSummary(_partialFailures),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: scheme.error)),
+          ),
+      ],
+    );
+    Widget candidate(BuildContext context, int index, {bool compact = false}) {
+      if (_loading || _results.isEmpty) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Center(
+              child: _loading
+                  ? const SizedBox.square(
+                      dimension: 24, child: CircularProgressIndicator())
+                  : Text(ui("没有找到候选结果，可修改关键词后重试"))),
+        );
+      }
+      final item = _results[index];
+      final selected = _selected?.path == item.path;
+      final details =
+          '${item.artist} · ${item.album}\n${onlineSourceDisplayLabel(provider: item.onlineProvider, fallback: item.sourceLabel)} · ${item.duration ~/ 60}:${(item.duration % 60).toString().padLeft(2, '0')}';
+      final tile = ListTile(
+        key: ValueKey('metadata-candidate-${item.path}'),
+        selected: selected,
+        selectedTileColor: scheme.secondaryContainer,
+        shape: AppShape.control,
+        enabled: !_applying,
+        onTap: () => _selectCandidate(item),
+        leading: ClipRRect(
+          borderRadius: AppShape.smallRadius,
+          child: AudioArtwork(
+            audio: item,
+            placeholder: const Icon(Symbols.album),
+          ),
+        ),
+        title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(details,
+            maxLines: compact ? 1 : 2, overflow: TextOverflow.ellipsis),
+        trailing: Icon(
+            selected ? Symbols.check_circle : Symbols.radio_button_unchecked),
+      );
+      return compact
+          ? Tooltip(message: '${item.title}\n$details', child: tile)
+          : tile;
+    }
+
     return PopScope<OnlineMetadataSelection>(
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) return;
@@ -281,182 +389,73 @@ class _OnlineMetadataLookupDialogState
           width: 740,
           maxHeight: (MediaQuery.sizeOf(context).height - 64).clamp(300, 700),
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.all(
+                MediaQuery.sizeOf(context).height < 400 ? 16 : 20),
             child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Flexible(
                     child: LayoutBuilder(builder: (context, constraints) {
+                      final scale =
+                          MediaQuery.textScalerOf(context).scale(14) / 14;
+                      final compact = constraints.maxHeight < 260 * scale;
+                      final count =
+                          _loading || _results.isEmpty ? 1 : _results.length;
+                      if (compact) {
+                        // Short windows need one readable body instead of two
+                        // independently clipped slivers of controls and results.
+                        return AppScrollbar(
+                          controller: _compactScroll,
+                          child: CustomScrollView(
+                            key: const ValueKey('metadata-lookup-compact'),
+                            controller: _compactScroll,
+                            primary: false,
+                            shrinkWrap: true,
+                            slivers: [
+                              SliverToBoxAdapter(child: controls),
+                              const SliverToBoxAdapter(
+                                  child: SizedBox(height: 12)),
+                              SliverList.builder(
+                                itemCount: count,
+                                itemBuilder: (context, index) =>
+                                    candidate(context, index, compact: true),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
                       return Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Controls keep their own viewport when results
-                          // arrive. In a short window they scroll independently
-                          // instead of disappearing after the candidate list.
                           ConstrainedBox(
                             constraints: BoxConstraints(
-                              maxHeight: constraints.maxHeight * .65,
-                            ),
-                            child: Scrollbar(
+                                maxHeight: constraints.maxHeight * .65),
+                            child: AppScrollbar(
                               controller: _controlsScroll,
-                              thumbVisibility: true,
                               child: SingleChildScrollView(
                                 key: const ValueKey('metadata-lookup-controls'),
                                 controller: _controlsScroll,
                                 primary: false,
                                 padding: const EdgeInsets.only(right: 12),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    AppDialogTitle(ui("联网查找歌曲信息与封面"),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge),
-                                    const SizedBox(height: 12),
-                                    Row(children: [
-                                      Expanded(
-                                          child: TextField(
-                                        key: const ValueKey(
-                                            'metadata-lookup-query'),
-                                        controller: _query,
-                                        enabled: !_applying,
-                                        onSubmitted: (_) => _search(),
-                                        decoration: InputDecoration(
-                                            labelText: ui("歌曲名 / 艺术家"),
-                                            border: AppShape.inputBorder),
-                                      )),
-                                      const SizedBox(width: 8),
-                                      IconButton.filledTonal(
-                                          style: IconButton.styleFrom(
-                                              foregroundColor: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSecondaryContainer),
-                                          key: const ValueKey(
-                                              'metadata-lookup-search'),
-                                          onPressed: _loading || _applying
-                                              ? null
-                                              : _search,
-                                          tooltip: ui("搜索"),
-                                          icon: const Icon(Symbols.search)),
-                                    ]),
-                                    const SizedBox(height: 8),
-                                    Wrap(spacing: 8, runSpacing: 4, children: [
-                                      FilterChip(
-                                          label: Text(ui("标题")),
-                                          selected: _title,
-                                          onSelected: _applying
-                                              ? null
-                                              : (value) => setState(
-                                                  () => _title = value)),
-                                      FilterChip(
-                                          label: Text(ui("艺术家")),
-                                          selected: _artist,
-                                          onSelected: _applying
-                                              ? null
-                                              : (value) => setState(
-                                                  () => _artist = value)),
-                                      FilterChip(
-                                          label: Text(ui("专辑")),
-                                          selected: _album,
-                                          onSelected: _applying
-                                              ? null
-                                              : (value) => setState(
-                                                  () => _album = value)),
-                                      FilterChip(
-                                          label: Text(ui("封面")),
-                                          tooltip: selectedHasCover
-                                              ? ui("填入候选封面")
-                                              : ui("候选未提供封面"),
-                                          selected: _cover && selectedHasCover,
-                                          onSelected:
-                                              _applying || !selectedHasCover
-                                                  ? null
-                                                  : (value) => setState(
-                                                      () => _cover = value)),
-                                    ]),
-                                    const SizedBox(height: 6),
-                                    Text(ui("选中候选结果后仅填入编辑器；点击“保存”才会写入本地文件。")),
-                                    if (_error != null ||
-                                        _partialFailures.isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 10),
-                                        child: Text(
-                                            _error ??
-                                                _onlineFailureSummary(
-                                                    _partialFailures),
-                                            maxLines: 3,
-                                            overflow: TextOverflow.ellipsis,
-                                            style:
-                                                TextStyle(color: scheme.error)),
-                                      ),
-                                  ],
-                                ),
+                                child: controls,
                               ),
                             ),
                           ),
                           const SizedBox(height: 8),
                           Flexible(
-                              child: Scrollbar(
+                              child: AppScrollbar(
                             controller: _resultsScroll,
-                            thumbVisibility: true,
                             child: ListView.builder(
-                              shrinkWrap: true,
                               key: const ValueKey('metadata-lookup-results'),
                               controller: _resultsScroll,
                               primary: false,
+                              shrinkWrap: true,
                               padding: const EdgeInsets.only(right: 12),
-                              // Empty/error/loading states use the same independent
-                              // list viewport and never change controls' placement.
-                              itemCount: _loading || _results.isEmpty
-                                  ? 1
-                                  : _results.length,
-                              itemBuilder: (context, index) {
-                                if (_loading || _results.isEmpty) {
-                                  return Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
-                                    child: Center(
-                                        child: _loading
-                                            ? const SizedBox.square(
-                                                dimension: 24,
-                                                child:
-                                                    CircularProgressIndicator())
-                                            : Text(ui("没有找到候选结果，可修改关键词后重试"))),
-                                  );
-                                }
-                                final item = _results[index];
-                                final selected = _selected?.path == item.path;
-                                return ListTile(
-                                  key: ValueKey(
-                                      'metadata-candidate-${item.path}'),
-                                  selected: selected,
-                                  selectedTileColor: scheme.secondaryContainer,
-                                  shape: AppShape.control,
-                                  enabled: !_applying,
-                                  onTap: () => _selectCandidate(item),
-                                  leading: ClipRRect(
-                                    borderRadius: AppShape.smallRadius,
-                                    child: AudioArtwork(
-                                      audio: item,
-                                      placeholder: const Icon(Symbols.album),
-                                    ),
-                                  ),
-                                  title: Text(item.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis),
-                                  subtitle: Text(
-                                      '${item.artist} · ${item.album}\n${onlineSourceDisplayLabel(provider: item.onlineProvider, fallback: item.sourceLabel)} · ${item.duration ~/ 60}:${(item.duration % 60).toString().padLeft(2, '0')}',
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis),
-                                  trailing: Icon(selected
-                                      ? Symbols.check_circle
-                                      : Symbols.radio_button_unchecked),
-                                );
-                              },
+                              itemCount: count,
+                              itemBuilder: (context, index) =>
+                                  candidate(context, index),
                             ),
                           )),
                         ],

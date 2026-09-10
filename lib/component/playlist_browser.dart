@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/playlist_management_dialog.dart';
 import 'package:dan_player/component/audio_columns.dart';
@@ -1544,7 +1545,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         // song list: long warnings and their retry controls scroll locally.
         key: const ValueKey('playlist-warning-viewport'),
         constraints: BoxConstraints(maxHeight: availableHeight * .4),
-        child: Scrollbar(
+        child: AppScrollbar(
           controller: _warningScrollController,
           child: ScrollConfiguration(
             behavior:

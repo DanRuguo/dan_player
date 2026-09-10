@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
@@ -41,6 +42,47 @@ void main() {
   });
 
   tearDown(() => statistics.dispose());
+
+  test('bounded rankings match full rankings, ties and live counter changes',
+      () {
+    final random = Random(123);
+    for (var i = 0; i < 1000; i++) {
+      statistics.tracks['$i'] = TrackPlaybackStatistics(
+          id: '$i',
+          title: 'Song $i',
+          artist: 'Artist',
+          album: 'Album',
+          online: false,
+          playCount: random.nextInt(12),
+          listenMilliseconds: random.nextInt(12));
+    }
+    for (final limit in [0, -1, 1, 10, 99, 1000, 1001]) {
+      expect(statistics.topPlayCount(limit: limit),
+          statistics.topByPlayCount.take(max(0, limit)).toList());
+      expect(statistics.topListeningTime(limit: limit),
+          statistics.topByListeningTime.take(max(0, limit)).toList());
+    }
+    final first = statistics.tracks.values.first;
+    first.playCount = 2000;
+    first.listenMilliseconds = 2000;
+    expect(statistics.topPlayCount(limit: 1), [first]);
+    expect(statistics.topListeningTime(limit: 1), [first]);
+    for (final track in statistics.tracks.values) {
+      track.playCount = 1;
+      track.listenMilliseconds = 1;
+    }
+    expect(
+        statistics.topPlayCount(), statistics.tracks.values.take(10).toList());
+    expect(statistics.topListeningTime(),
+        statistics.tracks.values.take(10).toList());
+    expect(statistics.topByPlayCount, statistics.tracks.values.toList());
+    expect(statistics.topByListeningTime, statistics.tracks.values.toList());
+  });
+
+  test('bounded rankings return empty results for empty history', () {
+    expect(statistics.topPlayCount(), isEmpty);
+    expect(statistics.topListeningTime(), isEmpty);
+  });
 
   void playingAfter(Duration duration) {
     clock.advance(duration);

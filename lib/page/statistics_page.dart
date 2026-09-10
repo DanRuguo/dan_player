@@ -1,10 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/statistics_bar_row.dart';
 import 'package:dan_player/library/audio_library.dart';
-import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:flutter/material.dart';
@@ -37,11 +37,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
   void initState() {
     super.initState();
     _scanner = widget.scanner ?? LibraryStatisticsScanner();
-    OnlineLibrary.instance.addListener(_libraryChanged);
+    AudioLibrary.changes.addListener(_libraryChanged);
     _refreshLibrary(notify: false);
   }
 
-  void _libraryChanged() => _refreshLibrary();
+  void _libraryChanged() => _refreshIfLibraryChanged();
 
   Future<void> _refreshLibrary({bool notify = true}) async {
     final generation = ++_generation;
@@ -100,12 +100,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
         _refreshLibrary();
       }
     });
+    // Library notifications can arrive while playback and the UI are idle.
+    // Coalesce them into one upcoming frame rather than waiting for playback.
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
   void dispose() {
     _generation++;
-    OnlineLibrary.instance.removeListener(_libraryChanged);
+    AudioLibrary.changes.removeListener(_libraryChanged);
     super.dispose();
   }
 
@@ -277,9 +280,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   sliver: SliverToBoxAdapter(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final topPlay = stats.topByPlayCount.take(10).toList();
-                        final topTime =
-                            stats.topByListeningTime.take(10).toList();
+                        final topPlay = stats.topPlayCount(limit: 10);
+                        final topTime = stats.topListeningTime(limit: 10);
                         final cards = [
                           _RankingCard(
                             title: ui("播放最多"),
@@ -341,11 +343,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
 String _formatListeningDuration(int milliseconds, {bool precise = false}) {
   final duration = Duration(milliseconds: math.max(0, milliseconds));
   if (duration.inHours >= 1) {
-    return ui("{0} 小时 {1} 分{2}", [
-      duration.inHours,
-      duration.inMinutes.remainder(60),
-      precise ? ' ${duration.inSeconds.remainder(60)} 秒' : ''
-    ]);
+    if (precise) {
+      return ui("{0} 小时 {1} 分 {2} 秒", [
+        duration.inHours,
+        duration.inMinutes.remainder(60),
+        duration.inSeconds.remainder(60)
+      ]);
+    }
+    return ui("{0} 小时 {1} 分{2}",
+        [duration.inHours, duration.inMinutes.remainder(60), '']);
   }
   if (duration.inMinutes >= 1) {
     return precise
@@ -659,9 +665,8 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Scrollbar(
+                AppScrollbar(
                   controller: _scrollController,
-                  thumbVisibility: scrollable,
                   child: SingleChildScrollView(
                     key: const ValueKey('listening-hours-scroll'),
                     controller: _scrollController,
@@ -696,7 +701,7 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                                       _formatListeningDuration(_value(hour),
                                           precise: true),
                                       widget.peakHours.contains(hour)
-                                          ? '，最高时段'
+                                          ? ' · ${ui("最高时段")}'
                                           : ''
                                     ]),
                                     onTap: () => _selectHour(hour),
@@ -704,7 +709,7 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                                     child: Tooltip(
                                       message: '${_hourRange(hour)} · '
                                           '${_formatListeningDuration(_value(hour), precise: true)}'
-                                          '${widget.peakHours.contains(hour) ? ' · 最高时段' : ''}',
+                                          '${widget.peakHours.contains(hour) ? ' · ${ui("最高时段")}' : ''}',
                                       child: InkWell(
                                         onTap: () => _selectHour(hour),
                                         borderRadius: BorderRadius.circular(6),
@@ -727,15 +732,14 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                                                     key: ValueKey(
                                                         'listening-bar-$hour'),
                                                     decoration: BoxDecoration(
-                                                      color: scheme.primary
-                                                          .withValues(
-                                                        alpha: widget.peakHours
-                                                                .contains(hour)
-                                                            ? 1
-                                                            : hour ==
-                                                                    selectedHour
-                                                                ? 0.8
-                                                                : 0.45,
+                                                      color:
+                                                          StatisticsMagnitudeColor
+                                                              .resolve(
+                                                        scheme,
+                                                        maximum == 0
+                                                            ? 0
+                                                            : _value(hour) /
+                                                                maximum,
                                                       ),
                                                       borderRadius:
                                                           const BorderRadius
@@ -748,10 +752,22 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                                               ),
                                             ),
                                             const SizedBox(height: 6),
-                                            Padding(
+                                            Container(
+                                              key: ValueKey(
+                                                  'listening-hour-label-$hour'),
                                               padding:
                                                   const EdgeInsets.symmetric(
+                                                      horizontal: 3,
                                                       vertical: 4),
+                                              decoration: BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(5),
+                                                border: Border.all(
+                                                  color: hour == selectedHour
+                                                      ? scheme.primary
+                                                      : Colors.transparent,
+                                                ),
+                                              ),
                                               child: Text(
                                                 hour.toString().padLeft(2, '0'),
                                                 style: Theme.of(context)
@@ -823,7 +839,7 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                       selectedHour == null
                           ? ui("点击、长按或悬停柱状条查看时长")
                           : '${_formatListeningDuration(_value(selectedHour), precise: true)}'
-                              '${selectedIsPeak ? ' · 最高时段' : ''}',
+                              '${selectedIsPeak ? ' · ${ui("最高时段")}' : ''}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),

@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'dart:async';
 
@@ -245,61 +246,64 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
           subtitle: ui("{0} 首 · {1}",
               [group.audios.length, categorySourceSummary(group)]),
           actions: const [],
-          responsiveActions: Wrap(
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (!selecting) const AppPlaybackModeControls(),
-              if (selecting)
-                AudioMultiSelectionActions(
-                  controller: _selection,
-                  contentList: queue,
-                  onPlay: (selected) => _play(0, selected),
-                  onAddToPlaylist: _add,
-                ),
-              if (!selecting)
-                OutlinedButton(
-                  key: const ValueKey('category-add-playlist'),
-                  onPressed:
-                      queue.isEmpty ? null : () => unawaited(_add(queue)),
-                  style: _actionStyle(context),
-                  child: AppToolbarLabel(
-                      icon: Icons.playlist_add, label: ui("加入歌单")),
-                ),
-              if (!selecting)
-                AppSortButton<AudioSortField>(
-                  key: const ValueKey('category-track-sort'),
-                  value: _sort,
-                  scopeId: (widget.kind, widget.groupId),
-                  direction:
-                      _sort == AudioSortField.original ? null : _direction,
-                  onChanged: (value) => setState(() => _sort = value),
-                  onDirectionChanged: (value) =>
-                      setState(() => _direction = value),
-                  options: [
-                    for (final sort in AudioSortField.values)
-                      AppSortOption(
-                        key: ValueKey('category-sort-${switch (sort) {
-                          AudioSortField.original => 'library',
-                          AudioSortField.name => 'title',
-                          _ => sort.name,
-                        }}'),
-                        value: sort,
-                        label: sort.label,
-                        icon: audioSortIcon(sort),
-                        group: sort.group,
-                      ),
-                  ],
-                  helpText: _sort == AudioSortField.original
-                      ? _sort.note
-                      : [
-                          audioSortMissingValueNote,
-                          if (_sort.note != null) _sort.note!
-                        ].join('\n'),
-                ),
-            ],
+          responsiveActions: AppContentTransition(
+            identity: selecting,
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (!selecting) const AppPlaybackModeControls(),
+                if (selecting)
+                  AudioMultiSelectionActions(
+                    controller: _selection,
+                    contentList: queue,
+                    onPlay: (selected) => _play(0, selected),
+                    onAddToPlaylist: _add,
+                  ),
+                if (!selecting)
+                  OutlinedButton(
+                    key: const ValueKey('category-add-playlist'),
+                    onPressed:
+                        queue.isEmpty ? null : () => unawaited(_add(queue)),
+                    style: _actionStyle(context),
+                    child: AppToolbarLabel(
+                        icon: Icons.playlist_add, label: ui("加入歌单")),
+                  ),
+                if (!selecting)
+                  AppSortButton<AudioSortField>(
+                    key: const ValueKey('category-track-sort'),
+                    value: _sort,
+                    scopeId: (widget.kind, widget.groupId),
+                    direction:
+                        _sort == AudioSortField.original ? null : _direction,
+                    onChanged: (value) => setState(() => _sort = value),
+                    onDirectionChanged: (value) =>
+                        setState(() => _direction = value),
+                    options: [
+                      for (final sort in AudioSortField.values)
+                        AppSortOption(
+                          key: ValueKey('category-sort-${switch (sort) {
+                            AudioSortField.original => 'library',
+                            AudioSortField.name => 'title',
+                            _ => sort.name,
+                          }}'),
+                          value: sort,
+                          label: sort.label,
+                          icon: audioSortIcon(sort),
+                          group: sort.group,
+                        ),
+                    ],
+                    helpText: _sort == AudioSortField.original
+                        ? _sort.note
+                        : [
+                            audioSortMissingValueNote,
+                            if (_sort.note != null) _sort.note!
+                          ].join('\n'),
+                  ),
+              ],
+            ),
           ),
           body: AppContentScrollbar(
             builder: (context, controller) => ListView.builder(

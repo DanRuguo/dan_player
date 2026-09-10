@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/listening_tools_dialog.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
@@ -478,7 +479,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
 }
 
 /// Queue rows already leave a small symmetric edge inset. Paint the thumb in
-/// that space instead of reserving the library toolbar's additional 24px lane.
+/// that space without reducing the available content width.
 class _QueueScrollbar extends StatelessWidget {
   const _QueueScrollbar({required this.controller, required this.child});
 
@@ -508,10 +509,10 @@ class _QueueScrollbar extends StatelessWidget {
                       ? scheme.primary.withValues(alpha: .8)
                       : scheme.onSurfaceVariant.withValues(alpha: .5)),
         ),
-        child: Scrollbar(
+        child: AppScrollbar(
             controller: controller,
             interactive: true,
-            thumbVisibility: true,
+
             child: child),
       ),
     );

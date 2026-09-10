@@ -1,3 +1,5 @@
+import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -136,27 +138,30 @@ class _GroupedSettingsState extends State<GroupedSettings> {
                 ]),
               const SizedBox(height: 16),
               Expanded(
-                child: IndexedStack(
-                  index: widget.sections
-                      .indexWhere((section) => section.id == _selected),
-                  sizing: StackFit.expand,
-                  children: [
-                    for (final section in widget.sections)
-                      if (_visited.contains(section.id))
-                        TickerMode(
-                          key: ValueKey('settings-section-${section.id}'),
-                          enabled: _selected == section.id ||
-                              !RenderingPreferencesScope.of(context)
-                                  .pauseWhenHidden,
-                          child: ExcludeFocus(
-                            excluding: _selected != section.id,
-                            child: _SectionContent(section: section),
-                          ),
-                        )
-                      else
-                        SizedBox.shrink(
-                            key: ValueKey('settings-section-${section.id}')),
-                  ],
+                child: AppContentTransition(
+                  identity: _selected,
+                  child: IndexedStack(
+                    index: widget.sections
+                        .indexWhere((section) => section.id == _selected),
+                    sizing: StackFit.expand,
+                    children: [
+                      for (final section in widget.sections)
+                        if (_visited.contains(section.id))
+                          TickerMode(
+                            key: ValueKey('settings-section-${section.id}'),
+                            enabled: _selected == section.id ||
+                                !RenderingPreferencesScope.of(context)
+                                    .pauseWhenHidden,
+                            child: ExcludeFocus(
+                              excluding: _selected != section.id,
+                              child: _SectionContent(section: section),
+                            ),
+                          )
+                        else
+                          SizedBox.shrink(
+                              key: ValueKey('settings-section-${section.id}')),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -187,9 +192,9 @@ class _SectionContentState extends State<_SectionContent> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return Scrollbar(
+    return AppScrollbar(
       controller: _scroll,
-      thumbVisibility: true,
+
       child: SingleChildScrollView(
         key: PageStorageKey('settings-scroll-${widget.section.id}'),
         controller: _scroll,

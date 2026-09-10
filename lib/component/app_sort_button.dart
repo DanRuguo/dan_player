@@ -332,10 +332,9 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
     const arrow = Icon(Icons.expand_more, size: 18);
     // showMenu captures this inherited theme from the anchor context. Windows'
     // standard scroll behavior supplies an independent controller per popup;
-    // keeping its thumb visible makes the bounded menu discoverably scrollable.
+    // the app's scrollbar reveals the bounded menu's scroll extent on input.
     return ScrollbarTheme(
       data: ScrollbarTheme.of(context).copyWith(
-        thumbVisibility: const WidgetStatePropertyAll(true),
         interactive: true,
       ),
       child: ConstrainedBox(

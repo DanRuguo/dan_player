@@ -259,7 +259,12 @@ class LyricService extends ChangeNotifier {
   void updateLyric() {
     if (_disposed) return;
     final nowPlaying = _getNowPlaying();
-    if (nowPlaying == null) return;
+    if (nowPlaying == null) {
+      // A removed last track has no replacement source. Invalidate pending
+      // lyric/desktop callbacks as well as the currently displayed copy.
+      _useRawFuture(Future.value(null));
+      return;
+    }
 
     final store = documents;
     if (store != null) {

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/track_identity.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 
 class PlaybackBookmark {
@@ -72,6 +73,7 @@ class PlaybackBookmark {
 class PlaybackBookmarkStore {
   PlaybackBookmarkStore(this.file);
   final File file;
+  static final changes = ValueNotifier<int>(0);
   static Future<PlaybackBookmarkStore>? _instance;
   static Future<PlaybackBookmarkStore> get instance => _instance ??= () async {
         final directory = await getAppDataDir();
@@ -195,6 +197,7 @@ class PlaybackBookmarkStore {
       await temporary.rename(file.path);
       _items = next;
       _recoveredBackup = false;
+      changes.value++;
     } catch (_) {
       if (!await file.exists() && await backup.exists()) {
         await backup.copy(file.path);

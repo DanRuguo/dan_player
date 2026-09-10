@@ -395,6 +395,11 @@ const Map<String, List<String>> uiCatalogC = {
   "{0} 次": ["{0} times", "{0} 回", "{0}회"],
   "收听最久": ["Longest listening time", "再生時間が最長", "청취 시간 최장"],
   "{0} 小时 {1} 分{2}": ["{0} hr {1} min{2}", "{0} 時間 {1} 分{2}", "{0}시간 {1}분{2}"],
+  "{0} 小时 {1} 分 {2} 秒": [
+    "{0} hr {1} min {2} sec",
+    "{0} 時間 {1} 分 {2} 秒",
+    "{0}시간 {1}분 {2}초"
+  ],
   "{0} 分 {1} 秒": ["{0} min {1} sec", "{0} 分 {1} 秒", "{0}분 {1}초"],
   "{0} 分钟": ["{0} minutes", "{0} 分", "{0}분"],
   "不足 1 秒": ["Less than 1 second", "1 秒未満", "1초 미만"],
@@ -427,6 +432,7 @@ const Map<String, List<String>> uiCatalogC = {
     "{0}곡 기록됨 · 재생 재개는 중복 집계하지 않음"
   ],
   "最活跃时段": ["Most active period", "最も活発な時間帯", "가장 활발한 시간대"],
+  "最高时段": ["Peak period", "ピーク時間帯", "최고 시간대"],
   "听歌行为": ["Listening activity", "再生の傾向", "청취 활동"],
   "包含所有已保存记录。历史小时分布没有日期维度，不作为近7天或近30天数据展示。": [
     "Includes all saved records. Historical hourly distribution has no dates, so it is not shown as last-7-day or last-30-day data.",

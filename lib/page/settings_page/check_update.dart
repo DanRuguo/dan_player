@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:async';
@@ -537,9 +538,9 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Flexible(
-                    child: Scrollbar(
+                    child: AppScrollbar(
                       controller: _detailsScroll,
-                      thumbVisibility: true,
+
                       child: SingleChildScrollView(
                         key: const ValueKey('update-details-scroll'),
                         controller: _detailsScroll,
@@ -657,9 +658,9 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                   Row(
                     children: [
                       Flexible(
-                        child: Scrollbar(
+                        child: AppScrollbar(
                           controller: _actionsScroll,
-                          thumbVisibility: true,
+
                           child: SingleChildScrollView(
                             key: const ValueKey('update-actions-scroll'),
                             controller: _actionsScroll,

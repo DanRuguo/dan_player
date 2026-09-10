@@ -33,6 +33,7 @@ Lyric _sampleLyric() => _Lyric([
 class _Playback extends Fake implements PlaybackService {
   final positions = StreamController<double>.broadcast(sync: true);
   final audio = _Audio();
+  late Audio? activeAudio = audio;
   double currentPosition = 0;
   int positionReads = 0;
   int audioReads = 0;
@@ -49,7 +50,7 @@ class _Playback extends Fake implements PlaybackService {
   @override
   Audio? get nowPlaying {
     audioReads++;
-    return audio;
+    return activeAudio;
   }
 
   @override
@@ -355,6 +356,64 @@ void main() {
     await _flush();
     expect(rig.desktop.lines, [0]);
     expect(rig.desktop.missing, 0);
+  });
+
+  test('clearing the current track removes resolved main and desktop lyrics',
+      () async {
+    rig.service.useSpecificLyric(_sampleLyric());
+    await _flush();
+    expect(rig.desktop.lines, [0]);
+    rig.playback.activeAudio = null;
+    rig.service.updateLyric();
+    await _flush();
+    expect(await rig.service.currLyricFuture, isNull);
+    expect(rig.service.rawCurrentLyric, isNull);
+    expect(rig.desktop.missing, 1);
+    rig.playback.positions.add(2.2);
+    await rig.service.syncDesktopLyric();
+    await _flush();
+    expect(rig.desktop.lines, [0]);
+  });
+
+  for (final failed in [false, true]) {
+    test('a lyric request completed after clearing the track is inert $failed',
+        () async {
+      final pending = Completer<Lyric?>();
+      rig.resolve = (_) => pending.future;
+      rig.service.updateLyric();
+      rig.playback.activeAudio = null;
+      rig.service.updateLyric();
+      if (failed) {
+        pending.completeError(StateError('Old track request failed'));
+      } else {
+        pending.complete(_sampleLyric());
+      }
+      await _flush();
+      expect(await rig.service.currLyricFuture, isNull);
+      expect(rig.service.rawCurrentLyric, isNull);
+      expect(rig.desktop.lines, isEmpty);
+      expect(rig.desktop.missing, 1);
+    });
+  }
+
+  test('clearing a track does not clear its subsequently loaded replacement',
+      () async {
+    final pending = Completer<Lyric?>();
+    rig.resolve = (_) => pending.future;
+    rig.service.updateLyric();
+    rig.playback.activeAudio = null;
+    rig.service.updateLyric();
+    await _flush();
+    rig.playback.activeAudio = rig.playback.audio;
+    final replacement = _sampleLyric();
+    rig.service.useSpecificLyric(replacement);
+    await _flush();
+    pending.complete(null);
+    await _flush();
+    expect(await rig.service.currLyricFuture, same(replacement));
+    expect(rig.service.rawCurrentLyric, same(replacement));
+    expect(rig.desktop.lines, [0]);
+    expect(rig.desktop.missing, 1);
   });
 
   test('late canSend does not send a previously passed line of the same lyric',

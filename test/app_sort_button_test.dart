@@ -3,6 +3,8 @@ import 'dart:ui';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_sort_button.dart';
+import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/touch_gestures.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -67,6 +69,7 @@ Widget _app(_Fixture fixture,
         Brightness brightness = Brightness.light,
         double? fontSize}) =>
     MaterialApp(
+      scrollBehavior: const DanPlayerScrollBehavior(),
       theme: ThemeData(
         useMaterial3: true,
         platform: TargetPlatform.windows,
@@ -292,10 +295,10 @@ void main() {
       final scroll = find.byType(SingleChildScrollView).last;
       expect(tester.getSize(scroll).height, lessThanOrEqualTo(432));
       final scrollbars =
-          find.descendant(of: scroll, matching: find.byType(Scrollbar));
+          find.descendant(of: scroll, matching: find.byType(AppScrollbar));
       expect(scrollbars, findsOneWidget);
       final scrollbarTheme = ScrollbarTheme.of(tester.element(scrollbars));
-      expect(scrollbarTheme.thumbVisibility!.resolve({}), isTrue);
+      expect(scrollbarTheme.thumbVisibility?.resolve({}), isNot(isTrue));
       await _choose(tester, 'long-24');
       expect(fixture.calls, [24]);
       expect(tester.takeException(), isNull);

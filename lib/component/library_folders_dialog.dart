@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_actions.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -59,9 +60,8 @@ class _LibraryFoldersDialogState extends State<LibraryFoldersDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Flexible(
-              child: Scrollbar(
+              child: AppScrollbar(
                 controller: _scroll,
-                thumbVisibility: true,
                 child: ListView(
                   controller: _scroll,
                   shrinkWrap: true,

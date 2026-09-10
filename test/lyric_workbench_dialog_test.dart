@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/lyric_workbench_dialog.dart';
 import 'package:dan_player/entry.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -133,6 +134,67 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('offset step buttons adjust the typed draft before saving',
+      (tester) async {
+    await tester.pumpWidget(host());
+    await settleSave(tester);
+    final field = find.byKey(const ValueKey('lyric-offset-value'));
+    await tester.ensureVisible(field);
+    await tester.enterText(field, '2000');
+    await tapAndSave(tester, 'lyric-offset-later');
+    expect(store.forAudio(audio)!.offsetMs, 2500);
+    expect(tester.widget<TextField>(field).controller!.text, '2500');
+    await tapAndSave(tester, 'lyric-offset-earlier');
+    expect(store.forAudio(audio)!.offsetMs, 2000);
+    expect(tester.widget<TextField>(field).controller!.text, '2000');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('invalid offset drafts are retained and never stepped or saved',
+      (tester) async {
+    await tester.pumpWidget(host());
+    await settleSave(tester);
+    final field = find.byKey(const ValueKey('lyric-offset-value'));
+    for (final draft in ['invalid', '', '600001', '-600001']) {
+      await tester.ensureVisible(field);
+      await tester.enterText(field, draft);
+      for (final action in [
+        'lyric-offset-later',
+        'lyric-offset-earlier',
+        'lyric-offset-save'
+      ]) {
+        await tapAndSave(tester, action);
+        expect(store.forAudio(audio), isNull);
+        expect(tester.widget<TextField>(field).controller!.text, draft);
+        expect(
+            find.byKey(const ValueKey('lyric-document-error')), findsOneWidget);
+      }
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('lyric protection switches preserve an unsaved offset draft',
+      (tester) async {
+    await tester.pumpWidget(host());
+    await settleSave(tester);
+    final field = find.byKey(const ValueKey('lyric-offset-value'));
+    await tester.ensureVisible(field);
+    await tester.enterText(field, '-1250');
+    await tapAndSave(tester, 'lyric-document-lock');
+    expect(store.forAudio(audio)!.locked, isTrue);
+    expect(store.forAudio(audio)!.offsetMs, 0);
+    expect(tester.widget<TextField>(field).controller!.text, '-1250');
+    await tapAndSave(tester, 'lyric-document-no-lyrics');
+    expect(store.forAudio(audio)!.noLyrics, isTrue);
+    expect(store.forAudio(audio)!.offsetMs, 0);
+    expect(tester.widget<TextField>(field).controller!.text, '-1250');
+    await tapAndSave(tester, 'lyric-offset-save');
+    expect(store.forAudio(audio)!.offsetMs, -1250);
+    expect(store.forAudio(audio)!.locked, isTrue);
+    expect(store.forAudio(audio)!.noLyrics, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
       'narrow window and large text keep workbench scrollable without overflow',
       (tester) async {
@@ -219,8 +281,9 @@ void main() {
             reason:
                 'The full-width heading should remain balanced and bounded.');
       }
-      final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar).first);
-      expect(scrollbar.thumbVisibility, isTrue);
+      final scrollbar =
+          tester.widget<AppScrollbar>(find.byType(AppScrollbar).first);
+      expect(scrollbar.thumbVisibility, isFalse);
       if (scenario.size.height < 800) {
         expect(scrollbar.controller!.position.maxScrollExtent, greaterThan(0));
       }

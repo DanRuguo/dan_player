@@ -4,6 +4,7 @@ import 'package:desktop_lyric/appearance_palette_app.dart';
 import 'package:desktop_lyric/appearance_palette_bridge.dart';
 import 'package:desktop_lyric/app_presentation.dart';
 import 'package:desktop_lyric/app_motion.dart';
+import 'package:desktop_lyric/app_scrollbar.dart';
 
 import 'package:desktop_lyric/app_typography.dart';
 import 'package:desktop_lyric/component/desktop_lyric_body.dart';
@@ -108,6 +109,7 @@ class _DesktopLyricAppState extends State<DesktopLyricApp> {
                       ValueListenableProvider.value(
                     value: DesktopLyricController.instance.theme,
                     child: MaterialApp(
+                      scrollBehavior: const AppScrollBehavior(),
                       debugShowCheckedModeBanner: false,
                       themeAnimationDuration: AppMotion.standard,
                       themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,

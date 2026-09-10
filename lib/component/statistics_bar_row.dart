@@ -1,6 +1,17 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+/// A sequential scale derived from the current palette rather than fixed chart
+/// colors. Larger values approach the full accent; smaller values use a softer
+/// tertiary tone so magnitude remains visible in both light and dark themes.
+abstract final class StatisticsMagnitudeColor {
+  static Color resolve(ColorScheme scheme, double fraction) {
+    final strength = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
+    final accent = Color.lerp(scheme.tertiary, scheme.primary, strength)!;
+    return Color.lerp(scheme.surfaceContainerLow, accent, .5 + .5 * strength)!;
+  }
+}
+
 /// A shared, theme-aware comparison row. Every bar in a group uses one scale.
 class StatisticsBarRow extends StatelessWidget {
   const StatisticsBarRow(
@@ -66,7 +77,8 @@ class StatisticsBarRow extends StatelessWidget {
                         widthFactor: fraction,
                         heightFactor: 1,
                         child: ColoredBox(
-                            color: scheme.primary.withValues(alpha: .72)))))));
+                            color: StatisticsMagnitudeColor.resolve(
+                                scheme, fraction)))))));
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: LayoutBuilder(builder: (context, constraints) {

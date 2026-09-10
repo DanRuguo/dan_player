@@ -1,4 +1,12 @@
 const Map<String, List<String>> catalogQueueHistoryStop = {
+  '主题预览': ['Theme preview', 'テーマのプレビュー', '테마 미리보기'],
+  '快速选色': ['Quick colors', 'クイックカラー', '빠른 색상 선택'],
+  '原主题颜色': ['Original theme color', '元のテーマ色', '기존 테마 색상'],
+  '请输入 #RRGGBB 格式的颜色': [
+    'Enter a color in #RRGGBB format',
+    '#RRGGBB 形式で色を入力してください',
+    '#RRGGBB 형식으로 색상을 입력하세요'
+  ],
   '开启': ['On', 'オン', '켜짐'],
   '音频输出': ['Audio output', '音声出力', '오디오 출력'],
   '音频处理': ['Audio processing', '音声処理', '오디오 처리'],

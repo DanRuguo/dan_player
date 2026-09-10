@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/adaptive_grid_drag.dart';
 import 'package:dan_player/component/audio_columns.dart';
@@ -453,12 +454,16 @@ class _UniPageState<T> extends State<UniPage<T>> {
       // Expanded two-choice selectors need the real toolbar width, not an
       // unbounded legacy Row. The common scaffold wraps without shrinking text.
       responsiveActions: visibleActions.isNotEmpty
-          ? Wrap(
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 8,
-              runSpacing: 8,
-              children: visibleActions,
+          ? AppContentTransition(
+              key: const ValueKey('uni-selection-transition'),
+              identity: multiSelectController?.enableMultiSelectView == true,
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: visibleActions,
+              ),
             )
           : null,
       body: NotificationListener<UserScrollNotification>(

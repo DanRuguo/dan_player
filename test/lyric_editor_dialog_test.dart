@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/component/lyric_editor_dialog.dart';
+import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -32,9 +34,11 @@ Widget _host(
   List<CustomLyricSourceChoice> customChoices = const [],
   OnlineLyricEditorCustomCandidateLoader? loadCustomCandidate,
   double textScale = 1,
+  TargetPlatform? platform,
 }) =>
     MaterialApp(
-      theme: ThemeData(useMaterial3: true),
+      scrollBehavior: const DanPlayerScrollBehavior(),
+      theme: ThemeData(useMaterial3: true, platform: platform),
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context).copyWith(
           disableAnimations: true,
@@ -452,6 +456,39 @@ void main() {
       '[00:00.00]Local line',
     );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'Windows lyric candidates share one scroll position with the thumb',
+      (tester) async {
+    final (directory, _, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    await tester.pumpWidget(_host(
+      audio,
+      platform: TargetPlatform.windows,
+      search: (_) async => LyricSearchResponse(
+        candidates: List.generate(40, (i) => _candidate('$i', 'Candidate $i')),
+        failures: const {},
+      ),
+      loadCandidate: (_) async => _lyric('Online line', 1),
+    ));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-fill-online')));
+    await _pumpCandidateTransition(tester);
+    final listFinder = find.byKey(const ValueKey('online-lyric-candidates'));
+    final list = tester.widget<ListView>(listFinder);
+    final scrollbar = tester.widget<AppScrollbar>(find
+        .ancestor(of: listFinder, matching: find.byType(AppScrollbar))
+        .first);
+    expect(list.controller, same(scrollbar.controller));
+    expect(list.controller!.positions, hasLength(1));
+    await tester.drag(listFinder, const Offset(0, -250));
+    // The editor underneath retains its blinking text cursor.
+    await tester.pump(const Duration(seconds: 1));
+    expect(list.controller!.offset, greaterThan(0));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('candidate choice remains usable in a short large-text window',

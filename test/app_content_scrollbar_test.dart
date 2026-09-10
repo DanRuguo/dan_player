@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/touch_gestures.dart';
@@ -41,24 +42,24 @@ Widget _list(ScrollController controller, {VoidCallback? onAction}) =>
 
 void main() {
   for (final direction in TextDirection.values) {
-    testWidgets('Material thumb has a separate lane in $direction',
+    testWidgets('overlay scrollbar preserves the full viewport in $direction',
         (tester) async {
       await tester.pumpWidget(_host(
         AppContentScrollbar(builder: (_, controller) => _list(controller)),
         direction: direction,
       ));
       await tester.pumpAndSettle();
-      expect(find.byType(Scrollbar), findsOneWidget,
+      expect(find.byType(AppScrollbar), findsOneWidget,
           reason: 'the Windows automatic scrollbar must not duplicate it');
       final outer = tester.getRect(find.byType(AppContentScrollbar));
       final row = tester.getRect(find.byKey(const ValueKey('row-0')));
       final menu = tester.getRect(find.byKey(const ValueKey('menu-0')));
       if (direction == TextDirection.ltr) {
-        expect(outer.right - row.right, AppContentScrollbar.gutter);
+        expect(outer.right - row.right, 0.0);
         expect(menu.right, lessThanOrEqualTo(row.right));
         expect(row.left, outer.left);
       } else {
-        expect(row.left - outer.left, AppContentScrollbar.gutter);
+        expect(row.left - outer.left, 0.0);
         expect(menu.left, greaterThanOrEqualTo(row.left));
         expect(row.right, outer.right);
       }
@@ -68,11 +69,6 @@ void main() {
       expect(theme.thickness!.resolve({WidgetState.hovered}),
           AppContentScrollbar.activeThumbThickness);
       expect(theme.crossAxisMargin, AppContentScrollbar.crossAxisMargin);
-      expect(
-          AppContentScrollbar.gutter -
-              AppContentScrollbar.crossAxisMargin -
-              AppContentScrollbar.activeThumbThickness,
-          greaterThanOrEqualTo(12));
       expect(theme.thumbColor!.resolve({WidgetState.dragged}),
           Theme.of(scrollContext).colorScheme.primary.withValues(alpha: .95));
       expect(tester.takeException(), isNull);
@@ -93,7 +89,9 @@ void main() {
     expect(actions, 1);
     final bounds = tester.getRect(find.byType(AppContentScrollbar));
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: Offset(bounds.right - 7, bounds.top + 20));
+    await mouse.addPointer(
+        location: Offset(bounds.right - 30, bounds.top + 20));
+    await mouse.moveTo(Offset(bounds.right - 7, bounds.top + 20));
     await tester.pumpAndSettle();
     await mouse.down(Offset(bounds.right - 7, bounds.top + 20));
     await mouse.moveBy(const Offset(0, 130));
@@ -138,8 +136,7 @@ void main() {
   });
 
   for (final mode in ['list', 'grid', 'reorder']) {
-    testWidgets('UniPage $mode keeps its content inside the shared lane',
-        (tester) async {
+    testWidgets('UniPage $mode keeps its full content width', (tester) async {
       final reorder = mode == 'reorder';
       await tester.pumpWidget(_host(UniPage<int>(
         pref: PagePreference(0, SortOrder.ascending,
@@ -177,16 +174,15 @@ void main() {
       expect(find.byType(AppContentScrollbar), findsOneWidget);
       final scrollbar = find.descendant(
           of: find.byType(AppContentScrollbar),
-          matching: find.byType(Scrollbar));
+          matching: find.byType(AppScrollbar));
       expect(scrollbar, findsOneWidget);
       final outer = tester.getRect(scrollbar);
       final content = tester.getRect(find.byKey(const ValueKey('library-0')));
-      expect(content.right,
-          lessThanOrEqualTo(outer.right - AppContentScrollbar.gutter));
+      expect(content.right, lessThanOrEqualTo(outer.right - 0.0));
       if (reorder) {
         final handle = find.byType(ReorderableDragStartListener).first;
-        expect(tester.getRect(handle).right,
-            lessThanOrEqualTo(outer.right - AppContentScrollbar.gutter));
+        expect(
+            tester.getRect(handle).right, lessThanOrEqualTo(outer.right - 0.0));
       }
       expect(tester.takeException(), isNull);
     });

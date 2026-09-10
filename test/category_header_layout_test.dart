@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'dart:math' as math;
 
 import 'package:dan_player/library/music_categories.dart';
@@ -76,8 +77,8 @@ void main() {
         final selectorRect = tester.getRect(selector);
         final search =
             tester.getRect(find.byKey(const ValueKey('category-search')));
-        final scrollbar = tester.widget<Scrollbar>(find
-            .ancestor(of: selector, matching: find.byType(Scrollbar))
+        final scrollbar = tester.widget<AppScrollbar>(find
+            .ancestor(of: selector, matching: find.byType(AppScrollbar))
             .first);
 
         expect(find.byType(ChoiceChip), findsNWidgets(8));
@@ -88,7 +89,7 @@ void main() {
         expect(search.left, greaterThanOrEqualTo(24));
         expect(search.right, lessThanOrEqualTo(width - 24));
         expect(search.height, greaterThanOrEqualTo(44));
-        expect(scrollbar.thumbVisibility, isTrue);
+        expect(scrollbar.thumbVisibility, isFalse);
         expect(scrollbar.interactive, isTrue);
         expect(tester.takeException(), isNull,
             reason: '${language.name} at ${width.toInt()}px');

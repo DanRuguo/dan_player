@@ -7,6 +7,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import 'app_typography.dart';
 import 'app_input_theme.dart';
+import 'app_scrollbar.dart';
 import 'appearance_palette_bridge.dart';
 import 'component/desktop_lyric_appearance_options.dart';
 import 'component/desktop_lyric_taskbar_options.dart';
@@ -35,6 +36,7 @@ class DesktopLyricAppearanceApp extends StatelessWidget {
                   fontFamily: client.fontFamily,
                   fontFamilyFallback: client.fontFamilyFallback);
               return MaterialApp(
+                scrollBehavior: const AppScrollBehavior(),
                 debugShowCheckedModeBanner: false,
                 // A hidden warm panel must paint the new cover theme on its
                 // first frame, not interpolate from the previous song's theme.

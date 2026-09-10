@@ -1,3 +1,5 @@
+import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/app_content_transition.dart';
 import 'dart:async';
 
 import 'package:dan_player/component/app_content_scrollbar.dart';
@@ -274,10 +276,12 @@ class _CategoriesPageState extends State<CategoriesPage> {
         subtitle: ui('共 {0} 首歌曲', [_audios.length]),
         actions: const [],
         responsiveActions: selector,
-        body: PersonalLibraryPanel(
-            audios: widget.audios,
-            personalStore: widget.personalStore,
-            bookmarkStore: widget.bookmarkStore),
+        body: AppContentTransition(
+            identity: 'personal',
+            child: PersonalLibraryPanel(
+                audios: widget.audios,
+                personalStore: widget.personalStore,
+                bookmarkStore: widget.bookmarkStore)),
       );
     }
     final scheme = Theme.of(context).colorScheme;
@@ -333,75 +337,79 @@ class _CategoriesPageState extends State<CategoriesPage> {
           [_audios.length, groups.length, ui(_kind.countLabel)]),
       actions: const [],
       responsiveActions: selector,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-            child: TextField(
-              key: const ValueKey('category-search'),
-              controller: _search,
-              onChanged: (value) => setState(() => _query = value),
-              decoration: InputDecoration(
-                hintText: _kind == MusicCategoryKind.album
-                    ? ui("搜索专辑或专辑艺术家")
-                    : ui("搜索{0}", [ui(_kind.label)]),
-                prefixIcon: const Icon(Icons.search),
-                border: AppShape.inputBorder,
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: ui("清除分类搜索"),
-                        onPressed: () => setState(() {
-                          _query = '';
-                          _search.clear();
-                        }),
-                        icon: const Icon(Icons.close),
-                      ),
+      body: AppContentTransition(
+        identity: _kind,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+              child: TextField(
+                key: const ValueKey('category-search'),
+                controller: _search,
+                onChanged: (value) => setState(() => _query = value),
+                decoration: InputDecoration(
+                  hintText: _kind == MusicCategoryKind.album
+                      ? ui("搜索专辑或专辑艺术家")
+                      : ui("搜索{0}", [ui(_kind.label)]),
+                  prefixIcon: const Icon(Icons.search),
+                  border: AppShape.inputBorder,
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: ui("清除分类搜索"),
+                          onPressed: () => setState(() {
+                            _query = '';
+                            _search.clear();
+                          }),
+                          icon: const Icon(Icons.close),
+                        ),
+                ),
               ),
             ),
-          ),
-          Expanded(
-            child: visible.isEmpty
-                ? Center(
-                    child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                        groups.isEmpty
-                            ? ui("总乐库还没有歌曲。添加本地音乐或将联网歌曲加入总乐库后即可分类浏览。")
-                            : ui("未找到匹配的分类"),
-                        textAlign: TextAlign.center),
-                  ))
-                : AppContentScrollbar(
-                    builder: (context, controller) => CustomScrollView(
-                      controller: controller,
-                      key: PageStorageKey('music-categories-${_kind.name}'),
-                      slivers: [
-                        if (note != null)
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                              child: Text(note,
-                                  key: const ValueKey('category-explanation'),
-                                  style: TextStyle(
-                                      color: scheme.onSurfaceVariant)),
+            Expanded(
+              child: visible.isEmpty
+                  ? Center(
+                      child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                          groups.isEmpty
+                              ? ui("总乐库还没有歌曲。添加本地音乐或将联网歌曲加入总乐库后即可分类浏览。")
+                              : ui("未找到匹配的分类"),
+                          textAlign: TextAlign.center),
+                    ))
+                  : AppContentScrollbar(
+                      builder: (context, controller) => CustomScrollView(
+                        controller: controller,
+                        key: PageStorageKey('music-categories-${_kind.name}'),
+                        slivers: [
+                          if (note != null)
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                                child: Text(note,
+                                    key: const ValueKey('category-explanation'),
+                                    style: TextStyle(
+                                        color: scheme.onSurfaceVariant)),
+                              ),
                             ),
+                          _CategoryGrid(
+                            groups: visible,
+                            onOpen: _open,
+                            covers: _covers,
+                            changing: _coverEdits,
+                            onChangeCover: _changeCover,
+                            onRemoveCover: _removeCover,
                           ),
-                        _CategoryGrid(
-                          groups: visible,
-                          onOpen: _open,
-                          covers: _covers,
-                          changing: _coverEdits,
-                          onChangeCover: _changeCover,
-                          onRemoveCover: _removeCover,
-                        ),
-                        const SliverPadding(
-                            padding: EdgeInsets.only(bottom: 96)),
-                      ],
+                          const SliverPadding(
+                              padding: EdgeInsets.only(bottom: 96)),
+                        ],
+                      ),
                     ),
-                  ),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -673,9 +681,9 @@ class _CategorySelectorState extends State<_CategorySelector> {
     UiLanguageScope.watch(context);
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-      child: Scrollbar(
+      child: AppScrollbar(
         controller: _scroll,
-        thumbVisibility: true,
+
         interactive: true,
         child: SingleChildScrollView(
           key: const ValueKey('category-kind-scroll'),

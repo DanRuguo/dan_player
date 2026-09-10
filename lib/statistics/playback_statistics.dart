@@ -141,21 +141,63 @@ class PlaybackStatistics extends ChangeNotifier {
     ];
   }
 
-  List<TrackPlaybackStatistics> get topByPlayCount {
-    final values = tracks.values.toList()
-      ..sort((a, b) {
-        final count = b.playCount.compareTo(a.playCount);
-        return count != 0
-            ? count
-            : b.listenMilliseconds.compareTo(a.listenMilliseconds);
-      });
-    return values;
+  static int _comparePlayCount(
+      TrackPlaybackStatistics a, TrackPlaybackStatistics b) {
+    final count = b.playCount.compareTo(a.playCount);
+    return count != 0
+        ? count
+        : b.listenMilliseconds.compareTo(a.listenMilliseconds);
   }
 
-  List<TrackPlaybackStatistics> get topByListeningTime {
-    final values = tracks.values.toList()
-      ..sort((a, b) => b.listenMilliseconds.compareTo(a.listenMilliseconds));
-    return values;
+  static int _compareListeningTime(
+          TrackPlaybackStatistics a, TrackPlaybackStatistics b) =>
+      b.listenMilliseconds.compareTo(a.listenMilliseconds);
+
+  List<TrackPlaybackStatistics> get topByPlayCount =>
+      _allRanked(_comparePlayCount);
+
+  List<TrackPlaybackStatistics> get topByListeningTime =>
+      _allRanked(_compareListeningTime);
+
+  List<TrackPlaybackStatistics> _allRanked(
+      Comparator<TrackPlaybackStatistics> compare) {
+    final rows = tracks.values.indexed.toList()
+      ..sort((a, b) {
+        final order = compare(a.$2, b.$2);
+        return order == 0 ? a.$1.compareTo(b.$1) : order;
+      });
+    return [for (final row in rows) row.$2];
+  }
+
+  /// Bounded rankings avoid sorting the entire history on each UI refresh.
+  /// Non-positive limits return no rows; exact ties retain record order, just
+  /// as the full rankings do. Live counters are read afresh on every call.
+  List<TrackPlaybackStatistics> topPlayCount({int limit = 10}) =>
+      _topRanked(limit, _comparePlayCount);
+
+  List<TrackPlaybackStatistics> topListeningTime({int limit = 10}) =>
+      _topRanked(limit, _compareListeningTime);
+
+  List<TrackPlaybackStatistics> _topRanked(
+      int limit, Comparator<TrackPlaybackStatistics> compare) {
+    if (limit <= 0) return [];
+    if (limit >= tracks.length) return _allRanked(compare);
+    final best = <TrackPlaybackStatistics>[];
+    for (final track in tracks.values) {
+      if (best.length == limit && compare(track, best.last) >= 0) continue;
+      var low = 0, high = best.length;
+      while (low < high) {
+        final middle = (low + high) ~/ 2;
+        if (compare(track, best[middle]) < 0) {
+          high = middle;
+        } else {
+          low = middle + 1;
+        }
+      }
+      best.insert(low, track);
+      if (best.length > limit) best.removeLast();
+    }
+    return best;
   }
 
   Future<void> initialize() async {

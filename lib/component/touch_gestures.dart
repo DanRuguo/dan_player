@@ -1,9 +1,11 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'app_scrollbar.dart';
+
 /// Enables direct manipulation with touch/stylus while retaining desktop
 /// wheel and trackpad behavior.
-class DanPlayerScrollBehavior extends MaterialScrollBehavior {
+class DanPlayerScrollBehavior extends AppScrollBehavior {
   const DanPlayerScrollBehavior();
 
   @override

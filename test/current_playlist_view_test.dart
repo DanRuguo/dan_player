@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'dart:io';
 import 'dart:ui' as raster;
 import 'package:dan_player/component/app_fonts.dart';
@@ -402,14 +403,14 @@ void main() {
     for (final width in [280.0, 520.0]) {
       await tester.pumpWidget(_host(playback, width: width));
       await tester.pumpAndSettle();
-      final bounds = tester.getRect(find.byType(Scrollbar));
+      final bounds = tester.getRect(find.byType(AppScrollbar));
       final row =
           tester.getRect(find.byKey(const ValueKey('current-playlist-item-0')));
       expect(row.left - bounds.left, closeTo(6, .01));
       expect(bounds.right - row.right, closeTo(6, .01));
       expect(tester.takeException(), isNull);
     }
-    final scrollbar = find.byType(Scrollbar);
+    final scrollbar = find.byType(AppScrollbar);
     final bounds = tester.getRect(scrollbar);
     final list = tester
         .widget<ListView>(find.byKey(const ValueKey('current-playlist-list')));
@@ -418,7 +419,9 @@ void main() {
     expect(details.right, lessThanOrEqualTo(bounds.right - 14),
         reason: 'The 6px thumb must not cover a trailing details button.');
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: Offset(bounds.right - 2, bounds.top + 18));
+    await mouse.addPointer(
+        location: Offset(bounds.right - 20, bounds.top + 18));
+    await mouse.moveTo(Offset(bounds.right - 2, bounds.top + 18));
     await tester.pumpAndSettle();
     await mouse.down(Offset(bounds.right - 2, bounds.top + 18));
     await mouse.moveBy(const Offset(0, 100));

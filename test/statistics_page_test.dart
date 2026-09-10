@@ -1,6 +1,7 @@
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/page/statistics_page.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
+import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -18,6 +19,47 @@ void main() {
   tearDown(() {
     AudioLibrary.instance.audioCollection = previousLibrary;
     AudioLibrary.revision = previousRevision;
+  });
+
+  testWidgets('idle local-library changes refresh once per frame',
+      (tester) async {
+    final previousNotification = AudioLibrary.changes.value;
+    addTearDown(() => AudioLibrary.changes.value = previousNotification);
+    final stats = PlaybackStatistics.inMemory();
+    addTearDown(stats.dispose);
+    Audio audio(String id) => Audio(id, 'Artist', 'Album', 1, 180, 320, 44100,
+        'C:/Synthetic/$id.mp3', 1, 1, id);
+    AudioLibrary.instance.audioCollection = [audio('one')];
+    var reads = 0;
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: StatisticsPage(
+                statistics: stats,
+                scanner: LibraryStatisticsScanner(
+                    readLyrics: (_) async => null,
+                    inspectFile: (_) async {
+                      reads++;
+                      return const LocalAudioFileInfo.available(1024);
+                    })))));
+    await tester.pumpAndSettle();
+    expect(reads, 1);
+    // Several notifications can describe one index update. No playback or
+    // parent rebuild should be required, and only the latest list is scanned.
+    for (var i = 0; i < 5; i++) {
+      AudioLibrary.instance.audioCollection = [audio('one'), audio('two')];
+      AudioLibrary.revision++;
+      AudioLibrary.changes.value = AudioLibrary.revision;
+    }
+    await tester.pumpAndSettle();
+    expect(reads, 3);
+    await tester.pump(const Duration(seconds: 6));
+    expect(reads, 3);
+    await tester.pumpWidget(const SizedBox.shrink());
+    AudioLibrary.revision++;
+    AudioLibrary.changes.value = AudioLibrary.revision;
+    await tester.pumpAndSettle();
+    expect(reads, 3);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

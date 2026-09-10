@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -732,6 +733,7 @@ class _OnlineLyricCandidateDialog extends StatefulWidget {
 
 class _OnlineLyricCandidateDialogState
     extends State<_OnlineLyricCandidateDialog> {
+  final _candidateScroll = ScrollController();
   LyricSearchResponse? _response;
   String? _searchError;
   String? _loadingIdentity;
@@ -868,6 +870,7 @@ class _OnlineLyricCandidateDialogState
   @override
   void dispose() {
     _invalidatePending();
+    _candidateScroll.dispose();
     super.dispose();
   }
 
@@ -1025,8 +1028,11 @@ class _OnlineLyricCandidateDialogState
       );
     }
 
-    return Scrollbar(
+    return AppScrollbar(
+      controller: _candidateScroll,
       child: ListView.separated(
+        controller: _candidateScroll,
+        primary: false,
         shrinkWrap: true,
         key: const ValueKey('online-lyric-candidates'),
         padding: const EdgeInsets.all(10),
@@ -1140,8 +1146,11 @@ class _OnlineLyricCandidateDialogState
       }
     }
 
-    return Scrollbar(
+    return AppScrollbar(
+      controller: _candidateScroll,
       child: ListView(
+        controller: _candidateScroll,
+        primary: false,
         shrinkWrap: true,
         key: const ValueKey('online-lyric-candidates'),
         children: children,

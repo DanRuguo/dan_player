@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_dialog_actions.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
@@ -550,74 +551,90 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
 
   Widget _actions() {
     final selected = _selected;
-    return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_selecting)
-            AudioSelectionToolbar(
-              selected: selected,
-              hasItems: !_previewing && _audios.isNotEmpty,
-              allVisibleSelected:
-                  _audios.isNotEmpty && selected.length == _audios.length,
-              onToggleAll: () => setState(() {
-                if (selected.length == _audios.length) {
-                  _selectedPaths.clear();
-                } else {
-                  _selectedPaths.addAll(_audios.map((a) => a.path));
-                }
-              }),
-              onInvert: () => setState(() {
-                final next = _audios
-                    .where((a) => !_selectedPaths.contains(a.path))
-                    .map((a) => a.path)
-                    .toSet();
-                _selectedPaths
-                  ..clear()
-                  ..addAll(next);
-              }),
-              onExit: () => setState(() => _selecting = false),
-              onPlay: _play,
-              onAddToPlaylist: _add,
-              onExport: _export,
-            )
-          else
-            Wrap(spacing: 8, runSpacing: 8, children: [
-              OutlinedButton.icon(
-                  style: appToolbarControlStyle(context),
-                  key: const ValueKey('smart-refresh'),
-                  label: Text(ui('刷新')),
-                  onPressed:
-                      _previewing ? null : () => _queuePreview(immediate: true),
-                  icon: const Icon(Symbols.refresh)),
-              OutlinedButton.icon(
-                  style: appToolbarControlStyle(context),
-                  label: Text(ui('匹配详情')),
-                  onPressed: _previewing || _previewError != null
-                      ? null
-                      : () => showSmartMatchDetails(
-                          context,
-                          _draft(forPreview: true),
-                          List<Audio>.of(widget.library?.call() ??
-                              AudioLibrary.instance.audioCollection),
-                          _audios.map((a) => a.path).toSet()),
-                  icon: const Icon(Icons.fact_check_outlined)),
-              const AppPlaybackModeControls(),
-              AudioSelectionMenu(
-                  selected: selected, onAddToPlaylist: _add, onExport: _export),
-              OutlinedButton.icon(
-                  style: appToolbarControlStyle(context),
-                  key: const ValueKey('smart-select'),
-                  label: Text(ui('多选')),
-                  onPressed: selected.isEmpty
-                      ? null
-                      : () => setState(() {
-                            _selecting = true;
-                            _selectedPaths
-                              ..clear()
-                              ..addAll(_audios.map((audio) => audio.path));
-                          }),
-                  icon: const Icon(Symbols.checklist)),
+    return AppContentTransition(
+      identity: _selecting,
+      child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_selecting)
+              AudioSelectionToolbar(
+                selected: selected,
+                hasItems: !_previewing && _audios.isNotEmpty,
+                allVisibleSelected:
+                    _audios.isNotEmpty && selected.length == _audios.length,
+                onToggleAll: () => setState(() {
+                  if (selected.length == _audios.length) {
+                    _selectedPaths.clear();
+                  } else {
+                    _selectedPaths.addAll(_audios.map((a) => a.path));
+                  }
+                }),
+                onInvert: () => setState(() {
+                  final next = _audios
+                      .where((a) => !_selectedPaths.contains(a.path))
+                      .map((a) => a.path)
+                      .toSet();
+                  _selectedPaths
+                    ..clear()
+                    ..addAll(next);
+                }),
+                onExit: () => setState(() => _selecting = false),
+                onPlay: _play,
+                onAddToPlaylist: _add,
+                onExport: _export,
+              )
+            else
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                OutlinedButton.icon(
+                    style: appToolbarControlStyle(context),
+                    key: const ValueKey('smart-refresh'),
+                    label: Text(ui('刷新')),
+                    onPressed: _previewing
+                        ? null
+                        : () => _queuePreview(immediate: true),
+                    icon: const Icon(Symbols.refresh)),
+                OutlinedButton.icon(
+                    style: appToolbarControlStyle(context),
+                    label: Text(ui('匹配详情')),
+                    onPressed: _previewing || _previewError != null
+                        ? null
+                        : () => showSmartMatchDetails(
+                            context,
+                            _draft(forPreview: true),
+                            List<Audio>.of(widget.library?.call() ??
+                                AudioLibrary.instance.audioCollection),
+                            _audios.map((a) => a.path).toSet()),
+                    icon: const Icon(Icons.fact_check_outlined)),
+                const AppPlaybackModeControls(),
+                AudioSelectionMenu(
+                    selected: selected,
+                    onAddToPlaylist: _add,
+                    onExport: _export),
+                OutlinedButton.icon(
+                    style: appToolbarControlStyle(context),
+                    key: const ValueKey('smart-select'),
+                    label: Text(ui('多选')),
+                    onPressed: selected.isEmpty
+                        ? null
+                        : () => setState(() {
+                              _selecting = true;
+                              _selectedPaths
+                                ..clear()
+                                ..addAll(_audios.map((audio) => audio.path));
+                            }),
+                    icon: const Icon(Symbols.checklist)),
+                OutlinedButton.icon(
+                    style: appToolbarControlStyle(context),
+                    key: const ValueKey('smart-ordinary'),
+                    onPressed: selected.isEmpty
+                        ? null
+                        : () => unawaited(_action(_add)),
+                    icon: const Icon(Symbols.playlist_add),
+                    label: Text(ui('加入或新建普通歌单…'))),
+              ]),
+            if (_selecting) ...[
+              const SizedBox(height: 8),
               OutlinedButton.icon(
                   style: appToolbarControlStyle(context),
                   key: const ValueKey('smart-ordinary'),
@@ -625,18 +642,9 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                       selected.isEmpty ? null : () => unawaited(_action(_add)),
                   icon: const Icon(Symbols.playlist_add),
                   label: Text(ui('加入或新建普通歌单…'))),
-            ]),
-          if (_selecting) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-                style: appToolbarControlStyle(context),
-                key: const ValueKey('smart-ordinary'),
-                onPressed:
-                    selected.isEmpty ? null : () => unawaited(_action(_add)),
-                icon: const Icon(Symbols.playlist_add),
-                label: Text(ui('加入或新建普通歌单…'))),
-          ],
-        ]);
+            ],
+          ]),
+    );
   }
 
   @override

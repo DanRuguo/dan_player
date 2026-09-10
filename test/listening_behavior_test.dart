@@ -5,6 +5,7 @@ import 'package:dan_player/page/statistics_page.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -171,7 +172,8 @@ void main() {
         .color!;
     expect(barColor(20).toARGB32(), lightScheme.primary.toARGB32());
     expect(barColor(23).toARGB32(), lightScheme.primary.toARGB32());
-    expect(barColor(14).a, closeTo(0.45, 0.001));
+    final softerColor = barColor(14);
+    expect(softerColor, isNot(lightScheme.primary));
     expect(
         tester.getSize(find.byKey(const ValueKey('listening-bar-20'))).height,
         168);
@@ -190,6 +192,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(barColor(20).toARGB32(), darkScheme.primary.toARGB32());
     expect(barColor(23).toARGB32(), darkScheme.primary.toARGB32());
+    expect(barColor(14), isNot(softerColor));
+    expect(barColor(14), isNot(darkScheme.primary));
     expect(tester.takeException(), isNull);
   });
 
@@ -204,6 +208,11 @@ void main() {
     ));
     await tester.pumpAndSettle();
     final hour = find.byKey(const ValueKey('listening-hour-14'));
+    final colorBefore = (tester
+            .widget<DecoratedBox>(
+                find.byKey(const ValueKey('listening-bar-14')))
+            .decoration as BoxDecoration)
+        .color;
     await tester.tap(hour);
     await tester.pumpAndSettle();
     final selection = find.byKey(const ValueKey('listening-hour-selection'));
@@ -211,12 +220,65 @@ void main() {
         findsOneWidget);
     expect(find.descendant(of: selection, matching: find.text('30 分 0 秒')),
         findsOneWidget);
+    final selected = tester.widget<Container>(
+        find.byKey(const ValueKey('listening-hour-label-14')));
+    final previous = tester.widget<Container>(
+        find.byKey(const ValueKey('listening-hour-label-20')));
+    expect(
+        ((selected.decoration as BoxDecoration).border! as Border).top.color.a,
+        1);
+    expect(
+        ((previous.decoration as BoxDecoration).border! as Border).top.color.a,
+        0);
+    expect(
+        (tester
+                .widget<DecoratedBox>(
+                    find.byKey(const ValueKey('listening-bar-14')))
+                .decoration as BoxDecoration)
+            .color,
+        colorBefore);
     await tester.longPress(hour);
     await tester.pumpAndSettle();
     expect(find.text('14:00–15:00 · 30 分 0 秒'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  for (final language in UiLanguage.values) {
+    testWidgets('hour peak annotations are localized in ${language.name}',
+        (tester) async {
+      _size(tester, const Size(1400, 1100));
+      uiLanguage.value = language;
+      addTearDown(() => uiLanguage.value = UiLanguage.zh);
+      final statistics = _recordedStatistics();
+      addTearDown(statistics.dispose);
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pumpWidget(_app(
+            statistics: statistics,
+            scheme: ColorScheme.fromSeed(seedColor: Colors.blue)));
+        await tester.pumpAndSettle();
+        final peak = ui('最高时段');
+        final node = tester
+            .getSemantics(find.byKey(const ValueKey('listening-hour-20')));
+        expect(node.label, contains(peak));
+        final selection =
+            find.byKey(const ValueKey('listening-hour-selection'));
+        expect(
+            find.descendant(of: selection, matching: find.textContaining(peak)),
+            findsOneWidget);
+        expect(
+            find.byTooltip('20:00–21:00 · '
+                '${ui("{0} 小时 {1} 分 {2} 秒", [1, 0, 0])} · $peak'),
+            findsOneWidget);
+        if (language != UiLanguage.zh) {
+          expect(node.label, isNot(contains('最高时段')));
+        }
+      } finally {
+        semantics.dispose();
+      }
+    });
+  }
 
   testWidgets('hour controls wrap around and reveal the selected narrow bar',
       (tester) async {

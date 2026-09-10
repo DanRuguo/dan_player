@@ -863,6 +863,7 @@ class PlaybackService extends ChangeNotifier {
     if (stillDisplaysDeletedSource) {
       nowPlaying = null;
       _playlistIndex = null;
+      playService.lyricService.updateLyric();
       if (stillOwnsDetachedSource && filtered.isNotEmpty) {
         final nextIndex = ticket.index.clamp(0, filtered.length - 1);
         if (ticket.wasPlaying) {
@@ -904,6 +905,7 @@ class PlaybackService extends ChangeNotifier {
           ticket.requestToken != _sourceRequestToken) {
         nowPlaying = null;
         _playlistIndex = null;
+        playService.lyricService.updateLyric();
         notifyListeners();
       }
       return;

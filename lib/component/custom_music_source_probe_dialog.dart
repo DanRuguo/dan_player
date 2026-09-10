@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:math' as math;
 
@@ -205,7 +206,7 @@ class _CustomMusicSourceProbeDialogState
                           constraints: BoxConstraints(
                             maxHeight: constraints.maxHeight * .48,
                           ),
-                          child: Scrollbar(
+                          child: AppScrollbar(
                             controller: _controlsScroll,
                             child: SingleChildScrollView(
                               controller: _controlsScroll,
@@ -261,7 +262,7 @@ class _CustomMusicSourceProbeDialogState
                               borderRadius: AppShape.surfaceRadius,
                               border: Border.all(color: scheme.outlineVariant),
                             ),
-                            child: Scrollbar(
+                            child: AppScrollbar(
                               controller: _resultsScroll,
                               child: ListView.separated(
                                 shrinkWrap: true,

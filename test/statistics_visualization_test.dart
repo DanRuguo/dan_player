@@ -58,6 +58,54 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('rank colors distinguish magnitudes and update with the theme',
+      (tester) async {
+    List<Color> renderedColors() => tester
+        .widgetList<FractionallySizedBox>(find.byType(FractionallySizedBox))
+        .map((bar) => (bar.child! as ColoredBox).color)
+        .toList();
+    List<Color>? previous;
+    for (final brightness in Brightness.values) {
+      for (final seed in [Colors.deepOrange, Colors.teal]) {
+        final scheme =
+            ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
+        await tester.pumpWidget(MaterialApp(
+            theme: ThemeData(colorScheme: scheme),
+            home: Column(children: [
+              for (final value in [100.0, 75.0, 50.0, 25.0])
+                StatisticsBarRow(
+                    label: 'Track',
+                    detail: 'fixture',
+                    valueLabel: '$value',
+                    value: value,
+                    maximum: 100),
+            ])));
+        await tester.pumpAndSettle();
+        final colors = renderedColors();
+        expect(colors.toSet(), hasLength(4));
+        expect(colors.first, scheme.primary);
+        double contrast(Color color) {
+          final foreground = color.computeLuminance();
+          final background = scheme.surfaceContainerLow.computeLuminance();
+          return foreground > background
+              ? (foreground + .05) / (background + .05)
+              : (background + .05) / (foreground + .05);
+        }
+
+        final contrastLevels = colors.map(contrast).toList();
+        for (var i = 1; i < contrastLevels.length; i++) {
+          expect(contrastLevels[i - 1], greaterThan(contrastLevels[i]));
+        }
+        if (previous != null) {
+          for (var i = 0; i < colors.length; i++) {
+            expect(colors[i], isNot(previous[i]));
+          }
+        }
+        previous = colors;
+      }
+    }
+  });
+
   for (final language in UiLanguage.values) {
     for (final narrow in [false, true]) {
       testWidgets('statistics render ${language.name} narrow=$narrow',
@@ -154,7 +202,7 @@ void main() {
                           readLyrics: (_) async => null))),
             ))));
         await tester.pumpAndSettle();
-        for (final section in ['音乐统计', '歌曲语言', '占用空间最多', '播放最多']) {
+        for (final section in ['音乐统计', '24 小时收听分布', '歌曲语言', '占用空间最多', '播放最多']) {
           if (section != '音乐统计') {
             await tester.scrollUntilVisible(find.text(ui(section)), 250,
                 scrollable: find.byType(Scrollable).first, maxScrolls: 100);

@@ -215,10 +215,15 @@ Future<void> showBookmarkLibrary(BuildContext context) => showAppDialog<void>(
 
 class BookmarkLibraryDialog extends StatefulWidget {
   const BookmarkLibraryDialog(
-      {super.key, this.embedded = false, this.store, this.header});
+      {super.key,
+      this.embedded = false,
+      this.store,
+      this.header,
+      this.playbackService});
   final Widget? header;
   final bool embedded;
   final PlaybackBookmarkStore? store;
+  final PlaybackService? playbackService;
   @override
   State<BookmarkLibraryDialog> createState() => _BookmarkLibraryDialogState();
 }
@@ -230,11 +235,18 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
   String? _error;
   bool _busy = true;
   bool _canRetryLoad = false;
+  bool _changing = false;
+  int _loadRevision = 0;
   @override
   void initState() {
     super.initState();
     _load();
     AudioLibrary.changes.addListener(_libraryChanged);
+    PlaybackBookmarkStore.changes.addListener(_bookmarksChanged);
+  }
+
+  void _bookmarksChanged() {
+    if (mounted && !_changing) _load();
   }
 
   void _libraryChanged() {
@@ -243,6 +255,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
 
   Future<void> _load() async {
     if (!mounted) return;
+    final revision = ++_loadRevision;
     setState(() {
       _busy = true;
       _error = null;
@@ -251,7 +264,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
     try {
       final items =
           await (widget.store ?? await PlaybackBookmarkStore.instance).all();
-      if (mounted)
+      if (mounted && revision == _loadRevision)
         setState(() {
           _items = items;
           _error = null;
@@ -260,16 +273,17 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
           _resolveBookmarks();
         });
     } catch (e) {
-      if (mounted) {
+      if (mounted && revision == _loadRevision) {
         setState(() {
           _canRetryLoad = e is! UnsupportedError;
-          _error = e is UnsupportedError
-              ? '书签由更新版本创建，请更新播放器后再打开。'
-              : '无法读取书签，请重试';
+          _error =
+              e is UnsupportedError ? '书签由更新版本创建，请更新播放器后再打开。' : '无法读取书签，请重试';
         });
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && revision == _loadRevision) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -301,6 +315,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
 
   Future<void> _change(Future<void> Function(PlaybackBookmarkStore) f) async {
     if (_busy) return;
+    _changing = true;
     setState(() => _busy = true);
     try {
       await f(widget.store ?? await PlaybackBookmarkStore.instance);
@@ -308,6 +323,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
+      _changing = false;
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -317,22 +333,27 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
       setState(() => _error = ui('书签超出当前有效时长'));
       return;
     }
-    final service = PlayService.instance.playbackService;
+    final service =
+        widget.playbackService ?? PlayService.instance.playbackService;
     final played = await service.playAudioAt(audio,
         position: item.position, stillCurrent: () => mounted);
     if (played &&
         mounted &&
-        item.end != null &&
         service.nowPlaying?.stableTrackId == audio.stableTrackId) {
-      service.segmentLoop.setStart(item.position, service.length);
-      service.segmentLoop.setEnd(item.end!, service.length);
-      service.setSegmentLoopEnabled(true);
+      if (item.end != null) {
+        service.segmentLoop.setStart(item.position, service.length);
+        service.segmentLoop.setEnd(item.end!, service.length);
+        service.setSegmentLoopEnabled(true);
+      } else {
+        service.setSegmentLoopEnabled(false);
+      }
     }
   }
 
   @override
   void dispose() {
     AudioLibrary.changes.removeListener(_libraryChanged);
+    PlaybackBookmarkStore.changes.removeListener(_bookmarksChanged);
     _search.dispose();
     super.dispose();
   }
@@ -370,8 +391,7 @@ class _BookmarkLibraryDialogState extends State<BookmarkLibraryDialog> {
             Text(ui(_error!),
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
           if (_canRetryLoad)
-            TextButton(
-                onPressed: _busy ? null : _load, child: Text(ui('重试'))),
+            TextButton(onPressed: _busy ? null : _load, child: Text(ui('重试'))),
           Flexible(
               fit: widget.embedded ? FlexFit.tight : FlexFit.loose,
               child: visible.isEmpty

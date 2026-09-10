@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -41,12 +42,19 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
     _load();
   }
 
-  Future<void> _load() async {
+  void _refreshDocument({bool preserveOffsetDraft = true}) {
+    final hasDraft = offset.text.trim() != (document?.offsetMs ?? 0).toString();
+    document = store.forAudio(widget.audio);
+    if (!preserveOffsetDraft || !hasDraft) {
+      offset.text = (document?.offsetMs ?? 0).toString();
+    }
+  }
+
+  Future<void> _load({bool preserveOffsetDraft = false}) async {
     try {
       await store.load();
       if (!mounted) return;
-      document = store.forAudio(widget.audio);
-      offset.text = (document?.offsetMs ?? 0).toString();
+      _refreshDocument(preserveOffsetDraft: preserveOffsetDraft);
     } catch (failure) {
       if (!mounted) return;
       error = failure.toString();
@@ -63,7 +71,8 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
         : null;
   }
 
-  Future<void> _change(Future<void> Function(int revision) work) async {
+  Future<void> _change(Future<void> Function(int revision) work,
+      {bool preserveOffsetDraft = true}) async {
     if (busy) return;
     setState(() {
       busy = true;
@@ -72,8 +81,7 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
     try {
       await work(document?.revision ?? 0);
       if (!mounted) return;
-      document = store.forAudio(widget.audio);
-      offset.text = (document?.offsetMs ?? 0).toString();
+      _refreshDocument(preserveOffsetDraft: preserveOffsetDraft);
     } catch (failure) {
       if (!mounted) return;
       error = failure.toString();
@@ -82,17 +90,30 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
     }
   }
 
-  Future<void> _saveOffset([int? value]) async {
-    final milliseconds = value ?? int.tryParse(offset.text.trim());
+  bool _validateOffset(int? milliseconds) {
     if (milliseconds == null ||
         milliseconds.abs() > LyricDocument.maxOffsetMs) {
       setState(() => error = ui('请输入 -600000 至 600000 的整数毫秒值。'));
-      return;
+      return false;
     }
+    return true;
+  }
+
+  Future<void> _stepOffset(int delta) async {
+    if (busy) return;
+    final milliseconds = int.tryParse(offset.text.trim());
+    if (!_validateOffset(milliseconds)) return;
+    await _saveOffset(milliseconds! + delta);
+  }
+
+  Future<void> _saveOffset([int? value]) async {
+    if (busy) return;
+    final milliseconds = value ?? int.tryParse(offset.text.trim());
+    if (!_validateOffset(milliseconds)) return;
     await _change((revision) async {
-      await store.setOffset(widget.audio, milliseconds,
+      await store.setOffset(widget.audio, milliseconds!,
           expectedRevision: revision);
-    });
+    }, preserveOffsetDraft: false);
   }
 
   @override
@@ -171,9 +192,7 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                                             iconOnly: true),
                                         onPressed: busy
                                             ? null
-                                            : () => _saveOffset(
-                                                (document?.offsetMs ?? 0) -
-                                                    500),
+                                            : () => _stepOffset(-500),
                                         icon: const Icon(Symbols.remove)),
                                     const SizedBox(width: 12),
                                     Expanded(
@@ -203,9 +222,7 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                                             iconOnly: true),
                                         onPressed: busy
                                             ? null
-                                            : () => _saveOffset(
-                                                (document?.offsetMs ?? 0) +
-                                                    500),
+                                            : () => _stepOffset(500),
                                         icon: const Icon(Symbols.add)),
                                   ]),
                               const SizedBox(height: 8),
@@ -285,7 +302,10 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                                           : () async {
                                               await showLyricEditorDialog(
                                                   context, widget.audio);
-                                              if (mounted) await _load();
+                                              if (mounted) {
+                                                await _load(
+                                                    preserveOffsetDraft: true);
+                                              }
                                             },
                                       icon: const Icon(Symbols.edit_document),
                                       label: Text(ui('编辑修订'))),
@@ -299,7 +319,10 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                                                 builder: (_) =>
                                                     LyricSourceDialog(
                                                         audio: widget.audio));
-                                            if (mounted) await _load();
+                                            if (mounted) {
+                                              await _load(
+                                                  preserveOffsetDraft: true);
+                                            }
                                           },
                                     icon: const Icon(Symbols.search),
                                     label: Text(ui('切换歌词来源'))),
@@ -426,9 +449,8 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
   Widget _scrollableBody(BuildContext context, {required Widget child}) =>
       ScrollConfiguration(
           behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-          child: Scrollbar(
+          child: AppScrollbar(
               controller: scrollController,
-              thumbVisibility: true,
               child: SingleChildScrollView(
                   key: const ValueKey('lyric-workbench-scroll'),
                   controller: scrollController,

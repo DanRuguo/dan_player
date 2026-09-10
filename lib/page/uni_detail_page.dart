@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/music_grid.dart';
@@ -557,13 +558,17 @@ class _UniDetailPageHeader extends StatelessWidget {
           : constraints.maxWidth >= 400
               ? 96.0
               : 72.0;
-      final controls = Wrap(
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 8,
-        runSpacing: 8,
-        children: multiSelectController?.enableMultiSelectView == true
-            ? multiSelectViewActions!
-            : actions,
+      final controls = AppContentTransition(
+        key: const ValueKey('uni-detail-selection-transition'),
+        identity: multiSelectController?.enableMultiSelectView == true,
+        child: Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: multiSelectController?.enableMultiSelectView == true
+              ? multiSelectViewActions!
+              : actions,
+        ),
       );
       final text = Column(
         mainAxisSize: MainAxisSize.min,
