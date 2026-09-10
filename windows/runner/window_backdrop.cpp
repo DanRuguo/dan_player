@@ -31,6 +31,7 @@ constexpr int kSystemRoundedCorners = 2;  // DWMWCP_ROUND; system radius.
 constexpr DWORD kBorderColor = 34;
 constexpr COLORREF kNoBorderColor = 0xFFFFFFFE;
 constexpr DWORD kSystemBackdropType = 38;
+constexpr DWORD kRedirectionBitmapAlpha = 39;
 constexpr int kNoSystemBackdrop = 1;
 constexpr int kDesktopAcrylicBackdrop = 3;  // DWMSBT_TRANSIENTWINDOW, not Mica.
 
@@ -248,12 +249,35 @@ struct WindowBackdropController::Impl {
     }
   }
 
-  bool RestoreFrame() const {
-    // The system backdrop and legacy accent policy already cover the HWND.
-    // Extending glass across the client area also exposes DWM caption buttons
-    // through Flutter's transparent title bar. Keep the normal caption style
-    // for system transitions, but do not extend native frame decorations into
-    // the client surface. Zero margins also avoid the old Win10 white top line.
+  bool EnableRedirectionAlpha() {
+    // ANGLE presents Flutter's premultiplied pixels through a child HWND.
+    // With no extended glass, modern DWM otherwise treats that bitmap as
+    // opaque even when the Acrylic attribute itself succeeds. Win11 26100+
+    // exposes this capability; older systems use the legacy blur path.
+    const BOOL use_alpha = TRUE;
+    if (FAILED(DwmSetWindowAttribute(window, kRedirectionBitmapAlpha, &use_alpha,
+                                     sizeof(use_alpha)))) {
+      return false;
+    }
+    redirection_alpha_owned = true;
+    return true;
+  }
+
+  void DisableRedirectionAlpha() {
+    if (redirection_alpha_owned) {
+      const BOOL use_alpha = FALSE;
+      if (SUCCEEDED(DwmSetWindowAttribute(window, kRedirectionBitmapAlpha,
+                                          &use_alpha, sizeof(use_alpha)))) {
+        redirection_alpha_owned = false;
+      }
+    }
+  }
+
+  bool RestoreFrame() {
+    // Use bitmap alpha rather than extended glass to expose modern Acrylic:
+    // full glass also reveals native caption buttons through Flutter. Keep
+    // normal caption styles for system transitions and zero frame margins to
+    // avoid those decorations and the old Win10 white top line.
     const MARGINS margins{0, 0, 0, 0};
     const HRESULT result = DwmExtendFrameIntoClientArea(window, &margins);
     // Independent capability probe: this works on early Win11 too, even when
@@ -277,13 +301,18 @@ struct WindowBackdropController::Impl {
     const int corners = square ? kSquareCorners : kSystemRoundedCorners;
     DwmSetWindowAttribute(window, kWindowCornerPreference,
                           &corners, sizeof(corners));
-    return SUCCEEDED(result);
+    return SUCCEEDED(result) &&
+           (!system_backdrop_owned || EnableRedirectionAlpha());
   }
 
   bool TrySystemAcrylic() {
+    // Probe the complete alpha path before enabling the material. A successful
+    // backdrop attribute alone is insufficient on an HWND-backed Flutter view.
+    if (!EnableRedirectionAlpha()) return false;
     const int acrylic = kDesktopAcrylicBackdrop;
     if (FAILED(DwmSetWindowAttribute(window, kSystemBackdropType, &acrylic,
                                      sizeof(acrylic)))) {
+      DisableRedirectionAlpha();
       return false;
     }
     if (!system_backdrop_owned) {
@@ -294,6 +323,7 @@ struct WindowBackdropController::Impl {
     system_backdrop_owned = true;
     if (!RestoreFrame()) {
       DisableSystemBackdrop();
+      DisableRedirectionAlpha();
       return false;
     }
     return true;
@@ -307,12 +337,14 @@ struct WindowBackdropController::Impl {
       return false;
     }
     DisableSystemBackdrop();
+    DisableRedirectionAlpha();
     return RestoreFrame();
   }
 
   void ApplySolid(COLORREF color) {
     SetAccent(kAccentSolid, ToAbgr(color, 0xFF));
     DisableSystemBackdrop();
+    DisableRedirectionAlpha();
     RestoreFrame();
   }
 
@@ -456,6 +488,7 @@ struct WindowBackdropController::Impl {
   bool applying = false;
   bool refresh_pending = false;
   bool system_backdrop_owned = false;
+  bool redirection_alpha_owned = false;
 };
 
 WindowBackdropController::WindowBackdropController(
