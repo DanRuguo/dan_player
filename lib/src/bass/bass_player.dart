@@ -517,6 +517,7 @@ class BassPlayer {
   final ffi.Pointer<ffi.Float> _frequencyBuffer =
       ffi.malloc.allocate<ffi.Float>(ffi.sizeOf<ffi.Float>());
   bool _freed = false;
+  final List<int> _loadedPlugins = [];
   Future<void>? _freeFuture;
   int _sourceGeneration = 0;
   final Set<_PendingBassUrlOpen> _pendingUrlOpens = {};
@@ -532,13 +533,26 @@ class BassPlayer {
 
   /// current position in seconds
   double get position {
+    final event = _lastEvent;
+    if (event != null && event.completed && _eventBoundary.accepts(event.stamp))
+      return length;
+    return _readPosition(decoding: false) ?? 0.0;
+  }
+
+  double? _readPosition({required bool decoding}) {
     final stream = _fstream;
-    if (stream == null) return 0.0;
-    final bytes = wasapiExclusive && _exclusiveMixer != null
+    if (stream == null) return null;
+    // BASS_POS_DECODE bypasses the tempo/output playback buffer. Only the UI
+    // clock uses mixer compensation; a stopped channel is diagnosed against
+    // the decoder clock, including when the tempo wrapper is playing at 1x.
+    const positionDecode = 0x10000000;
+    final bytes = !decoding && wasapiExclusive && _exclusiveMixer != null
         ? _mix!.getChannelPosition(stream, BASS.BASS_POS_BYTE)
-        : _bass.BASS_ChannelGetPosition(stream, BASS.BASS_POS_BYTE);
-    if (bytes == _bassPositionErrorValue) return 0.0;
+        : _bass.BASS_ChannelGetPosition(
+            stream, BASS.BASS_POS_BYTE | (decoding ? positionDecode : 0));
+    if (bytes == _bassPositionErrorValue) return null;
     final absolute = _bass.BASS_ChannelBytes2Seconds(stream, bytes);
+    if (!absolute.isFinite || absolute < 0) return null;
     return _segment?.relativePosition(absolute, length) ?? absolute;
   }
 
@@ -672,6 +686,7 @@ class BassPlayer {
           if (reason == PlaybackEndReason.naturalEnd ||
               reason == PlaybackEndReason.segmentEnd) {
             _publishState(PlayerState.completed, reason: reason);
+            _publishPosition();
           } else {
             final device = reason == PlaybackEndReason.deviceUnavailable;
             // Explicit user recovery is required after an endpoint failure;
@@ -1126,6 +1141,8 @@ class BassPlayer {
           case BASS.BASS_ERROR_ALREADY:
             throw const FormatException("The plugin is already loaded.");
         }
+      } else {
+        _loadedPlugins.add(hplugin);
       }
     }
 
@@ -1533,14 +1550,7 @@ class BassPlayer {
   /// The decoder position diagnoses the cause of an inactive stream. In
   /// exclusive mode the UI clock compensates mixer buffering, and therefore
   /// must not be mistaken for the raw decoder's end marker (or vice versa).
-  double get _boundaryPosition {
-    final stream = _fstream;
-    if (stream == null) return double.nan;
-    final bytes = _bass.BASS_ChannelGetPosition(stream, BASS.BASS_POS_BYTE);
-    if (bytes == _bassPositionErrorValue) return double.nan;
-    final seconds = _bass.BASS_ChannelBytes2Seconds(stream, bytes);
-    return _segment?.relativePosition(seconds, length) ?? seconds;
-  }
+  double get _boundaryPosition => _readPosition(decoding: true) ?? double.nan;
 
   /// Transactional and safe during source opening: the commit uses the latest
   /// preferences. Persist only after true; a failed native call keeps old prefs.
@@ -1723,9 +1733,22 @@ class BassPlayer {
   void _startCurrentStream() {
     final interrupted = _deviceInterrupted;
     _deviceInterrupted = false;
+    // Capture completion before rearming invalidates its event stamp. A CUE
+    // source must restart at its segment start, not the containing file start.
+    final restartSegment = _segment != null &&
+        (position >= length ||
+            (playerState == PlayerState.stopped &&
+                classifyPlaybackStop(
+                      validHandle: true,
+                      deviceAvailable: true,
+                      position: _boundaryPosition,
+                      duration: length,
+                      segment: true,
+                    ) ==
+                    PlaybackEndReason.segmentEnd));
     _eventBoundary.command(rearm: true);
 
-    if (_segment != null && position >= length) _seekNative(0);
+    if (restartSegment) _seekNative(0);
 
     _positionUpdater?.cancel();
 
@@ -1777,7 +1800,10 @@ class BassPlayer {
           throw const FormatException(
               "handle is a decoding channel, so cannot be played or paused.");
         case BASS.BASS_ERROR_NOPLAY:
-          throw const FormatException("The channel is not playing.");
+          // EOF may win immediately before an A–B interval or user pause.
+          // Already inactive is a successful pause; still invalidate queued
+          // completion below so this command cannot accidentally auto-advance.
+          break;
       }
     }
 
@@ -1973,6 +1999,13 @@ class BassPlayer {
       }
     }
 
+    // BASS_Free releases device streams, but not codec plugins. Releasing
+    // only our own handles lets a closed player be constructed again without
+    // leaving DLL references behind or unloading someone else's codecs.
+    for (final plugin in _loadedPlugins.reversed) {
+      _bass.BASS_PluginFree(plugin);
+    }
+    _loadedPlugins.clear();
     _bassWasapiLib.close();
     _mix?.close();
     _mix = null;

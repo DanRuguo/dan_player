@@ -123,6 +123,52 @@ ValueListenable<List<double>> _levels(WidgetTester tester) => tester
     .levels;
 
 void main() {
+  testWidgets('visible blur keeps lyric spectrum and background clocks running',
+      (tester) async {
+    final fixture = _Fixture();
+    addTearDown(fixture.dispose);
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    await tester.pumpWidget(fixture.app());
+    final original = tester.state(find.byType(VerticalLyricScrollView));
+    final position = _position(tester);
+    final phase = _phase(tester);
+    final levels = _levels(tester);
+    final reads = fixture.reads;
+    final fftReads = fixture.fftReads;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    expect(fixture.positions.hasListener, isTrue);
+    expect(fixture.spectra.hasListener, isTrue);
+    final before = phase.value;
+    final timer = Timer.periodic(const Duration(milliseconds: 100),
+        (_) => fixture.emit(fixture.current + .1));
+    addTearDown(timer.cancel);
+    await tester.pump(const Duration(seconds: 1));
+    expect(position.value.inMilliseconds, closeTo(1000, 1));
+    expect(levels.value.first, closeTo(.01, .00001));
+    expect(phase.value, greaterThan(before));
+    expect(fixture.reads, reads,
+        reason: 'blur must not detach and resubscribe');
+    expect(fixture.fftReads, fftReads);
+    timer.cancel();
+    fixture.hidden.value = true;
+    final stoppedPhase = phase.value;
+    expect(fixture.positions.hasListener, isFalse);
+    expect(fixture.spectra.hasListener, isFalse);
+    fixture.emit(35);
+    await tester.pump(const Duration(seconds: 1));
+    expect(position.value.inMilliseconds, closeTo(1000, 1));
+    expect(phase.value, stoppedPhase);
+    fixture.hidden.value = false;
+    await tester.pump();
+    expect(position.value, const Duration(seconds: 35));
+    expect(fixture.positions.hasListener, isTrue);
+    expect(fixture.spectra.hasListener, isTrue);
+    expect(tester.state(find.byType(VerticalLyricScrollView)), same(original));
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('opt-out immediately resumes mounted streams and hidden clock',
       (tester) async {
     final fixture = _Fixture();

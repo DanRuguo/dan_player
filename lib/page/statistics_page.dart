@@ -255,6 +255,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     sliver: SliverToBoxAdapter(
                       child: _SectionCard(
                         title: ui("占用空间最多"),
+                        icon: Symbols.hard_drive,
                         child: Column(children: [
                           for (final file in library.largestFiles)
                             StatisticsBarRow(
@@ -285,12 +286,14 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         final cards = [
                           _RankingCard(
                             title: ui("播放最多"),
+                            icon: Symbols.play_circle,
                             tracks: topPlay,
                             value: (item) => ui("{0} 次", [item.playCount]),
                             magnitude: (item) => item.playCount.toDouble(),
                           ),
                           _RankingCard(
                             title: ui("收听最久"),
+                            icon: Symbols.headphones,
                             tracks: topTime,
                             value: (item) => _formatListeningDuration(
                                 item.listenMilliseconds),
@@ -386,18 +389,21 @@ class _ListeningBehavior extends StatelessWidget {
                 [peaks.length, _formatListeningDuration(peakDuration)]);
     final metrics = [
       _BehaviorMetric(
+        key: const ValueKey('statistics-behavior-duration'),
         icon: Symbols.headphones,
         label: ui("听歌时长"),
         value: _formatListeningDuration(statistics.totalListenMilliseconds),
         detail: ui("仅累计实际播放采样时间"),
       ),
       _BehaviorMetric(
+        key: const ValueKey('statistics-behavior-count'),
         icon: Symbols.play_circle,
         label: ui("播放次数"),
         value: ui('{0} 次', [statistics.totalPlayCount]),
         detail: ui("{0} 首有记录 · 恢复播放不重复计次", [statistics.tracks.length]),
       ),
       _BehaviorMetric(
+        key: const ValueKey('statistics-behavior-peak'),
         icon: Symbols.schedule,
         label: ui("最活跃时段"),
         value: peaks.isEmpty ? '—' : _hourRange(peaks.first),
@@ -405,120 +411,93 @@ class _ListeningBehavior extends StatelessWidget {
         tooltip: peaks.isEmpty ? null : peaks.map(_hourRange).join('、'),
       ),
     ];
-    return Card.filled(
+    return _StatisticsCard(
       key: const ValueKey('listening-behavior'),
-      margin: EdgeInsets.zero,
-      color: scheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-          borderRadius: AppShape.controlRadius,
-          side:
-              BorderSide(color: scheme.outlineVariant.withValues(alpha: .55))),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  ui("听歌行为"),
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StatisticsHeading(
+            title: ui("听歌行为"),
+            icon: Symbols.headphones,
+            trailing: Tooltip(
+              message: ui("包含所有已保存记录。历史小时分布没有日期维度，不作为近7天或近30天数据展示。"),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.secondaryContainer,
+                  borderRadius: AppShape.smallRadius,
                 ),
-                Tooltip(
-                  message: ui("包含所有已保存记录。历史小时分布没有日期维度，不作为近7天或近30天数据展示。"),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.secondaryContainer,
-                      borderRadius: AppShape.smallRadius,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 5,
-                      ),
-                      child: Text(
-                        ui("全部记录"),
-                        style:
-                            Theme.of(context).textTheme.labelMedium?.copyWith(
-                                  color: scheme.onSecondaryContainer,
-                                ),
-                      ),
-                    ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 5,
+                  ),
+                  child: Text(
+                    ui("全部记录"),
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: scheme.onSecondaryContainer,
+                        ),
                   ),
                 ),
-              ],
+              ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              ui("本地与联网歌曲一并统计，发现你一天中的听歌习惯。"),
-              style: TextStyle(color: scheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 18),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final textScale =
-                    MediaQuery.textScalerOf(context).scale(14) / 14;
-                final effectiveWidth =
-                    constraints.maxWidth / math.max(1, textScale);
-                final columns = effectiveWidth >= 720
-                    ? 3
-                    : effectiveWidth >= 460
-                        ? 2
-                        : 1;
-                final width =
-                    (constraints.maxWidth - (columns - 1) * 12) / columns;
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    for (final metric in metrics)
-                      SizedBox(width: width, child: metric),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 18,
-              runSpacing: 6,
-              children: [
-                Text(ui("完整 {0} 次", [statistics.totalCompletedCount])),
-                Text(ui("提前跳过 {0} 次", [statistics.totalSkippedCount])),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Text(
-              ui("24 小时收听分布"),
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              ui("每根柱表示该时段累计收听时长，强调色柱为最高时段。"),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            _HourlyListeningChart(
-              values: List<int>.of(statistics.hourlyMilliseconds),
-              peakHours: peaks,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              ui("暂停、缓冲和拖动播放进度不补算时长。休眠或采样间隔超过 2 秒时，仅计最近 2 秒，未观测的间隔不补记。"),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            ui("本地与联网歌曲一并统计，发现你一天中的听歌习惯。"),
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 18),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+              final effectiveWidth =
+                  constraints.maxWidth / math.max(1, textScale);
+              final columns = effectiveWidth >= 720
+                  ? 3
+                  : effectiveWidth >= 460
+                      ? 2
+                      : 1;
+              return _EqualHeightRows(
+                columns: columns,
+                spacing: 12,
+                children: metrics,
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 18,
+            runSpacing: 6,
+            children: [
+              Text(ui("完整 {0} 次", [statistics.totalCompletedCount])),
+              Text(ui("提前跳过 {0} 次", [statistics.totalSkippedCount])),
+            ],
+          ),
+          const SizedBox(height: 24),
+          _StatisticsHeading(
+            title: ui("24 小时收听分布"),
+            icon: Symbols.bar_chart,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            ui("每根柱表示该时段累计收听时长，强调色柱为最高时段。"),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 16),
+          _HourlyListeningChart(
+            values: List<int>.of(statistics.hourlyMilliseconds),
+            peakHours: peaks,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            ui("暂停、缓冲和拖动播放进度不补算时长。休眠或采样间隔超过 2 秒时，仅计最近 2 秒，未观测的间隔不补记。"),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+        ],
       ),
     );
   }
@@ -526,6 +505,7 @@ class _ListeningBehavior extends StatelessWidget {
 
 class _BehaviorMetric extends StatelessWidget {
   const _BehaviorMetric({
+    super.key,
     required this.icon,
     required this.label,
     required this.value,
@@ -553,16 +533,7 @@ class _BehaviorMetric extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(icon, color: scheme.primary, size: 22),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(label,
-                      style: TextStyle(color: scheme.onSurfaceVariant)),
-                ),
-              ],
-            ),
+            _StatisticsHeading(title: label, icon: icon),
             const SizedBox(height: 10),
             FittedBox(
               fit: BoxFit.scaleDown,
@@ -877,7 +848,7 @@ const _distributionColors = [
 double _statisticsTextScale(BuildContext context) =>
     math.max(1, MediaQuery.textScalerOf(context).scale(14) / 14);
 
-/// Only the bounded overview/distribution cards use intrinsic row sizing.
+/// Only the bounded metric/distribution cards use intrinsic row sizing.
 /// Natural text/legend height determines the row height; there is no clipping
 /// or fixed-height scroll area when accessibility text sizes grow.
 class _EqualHeightRows extends StatelessWidget {
@@ -940,6 +911,7 @@ class _LibraryOverview extends StatelessWidget {
           spacing: 12,
           children: [
             _MetricCard(
+              key: const ValueKey('statistics-local-total-metric'),
               icon: Symbols.library_music,
               label: ui("总乐库"),
               value: library?.totalTracks.toString() ?? '—',
@@ -949,6 +921,7 @@ class _LibraryOverview extends StatelessWidget {
                       [library.localTracks, library.onlineTracks]),
             ),
             _MetricCard(
+              key: const ValueKey('statistics-local-storage-metric'),
               icon: Icons.storage_rounded,
               label: ui("本地源文件占用"),
               value: library == null
@@ -959,6 +932,7 @@ class _LibraryOverview extends StatelessWidget {
                   : ui("{0} 首已核实 · 不含联网曲目", [library.measuredLocalTracks]),
             ),
             _MetricCard(
+              key: const ValueKey('statistics-local-readable-metric'),
               icon: Icons.folder_off_outlined,
               label: ui("文件读取情况"),
               value: library == null
@@ -1082,6 +1056,7 @@ class _LanguageCard extends StatelessWidget {
     return _SectionCard(
       key: const ValueKey('statistics-language-card'),
       title: ui("歌曲语言"),
+      icon: Symbols.language,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1156,6 +1131,7 @@ class _StorageFormatCard extends StatelessWidget {
     return _SectionCard(
       key: const ValueKey('statistics-format-card'),
       title: ui("本地空间 · 文件格式"),
+      icon: Symbols.audio_file,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1232,6 +1208,7 @@ class _FolderStorageCard extends StatelessWidget {
     return _SectionCard(
       key: const ValueKey('statistics-folder-card'),
       title: ui("本地分布 · 文件夹"),
+      icon: Symbols.folder,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1575,87 +1552,30 @@ class _MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
-    return Card.filled(
-      margin: EdgeInsets.zero,
-      shape: AppShape.surface,
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+    return _StatisticsCard(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 144),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Icon(icon, color: scheme.primary),
-                  const SizedBox(width: 8.0),
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: TextStyle(color: scheme.onSurfaceVariant),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  value,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                detail,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({super.key, required this.title, required this.child});
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    return Card.filled(
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-          borderRadius: AppShape.controlRadius,
-          side: BorderSide(
-              color: Theme.of(context)
-                  .colorScheme
-                  .outlineVariant
-                  .withValues(alpha: .55))),
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        constraints: const BoxConstraints(minHeight: 112),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.bold,
-                  ),
+            _StatisticsHeading(title: label, icon: icon),
+            const SizedBox(height: 10),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
             ),
-            const SizedBox(height: 12.0),
-            child,
+            const SizedBox(height: 8),
+            Text(
+              detail,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ],
         ),
       ),
@@ -1663,13 +1583,85 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
+/// Shared card chrome and headings keep every statistics section at one level.
+class _StatisticsCard extends StatelessWidget {
+  const _StatisticsCard({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card.filled(
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+          borderRadius: AppShape.controlRadius,
+          side:
+              BorderSide(color: scheme.outlineVariant.withValues(alpha: .55))),
+      color: scheme.surfaceContainerLow,
+      child: Padding(padding: const EdgeInsets.all(18), child: child),
+    );
+  }
+}
+
+class _StatisticsHeading extends StatelessWidget {
+  const _StatisticsHeading({required this.title, this.icon, this.trailing});
+  final String title;
+  final IconData? icon;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final heading = Row(mainAxisSize: MainAxisSize.min, children: [
+      if (icon != null) ...[
+        Icon(icon, size: 22, color: theme.colorScheme.primary),
+        const SizedBox(width: 8),
+      ],
+      Flexible(
+          child: Text(title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.w600))),
+    ]);
+    return Semantics(
+        header: true,
+        child: trailing == null
+            ? heading
+            : Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [heading, trailing!],
+              ));
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  const _SectionCard(
+      {super.key, required this.title, this.icon, required this.child});
+  final String title;
+  final IconData? icon;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => _StatisticsCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _StatisticsHeading(title: title, icon: icon),
+          const SizedBox(height: 12),
+          child,
+        ]),
+      );
+}
+
 class _RankingCard extends StatelessWidget {
   const _RankingCard(
       {required this.title,
+      required this.icon,
       required this.tracks,
       required this.value,
       required this.magnitude});
   final String title;
+  final IconData icon;
   final List<TrackPlaybackStatistics> tracks;
   final String Function(TrackPlaybackStatistics) value;
   final double Function(TrackPlaybackStatistics) magnitude;
@@ -1679,6 +1671,7 @@ class _RankingCard extends StatelessWidget {
         0, (maxValue, track) => math.max(maxValue, magnitude(track)));
     return _SectionCard(
         title: title,
+        icon: icon,
         child: tracks.isEmpty
             ? Padding(
                 padding: const EdgeInsets.symmetric(vertical: 28),

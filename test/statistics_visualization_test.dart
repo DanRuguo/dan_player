@@ -202,6 +202,20 @@ void main() {
                           readLyrics: (_) async => null))),
             ))));
         await tester.pumpAndSettle();
+        final metricBounds = [
+          for (final name in ['duration', 'count', 'peak'])
+            tester.getRect(find.byKey(ValueKey('statistics-behavior-$name'))),
+        ];
+        if (!narrow) {
+          for (final bounds in metricBounds.skip(1)) {
+            expect(bounds.top, closeTo(metricBounds.first.top, .01));
+            expect(bounds.bottom, closeTo(metricBounds.first.bottom, .01),
+                reason: 'Long translated descriptions grow the whole row');
+          }
+        } else {
+          expect(metricBounds[1].top, greaterThan(metricBounds[0].bottom));
+          expect(metricBounds[2].top, greaterThan(metricBounds[1].bottom));
+        }
         for (final section in ['音乐统计', '24 小时收听分布', '歌曲语言', '占用空间最多', '播放最多']) {
           if (section != '音乐统计') {
             await tester.scrollUntilVisible(find.text(ui(section)), 250,
@@ -210,6 +224,14 @@ void main() {
             await tester.pumpAndSettle();
           }
           expect(tester.takeException(), isNull);
+          if (section != '音乐统计') {
+            final heading = tester.widget<Text>(find.text(ui(section)));
+            final theme = Theme.of(tester.element(find.text(ui(section))));
+            expect(
+                heading.style?.fontSize, theme.textTheme.titleMedium?.fontSize);
+            expect(heading.style?.fontWeight, FontWeight.w600);
+            expect(heading.style?.color, theme.colorScheme.primary);
+          }
           const output = String.fromEnvironment('DAN_STATISTICS_RENDER');
           if (output.isNotEmpty) {
             await tester.runAsync(() async {

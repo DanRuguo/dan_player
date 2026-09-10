@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/rendering_preferences.dart';
 import 'dart:async';
 
 import 'package:desktop_lyric/ui_language.dart';
@@ -161,9 +162,11 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
     _reduced =
         _mediaReduced || features.disableAnimations || features.reduceMotion;
-    final active = _treeVisible &&
-        !(widget.hidden?.value ?? false) &&
-        (_lifecycle == null || _lifecycle == AppLifecycleState.resumed);
+    final active = const RenderingPreferences().allowsVisualUpdates(
+      lifecycle: _lifecycle,
+      treeVisible: _treeVisible,
+      nativeHidden: widget.hidden?.value ?? false,
+    );
     if (active != _active) {
       _active = active;
       _detach();

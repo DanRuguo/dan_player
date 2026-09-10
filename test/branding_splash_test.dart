@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:ui' as raster;
+
+import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/brand_logo.dart';
 import 'package:dan_player/component/startup_splash.dart';
 import 'package:dan_player/page/settings_page/about_brand.dart';
@@ -6,6 +10,8 @@ import 'package:dan_player/page/settings_page/grouped_settings.dart';
 import 'package:dan_player/page/settings_page/page.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget _host(
@@ -17,6 +23,7 @@ Widget _host(
     MaterialApp(
       themeAnimationDuration: Duration.zero,
       theme: ThemeData(
+        fontFamily: danEmbeddedFontFamily,
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.teal,
           brightness: brightness,
@@ -74,15 +81,20 @@ class _FailingImageProvider extends ImageProvider<_FailingImageProvider> {
 }
 
 void main() {
-  testWidgets('two brands share a two-second clock with a soft handoff',
+  setUpAll(() async {
+    await (FontLoader(danEmbeddedFontFamily)
+          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+        .load();
+  });
+  testWidgets('brands use 800 / 600 ms phases with a soft handoff',
       (tester) async {
     await tester.pumpWidget(_host(const StartupSplash(child: Text('Ready'))));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 0);
 
-    await tester.pump(const Duration(milliseconds: 790));
+    await tester.pump(const Duration(milliseconds: 670));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), closeTo(1, .001));
-    await tester.pump(const Duration(milliseconds: 210));
+    await tester.pump(const Duration(milliseconds: 130));
     final rce = _opacity(tester, StartupSplash.rceOpacityKey);
     final danRuguo = _opacity(tester, StartupSplash.danRuguoOpacityKey);
     expect(rce, closeTo(.5, .04));
@@ -91,11 +103,11 @@ void main() {
     expect(_overlayOpacity(tester), 1,
         reason: 'The shared background does not flash during the handoff');
 
-    await tester.pump(const Duration(milliseconds: 210));
+    await tester.pump(const Duration(milliseconds: 120));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), closeTo(0, .001));
     expect(
         _opacity(tester, StartupSplash.danRuguoOpacityKey), closeTo(1, .001));
-    await tester.pump(const Duration(milliseconds: 490));
+    await tester.pump(const Duration(milliseconds: 180));
     expect(_overlayOpacity(tester), closeTo(1, .001));
     await tester.pump(const Duration(milliseconds: 150));
     expect(_overlayOpacity(tester), allOf(greaterThan(0), lessThan(1)));
@@ -108,19 +120,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('reduced motion keeps two static one-second brand presentations',
+  testWidgets('reduced motion keeps static 800 / 600 ms brand presentations',
       (tester) async {
     await tester.pumpWidget(_host(
       const StartupSplash(child: Text('Ready')),
       reducedMotion: true,
     ));
-    await tester.pump(const Duration(milliseconds: 999));
+    await tester.pump(const Duration(milliseconds: 799));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 0);
     await tester.pump(const Duration(milliseconds: 1));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 0);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 1);
-    await tester.pump(const Duration(milliseconds: 999));
+    await tester.pump(const Duration(milliseconds: 599));
     expect(_overlayOpacity(tester), 1);
     expect(find.byKey(StartupSplash.overlayKey), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 1));
@@ -131,7 +143,7 @@ void main() {
       (tester) async {
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     await tester.pumpWidget(_host(const StartupSplash(child: Text('Ready'))));
-    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pump(const Duration(milliseconds: 700));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), lessThan(1));
     tester.platformDispatcher.accessibilityFeaturesTestValue =
         const FakeAccessibilityFeatures(reduceMotion: true);
@@ -139,7 +151,7 @@ void main() {
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
     await tester.pump(const Duration(milliseconds: 100));
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 1);
-    await tester.pump(const Duration(milliseconds: 999));
+    await tester.pump(const Duration(milliseconds: 599));
     expect(find.byKey(StartupSplash.overlayKey), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 1));
     expect(find.byKey(StartupSplash.overlayKey), findsNothing);
@@ -171,11 +183,12 @@ void main() {
     );
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 1,
         reason: 'Rebuilding the theme must not replay the RCE stage');
-    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byKey(StartupSplash.overlayKey), findsNothing);
   });
 
-  testWidgets('the splash blocks hidden controls and exposes one brand label',
+  testWidgets(
+      'the splash blocks controls and exposes only the current brand phase',
       (tester) async {
     final semantics = tester.ensureSemantics();
     try {
@@ -191,14 +204,16 @@ void main() {
       // Query the active semantics tree, not render objects' cached semantics
       // nodes: ExcludeSemantics may leave a detached debug node on a render box.
       expect(find.semantics.byLabel('RCE'), findsOneWidget);
+      expect(find.semantics.byLabel('Dan Player'), findsOneWidget);
       expect(find.semantics.byLabel('DanRuguo'), findsNothing);
       expect(find.semantics.byLabel('Hidden action'), findsNothing);
       await tester.tapAt(tester.getCenter(find.text('Hidden action')));
       expect(taps, 0);
-      await tester.pump(const Duration(milliseconds: 1000));
+      await tester.pump(const Duration(milliseconds: 800));
       expect(find.semantics.byLabel('RCE'), findsNothing);
+      expect(find.semantics.byLabel('Dan Player'), findsNothing);
       expect(find.semantics.byLabel('DanRuguo'), findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 1000));
+      await tester.pump(const Duration(milliseconds: 600));
       await tester.tap(find.text('Hidden action'));
       expect(taps, 1);
     } finally {
@@ -273,6 +288,98 @@ void main() {
           ),
           findsNothing,
         );
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  for (final brightness in Brightness.values) {
+    for (final view in [
+      (const Size(1200, 800), 1.0),
+      (const Size(480, 600), 1.0),
+      (const Size(320, 240), 2.0),
+      (const Size(220, 160), 2.0),
+      (const Size(140, 160), 2.0),
+    ]) {
+      testWidgets(
+          'startup signature stays at the safe bottom at $brightness / $view',
+          (tester) async {
+        final (size, textScale) = view;
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final capture = GlobalKey();
+        await tester.pumpWidget(_host(
+          RepaintBoundary(
+            key: capture,
+            child: const StartupSplash(child: SizedBox()),
+          ),
+          brightness: brightness,
+          textScale: textScale,
+        ));
+        await tester.runAsync(() async {
+          final context = tester.element(find.byType(StartupSplash));
+          for (final asset in [
+            BrandLogo.assetFor(AppBrand.rce, brightness),
+            BrandLogo.assetFor(AppBrand.danRuguo, brightness),
+            'app_icon.ico',
+          ]) {
+            await precacheImage(AssetImage(asset), context);
+          }
+        });
+        await tester.pump();
+        final signature =
+            tester.getRect(find.byKey(StartupSplash.playerSignatureKey));
+        final icon = tester.getRect(find.byKey(StartupSplash.playerIconKey));
+        final name = tester.getRect(find.byKey(StartupSplash.playerNameKey));
+        final logo = tester.getRect(find.byWidgetPredicate(
+            (w) => w is BrandLogo && w.brand == AppBrand.rce));
+        expect(signature.center.dx, closeTo(size.width / 2, 1));
+        expect(signature.bottom, closeTo(size.height - 16, 1));
+        final nameWidget =
+            tester.widget<Text>(find.byKey(StartupSplash.playerNameKey));
+        expect(
+            nameWidget.style?.fontSize,
+            Theme.of(tester.element(find.byType(StartupSplash)))
+                .textTheme
+                .bodyMedium
+                ?.fontSize);
+        expect(signature.top, greaterThanOrEqualTo(logo.bottom + 15));
+        if (size.width == 140) {
+          expect(name.top, greaterThanOrEqualTo(icon.bottom + 7));
+          expect(name.center.dx, closeTo(icon.center.dx, 1));
+        } else {
+          expect(name.center.dy, closeTo(icon.center.dy, 1));
+          expect(name.left, greaterThanOrEqualTo(icon.right + 7));
+        }
+        for (final bounds in [signature, icon, name, logo]) {
+          expect(bounds.left, greaterThanOrEqualTo(0));
+          expect(bounds.top, greaterThanOrEqualTo(0));
+          expect(bounds.right, lessThanOrEqualTo(size.width));
+          expect(bounds.bottom, lessThanOrEqualTo(size.height));
+        }
+        expect(tester.takeException(), isNull);
+        const output = String.fromEnvironment('DAN_STARTUP_RENDER');
+        if (output.isNotEmpty) {
+          await tester.runAsync(() async {
+            final image = await (capture.currentContext!.findRenderObject()
+                    as RenderRepaintBoundary)
+                .toImage();
+            try {
+              final bytes =
+                  await image.toByteData(format: raster.ImageByteFormat.png);
+              final file = File(
+                  '$output/startup-${brightness.name}-${size.width.toInt()}-${textScale.toInt()}x.png');
+              await file.parent.create(recursive: true);
+              await file.writeAsBytes(bytes!.buffer.asUint8List());
+            } finally {
+              image.dispose();
+            }
+          });
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+        expect(tester.binding.transientCallbackCount, 0);
         expect(tester.takeException(), isNull);
       });
     }

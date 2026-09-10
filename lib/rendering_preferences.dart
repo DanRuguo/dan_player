@@ -29,6 +29,8 @@ class RenderingPreferences {
             : true,
       );
 
+  /// Inactive includes a visible desktop window without keyboard focus. Only
+  /// hidden/native-hidden/offstage surfaces are eligible for visibility pause.
   /// Paused/detached always stop. Opting out bypasses our visibility gates, not
   /// disposal, reduced motion, or the framework's own offstage frame policy.
   bool allowsVisualUpdates({
@@ -43,7 +45,9 @@ class RenderingPreferences {
     return !pauseWhenHidden ||
         (treeVisible &&
             !nativeHidden &&
-            (lifecycle == null || lifecycle == AppLifecycleState.resumed));
+            (lifecycle == null ||
+                lifecycle == AppLifecycleState.resumed ||
+                lifecycle == AppLifecycleState.inactive));
   }
 
   @override

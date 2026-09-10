@@ -17,6 +17,7 @@ class BrandLogo extends StatelessWidget {
 
   static const rceLightAsset = 'assets/images/RCE_logo_transparent.png';
   static const rceDarkAsset = 'assets/images/RCE_logo_white.png';
+  static const rceAspectRatio = 1104 / 679;
   static const danRuguoLightAsset = 'assets/branding/danruguo_light.png';
   static const danRuguoDarkAsset = 'assets/branding/danruguo_dark.png';
 

@@ -91,6 +91,29 @@ Future<void> _withBarPixels(
 }
 
 void main() {
+  testWidgets(
+      'global playback bar advances while the visible window is inactive',
+      (tester) async {
+    final fixture = _Fixture();
+    addTearDown(fixture.positions.close);
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    await tester.pumpWidget(fixture.app());
+    final state = tester.state(find.byType(RectangleProgressIndicator));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    for (final seconds in [15.0, 30.0, 45.0]) {
+      fixture.positions.add(seconds);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_painter(tester).progress.value, seconds / fixture.length);
+    }
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(_painter(tester).progress.value, 45 / fixture.length);
+    expect(tester.state(find.byType(RectangleProgressIndicator)), same(state));
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
   for (final kind in [ui.PointerDeviceKind.mouse, ui.PointerDeviceKind.touch]) {
     testWidgets(
         'release fades the handle within 120ms with $kind focus retained',

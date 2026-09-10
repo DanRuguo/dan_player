@@ -33,6 +33,53 @@ void main() {
       );
 
   testWidgets(
+      'unfocused visible progress follows samples and resumes while inactive',
+      (tester) async {
+    final positions = StreamController<double>.broadcast(sync: true);
+    final hidden = ValueNotifier(false);
+    addTearDown(positions.close);
+    addTearDown(hidden.dispose);
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    var actual = 12.0;
+    await tester.pumpWidget(host(DetailProgressSlider(
+      positions: positions.stream,
+      readPosition: () => actual,
+      duration: 180,
+      trackIdentity: 'song',
+      hidden: hidden,
+      onSeek: (_) {},
+    )));
+    await tester.pumpAndSettle();
+    final original = tester.state(find.byType(DetailProgressSlider));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    expect(positions.hasListener, isTrue,
+        reason: 'a visible Windows window loses focus without being hidden');
+    for (var i = 0; i < 4; i++) {
+      actual += .2;
+      positions.add(actual);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.widget<Slider>(find.byType(Slider)).value, actual);
+    }
+    hidden.value = true;
+    expect(positions.hasListener, isFalse);
+    actual = 90;
+    positions.add(actual);
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.widget<Slider>(find.byType(Slider)).value, lessThan(13));
+    hidden.value = false;
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(find.byType(Slider)).value, 90);
+    expect(tester.state(find.byType(DetailProgressSlider)), same(original));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(find.byType(Slider)).value, 90);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
       'real samples settle, hidden view releases subscription and resumes at actual time',
       (tester) async {
     final positions = StreamController<double>.broadcast(sync: true);

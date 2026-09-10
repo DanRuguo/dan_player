@@ -41,7 +41,8 @@ void main() {
     expect(
         RenderingPreferences.fromMap(prefs.value.toMap()).lyricSpectrum, false);
     expect(
-        RenderingPreferences.fromMap({'lyricSpectrum': 'false'}).lyricSpectrum,
+        RenderingPreferences.fromMap(const {'lyricSpectrum': 'false'})
+            .lyricSpectrum,
         true);
     await tester.pumpWidget(RenderingPreferencesScope(
         preferences: prefs,
@@ -61,10 +62,11 @@ void main() {
       for (final lifecycle in [null, ...AppLifecycleState.values]) {
         final hardStop = lifecycle == AppLifecycleState.paused ||
             lifecycle == AppLifecycleState.detached;
-        final foreground =
-            lifecycle == null || lifecycle == AppLifecycleState.resumed;
+        final visible = lifecycle == null ||
+            lifecycle == AppLifecycleState.resumed ||
+            lifecycle == AppLifecycleState.inactive;
         expect(prefs.allowsVisualUpdates(lifecycle: lifecycle),
-            !hardStop && (!pause || foreground));
+            !hardStop && (!pause || visible));
         expect(
             prefs.allowsVisualUpdates(
                 lifecycle: lifecycle, treeVisible: false, nativeHidden: true),

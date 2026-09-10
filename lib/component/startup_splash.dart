@@ -7,21 +7,25 @@ class StartupSplash extends StatefulWidget {
   const StartupSplash({
     super.key,
     required this.child,
-    this.minimumVisibleDuration = const Duration(milliseconds: 1700),
+    this.minimumVisibleDuration = const Duration(milliseconds: 1100),
     this.fadeDuration = AppMotion.long,
     this.logoTransitionDuration = AppMotion.emphasized,
   });
 
-  static const totalDuration = Duration(seconds: 2);
-  static const logoPhaseDuration = Duration(seconds: 1);
+  static const totalDuration = Duration(milliseconds: 1400);
+  static const rcePhaseDuration = Duration(milliseconds: 800);
+  static const danRuguoPhaseDuration = Duration(milliseconds: 600);
   static const overlayKey = ValueKey('startup-brand-overlay');
   static const surfaceKey = ValueKey('startup-brand-surface');
   static const rceOpacityKey = ValueKey('startup-rce-opacity');
   static const danRuguoOpacityKey = ValueKey('startup-danruguo-opacity');
+  static const playerSignatureKey = ValueKey('startup-player-signature');
+  static const playerIconKey = ValueKey('startup-player-icon');
+  static const playerNameKey = ValueKey('startup-player-name');
 
   final Widget child;
 
-  /// Time before the final fade begins; the fade is part of the two-second
+  /// Time before the final fade begins; the fade is part of the 1.4-second
   /// sequence, rather than an extra delay after both brand presentations.
   final Duration minimumVisibleDuration;
   final Duration fadeDuration;
@@ -76,7 +80,7 @@ class _StartupSplashState extends State<StartupSplash>
   void _onTimelineTick() {
     // Flutter's interpolation simulation reports `completed` only on the
     // first frame strictly after its duration. Retire the overlay when the
-    // value reaches its endpoint so the 2000 ms frame is already interactive.
+    // value reaches its endpoint so the 1400 ms frame is already interactive.
     if (_timeline.value >= 1 && !_removed && mounted) {
       _timeline.stop(canceled: false);
       setState(() => _removed = true);
@@ -146,16 +150,18 @@ class _StartupSplashOverlay extends StatelessWidget {
     final fadeFraction = total == 0
         ? 0.0
         : (fadeDuration.inMicroseconds / total).clamp(0.0, 1.0);
+    final handoff = StartupSplash.rcePhaseDuration.inMicroseconds /
+        StartupSplash.totalDuration.inMicroseconds;
 
     return AnimatedBuilder(
       animation: timeline,
       builder: (context, child) {
         final progress = timeline.value;
-        final secondBrand = progress >= 0.5;
+        final secondBrand = progress >= handoff;
         final blend = reducedMotion || transitionFraction == 0
             ? (secondBrand ? 1.0 : 0.0)
             : Curves.easeInOut.transform(
-                ((progress - (0.5 - transitionFraction / 2)) /
+                ((progress - (handoff - transitionFraction / 2)) /
                         transitionFraction)
                     .clamp(0.0, 1.0),
               );
@@ -175,41 +181,51 @@ class _StartupSplashOverlay extends StatelessWidget {
               builder: (context, constraints) {
                 final width = (constraints.maxWidth * 0.46).clamp(0.0, 500.0);
                 final height = (constraints.maxHeight * 0.52).clamp(0.0, 310.0);
-                return Align(
-                  alignment: const Alignment(0, -0.10),
-                  child: SizedBox(
-                    width: width,
-                    height: height,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        ExcludeSemantics(
-                          excluding: secondBrand,
-                          child: Opacity(
-                            key: StartupSplash.rceOpacityKey,
-                            opacity: 1 - blend,
-                            child: BrandLogo(
-                              brand: AppBrand.rce,
-                              width: width,
-                              height: height,
-                            ),
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ExcludeSemantics(
+                      excluding: secondBrand,
+                      child: Opacity(
+                        key: StartupSplash.rceOpacityKey,
+                        opacity: 1 - blend,
+                        child: SafeArea(
+                          minimum: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              Expanded(
+                                child: Center(
+                                  child: BrandLogo(
+                                    brand: AppBrand.rce,
+                                    width: width,
+                                    height: (width / BrandLogo.rceAspectRatio)
+                                        .clamp(0.0, height),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              const _PlayerSignature(),
+                            ],
                           ),
                         ),
-                        ExcludeSemantics(
-                          excluding: !secondBrand,
-                          child: Opacity(
-                            key: StartupSplash.danRuguoOpacityKey,
-                            opacity: blend,
-                            child: BrandLogo(
-                              brand: AppBrand.danRuguo,
-                              width: width,
-                              height: height,
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                    ExcludeSemantics(
+                      excluding: !secondBrand,
+                      child: Opacity(
+                        key: StartupSplash.danRuguoOpacityKey,
+                        opacity: blend,
+                        child: Align(
+                          alignment: const Alignment(0, -0.10),
+                          child: BrandLogo(
+                            brand: AppBrand.danRuguo,
+                            width: width,
+                            height: height,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
@@ -218,4 +234,45 @@ class _StartupSplashOverlay extends StatelessWidget {
       },
     );
   }
+}
+
+class _PlayerSignature extends StatelessWidget {
+  const _PlayerSignature();
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+        key: StartupSplash.playerSignatureKey,
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          Image.asset(
+            'app_icon.ico',
+            key: StartupSplash.playerIconKey,
+            width: 24,
+            height: 24,
+            excludeFromSemantics: true,
+            filterQuality: FilterQuality.high,
+            errorBuilder: (context, error, stackTrace) => Icon(
+              Icons.music_note,
+              size: 24,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          // Keep the name intact even in a window narrower than the text. The
+          // Wrap moves it beneath the icon before this last-resort scaling.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              'Dan Player',
+              key: StartupSplash.playerNameKey,
+              maxLines: 1,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+            ),
+          ),
+        ],
+      );
 }

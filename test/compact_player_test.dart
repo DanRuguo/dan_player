@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dan_player/component/compact_player.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -70,6 +71,43 @@ class _Line extends UnsyncLyricLine {
 }
 
 void main() {
+  testWidgets('visible inactive mini player keeps progress samples current',
+      (tester) async {
+    final positions = StreamController<double>.broadcast(sync: true);
+    addTearDown(positions.close);
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    await _show(
+        tester,
+        StreamBuilder<double>(
+          stream: positions.stream,
+          initialData: 10,
+          builder: (_, sample) => CompactPlayerView(
+            trackIdentity: 'song',
+            position: sample.data!,
+            duration: 120,
+            isPlaying: true,
+            onSeek: (_) {},
+          ),
+        ),
+        reduced: false);
+    await tester.pumpAndSettle();
+    final state = tester.state(find.byType(CompactPlayerView));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    for (final seconds in [15.0, 30.0, 45.0]) {
+      positions.add(seconds);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.widget<Slider>(_key('compact-progress-slider')).value,
+          seconds);
+    }
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(tester.widget<Slider>(_key('compact-progress-slider')).value, 45);
+    expect(tester.state(find.byType(CompactPlayerView)), same(state));
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
   for (final width in [440.0, 520.0]) {
     // The smaller values are transient/legacy viewport sizes. Even there the
     // fixed controls stay accessible while the new content can be scrolled.

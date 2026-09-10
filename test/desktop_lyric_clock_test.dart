@@ -4,8 +4,38 @@ import 'dart:convert';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
 import 'package:desktop_lyric/message.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/widgets.dart';
 
 void main() {
+  testWidgets('desktop lyric clock keeps notifying while window is unfocused',
+      (tester) async {
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    final clock = PlaybackClock(
+        nowMilliseconds: () =>
+            tester.binding.clock.now().millisecondsSinceEpoch);
+    addTearDown(clock.dispose);
+    clock.sync(const PlaybackTimelineMessage(1, 10000, true));
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: ListenableBuilder(
+          listenable: clock,
+          builder: (_, __) => Text('${clock.positionMilliseconds}')),
+    ));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump(const Duration(seconds: 1));
+    expect(clock.positionMilliseconds, 11000);
+    expect(find.text('11000'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('12000'), findsOneWidget);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('12100'), findsOneWidget);
+    clock.setPlaying(false);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
   for (final rate in [.5, .75, 1.0, 1.25, 1.5, 1.75, 2.0]) {
     test('$rate x extrapolates media time, not lyric timestamps', () {
       var now = 1000;

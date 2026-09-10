@@ -508,23 +508,6 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
               ),
             ),
             IconButton(
-              key: const ValueKey('title-fullscreen-control'),
-              tooltip: _isFullScreen ? ui("退出全屏") : ui("全屏"),
-              onPressed: _isProcessing || WindowModeController.instance.isBusy
-                  ? null
-                  : _toggleFullScreen,
-              style: controlStyle,
-              icon: AppEntrance(
-                identity: 'title-fullscreen',
-                order: 5,
-                child: Icon(
-                  _isFullScreen
-                      ? Symbols.close_fullscreen
-                      : Symbols.open_in_full,
-                ),
-              ),
-            ),
-            IconButton(
               key: const ValueKey('title-maximize-control'),
               tooltip: sizeLocked
                   ? ui("窗口大小已锁定")
@@ -540,9 +523,26 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
               style: controlStyle,
               icon: AppEntrance(
                 identity: 'title-maximize',
-                order: 6,
+                order: 5,
                 child: Icon(
                   _isMaximized ? Symbols.fullscreen_exit : Symbols.fullscreen,
+                ),
+              ),
+            ),
+            IconButton(
+              key: const ValueKey('title-fullscreen-control'),
+              tooltip: _isFullScreen ? ui("退出全屏") : ui("全屏"),
+              onPressed: _isProcessing || WindowModeController.instance.isBusy
+                  ? null
+                  : _toggleFullScreen,
+              style: controlStyle,
+              icon: AppEntrance(
+                identity: 'title-fullscreen',
+                order: 6,
+                child: Icon(
+                  _isFullScreen
+                      ? Symbols.close_fullscreen
+                      : Symbols.open_in_full,
                 ),
               ),
             ),

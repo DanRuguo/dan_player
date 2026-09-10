@@ -82,6 +82,19 @@ Future<void> _show(WidgetTester tester, Finder finder) async {
 Finder _card(String name) => find.byKey(ValueKey('statistics-$name-card'));
 Finder _chart(String name) => find.byKey(ValueKey('statistics-chart-$name'));
 
+void _expectAlignedRows(WidgetTester tester, List<String> keys) {
+  final cards = [
+    for (final key in keys) tester.getRect(find.byKey(ValueKey(key)))
+  ];
+  for (var index = 1; index < cards.length; index++) {
+    if ((cards[index].top - cards[index - 1].top).abs() < .01) {
+      expect(cards[index].bottom, closeTo(cards[index - 1].bottom, .01));
+    } else {
+      expect(cards[index].top, greaterThan(cards[index - 1].bottom));
+    }
+  }
+}
+
 void main() {
   late List<Audio> previousLibrary;
   late int previousRevision;
@@ -125,8 +138,16 @@ void main() {
           ));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
+          _expectAlignedRows(tester, [
+            for (final name in ['duration', 'count', 'peak'])
+              'statistics-behavior-$name'
+          ]);
           await _show(tester,
               find.byKey(const ValueKey('statistics-local-folder-metric')));
+          _expectAlignedRows(tester, [
+            for (final name in ['total', 'storage', 'readable', 'folder'])
+              'statistics-local-$name-metric'
+          ]);
           expect(find.text('本地文件夹'), findsOneWidget);
           final folderMetric =
               find.byKey(const ValueKey('statistics-local-folder-metric'));

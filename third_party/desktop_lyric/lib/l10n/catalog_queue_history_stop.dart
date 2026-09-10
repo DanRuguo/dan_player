@@ -1,4 +1,5 @@
 const Map<String, List<String>> catalogQueueHistoryStop = {
+  '评分和标签': ['Ratings and tags', '評価とタグ', '평점과 태그'],
   '主题预览': ['Theme preview', 'テーマのプレビュー', '테마 미리보기'],
   '快速选色': ['Quick colors', 'クイックカラー', '빠른 색상 선택'],
   '原主题颜色': ['Original theme color', '元のテーマ色', '기존 테마 색상'],

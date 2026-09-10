@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'package:dan_player/component/app_content_transition.dart';
+import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/page/personal_library_page.dart';
 import 'package:flutter/gestures.dart';
 import 'package:dan_player/component/audio_tile.dart';
@@ -149,6 +152,54 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final reduced in [false, true]) {
+    testWidgets(
+        'personal tabs preserve their selector and honor motion reduced=$reduced',
+        (tester) async {
+      tester.view.physicalSize = const Size(900, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(MaterialApp(
+          builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
+              child: child!),
+          home: Scaffold(
+              body: PersonalLibraryPanel(
+                  personalStore: _Personal(),
+                  bookmarkStore: _Bookmarks(),
+                  audios: [CategoryTestAudio('Canon')]))));
+      await tester.pumpAndSettle();
+      final tabs = find.byKey(const ValueKey('personal-library-tabs'));
+      final bounds = tester.getRect(tabs);
+      final before = find.byType(AppSegmentedControl<bool>).evaluate().single;
+      final transition = find.byKey(const ValueKey('personal-library-content'));
+      expect(tester.widget<AppContentTransition>(transition).identity, false);
+      await tester.tap(find.text(ui('全库书签')));
+      await tester.pump();
+      expect(tester.getRect(tabs), bounds);
+      expect(find.byType(AppSegmentedControl<bool>).evaluate().single,
+          same(before));
+      final fade = find
+          .descendant(of: transition, matching: find.byType(FadeTransition))
+          .first;
+      expect(
+          tester.widget<FadeTransition>(fade).opacity.value, reduced ? 1 : 0);
+      await tester.pump(AppMotion.standard ~/ 2);
+      if (!reduced) {
+        expect(tester.widget<FadeTransition>(fade).opacity.value,
+            allOf(greaterThan(0), lessThan(1)));
+      }
+      await tester.pumpAndSettle();
+      expect(tester.widget<FadeTransition>(fade).opacity.value, 1);
+      await tester.tap(find.text(ui('评分和标签')));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(tabs), bounds);
+      expect(find.byType(PersonalLibraryDialog), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   for (final viewport in [const Size(380, 560), const Size(900, 420)]) {
     testWidgets('date range remains usable at $viewport', (tester) async {
       tester.view.physicalSize = viewport;
@@ -254,13 +305,23 @@ void main() {
             find.byKey(const ValueKey('personal-rating-menu')), findsOneWidget);
         await capture(
             tester, captureKey, 'category-personal-${language.name}-$large');
+        final tabs = find.byKey(const ValueKey('personal-library-tabs'));
+        final tabBounds = tester.getRect(tabs);
+        final selectorElement =
+            find.byType(AppSegmentedControl<bool>).evaluate().single;
         if (find.text(ui('全库书签')).evaluate().isEmpty) {
-          await tester.tap(find.text(ui('歌曲')));
+          await tester.tap(find.text(ui('评分和标签')));
           await tester.pumpAndSettle();
         }
         await tester.tap(find.text(ui('全库书签')));
         await tester.pumpAndSettle();
         expect(find.byType(BookmarkLibraryDialog), findsOneWidget);
+        expect(tester.getRect(tabs), tabBounds,
+            reason:
+                'Both tabs retain the same bounds at every locale and scale');
+        expect(find.byType(AppSegmentedControl<bool>).evaluate().single,
+            same(selectorElement),
+            reason: 'Selection animation must keep its element');
         await tester.scrollUntilVisible(find.text('Good Time · Chorus'), 140,
             scrollable: find
                 .descendant(

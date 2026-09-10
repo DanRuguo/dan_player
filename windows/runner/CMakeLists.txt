@@ -212,3 +212,16 @@ set_target_properties(window_resize_policy_test PROPERTIES
   CXX_STANDARD_REQUIRED YES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/window_tests"
 )
+
+add_executable(window_chrome_policy_test EXCLUDE_FROM_ALL
+  "tests/window_chrome_policy_test.cpp"
+)
+target_compile_definitions(window_chrome_policy_test PRIVATE "NOMINMAX")
+target_link_libraries(window_chrome_policy_test PRIVATE "user32.lib" "dwmapi.lib")
+if(MSVC)
+  target_compile_options(window_chrome_policy_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(window_chrome_policy_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/window_tests"
+)

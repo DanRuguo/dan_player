@@ -138,7 +138,7 @@ void _expectGeometry(
   final fullScreen = tester.getRect(find.byTooltip('全屏'));
   final maximize = tester.getRect(find.byTooltip('最大化'));
   final close = tester.getRect(find.byTooltip('退出'));
-  final windowButtons = [minimize, mini, fullScreen, maximize, close];
+  final windowButtons = [minimize, mini, maximize, fullScreen, close];
   for (final button in windowButtons) {
     expect(button.size, minimize.size);
     expect(button.width, greaterThanOrEqualTo(40));
