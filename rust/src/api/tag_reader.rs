@@ -492,10 +492,7 @@ fn write_metadata_with_expectation(
             .ok_or_else(|| metadata_message("TAG_FORMAT_UNSUPPORTED", "无法创建可写的主标签"))?;
         apply_tag_values(tag, title, artist, album, picture_path)?;
     }
-    let expected_front_picture = tagged_file
-        .primary_tag()
-        .and_then(|tag| tag.get_picture_type(PictureType::CoverFront))
-        .cloned();
+    let expected_front_picture = tagged_file.primary_tag().and_then(edited_cover).cloned();
 
     let mut temporary = TransactionPath::copy_of(source_path, "edit")?;
     let write_result = catch_unwind(AssertUnwindSafe(|| {
@@ -865,12 +862,17 @@ impl PreservedMetadata {
                     pictures: tag
                         .pictures()
                         .iter()
-                        .filter(|picture| {
+                        .enumerate()
+                        .filter(|(index, picture)| {
                             tag.tag_type() != edited_tag_type
                                 || !replaces_front
-                                || picture.pic_type() != PictureType::CoverFront
+                                || if edited_tag_type == TagType::Mp4Ilst {
+                                    *index != 0
+                                } else {
+                                    picture.pic_type() != PictureType::CoverFront
+                                }
                         })
-                        .cloned()
+                        .map(|(_, picture)| picture.clone())
                         .collect(),
                 })
                 .collect(),
@@ -891,11 +893,17 @@ impl PreservedMetadata {
             let actual_pictures: Vec<&Picture> = actual
                 .pictures()
                 .iter()
-                .filter(|picture| {
+                .enumerate()
+                .filter(|(index, picture)| {
                     expected.tag_type != edited_tag_type
                         || !replaces_front
-                        || picture.pic_type() != PictureType::CoverFront
+                        || if edited_tag_type == TagType::Mp4Ilst {
+                            *index != 0
+                        } else {
+                            picture.pic_type() != PictureType::CoverFront
+                        }
                 })
+                .map(|(_, picture)| picture)
                 .collect();
             multiset_contains(&actual_items, &expected.items)
                 && actual_items.len() == expected.items.len()
@@ -961,7 +969,7 @@ fn verify_metadata_edit(
         ));
     }
     if replaces_front {
-        let written = tag.get_picture_type(PictureType::CoverFront);
+        let written = edited_cover(tag);
         let picture_matches = written
             .zip(expected_front)
             .is_some_and(|(actual, expected)| {
@@ -1129,6 +1137,14 @@ fn replace_with_rollback(
     }
 }
 
+fn edited_cover(tag: &Tag) -> Option<&Picture> {
+    if tag.tag_type() == TagType::Mp4Ilst {
+        tag.pictures().first()
+    } else {
+        tag.get_picture_type(PictureType::CoverFront)
+    }
+}
+
 fn apply_tag_values(
     tag: &mut Tag,
     title: &str,
@@ -1145,9 +1161,16 @@ fn apply_tag_values(
             .map_err(|error| metadata_error("TAG_COVER_READ", "无法打开所选封面", error))?;
         let mut picture = Picture::from_reader(&mut pic_file)
             .map_err(|error| metadata_error("TAG_COVER_INVALID", "无法解析所选封面", error))?;
-        picture.set_pic_type(PictureType::CoverFront);
-        tag.remove_picture_type(PictureType::CoverFront);
-        tag.push_picture(picture);
+        if tag.tag_type() == TagType::Mp4Ilst {
+            // MP4 covr has no front/back types. Replace the displayed first
+            // image and keep all additional pictures in their original order.
+            picture.set_pic_type(PictureType::Other);
+            tag.set_picture(0, picture);
+        } else {
+            picture.set_pic_type(PictureType::CoverFront);
+            tag.remove_picture_type(PictureType::CoverFront);
+            tag.push_picture(picture);
+        }
     }
 
     Ok(())
@@ -2059,6 +2082,59 @@ mod tests {
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
         fs::remove_dir_all(directory).unwrap();
     }
+    #[test]
+    fn mp4_cover_replacement_keeps_additional_images() {
+        let root = test_directory("mp4-cover");
+        let cover = root.join("cover.png");
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([31u8, 91, 171, 255])).save(&cover).unwrap();
+        let mut tag = Tag::new(TagType::Mp4Ilst);
+        apply_tag_values(&mut tag, "Title", "Artist", "Album", Some(cover.to_str().unwrap())).unwrap();
+        let first = edited_cover(&tag).unwrap().clone();
+        let mut extra = first.clone();
+        extra.set_description(Some("additional image".into()));
+        tag.push_picture(extra.clone());
+        for _ in 0..2 {
+            apply_tag_values(&mut tag, "Title", "Artist", "Album", Some(cover.to_str().unwrap())).unwrap();
+            assert_eq!(tag.pictures(), &[first.clone(), extra.clone()]);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "workspace-only supplied cover samples"]
+    fn supplied_cover_copies_probe() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tool/validation/sep11-cover-copies")
+            .canonicalize()
+            .unwrap();
+        let cover = root.join("replacement.png");
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([31u8, 91, 171, 255]))
+            .save(&cover)
+            .unwrap();
+        for name in ["1.mp3", "2.mp3", "3.mp3", "4.mp3", "5.mp3", "6.mp3"] {
+            let source = root.join(name);
+            let result = write_metadata_safely(
+                &source,
+                &source,
+                "Test title",
+                "Test artist",
+                "Test album",
+                Some(cover.to_str().unwrap()),
+            );
+            println!("{name}: {result:?}");
+            assert!(result.is_ok());
+            let rendered = _get_picture_by_lofty(&source.to_string_lossy().into_owned(), 32, 32)
+                .expect("saved cover must render");
+            assert_eq!(
+                *image::load_from_memory(&rendered)
+                    .unwrap()
+                    .to_rgba8()
+                    .get_pixel(0, 0),
+                image::Rgba([31u8, 91, 171, 255])
+            );
+        }
+    }
+
     // Explicitly opt-in: only a marker-bearing, workspace-local copy folder is
     // accepted. No production music path is ever passed to a writer here.
     #[test]

@@ -148,21 +148,21 @@ impl RawTag {
         if !replaces_front || id != b"APIC" {
             return Ok(false);
         }
-        let version = if self.version == 3 {
-            lofty::id3::v2::Id3v2Version::V3
-        } else {
-            lofty::id3::v2::Id3v2Version::V4
-        };
-        let mut payload = &self.body[frame.start + 10..frame.end];
-        let picture = lofty::id3::v2::AttachedPictureFrame::parse(
-            &mut payload,
-            lofty::id3::v2::FrameFlags::default(),
-            version,
-        )
-        .map_err(|_| unsupported())?;
-        Ok(picture.picture.pic_type() == PictureType::CoverFront)
+        // Identifying a front cover needs only the bounded APIC header. Do not
+        // decode the old image or description: either may be damaged, and the
+        // user explicitly asked to replace this frame. Other frames stay raw.
+        let payload = &self.body[frame.start + 10..frame.end];
+        if payload.first().is_none_or(|encoding| *encoding > 3) {
+            return Err(unsupported());
+        }
+        let mime_end = payload[1..]
+            .iter()
+            .position(|byte| *byte == 0)
+            .map(|position| position + 1)
+            .ok_or_else(unsupported)?;
+        let kind = *payload.get(mime_end + 1).ok_or_else(unsupported)?;
+        Ok(kind == 3)
     }
-
     fn kept_frames(&self, replaces_front: bool) -> anyhow::Result<Vec<&[u8]>> {
         let mut kept = Vec::new();
         for frame in &self.frames {
@@ -298,12 +298,48 @@ pub(super) fn try_write_expected(
     let kept = raw.kept_frames(replaces_front)?;
     let mut replacement = Tag::new(TagType::Id3v2);
     apply_tag_values(&mut replacement, title, artist, album, picture_path)?;
+    let front = replacement
+        .get_picture_type(PictureType::CoverFront)
+        .cloned();
+    replacement.remove_picture_type(PictureType::CoverFront);
     let mut encoded = Vec::new();
     replacement.dump_to(
         &mut encoded,
         WriteOptions::default().use_id3v23(raw.version == 3),
     )?;
-    let encoded = RawTag::read(&mut encoded.as_slice())?;
+    let mut encoded = RawTag::read(&mut encoded.as_slice())?;
+    if let Some(picture) = front {
+        // The generic v2.3 writer emits an empty UTF-16 description without a
+        // BOM. Use a Latin-1 empty description, independent of image bytes.
+        let mut payload = b"\0".to_vec();
+        payload.extend_from_slice(
+            picture
+                .mime_type()
+                .ok_or_else(unsupported)?
+                .as_str()
+                .as_bytes(),
+        );
+        payload.extend_from_slice(&[0, 3, 0]);
+        payload.extend_from_slice(picture.data());
+        let length = payload.len() as u32;
+        let mut frame = b"APIC".to_vec();
+        frame.extend_from_slice(&if raw.version == 3 {
+            length.to_be_bytes()
+        } else {
+            [
+                ((length >> 21) & 127) as u8,
+                ((length >> 14) & 127) as u8,
+                ((length >> 7) & 127) as u8,
+                (length & 127) as u8,
+            ]
+        });
+        frame.extend_from_slice(&[0, 0]);
+        frame.extend(payload);
+        let end = encoded.frames.last().map_or(0, |frame| frame.end);
+        encoded.body.truncate(end);
+        encoded.body.extend(frame);
+        encoded = RawTag::parse(raw.version, encoded.body)?;
+    }
     let kept_size = kept
         .iter()
         .try_fold(0usize, |size, frame| size.checked_add(frame.len()))
@@ -515,6 +551,19 @@ mod tests {
                 tagged,
                 "cover reads never rewrite tags"
             );
+            let selected = root.join("selected.png");
+            fs::write(&selected, png.get_ref()).unwrap();
+            assert!(try_write(
+                &source,
+                &source,
+                "New",
+                "Artist",
+                "Album",
+                Some(selected.to_str().unwrap())
+            )
+            .unwrap());
+            let saved = read_picture(&source, 96, 96).expect("written APIC must decode");
+            assert_eq!(image::load_from_memory(&saved).unwrap().to_rgba8(), image);
             fs::remove_dir_all(root).unwrap();
         }
     }
