@@ -1,26 +1,55 @@
+import 'package:desktop_lyric/frame_pacing.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-/// Visibility policy only. This does not create pages, control playback, or
-/// override accessibility animation preferences and the platform scheduler.
+enum SpectrumDensity {
+  low(36),
+  medium(72),
+  high(112);
+
+  const SpectrumDensity(this.maximumBars);
+  final int maximumBars;
+}
+
+/// Visual preferences; audio clocks and accessibility remain independent.
 @immutable
 class RenderingPreferences {
   const RenderingPreferences(
-      {this.pauseWhenHidden = true, this.lyricSpectrum = true});
+      {this.pauseWhenHidden = true,
+      this.lyricSpectrum = true,
+      this.spectrumDensity = SpectrumDensity.high,
+      this.frameRate = const FrameRatePreference()});
 
   final bool pauseWhenHidden;
   final bool lyricSpectrum;
+  final SpectrumDensity spectrumDensity;
+  final FrameRatePreference frameRate;
 
-  RenderingPreferences copyWith({bool? pauseWhenHidden, bool? lyricSpectrum}) =>
+  RenderingPreferences copyWith(
+          {bool? pauseWhenHidden,
+          bool? lyricSpectrum,
+          SpectrumDensity? spectrumDensity,
+          FrameRatePreference? frameRate}) =>
       RenderingPreferences(
         pauseWhenHidden: pauseWhenHidden ?? this.pauseWhenHidden,
         lyricSpectrum: lyricSpectrum ?? this.lyricSpectrum,
+        spectrumDensity: spectrumDensity ?? this.spectrumDensity,
+        frameRate: frameRate ?? this.frameRate,
       );
 
-  Map<String, Object> toMap() =>
-      {'pauseWhenHidden': pauseWhenHidden, 'lyricSpectrum': lyricSpectrum};
+  Map<String, Object> toMap() => {
+        'pauseWhenHidden': pauseWhenHidden,
+        'lyricSpectrum': lyricSpectrum,
+        'spectrumDensity': spectrumDensity.name,
+        'frameRate': frameRate.toMap()
+      };
 
   factory RenderingPreferences.fromMap(Object? value) => RenderingPreferences(
+        spectrumDensity: SpectrumDensity.values.firstWhere(
+            (v) => value is Map && value['spectrumDensity'] == v.name,
+            orElse: () => SpectrumDensity.high),
+        frameRate: FrameRatePreference.fromMap(
+            value is Map ? value['frameRate'] : null),
         lyricSpectrum: value is Map && value['lyricSpectrum'] is bool
             ? value['lyricSpectrum'] as bool
             : true,
@@ -54,10 +83,13 @@ class RenderingPreferences {
   bool operator ==(Object other) =>
       other is RenderingPreferences &&
       pauseWhenHidden == other.pauseWhenHidden &&
-      lyricSpectrum == other.lyricSpectrum;
+      lyricSpectrum == other.lyricSpectrum &&
+      spectrumDensity == other.spectrumDensity &&
+      frameRate == other.frameRate;
 
   @override
-  int get hashCode => Object.hash(pauseWhenHidden, lyricSpectrum);
+  int get hashCode =>
+      Object.hash(pauseWhenHidden, lyricSpectrum, spectrumDensity, frameRate);
 }
 
 /// A listenable lets stream/timer owners apply a change synchronously even

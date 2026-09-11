@@ -639,3 +639,11 @@ class UnlockMessage extends Message {
 //         length: Duration(milliseconds: map["length"]),
 //       );
 // }
+
+/// Main player -> lyric helper; also forwarded to its appearance engine.
+class FrameRateMessage extends Message {
+  const FrameRateMessage(this.preference);
+  final Map<String, Object> preference;
+  @override
+  Map<String, dynamic> _toJson() => preference;
+}

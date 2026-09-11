@@ -1,10 +1,10 @@
+import 'spectrum_analysis.dart';
 // ignore_for_file: constant_identifier_names
 
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'package:dan_player/play_service/playback_rate.dart';
 import 'package:dan_player/play_service/playback_diagnostics.dart';
 import 'package:dan_player/src/bass/bass_diagnostics.dart';
@@ -510,8 +510,10 @@ class BassPlayer {
   final _spectrumStreamController = StreamController<List<double>>.broadcast();
   final _frequencySpectrumStreamController =
       StreamController<List<double>>.broadcast();
-  final List<double> _spectrumLevels = List.filled(7, 0.0);
-  final List<double> _frequencySpectrumLevels = List.filled(48, 0.0);
+  final _spectrumAnalysis = SpectrumAnalysis();
+  late final List<double> _spectrumLevels = _spectrumAnalysis.tones;
+  late final List<double> _frequencySpectrumLevels =
+      _spectrumAnalysis.frequencies;
   final ffi.Pointer<ffi.Float> _fftBuffer =
       ffi.malloc.allocate<ffi.Float>(_fftValueCount * ffi.sizeOf<ffi.Float>());
   final ffi.Pointer<ffi.Float> _frequencyBuffer =
@@ -830,44 +832,9 @@ class BassPlayer {
     if (!sampleRate.isFinite || sampleRate <= 0) sampleRate = 48000.0;
 
     final fft = _fftBuffer.asTypedList(_fftValueCount);
-    _updateFrequencyBands(fft, sampleRate);
-    final chroma = List.filled(12, 0.0);
-    final counts = List.filled(12, 0);
-    for (var midi = 33; midi <= 119; midi++) {
-      final frequency = 440.0 * math.pow(2.0, (midi - 69) / 12.0);
-      final center = (frequency * _fftSize / sampleRate).round();
-      if (center < 1 || center >= _fftValueCount) continue;
-
-      var magnitude = 0.0;
-      final start = math.max(1, center - 2);
-      final end = math.min(_fftValueCount - 1, center + 2);
-      for (var bin = start; bin <= end; bin++) {
-        magnitude = math.max(magnitude, fft[bin].toDouble());
-      }
-      final pitchClass = midi % 12;
-      chroma[pitchClass] += math.sqrt(math.max(0.0, magnitude));
-      counts[pitchClass]++;
-    }
-    for (var i = 0; i < chroma.length; i++) {
-      if (counts[i] > 0) chroma[i] /= counts[i];
-    }
-
-    final tones = <double>[
-      chroma[0] + chroma[1] * 0.5,
-      chroma[2] + (chroma[1] + chroma[3]) * 0.5,
-      chroma[4] + chroma[3] * 0.5,
-      chroma[5] + chroma[6] * 0.5,
-      chroma[7] + (chroma[6] + chroma[8]) * 0.5,
-      chroma[9] + (chroma[8] + chroma[10]) * 0.5,
-      chroma[11] + chroma[10] * 0.5,
-    ];
-
-    for (var i = 0; i < _spectrumLevels.length; i++) {
-      var target = (tones[i] * 3.2).clamp(0.0, 1.0).toDouble();
-      if (target < 0.025) target = 0.0;
-      final smoothing = target > _spectrumLevels[i] ? 0.58 : 0.14;
-      _spectrumLevels[i] += (target - _spectrumLevels[i]) * smoothing;
-    }
+    _spectrumAnalysis.update(fft, sampleRate,
+        frequencyDemand: _frequencySpectrumStreamController.hasListener,
+        toneDemand: _spectrumStreamController.hasListener);
     return List.unmodifiable(_spectrumLevels);
   }
 
@@ -879,36 +846,6 @@ class BassPlayer {
       _frequencySpectrumLevels[i] *= 0.82;
     }
     return List.unmodifiable(_spectrumLevels);
-  }
-
-  void _updateFrequencyBands(Float32List fft, double sampleRate) {
-    const minimumFrequency = 40.0;
-    const maximumFrequency = 16000.0;
-    const ratio = maximumFrequency / minimumFrequency;
-    for (var band = 0; band < _frequencySpectrumLevels.length; band++) {
-      final low = minimumFrequency *
-          math.pow(ratio, band / _frequencySpectrumLevels.length);
-      final high = minimumFrequency *
-          math.pow(ratio, (band + 1) / _frequencySpectrumLevels.length);
-      final start = (low * _fftSize / sampleRate)
-          .floor()
-          .clamp(1, _fftValueCount - 1)
-          .toInt();
-      final end = (high * _fftSize / sampleRate)
-          .ceil()
-          .clamp(start + 1, _fftValueCount)
-          .toInt();
-      var peak = 0.0;
-      for (var bin = start; bin < end; bin++) {
-        peak = math.max(peak, fft[bin].toDouble());
-      }
-      var target =
-          math.pow(peak * 11.0, 0.55).toDouble().clamp(0.0, 1.0).toDouble();
-      if (target < 0.018) target = 0.0;
-      final current = _frequencySpectrumLevels[band];
-      final smoothing = target > current ? 0.34 : 0.15;
-      _frequencySpectrumLevels[band] += (target - current) * smoothing;
-    }
   }
 
   List<double> _resetSpectrum({bool emit = true}) {

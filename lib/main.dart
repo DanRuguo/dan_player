@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/frame_pacing.dart';
 import 'package:dan_player/data/snapshot3_upgrade.dart';
 import 'dart:io';
 
@@ -116,7 +117,7 @@ Future<void> desktopLyricAppearanceMain(List<String> arguments) =>
     desktop_lyric.desktopLyricAppearanceMain(arguments);
 
 Future<void> _startMainPlayer() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  FramePacedWidgetsBinding();
   // Artwork is already decoded to physical display buckets. Keep Flutter's
   // decoded cache bounded as a second line of defence for large libraries.
   PaintingBinding.instance.imageCache
@@ -164,6 +165,15 @@ Future<void> _startMainPlayer() async {
 
 Future<void> _startPlayer(Directory dataDirectory) async {
   final supportPath = dataDirectory.path;
+  void syncFrameRate() {
+    final prefs = AppSettings.instance.rendering.value;
+    frameRatePreference.value = prefs.frameRate;
+    pauseWindowRendering.value =
+        prefs.pauseWhenHidden && DesktopIntegration.instance.isHidden.value;
+  }
+
+  AppSettings.instance.rendering.addListener(syncFrameRate);
+  DesktopIntegration.instance.isHidden.addListener(syncFrameRate);
   if (File("$supportPath\\settings.json").existsSync()) {
     await AppSettings.readFromJson();
     await loadPrefFont();
@@ -176,6 +186,7 @@ Future<void> _startPlayer(Directory dataDirectory) async {
   await SongCommentAssociationStore.instance.initialize();
   final welcome = !File("$supportPath\\index.json").existsSync();
 
+  syncFrameRate();
   await prepareWindow();
   runApp(Entry(welcome: welcome));
   await showPreparedWindow();

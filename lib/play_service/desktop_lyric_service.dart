@@ -39,6 +39,7 @@ class DesktopLyricService extends ChangeNotifier {
         _saveAppearance = saveAppearance ??
             (() => AppSettings.instance
                 .saveSettings(throwOnError: true, captureWindowSize: false)) {
+    AppSettings.instance.rendering.addListener(_syncFrameRate);
     AppSettings.instance.experience.addListener(_syncDisplayPreference);
     AppSettings.instance.desktopLyricAppearance.addListener(_syncAppearance);
     uiLanguage.addListener(_syncLanguage);
@@ -171,6 +172,7 @@ class DesktopLyricService extends ChangeNotifier {
       notifyListeners();
 
       try {
+        _syncFrameRate();
         await _syncCurrentState();
       } catch (error, trace) {
         LOGGER.e('[desktop lyric initial sync] $error', stackTrace: trace);
@@ -321,6 +323,11 @@ class DesktopLyricService extends ChangeNotifier {
       _sendNowPlayingMessage(nowPlaying, syncLyric: false);
     }
     await playService.lyricService.syncDesktopLyric();
+  }
+
+  void _syncFrameRate() {
+    sendMessage(msg.FrameRateMessage(
+        AppSettings.instance.rendering.value.frameRate.toMap()));
   }
 
   void _syncDisplayPreference() {
@@ -656,6 +663,7 @@ class DesktopLyricService extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    AppSettings.instance.rendering.removeListener(_syncFrameRate);
     AppSettings.instance.experience.removeListener(_syncDisplayPreference);
     AppSettings.instance.desktopLyricAppearance.removeListener(_syncAppearance);
     uiLanguage.removeListener(_syncLanguage);

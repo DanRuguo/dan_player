@@ -87,6 +87,7 @@ bool FlutterWindow::OnCreate() {
         }
         result->Success(flutter::EncodableValue(insets));
       });
+  frame_display_ = std::make_unique<FrameDisplayChannel>(GetHandle(), flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -106,6 +107,7 @@ void FlutterWindow::OnDestroy() {
   if (palette_manager) palette_manager->Shutdown();
   if (geometry_channel_) geometry_channel_->SetMethodCallHandler(nullptr);
   geometry_channel_.reset();
+  frame_display_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -117,6 +119,7 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (frame_display_) frame_display_->Handle(message);
   if (palette_manager_ && message == kPaletteDispatchMessage) {
     auto manager = palette_manager_;
     manager->DrainOwnerTasks();

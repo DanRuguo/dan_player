@@ -80,6 +80,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  frame_display_ = std::make_unique<FrameDisplayChannel>(GetHandle(), flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
   resize_bridge_ = std::make_unique<window_resize::ChildResizeBridge>(
       GetHandle(), flutter_controller_->view()->GetNativeWindow());
@@ -109,6 +110,7 @@ void FlutterWindow::OnDestroy() {
   desktop_controller_.reset();
   backdrop_controller_.reset();
   resize_bridge_.reset();
+  frame_display_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -120,6 +122,7 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (frame_display_) frame_display_->Handle(message);
   if (windows_shell_) {
     if (const auto result = windows_shell_->HandleMessage(message, wparam, lparam)) {
       return *result;

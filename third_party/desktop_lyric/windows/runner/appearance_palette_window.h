@@ -1,6 +1,8 @@
 #ifndef RUNNER_APPEARANCE_PALETTE_WINDOW_H_
 #define RUNNER_APPEARANCE_PALETTE_WINDOW_H_
 
+#include "frame_display_channel.h"
+
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
@@ -51,6 +53,7 @@ class AppearancePaletteWindow : public Win32Window {
   Handler handler_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::unique_ptr<flutter::FlutterViewController> controller_;
+  std::unique_ptr<FrameDisplayChannel> frame_display_;
   std::unique_ptr<flutter::MethodChannel<Value>> channel_;
 };
 

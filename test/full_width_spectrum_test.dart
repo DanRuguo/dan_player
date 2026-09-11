@@ -84,9 +84,12 @@ List<RRect> _drawnBars(TestRecordingCanvas canvas) => [
     ];
 
 Paint _firstBarPaint(TestRecordingCanvas canvas) => canvas.invocations
-    .firstWhere((record) => record.invocation.memberName == #drawRRect)
+    .firstWhere((record) =>
+        record.invocation.memberName == #drawRRect ||
+        record.invocation.memberName == #drawVertices)
     .invocation
-    .positionalArguments[1] as Paint;
+    .positionalArguments
+    .last as Paint;
 
 void main() {
   testWidgets('initial FFT snapshot is real and frames repaint without rebuild',
@@ -304,7 +307,15 @@ void main() {
       final canvas = TestRecordingCanvas();
       painter.paint(canvas, size);
       final bars = _drawnBars(canvas);
-      expect(bars.length, inInclusiveRange(1, 112));
+      if (bars.isEmpty) {
+        expect(
+            canvas.invocations
+                .where((v) => v.invocation.memberName == #drawVertices)
+                .length,
+            1);
+      } else {
+        expect(bars.length, inInclusiveRange(1, 112));
+      }
       for (final bar in bars) {
         expect(bar.left, greaterThanOrEqualTo(0));
         expect(bar.top, greaterThanOrEqualTo(0));
@@ -337,14 +348,12 @@ void main() {
     final after = TestRecordingCanvas();
     painter.paint(after, const Size(440, 32));
     expect(_firstBarPaint(after).shader, same(oldShader));
-    final low = _drawnBars(before);
-    final high = _drawnBars(after);
-    expect(high.length, low.length);
-    for (var index = 0; index < low.length; index++) {
-      expect(high[index].left, low[index].left);
-      expect(high[index].width, low[index].width);
-      expect(high[index].height, greaterThan(low[index].height));
-    }
+    expect(painter.sampleAt(.5), 1);
+    expect(
+        after.invocations
+            .where((v) => v.invocation.memberName == #drawVertices)
+            .length,
+        1);
     final resized = TestRecordingCanvas();
     painter.paint(resized, const Size(200, 24));
     expect(_firstBarPaint(resized).shader, isNot(same(oldShader)));

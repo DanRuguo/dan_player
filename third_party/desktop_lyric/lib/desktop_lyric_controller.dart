@@ -1,3 +1,4 @@
+import 'frame_pacing.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -239,7 +240,9 @@ class DesktopLyricController {
       if (type is! String || rawContent is! Map) return;
       final content = Map<String, dynamic>.from(rawContent);
 
-      if (type == getMessageTypeName<UiLanguageMessage>()) {
+      if (type == getMessageTypeName<FrameRateMessage>()) {
+        frameRatePreference.value = FrameRatePreference.fromMap(content);
+      } else if (type == getMessageTypeName<UiLanguageMessage>()) {
         uiLanguage.value = UiLanguage.parse(content['language']);
       } else if (type == getMessageTypeName<PlayerStateChangedMessage>()) {
         final playerState = PlayerStateChangedMessage.fromJson(content);

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'dart:ui' as graphics;
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -19,6 +21,8 @@ class FullWidthSpectrum extends StatelessWidget {
     final playback = PlayService.instance.playbackService;
     return FullWidthSpectrumView(
       height: height,
+      maximumBars:
+          RenderingPreferencesScope.of(context).spectrumDensity.maximumBars,
       samples: playback.frequencySpectrumStream,
       readLevels: () => playback.frequencySpectrumLevels,
       hidden: DesktopIntegration.instance.isHidden,
@@ -46,9 +50,11 @@ class FullWidthSpectrumView extends StatefulWidget {
     required this.samples,
     required this.readLevels,
     this.height = 72,
+    this.maximumBars = 112,
     this.hidden,
   }) : assert(height >= 0);
 
+  final int maximumBars;
   final Stream<List<double>> samples;
   final List<double> Function() readLevels;
   final double height;
@@ -198,6 +204,8 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
             child: CustomPaint(
               painter: FrequencySpectrumPainter(
                 levels: _levels,
+                maximumBars: widget.maximumBars,
+                pixelRatio: MediaQuery.devicePixelRatioOf(context),
                 startColor: scheme.primary,
                 endColor: scheme.tertiary,
               ),
@@ -258,14 +266,19 @@ class FrequencySpectrumPainter extends CustomPainter {
     required this.levels,
     required this.startColor,
     required this.endColor,
+    this.pixelRatio = 1,
+    this.maximumBars = 112,
   }) : super(repaint: levels);
 
   final ValueListenable<List<double>> levels;
   final Color startColor;
   final Color endColor;
+  final double pixelRatio;
+  final int maximumBars;
   final _paint = Paint();
   Size? _geometrySize;
   List<_SpectrumBar> _bars = const [];
+  _SpectrumMesh? _mesh;
 
   double sampleAt(double position) {
     final frame = levels.value;
@@ -281,7 +294,8 @@ class FrequencySpectrumPainter extends CustomPainter {
 
   void _layoutBars(Size size) {
     if (size == _geometrySize) return;
-    final count = (size.width / 5).floor().clamp(1, 112);
+    final count =
+        (size.width / 5 * maximumBars / 112).floor().clamp(1, maximumBars);
     final gap = math.min(2.0, size.width / count * .4);
     final barWidth = (size.width - gap * (count - 1)) / count;
     _bars = List.generate(count, (index) {
@@ -299,6 +313,7 @@ class FrequencySpectrumPainter extends CustomPainter {
       end: Alignment.topRight,
       colors: [startColor, endColor],
     ).createShader(Offset.zero & size);
+    _mesh = _SpectrumMesh(_bars, .5 / pixelRatio);
     _geometrySize = size;
   }
 
@@ -309,19 +324,24 @@ class FrequencySpectrumPainter extends CustomPainter {
     final baselineHeight = math.min(2.0, size.height);
     canvas.save();
     canvas.clipRect(Offset.zero & size);
-    for (final bar in _bars) {
-      final height = math.max(
-        baselineHeight,
-        size.height * sampleAt(bar.position) * bar.edgeFade,
-      );
-      _paint.color = Colors.white.withValues(alpha: .35 + bar.edgeFade * .65);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(bar.left, size.height - height, bar.width, height),
-          Radius.circular(bar.width / 2),
-        ),
-        _paint,
-      );
+    if (size.height >= 2 && _bars.first.width >= 2) {
+      _paint.color = Colors.white;
+      _mesh!.paint(canvas, size, _bars, sampleAt, _paint);
+    } else {
+      for (final bar in _bars) {
+        final height = math.max(
+          baselineHeight,
+          size.height * sampleAt(bar.position) * bar.edgeFade,
+        );
+        _paint.color = Colors.white.withValues(alpha: .35 + bar.edgeFade * .65);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(bar.left, size.height - height, bar.width, height),
+            Radius.circular(bar.width / 2),
+          ),
+          _paint,
+        );
+      }
     }
     canvas.restore();
   }
@@ -330,6 +350,8 @@ class FrequencySpectrumPainter extends CustomPainter {
   bool shouldRepaint(FrequencySpectrumPainter oldDelegate) =>
       !identical(oldDelegate.levels, levels) ||
       oldDelegate.startColor != startColor ||
+      oldDelegate.maximumBars != maximumBars ||
+      oldDelegate.pixelRatio != pixelRatio ||
       oldDelegate.endColor != endColor;
 }
 
@@ -345,4 +367,82 @@ class _SpectrumBar {
   final double width;
   final double position;
   final double edgeFade;
+}
+
+/// One indexed draw instead of one gradient draw call per rounded bar. Each
+/// contour has an explicit one-pixel coverage fringe, so batching retains soft
+/// edges, the diagonal theme gradient and the per-bar edge attenuation.
+class _SpectrumMesh {
+  final double fringe;
+  static const _steps = 8;
+  static const _ring = 4 * (_steps + 1);
+  static const _verticesPerBar = _ring * 2;
+  final Float32List positions;
+  final Int32List colors;
+  final Uint16List indices;
+  static final _directions = [
+    for (var corner = 0; corner < 4; corner++)
+      for (var step = 0; step <= _steps; step++)
+        (
+          x: math.cos((-math.pi / 2) +
+              corner * math.pi / 2 +
+              step * math.pi / (2 * _steps)),
+          y: math.sin((-math.pi / 2) +
+              corner * math.pi / 2 +
+              step * math.pi / (2 * _steps))
+        ),
+  ];
+  _SpectrumMesh(List<_SpectrumBar> bars, this.fringe)
+      : positions = Float32List(bars.length * _verticesPerBar * 2),
+        colors = Int32List(bars.length * _verticesPerBar),
+        indices = Uint16List(bars.length * ((_ring - 2) * 3 + _ring * 6)) {
+    var index = 0;
+    for (var bar = 0; bar < bars.length; bar++) {
+      final base = bar * _verticesPerBar;
+      final alpha = ((.35 + bars[bar].edgeFade * .65) * 255).round();
+      for (var p = 0; p < _ring; p++) {
+        colors[base + p] = (alpha << 24) | 0xffffff;
+        colors[base + _ring + p] = 0x00ffffff;
+      }
+      for (var p = 1; p < _ring - 1; p++) {
+        indices[index++] = base;
+        indices[index++] = base + p;
+        indices[index++] = base + p + 1;
+      }
+      for (var p = 0; p < _ring; p++) {
+        final next = (p + 1) % _ring;
+        for (final v in [p, next, p + _ring, next, next + _ring, p + _ring]) {
+          indices[index++] = base + v;
+        }
+      }
+    }
+  }
+  void paint(Canvas canvas, Size size, List<_SpectrumBar> bars,
+      double Function(double) sample, Paint paint) {
+    for (var bar = 0; bar < bars.length; bar++) {
+      final geometry = bars[bar];
+      final height = math.max(
+          2.0, size.height * sample(geometry.position) * geometry.edgeFade);
+      final radius = math.min(geometry.width, height) / 2;
+      for (var p = 0; p < _ring; p++) {
+        final corner = p ~/ (_steps + 1);
+        final cx =
+            geometry.left + (corner < 2 ? geometry.width - radius : radius);
+        final cy = size.height -
+            (corner == 0 || corner == 3 ? height - radius : radius);
+        final direction = _directions[p];
+        for (var outer = 0; outer < 2; outer++) {
+          final r = radius + (outer == 0 ? -fringe : fringe);
+          final offset = (bar * _verticesPerBar + outer * _ring + p) * 2;
+          positions[offset] = cx + direction.x * r;
+          positions[offset + 1] = cy + direction.y * r;
+        }
+      }
+    }
+    final vertices = graphics.Vertices.raw(
+        graphics.VertexMode.triangles, positions,
+        colors: colors, indices: indices);
+    canvas.drawVertices(vertices, BlendMode.modulate, paint);
+    vertices.dispose();
+  }
 }

@@ -107,6 +107,7 @@ bool AppearancePaletteWindow::OnCreate() {
       controller_->engine()->messenger(), "dan_player/desktop_lyric_palette_child",
       &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler(handler_);
+  frame_display_ = std::make_unique<FrameDisplayChannel>(GetHandle(), controller_->engine()->messenger());
   SetChildContent(controller_->view()->GetNativeWindow(), false);
   if (!*alive_ || !controller_ || !IsWindow(GetHandle()) || !IsWindow(owner_)) return false;
   RequestFreshFrame(session_);
@@ -188,12 +189,14 @@ void AppearancePaletteWindow::OnDestroy() {
   *alive_ = false;
   if (channel_) channel_->SetMethodCallHandler(nullptr);
   channel_.reset();
+  frame_display_.reset();
   controller_.reset();
   Win32Window::OnDestroy();
 }
 
 LRESULT AppearancePaletteWindow::MessageHandler(
     HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+  if (frame_display_) frame_display_->Handle(message);
   if (message == WM_CLOSE) {
     // Ask Dart to flush a last slider edit first. The visible close button and
     // Escape use the same path. Destruction itself is always owner-queued.

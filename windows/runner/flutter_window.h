@@ -1,6 +1,8 @@
 #ifndef RUNNER_FLUTTER_WINDOW_H_
 #define RUNNER_FLUTTER_WINDOW_H_
 
+#include "../../third_party/desktop_lyric/windows/runner/frame_display_channel.h"
+
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 
@@ -34,6 +36,7 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+  std::unique_ptr<FrameDisplayChannel> frame_display_;
   std::unique_ptr<window_resize::ChildResizeBridge> resize_bridge_;
 
   // Declared after the engine so the MethodChannel is destroyed before its

@@ -1,3 +1,4 @@
+import 'frame_pacing.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:desktop_lyric/appearance_palette_app.dart';
@@ -23,7 +24,7 @@ Future<void> main(List<String> args) => runDesktopLyric(args);
 
 /// Used by the standalone development runner and Dan Player's lyric mode.
 Future<void> runDesktopLyric(List<String> args) async {
-  WidgetsFlutterBinding.ensureInitialized();
+  FramePacedWidgetsBinding();
   await windowManager.ensureInitialized();
   DesktopLyricController.initWithArgs(args);
   final controller = DesktopLyricController.instance;
@@ -61,7 +62,7 @@ Future<void> runDesktopLyric(List<String> args) async {
 
 @pragma('vm:entry-point')
 Future<void> desktopLyricAppearanceMain(List<String> arguments) async {
-  WidgetsFlutterBinding.ensureInitialized();
+  FramePacedWidgetsBinding();
   final client = DesktopLyricPaletteClient();
   await client.initialize(
       initialSnapshot:

@@ -1,3 +1,4 @@
+import 'frame_pacing.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -65,6 +66,7 @@ class DesktopLyricPaletteHost {
   }
 
   List<Listenable> get _sources => [
+        frameRatePreference,
         controller.appearance,
         controller.theme,
         controller.isDarkMode,
@@ -85,6 +87,7 @@ class DesktopLyricPaletteHost {
       'surfaceContainer': theme.surfaceContainer,
       'onSurface': theme.onSurface,
       'language': uiLanguage.value.code,
+      'frameRate': frameRatePreference.value.toMap(),
       'fontFamily': DesktopLyricTypography.fontFamily,
       'fontFamilyFallback': DesktopLyricTypography.fontFamilyFallback,
       'saveError': controller.appearanceSaveError.value == null
@@ -387,6 +390,7 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
       saveError.value = raw['saveError'] as String?;
       layoutError.value = raw['layoutError'] as String?;
       uiLanguage.value = UiLanguage.parse(raw['language']);
+      frameRatePreference.value = FrameRatePreference.fromMap(raw['frameRate']);
       fontFamily =
           raw['fontFamily'] as String? ?? DesktopLyricTypography.fontFamily;
       fontFamilyFallback =
