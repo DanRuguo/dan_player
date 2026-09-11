@@ -7,6 +7,40 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('progress does not repaint its static content or page',
+      (tester) async {
+    final positions = StreamController<double>.broadcast(sync: true);
+    addTearDown(positions.close);
+    var pagePaints = 0;
+    var contentPaints = 0;
+    await tester.pumpWidget(MaterialApp(
+        home: CustomPaint(
+      painter: _PaintCounter(() => pagePaints++),
+      child: Center(
+          child: RectangleProgressIndicator(
+        size: const Size(300, 64),
+        positionStream: positions.stream,
+        lengthProvider: () => 180,
+        onSeek: (_) {},
+        child: CustomPaint(
+            painter: _PaintCounter(() => contentPaints++),
+            child: const SizedBox(width: 300, height: 64)),
+      )),
+    )));
+    await tester.pumpAndSettle();
+    final before = (pagePaints, contentPaints);
+    for (var i = 1; i <= 30; i++) {
+      positions.add(i / 30);
+      await tester.pump(const Duration(milliseconds: 33));
+    }
+    expect((pagePaints, contentPaints), before);
+    expect(
+        tester
+            .widget<CustomPaint>(find.byWidgetPredicate((w) =>
+                w is CustomPaint && w.painter is RectangleProgressPainter))
+            .painter,
+        isA<RectangleProgressPainter>());
+  });
   for (final ratio in [1.0, 1.25, 1.5, 2.0]) {
     testWidgets('centered handle stays crisp at half-pixel origin ${ratio}x',
         (tester) async {
@@ -252,4 +286,13 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     expect(cancelled, isTrue);
   });
+}
+
+class _PaintCounter extends CustomPainter {
+  _PaintCounter(this.count);
+  final VoidCallback count;
+  @override
+  void paint(Canvas canvas, Size size) => count();
+  @override
+  bool shouldRepaint(_PaintCounter oldDelegate) => false;
 }

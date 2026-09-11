@@ -317,7 +317,8 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
                   ),
               },
               child: Builder(
-                  builder: (paintContext) => CustomPaint(
+                  builder: (paintContext) => RepaintBoundary(
+                          child: CustomPaint(
                         size: widget.size,
                         painter: RectangleProgressPainter(
                             progress: progress,
@@ -335,7 +336,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
                             highlightBoundary: _highlightBoundary),
                         child: ValueListenableBuilder<double>(
                           valueListenable: progress,
-                          child: widget.child,
+                          child: RepaintBoundary(child: widget.child),
                           builder: (context, fraction, child) => Semantics(
                             key: const ValueKey('now-playing-seek-semantics'),
                             container: true,
@@ -361,7 +362,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
                             child: child,
                           ),
                         ),
-                      )),
+                      ))),
             )),
       ),
     );

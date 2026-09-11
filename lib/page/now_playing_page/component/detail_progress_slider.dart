@@ -73,6 +73,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _smoothing;
   late final ValueNotifier<double> _display;
+  final _elapsed = ValueNotifier<int>(0);
   StreamSubscription<double>? _subscription;
   AppLifecycleState? _lifecycle;
   bool _treeVisible = false;
@@ -107,6 +108,8 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   void initState() {
     super.initState();
     _display = ValueNotifier(_safe(widget.readPosition()));
+    _elapsed.value = _display.value.floor();
+    _display.addListener(() => _elapsed.value = _display.value.floor());
     _target = _display.value;
     _smoothing =
         AnimationController(vsync: this, duration: AppMotion.followSample)
@@ -245,6 +248,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     widget.hidden?.removeListener(_syncActivity);
     _smoothing.dispose();
     _display.dispose();
+    _elapsed.dispose();
     super.dispose();
   }
 
@@ -328,9 +332,10 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                 overflowSpacing: 2,
                 overflowAlignment: OverflowBarAlignment.end,
                 children: [
-                  ValueListenableBuilder<double>(
-                    valueListenable: _display,
-                    builder: (context, position, _) => Text(_time(position),
+                  ValueListenableBuilder<int>(
+                    valueListenable: _elapsed,
+                    builder: (context, position, _) => Text(
+                        _time(position.toDouble()),
                         key: const ValueKey('detail-progress-elapsed'),
                         style: _dragging
                             ? TextStyle(color: scheme.primary)

@@ -32,6 +32,30 @@ void main() {
                 body: Center(child: SizedBox(width: 320, child: child)))),
       );
 
+  testWidgets('smooth progress only rebuilds elapsed text when seconds change',
+      (tester) async {
+    final positions = StreamController<double>.broadcast(sync: true);
+    addTearDown(positions.close);
+    await tester.pumpWidget(host(DetailProgressSlider(
+        positions: positions.stream,
+        readPosition: () => 12,
+        duration: 180,
+        trackIdentity: 'song',
+        onSeek: (_) {})));
+    await tester.pumpAndSettle();
+    final label = find.byKey(const ValueKey('detail-progress-elapsed'));
+    final initial = tester.widget<Text>(label);
+    positions.add(12.5);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.widget<Text>(label), same(initial));
+    expect(tester.widget<Slider>(find.byType(Slider)).value, 12.5);
+    positions.add(13.1);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.widget<Text>(label).data, '0:13');
+  });
+
   testWidgets(
       'unfocused visible progress follows samples and resumes while inactive',
       (tester) async {
