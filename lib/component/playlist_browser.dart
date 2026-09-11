@@ -703,6 +703,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     return DragTarget<PlaylistDragData>(
       key: ValueKey('playlist-drop-slot-${parent?.id ?? 'root'}-$slot'),
       onWillAcceptWithDetails: (details) =>
+          _sortMode(parent) == PlaylistSortMode.custom &&
           !_editingBlocked &&
           !_selecting &&
           _tree.moveError(
@@ -880,15 +881,18 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }
 
   Widget _gridIdentityDragSource(
-      _PlaylistRowData row, Playlist? parent, Widget child) {
+      _PlaylistRowData row, Playlist? parent, Widget child,
+      {Rect Function()? mouseBounds}) {
     if (_selecting ||
         _editingBlocked ||
-        _sortMode(parent) != PlaylistSortMode.custom ||
+        (row.playlist == null &&
+            _sortMode(parent) != PlaylistSortMode.custom) ||
         _view == PlaylistViewMode.list) {
       return child;
     }
     return _freeGridDragSource(
       key: ValueKey('playlist-card-drag-${row.id}'),
+      mouseBounds: row.playlist == null ? null : mouseBounds,
       row: row,
       parent: parent,
       child: child,
@@ -896,6 +900,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }
 
   Widget _freeGridDragSource({
+    Rect Function()? mouseBounds,
     required Key key,
     required _PlaylistRowData row,
     required Playlist? parent,
@@ -903,7 +908,12 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }) =>
       Builder(
         builder: (context) => AdaptiveGridDragSource<PlaylistDragData>(
-          mouseHoldDelay: const Duration(milliseconds: 250),
+          mouseHoldDelay: mouseBounds == null
+              ? Duration.zero
+              : const Duration(milliseconds: 250),
+          mouseBounds: mouseBounds,
+          onMouseClick:
+              mouseBounds == null ? null : () => _navigate(row.playlist!),
           dragKey: key,
           data: PlaylistDragData(
             entryId: row.id,
@@ -980,7 +990,11 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
           final audio = row.audio;
           final queueIndex = queueIndices[row.id] ?? -1;
           Widget wrapGridIdentity(Widget child) {
-            final draggable = _gridIdentityDragSource(row, parent, child);
+            final draggable =
+                _gridIdentityDragSource(row, parent, child, mouseBounds: () {
+              final box = context.findRenderObject()! as RenderBox;
+              return box.localToGlobal(Offset.zero) & box.size;
+            });
             return folder == null
                 ? draggable
                 : _folderTarget(
@@ -1675,7 +1689,11 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                               : CompactMusicGridDelegate.of(
                                                   context),
                                       itemCount: rows.length +
-                                          (_draggingId == null ? 0 : 1),
+                                          (_draggingId == null ||
+                                                  _sortMode(current) !=
+                                                      PlaylistSortMode.custom
+                                              ? 0
+                                              : 1),
                                       findChildIndexCallback: (key) =>
                                           gridChildIndices[key],
                                       itemBuilder: (context, index) => index ==
@@ -1708,8 +1726,11 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                                   start: 0,
                                                   width: 36,
                                                   child: IgnorePointer(
-                                                    ignoring:
-                                                        _draggingId == null,
+                                                    ignoring: _draggingId ==
+                                                            null ||
+                                                        _sortMode(current) !=
+                                                            PlaylistSortMode
+                                                                .custom,
                                                     child: _dropGap(
                                                         current, rows, index,
                                                         grid: true),

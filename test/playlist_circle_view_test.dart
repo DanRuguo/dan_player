@@ -307,7 +307,7 @@ void main() {
       final source = _key('playlist-card-drag-${child.id}');
       final gesture = await tester.startGesture(tester.getCenter(source),
           kind: PointerDeviceKind.mouse);
-      await gesture.moveBy(const Offset(6, 2));
+      await gesture.moveBy(const Offset(60, 2));
       await tester.pump(const Duration(milliseconds: 100));
       await gesture.up();
       await _settle(tester);
@@ -316,6 +316,93 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     }
   });
+
+  for (final view in [PlaylistViewMode.circular, PlaylistViewMode.grid]) {
+    testWidgets('song drag stays immediate in ${view.name}', (tester) async {
+      _size(tester, 1800);
+      final fixture = _Fixture();
+      final song =
+          fixture.tree.addAudio(fixture.parent, CategoryTestAudio('Song'));
+      await tester.pumpWidget(_app(fixture.browser(view: view)));
+      await _settle(tester);
+      final mouse = await tester.startGesture(
+          tester.getCenter(_key('playlist-card-drag-${song.id}')),
+          kind: PointerDeviceKind.mouse);
+      await mouse.moveBy(const Offset(12, 0));
+      await tester.pump();
+      expect(_key('playlist-drop-slot-${fixture.parent.id}-1'), findsOneWidget);
+      await mouse.cancel();
+      await _settle(tester);
+      expect(fixture.played, isEmpty);
+      expect(fixture.saves, 0);
+    });
+    testWidgets('sorted ${view.name} allows folder drop but no reorder',
+        (tester) async {
+      _size(tester, 1800);
+      final fixture = _Fixture();
+      final source = fixture.tree.createPlaylist('A', parent: fixture.parent);
+      final target = fixture.tree.createPlaylist('B', parent: fixture.parent);
+      await tester.pumpWidget(_app(fixture.browser(view: view)));
+      await _settle(tester);
+      tester
+          .widget<PlaylistToolbar>(find.byType(PlaylistToolbar))
+          .onSortChanged(PlaylistSortMode.nameAscending);
+      await _settle(tester);
+      final saves = fixture.saves;
+      final mouse = await tester.startGesture(
+          tester.getCenter(_key('playlist-card-drag-${source.id}')),
+          kind: PointerDeviceKind.mouse);
+      await mouse
+          .moveTo(tester.getCenter(_key('playlist-drop-folder-${target.id}')));
+      await tester.pump();
+      expect(_key('playlist-drop-slot-${fixture.parent.id}-2'), findsNothing);
+      await mouse.up();
+      await _settle(tester);
+      expect(source.parent, same(target));
+      expect(fixture.saves, saves + 1);
+      expect(fixture.navigated, isEmpty);
+    });
+    testWidgets('continuous exit drag reorders and merges ${view.name}',
+        (tester) async {
+      _size(tester, 1800);
+      final fixture = _Fixture();
+      final children = [
+        for (var i = 0; i < 3; i++)
+          fixture.tree.createPlaylist('Folder $i', parent: fixture.parent)
+      ];
+      await tester.pumpWidget(_app(fixture.browser(view: view)));
+      await _settle(tester);
+      final source = _key('playlist-card-drag-${children.first.id}');
+      final mouse = await tester.startGesture(tester.getCenter(source),
+          kind: PointerDeviceKind.mouse);
+      await mouse.moveBy(const Offset(40, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+      final bounds = tester.getRect(_key('playlist-menu-${children.first.id}'));
+      await mouse
+          .moveTo(Offset(tester.getCenter(source).dx, bounds.bottom + 30));
+      await tester.pump();
+      await mouse.moveTo(
+          tester.getCenter(_key('playlist-drop-slot-${fixture.parent.id}-3')));
+      await tester.pump();
+      await mouse.up();
+      await _settle(tester);
+      expect(fixture.parent.entries.map((e) => e.childPlaylist),
+          [children[1], children[2], children[0]]);
+      expect(fixture.navigated, isEmpty);
+      final merge = await tester.startGesture(tester.getCenter(source),
+          kind: PointerDeviceKind.mouse);
+      await merge.moveBy(const Offset(-40, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+      await merge.moveTo(
+          tester.getCenter(_key('playlist-drop-folder-${children[1].id}')));
+      await tester.pump();
+      await merge.up();
+      await _settle(tester);
+      expect(children[0].parent, same(children[1]));
+      expect(fixture.saves, 2);
+      expect(fixture.navigated, isEmpty);
+    });
+  }
 
   testWidgets(
       'circle cover or title reorder still uses exact ids after language switch',

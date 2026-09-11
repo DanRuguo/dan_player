@@ -27,9 +27,12 @@ class AdaptiveGridDragSource<T extends Object> extends StatelessWidget {
     this.onDragCompleted,
     this.rootOverlay = true,
     this.mouseHoldDelay = Duration.zero,
-  });
+    this.mouseBounds,
+    this.onMouseClick,
+  })  : assert(mouseHoldDelay == Duration.zero || mouseBounds != null),
+        assert(onMouseClick == null || mouseBounds != null);
 
-  /// Applied to the immediate mouse [Draggable] to preserve stable finders and
+  /// Applied to the mouse [Draggable] to preserve stable finders and
   /// state while a virtualized grid rebuilds around the active drag.
   final Key dragKey;
   final T data;
@@ -44,8 +47,11 @@ class AdaptiveGridDragSource<T extends Object> extends StatelessWidget {
   final VoidCallback? onDragCompleted;
   final bool rootOverlay;
 
-  /// Optional deliberate press for cards that also open on click.
+  /// Cards may drag on boundary exit or a still press; other sources drag
+  /// immediately. Click and drag use the same full-card bounds.
   final Duration mouseHoldDelay;
+  final Rect Function()? mouseBounds;
+  final VoidCallback? onMouseClick;
 
   @override
   Widget build(BuildContext context) {
@@ -84,10 +90,35 @@ class AdaptiveGridDragSource<T extends Object> extends StatelessWidget {
       onDragEnd: ended,
       onDragCompleted: completed,
       onDraggableCanceled: canceled,
-      child: child,
+      child: onMouseClick == null
+          ? child
+          : RawGestureDetector(
+              gestures: {
+                TapGestureRecognizer:
+                    GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+                  () => TapGestureRecognizer(
+                    supportedDevices: const {
+                      PointerDeviceKind.mouse,
+                      PointerDeviceKind.trackpad
+                    },
+                    allowedButtonsFilter: (buttons) =>
+                        buttons == kPrimaryButton,
+                    preAcceptSlopTolerance: double.infinity,
+                    postAcceptSlopTolerance: double.infinity,
+                  ),
+                  (recognizer) => recognizer.onTapUp = (details) {
+                    if (mouseBounds!().contains(details.globalPosition)) {
+                      onMouseClick!();
+                    }
+                  },
+                ),
+              },
+              child: child,
+            ),
     );
     return _MouseDraggable<T>(
       holdDelay: mouseHoldDelay,
+      bounds: mouseBounds,
       key: dragKey,
       data: data,
       feedback: feedback,
@@ -108,6 +139,7 @@ class AdaptiveGridDragSource<T extends Object> extends StatelessWidget {
 class _MouseDraggable<T extends Object> extends Draggable<T> {
   const _MouseDraggable({
     required this.holdDelay,
+    this.bounds,
     super.key,
     required super.data,
     required super.child,
@@ -124,6 +156,7 @@ class _MouseDraggable<T extends Object> extends Draggable<T> {
   });
 
   final Duration holdDelay;
+  final Rect Function()? bounds;
 
   @override
   MultiDragGestureRecognizer createRecognizer(
@@ -136,13 +169,13 @@ class _MouseDraggable<T extends Object> extends Draggable<T> {
             },
             allowedButtonsFilter: (buttons) => buttons == kPrimaryButton,
           )
-        : _HeldMouseDragRecognizer(holdDelay);
+        : _HeldMouseDragRecognizer(holdDelay, bounds!);
     return recognizer..onStart = onStart;
   }
 }
 
 class _HeldMouseDragRecognizer extends MultiDragGestureRecognizer {
-  _HeldMouseDragRecognizer(this.delay)
+  _HeldMouseDragRecognizer(this.delay, this.bounds)
       : super(
             debugOwner: null,
             supportedDevices: const {
@@ -151,32 +184,43 @@ class _HeldMouseDragRecognizer extends MultiDragGestureRecognizer {
             },
             allowedButtonsFilter: (buttons) => buttons == kPrimaryButton);
   final Duration delay;
+  final Rect Function() bounds;
   @override
   MultiDragPointerState createNewPointerState(PointerDownEvent event) =>
-      _HeldMouseDragState(event.position, event.kind, gestureSettings, delay);
+      _HeldMouseDragState(
+          event.position, event.kind, gestureSettings, delay, bounds());
   @override
   String get debugDescription => 'held mouse drag';
 }
 
+/// Remain a click inside the original card; exiting it always starts a drag.
+/// A still press may also lift the card. Movement only cancels that timer,
+/// never the exit-to-drag gesture, so a continuous drag cannot get stranded.
 class _HeldMouseDragState extends MultiDragPointerState {
   _HeldMouseDragState(super.initialPosition, super.kind, super.gestureSettings,
-      Duration delay) {
-    _timer = Timer(delay, () {
-      _timer = null;
-      final starter = _starter;
-      _starter = null;
-      if (starter != null) {
-        starter(initialPosition);
-      } else {
-        resolve(GestureDisposition.accepted);
-      }
-    });
+      Duration delay, this.bounds) {
+    _timer = Timer(delay, _activate);
   }
+  final Rect bounds;
   Timer? _timer;
   GestureMultiDragStartCallback? _starter;
+  bool _ready = false;
+  void _activate() {
+    _timer?.cancel();
+    _timer = null;
+    _ready = true;
+    final starter = _starter;
+    _starter = null;
+    if (starter != null) {
+      starter(initialPosition);
+    } else {
+      resolve(GestureDisposition.accepted);
+    }
+  }
+
   @override
   void accepted(GestureMultiDragStartCallback starter) {
-    if (_timer == null) {
+    if (_ready) {
       starter(initialPosition);
     } else {
       _starter = starter;
@@ -185,9 +229,10 @@ class _HeldMouseDragState extends MultiDragPointerState {
 
   @override
   void checkForResolutionAfterMove() {
-    // Match click tolerance, rather than the one-pixel mouse drag threshold.
-    if (_timer != null && pendingDelta!.distance > kTouchSlop) {
-      resolve(GestureDisposition.rejected);
+    final delta = pendingDelta!;
+    if (!bounds.contains(initialPosition + delta)) {
+      _activate();
+    } else if (delta.distance > kTouchSlop) {
       _timer?.cancel();
       _timer = null;
     }
