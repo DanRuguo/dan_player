@@ -28,10 +28,10 @@ const Map<String, List<String>> catalogRendering = {
     "画面が変化するときはディスプレイに合わせ、静止中は連続描画しません。",
     "화면이 변할 때 디스플레이에 맞추며 정지 상태에서는 계속 그리지 않습니다."
   ],
-  "交互时跟随屏幕，交互结束后动画最高 60 FPS；静止时不持续绘制。": [
-    "Follows the display during interaction, then limits animations to 60 FPS. No continuous rendering when idle.",
-    "操作中はディスプレイに合わせ、操作後のアニメーションは最大 60 FPS。静止中は連続描画しません。",
-    "조작 중에는 디스플레이에 맞추고 이후 애니메이션은 최대 60 FPS로 제한합니다. 정지 상태에서는 계속 그리지 않습니다."
+  "交互时跟随屏幕，交互结束后动画最高 48 FPS；静止时不持续绘制。": [
+    "Follows the display during interaction, then limits animations to 48 FPS. No continuous rendering when idle.",
+    "操作中はディスプレイに合わせ、操作後のアニメーションは最大 48 FPS。静止中は連続描画しません。",
+    "조작 중에는 디스플레이에 맞추고 이후 애니메이션은 최대 48 FPS로 제한합니다. 정지 상태에서는 계속 그리지 않습니다."
   ],
   "动画按所选目标刷新；跨屏时自动受所在屏幕限制。实际帧率也取决于系统负载。": [
     "Targets the selected animation frame rate, limited by the current display when moving between screens. Actual frame rate also depends on system load.",

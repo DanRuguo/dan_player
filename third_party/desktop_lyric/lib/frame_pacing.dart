@@ -29,7 +29,7 @@ class FrameRatePreference {
       switch (mode) {
         FrameRateMode.display => validDisplayRate(displayHz),
         FrameRateMode.adaptive =>
-          math.min(validDisplayRate(displayHz), interacting ? 1000.0 : 60.0),
+          math.min(validDisplayRate(displayHz), interacting ? 1000.0 : 48.0),
         FrameRateMode.fixed =>
           math.min(validDisplayRate(displayHz), fps.toDouble()),
       };

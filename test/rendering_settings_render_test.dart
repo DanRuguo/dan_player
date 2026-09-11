@@ -93,6 +93,10 @@ void main() {
         expect(prefs.spectrumDensity, SpectrumDensity.low);
         const output = String.fromEnvironment('DAN_RENDERING_SETTINGS_RENDER');
         if (output.isNotEmpty) {
+          final frameControl = tester.widget<AppSegmentedControl<FrameRateMode>>(
+              find.byKey(const ValueKey('frame-rate-mode')));
+          frameControl.onChanged!(FrameRateMode.adaptive);
+          await tester.pumpAndSettle();
           await tester.runAsync(() async {
             final image = await (key.currentContext!.findRenderObject()!
                     as RenderRepaintBoundary)

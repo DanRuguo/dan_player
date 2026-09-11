@@ -903,6 +903,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }) =>
       Builder(
         builder: (context) => AdaptiveGridDragSource<PlaylistDragData>(
+          mouseHoldDelay: const Duration(milliseconds: 250),
           dragKey: key,
           data: PlaylistDragData(
             entryId: row.id,

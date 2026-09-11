@@ -87,6 +87,7 @@ Future<TestGesture> _dragTo(
   final handle = find.byKey(ValueKey('playlist-drag-$id'));
   final pointer = await tester.startGesture(tester.getCenter(handle),
       kind: PointerDeviceKind.mouse);
+  await tester.pump(const Duration(milliseconds: 260));
   await pointer.moveBy(const Offset(12, 0));
   await tester.pump();
   await pointer.moveTo(tester.getCenter(target));

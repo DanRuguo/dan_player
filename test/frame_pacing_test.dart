@@ -33,13 +33,16 @@ void main() {
       final settings = RenderingPreferences(frameRate: pref);
       expect(RenderingPreferences.fromMap(settings.toMap()), settings);
       expect(pref.target(59, interacting: true), 59);
-      expect(pref.target(double.nan, interacting: false), 60);
+      expect(pref.target(double.nan, interacting: false),
+          mode == FrameRateMode.adaptive ? 48 : 60);
     }
     expect(FrameRatePreference.fromMap(const {'mode': 'bad', 'fps': -1}),
         const FrameRatePreference());
     const adaptive = FrameRatePreference(mode: FrameRateMode.adaptive);
     expect(adaptive.target(144, interacting: true), 144);
-    expect(adaptive.target(144, interacting: false), 60);
+    expect(adaptive.target(144, interacting: false), 48);
+    expect(adaptive.target(60, interacting: false), 48);
+    expect(adaptive.target(30, interacting: false), 30);
   });
 
   test('coalesces bursts, emits at the target and has no idle timers', () {

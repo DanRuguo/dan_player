@@ -295,6 +295,28 @@ void main() {
     expect(fixture.saves, 0);
   });
 
+  testWidgets('moving short mouse click opens circle and square playlists',
+      (tester) async {
+    _size(tester, 1200);
+    for (final view in [PlaylistViewMode.circular, PlaylistViewMode.grid]) {
+      final fixture = _Fixture();
+      final child =
+          fixture.tree.createPlaylist('Click me', parent: fixture.parent);
+      await tester.pumpWidget(_app(fixture.browser(view: view)));
+      await _settle(tester);
+      final source = _key('playlist-card-drag-${child.id}');
+      final gesture = await tester.startGesture(tester.getCenter(source),
+          kind: PointerDeviceKind.mouse);
+      await gesture.moveBy(const Offset(6, 2));
+      await tester.pump(const Duration(milliseconds: 100));
+      await gesture.up();
+      await _settle(tester);
+      expect(fixture.navigated, contains(child));
+      expect(fixture.saves, 0);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets(
       'circle cover or title reorder still uses exact ids after language switch',
       (tester) async {
@@ -309,6 +331,7 @@ void main() {
     final identity = _key('playlist-card-drag-${children.first.id}');
     final gesture = await tester.startGesture(tester.getCenter(identity),
         kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 260));
     await gesture.moveBy(const Offset(0, 20));
     await tester.pump();
     uiLanguage.value = UiLanguage.ja;
@@ -340,6 +363,7 @@ void main() {
     final gesture = await tester.startGesture(
         tester.getCenter(_key('playlist-card-drag-${children.first.id}')),
         kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 260));
     await gesture.moveBy(const Offset(20, 0));
     await tester.pump();
     final rect = tester.getRect(gridFinder);
@@ -413,6 +437,7 @@ void main() {
     final gesture = await tester.startGesture(
         tester.getCenter(_key('playlist-drag-${source.id}')),
         kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 260));
     await gesture.moveBy(const Offset(0, 20));
     await tester.pump();
     await gesture

@@ -179,7 +179,7 @@ class _FrameRateSettings extends StatelessWidget {
                 ui(switch (preference.mode) {
                   FrameRateMode.display => '有画面变化时跟随屏幕刷新，静止时不持续绘制。',
                   FrameRateMode.adaptive =>
-                    '交互时跟随屏幕，交互结束后动画最高 60 FPS；静止时不持续绘制。',
+                    '交互时跟随屏幕，交互结束后动画最高 48 FPS；静止时不持续绘制。',
                   FrameRateMode.fixed => '动画按所选目标刷新；跨屏时自动受所在屏幕限制。实际帧率也取决于系统负载。',
                 }),
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
