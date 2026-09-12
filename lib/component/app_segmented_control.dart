@@ -33,6 +33,7 @@ class AppSegmentedControl<T> extends StatelessWidget {
     this.compact = false,
     this.showLabels = true,
     this.semanticLabel,
+    this.segmentWidth,
   }) : assert(options.length >= 2);
 
   final T value;
@@ -44,6 +45,9 @@ class AppSegmentedControl<T> extends StatelessWidget {
   /// Icon-only segments retain translated tooltips and accessibility labels.
   final bool showLabels;
   final String? semanticLabel;
+
+  /// Align related groups using the same measured segment width.
+  final double? segmentWidth;
 
   void _select(T next) {
     if (next != value && options.any((option) => option.value == next)) {
@@ -77,12 +81,16 @@ class AppSegmentedControl<T> extends StatelessWidget {
       }
     }
     painter.dispose();
+    widestSegment = math.max(widestSegment, segmentWidth ?? 0);
     // Material gives each segment the widest child's intrinsic width.
     // Summing unlike labels would underestimate e.g. "List / Circular covers".
     final expandedWidth = widestSegment * options.length + 4;
     final baseStyle = appToolbarControlStyle(context, reduced: reduced);
     final controlHeight = baseStyle.minimumSize!.resolve({})!.height;
     final style = baseStyle.copyWith(
+      fixedSize: segmentWidth == null
+          ? null
+          : WidgetStatePropertyAll(Size(segmentWidth!, controlHeight)),
       foregroundColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.disabled)
               ? scheme.onSurface.withValues(alpha: .38)

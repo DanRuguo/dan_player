@@ -1,3 +1,5 @@
+import 'package:dan_player/component/app_item_ink_well.dart';
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/listening_tools_dialog.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
@@ -510,10 +512,7 @@ class _QueueScrollbar extends StatelessWidget {
                       : scheme.onSurfaceVariant.withValues(alpha: .5)),
         ),
         child: AppScrollbar(
-            controller: controller,
-            interactive: true,
-
-            child: child),
+            controller: controller, interactive: true, child: child),
       ),
     );
   }
@@ -695,7 +694,7 @@ class _PlaylistViewItem extends StatelessWidget {
         color: current ? scheme.primary : scheme.onSurfaceVariant,
       ),
     );
-    return MenuAnchor(
+    return AppMenuAnchor(
       consumeOutsideTap: true,
       menuChildren: [
         MenuItemButton(
@@ -781,7 +780,7 @@ class _PlaylistViewItem extends StatelessWidget {
             borderRadius: AppShape.controlRadius,
             child: child,
           ),
-          child: InkWell(
+          child: AppItemInkWell(
             key: ValueKey('current-playlist-item-$index'),
             borderRadius: AppShape.controlRadius,
             onTap: _playOccurrence,

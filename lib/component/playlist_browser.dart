@@ -1,3 +1,5 @@
+import 'package:dan_player/component/app_item_ink_well.dart';
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/anchored_menu_action.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
@@ -971,7 +973,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
       key: ValueKey(('playlist-entry', row.id)),
       identity: ('playlist-entry', row.id),
       order: index,
-      child: MenuAnchor(
+      child: AppMenuAnchor(
         useRootOverlay: true,
         menuChildren: menuItems,
         builder: (context, controller, _) {
@@ -1031,7 +1033,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
               }
             }
 
-            content = InkWell(
+            content = AppItemInkWell(
               key: ValueKey('playlist-circle-open-${row.id}'),
               borderRadius: AppShape.controlRadius,
               onTap: () => _selecting
@@ -1100,7 +1102,20 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                       key: ValueKey('playlist-audio-${row.id}'),
                       audioIndex: queueIndex,
                       playlist: queue,
-                      action: rowAction,
+                      menuActionBuilder: (songAnchor, songMenu) => Builder(
+                          builder: (actionContext) => _dragHandle(
+                              row,
+                              parent,
+                              index,
+                              AppIconActionButton(
+                                  key: ValueKey('playlist-menu-${row.id}'),
+                                  tooltip: ui('歌曲操作'),
+                                  onPressed: _selecting
+                                      ? null
+                                      : () => toggleMenuAtAction(
+                                          songMenu, songAnchor, actionContext),
+                                  selected: songMenu.isOpen,
+                                  glyph: AppActionGlyph.moreVertical))),
                       selection: AudioTileSelection(
                         enabled: _selecting,
                         selected: _isSelected(row),
@@ -1119,7 +1134,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                       )
                 : track;
           } else {
-            content = InkWell(
+            content = AppItemInkWell(
               key: ValueKey('playlist-open-${row.id}'),
               borderRadius: AppShape.controlRadius,
               onTap: folder == null

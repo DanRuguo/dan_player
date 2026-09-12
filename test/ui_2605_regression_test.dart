@@ -1,3 +1,7 @@
+import 'package:dan_player/component/category_tile_grid.dart';
+import 'package:dan_player/component/category_tile_motion.dart';
+import 'package:dan_player/library/artwork_size.dart';
+import 'package:dan_player/library/category_cover_store.dart';
 import 'dart:io';
 import 'dart:ui' as drawing;
 import 'package:dan_player/app_preference.dart';
@@ -17,6 +21,7 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/music_category_fixtures.dart';
 
@@ -65,8 +70,21 @@ Future<List<int>> _render(
       }
     }))!;
 
+class _RenderedCoverAudio extends CategoryTestAudio {
+  _RenderedCoverAudio(String id, this.image) : super(id, artist: 'Cover $id');
+  final ImageProvider image;
+  @override
+  Future<ImageProvider?> artworkForSize(ArtworkSize size) async => image;
+}
+
 void main() {
+  late Directory settingsFixture;
   setUpAll(() async {
+    settingsFixture = Directory.systemTemp.createTempSync('dan-ui-settings-');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'),
+            (_) async => settingsFixture.path);
     for (final font in [
       (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
       ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
@@ -84,6 +102,14 @@ void main() {
                 Future.value(ByteData.sublistView(await korean.readAsBytes()))))
           .load();
     }
+  });
+  tearDownAll(() async {
+    await AppPreference.instance.save();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'), null);
+    if (settingsFixture.existsSync())
+      settingsFixture.deleteSync(recursive: true);
   });
   setUp(() => uiLanguage.value = UiLanguage.zh);
   tearDown(() => uiLanguage.value = UiLanguage.zh);
@@ -110,6 +136,42 @@ void main() {
         }
       }
     }
+  });
+
+  testWidgets('right-click dismissal clears category ink after repeated menus',
+      (tester) async {
+    _size(tester, const Size(1100, 780));
+    final boundary = GlobalKey();
+    await tester.pumpWidget(_app(RepaintBoundary(
+        key: boundary,
+        child: CategoriesPage(audios: [
+          CategoryTestAudio('One', artist: 'First'),
+          CategoryTestAudio('Two', artist: 'Second'),
+        ], onOpenGroup: (_) {}))));
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(
+        kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
+    await mouse.addPointer(location: const Offset(1000, 700));
+    await tester.pumpAndSettle();
+    final before = await _render(tester, boundary, 'menus-before');
+    for (final title in ['First', 'Second']) {
+      final card = find
+          .ancestor(of: find.text(title), matching: find.byType(InkWell))
+          .first;
+      final point = tester.getTopLeft(card) + const Offset(45, 45);
+      await mouse.down(point);
+      await tester.pump(const Duration(milliseconds: 150));
+      await mouse.up();
+      await tester.pumpAndSettle();
+      expect(find.byType(MenuItemButton), findsWidgets);
+      await tester.tapAt(const Offset(1000, 700),
+          kind: PointerDeviceKind.mouse);
+      await mouse.moveTo(const Offset(1000, 700));
+      await tester.pumpAndSettle();
+    }
+    final after = await _render(tester, boundary, 'menus-after');
+    expect(after, before);
+    await mouse.removePointer();
   });
 
   testWidgets(
@@ -140,6 +202,115 @@ void main() {
     expect(tester.widget<TextField>(search).controller!.text, 'Unique');
     expect(AppPreference.instance.categoryPresentation.shape,
         CategoryCoverShape.rounded);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'mixed tiles resize, preserve holes, reorder and render transparent captions',
+      (tester) async {
+    _size(tester, const Size(1100, 780));
+    final temp = Directory.systemTemp.createTempSync('dan-tile-render-');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final covers = CategoryCoverStore(dataDirectory: () async => temp);
+    addTearDown(covers.dispose);
+    final images = <ImageProvider>[];
+    await tester.runAsync(() async {
+      for (var i = 0; i < 8; i++) {
+        final recorder = drawing.PictureRecorder();
+        final canvas = drawing.Canvas(recorder);
+        final base =
+            i.isEven ? const Color(0xFFEFE5CB) : const Color(0xFF163843);
+        canvas.drawRect(
+            const Rect.fromLTWH(0, 0, 256, 256), drawing.Paint()..color = base);
+        canvas.drawCircle(const Offset(128, 90), 58,
+            drawing.Paint()..color = Colors.primaries[i]);
+        final picture = recorder.endRecording();
+        final image = await picture.toImage(256, 256);
+        images.add(MemoryImage(
+            (await image.toByteData(format: drawing.ImageByteFormat.png))!
+                .buffer
+                .asUint8List()));
+        image.dispose();
+        picture.dispose();
+      }
+    });
+    final groups = MusicCategories(
+            [for (var i = 0; i < 8; i++) _RenderedCoverAudio('$i', images[i])])
+        .groups(MusicCategoryKind.artist);
+    var value = CategoryPresentation(
+        shape: CategoryCoverShape.rounded,
+        sort: CategorySort.custom,
+        autoFill: false,
+        sizes: {
+          groups[0].persistenceKey: CategoryTileSize.large,
+          groups[2].persistenceKey: CategoryTileSize.tall,
+          groups[3].persistenceKey: CategoryTileSize.wide
+        });
+    late StateSetter update;
+    final boundary = GlobalKey();
+    await tester.pumpWidget(_app(RepaintBoundary(
+        key: boundary,
+        child: StatefulBuilder(builder: (context, setState) {
+          update = setState;
+          final ordered = [...groups];
+          final order = value.orders[MusicCategoryKind.artist.name] ?? [];
+          if (order.isNotEmpty)
+            ordered.sort((a, b) => order
+                .indexOf(a.persistenceKey)
+                .compareTo(order.indexOf(b.persistenceKey)));
+          return CustomScrollView(slivers: [
+            CategoryTileGrid(
+                groups: ordered,
+                presentation: value,
+                onChanged: (next) => setState(() => value = next),
+                onOpen: (_) {},
+                covers: covers,
+                changing: const {},
+                onChangeCover: (_) {},
+                onRemoveCover: (_) {},
+                icon: Icons.album_outlined)
+          ]);
+        }))));
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 20 && find.byType(Image).evaluate().length < 8; i++) {
+      await tester.runAsync(
+          () async => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsNWidgets(8),
+        reason: 'Render decoded covers, not placeholders');
+    await _render(tester, boundary, 'tiles-mixed-no-caption-background');
+    final first = find.byKey(ValueKey(('category-group', groups[0].id)));
+    final third = find.byKey(ValueKey(('category-group', groups[2].id)));
+    final oldThird = tester.widget<CategoryTileMotion>(third).rect;
+    update(() => value = value.copyWith(sizes: {
+          ...value.sizes,
+          groups[0].persistenceKey: CategoryTileSize.small
+        }));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(tester.widget<CategoryTileMotion>(third).rect, oldThird);
+    await _render(tester, boundary, 'tiles-resize-mid');
+    await tester.pumpAndSettle();
+    expect(tester.getSize(first).width, tester.getSize(first).height);
+    update(() => value = value.copyWith(autoFill: true));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(tester.widget<CategoryTileMotion>(third).linear, isTrue);
+    await _render(tester, boundary, 'tiles-autofill-mid');
+    await tester.pumpAndSettle();
+    await _render(tester, boundary, 'tiles-autofill-end');
+    final source = find.byKey(ValueKey(('category-card', groups[1].id)));
+    final target = find.byKey(ValueKey(('category-card', groups[0].id)));
+    final mouse = await tester.startGesture(tester.getCenter(source),
+        kind: PointerDeviceKind.mouse);
+    await mouse.moveTo(tester.getCenter(target));
+    await tester.pump(const Duration(milliseconds: 30));
+    await mouse.up();
+    await tester.pumpAndSettle();
+    expect(value.orders[MusicCategoryKind.artist.name]!.first,
+        groups[1].persistenceKey);
     expect(tester.takeException(), isNull);
   });
 

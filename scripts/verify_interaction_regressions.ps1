@@ -15,6 +15,9 @@ if (-not $ReceiptPath) { $ReceiptPath = Join-Path (Split-Path -Parent $ProjectRo
 # Small release gate, separate from CI's full Flutter suite. These tests use
 # isolated fixtures and widget layouts, never the installed player or GUI input.
 $regressionTests = @(
+    'test/category_tile_layout_test.dart',
+    'test/item_menu_lifecycle_test.dart',
+    'test/ui_2605_regression_test.dart',
     'test/snapshot3_data_test.dart',
     'test/personal_track_editor_test.dart',
     'test/bounded_tag_wrap_test.dart',

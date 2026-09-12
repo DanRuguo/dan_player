@@ -13,6 +13,7 @@
 
 #include "window_backdrop_policy.h"
 #include "window_backdrop_updates.h"
+#include "window_backdrop_transition.h"
 
 namespace {
 
@@ -306,26 +307,22 @@ struct WindowBackdropController::Impl {
   }
 
   bool TrySystemAcrylic() {
+    // Clearing an AccentPolicy after enabling a DWM material tears down its
+    // blur surface on a solid -> acrylic transition, even though attribute 38
+    // still reports acrylic. Retire the old backend before composing the new
+    // one. Frame restoration must precede the final material assignment too.
     // Probe the complete alpha path before enabling the material. A successful
     // backdrop attribute alone is insufficient on an HWND-backed Flutter view.
-    if (!EnableRedirectionAlpha()) return false;
-    const int acrylic = kDesktopAcrylicBackdrop;
-    if (FAILED(DwmSetWindowAttribute(window, kSystemBackdropType, &acrylic,
-                                     sizeof(acrylic)))) {
-      DisableRedirectionAlpha();
-      return false;
-    }
-    if (!system_backdrop_owned) {
-      // Only a transition to the modern backend needs to remove the legacy
-      // policy (including window_manager's initial transparent gradient).
-      SetAccent(kAccentDisabled, 0);
-    }
+    if (!window_backdrop::EstablishAcrylic(system_backdrop_owned,
+        [this]() { SetAccent(kAccentDisabled, 0); },
+        [this]() { return RestoreFrame(); },
+        [this]() { return EnableRedirectionAlpha(); },
+        [this]() {
+          const int acrylic = kDesktopAcrylicBackdrop;
+          return SUCCEEDED(DwmSetWindowAttribute(window, kSystemBackdropType,
+                                                 &acrylic, sizeof(acrylic)));
+        }, [this]() { DisableRedirectionAlpha(); })) return false;
     system_backdrop_owned = true;
-    if (!RestoreFrame()) {
-      DisableSystemBackdrop();
-      DisableRedirectionAlpha();
-      return false;
-    }
     return true;
   }
 

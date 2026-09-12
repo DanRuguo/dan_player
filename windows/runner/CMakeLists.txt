@@ -239,3 +239,13 @@ set_target_properties(window_chrome_policy_test PROPERTIES
   CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/window_tests"
 )
+
+add_executable(window_backdrop_transition_test EXCLUDE_FROM_ALL
+  "tests/window_backdrop_transition_test.cpp"
+)
+target_include_directories(window_backdrop_transition_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+set_target_properties(window_backdrop_transition_test PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/backdrop_tests"
+)

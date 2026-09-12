@@ -1,3 +1,5 @@
+import 'package:dan_player/component/app_item_ink_well.dart';
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/anchored_menu_action.dart';
 import 'package:dan_player/component/personal_library_dialog.dart';
 import 'package:dan_player/component/app_motion.dart';
@@ -60,6 +62,7 @@ class AudioTile extends StatefulWidget {
     this.content,
     this.leading,
     this.action,
+    this.menuActionBuilder,
     this.multiSelectController,
     this.additionalMenuItems = const [],
     this.selection,
@@ -73,6 +76,10 @@ class AudioTile extends StatefulWidget {
   final Widget? content;
   final Widget? leading;
   final Widget? action;
+
+  /// Relationship actions share this tile's menu instead of opening a second
+  /// nested menu controller for the same song.
+  final Widget Function(BuildContext, MenuController)? menuActionBuilder;
   final MultiSelectController? multiSelectController;
 
   /// Relationship actions supplied by a playlist view. Source-specific music
@@ -306,7 +313,7 @@ class _AudioTileState extends State<AudioTile> {
       key: ValueKey(audio.path),
       identity: ('audio', audio.path),
       order: widget.audioIndex,
-      child: MenuAnchor(
+      child: AppMenuAnchor(
         // Song pages live in a nested Navigator below the persistent mini
         // player. The root Overlay keeps the mini player from painting over
         // editing/actions; this inset also makes a long menu scroll above the
@@ -356,7 +363,10 @@ class _AudioTileState extends State<AudioTile> {
                             cursor: SystemMouseCursors.grab, child: button),
                       );
               });
-          final compactAction = widget.action ??
+          final suppliedAction =
+              widget.menuActionBuilder?.call(anchorContext, controller) ??
+                  widget.action;
+          final compactAction = suppliedAction ??
               (reorderIndex == null
                   ? null
                   : defaultListAction('audio-list-menu-${audio.path}'));
@@ -431,7 +441,7 @@ class _AudioTileState extends State<AudioTile> {
                 child: child,
               ),
             ),
-            child: InkWell(
+            child: AppItemInkWell(
                 focusColor: Colors.transparent,
                 borderRadius: AppShape.controlRadius,
                 overlayColor: WidgetStateProperty.resolveWith((states) {
@@ -513,7 +523,7 @@ class _AudioTileState extends State<AudioTile> {
                               label: audio.displayTitle,
                               child: child,
                             ),
-                            action: widget.action ??
+                            action: suppliedAction ??
                                 Builder(
                                   builder: (actionContext) =>
                                       AppIconActionButton(
@@ -574,7 +584,7 @@ class _AudioTileState extends State<AudioTile> {
                                                     .centerEnd,
                                                 child: durationLabel))),
                                     const SizedBox(width: 8),
-                                    widget.action ??
+                                    suppliedAction ??
                                         defaultListAction(
                                             'audio-columns-menu-${audio.path}'),
                                   ],

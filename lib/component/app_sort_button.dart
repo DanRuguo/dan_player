@@ -349,27 +349,34 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
             excludeFromSemantics: true,
             onSecondaryTap: _enabled ? _show : null,
             onLongPress: _enabled ? _show : null,
-            child: OutlinedButton(
-              onPressed: _enabled ? _show : null,
-              style: appToolbarControlStyle(context, reduced: reduced),
-              child: AppToolbarLabel(
-                label: label,
-                semanticsLabel: ui("排序：{0}", [label]),
-                icon: widget.direction == null
-                    ? Icons.sort
-                    : widget.direction == SortDirection.ascending
-                        ? Icons.arrow_upward
-                        : Icons.arrow_downward,
-                trailing: reduced
-                    ? arrow
-                    : AnimatedRotation(
-                        turns: _open ? .5 : 0,
-                        duration: AppMotion.quick,
-                        curve: AppMotion.standardCurve,
-                        child: arrow,
-                      ),
-              ),
-            ),
+            child: maxWidth < 90
+                ? IconButton.outlined(
+                    tooltip: ui("排序：{0}", [label]),
+                    onPressed: _enabled ? _show : null,
+                    style: appToolbarControlStyle(context,
+                        reduced: reduced, iconOnly: true),
+                    icon: const Icon(Icons.sort))
+                : OutlinedButton(
+                    onPressed: _enabled ? _show : null,
+                    style: appToolbarControlStyle(context, reduced: reduced),
+                    child: AppToolbarLabel(
+                      label: label,
+                      semanticsLabel: ui("排序：{0}", [label]),
+                      icon: widget.direction == null
+                          ? Icons.sort
+                          : widget.direction == SortDirection.ascending
+                              ? Icons.arrow_upward
+                              : Icons.arrow_downward,
+                      trailing: reduced
+                          ? arrow
+                          : AnimatedRotation(
+                              turns: _open ? .5 : 0,
+                              duration: AppMotion.quick,
+                              curve: AppMotion.standardCurve,
+                              child: arrow,
+                            ),
+                    ),
+                  ),
           ),
         ),
       ),
