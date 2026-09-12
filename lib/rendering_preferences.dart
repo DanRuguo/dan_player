@@ -17,22 +17,30 @@ class RenderingPreferences {
   const RenderingPreferences(
       {this.pauseWhenHidden = true,
       this.lyricSpectrum = true,
+      this.compactSpectrum = true,
+      this.surfaceBlur = true,
       this.spectrumDensity = SpectrumDensity.high,
       this.frameRate = const FrameRatePreference()});
 
   final bool pauseWhenHidden;
   final bool lyricSpectrum;
+  final bool compactSpectrum;
+  final bool surfaceBlur;
   final SpectrumDensity spectrumDensity;
   final FrameRatePreference frameRate;
 
   RenderingPreferences copyWith(
           {bool? pauseWhenHidden,
           bool? lyricSpectrum,
+          bool? compactSpectrum,
+          bool? surfaceBlur,
           SpectrumDensity? spectrumDensity,
           FrameRatePreference? frameRate}) =>
       RenderingPreferences(
         pauseWhenHidden: pauseWhenHidden ?? this.pauseWhenHidden,
         lyricSpectrum: lyricSpectrum ?? this.lyricSpectrum,
+        compactSpectrum: compactSpectrum ?? this.compactSpectrum,
+        surfaceBlur: surfaceBlur ?? this.surfaceBlur,
         spectrumDensity: spectrumDensity ?? this.spectrumDensity,
         frameRate: frameRate ?? this.frameRate,
       );
@@ -40,11 +48,19 @@ class RenderingPreferences {
   Map<String, Object> toMap() => {
         'pauseWhenHidden': pauseWhenHidden,
         'lyricSpectrum': lyricSpectrum,
+        'compactSpectrum': compactSpectrum,
+        'surfaceBlur': surfaceBlur,
         'spectrumDensity': spectrumDensity.name,
         'frameRate': frameRate.toMap()
       };
 
   factory RenderingPreferences.fromMap(Object? value) => RenderingPreferences(
+        compactSpectrum: value is Map && value['compactSpectrum'] is bool
+            ? value['compactSpectrum']
+            : true,
+        surfaceBlur: value is Map && value['surfaceBlur'] is bool
+            ? value['surfaceBlur']
+            : true,
         spectrumDensity: SpectrumDensity.values.firstWhere(
             (v) => value is Map && value['spectrumDensity'] == v.name,
             orElse: () => SpectrumDensity.high),
@@ -84,12 +100,14 @@ class RenderingPreferences {
       other is RenderingPreferences &&
       pauseWhenHidden == other.pauseWhenHidden &&
       lyricSpectrum == other.lyricSpectrum &&
+      compactSpectrum == other.compactSpectrum &&
+      surfaceBlur == other.surfaceBlur &&
       spectrumDensity == other.spectrumDensity &&
       frameRate == other.frameRate;
 
   @override
-  int get hashCode =>
-      Object.hash(pauseWhenHidden, lyricSpectrum, spectrumDensity, frameRate);
+  int get hashCode => Object.hash(pauseWhenHidden, lyricSpectrum,
+      compactSpectrum, surfaceBlur, spectrumDensity, frameRate);
 }
 
 /// A listenable lets stream/timer owners apply a change synchronously even

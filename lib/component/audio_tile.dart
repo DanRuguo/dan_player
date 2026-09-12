@@ -1,3 +1,4 @@
+import 'package:dan_player/component/anchored_menu_action.dart';
 import 'package:dan_player/component/personal_library_dialog.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_action_icon.dart';
@@ -92,45 +93,6 @@ class AudioTile extends StatefulWidget {
 
 class _AudioTileState extends State<AudioTile> {
   BuildContext? _artworkContext;
-
-  /// Opens the shared song menu at the visible trailing action instead of the
-  /// leading edge of the full-width row/card owned by [MenuAnchor].
-  ///
-  /// Right-click already supplies a pointer-local position. Keyboard/touch
-  /// activation of the three-dot button has no pointer position, so a bare
-  /// `open()` falls back to the anchor's start edge (the far left on LTR
-  /// pages). Converting the action's bottom centre back into the anchor's
-  /// coordinate space keeps both entry points on one accessible menu without
-  /// duplicating actions or overlays.
-  void _toggleMenuFromAction(
-    MenuController controller,
-    BuildContext anchorContext,
-    BuildContext actionContext,
-  ) {
-    if (controller.isOpen) {
-      controller.close();
-      return;
-    }
-
-    final anchorBox = anchorContext.findRenderObject() as RenderBox?;
-    final actionBox = actionContext.findRenderObject() as RenderBox?;
-    if (anchorBox == null ||
-        actionBox == null ||
-        !anchorBox.attached ||
-        !actionBox.attached ||
-        !anchorBox.hasSize ||
-        !actionBox.hasSize) {
-      // Defensive fallback for the unlikely frame in which the action has
-      // just changed view and its render box is not available yet.
-      controller.open();
-      return;
-    }
-
-    final actionBottomCenter = actionBox.localToGlobal(
-      Offset(actionBox.size.width / 2, actionBox.size.height),
-    );
-    controller.open(position: anchorBox.globalToLocal(actionBottomCenter));
-  }
 
   Widget _artwork(Audio audio, Widget placeholder) => Builder(
         builder: (context) {
@@ -380,7 +342,7 @@ class _AudioTileState extends State<AudioTile> {
                       reorderIndex == null ? ui('歌曲操作') : ui('拖动排序 · 点按打开菜单'),
                   onPressed: selecting
                       ? null
-                      : () => _toggleMenuFromAction(
+                      : () => toggleMenuAtAction(
                           controller, anchorContext, actionContext),
                   selected: controller.isOpen,
                   glyph: AppActionGlyph.moreVertical,
@@ -560,7 +522,7 @@ class _AudioTileState extends State<AudioTile> {
                                     tooltip: ui("歌曲操作"),
                                     onPressed: selecting
                                         ? null
-                                        : () => _toggleMenuFromAction(
+                                        : () => toggleMenuAtAction(
                                               controller,
                                               anchorContext,
                                               actionContext,

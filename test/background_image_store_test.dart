@@ -343,6 +343,32 @@ void main() {
       expect(await original.exists(), isTrue);
     });
 
+    test(
+        'preset recovery retains its background after current image is replaced',
+        () async {
+      final original = await source('preset-original.png', await _png(36, 24));
+      final before = await store.importFile(original.path);
+      final replacement = await source('preset-new.png', await _png(40, 32));
+      final current = await store.importFile(replacement.path);
+      await File(path.join(appData.path, 'settings.json'))
+          .writeAsString(jsonEncode({
+        'Backgrounds': {
+          'main': {'customImageId': current.id}
+        },
+        'PerformancePreset': {
+          'mode': 'economy',
+          'before': {
+            'backgrounds': {
+              'main': {'customImageId': before.id}
+            }
+          }
+        },
+      }));
+      expect(await store.removeUnused(() => {}), 0);
+      expect(await File(path.join(copies.path, before.id)).exists(), true);
+      expect(await File(path.join(copies.path, current.id)).exists(), true);
+    });
+
     test('a malformed scene or image reference prevents all cleanup', () async {
       final original = await source('safe.png', await _png(35, 22));
       final asset = await store.importFile(original.path);

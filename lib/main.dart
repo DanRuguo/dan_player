@@ -32,14 +32,16 @@ import 'package:desktop_lyric/main.dart' as desktop_lyric;
 /// first frame; otherwise Windows briefly exposes the runner's placeholder
 /// bounds and then jumps to the restored size.
 Future<void> prepareWindow() async {
+  AppSettings.instance.windowGeometryCaptureSuspended = true;
   // Keep this immutable during preparation: ratio-lock initialization may
   // persist its captured ratio before the native maximize state is restored.
   final restoreMaximized = AppSettings.instance.isWindowMaximized;
+  final restoredSize = AppSettings.instance.windowSize;
   await windowManager.ensureInitialized();
   await registerAppCloseHandler();
   final windowOptions = WindowOptions(
     minimumSize: WindowModeController.instance.normalMinimumSize,
-    size: AppSettings.instance.windowSize,
+    size: restoredSize,
     center: true,
     backgroundColor: Colors.transparent,
     skipTaskbar: false,
@@ -72,6 +74,19 @@ Future<void> prepareWindow() async {
   if (restoreMaximized) {
     await windowManager.maximize();
     AppSettings.instance.isWindowMaximized = true;
+  } else {
+    // Hidden native material/style changes may deliver an intermediate resize.
+    // Read it back after preparation and repair undersized startup geometry
+    // before the first visible frame, while the loaded size is still immutable.
+    final actual = await windowManager.getSize();
+    final minimum = WindowModeController.instance.normalMinimumSize;
+    if (!actual.width.isFinite ||
+        !actual.height.isFinite ||
+        actual.width < minimum.width - 1 ||
+        actual.height < minimum.height - 1) {
+      await windowManager.setSize(restoredSize);
+      await windowManager.center();
+    }
   }
 }
 
@@ -81,6 +96,7 @@ Future<void> showPreparedWindow() async {
   await WidgetsBinding.instance.endOfFrame;
   await windowManager.show();
   await windowManager.focus();
+  AppSettings.instance.windowGeometryCaptureSuspended = false;
 }
 
 Future<void> loadPrefFont() async {

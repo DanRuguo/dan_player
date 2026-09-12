@@ -206,61 +206,113 @@ class _PlaylistPresentationDialogState
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-          title: Text(ui('此歌单的视图与列'), textAlign: TextAlign.center),
-          content: SizedBox(
-              width: 500,
-              child: SingleChildScrollView(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text(ui('仅影响此歌单。窄窗口自动使用紧凑布局。')),
-                for (final entry in {
-                  'artist': '艺术家',
-                  'album': '专辑',
-                  'track': '轨号',
-                  'tags': '个人标签',
-                  'rating': '个人评分'
-                }.entries)
-                  Column(children: [
-                    CheckboxListTile(
-                        title: Text(ui(entry.value)),
-                        value: _columns.contains(entry.key),
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() {
-                                  if (v!) {
-                                    _columns.add(entry.key);
-                                  } else {
-                                    _columns.remove(entry.key);
-                                  }
-                                })),
-                    if (_columns.contains(entry.key))
-                      Slider(
-                          min: 80,
-                          max: 320,
-                          divisions: 12,
-                          label:
-                              '${((_widths[entry.key] as num?) ?? 160).round()}',
-                          value:
-                              ((_widths[entry.key] as num?)?.toDouble() ?? 160)
-                                  .clamp(80, 320),
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() => _widths[entry.key] = v)),
-                  ]),
-                if (_error != null)
-                  Text(_error!,
-                      style:
-                          TextStyle(color: Theme.of(context).colorScheme.error))
-              ]))),
-          actions: [
-            TextButton(
-                onPressed: _busy ? null : () => _save(true),
-                child: Text(ui('恢复全局设置'))),
-            TextButton(
-                onPressed: _busy ? null : () => Navigator.pop(context),
-                child: Text(ui('取消'))),
-            FilledButton(
-                onPressed: _busy ? null : () => _save(false),
-                child: Text(ui('保存')))
-          ]);
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: AppDialogTitle(ui('歌单视图'),
+          leading: const Icon(Icons.view_column_outlined)),
+      content: AppDialogContent(
+          width: 500,
+          child: SingleChildScrollView(
+              child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(widget.playlist.name,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(color: theme.colorScheme.primary)),
+              const SizedBox(height: 8),
+              Text(ui('仅影响此歌单。窄窗口自动使用紧凑布局。'),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 20),
+              Text(ui('显示的列'), style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              for (final entry in const {
+                'artist': ('艺术家', Icons.person_outline),
+                'album': ('专辑', Icons.album_outlined),
+                'track': ('轨号', Icons.numbers),
+                'tags': ('个人标签', Icons.label_outline),
+                'rating': ('个人评分', Icons.star_outline),
+              }.entries)
+                Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: SettingsSurface(
+                        padding: EdgeInsets.zero,
+                        child: Column(children: [
+                          CheckboxListTile(
+                            key: ValueKey('playlist-column-${entry.key}'),
+                            secondary: Icon(entry.value.$2,
+                                size: 22, color: theme.colorScheme.primary),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 4),
+                            title: Text(ui(entry.value.$1)),
+                            value: _columns.contains(entry.key),
+                            onChanged: _busy
+                                ? null
+                                : (selected) => setState(() {
+                                      if (selected == true) {
+                                        _columns.add(entry.key);
+                                      } else {
+                                        _columns.remove(entry.key);
+                                      }
+                                    }),
+                          ),
+                          if (_columns.contains(entry.key))
+                            Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                                child: Column(children: [
+                                  Row(children: [
+                                    Expanded(
+                                        child: Text(ui('列宽'),
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                                    color: theme.colorScheme
+                                                        .onSurfaceVariant))),
+                                    Text(
+                                        '${(_widths[entry.key] ?? 160).round()}',
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(
+                                                color:
+                                                    theme.colorScheme.primary)),
+                                  ]),
+                                  Slider(
+                                      min: 80,
+                                      max: 320,
+                                      divisions: 12,
+                                      label:
+                                          '${(_widths[entry.key] ?? 160).round()}',
+                                      value: (_widths[entry.key] ?? 160)
+                                          .clamp(80, 320),
+                                      onChanged: _busy
+                                          ? null
+                                          : (width) => setState(() =>
+                                              _widths[entry.key] = width)),
+                                ])),
+                        ]))),
+              if (_error != null)
+                Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+            ],
+          ))),
+      actions: [
+        TextButton.icon(
+            onPressed: _busy ? null : () => _save(true),
+            icon: const Icon(Icons.restore, size: 18),
+            label: Text(ui('恢复全局设置'))),
+        TextButton(
+            onPressed: _busy ? null : () => Navigator.pop(context),
+            child: Text(ui('取消'))),
+        FilledButton.icon(
+            onPressed: _busy ? null : () => _save(false),
+            icon: const Icon(Icons.check, size: 18),
+            label: Text(ui('保存'))),
+      ],
+    );
+  }
 }

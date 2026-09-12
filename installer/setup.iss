@@ -103,6 +103,7 @@ Source: "{#NativeLibrary}"; DestName: "dan_installer_native.dll"; Flags: dontcop
 Source: "{#ManifestFile}"; DestName: "payload.manifest"; Flags: dontcopy
 Source: "{#ManifestFile}"; DestDir: "{app}\.dan-player-install"; DestName: "payload.manifest"; Flags: ignoreversion
 Source: "{#RepositoryRoot}\assets\images\RCE_logo_transparent.png"; Flags: dontcopy
+Source: "{#RepositoryRoot}\app_icon.ico"; Flags: dontcopy
 Source: "{#RepositoryRoot}\assets\images\RCE_logo_white.png"; Flags: dontcopy
 Source: "{#RepositoryRoot}\assets\branding\danruguo_light.png"; Flags: dontcopy
 Source: "{#RepositoryRoot}\assets\branding\danruguo_dark.png"; Flags: dontcopy
@@ -190,7 +191,7 @@ function DP_DeleteOriginalInstaller(): Integer;
 function DP_LoadPrivateFont(Path, Buffer: String; Capacity: Integer): Integer;
   external 'DP_LoadPrivateFont@files:dan_installer_native.dll stdcall';
 function DP_ShowBrand(Parent: HWND; Width, Height: Integer; Background: LongWord;
-  RcePath, DanPath: String; Callback: NativeInt): Integer;
+  IconPath: String; Callback: NativeInt): Integer;
   external 'DP_ShowBrand@files:dan_installer_native.dll stdcall';
 procedure DP_CloseBrand();
   external 'DP_CloseBrand@files:dan_installer_native.dll stdcall';
@@ -499,8 +500,8 @@ var Name, Root: String; Corners: Boolean;
 begin
   Root := ExpandConstant('{param:QARENDERROOT|}');
   if Root = '' then Exit;
-  if QaRenderPhase = 0 then Name := 'rce'
-  else if QaRenderPhase = 1 then Name := 'danruguo'
+  if QaRenderPhase = 0 then Name := 'player'
+  else if QaRenderPhase = 1 then Name := 'player-fade'
   else if QaRenderPhase = 2 then Name := 'directory'
   else Name := 'finished';
   if DP_QA_Capture(WizardForm.Handle, AddBackslash(Root) + Name + '.png') = 1 then
@@ -509,7 +510,7 @@ begin
   QaAuditFooter(Name);
   if QaRenderPhase = 0 then begin
     QaRenderPhase := 1;
-    DP_QA_ScheduleFrame(WizardForm.Handle, 780, CreateCallback(@QaRenderFrame));
+    DP_QA_ScheduleFrame(WizardForm.Handle, 360, CreateCallback(@QaRenderFrame));
   end else if QaRenderPhase = 2 then begin
     if (DP_QA_ButtonFont(ParentButton.Handle, WizardForm.DirEdit.Handle) <> 1) or
        (DP_QA_ButtonFont(OpenButton.Handle, WizardForm.DirEdit.Handle) <> 1) or
@@ -574,6 +575,7 @@ var Previous, FontName, Forced, UpdateFlag: String; Count: Integer;
 begin
   ExtractTemporaryFile('payload.manifest');
   ExtractTemporaryFile('PingFangSC-Regular.ttf');
+  ExtractTemporaryFile('app_icon.ico');
   FontName := StringOfChar(#0, 128);
   Count := DP_LoadPrivateFont(ExpandConstant('{tmp}\PingFangSC-Regular.ttf'), FontName, 128);
   if Count > 0 then begin
@@ -722,7 +724,7 @@ begin
     if not BrandStarted then begin
       BrandStarted := True;
       if DP_ShowBrand(BrandPage.Surface.Handle, BrandPage.SurfaceWidth, BrandPage.SurfaceHeight,
-        Background, BrandRcePath, BrandDanPath,
+        Background, ExpandConstant('{tmp}\app_icon.ico'),
         CreateCallback(@BrandComplete)) = 0 then BrandComplete();
 #ifdef QaBuild
       if ExpandConstant('{param:QARENDERROOT|}') <> '' then begin

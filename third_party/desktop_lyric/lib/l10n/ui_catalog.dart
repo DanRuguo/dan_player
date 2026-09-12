@@ -1,3 +1,7 @@
+import 'catalog_backup_v2.dart';
+import 'catalog_ui_2605.dart';
+import 'catalog_startup_2605.dart';
+import 'catalog_performance_presets.dart';
 import 'catalog_snapshot3.dart';
 // Explicit application UI messages. Original media/user strings are not keys.
 import 'ui_catalog_d.dart';
@@ -85,4 +89,8 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogWindowsTasks,
   ...catalogSnapshot22605,
   ...catalogSnapshot3,
+  ...catalogBackupV2,
+  ...catalogUi2605,
+  ...catalogStartup2605,
+  ...catalogPerformancePresets,
 });

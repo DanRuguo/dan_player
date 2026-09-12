@@ -42,7 +42,7 @@ foreach ($theme in @('light','dark')) {
     $hasLayoutFailure = $text -match 'QA UI (FOOTER CLIPPED|FINISHED ACTIONS MISPLACED)'
     if ($ExpectLayoutFailure -and -not $hasLayoutFailure) { throw 'Negative regression did not reproduce a layout failure.' }
     if (-not $ExpectLayoutFailure -and $hasLayoutFailure) { throw "Actual page layout/painter regression: $log" }
-    foreach ($name in @('rce','danruguo','directory','installing','finished')) {
+    foreach ($name in @('player','player-fade','directory','installing','finished')) {
         if (-not (Test-Path -LiteralPath (Join-Path $frames ($name + '.png')) -PathType Leaf)) { throw "Missing $theme/$name render" }
         if (-not $ExpectLayoutFailure -and $text -notmatch ('QA UI footer fully visible: ' + $name)) { throw "Missing $theme/$name paint-region evidence" }
     }

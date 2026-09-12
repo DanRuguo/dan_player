@@ -305,23 +305,37 @@ class BackgroundImageStore {
               settings['Backgrounds'] is! Map)) {
         throw const BackgroundImageException('已保存配置无效，暂不清理背景副本。');
       }
-      final backgrounds = settings['Backgrounds'];
-      if (backgrounds is Map) {
-        for (final scene in BackgroundScene.values) {
-          final appearance = backgrounds[scene.name];
-          if (appearance == null) continue;
-          // Reading preferences may recover malformed values using defaults;
-          // destructive cleanup may not infer that unreadable references are
-          // unused. Reject the entire cleanup before deleting its first file.
-          if (appearance is! Map ||
-              (appearance['customImageId'] != null &&
-                  !isBackgroundImageId(appearance['customImageId']))) {
-            throw const BackgroundImageException('已保存图片引用不可读，暂不清理背景副本。');
+      void retainBackgrounds(Object? backgrounds) {
+        if (backgrounds != null && backgrounds is! Map) {
+          throw const BackgroundImageException('已保存图片引用不可读，暂不清理背景副本。');
+        }
+        if (backgrounds is Map) {
+          for (final scene in BackgroundScene.values) {
+            final appearance = backgrounds[scene.name];
+            if (appearance == null) continue;
+            // Reading preferences may recover malformed values using defaults;
+            // destructive cleanup may not infer that unreadable references are
+            // unused. Reject the entire cleanup before deleting its first file.
+            if (appearance is! Map ||
+                (appearance['customImageId'] != null &&
+                    !isBackgroundImageId(appearance['customImageId']))) {
+              throw const BackgroundImageException('已保存图片引用不可读，暂不清理背景副本。');
+            }
           }
         }
+        result.addAll(
+            BackgroundPreferences.fromMap(backgrounds).retainedImageIds);
       }
-      result.addAll(BackgroundPreferences.fromMap(settings['Backgrounds'])
-          .retainedImageIds);
+
+      retainBackgrounds(settings['Backgrounds']);
+      final preset = settings['PerformancePreset'];
+      if (preset is Map && preset['before'] != null) {
+        final before = preset['before'];
+        if (before is! Map) {
+          throw const BackgroundImageException('已保存图片引用不可读，暂不清理背景副本。');
+        }
+        retainBackgrounds(before['backgrounds']);
+      }
     }
     return result;
   }

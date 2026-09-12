@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:dan_player/data/app_data_location.dart';
 import 'package:dan_player/background_preferences.dart';
+import 'package:dan_player/performance_preset.dart';
+import 'package:dan_player/data/settings_file_writer.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:dan_player/player_experience_preferences.dart';
@@ -133,7 +135,7 @@ Future<void> scheduleAppDataDirectorySwitch(
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.5-snapshot.3";
+  static const String version = "26.0.5";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";
@@ -174,6 +176,26 @@ class AppSettings {
 
   final uiLayout = ValueNotifier(const UiLayoutPreferences());
   final rendering = ValueNotifier(const RenderingPreferences());
+  late final performancePresets = PerformancePresetController(
+    capture: () => PerformanceSnapshot.capture(
+        rendering.value, backgrounds.value, experience.value, dynamicTheme),
+    apply: (snapshot) {
+      rendering.value = snapshot.rendering;
+      backgrounds.value = snapshot.backgrounds;
+      dynamicTheme = snapshot.dynamicTheme;
+      experience.value = experience.value.copyWith(
+          springLyrics: snapshot.springLyrics,
+          taskbarSongPreview: snapshot.taskbarSongPreview,
+          trayMenuBlurRadius: snapshot.trayBlur);
+    },
+    persist: () => saveSettings(
+        captureWindowSize: false, throwOnError: true, requireCommit: true),
+  );
+
+  Set<String> get retainedBackgroundImageIds => {
+        ...backgrounds.value.retainedImageIds,
+        ...?performancePresets.value.before?.backgrounds.retainedImageIds,
+      };
 
   /// App-local keyboard bindings. Older settings keep the documented defaults.
   final shortcuts = ValueNotifier(ShortcutPreferences.defaults());
@@ -216,6 +238,7 @@ class AppSettings {
   }
 
   bool restoreLastSession = true;
+  bool onboardingCompleted = false;
 
   /// Watch configured music folders on demand; older profiles remain opt-in.
   final libraryAutoRefresh = ValueNotifier(false);
@@ -237,6 +260,9 @@ class AppSettings {
   DateTime? lastUpdateCheckAt;
 
   Size windowSize = const Size(1280, 756);
+  // Startup applies several native window policies before the HWND is shown.
+  // Preference saves during that interval must retain the loaded normal size.
+  bool windowGeometryCaptureSuspended = false;
   bool isWindowMaximized = false;
 
   String? fontFamily;
@@ -336,6 +362,9 @@ class AppSettings {
         UiLayoutPreferences.fromMap(settingsMap['UiLayout']);
     _instance.rendering.value =
         RenderingPreferences.fromMap(settingsMap['Rendering']);
+    _instance.performancePresets.value =
+        PerformancePresetState.fromMap(settingsMap['PerformancePreset']);
+    _instance.onboardingCompleted = settingsMap['OnboardingCompleted'] == true;
     _instance.shortcuts.value =
         ShortcutPreferences.fromMap(settingsMap['PlayerShortcuts']);
     final autoCheck = settingsMap["AutoCheckUpdates"];
@@ -428,12 +457,18 @@ class AppSettings {
   Future<void> saveSettings({
     bool throwOnError = false,
     bool captureWindowSize = true,
+    bool requireCommit = false,
   }) async {
     try {
       final mode = WindowModeController.instance;
+      captureWindowSize = captureWindowSize && !windowGeometryCaptureSuspended;
       // Native maximize/fullscreen notifications also arrive during compact
       // transitions. They must not persist an intermediate/mini window size.
-      if (captureWindowSize && mode.isBusy) return;
+      if (captureWindowSize && mode.isBusy) {
+        if (requireCommit)
+          throw StateError('Settings save deferred during window transition');
+        return;
+      }
       final saveRevision = ++_saveRevision;
       final normalSnapshot = mode.isMini ? mode.normalWindowSnapshot : null;
       final isMaximized = normalSnapshot?.maximized ??
@@ -445,6 +480,7 @@ class AppSettings {
       if (saveRevision != _saveRevision ||
           (captureWindowSize &&
               (mode.isBusy || mode.isMini != (normalSnapshot != null)))) {
+        if (requireCommit) throw StateError('Settings save superseded');
         return;
       }
       final settingsMap = {
@@ -457,6 +493,7 @@ class AppSettings {
         "UiLanguage": uiLanguage.value.code,
         "UiLayout": uiLayout.value.toMap(),
         "Rendering": rendering.value.toMap(),
+        "PerformancePreset": performancePresets.value.toMap(),
         "PlayerShortcuts": shortcuts.value.toMap(),
         "OnlineSources": onlineSources.value.toJson(),
         "LrclibEnabled": lrclibEnabled.value,
@@ -468,6 +505,7 @@ class AppSettings {
         "LocalLyricFirst": localLyricFirst,
         "LyricApiUrl": lyricApiUrl,
         "RestoreLastSession": restoreLastSession,
+        "OnboardingCompleted": onboardingCompleted,
         "LibraryAutoRefresh": libraryAutoRefresh.value,
         "ReplayGain": replayGain.value.toJson(),
         "TrackResume": trackResume.value.toJson(),
@@ -491,10 +529,12 @@ class AppSettings {
       if (saveRevision != _saveRevision ||
           (captureWindowSize &&
               (mode.isBusy || mode.isMini != (normalSnapshot != null)))) {
+        if (requireCommit) throw StateError('Settings save superseded');
         return;
       }
-      final safeSize = WindowGeometryPolicy.constrain(
+      final safeSize = WindowGeometryPolicy.acceptNormalSample(
         WindowGeometrySize(sizeToSave.width, sizeToSave.height),
+        WindowGeometrySize(windowSize.width, windowSize.height),
       );
       sizeToSave = Size(safeSize.width, safeSize.height);
       windowSize = sizeToSave;
@@ -507,12 +547,13 @@ class AppSettings {
       final settingsStr = json.encode(settingsMap);
       final supportPath = (await getAppDataDir()).path;
       final settingsPath = "$supportPath\\settings.json";
-      if (saveRevision != _saveRevision) return;
-      final output = await File(settingsPath).create(recursive: true);
       // Sliders and mode/appearance switches may save concurrently. A delayed
       // old window/path reply must never overwrite a newer preference snapshot.
-      if (saveRevision != _saveRevision) return;
-      output.writeAsStringSync(settingsStr);
+      if (saveRevision != _saveRevision) {
+        if (requireCommit) throw StateError('Settings save superseded');
+        return;
+      }
+      writeSettingsFile(File(settingsPath), settingsStr);
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
       // Existing fire-and-forget callers keep their non-throwing behavior.

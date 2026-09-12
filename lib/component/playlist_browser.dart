@@ -1,3 +1,4 @@
+import 'package:dan_player/component/anchored_menu_action.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/playlist_management_dialog.dart';
@@ -974,18 +975,20 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         useRootOverlay: true,
         menuChildren: menuItems,
         builder: (context, controller, _) {
-          final menuButton = AppIconActionButton(
-            key: ValueKey('playlist-menu-${row.id}'),
-            tooltip: _sortMode(parent) == PlaylistSortMode.custom && !_selecting
-                ? ui("拖动排序 · 点按打开菜单")
-                : ui("歌单项目操作（切到自定义可拖动）"),
-            onPressed: _selecting
-                ? null
-                : () =>
-                    controller.isOpen ? controller.close() : controller.open(),
-            selected: controller.isOpen,
-            glyph: AppActionGlyph.moreVertical,
-          );
+          final menuButton = Builder(
+              builder: (actionContext) => AppIconActionButton(
+                    key: ValueKey('playlist-menu-${row.id}'),
+                    tooltip: _sortMode(parent) == PlaylistSortMode.custom &&
+                            !_selecting
+                        ? ui("拖动排序 · 点按打开菜单")
+                        : ui("歌单项目操作（切到自定义可拖动）"),
+                    onPressed: _selecting
+                        ? null
+                        : () => toggleMenuAtAction(
+                            controller, context, actionContext),
+                    selected: controller.isOpen,
+                    glyph: AppActionGlyph.moreVertical,
+                  ));
           final rowAction = _dragHandle(row, parent, index, menuButton);
           final audio = row.audio;
           final queueIndex = queueIndices[row.id] ?? -1;

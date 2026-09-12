@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dan_player/data/backup_restore_preservation.dart';
+
 import 'package:path/path.dart' as path;
 
 const String appDataReadyMarkerName = '.dan-player-data-ready';
@@ -65,6 +67,14 @@ class AppDataLocationStore {
     var movedPrevious = false;
     var installed = false;
     try {
+      // A selective restore may wait until a later launch. Refresh unselected
+      // data before moving either tree. A refresh failure follows the same
+      // safe fallback as a failed activation while the old data is untouched.
+      await BackupRestorePreservation.refreshBeforeActivation(
+        currentData: active == null ? null : Directory(active),
+        staged: staged,
+        destination: target,
+      );
       if (await target.exists()) {
         await target.rename(previous.path);
         movedPrevious = true;

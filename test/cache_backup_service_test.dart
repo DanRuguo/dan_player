@@ -61,6 +61,8 @@ void main() {
       await File(path.join(source.path, 'updates', 'setup.exe'))
           .writeAsBytes([7]);
       await File(path.join(source.path, 'write.partial')).writeAsBytes([8]);
+      await File(path.join(source.path, 'settings.json.pending'))
+          .writeAsBytes([8]);
 
       final current = Directory(path.join(sandbox.path, 'current'));
       await current.create();
@@ -117,6 +119,9 @@ void main() {
           [6, 6]);
       expect(
           await File(path.join(staged!.path, 'updates', 'setup.exe')).exists(),
+          isFalse);
+      expect(
+          await File(path.join(staged!.path, 'settings.json.pending')).exists(),
           isFalse);
       expect(await File(path.join(staged!.path, 'write.partial')).exists(),
           isFalse);

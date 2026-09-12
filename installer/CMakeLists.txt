@@ -50,10 +50,7 @@ target_compile_options(dan_installer_brand_test PRIVATE /W4 /WX /utf-8 /EHsc)
 target_compile_definitions(dan_installer_brand_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(dan_installer_brand_test PRIVATE dan_installer_native gdi32)
 add_test(NAME dan_installer_brand_test COMMAND dan_installer_brand_test
-  "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/RCE_logo_transparent.png"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../assets/branding/danruguo_light.png"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../assets/images/RCE_logo_white.png"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../assets/branding/danruguo_dark.png")
+  "${CMAKE_CURRENT_SOURCE_DIR}/../app_icon.ico")
 add_executable(dan_installer_update_gate_test tests/installer_update_gate_test.cpp native/update_gate.cpp)
 target_compile_options(dan_installer_update_gate_test PRIVATE /W4 /WX /utf-8 /EHsc)
 target_link_libraries(dan_installer_update_gate_test PRIVATE dan_installer_core)

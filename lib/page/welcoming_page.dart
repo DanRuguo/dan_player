@@ -3,6 +3,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/build_index_state_view.dart';
+import 'package:dan_player/component/feature_onboarding.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/library_auto_refresh.dart';
 import 'package:dan_player/library/collection.dart';
@@ -17,8 +18,21 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
-class WelcomingPage extends StatelessWidget {
+class WelcomingPage extends StatefulWidget {
   const WelcomingPage({super.key});
+
+  @override
+  State<WelcomingPage> createState() => _WelcomingPageState();
+}
+
+class _WelcomingPageState extends State<WelcomingPage> {
+  late bool _tutorialCompleted = AppSettings.instance.onboardingCompleted;
+
+  void _completeTutorial() {
+    AppSettings.instance.onboardingCompleted = true;
+    unawaited(AppSettings.instance.saveSettings(captureWindowSize: false));
+    setState(() => _tutorialCompleted = true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,37 +45,43 @@ class WelcomingPage extends StatelessWidget {
         preferredSize: Size.fromHeight(48.0),
         child: _TitleBar(),
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 48.0),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AppEntrance(
-                identity: 'welcome-heading',
+      body: !_tutorialCompleted
+          ? FeatureOnboarding(onComplete: _completeTutorial)
+          : SingleChildScrollView(
+              child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24),
+              child: Center(
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      ui("你的音乐放在哪些文件夹呢？"),
-                      style: TextStyle(
-                        color: scheme.onSurface,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 22,
+                    AppEntrance(
+                      identity: 'welcome-heading',
+                      child: Column(
+                        children: [
+                          Text(
+                            ui("你的音乐放在哪些文件夹呢？"),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: scheme.onSurface,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 22,
+                            ),
+                          ),
+                          Text(
+                            ui("软件会扫描这些文件夹（包括所有子文件夹）下的音乐并建立索引。"),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: scheme.onSurface),
+                          ),
+                        ],
                       ),
                     ),
-                    Text(
-                      ui("软件会扫描这些文件夹（包括所有子文件夹）下的音乐并建立索引。"),
-                      style: TextStyle(color: scheme.onSurface),
-                    ),
+                    const SizedBox(height: 16),
+                    const FolderSelectorView(),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              const FolderSelectorView(),
-            ],
-          ),
-        ),
-      ),
+            )),
     );
   }
 }
@@ -93,15 +113,23 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
             : FutureBuilder(
                 future: applicationSupportDirectory,
                 builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(child: Text(ui('无法打开播放器数据目录，请检查文件夹权限后重试。')));
+                  }
                   if (snapshot.data == null) {
-                    return const Center(
-                      child: Text("Fail to get app data dir."),
-                    );
+                    return const Center(child: CircularProgressIndicator());
                   }
 
                   return BuildIndexStateView(
                     indexPath: snapshot.data!,
                     folders: folders,
+                    whenIndexFailed: (error, _) {
+                      if (!mounted) return;
+                      setState(() => selecting = true);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(ui('扫描未完成，可以调整文件夹后重试。')),
+                      ));
+                    },
                     whenIndexBuilt: () async {
                       await Future.wait([
                         AppSettings.instance.saveSettings(),
@@ -134,8 +162,10 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
         AppEntrance(
           identity: 'welcome-folder-actions',
           order: 1,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 12,
+            runSpacing: 8,
             children: [
               FilledButton(
                 onPressed: () async {
@@ -147,9 +177,11 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
                   final dir = dirPicker.getDirectory();
                   if (dir == null) return;
 
-                  setState(() {
-                    folders.add(dir.path);
-                  });
+                  if (!mounted) return;
+                  if (!folders.any(
+                      (path) => path.toLowerCase() == dir.path.toLowerCase())) {
+                    setState(() => folders.add(dir.path));
+                  }
                 },
                 child: Text(ui("添加文件夹")),
               ),
@@ -159,7 +191,7 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
                     selecting = false;
                   });
                 },
-                child: Text(ui("扫描")),
+                child: Text(ui(folders.isEmpty ? '暂不添加' : '扫描')),
               ),
             ],
           ),

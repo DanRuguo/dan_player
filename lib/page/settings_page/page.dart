@@ -3,6 +3,7 @@ import 'package:dan_player/page/settings_page/about_brand.dart';
 import 'package:dan_player/page/settings_page/artist_separator_editor.dart';
 import 'package:dan_player/page/settings_page/check_update.dart';
 import 'package:dan_player/page/settings_page/cache_backup_settings.dart';
+import 'package:dan_player/page/settings_page/performance_preset_settings.dart';
 import 'package:dan_player/page/settings_page/create_issue.dart';
 import 'package:dan_player/page/settings_page/other_settings.dart';
 import 'package:dan_player/page/settings_page/music_source_settings.dart';
@@ -92,6 +93,7 @@ class SettingsPage extends StatelessWidget {
           icon: Icons.settings_backup_restore_outlined,
           children: const [
             CacheBackupSettings(),
+            PerformancePresetSettings(),
           ],
         ),
         SettingsSection(

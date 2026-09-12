@@ -98,8 +98,7 @@ class DestinationSelection {
 };
 
 struct LogoFrame {
-  double rce = 0;
-  double danruguo = 0;
+  double player = 0;
   bool finished = false;
 };
 LogoFrame EvaluateLogoFrame(uint64_t elapsed_ms, bool reduce_motion);

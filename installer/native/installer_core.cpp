@@ -449,13 +449,11 @@ void DestinationSelection::EditFinal(const fs::path& path) {
   value_ = path;
 }
 LogoFrame EvaluateLogoFrame(uint64_t elapsed_ms, bool reduce_motion) {
-  if (elapsed_ms >= 1600) return {0, 0, true};
-  if (reduce_motion) return elapsed_ms < 800 ? LogoFrame{1, 0, false} : LogoFrame{0, 1, false};
-  const double position = std::clamp((static_cast<double>(elapsed_ms) - 680.0) / 240.0, 0.0, 1.0);
-  const double eased = position * position * (3.0 - 2.0 * position);
+  if (elapsed_ms >= 750) return {0, true};
+  if (reduce_motion) return {1, false};
   const double fade_in = std::clamp(static_cast<double>(elapsed_ms) / 100.0, 0.0, 1.0);
-  const double fade_out = std::clamp((1600.0 - static_cast<double>(elapsed_ms)) / 100.0, 0.0, 1.0);
-  return {(1.0 - eased) * fade_in, eased * fade_out, false};
+  const double fade_out = std::clamp((750.0 - static_cast<double>(elapsed_ms)) / 100.0, 0.0, 1.0);
+  return {fade_in * fade_out, false};
 }
 
 Transaction::Transaction(Context context, RegistryStore& registry, FaultInjector inject)

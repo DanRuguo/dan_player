@@ -97,6 +97,19 @@ abstract final class WindowGeometryPolicy {
     );
   }
 
+  /// Minimized HWNDs and in-flight compact transitions can report a tiny but
+  /// positive rectangle. Never replace the last normal size with that sample.
+  /// One logical pixel of rounding is allowed at fractional monitor scaling.
+  static WindowGeometrySize acceptNormalSample(
+      WindowGeometrySize sample, WindowGeometrySize previous) {
+    if (!sample.isFiniteAndPositive ||
+        sample.width < normalMinimumWidth - dpiRoundingTolerance ||
+        sample.height < normalMinimumHeight - dpiRoundingTolerance) {
+      return constrain(previous);
+    }
+    return constrain(sample);
+  }
+
   /// Returns the canonical settings representation after validation.
   static String encodeSize(WindowGeometrySize size) {
     final safe = constrain(size);

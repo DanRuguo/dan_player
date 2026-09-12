@@ -160,10 +160,27 @@ void main() {
       for (final dpr in [1.0, 2.0]) {
         await tester.pumpWidget(_host(layer, dpr: dpr));
         await tester.pump();
-        final provider = tester.widget<Image>(find.byType(Image)).image
-            as ArtworkImageProvider;
         final expected = ArtworkSize.forDisplay(
             logicalWidth: 300, logicalHeight: 180, devicePixelRatio: dpr);
+        // Production now waits for the native codec before exposing Image.
+        // Fake frame pumps alone cannot complete that real asynchronous work.
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (true) {
+          await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 10)));
+          await tester.pump(const Duration(milliseconds: 200));
+          final images = tester.widgetList<Image>(find.byType(Image)).toList();
+          if (images.length == 1 &&
+              images.single.image is ArtworkImageProvider &&
+              (images.single.image as ArtworkImageProvider).size == expected) {
+            break;
+          }
+          if (DateTime.now().isAfter(deadline)) {
+            fail('Decoded background did not reach $expected before timeout');
+          }
+        }
+        final provider = tester.widget<Image>(find.byType(Image)).image
+            as ArtworkImageProvider;
         expect(provider.size, expected);
         final decoded = (await tester.runAsync(() => _decode(provider)))!;
         expect(decoded, expected.decodeSize(source.$1, source.$2));

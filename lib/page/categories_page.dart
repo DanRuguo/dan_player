@@ -1,3 +1,6 @@
+import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/category_presentation.dart';
+import 'package:dan_player/component/category_display_controls.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_content_transition.dart';
 import 'dart:async';
@@ -54,6 +57,8 @@ class CategoriesPage extends StatefulWidget {
 
 class _CategoriesPageState extends State<CategoriesPage> {
   final _search = TextEditingController();
+  late CategoryPresentation _presentation =
+      AppPreference.instance.categoryPresentation;
   late MusicCategoryKind _kind = widget.initialCategory;
   MusicCategories? _snapshot;
   int _snapshotLibraryRevision = -1;
@@ -344,28 +349,35 @@ class _CategoriesPageState extends State<CategoriesPage> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-              child: TextField(
-                key: const ValueKey('category-search'),
-                controller: _search,
-                onChanged: (value) => setState(() => _query = value),
-                decoration: InputDecoration(
-                  hintText: _kind == MusicCategoryKind.album
-                      ? ui("搜索专辑或专辑艺术家")
-                      : ui("搜索{0}", [ui(_kind.label)]),
-                  prefixIcon: const Icon(Icons.search),
-                  border: AppShape.inputBorder,
-                  suffixIcon: _query.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: ui("清除分类搜索"),
-                          onPressed: () => setState(() {
-                            _query = '';
-                            _search.clear();
-                          }),
-                          icon: const Icon(Icons.close),
-                        ),
-                ),
-              ),
+              child: CategoryDisplayControls(
+                  value: _presentation,
+                  onChanged: (value) {
+                    setState(() => _presentation = value);
+                    AppPreference.instance.categoryPresentation = value;
+                    unawaited(AppPreference.instance.save());
+                  },
+                  search: TextField(
+                    key: const ValueKey('category-search'),
+                    controller: _search,
+                    onChanged: (value) => setState(() => _query = value),
+                    decoration: InputDecoration(
+                      hintText: _kind == MusicCategoryKind.album
+                          ? ui("搜索专辑或专辑艺术家")
+                          : ui("搜索{0}", [ui(_kind.label)]),
+                      prefixIcon: const Icon(Icons.search),
+                      border: AppShape.inputBorder,
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: ui("清除分类搜索"),
+                              onPressed: () => setState(() {
+                                _query = '';
+                                _search.clear();
+                              }),
+                              icon: const Icon(Icons.close),
+                            ),
+                    ),
+                  )),
             ),
             Expanded(
               child: visible.isEmpty
@@ -396,6 +408,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                             ),
                           _CategoryGrid(
                             groups: visible,
+                            presentation: _presentation,
                             onOpen: _open,
                             covers: _covers,
                             changing: _coverEdits,
@@ -428,6 +441,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
 class _CategoryGrid extends StatelessWidget {
   const _CategoryGrid({
     required this.groups,
+    required this.presentation,
     required this.onOpen,
     required this.covers,
     required this.changing,
@@ -436,6 +450,7 @@ class _CategoryGrid extends StatelessWidget {
   });
 
   final List<MusicCategoryGroup> groups;
+  final CategoryPresentation presentation;
   final ValueChanged<MusicCategoryGroup> onOpen;
   final CategoryCoverStore covers;
   final Set<String> changing;
@@ -463,12 +478,13 @@ class _CategoryGrid extends StatelessWidget {
       final coverSize = math.min(112.0, math.max(48.0, width - 24));
       final height = 16 +
           coverSize +
-          8 +
-          titleHeight +
-          4 +
-          metadataHeight +
-          (hasSubtitle ? metadataHeight : 0) +
-          (hasEvidence ? metadataHeight : 0);
+          (presentation.showTitle ? 8 + titleHeight : 0) +
+          (presentation.showDetails
+              ? 4 +
+                  metadataHeight +
+                  (hasSubtitle ? metadataHeight : 0) +
+                  (hasEvidence ? metadataHeight : 0)
+              : 0);
       return SliverGrid.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: columns,
@@ -544,7 +560,11 @@ class _CategoryGrid extends StatelessWidget {
                             behavior: HitTestBehavior.opaque,
                             onLongPress: controller.open,
                             onSecondaryTapDown: (_) => controller.open(),
-                            child: ClipOval(
+                            child: ClipRRect(
+                              borderRadius: presentation.shape ==
+                                      CategoryCoverShape.circle
+                                  ? BorderRadius.circular(coverSize / 2)
+                                  : AppShape.surfaceRadius,
                               key: ValueKey(('category-cover', group.id)),
                               child: CategoryCover(
                                 group: group,
@@ -562,50 +582,54 @@ class _CategoryGrid extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: titleHeight,
-                          child: Align(
-                            alignment: Alignment.topCenter,
-                            child: Text(categoryDisplayTitle(group),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: musicGridTitleStyle.copyWith(
-                                    fontWeight: FontWeight.w600)),
-                          ),
-                        ),
-                        if (hasSubtitle)
+                        if (presentation.showTitle) ...[
+                          const SizedBox(height: 8),
                           SizedBox(
-                            height: metadataHeight,
-                            child: Text(group.subtitle ?? '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    height: 1.25,
-                                    color: scheme.onSurfaceVariant)),
+                            height: titleHeight,
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: Text(categoryDisplayTitle(group),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: musicGridTitleStyle.copyWith(
+                                      fontWeight: FontWeight.w600)),
+                            ),
                           ),
-                        const SizedBox(height: 4),
-                        Text(
-                            ui("{0} 首 · {1}", [
-                              group.audios.length,
-                              categorySourceSummary(group)
-                            ]),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 13,
-                                height: 1.25,
-                                color: scheme.onSurfaceVariant)),
-                        if (hasEvidence)
-                          Text(categoryEvidenceSummary(group),
+                        ],
+                        if (presentation.showDetails) ...[
+                          if (hasSubtitle)
+                            SizedBox(
+                              height: metadataHeight,
+                              child: Text(group.subtitle ?? '',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      height: 1.25,
+                                      color: scheme.onSurfaceVariant)),
+                            ),
+                          const SizedBox(height: 4),
+                          Text(
+                              ui("{0} 首 · {1}", [
+                                group.audios.length,
+                                categorySourceSummary(group)
+                              ]),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                   fontSize: 13,
                                   height: 1.25,
                                   color: scheme.onSurfaceVariant)),
+                          if (hasEvidence)
+                            Text(categoryEvidenceSummary(group),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    height: 1.25,
+                                    color: scheme.onSurfaceVariant)),
+                        ],
                       ],
                     ),
                   ),
@@ -683,7 +707,6 @@ class _CategorySelectorState extends State<_CategorySelector> {
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
       child: AppScrollbar(
         controller: _scroll,
-
         interactive: true,
         child: SingleChildScrollView(
           key: const ValueKey('category-kind-scroll'),

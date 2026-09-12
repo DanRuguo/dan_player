@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:dan_player/rendering_preferences.dart';
 
 import 'package:flutter/material.dart';
 
@@ -33,10 +34,12 @@ class FrostedSurface extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    final tint = tintColor ??
+    final blurEnabled = RenderingPreferencesScope.of(context).surfaceBlur;
+    final baseTint = tintColor ??
         (isDark
             ? scheme.surfaceContainerHighest.withValues(alpha: 0.44)
             : scheme.surface.withValues(alpha: 0.60));
+    final tint = blurEnabled ? baseTint : baseTint.withValues(alpha: 1);
     final outline = borderColor ??
         scheme.outlineVariant.withValues(alpha: isDark ? 0.36 : 0.56);
     final shadows = boxShadow ??
@@ -57,6 +60,7 @@ class FrostedSurface extends StatelessWidget {
         borderRadius: borderRadius,
         clipBehavior: clipBehavior,
         child: BackdropFilter(
+          enabled: blurEnabled,
           filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
           child: DecoratedBox(
             decoration: BoxDecoration(

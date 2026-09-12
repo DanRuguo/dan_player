@@ -90,6 +90,41 @@ void main() {
     expect(PlayService.isInitialized, isFalse);
   });
 
+  test(
+      'startup saves retain loaded geometry until native preparation completes',
+      () async {
+    AppSettings.instance.windowSize = const Size(1160, 740);
+    AppSettings.instance.isWindowMaximized = true;
+    AppSettings.instance.windowGeometryCaptureSuspended = true;
+    addTearDown(
+        () => AppSettings.instance.windowGeometryCaptureSuspended = false);
+    window.bounds = const Rect.fromLTWH(0, 0, 520, 300);
+    await AppSettings.instance.saveSettings(throwOnError: true);
+    final saved = await readSettings();
+    expect(saved['WindowSize'], '1160.0,740.0');
+    expect(saved['IsWindowMaximized'], true);
+    expect(window.calls, isEmpty);
+  });
+
+  test('tiny minimized or compact native samples never replace normal size',
+      () async {
+    for (final sample in [
+      const Size(160, 28),
+      const Size(520, 300),
+      const Size(0, 0)
+    ]) {
+      AppSettings.instance.windowSize = const Size(1160, 740);
+      window.bounds = Rect.fromLTWH(0, 0, sample.width, sample.height);
+      await AppSettings.instance.saveSettings(throwOnError: true);
+      expect((await readSettings())['WindowSize'], '1160.0,740.0');
+    }
+    window.bounds = const Rect.fromLTWH(0, 0, 506.4, 319.2);
+    await AppSettings.instance.saveSettings(throwOnError: true);
+    expect((await readSettings())['WindowSize'], '507.0,320.0',
+        reason:
+            'Legitimate fractional-DPI minimum-size rounding remains valid');
+  });
+
   test('theme seed persists without the removed startup-system toggle',
       () async {
     const seed = 0xff336699;

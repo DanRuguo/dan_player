@@ -1,5 +1,5 @@
 import 'package:dan_player/component/artwork_handoff.dart';
-import 'dart:ui';
+import 'package:dan_player/component/detail_header_backdrop.dart';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_entrance.dart';
@@ -631,29 +631,7 @@ class _UniDetailPageHeader extends StatelessWidget {
         child: Stack(
           children: [
             Positioned.fill(
-                child: ColoredBox(color: scheme.surfaceContainerHighest)),
-            Positioned.fill(
-              child: ArtworkHandoff(
-                artworkKey: backgroundPic,
-                loadArtwork: () => backgroundPic,
-                placeholder: const SizedBox.expand(),
-                imageBuilder: (provider) => Image(
-                    image: provider,
-                    gaplessPlayback: true,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.expand()),
-              ),
-            ),
-            Positioned.fill(
-                child: ColoredBox(
-                    color: theme.brightness == Brightness.dark
-                        ? Colors.black38
-                        : Colors.white30)),
-            Positioned.fill(
-                child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 100, sigmaY: 100),
-              child: const ColoredBox(color: Colors.transparent),
-            )),
+                child: DetailHeaderBackdrop(artwork: backgroundPic)),
             AppEntrance(
               identity: 'detail-header',
               child: Padding(

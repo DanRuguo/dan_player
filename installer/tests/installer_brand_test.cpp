@@ -1,9 +1,10 @@
 #include <windows.h>
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 #include <string>
 
-extern "C" int __stdcall DP_ShowBrand(HWND,int,int,COLORREF,const wchar_t*,const wchar_t*,void(__stdcall*)());
+extern "C" int __stdcall DP_ShowBrand(HWND,int,int,COLORREF,const wchar_t*,void(__stdcall*)());
 extern "C" void __stdcall DP_CloseBrand();
 namespace {
 COLORREF surface=RGB(235,240,245);
@@ -31,12 +32,25 @@ bool CheckFrame(HWND child) {
   if(!same||ink<=100)std::cerr<<"Frame mismatch: corners="<<same<<" ink="<<ink
       <<" colors="<<GetPixel(dc,0,0)<<","<<GetPixel(dc,width-1,0)<<","<<GetPixel(dc,0,height-1)
       <<","<<GetPixel(dc,width-1,height-1)<<" expected="<<surface<<"\n";
+  wchar_t render_root[32768]{};
+  if(GetEnvironmentVariableW(L"DAN_INSTALLER_BRAND_RENDER",render_root,32768)) {
+    std::filesystem::create_directories(render_root);
+    const auto output=std::filesystem::path(render_root)/
+        (GetRValue(surface)<128?L"installer-brand-dark.bmp":L"installer-brand-light.bmp");
+    BITMAPFILEHEADER header{};header.bfType=0x4d42;
+    header.bfOffBits=sizeof(header)+sizeof(info.bmiHeader);
+    header.bfSize=header.bfOffBits+width*height*4;
+    std::ofstream file(output,std::ios::binary);
+    file.write(reinterpret_cast<const char*>(&header),sizeof(header));
+    file.write(reinterpret_cast<const char*>(&info.bmiHeader),sizeof(info.bmiHeader));
+    file.write(static_cast<const char*>(bytes),width*height*4);
+  }
   SelectObject(dc,previous);DeleteObject(image);DeleteDC(dc);
   return same&&ink>100;
 }
 }
 int wmain(int argc,wchar_t** argv) {
-  if(argc!=5)return 2;
+  if(argc!=2)return 2;
   WNDCLASSW cls{};cls.lpfnWndProc=ParentProcedure;cls.hInstance=GetModuleHandleW(nullptr);
   cls.lpszClassName=L"DanInstallerBrandTestSurface";RegisterClassW(&cls);
   HWND owner=CreateWindowExW(0,cls.lpszClassName,L"hidden branding test",WS_OVERLAPPED,
@@ -47,14 +61,11 @@ int wmain(int argc,wchar_t** argv) {
   unsigned passed=0;
   for(const bool dark:{false,true}) {
     surface=dark?RGB(31,37,42):RGB(235,240,245);
-    if(!DP_ShowBrand(owner,640,400,RGB(255,255,255),argv[dark?3:1],argv[dark?4:2],nullptr))return 4;
+    if(!DP_ShowBrand(owner,640,400,surface,argv[1],nullptr))return 4;
     HWND child=GetWindow(owner,GW_CHILD);
     Sleep(350);
     if(!CheckFrame(child))return 5;
-    ++passed;std::cout<<"PASS "<<(dark?"dark":"light")<<" RCE alpha ink and four parent-matched corners\n";
-    Sleep(800);
-    if(!CheckFrame(child))return 6;
-    ++passed;std::cout<<"PASS "<<(dark?"dark":"light")<<" DanRuguo alpha ink and four parent-matched corners\n";
+    ++passed;std::cout<<"PASS "<<(dark?"dark":"light")<<" player icon and name with four parent-matched corners\n";
     if(IsWindowVisible(owner))return 7;
     DP_CloseBrand();
   }

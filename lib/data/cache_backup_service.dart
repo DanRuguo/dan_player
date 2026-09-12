@@ -3,14 +3,22 @@ import 'package:dan_player/data/snapshot3_upgrade.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:async';
 
-import 'package:archive/archive_io.dart';
+import 'package:archive/archive_io.dart' hide ZLibEncoder, ZLibDecoder;
 import 'package:crypto/crypto.dart';
 import 'package:dan_player/data/app_data_location.dart';
+import 'package:dan_player/data/backup_encryption.dart';
+import 'package:dan_player/data/backup_selection.dart';
+import 'package:dan_player/data/backup_restore_preservation.dart';
 import 'package:path/path.dart' as path;
 
+export 'backup_selection.dart';
+part 'cache_backup_archive.dart';
+part 'cache_backup_music.dart';
+
 const _backupFormat = 'dan-player-cache-backup';
-const _backupVersion = 1;
+const _backupVersion = 2;
 const _tokenPrefix = '@dan-player-backup/';
 
 class CacheBackupException implements Exception {
@@ -21,10 +29,25 @@ class CacheBackupException implements Exception {
   String toString() => message;
 }
 
+class CacheBackupCancelled extends CacheBackupException {
+  const CacheBackupCancelled() : super('Backup operation cancelled');
+}
+
+class CacheBackupPasswordRequired extends CacheBackupException {
+  const CacheBackupPasswordRequired() : super('Password required');
+}
+
+class CacheBackupEncryptionTooLarge extends CacheBackupException {
+  const CacheBackupEncryptionTooLarge()
+      : super('Encrypted backup must be smaller than 64 GiB');
+}
+
 class CacheBackupResult {
-  const CacheBackupResult({required this.fileCount, required this.songCount});
+  const CacheBackupResult(
+      {required this.fileCount, required this.songCount, this.musicCount = 0});
   final int fileCount;
   final int songCount;
+  final int musicCount;
 }
 
 class CacheRestoreResult {
@@ -34,6 +57,7 @@ class CacheRestoreResult {
     required this.restoredSongs,
     required this.missingSongs,
     required this.restartRequired,
+    this.musicCount = 0,
   });
 
   final Directory destination;
@@ -41,6 +65,7 @@ class CacheRestoreResult {
   final int restoredSongs;
   final int missingSongs;
   final bool restartRequired;
+  final int musicCount;
 }
 
 typedef CacheLocationActivator = Future<void> Function(
@@ -58,12 +83,23 @@ class CacheBackupService {
   Future<CacheBackupResult> exportBackup({
     required Directory source,
     required File destination,
+    BackupSelection selection = const BackupSelection(),
+    String? password,
+    BackupOperation? operation,
   }) =>
       ProtectedJsonStore.withSnapshot(() async {
         try {
-          final result = await Isolate.run(() => _exportBackupOnWorker(
-              source.absolute.path, destination.absolute.path));
-          return CacheBackupResult(fileCount: result[0], songCount: result[1]);
+          final sourcePath = source.absolute.path;
+          final destinationPath = destination.absolute.path;
+          final options = selection.toMap();
+          final result = await _runBackupOperation(
+              operation,
+              (control) => _exportBackupOnWorker(
+                  sourcePath, destinationPath, options, password, control));
+          return CacheBackupResult(
+              fileCount: result[0],
+              songCount: result[1],
+              musicCount: result[2]);
         } on CacheBackupException {
           rethrow;
         } catch (error) {
@@ -72,7 +108,13 @@ class CacheBackupService {
       });
 
   static Future<List<int>> _exportBackupOnWorker(
-      String sourceDirectory, String destinationFile) async {
+      String sourceDirectory,
+      String destinationFile,
+      Map<String, Object?> options,
+      String? password,
+      _BackupWorkerControl control) async {
+    final selection = BackupSelection.fromMap(options);
+    if (selection.isEmpty) throw const CacheBackupException('Nothing selected');
     final source = Directory(sourceDirectory);
     final destination = File(destinationFile);
     if (!await source.exists()) {
@@ -96,8 +138,9 @@ class CacheBackupService {
           'A backup cannot be written inside the app data directory');
     }
 
+    await destination.parent.create(recursive: true);
     final temporary =
-        await Directory.systemTemp.createTemp('dan-player-backup-');
+        await destination.parent.createTemp('.dan-player-backup-');
     final payload = Directory(path.join(temporary.path, 'payload'));
     await payload.create(recursive: true);
     try {
@@ -109,12 +152,17 @@ class CacheBackupService {
         payloadRoot: payload,
       );
       encoder.collectSongReferences(index);
+      final music = await _MusicInventory.read(index);
+      var musicCount = 0;
 
       await for (final entity
           in source.list(recursive: true, followLinks: false)) {
         if (entity is! File) continue;
         final relative = path.relative(entity.path, from: source.path);
         if (!_shouldIncludeCacheEntry(relative)) continue;
+        if (!selection.components.contains(backupComponentForPath(relative)))
+          continue;
+        await control.check('collect');
         if (!_isSafeRelative(relative)) {
           throw const CacheBackupException('Unsafe cache entry path');
         }
@@ -129,6 +177,7 @@ class CacheBackupService {
         }
         if (isJson) {
           final portable = await encoder.convert(decoded);
+          await _copyReferencedCacheAssets(portable, source, payload, control);
           await output.writeAsString(json.encode(portable), flush: true);
           if (_containsAbsolutePath(portable)) {
             throw CacheBackupException(
@@ -145,6 +194,31 @@ class CacheBackupService {
           throw const CacheBackupException(
               'Cache changed while it was being backed up; please retry');
         }
+      }
+
+      final musicManifest = <Map<String, Object?>>[];
+      for (final folder in music.folders) {
+        if (!selection.includesFolder(folder.id)) continue;
+        final files = <Map<String, Object?>>[];
+        for (final song in folder.files) {
+          final outputRelative =
+              'restored-music/${folder.id}/${path.basename(song.path)}';
+          if (!_isSafeRelative(outputRelative)) {
+            throw CacheBackupException(
+                'Unsafe music filename: ${path.basename(song.path)}');
+          }
+          final output = File(path.join(payload.path, outputRelative));
+          await _checkedCopy(song, output, control);
+          files.add({
+            'path': outputRelative,
+            'token': await encoder.convert(song.path),
+            'name': path.basename(song.path),
+            'size': await song.length(),
+          });
+          musicCount++;
+        }
+        musicManifest
+            .add({'id': folder.id, 'name': folder.label, 'files': files});
       }
 
       final payloadFiles = <Map<String, Object?>>[];
@@ -169,6 +243,8 @@ class CacheBackupService {
         'roots': encoder.rootManifest,
         'songs': encoder.songManifest,
         'files': payloadFiles,
+        'components': selection.components.map((value) => value.name).toList(),
+        'music': musicManifest,
       };
       await File(path.join(temporary.path, 'manifest.json'))
           .writeAsString(json.encode(manifest), flush: true);
@@ -176,27 +252,29 @@ class CacheBackupService {
       await destination.parent.create(recursive: true);
       final partial = File(
           '$destinationPath.${pid}_${DateTime.now().microsecondsSinceEpoch}.partial');
-      final zip = ZipFileEncoder();
       try {
-        zip.create(partial.path, level: ZipFileEncoder.GZIP);
-        // `ZipFileEncoder.addDirectory` in archive 3.x starts every file write
-        // concurrently against one encoder. Entries can then receive another
-        // file's bytes. This is already running in a worker isolate, so write
-        // sequentially for deterministic, corruption-free archives.
-        await for (final entity
-            in temporary.list(recursive: true, followLinks: false)) {
-          if (entity is! File) continue;
-          final archiveName = _portableRelative(
-              path.relative(entity.path, from: temporary.path));
-          await zip.addFile(entity, archiveName, ZipFileEncoder.GZIP);
+        final plain = password == null
+            ? partial
+            : File(path.join(temporary.path, 'archive.zip'));
+        await _writeStreamingZip(temporary, plain, control);
+        if (password != null) {
+          await BackupEncryption.encrypt(plain, partial, password,
+              checkpoint: (done, total) =>
+                  control.check('encrypt', done, total));
         }
-        await zip.close();
+        await control.check('verify');
       } catch (_) {
         if (await partial.exists()) await partial.delete();
         rethrow;
       }
       await _atomicReplaceFile(partial, destination);
-      return <int>[payloadFiles.length, encoder.songManifest.length];
+      return <int>[
+        payloadFiles.length,
+        encoder.songManifest.length,
+        musicCount
+      ];
+    } on BackupEncryptionLimitException {
+      throw const CacheBackupEncryptionTooLarge();
     } on CacheBackupException {
       rethrow;
     } catch (error) {
@@ -211,14 +289,20 @@ class CacheBackupService {
     required Directory destination,
     required Directory currentData,
     CacheLocationActivator? activateLocation,
+    BackupSelection? selection,
+    String? password,
+    BackupOperation? operation,
   }) async {
     Map<String, Object?> transaction;
     try {
-      transaction = await Isolate.run(() => _restoreBackupOnWorker(
-            backup.absolute.path,
-            destination.absolute.path,
-            currentData.absolute.path,
-          ));
+      final backupPath = backup.absolute.path;
+      final destinationPath = destination.absolute.path;
+      final currentPath = currentData.absolute.path;
+      final options = selection?.toMap();
+      transaction = await _runBackupOperation(
+          operation,
+          (control) => _restoreBackupOnWorker(backupPath, destinationPath,
+              currentPath, options, password, control));
     } on CacheBackupException {
       rethrow;
     } catch (error) {
@@ -251,11 +335,17 @@ class CacheBackupService {
       restoredSongs: transaction['restoredSongs'] as int,
       missingSongs: transaction['missingSongs'] as int,
       restartRequired: true,
+      musicCount: transaction['musicCount'] as int? ?? 0,
     );
   }
 
-  static Future<Map<String, Object?>> _restoreBackupOnWorker(String backupFile,
-      String destinationDirectory, String currentDirectory) async {
+  static Future<Map<String, Object?>> _restoreBackupOnWorker(
+      String backupFile,
+      String destinationDirectory,
+      String currentDirectory,
+      Map<String, Object?>? options,
+      String? password,
+      _BackupWorkerControl control) async {
     final backup = File(backupFile);
     final destination = Directory(destinationDirectory);
     final currentData = Directory(currentDirectory);
@@ -273,39 +363,104 @@ class CacheBackupService {
         path.join(destination.parent.path, '.dan-player-restore-$nonce'));
     final staged = Directory(
         path.join(destination.parent.path, '.dan-player-pending-$nonce'));
-    InputFileStream? input;
     try {
       await extraction.create(recursive: true);
-      input = InputFileStream(backup.path);
-      final archive = ZipDecoder().decodeBuffer(input, verify: true);
-      _validateArchive(archive);
-      extractArchiveToDiskSync(archive, extraction.path);
-      await archive.clear();
-      await input.close();
-      input = null;
-
-      final manifestFile = File(path.join(extraction.path, 'manifest.json'));
-      final manifestValue = await _tryReadJson(manifestFile);
-      if (manifestValue is! Map ||
-          manifestValue['format'] != _backupFormat ||
-          manifestValue['version'] != _backupVersion) {
-        throw const CacheBackupException('Unsupported or damaged backup');
-      }
-      final manifest =
-          manifestValue.map((key, value) => MapEntry(key.toString(), value));
+      final plain =
+          await _openBackupEnvelope(backup, extraction, password, control);
+      final manifest = await _readStreamingZip(plain, extraction, control,
+          selection: options == null ? null : BackupSelection.fromMap(options));
       final payload = Directory(path.join(extraction.path, 'payload'));
-      final files = await _verifyPayload(payload, manifest['files']);
+      await payload.create(recursive: true);
+      final files = await _verifyPayload(
+          payload,
+          (manifest['files'] as List)
+              .where((item) => (manifest['_extracted'] as Set<String>)
+                  .contains((item as Map)['path']))
+              .toList());
+      final contents = _contentsFromManifest(manifest);
+      final requested = options == null
+          ? BackupSelection(components: contents.components, includeMusic: true)
+          : BackupSelection.fromMap(options);
+      final selection = BackupSelection(
+          components: requested.components.intersection(contents.components),
+          includeMusic: requested.includeMusic,
+          musicFolders: requested.musicFolders);
+      if (selection.isEmpty)
+        throw const CacheBackupException('Nothing selected');
+      final musicBatch = 'import-$nonce';
+      final restoredMusic = _selectedMusicPaths(
+          manifest, selection, destination,
+          musicBatch: musicBatch);
 
       final catalog = await _CurrentLibraryCatalog.read(currentData);
+      final dependencies = <String>{};
+      void collectDependencies(Object? value) {
+        if (value is String && value.startsWith('${_tokenPrefix}cache/')) {
+          final relative = Uri.decodeComponent(
+              value.substring('${_tokenPrefix}cache/'.length));
+          if (_isSafeRelative(relative) && !_looksLikeJson(relative))
+            dependencies.add(relative);
+        } else if (value is Map) {
+          final background = _backgroundAssetReference(value);
+          if (background != null) dependencies.add(background);
+          for (final item in value.values) {
+            collectDependencies(item);
+          }
+        } else if (value is List) {
+          for (final item in value) {
+            collectDependencies(item);
+          }
+        }
+      }
+
+      final payloadEntries =
+          await payload.list(recursive: true, followLinks: false).toList();
+      for (final entity in payloadEntries.whereType<File>()) {
+        final relative =
+            _portableRelative(path.relative(entity.path, from: payload.path));
+        if (_looksLikeJson(relative) &&
+            selection.components.contains(backupComponentForPath(relative))) {
+          collectDependencies(await _tryReadJson(entity));
+        }
+      }
+      final cacheOverrides = <String, String>{
+        for (final dependency in dependencies)
+          if (_backgroundAssetId(dependency) == null)
+            dependency: path.join('restored-assets', musicBatch, dependency),
+      };
       final decoder = _PortablePathDecoder(
-        destination: destination,
-        manifest: manifest,
-        catalog: catalog,
-      );
-      await for (final entity
-          in payload.list(recursive: true, followLinks: false)) {
-        if (entity is! File) continue;
+          destination: destination,
+          manifest: manifest,
+          catalog: catalog,
+          restoredMusic: restoredMusic,
+          cacheOverrides: cacheOverrides);
+      for (final entity in payloadEntries.whereType<File>()) {
         final relative = path.relative(entity.path, from: payload.path);
+        if (_isMusicPayload(relative)) {
+          final targetRelative = path.join('restored-music', musicBatch,
+              relative.substring('restored-music/'.length));
+          if (!restoredMusic
+              .containsValue(path.join(destination.path, targetRelative))) {
+            await entity.delete();
+          } else {
+            final output = File(path.join(payload.path, targetRelative));
+            await output.parent.create(recursive: true);
+            await entity.rename(output.path);
+          }
+          continue;
+        }
+        final assetRelative = cacheOverrides[_portableRelative(relative)];
+        if (assetRelative != null) {
+          final output = File(path.join(payload.path, assetRelative));
+          await output.parent.create(recursive: true);
+          await entity.rename(output.path);
+          continue;
+        }
+        if (!selection.components.contains(backupComponentForPath(relative)) &&
+            !dependencies.contains(_portableRelative(relative))) {
+          await entity.delete();
+          continue;
+        }
         if (!_looksLikeJson(relative)) continue;
         final decoded = await _tryReadJson(entity);
         if (decoded == null) {
@@ -323,6 +478,23 @@ class CacheBackupService {
             json.encode(identical(restored, _dropValue) ? null : restored),
             flush: true);
       }
+      // Preserve unselected live data. It remains a snapshot until the next
+      // launch atomically installs this complete, verified directory.
+      if (options != null) {
+        await _mergeUnselectedCurrent(
+            currentData, payload, destination, selection, control);
+        await BackupRestorePreservation.writePlan(
+            staged: payload,
+            source: currentData,
+            selected: selection.components,
+            protectedPaths: {
+              ...cacheOverrides.values,
+              ...dependencies
+                  .where((value) => _backgroundAssetId(value) != null),
+              for (final value in restoredMusic.values)
+                path.relative(value, from: destination.path),
+            });
+      }
       await File(path.join(payload.path, appDataReadyMarkerName)).writeAsString(
         json.encode(<String, Object?>{
           'format': _backupFormat,
@@ -339,13 +511,13 @@ class CacheBackupService {
         'fileCount': files,
         'restoredSongs': decoder.restoredSongs,
         'missingSongs': decoder.missingSongs,
+        'musicCount': restoredMusic.length,
       };
     } catch (error) {
       if (await staged.exists()) await staged.delete(recursive: true);
       if (error is CacheBackupException) rethrow;
       throw CacheBackupException('Could not restore backup: $error');
     } finally {
-      if (input != null) await input.close();
       if (await extraction.exists()) await extraction.delete(recursive: true);
     }
   }
@@ -357,6 +529,48 @@ class CacheBackupService {
       final staged = Directory(stagedPath);
       if (await staged.exists()) await staged.delete(recursive: true);
     }
+  }
+
+  Future<BackupContents> inspectBackup(
+      {required File backup,
+      String? password,
+      BackupOperation? operation}) async {
+    final backupPath = backup.absolute.path;
+    final result = await _runBackupOperation(operation, (control) async {
+      final temporary =
+          await Directory.systemTemp.createTemp('dan-player-inspect-');
+      try {
+        final input = File(backupPath);
+        final encrypted = await BackupEncryption.isEncrypted(input);
+        final plain =
+            await _openBackupEnvelope(input, temporary, password, control);
+        final manifest = await _readStreamingZip(plain, temporary, control,
+            manifestOnly: true);
+        return {...manifest, 'encrypted': encrypted};
+      } finally {
+        await temporary.delete(recursive: true);
+      }
+    });
+    return _contentsFromManifest(result);
+  }
+
+  Future<BackupContents> inspectLibrary({required Directory source}) async {
+    final sourcePath = source.absolute.path;
+    return Isolate.run(() async {
+      final index =
+          await _tryReadJson(File(path.join(sourcePath, 'index.json')));
+      final inventory = await _MusicInventory.read(index);
+      return BackupContents(components: {
+        ...BackupComponent.values
+      }, musicFolders: [
+        for (final folder in inventory.folders)
+          BackupMusicFolder(
+              id: folder.id,
+              name: folder.label,
+              songCount: folder.files.length,
+              bytes: folder.bytes)
+      ]);
+    });
   }
 }
 
@@ -705,6 +919,8 @@ class _PortablePathDecoder {
     required this.destination,
     required Map<String, Object?> manifest,
     required this.catalog,
+    Map<String, String> restoredMusic = const {},
+    this.cacheOverrides = const {},
   }) {
     final rawSongs = manifest['songs'];
     if (rawSongs is Map) {
@@ -717,15 +933,33 @@ class _PortablePathDecoder {
     }
     _matchRoots();
     _resolveSongs();
+    _resolvedPaths.addAll(restoredMusic);
+    _resolved.addAll(restoredMusic.keys);
+    _missing.removeAll(restoredMusic.keys);
+    for (final entry in restoredMusic.entries) {
+      final descriptor = songs[entry.key];
+      if (descriptor == null) continue;
+      final rootId = descriptor['root'] as String?;
+      final relative = descriptor['relativePath'] as String?;
+      if (rootId == null || relative == null) continue;
+      _restoredDirectories['$rootId/${path.posix.dirname(relative)}'] =
+          path.dirname(entry.value);
+      // Song paths resolve individually; folder/root records use the common
+      // music restore root so subsequent scans also find restored folders.
+      rootMatches[rootId] =
+          _CurrentRoot(path.dirname(path.dirname(entry.value)), {}, {});
+    }
   }
 
   final Directory destination;
   final _CurrentLibraryCatalog catalog;
+  final Map<String, String> cacheOverrides;
   final Map<String, Map<String, Object?>> songs = {};
   final Map<String, _CurrentRoot> rootMatches = {};
   final Set<String> _resolved = {};
   final Set<String> _missing = {};
   final Map<String, String> _resolvedPaths = {};
+  final Map<String, String> _restoredDirectories = {};
   final Set<String> _ambiguous = {};
 
   int get restoredSongs => _resolved.length;
@@ -765,6 +999,7 @@ class _PortablePathDecoder {
   }
 
   Object _convertString(String value, {bool preserveMissing = false}) {
+    if (_resolvedPaths.containsKey(value)) return _resolvedPaths[value]!;
     final cue = _cueIdentityParts(value);
     if (cue != null) {
       final restoredCue =
@@ -777,7 +1012,8 @@ class _PortablePathDecoder {
       final encoded = value.substring('${_tokenPrefix}cache/'.length);
       final relative = Uri.decodeComponent(encoded);
       if (!_isSafeRelative(relative)) return _dropValue;
-      return path.normalize(path.join(destination.path, relative));
+      return path.normalize(
+          path.join(destination.path, cacheOverrides[relative] ?? relative));
     }
     if (value == '${_tokenPrefix}cache') return destination.path;
     if (value.startsWith('${_tokenPrefix}root-directory/') ||
@@ -792,6 +1028,8 @@ class _PortablePathDecoder {
       final id = rest.substring(0, separator);
       final relative = Uri.decodeComponent(rest.substring(separator + 1));
       if (!_isSafeRelative(relative)) return _dropValue;
+      final restoredDirectory = _restoredDirectories['$id/$relative'];
+      if (!isFile && restoredDirectory != null) return restoredDirectory;
       final root = rootMatches[id];
       if (root == null && !preserveMissing) return _dropValue;
       final location =
@@ -805,7 +1043,8 @@ class _PortablePathDecoder {
     }
     if (value.startsWith('${_tokenPrefix}root/')) {
       final id = value.substring('${_tokenPrefix}root/'.length);
-      return rootMatches[id]?.path ??
+      return _restoredDirectories['$id/.'] ??
+          rootMatches[id]?.path ??
           (preserveMissing ? _missingRoot(id) : _dropValue);
     }
     if (value.startsWith('${_tokenPrefix}song/')) {
@@ -1107,7 +1346,9 @@ bool _shouldIncludeCacheEntry(String relative) {
   final portable = _portableRelative(relative);
   final segments = portable.toLowerCase().split('/');
   if (segments.any((segment) =>
+      segment == BackupRestorePreservation.planName ||
       segment == 'updates' ||
+      segment == 'restored-music' ||
       segment == 'library_migrations' ||
       segment.startsWith('.dan-player-restore-') ||
       segment.startsWith('.dan-player-pending-') ||
@@ -1124,6 +1365,7 @@ bool _shouldIncludeCacheEntry(String relative) {
     return false;
   }
   return !lower.endsWith('.tmp') &&
+      !lower.endsWith('.pending') &&
       !lower.endsWith('.migration-tmp') &&
       !lower.endsWith('.partial') &&
       !lower.endsWith('.exe') &&
@@ -1272,32 +1514,6 @@ Future<void> _atomicReplaceFile(File temporary, File destination) async {
   }
 }
 
-void _validateArchive(Archive archive) {
-  final names = <String>{};
-  var total = 0;
-  for (final file in archive.files) {
-    final name = _portableRelative(file.name);
-    final comparisonName = name.toLowerCase();
-    if (!_isSafeRelative(name) ||
-        file.isSymbolicLink ||
-        !names.add(comparisonName)) {
-      throw const CacheBackupException('Unsafe or duplicated backup entry');
-    }
-    if (name != 'manifest.json' &&
-        name != 'payload' &&
-        !name.startsWith('payload/')) {
-      throw const CacheBackupException('Unexpected backup entry');
-    }
-    total += file.size;
-    if (file.size > 1024 * 1024 * 1024 || total > 4 * 1024 * 1024 * 1024) {
-      throw const CacheBackupException('Backup is too large to restore safely');
-    }
-  }
-  if (!names.contains('manifest.json')) {
-    throw const CacheBackupException('Backup manifest is missing');
-  }
-}
-
 Future<int> _verifyPayload(Directory payload, Object? rawFiles) async {
   if (rawFiles is! List) {
     throw const CacheBackupException('Backup file list is missing');
@@ -1322,7 +1538,9 @@ Future<int> _verifyPayload(Directory payload, Object? rawFiles) async {
     final descriptor = expected[relative];
     if (descriptor == null ||
         descriptor['size'] != await entity.length() ||
-        descriptor['sha256'] != await _fileDigest(entity)) {
+        descriptor['sha256'] != await _fileDigest(entity) ||
+        (_backgroundAssetId(relative) != null &&
+            _backgroundAssetId(relative) != descriptor['sha256'])) {
       throw const CacheBackupException('Backup payload verification failed');
     }
     actual.add(relative);

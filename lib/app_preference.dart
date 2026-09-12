@@ -1,3 +1,4 @@
+import 'package:dan_player/category_presentation.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -104,6 +105,7 @@ class PlaybackPreference {
 }
 
 class AppPreference {
+  var categoryPresentation = const CategoryPresentation();
   var audiosPagePref = PagePreference(0, SortOrder.ascending, ContentView.list);
 
   var artistsPagePref =
@@ -162,6 +164,7 @@ class AppPreference {
       final appPreferencePath = "$supportPath\\app_preference.json";
 
       Map prefMap = {
+        "categoryPresentation": categoryPresentation.toMap(),
         "audiosPagePref": audiosPagePref.toMap(),
         "artistsPagePref": artistsPagePref.toMap(),
         "artistDetailPagePref": artistDetailPagePref.toMap(),
@@ -199,6 +202,8 @@ class AppPreference {
       final prefJson = await File(appPreferencePath).readAsString();
       final Map prefMap = json.decode(prefJson);
 
+      instance.categoryPresentation =
+          CategoryPresentation.fromMap(prefMap["categoryPresentation"]);
       instance.audiosPagePref =
           PagePreference.fromMap(prefMap["audiosPagePref"]);
       instance.artistsPagePref =

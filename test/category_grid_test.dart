@@ -59,8 +59,9 @@ void main() {
       )));
       await tester.pumpAndSettle();
       final cover = find.byKey(ValueKey(('category-cover', expected.id)));
-      expect(tester.widget(cover), isA<ClipOval>());
       final rect = tester.getRect(cover);
+      expect(tester.widget<ClipRRect>(cover).borderRadius,
+          BorderRadius.circular(rect.width / 2));
       expect(rect.width, rect.height);
       expect(rect.width, inInclusiveRange(80, 112));
       final title = find.descendant(

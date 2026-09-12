@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:dan_player/performance_preset.dart';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -59,6 +60,30 @@ void main() {
     }
   });
 
+  test('a staging write failure preserves the committed recovery checkpoint',
+      () async {
+    await AppSettings.instance
+        .saveSettings(throwOnError: true, captureWindowSize: false);
+    final committed = await settingsFile.readAsBytes();
+    final blockedStage =
+        await Directory('${settingsFile.path}.pending').create();
+    AppSettings.instance.rendering.value =
+        const RenderingPreferences(lyricSpectrum: false);
+    await expectLater(
+        AppSettings.instance.saveSettings(
+            throwOnError: true, captureWindowSize: false, requireCommit: true),
+        throwsA(isA<FileSystemException>()));
+    expect(await settingsFile.readAsBytes(), committed);
+    await blockedStage.delete();
+    await AppSettings.instance
+        .saveSettings(throwOnError: true, captureWindowSize: false);
+    expect(
+        jsonDecode(await settingsFile.readAsString())['Rendering']
+            ['lyricSpectrum'],
+        false);
+    expect(await File('${settingsFile.path}.pending').exists(), false);
+  });
+
   test('legacy and malformed real settings restore default-on', () async {
     for (final raw in [
       null,
@@ -90,12 +115,36 @@ void main() {
     await blocked.delete();
     await AppSettings.instance
         .saveSettings(throwOnError: true, captureWindowSize: false);
-    expect(jsonDecode(await settingsFile.readAsString())['Rendering'],
-        {
-          'pauseWhenHidden': false,
-          'lyricSpectrum': true,
-          'spectrumDensity': 'high',
-          'frameRate': {'mode': 'display', 'fps': 60},
-        });
+    expect(jsonDecode(await settingsFile.readAsString())['Rendering'], {
+      'pauseWhenHidden': false,
+      'lyricSpectrum': true,
+      'compactSpectrum': true,
+      'surfaceBlur': true,
+      'spectrumDensity': 'high',
+      'frameRate': {'mode': 'display', 'fps': 60},
+    });
+  });
+
+  test('preset recovery copy survives an actual settings save and reload',
+      () async {
+    final controller = AppSettings.instance.performancePresets;
+    final oldState = controller.value;
+    final before = controller.capture();
+    addTearDown(() {
+      controller.apply(before);
+      controller.value = oldState;
+    });
+    controller.value = const PerformancePresetState();
+    await controller.select(PerformanceMode.economy);
+    var saved = jsonDecode(await settingsFile.readAsString());
+    expect(saved['PerformancePreset']['mode'], 'economy');
+    expect(saved['PerformancePreset']['before'], before.toMap());
+    controller.value = const PerformancePresetState();
+    await AppSettings.readFromJson();
+    expect(controller.value.mode, PerformanceMode.economy);
+    await controller.select(PerformanceMode.custom);
+    expect(controller.capture().toMap(), before.toMap());
+    saved = jsonDecode(await settingsFile.readAsString());
+    expect(saved['PerformancePreset'], {'mode': 'custom'});
   });
 }

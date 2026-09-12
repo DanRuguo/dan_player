@@ -86,13 +86,13 @@ void main() {
           ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
         .load();
   });
-  testWidgets('brands use 800 / 600 ms phases with a soft handoff',
+  testWidgets('brands use 750 / 500 ms phases with a soft handoff',
       (tester) async {
     await tester.pumpWidget(_host(const StartupSplash(child: Text('Ready'))));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 0);
 
-    await tester.pump(const Duration(milliseconds: 670));
+    await tester.pump(const Duration(milliseconds: 620));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), closeTo(1, .001));
     await tester.pump(const Duration(milliseconds: 130));
     final rce = _opacity(tester, StartupSplash.rceOpacityKey);
@@ -107,7 +107,7 @@ void main() {
     expect(_opacity(tester, StartupSplash.rceOpacityKey), closeTo(0, .001));
     expect(
         _opacity(tester, StartupSplash.danRuguoOpacityKey), closeTo(1, .001));
-    await tester.pump(const Duration(milliseconds: 180));
+    await tester.pump(const Duration(milliseconds: 80));
     expect(_overlayOpacity(tester), closeTo(1, .001));
     await tester.pump(const Duration(milliseconds: 150));
     expect(_overlayOpacity(tester), allOf(greaterThan(0), lessThan(1)));
@@ -120,19 +120,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('reduced motion keeps static 800 / 600 ms brand presentations',
+  testWidgets('reduced motion keeps static 750 / 500 ms brand presentations',
       (tester) async {
     await tester.pumpWidget(_host(
       const StartupSplash(child: Text('Ready')),
       reducedMotion: true,
     ));
-    await tester.pump(const Duration(milliseconds: 799));
+    await tester.pump(const Duration(milliseconds: 749));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 0);
     await tester.pump(const Duration(milliseconds: 1));
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 0);
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 1);
-    await tester.pump(const Duration(milliseconds: 599));
+    await tester.pump(const Duration(milliseconds: 499));
     expect(_overlayOpacity(tester), 1);
     expect(find.byKey(StartupSplash.overlayKey), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 1));
@@ -149,9 +149,9 @@ void main() {
         const FakeAccessibilityFeatures(reduceMotion: true);
     await tester.pump();
     expect(_opacity(tester, StartupSplash.rceOpacityKey), 1);
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 50));
     expect(_opacity(tester, StartupSplash.danRuguoOpacityKey), 1);
-    await tester.pump(const Duration(milliseconds: 599));
+    await tester.pump(const Duration(milliseconds: 499));
     expect(find.byKey(StartupSplash.overlayKey), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 1));
     expect(find.byKey(StartupSplash.overlayKey), findsNothing);
@@ -170,7 +170,7 @@ void main() {
       tester.widget<ColoredBox>(find.byKey(StartupSplash.surfaceKey)).color,
       const Color(0xFFF6F8F2),
     );
-    await tester.pump(const Duration(milliseconds: 1300));
+    await tester.pump(const Duration(milliseconds: 1150));
     await tester.pumpWidget(_host(splash, brightness: Brightness.dark));
     expect((_brandImage(tester, AppBrand.rce).image as AssetImage).assetName,
         BrandLogo.rceDarkAsset);
@@ -209,11 +209,11 @@ void main() {
       expect(find.semantics.byLabel('Hidden action'), findsNothing);
       await tester.tapAt(tester.getCenter(find.text('Hidden action')));
       expect(taps, 0);
-      await tester.pump(const Duration(milliseconds: 800));
+      await tester.pump(const Duration(milliseconds: 750));
       expect(find.semantics.byLabel('RCE'), findsNothing);
       expect(find.semantics.byLabel('Dan Player'), findsNothing);
       expect(find.semantics.byLabel('DanRuguo'), findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump(const Duration(milliseconds: 500));
       await tester.tap(find.text('Hidden action'));
       expect(taps, 1);
     } finally {

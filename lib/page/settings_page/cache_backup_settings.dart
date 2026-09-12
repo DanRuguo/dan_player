@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
@@ -14,6 +15,7 @@ import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/library/track_resume_store.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/page/settings_page/backup_selection_dialog.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -30,12 +32,18 @@ Future<CacheBackupResult> exportLibraryCacheBackup({
   required Future<void> Function() flush,
   Future<Directory> Function()? dataDirectory,
   LibraryMutationGate? gate,
+  BackupSelection selection = const BackupSelection(),
+  String? password,
+  BackupOperation? operation,
 }) =>
     (gate ?? LibraryMutationGate.shared).run(() async {
       await flush();
       return service.exportBackup(
           source: await (dataDirectory ?? getAppDataDir)(),
-          destination: destination);
+          destination: destination,
+          selection: selection,
+          password: password,
+          operation: operation);
     });
 
 class CacheBackupSettings extends StatefulWidget {
@@ -50,6 +58,25 @@ class CacheBackupSettings extends StatefulWidget {
 
 class _CacheBackupSettingsState extends State<CacheBackupSettings> {
   bool _busy = false;
+  BackupOperation? _operation;
+  BackupProgress? _progress;
+  DateTime _lastProgress = DateTime.fromMillisecondsSinceEpoch(0);
+
+  BackupOperation _beginOperation() {
+    final job = BackupOperation(onProgress: (progress) {
+      final now = DateTime.now();
+      if (mounted && now.difference(_lastProgress).inMilliseconds >= 150) {
+        _lastProgress = now;
+        setState(() => _progress = progress);
+      }
+    });
+    setState(() {
+      _busy = true;
+      _operation = job;
+      _progress = null;
+    });
+    return job;
+  }
 
   Future<bool> _confirm({
     required String title,
@@ -93,20 +120,34 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
 
   Future<void> _export() async {
     if (_busy) return;
-    final proceed = await _confirm(
-      title: ui('备份本地缓存？'),
-      body: ui(
-          '备份会保存曲库索引、歌单、歌词来源、播放统计、设置和缓存资源，不会复制音乐文件。\n\n在另一台电脑恢复前，请先准备包含尽量相同歌曲的文件夹，并先让 Dan Player 导入该文件夹；文件夹名称和位置可以不同。'),
-    );
-    if (!proceed || !mounted) return;
+    BackupContents contents;
+    setState(() => _busy = true);
+    try {
+      contents = await LibraryMutationGate.shared.run(() async {
+        await _flushPersistentState();
+        return widget.service.inspectLibrary(source: await getAppDataDir());
+      });
+    } catch (error) {
+      if (mounted)
+        showTextOnSnackBar('无法读取曲库，请等待扫描完成后重试',
+            kind: AppNoticeKind.error, context: context);
+      return;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    final choice = await showAppDialog<BackupDialogChoice>(
+        context: context,
+        builder: (context) => BackupSelectionDialog(contents: contents));
+    if (choice == null || !mounted) return;
 
     final now = DateTime.now();
     final date = '${now.year.toString().padLeft(4, '0')}'
         '${now.month.toString().padLeft(2, '0')}'
         '${now.day.toString().padLeft(2, '0')}';
     final picker = SaveFilePicker()
-      ..title = ui('保存本地缓存备份')
-      ..fileName = 'DanPlayer-cache-$date.bak'
+      ..title = ui('保存播放器备份')
+      ..fileName = 'DanPlayer-$date.bak'
       ..defaultExtension = 'bak'
       ..filterSpecification = {
         ui('Dan Player 备份'): '*.bak',
@@ -115,12 +156,15 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
     final output = picker.getFile();
     if (output == null) return;
 
-    setState(() => _busy = true);
+    final operation = _beginOperation();
     try {
       final result = await exportLibraryCacheBackup(
         service: widget.service,
         flush: _flushPersistentState,
         destination: output,
+        selection: choice.selection,
+        password: choice.password,
+        operation: operation,
       );
       if (!mounted) return;
       await showAppDialog<void>(
@@ -128,9 +172,8 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
         builder: (context) => AlertDialog(
           scrollable: true,
           title: AppDialogTitle(ui('备份已保存')),
-          content: Text(ui(
-              '已写入 {0} 个缓存文件，并记录 {1} 首歌曲的可迁移引用。备份不含音乐文件；恢复前仍需先导入尽量相同的歌曲文件夹。',
-              [result.fileCount, result.songCount])),
+          content: Text(ui('已保存 {0} 个文件，包含 {1} 个音乐源文件。',
+              [result.fileCount, result.musicCount])),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(context),
@@ -139,6 +182,12 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
           ],
         ),
       );
+    } on CacheBackupEncryptionTooLarge {
+      if (mounted)
+        showTextOnSnackBar('加密备份的压缩后大小必须小于 64 GiB，请减少所选文件夹并分批备份。',
+            kind: AppNoticeKind.error, context: context);
+    } on CacheBackupCancelled {
+      if (mounted) showTextOnSnackBar('操作已取消，原有文件保持不变', context: context);
     } on LibraryMutationBusy {
       if (mounted) {
         showTextOnSnackBar('曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试',
@@ -151,22 +200,20 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
             kind: AppNoticeKind.error, context: context);
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted)
+        setState(() {
+          _busy = false;
+          _operation = null;
+          _progress = null;
+        });
     }
   }
 
   Future<void> _restore() async {
     if (_busy) return;
     var restorePrepared = false;
-    final proceed = await _confirm(
-      title: ui('恢复本地缓存？'),
-      body: ui(
-          '请先在这台电脑准备包含尽量相同歌曲的文件夹，并让 Dan Player 完成导入。恢复时会按扫描根内的相对位置、文件名和大小匹配歌曲；无法可靠匹配的信息会跳过并在完成后统计，不会保留旧电脑上失效的绝对路径。'),
-    );
-    if (!proceed || !mounted) return;
-
     final open = OpenFilePicker()
-      ..title = ui('选择本地缓存备份')
+      ..title = ui('选择播放器备份')
       ..defaultExtension = 'bak'
       ..filterSpecification = {
         ui('Dan Player 备份'): '*.bak',
@@ -175,15 +222,52 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
     final backup = open.getFile();
     if (backup == null) return;
 
+    String? password;
+    BackupContents contents;
+    var inspection = _beginOperation();
+    try {
+      try {
+        contents = await widget.service
+            .inspectBackup(backup: backup, operation: inspection);
+      } on CacheBackupPasswordRequired {
+        if (!mounted) return;
+        password = await _requestPassword();
+        if (password == null || !mounted) return;
+        inspection = _beginOperation();
+        contents = await widget.service.inspectBackup(
+            backup: backup, password: password, operation: inspection);
+      }
+    } on CacheBackupCancelled {
+      return;
+    } catch (error) {
+      if (mounted)
+        showTextOnSnackBar('无法读取备份，请检查密码或文件完整性',
+            kind: AppNoticeKind.error, context: context);
+      return;
+    } finally {
+      if (mounted)
+        setState(() {
+          _busy = false;
+          _operation = null;
+          _progress = null;
+        });
+    }
+    if (!mounted) return;
+    final choice = await showAppDialog<BackupDialogChoice>(
+        context: context,
+        builder: (context) =>
+            BackupSelectionDialog(contents: contents, restoring: true));
+    if (choice == null || !mounted) return;
+
     final documents = await getApplicationDocumentsDirectory();
     final directoryPicker = DirectoryPicker()
-      ..title = ui('选择恢复后的缓存存放位置')
+      ..title = ui('选择恢复内容的存放位置')
       ..initialDirectory = documents.path
       ..alwaysShowInitialDirectory = true;
     final selected = directoryPicker.getDirectory();
     if (selected == null || !mounted) return;
 
-    setState(() => _busy = true);
+    final operation = _beginOperation();
     try {
       final current = await getAppDataDir();
       final decision = await CacheRestoreDestinationPolicy.decide(
@@ -202,26 +286,33 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
         if (!replace || !mounted) return;
       }
 
-      final result = await widget.service.restoreBackup(
-        backup: backup,
-        destination: decision.directory,
-        currentData: current,
-        activateLocation: (target, staged) =>
-            scheduleAppDataDirectorySwitch(target, stagedDirectory: staged),
-      );
+      final result = await LibraryMutationGate.shared.run(() async {
+        await _flushPersistentState();
+        return widget.service.restoreBackup(
+            backup: backup,
+            destination: decision.directory,
+            currentData: current,
+            selection: choice.selection,
+            password: password,
+            operation: operation,
+            activateLocation: (target, staged) =>
+                scheduleAppDataDirectorySwitch(target,
+                    stagedDirectory: staged));
+      });
       restorePrepared = true;
       if (!mounted) return;
       final exitNow = await showAppDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
               scrollable: true,
-              title: AppDialogTitle(ui('缓存恢复已准备完成')),
+              title: AppDialogTitle(ui('恢复已准备完成')),
               content: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 580),
                 child: Text(ui(
-                    '缓存将在下次启动时安全切换到：\n{0}\n\n已匹配 {1} 首歌曲；{2} 首无法可靠匹配的歌曲信息已跳过。其他可恢复的设置、歌单和统计已保留。',
+                    '下次启动时将切换到：\n{0}\n\n已还原 {1} 个音乐源文件；已匹配 {2} 首歌曲引用，{3} 首暂不可用。未勾选的数据保持原状。',
                     [
                       result.destination.path,
+                      result.musicCount,
                       result.restoredSongs,
                       result.missingSongs,
                     ])),
@@ -251,6 +342,8 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
           }
         }
       }
+    } on CacheBackupCancelled {
+      if (mounted) showTextOnSnackBar('操作已取消，原有文件保持不变', context: context);
     } catch (error, trace) {
       LOGGER.e('[cache restore] $error', stackTrace: trace);
       if (mounted) {
@@ -260,7 +353,47 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
             context: context);
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted)
+        setState(() {
+          _busy = false;
+          _operation = null;
+          _progress = null;
+        });
+    }
+  }
+
+  Future<String?> _requestPassword() async {
+    final controller = TextEditingController();
+    try {
+      return await showAppDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+                  scrollable: true,
+                  title: AppDialogTitle(ui('解锁备份')),
+                  content: SizedBox(
+                      width: 440,
+                      child: TextField(
+                          controller: controller,
+                          autofocus: true,
+                          obscureText: true,
+                          enableSuggestions: false,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                              labelText: ui('备份密码'),
+                              helperText: ui('请原样输入密码，保留空格、大小写和符号。')),
+                          onSubmitted: (value) =>
+                              Navigator.pop(context, value))),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(ui('取消'))),
+                    FilledButton(
+                        onPressed: () =>
+                            Navigator.pop(context, controller.text),
+                        child: Text(ui('解锁'))),
+                  ]));
+    } finally {
+      controller.dispose();
     }
   }
 
@@ -272,16 +405,41 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SettingsHeader(
-            title: ui('本地缓存备份与恢复'),
+            title: ui('播放器备份与恢复'),
             icon: Symbols.settings_backup_restore,
-            subtitle: ui('将曲库索引、歌单、统计、设置和缓存资源保存为单个 .bak 文件；不复制音乐文件。'),
+            subtitle: ui('音乐、曲库、歌单、统计与设置，自由组合为一个压缩备份；支持密码加密和按需恢复。'),
           ),
           const SizedBox(height: 14),
+          if (_busy) ...[
+            LinearProgressIndicator(
+                value: (_progress?.total ?? 0) > 0
+                    ? (_progress!.completed / _progress!.total).clamp(0, 1)
+                    : null),
+            const SizedBox(height: 8),
+            Text(ui(switch (_progress?.phase) {
+              'encrypt' => '正在加密备份…',
+              'decrypt' => '正在解锁并验证备份…',
+              'compress' => '正在压缩文件…',
+              'restore' => '正在验证和恢复文件…',
+              _ => '正在准备备份文件…',
+            })),
+            const SizedBox(height: 8),
+          ],
           Wrap(
             alignment: WrapAlignment.end,
             spacing: 10,
             runSpacing: 10,
             children: [
+              if (_busy)
+                TextButton(
+                    onPressed: _operation?.isCancelled == true
+                        ? null
+                        : () {
+                            unawaited(_operation?.cancel());
+                            setState(() {});
+                          },
+                    child: Text(ui(
+                        _operation?.isCancelled == true ? '正在取消…' : '取消操作'))),
               OutlinedButton.icon(
                 onPressed: _busy ? null : _restore,
                 icon: const Icon(Symbols.settings_backup_restore),

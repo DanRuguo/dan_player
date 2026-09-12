@@ -242,7 +242,7 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
         if (widget.onPresentation != null)
           _ToolbarMenuItem(
               value: _PlaylistToolbarAction.presentation,
-              label: ui('此歌单的视图与列'),
+              label: ui('歌单视图'),
               icon: Icons.view_column_outlined,
               onSelected: widget.onPresentation),
         if (widget.onImportM3u != null)

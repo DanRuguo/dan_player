@@ -1,3 +1,4 @@
+import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:math' as math;
 
@@ -281,6 +282,7 @@ class _NowPlayingSpectrum extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    if (!RenderingPreferencesScope.of(context).compactSpectrum) return const SizedBox.shrink();
     final playbackService = PlayService.instance.playbackService;
     return StreamBuilder<PlayerState>(
       stream: playbackService.playerStateStream,

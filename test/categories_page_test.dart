@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/category_presentation.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/side_nav.dart';
@@ -112,11 +113,17 @@ void main() {
   late List<AudioFolder> previousFolders;
   late List<Audio> previousOnline;
   late int previousStartPage;
+  late CategoryPresentation previousPresentation;
 
   setUp(() {
     previousFolders = AudioLibrary.instance.folders;
     previousOnline = AudioLibrary.instance.onlineAudioCollection;
     previousStartPage = AppPreference.instance.startPage;
+    previousPresentation = AppPreference.instance.categoryPresentation;
+    // These tests inspect metadata provenance. Its row is user-selectable;
+    // the new hidden-by-default presentation has its own regression test.
+    AppPreference.instance.categoryPresentation =
+        const CategoryPresentation(showDetails: true);
     _library([]);
   });
 
@@ -125,6 +132,7 @@ void main() {
     AudioLibrary.instance.onlineAudioCollection = previousOnline;
     AudioLibrary.instance.rebuildDerivedCollections();
     AppPreference.instance.startPage = previousStartPage;
+    AppPreference.instance.categoryPresentation = previousPresentation;
     expect(PlayService.isInitialized, isFalse);
   });
 
@@ -144,8 +152,8 @@ void main() {
         await tester
             .pumpWidget(MaterialApp(theme: theme, home: Scaffold(body: page)));
         await tester.pumpAndSettle();
-        final action = find.byWidgetPredicate((widget) =>
-            widget is IconButton && widget.tooltip == '重新读取封面');
+        final action = find.byWidgetPredicate(
+            (widget) => widget is IconButton && widget.tooltip == '重新读取封面');
         final button = tester.widget<IconButton>(action);
         final scheme = theme.colorScheme;
         expect(button.style!.foregroundColor!.resolve({}), scheme.primary);

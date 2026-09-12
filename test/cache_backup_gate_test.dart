@@ -11,7 +11,11 @@ class _Backup extends CacheBackupService {
   final Future<CacheBackupResult> Function() create;
   @override
   Future<CacheBackupResult> exportBackup(
-          {required Directory source, required File destination}) =>
+          {required Directory source,
+          required File destination,
+          BackupSelection selection = const BackupSelection(),
+          String? password,
+          BackupOperation? operation}) =>
       create();
 }
 

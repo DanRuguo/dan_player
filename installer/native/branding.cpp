@@ -13,7 +13,7 @@ using namespace dan::installer;
 namespace {
 ULONG_PTR gdiplus_token = 0;
 HWND logo_window = nullptr;
-std::unique_ptr<Gdiplus::Image> rce, danruguo;
+std::unique_ptr<Gdiplus::Bitmap> player_icon;
 uint64_t started = 0;
 COLORREF background_color = RGB(255, 255, 255);
 using Completed = void(__stdcall*)();
@@ -28,21 +28,39 @@ void EnsureGraphics() {
     if (Gdiplus::GdiplusStartup(&gdiplus_token, &options, nullptr) != Gdiplus::Ok) gdiplus_token = 0;
   }
 }
-void DrawImage(Gdiplus::Graphics& graphics, Gdiplus::Image* image,
+void DrawPlayer(Gdiplus::Graphics& graphics, Gdiplus::Image* image,
                const RECT& bounds, double opacity) {
   if (!image || image->GetLastStatus() != Gdiplus::Ok || opacity <= 0) return;
   const float width = static_cast<float>(bounds.right - bounds.left);
   const float height = static_cast<float>(bounds.bottom - bounds.top);
-  const float scale = (std::min)(width * .76f / image->GetWidth(), height * .55f / image->GetHeight());
-  const float dw = image->GetWidth() * scale, dh = image->GetHeight() * scale;
+  const float dpi_scale = static_cast<float>(GetDpiForWindow(logo_window)) / 96.0f;
+  const float dw = (std::min)(96.0f * dpi_scale, (std::min)(width * .28f, height * .38f));
+  const float dh = dw;
+  const float font_size = (std::min)(20.0f * dpi_scale, width * .075f);
+  const float gap = 16.0f * dpi_scale;
+  const float total_height = dh + gap + font_size * 1.6f;
+  const float top = (height - total_height) / 2;
   Gdiplus::ColorMatrix matrix = {{{1,0,0,0,0},{0,1,0,0,0},{0,0,1,0,0},
                                  {0,0,0,static_cast<float>(opacity),0},{0,0,0,0,1}}};
   Gdiplus::ImageAttributes attributes;
   attributes.SetColorMatrix(&matrix);
-  graphics.DrawImage(image, Gdiplus::RectF((width-dw)/2, (height-dh)/2, dw, dh),
+  graphics.DrawImage(image, Gdiplus::RectF((width-dw)/2, top, dw, dh),
                       0, 0, static_cast<float>(image->GetWidth()),
                       static_cast<float>(image->GetHeight()), Gdiplus::UnitPixel,
                       &attributes);
+  const bool dark = (GetRValue(background_color) * 299 +
+      GetGValue(background_color) * 587 + GetBValue(background_color) * 114) < 128000;
+  const auto alpha = static_cast<BYTE>(opacity * 255.0);
+  Gdiplus::SolidBrush text(Gdiplus::Color(alpha, dark ? 240 : 30,
+      dark ? 240 : 30, dark ? 240 : 30));
+  Gdiplus::Font font(L"Segoe UI", font_size, Gdiplus::FontStyleRegular,
+      Gdiplus::UnitPixel);
+  Gdiplus::StringFormat format;
+  format.SetAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
+  graphics.DrawString(L"Dan Player", -1, &font,
+      Gdiplus::RectF(0, top + dh + gap, width, font_size * 1.6f), &format, &text);
 }
 void PaintLogo(HWND window, HDC dc) {
   RECT bounds{}; GetClientRect(window, &bounds);
@@ -57,8 +75,7 @@ void PaintLogo(HWND window, HDC dc) {
     graphics.ReleaseHDC(background);
     graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
     const auto frame = EvaluateLogoFrame(GetTickCount64() - started, reduce_motion);
-    DrawImage(graphics, rce.get(), bounds, frame.rce);
-    DrawImage(graphics, danruguo.get(), bounds, frame.danruguo);
+    DrawPlayer(graphics, player_icon.get(), bounds, frame.player);
   }
   // Finish writing the buffer before another GDI+ Graphics reads it.
   Gdiplus::Graphics destination(dc);
@@ -124,14 +141,17 @@ extern "C" __declspec(dllexport) int __stdcall DP_LoadPrivateFont(
 }
 extern "C" __declspec(dllexport) int __stdcall DP_ShowBrand(
     HWND parent, int width, int height, COLORREF background,
-    const wchar_t* rce_path, const wchar_t* dan_path, Completed callback) {
+    const wchar_t* icon_path, Completed callback) {
   EnsureGraphics();
   if (!gdiplus_token || !IsWindow(parent) || width <= 0 || height <= 0) return 0;
   if (logo_window) DestroyWindow(logo_window);
   logo_window = nullptr;
-  rce = std::make_unique<Gdiplus::Image>(rce_path);
-  danruguo = std::make_unique<Gdiplus::Image>(dan_path);
-  if (rce->GetLastStatus() != Gdiplus::Ok || danruguo->GetLastStatus() != Gdiplus::Ok) return 0;
+  const auto icon = static_cast<HICON>(LoadImageW(nullptr, icon_path, IMAGE_ICON,
+      256, 256, LR_LOADFROMFILE));
+  if (!icon) return 0;
+  player_icon.reset(Gdiplus::Bitmap::FromHICON(icon));
+  DestroyIcon(icon);
+  if (!player_icon || player_icon->GetLastStatus() != Gdiplus::Ok) return 0;
   WNDCLASSW cls{};
   cls.lpfnWndProc = LogoProcedure;
   cls.hInstance = GetModuleHandleW(nullptr);
@@ -155,7 +175,7 @@ extern "C" __declspec(dllexport) void __stdcall DP_CloseBrand() {
   completed = nullptr;
   if (logo_window) DestroyWindow(logo_window);
   logo_window = nullptr;
-  rce.reset(); danruguo.reset();
+  player_icon.reset();
   if (private_font) RemoveFontMemResourceEx(private_font);
   private_font = nullptr;
   private_font_bytes.clear();

@@ -131,8 +131,10 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
     final revision = ++_importRevision;
     setState(() => _imageBusy = true);
     try {
-      final removed =
-          await _images.removeUnused(() => _preferences.value.retainedImageIds);
+      final removed = await _images.removeUnused(() =>
+          widget.preferences == null
+              ? AppSettings.instance.retainedBackgroundImageIds
+              : _preferences.value.retainedImageIds);
       if (!mounted || revision != _importRevision) return;
       setState(() {
         _imageFailed = false;

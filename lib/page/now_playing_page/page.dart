@@ -1,3 +1,4 @@
+import 'package:dan_player/component/detail_volume_panel.dart';
 import 'component/sleep_timer_submenu.dart';
 import 'package:dan_player/component/listening_tools_dialog.dart';
 // ignore_for_file: camel_case_types, non_constant_identifier_names
@@ -345,83 +346,15 @@ class _DesktopLyricSwitch extends StatelessWidget {
   }
 }
 
-class _NowPlayingVolDspSlider extends StatefulWidget {
+class _NowPlayingVolDspSlider extends StatelessWidget {
   const _NowPlayingVolDspSlider();
-
-  @override
-  State<_NowPlayingVolDspSlider> createState() =>
-      _NowPlayingVolDspSliderState();
-}
-
-class _NowPlayingVolDspSliderState extends State<_NowPlayingVolDspSlider> {
-  final playbackService = PlayService.instance.playbackService;
-  final dragVolDsp = ValueNotifier(
-    AppPreference.instance.playbackPref.volumeDsp,
-  );
-  bool isDragging = false;
-
-  @override
-  void dispose() {
-    dragVolDsp.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
-
-    return MenuAnchor(
-      style: const MenuStyle(
-        shape: WidgetStatePropertyAll(
-          AppShape.control,
-        ),
-      ),
-      menuChildren: [
-        SliderTheme(
-          data: const SliderThemeData(
-            showValueIndicator: ShowValueIndicator.onDrag,
-          ),
-          child: ValueListenableBuilder(
-            valueListenable: dragVolDsp,
-            builder: (context, dragVolDspValue, _) => Slider(
-              thumbColor: scheme.primary,
-              activeColor: scheme.primary,
-              inactiveColor: scheme.outline,
-              min: 0.0,
-              max: 1.0,
-              value: isDragging ? dragVolDspValue : playbackService.volumeDsp,
-              label: "${(dragVolDspValue * 100).toInt()}",
-              onChangeStart: (value) {
-                isDragging = true;
-                dragVolDsp.value = value;
-                playbackService.setVolumeDsp(value);
-              },
-              onChanged: (value) {
-                dragVolDsp.value = value;
-                playbackService.setVolumeDsp(value);
-              },
-              onChangeEnd: (value) {
-                isDragging = false;
-                dragVolDsp.value = value;
-                playbackService.setVolumeDsp(value);
-              },
-            ),
-          ),
-        ),
-      ],
-      builder: (context, controller, _) => IconButton(
-        tooltip: ui("音量"),
-        onPressed: () {
-          if (controller.isOpen) {
-            controller.close();
-          } else {
-            controller.open();
-          }
-        },
-        icon: const Icon(Symbols.volume_up),
-        color: scheme.primary,
-      ),
+    final playback = PlayService.instance.playbackService;
+    return DetailVolumeButton(
+      readVolume: () => playback.volumeDsp,
+      onChanged: playback.setVolumeDsp,
+      changes: playback.diagnosticsRevision,
     );
   }
 }

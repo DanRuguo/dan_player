@@ -151,11 +151,10 @@ int wmain(int argc, wchar_t** argv) {
       Reject([&] { CanonicalPath(path); });
     Check(IsSafeRelativePath(L"data\\flutter_assets\\中文.ttf"), "valid Unicode rejected");
   });
-  run("logo duration crossfade and reduce-motion", [] {
-    Check(!EvaluateLogoFrame(1599, false).finished && EvaluateLogoFrame(1600, false).finished, "1.6 second boundary");
-    const auto middle = EvaluateLogoFrame(800, false);
-    Check(std::abs(middle.rce - .5) < .001 && std::abs(middle.danruguo - .5) < .001, "continuous crossfade");
-    Check(EvaluateLogoFrame(799, true).rce == 1 && EvaluateLogoFrame(800, true).danruguo == 1, "reduced motion boundary");
+  run("player intro duration fade and reduced motion", [] {
+    Check(!EvaluateLogoFrame(749, false).finished && EvaluateLogoFrame(750, false).finished, "0.75 second boundary");
+    Check(EvaluateLogoFrame(350, false).player == 1, "player signature fully visible");
+    Check(EvaluateLogoFrame(749, true).player == 1 && EvaluateLogoFrame(750, true).finished, "reduced motion boundary");
   });
   run("new installation commits verified payload", [&] {
     Fixture f(base / L"new");
