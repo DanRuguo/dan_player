@@ -31,7 +31,7 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 <p>
   <a href="https://github.com/DanRuguo/dan_player/releases/latest"><strong>Download stable</strong></a> ·
-  <a href="https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.3">Try the preview</a> ·
+  <a href="https://github.com/DanRuguo/dan_player/releases">Previous releases</a> ·
   <a href="https://github.com/DanRuguo/dan_player/releases">Release notes</a> ·
   <a href="https://github.com/DanRuguo/dan_player/issues/new/choose">Report an issue</a>
 </p>
@@ -67,10 +67,9 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 | Release | Best for | Download |
 | --- | --- | --- |
-| **26.0.4 · Stable** | Everyday listening with an official stable release | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.4) |
-| **26.0.5-snapshot.3 · Preview** | Trying personal library tools, library-wide bookmarks and other additions before the next stable release | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5-snapshot.3) |
+| **26.0.5 · Stable** | Everyday listening with an official stable release | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
-**Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. In the 26.0.5 preview, desktop lyrics run in a separate process launched from the same executable.
+**Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. In the 26.0.5 release, desktop lyrics run in a separate process launched from the same executable.
 
 > **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through the app's backup and restore settings before upgrading.
 
@@ -104,9 +103,17 @@ From finding a track to organizing an entire collection, everyday tools work aro
 | **Personal music data** | Add personal ratings and tags, filter your collection, and explore listening times, track rankings, library composition and disk usage. |
 | **Windows experience** | Enjoy artwork-based colors, light and dark themes, and four interface languages; use keyboard shortcuts, a mini window, taskbar previews and playback diagnostics. |
 
-This overview describes the current repository. Some features require the 26.0.5 preview; check the corresponding [Release notes](https://github.com/DanRuguo/dan_player/releases) for what is included in a published package.
+These features are included in the 26.0.5 stable release; see the corresponding [Release notes](https://github.com/DanRuguo/dan_player/releases) for what is included in a published package.
 
 Online music and custom sources complement local listening. Custom services provide capabilities such as search and lyrics according to what they explicitly declare. See the [custom music source API](docs/custom-music-source-api.md) for integration details.
+
+### New in 26.0.5
+
+- **Category tiles:** rectangular artwork supports 1×1, 2×1, 1×2 and 2×2 sizes, custom drag ordering and optional gap filling. Captions sit directly on the artwork and choose light or dark text from its colors.
+- **Backup and restore:** choose local music by folder, library index, playlists, statistics, settings and cached resources for a single `.bak` file, with optional password encryption. Choose folders and data again when restoring, or select everything at once. Keep your password safe. Each encrypted backup must be smaller than about 64 GiB; split larger collections by folder.
+- **Performance and onboarding:** switch to power saving or high performance, then restore the previous related settings when turning the mode off. Refresh-rate and spectrum-density settings, a first-use guide and a shorter splash sequence are also available.
+
+Playlist view controls, the volume panel, menus, native blur switching and window-size restoration have also been improved. Tile layout and caption sampling run on demand and use caches; tile animations stop refreshing when complete. Actual power use depends on your device and settings.
 
 <a id="screenshots"></a>
 
@@ -136,11 +143,11 @@ Online music and custom sources complement local listening. Custom services prov
 
 **Add music.** Import audio files or folders, then browse them from the music, category and playlist pages. Organize your collection with nested playlists and drag-to-reorder.
 
-**Keep your own ratings and tags.** In the 26.0.5 preview, open the category page and choose **Personal library → Songs** to see tracks you have rated or given personal tags. Filter by date, rating or tag. Personal ratings and tags are stored in player data and **are not written to music files**. The metadata-editing and batch-tag tools do change file metadata, so review the changes before saving.
+**Keep your own ratings and tags.** In the 26.0.5 release, open the category page and choose **Personal library → Songs** to see tracks you have rated or given personal tags. Filter by date, rating or tag. Personal ratings and tags are stored in player data and **are not written to music files**. The metadata-editing and batch-tag tools do change file metadata, so review the changes before saving.
 
 **Save a favorite moment.** In the Now Playing page, open the playback bookmarks dialog from the More menu to save the current position or an A–B segment. Find your saved entries under **Personal library → All bookmarks** on the category page. The play button there starts at the saved position; to restore an A–B loop, select that segment in the corresponding track's playback bookmarks dialog.
 
-**Back up your data.** Use backup and restore in Settings to save player data. Updating the program and backing up your data are separate operations: application files in the installation directory do not replace backups of your library, playlists and settings.
+**Back up your data.** Use backup and restore in Settings to save selected player data and local music, with optional encryption and selective restoration. Updating the program and backing up your data are separate operations: application files in the installation directory do not replace backups of your library, playlists and settings.
 
 <details>
 <summary><strong>Common keyboard shortcuts</strong></summary>
