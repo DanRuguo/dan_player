@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/category_presentation.dart';
+import 'package:dan_player/component/cover_caption_colors.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -619,8 +620,14 @@ void main() {
   final covers = <ImageProvider>[];
   final iconFonts = <String, SfntFont>{};
   const channel = MethodChannel('window_manager');
+  const paths = MethodChannel('plugins.flutter.io/path_provider');
+  late Directory profile;
 
   setUpAll(() async {
+    final parent = await Directory('build/test-data').create(recursive: true);
+    profile = await parent.createTemp('public-ui-');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(paths, (_) async => profile.absolute.path);
     for (final font in [
       (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
       ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
@@ -661,8 +668,20 @@ void main() {
           'Run layout-only tests elsewhere; never publish blank language labels.');
     }
     for (var index = 0; index < 3; index++) {
-      covers.add(MemoryImage(await _coverBytes(index)));
+      final provider = MemoryImage(await _coverBytes(index));
+      covers.add(provider);
     }
+  });
+
+  tearDownAll(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(paths, null);
+    final resolved = await profile.resolveSymbolicLinks();
+    final parent = await Directory('build/test-data').resolveSymbolicLinks();
+    if (!resolved.startsWith('$parent${Platform.pathSeparator}public-ui-')) {
+      throw StateError('Refusing cleanup outside the public UI fixture');
+    }
+    await Directory(resolved).delete(recursive: true);
   });
 
   for (final scenario in _showcaseCases) {
@@ -930,6 +949,29 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
+      if (page == 'tiles') {
+        final artwork = find.descendant(
+            of: find.byType(CategoriesPage), matching: find.byType(Image));
+        bool captionsReady() =>
+            artwork.evaluate().length == audios.length &&
+            artwork.evaluate().every((element) {
+              final image = element.widget as Image;
+              final box = element.renderObject! as RenderBox;
+              return CoverCaptionCache.cached(
+                      image.image, box.size.width / box.size.height) !=
+                  null;
+            });
+        // Pixel readback completes on the real image engine, outside fake time.
+        // Wait for actual sampled colors, not for the five-second fallback.
+        for (var attempt = 0; attempt < 40 && !captionsReady(); attempt++) {
+          await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 20)));
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        expect(captionsReady(), isTrue,
+            reason: 'Export actual sampled caption colors');
+        await tester.pumpAndSettle();
+      }
       Future<List<Audio>?>? songPickerResult;
       if (['settings', 'appearance', 'theme'].contains(page)) {
         await _selectSettingsCategory(tester, 'appearance');
