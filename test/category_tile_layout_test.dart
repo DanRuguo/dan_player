@@ -166,6 +166,19 @@ void main() {
           (max(l, ink) + .05) / (min(l, ink) + .05), greaterThanOrEqualTo(4.5));
       expect(result.background, Colors.transparent);
     }
+    expect(
+        captionColorsForSamples([
+          ...List.filled(180, const Color(0xFF245B66)),
+          ...List.filled(108, const Color(0xFFF4DCB0)),
+        ]).foreground,
+        Colors.white,
+        reason: 'A bright accent must not override the dark text region');
+    expect(
+        captionColorsForSamples([
+          ...List.filled(180, const Color(0xFFF4DCB0)),
+          ...List.filled(108, const Color(0xFF245B66)),
+        ]).foreground,
+        Colors.black);
     expect(captionColorsForSamples([Colors.white]).foreground, Colors.black);
     expect(captionColorsForSamples([Colors.black]).foreground, Colors.white);
   });

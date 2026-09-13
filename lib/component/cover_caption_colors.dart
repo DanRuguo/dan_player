@@ -79,7 +79,7 @@ class CoverCaptionCache {
             final px = (crop.left + (x + .5) * crop.width / 24)
                 .floor()
                 .clamp(0, info.image.width - 1);
-            final py = (crop.top + crop.height * (.58 + (y + .5) * .42 / 12))
+            final py = (crop.top + crop.height * (.78 + (y + .5) * .22 / 12))
                 .floor()
                 .clamp(0, info.image.height - 1);
             final offset = (py * info.image.width + px) * 4;
@@ -107,9 +107,14 @@ class CoverCaptionCache {
 @visibleForTesting
 CoverCaptionColors captionColorsForSamples(List<Color> samples) {
   if (samples.isEmpty) return CoverCaptionColors.fallback;
-  final luminance =
-      samples.fold<double>(0, (sum, color) => sum + color.computeLuminance()) /
-          samples.length;
+  // A small bright illustration should not make text over the predominantly
+  // dark caption area turn black. Median is robust to those local highlights.
+  final values = samples.map((color) => color.computeLuminance()).toList()
+    ..sort();
+  final middle = values.length ~/ 2;
+  final luminance = values.length.isOdd
+      ? values[middle]
+      : (values[middle - 1] + values[middle]) / 2;
   // Choose the higher-contrast black/white text against the sampled region.
   // The text layer is fully transparent; never paint a caption rectangle.
   final darkText = (luminance + .05) / .05 >= 1.05 / (luminance + .05);
