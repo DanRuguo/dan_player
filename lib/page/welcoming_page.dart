@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/build_index_state_view.dart';
 import 'package:dan_player/component/feature_onboarding.dart';
+import 'package:dan_player/page/settings_page/cache_backup_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/library_auto_refresh.dart';
 import 'package:dan_player/library/collection.dart';
@@ -77,6 +78,12 @@ class _WelcomingPageState extends State<WelcomingPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () => showOnboardingRestore(context,
+                          onRestored: _completeTutorial),
+                      icon: const Icon(Icons.settings_backup_restore),
+                      label: Text(ui('从备份恢复')),
+                    ),
                     const FolderSelectorView(),
                   ],
                 ),

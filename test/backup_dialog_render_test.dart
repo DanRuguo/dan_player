@@ -78,6 +78,7 @@ void main() {
                           body: BackupSelectionDialog(
                               key: ValueKey(restoring),
                               contents: contents,
+                              firstUse: restoring,
                               restoring: restoring))))));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
@@ -116,6 +117,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await capture('password');
         await show(true);
+        await capture('restore-overview');
         await tester.ensureVisible(
             find.byKey(const ValueKey('backup-component-settings')));
         await tester

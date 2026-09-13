@@ -3,6 +3,7 @@ import 'dart:ui' as drawing;
 import 'package:dan_player/component/app_control_theme.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/feature_onboarding.dart';
+import 'package:dan_player/page/settings_page/cache_backup_settings.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -59,6 +60,18 @@ void main() {
                   body: FeatureOnboarding(onComplete: () => completions++))),
         )));
         await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('onboarding-restore')));
+        await tester.pumpAndSettle();
+        expect(find.byType(CacheBackupSettings), findsOneWidget);
+        expect(
+            tester
+                .widget<CacheBackupSettings>(find.byType(CacheBackupSettings))
+                .restoreOnly,
+            isTrue);
+        await tester.ensureVisible(find.text(ui('关闭')));
+        await tester.tap(find.text(ui('关闭')));
+        await tester.pumpAndSettle();
+        expect(completions, 0);
         for (var step = 0; step < 3; step++) {
           expect(
               find.byKey(ValueKey('onboarding-preview-$step')), findsOneWidget);

@@ -137,6 +137,14 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 <sub>이미지는 저장소의 기존 리소스를 재사용합니다. 실제 Flutter 위젯을 가상 곡과 격리된 데이터로 렌더링한 것으로, 실시간 오디오나 Windows 네이티브 효과의 검증 결과가 아닙니다. 이미지는 중국어 인터페이스를 사용하지만 앱은 영어, 일본어, 한국어도 지원합니다. 밝은 테마와 어두운 테마, 여러 창 너비, 추가 기능은 <a href="docs/images/README.md">화면 갤러리</a>에서 확인할 수 있습니다.</sub>
 
+### 분류 타일과 시작 안내
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="분류별 보기 설정과 다양한 표지 크기. 가상 데모 데이터 사용" width="1200"></picture>
+
+| 첫 실행 안내: 언어 선택과 재생 조작 체험 | 플레이어 데이터와 로컬 음악 선택 복원 |
+| --- | --- |
+| ![첫 실행 안내: 언어 선택과 재생 조작 체험](docs/images/feature-onboarding-ko.png) | ![플레이어 데이터와 로컬 음악 선택 복원](docs/images/feature-restore-ko.png) |
+
 <a id="quick-start"></a>
 
 ## 시작하기

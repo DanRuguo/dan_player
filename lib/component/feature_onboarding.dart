@@ -1,4 +1,6 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/page/settings_page/cache_backup_settings.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -56,6 +58,24 @@ class _FeatureOnboardingState extends State<FeatureOnboarding> {
               controller: _scroll,
               padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
               child: Column(children: [
+                AppSegmentedControl<UiLanguage>(
+                    key: const ValueKey('onboarding-language'),
+                    value: uiLanguage.value,
+                    options: [
+                      for (final language in UiLanguage.values)
+                        AppSegmentOption(
+                            value: language,
+                            label: language.nativeName,
+                            icon: Icons.language,
+                            key: ValueKey(
+                                ('onboarding-language', language.code))),
+                    ],
+                    onChanged: (language) {
+                      setState(() => uiLanguage.value = language);
+                      AppSettings.instance
+                          .saveSettings(captureWindowSize: false);
+                    }),
+                const SizedBox(height: 20),
                 Text(ui('欢迎使用 Dan Player'),
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineSmall
@@ -123,6 +143,13 @@ class _FeatureOnboardingState extends State<FeatureOnboarding> {
                 runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
+                  OutlinedButton.icon(
+                    key: const ValueKey('onboarding-restore'),
+                    onPressed: () => showOnboardingRestore(context,
+                        onRestored: widget.onComplete),
+                    icon: const Icon(Icons.settings_backup_restore),
+                    label: Text(ui('从备份恢复')),
+                  ),
                   TextButton(
                       onPressed: widget.onComplete, child: Text(ui('跳过引导'))),
                   if (_step > 0)

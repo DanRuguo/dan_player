@@ -140,6 +140,14 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 <sub>图片均复用仓库内的生产控件渲染资源，使用虚构曲目与隔离资料；用于展示界面，不代表实时音频或原生桌面效果测试。更多明暗主题、宽窄窗口和功能示例见 <a href="docs/images/README.md">界面图库</a>。</sub>
 
+### 分类磁贴与首次迁移
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="分类磁贴支持独立视图与多种封面尺寸，使用虚构演示数据" width="1200"></picture>
+
+| 首次引导：选择语言并体验播放控制 | 选择恢复内容：播放器资料与本地音乐 |
+| --- | --- |
+| ![首次引导：选择语言并体验播放控制](docs/images/feature-onboarding-zh.png) | ![选择恢复内容：播放器资料与本地音乐](docs/images/feature-restore-zh.png) |
+
 <a id="quick-start"></a>
 
 ## 开始使用

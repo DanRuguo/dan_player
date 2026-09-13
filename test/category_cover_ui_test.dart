@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:dan_player/component/audio_artwork.dart';
+import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/page/categories_page.dart';
@@ -117,7 +117,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
 
     expect(
-        find.byKey(ValueKey(('category-custom-cover', group.persistenceKey))),
+        find.descendant(
+            of: find.byKey(ValueKey(('category-cover', group.id))),
+            matching: find.byType(ArtworkHandoff)),
         findsOneWidget);
     final coverMenu = find.byKey(ValueKey(('category-cover-menu', group.id)));
     Future<void> openCoverMenu() async {
@@ -231,10 +233,15 @@ void main() {
     final cover = find.byKey(ValueKey(('category-cover', group.id)));
     expect(recovered.coverIdFor(group), id,
         reason: 'an unavailable image must not erase the manual choice');
-    expect(find.descendant(of: cover, matching: find.byType(AudioArtwork)),
+    await tester.pumpAndSettle();
+    expect(
+        find.descendant(of: cover, matching: find.byType(Image)), findsNothing);
+    expect(find.descendant(of: cover, matching: find.byType(Icon)),
         findsOneWidget);
     expect(
-        find.byKey(ValueKey(('category-custom-cover', group.persistenceKey))),
+        find.descendant(
+            of: find.byKey(ValueKey(('category-cover', group.id))),
+            matching: find.byType(ArtworkHandoff)),
         findsOneWidget);
     await tester.runAsync(() async {
       await File(path.join(fixture.path, 'category-covers', id))
@@ -242,13 +249,17 @@ void main() {
       expect(await recovered.reread(group), isA<FileImage>());
     });
     await tester.pump();
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    for (var attempt = 0; attempt < 30; attempt++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
     await tester.pumpAndSettle();
     expect(recovered.coverIdFor(group), id);
-    expect(find.descendant(of: cover, matching: find.byType(ArtworkImage)),
+    expect(find.descendant(of: cover, matching: find.byType(Image)),
         findsOneWidget);
-    expect(find.descendant(of: cover, matching: find.byType(AudioArtwork)),
-        findsNothing);
+    expect(
+        find.descendant(of: cover, matching: find.byType(Icon)), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

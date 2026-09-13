@@ -155,9 +155,10 @@ void main() {
     await tester.pumpAndSettle();
     final before = await _render(tester, boundary, 'menus-before');
     for (final title in ['First', 'Second']) {
-      final card = find
-          .ancestor(of: find.text(title), matching: find.byType(InkWell))
-          .first;
+      final tile = find.ancestor(
+          of: find.text(title), matching: find.byType(CategoryTileMotion));
+      final card =
+          find.descendant(of: tile, matching: find.byType(InkWell)).first;
       final point = tester.getTopLeft(card) + const Offset(45, 45);
       await mouse.down(point);
       await tester.pump(const Duration(milliseconds: 150));
@@ -200,8 +201,27 @@ void main() {
     expect(find.text('Unique Artist'), findsNothing);
     expect(find.text('1 首 · 本地 1'), findsOneWidget);
     expect(tester.widget<TextField>(search).controller!.text, 'Unique');
-    expect(AppPreference.instance.categoryPresentation.shape,
+    expect(
+        AppPreference.instance.categoryPresentation.forCategory('artist').shape,
         CategoryCoverShape.rounded);
+    final album = find.byKey(const ValueKey('category-kind-album'));
+    await tester.tap(album);
+    await tester.pumpAndSettle();
+    var other = tester
+        .widget<CategoryDisplayControls>(find.byType(CategoryDisplayControls));
+    expect(other.value.shape, CategoryCoverShape.circle);
+    expect(other.value.showTitle, isTrue);
+    other.onChanged(other.value
+        .copyWith(sort: CategorySort.count, descending: true, autoFill: false));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('category-kind-artist')));
+    await tester.pumpAndSettle();
+    other = tester
+        .widget<CategoryDisplayControls>(find.byType(CategoryDisplayControls));
+    expect(other.value.shape, CategoryCoverShape.rounded);
+    expect(other.value.showTitle, isFalse);
+    expect(other.value.sort, CategorySort.standard);
+    expect(other.value.autoFill, isTrue);
     expect(tester.takeException(), isNull);
   });
 
@@ -301,6 +321,73 @@ void main() {
     await _render(tester, boundary, 'tiles-autofill-mid');
     await tester.pumpAndSettle();
     await _render(tester, boundary, 'tiles-autofill-end');
+    // Shape changes reuse the decoded image and interpolate the clip itself.
+    final imageFinder =
+        find.descendant(of: first, matching: find.byType(Image));
+    final imageElement = imageFinder.evaluate().single;
+    final stableRect = tester.getRect(imageFinder);
+    for (var cycle = 0; cycle < 3; cycle++) {
+      for (final shape in [
+        CategoryCoverShape.circle,
+        CategoryCoverShape.rounded
+      ]) {
+        update(() => value = value.copyWith(shape: shape, showTitle: false));
+        await tester.pump();
+        for (var frame = 0; frame < 12; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          expect(imageFinder.evaluate().single, same(imageElement),
+              reason:
+                  'Stationary artwork must not remount or show a placeholder');
+          expect(tester.getRect(imageFinder), stableRect);
+          if (cycle == 0 && frame == 3) {
+            final decorated = find.descendant(
+                of: find.byKey(ValueKey(('category-cover', groups[0].id))),
+                matching: find.byType(DecoratedBox));
+            final radius = (tester
+                    .widget<DecoratedBox>(decorated.first)
+                    .decoration as BoxDecoration)
+                .borderRadius! as BorderRadius;
+            expect(radius.topLeft.x, greaterThan(0));
+            expect(radius.topLeft.x, lessThan(stableRect.width / 2));
+            await _render(tester, boundary, 'tiles-shape-${shape.name}-mid');
+          }
+        }
+        await tester.pumpAndSettle();
+      }
+    }
+    update(() => value = value.copyWith(shape: CategoryCoverShape.circle));
+    await tester.pumpAndSettle();
+    for (final visible in [true, false, true, false]) {
+      update(() =>
+          value = value.copyWith(showTitle: visible, showDetails: visible));
+      await tester.pump();
+      for (var frame = 0; frame < 12; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(tester.getRect(imageFinder), stableRect,
+            reason: 'Caption height must not stretch the circular artwork');
+        expect(imageFinder.evaluate().single, same(imageElement));
+      }
+      await tester.pumpAndSettle();
+    }
+    update(() => value = value.copyWith(shape: CategoryCoverShape.rounded));
+    await tester.pumpAndSettle();
+    final resting = await _render(tester, boundary, 'tiles-switch-restored');
+    final hover = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await hover.addPointer(location: const Offset(1050, 750));
+    await hover.moveTo(tester.getCenter(first));
+    await tester.pumpAndSettle();
+    final glowing = await _render(tester, boundary, 'tiles-hover');
+    expect(glowing, isNot(resting));
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    // OverlayPortal keeps a passive transform callback for the tooltip;
+    // it must not request another frame while the pointer stays still.
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    await hover.moveTo(const Offset(1050, 750));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(await _render(tester, boundary, 'tiles-hover-ended'), resting);
+    await hover.removePointer();
     final source = find.byKey(ValueKey(('category-card', groups[1].id)));
     final target = find.byKey(ValueKey(('category-card', groups[0].id)));
     final mouse = await tester.startGesture(tester.getCenter(source),

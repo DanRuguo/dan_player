@@ -48,9 +48,14 @@ Future<CacheBackupResult> exportLibraryCacheBackup({
 
 class CacheBackupSettings extends StatefulWidget {
   const CacheBackupSettings(
-      {super.key, this.service = const CacheBackupService()});
+      {super.key,
+      this.service = const CacheBackupService(),
+      this.restoreOnly = false,
+      this.onRestorePrepared});
 
   final CacheBackupService service;
+  final bool restoreOnly;
+  final VoidCallback? onRestorePrepared;
 
   @override
   State<CacheBackupSettings> createState() => _CacheBackupSettingsState();
@@ -61,6 +66,12 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
   BackupOperation? _operation;
   BackupProgress? _progress;
   DateTime _lastProgress = DateTime.fromMillisecondsSinceEpoch(0);
+
+  @override
+  void dispose() {
+    unawaited(_operation?.cancel());
+    super.dispose();
+  }
 
   BackupOperation _beginOperation() {
     final job = BackupOperation(onProgress: (progress) {
@@ -255,8 +266,8 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
     if (!mounted) return;
     final choice = await showAppDialog<BackupDialogChoice>(
         context: context,
-        builder: (context) =>
-            BackupSelectionDialog(contents: contents, restoring: true));
+        builder: (context) => BackupSelectionDialog(
+            contents: contents, restoring: true, firstUse: widget.restoreOnly));
     if (choice == null || !mounted) return;
 
     final documents = await getApplicationDocumentsDirectory();
@@ -300,6 +311,11 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
                     stagedDirectory: staged));
       });
       restorePrepared = true;
+      if (widget.restoreOnly) {
+        AppSettings.instance.onboardingCompleted = true;
+        await AppSettings.instance.saveSettings(captureWindowSize: false);
+      }
+      widget.onRestorePrepared?.call();
       if (!mounted) return;
       final exitNow = await showAppDialog<bool>(
             context: context,
@@ -400,65 +416,92 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return SettingsSurface(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SettingsHeader(
-            title: ui('播放器备份与恢复'),
-            icon: Symbols.settings_backup_restore,
-            subtitle: ui('音乐、曲库、歌单、统计与设置，自由组合为一个压缩备份；支持密码加密和按需恢复。'),
-          ),
-          const SizedBox(height: 14),
-          if (_busy) ...[
-            LinearProgressIndicator(
-                value: (_progress?.total ?? 0) > 0
-                    ? (_progress!.completed / _progress!.total).clamp(0, 1)
-                    : null),
-            const SizedBox(height: 8),
-            Text(ui(switch (_progress?.phase) {
-              'encrypt' => '正在加密备份…',
-              'decrypt' => '正在解锁并验证备份…',
-              'compress' => '正在压缩文件…',
-              'restore' => '正在验证和恢复文件…',
-              _ => '正在准备备份文件…',
-            })),
-            const SizedBox(height: 8),
-          ],
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 10,
-            runSpacing: 10,
+    return PopScope(
+        canPop: !_busy,
+        child: SettingsSurface(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_busy)
-                TextButton(
-                    onPressed: _operation?.isCancelled == true
-                        ? null
-                        : () {
-                            unawaited(_operation?.cancel());
-                            setState(() {});
-                          },
-                    child: Text(ui(
-                        _operation?.isCancelled == true ? '正在取消…' : '取消操作'))),
-              OutlinedButton.icon(
-                onPressed: _busy ? null : _restore,
-                icon: const Icon(Symbols.settings_backup_restore),
-                label: Text(ui('从备份恢复')),
+              SettingsHeader(
+                title: ui('播放器备份与恢复'),
+                icon: Symbols.settings_backup_restore,
+                subtitle: ui('音乐、曲库、歌单、统计与设置，自由组合为一个压缩备份；支持密码加密和按需恢复。'),
               ),
-              FilledButton.icon(
-                onPressed: _busy ? null : _export,
-                icon: _busy
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Symbols.backup),
-                label: Text(_busy ? ui('正在处理…') : ui('备份到文件')),
+              const SizedBox(height: 14),
+              if (widget.restoreOnly) ...[
+                Text(ui('首次迁移建议选择包含音乐和播放器资料的完整备份，并恢复全部内容；也可以按需选择。')),
+                const SizedBox(height: 14),
+              ],
+              if (_busy) ...[
+                LinearProgressIndicator(
+                    value: (_progress?.total ?? 0) > 0
+                        ? (_progress!.completed / _progress!.total).clamp(0, 1)
+                        : null),
+                const SizedBox(height: 8),
+                Text(ui(switch (_progress?.phase) {
+                  'encrypt' => '正在加密备份…',
+                  'decrypt' => '正在解锁并验证备份…',
+                  'compress' => '正在压缩文件…',
+                  'restore' => '正在验证和恢复文件…',
+                  _ => '正在准备备份文件…',
+                })),
+                const SizedBox(height: 8),
+              ],
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  if (_busy)
+                    TextButton(
+                        onPressed: _operation?.isCancelled == true
+                            ? null
+                            : () {
+                                unawaited(_operation?.cancel());
+                                setState(() {});
+                              },
+                        child: Text(ui(_operation?.isCancelled == true
+                            ? '正在取消…'
+                            : '取消操作'))),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _restore,
+                    icon: const Icon(Symbols.settings_backup_restore),
+                    label: Text(ui('从备份恢复')),
+                  ),
+                  if (widget.restoreOnly)
+                    TextButton(
+                        onPressed: _busy ? null : () => Navigator.pop(context),
+                        child: Text(ui('关闭'))),
+                  if (!widget.restoreOnly)
+                    FilledButton.icon(
+                      onPressed: _busy ? null : _export,
+                      icon: _busy
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Symbols.backup),
+                      label: Text(_busy ? ui('正在处理…') : ui('备份到文件')),
+                    ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
-    );
+        ));
   }
 }
+
+Future<void> showOnboardingRestore(BuildContext context,
+        {VoidCallback? onRestored}) =>
+    showAppDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        scrollable: true,
+        title: AppDialogTitle(ui('从备份恢复')),
+        content: SizedBox(
+            width: 640,
+            child: CacheBackupSettings(
+                restoreOnly: true, onRestorePrepared: onRestored)),
+      ),
+    );

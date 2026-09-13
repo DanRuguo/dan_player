@@ -1,4 +1,5 @@
-import 'package:dan_player/component/category_cover.dart';
+import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/category_pointer_glow.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
@@ -196,8 +197,9 @@ class _CategoryTileGridState extends State<CategoryTileGrid> {
         final line = MediaQuery.textScalerOf(context).scale(14) * 1.3;
         final rowHeight = circle
             ? unit +
-                (widget.presentation.showTitle ? line * 2 + 2 : 0) +
-                (widget.presentation.showDetails ? line * metadataLines + 2 : 0)
+                (p.showTitle || p.showDetails ? 4 : 0) +
+                (p.showTitle ? line * 2 : 0) +
+                (p.showDetails ? line * metadataLines : 0)
             : unit;
         final indexByKey = <Key, int>{
           for (var i = 0; i < _placements.length; i++)
@@ -220,6 +222,7 @@ class _CategoryTileGridState extends State<CategoryTileGrid> {
               return CategoryTileMotion(
                   key: ValueKey(('category-group', group.id)),
                   rect: rect,
+                  scaleSize: false,
                   linear: _linear,
                   child: DragTarget<String>(
                       onWillAcceptWithDetails: (details) =>
@@ -315,7 +318,7 @@ class _CategoryTileState extends State<_CategoryTile> {
   }
 
   Future<ImageProvider?> _load(
-      MusicCategoryGroup group, ArtworkSize target, double? aspect) async {
+      MusicCategoryGroup group, ArtworkSize target) async {
     ImageProvider? provider = await widget.covers.imageFor(group);
     if (provider != null && mounted) {
       provider = ArtworkImageProvider(provider, target,
@@ -325,8 +328,6 @@ class _CategoryTileState extends State<_CategoryTile> {
       if (failed) provider = null;
     }
     provider ??= await group.coverAudio?.artworkForSize(target);
-    if (provider != null && aspect != null)
-      await CoverCaptionCache.resolve(provider, aspect);
     return provider;
   }
 
@@ -342,7 +343,7 @@ class _CategoryTileState extends State<_CategoryTile> {
       final width = constraints.maxWidth, height = constraints.maxHeight;
       final target = ArtworkSize.forDisplay(
           logicalWidth: width,
-          logicalHeight: height,
+          logicalHeight: circle ? width : height,
           devicePixelRatio: MediaQuery.devicePixelRatioOf(context));
       final audio = group.coverAudio;
       final source = (
@@ -357,11 +358,11 @@ class _CategoryTileState extends State<_CategoryTile> {
             ? 0
             : CoverCache.instance.generationFor(audio.localFilePath)
       );
-      final request = (source as Object, target);
+      final aspect = circle ? 1.0 : width / height;
+      final request = (source as Object, target, aspect);
       if (request != _request) {
         _request = request;
-        _artwork =
-            circle ? Future.value(null) : _load(group, target, width / height);
+        _artwork = _load(group, target);
       }
       final placeholder = ColoredBox(
           color: scheme.surfaceContainerHighest,
@@ -407,12 +408,12 @@ class _CategoryTileState extends State<_CategoryTile> {
                       style: const TextStyle(fontSize: 12, height: 1.3)),
               ])));
       Widget visual(ImageProvider? image) =>
-          Stack(fit: StackFit.expand, children: [
+          Stack(fit: StackFit.expand, clipBehavior: Clip.none, children: [
             AnimatedPositioned(
                 duration: duration,
                 curve: AppMotion.standardCurve,
                 left: 0,
-                right: 0,
+                width: width,
                 top: 0,
                 height: circle ? width : height,
                 child: AnimatedContainer(
@@ -422,44 +423,44 @@ class _CategoryTileState extends State<_CategoryTile> {
                     decoration: BoxDecoration(
                         borderRadius:
                             BorderRadius.circular(circle ? width / 2 : 0)),
-                    child: circle
-                        ? CategoryCover(
-                            group: group,
-                            store: widget.covers,
-                            size: width,
-                            placeholder: placeholder)
-                        : image == null
-                            ? placeholder
-                            : Image(
-                                image: image,
-                                fit: BoxFit.cover,
-                                gaplessPlayback: true,
-                                filterQuality: FilterQuality.medium,
-                                errorBuilder: (_, __, ___) => placeholder))),
-            if (p.showTitle || p.showDetails)
-              Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: circle || image == null
-                      ? caption(CoverCaptionColors(
-                          scheme.onSurfaceVariant, Colors.transparent))
-                      : FutureBuilder<CoverCaptionColors>(
-                          initialData:
-                              CoverCaptionCache.cached(image, width / height),
-                          future:
-                              CoverCaptionCache.resolve(image, width / height),
-                          builder: (context, snapshot) => caption(
-                              snapshot.data ?? CoverCaptionColors.fallback))),
+                    child: ArtworkHandoff(
+                      artworkKey: _request!,
+                      loadArtwork: () => _artwork!,
+                      placeholder: placeholder,
+                      imageBuilder: (image) => Image(
+                          image: image,
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                          filterQuality: FilterQuality.medium,
+                          errorBuilder: (_, __, ___) => placeholder),
+                    ))),
+            AnimatedPositioned(
+                duration: duration,
+                curve: AppMotion.standardCurve,
+                left: 0,
+                width: width,
+                top: circle ? width + 4 : height,
+                child: AnimatedSlide(
+                    duration: duration,
+                    curve: AppMotion.standardCurve,
+                    offset: circle ? Offset.zero : const Offset(0, -1),
+                    child: FutureBuilder<CoverCaptionColors>(
+                        initialData: image == null
+                            ? null
+                            : CoverCaptionCache.cached(image, aspect),
+                        future: circle ||
+                                image == null ||
+                                (!p.showTitle && !p.showDetails)
+                            ? null
+                            : CoverCaptionCache.resolve(image, aspect),
+                        builder: (context, snapshot) => caption(
+                            snapshot.data ?? CoverCaptionColors.fallback)))),
           ]);
       final cover = RepaintBoundary(
-          child: circle
-              ? visual(null)
-              : ArtworkHandoff(
-                  artworkKey: _request!,
-                  loadArtwork: () => _artwork!,
-                  placeholder: visual(null),
-                  imageBuilder: visual));
+          child: FutureBuilder<ImageProvider?>(
+        future: _artwork,
+        builder: (_, snapshot) => visual(snapshot.data),
+      ));
       return AppMenuAnchor(
           useRootOverlay: true,
           consumeOutsideTap: true,
@@ -504,7 +505,7 @@ class _CategoryTileState extends State<_CategoryTile> {
                   child: Text(ui('移除自定义封面'))),
           ],
           builder: (anchorContext, controller, _) {
-            final card = Material(
+            final interaction = Material(
                 key: ValueKey(('category-cover-menu', group.id)),
                 color: Colors.transparent,
                 child: AppItemInkWell(
@@ -516,12 +517,21 @@ class _CategoryTileState extends State<_CategoryTile> {
                         controller.open(position: _menuPosition),
                     onLongPress:
                         p.sort == CategorySort.custom ? null : controller.open,
-                    overlayColor: WidgetStateProperty.resolveWith((states) =>
-                        states.contains(WidgetState.pressed)
-                            ? scheme.primary.withValues(alpha: .06)
-                            : Colors.transparent),
-                    child: Opacity(
-                        opacity: widget.dragging ? .35 : 1, child: cover)));
+                    child: const SizedBox.expand()));
+            final card = AppEntrance(
+              identity: ('category-tile', group.persistenceKey),
+              translate: false,
+              initialScale: .9,
+              child: Opacity(
+                  opacity: widget.dragging ? .35 : 1,
+                  child: Stack(
+                      fit: StackFit.expand,
+                      clipBehavior: Clip.none,
+                      children: [
+                        cover,
+                        CategoryPointerGlow(circle: circle, child: interaction),
+                      ])),
+            );
             return Tooltip(
                 message:
                     '${categoryDisplayTitle(group)} · ${categorySourceSummary(group)}',

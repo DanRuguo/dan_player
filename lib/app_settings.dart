@@ -403,6 +403,12 @@ class AppSettings {
       final supportPath = (await getAppDataDir()).path;
       final settingsPath = "$supportPath\\settings.json";
 
+      if (!await File(settingsPath).exists()) {
+        uiLanguage.value = UiLanguage.fromSystem(
+            WidgetsBinding.instance.platformDispatcher.locale);
+        return;
+      }
+
       final settingsStr = File(settingsPath).readAsStringSync();
       Map settingsMap = json.decode(settingsStr);
 
@@ -451,6 +457,26 @@ class AppSettings {
       _readUpdatePreferences(settingsMap);
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
+    } finally {
+      // The marker is installed only by an activated restore transaction.
+      // It also covers old/settings-only backups carrying a false tour flag.
+      try {
+        final directory = await getAppDataDir();
+        final marker = File('${directory.path}/$appDataReadyMarkerName');
+        if (await marker.exists() && await marker.length() < 4096) {
+          final data = json.decode(await marker.readAsString());
+          if (data is Map &&
+              data['format'] == 'dan-player-cache-backup' &&
+              data['restoredAt'] is String &&
+              DateTime.tryParse(data['restoredAt']) != null) {
+            _instance.onboardingCompleted = true;
+          }
+        }
+      } on FileSystemException {
+        // An inaccessible marker must not prevent normal startup.
+      } on FormatException {
+        // Non-restore/invalid markers do not bypass onboarding.
+      }
     }
   }
 

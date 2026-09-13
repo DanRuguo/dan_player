@@ -137,6 +137,14 @@ Playlist view controls, the volume panel, menus, native blur switching and windo
 
 <sub>These existing repository images render production Flutter widgets with fictional tracks and isolated data. They illustrate the interface, not live audio or native desktop-effects testing. The screenshots use the Chinese interface; the app also offers English, Japanese and Korean. See the <a href="docs/images/README.md">full gallery</a> for more light/dark themes, window sizes and feature previews.</sub>
 
+### Category tiles and getting started
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="Independent category views and mixed cover sizes with fictional demo data" width="1200"></picture>
+
+| First-run guide: choose a language and try playback controls | Selective restore of player data and local music |
+| --- | --- |
+| ![First-run guide: choose a language and try playback controls](docs/images/feature-onboarding-en.png) | ![Selective restore of player data and local music](docs/images/feature-restore-en.png) |
+
 <a id="quick-start"></a>
 
 ## Getting started

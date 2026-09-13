@@ -1,4 +1,19 @@
 const Map<String, List<String>> catalogUi2605 = {
+  '首次迁移建议选择包含音乐和播放器资料的完整备份，并恢复全部内容；也可以按需选择。': [
+    'For a first migration, we recommend a full backup containing music and player data, restoring all contents. You can also choose individual items.',
+    '初めての移行には、音楽とプレーヤーのデータを含む完全なバックアップから、すべての内容を復元することをおすすめします。必要な項目だけ選ぶこともできます。',
+    '처음 이전할 때는 음악과 플레이어 데이터가 포함된 전체 백업에서 모든 내용을 복원하는 것이 좋습니다. 필요한 항목만 선택할 수도 있습니다.',
+  ],
+  '未恢复全部音乐：索引不会包含音频本身。原路径不可用的歌曲无法播放，之后可导入音乐或修复路径；已有封面缓存仍可显示。': [
+    'Not all music is selected. The index does not contain audio files. Tracks whose original paths are unavailable cannot play; import music or repair paths later. Existing cached covers can still appear.',
+    'すべての音楽は選択されていません。索引に音声ファイルは含まれません。元のパスが使えない曲は再生できないため、後から音楽の取り込みやパスの修復が必要です。既存の画像キャッシュは表示できます。',
+    '모든 음악이 선택되지는 않았습니다. 인덱스에는 오디오 파일이 포함되지 않습니다. 원래 경로를 사용할 수 없는 곡은 재생할 수 없으므로 나중에 음악을 가져오거나 경로를 수정하세요. 기존 커버 캐시는 표시할 수 있습니다.',
+  ],
+  '未选择完整缓存资源：随其他资料附带的封面仍可恢复；缺少的封面和歌词需要重新读取或获取。': [
+    'Full cached resources are not selected. Covers bundled with other selected data can still be restored; missing covers and lyrics must be read or fetched again.',
+    'キャッシュ全体は選択されていません。他の選択データに付属する画像は復元できますが、不足する画像や歌詞は再読み込みまたは再取得が必要です。',
+    '전체 캐시 리소스가 선택되지 않았습니다. 선택한 다른 데이터에 포함된 커버는 복원할 수 있지만, 없는 커버와 가사는 다시 읽거나 받아야 합니다.',
+  ],
   '歌单视图': ['Playlist view', 'プレイリストの表示', '재생목록 보기'],
   '显示的列': ['Visible columns', '表示する列', '표시할 열'],
   '列宽': ['Column width', '列幅', '열 너비'],

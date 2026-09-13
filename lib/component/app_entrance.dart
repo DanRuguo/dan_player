@@ -92,6 +92,7 @@ class AppEntrance extends StatefulWidget {
     this.identity,
     this.order = 0,
     this.translate = true,
+    this.initialScale = 1,
   });
 
   static const duration = AppMotion.standard;
@@ -109,6 +110,7 @@ class AppEntrance extends StatefulWidget {
   /// the fade while disabling translation. This avoids a visibly off-centre
   /// hit target during responsive layout changes.
   final bool translate;
+  final double initialScale;
 
   @override
   State<AppEntrance> createState() => _AppEntranceState();
@@ -247,7 +249,14 @@ class _AppEntranceState extends State<AppEntrance>
             child: Opacity(
               opacity: _progress.value,
               alwaysIncludeSemantics: true,
-              child: child,
+              child: widget.initialScale == 1
+                  ? child
+                  : Transform.scale(
+                      scale: widget.initialScale +
+                          (1 - widget.initialScale) * _progress.value,
+                      alignment: Alignment.center,
+                      child: child,
+                    ),
             ),
           ),
         ),

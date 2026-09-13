@@ -15,6 +15,11 @@ enum UiLanguage {
   Locale get locale => Locale(code);
   static UiLanguage parse(Object? value) =>
       values.firstWhere((item) => item.code == value, orElse: () => zh);
+
+  /// Only for a fresh profile. Saved/legacy preferences use [parse].
+  static UiLanguage fromSystem(Locale locale) => values.firstWhere(
+      (item) => item.code == locale.languageCode.toLowerCase(),
+      orElse: () => en);
 }
 
 /// Shared in-process source; the player persists it and forwards changes to

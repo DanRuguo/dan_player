@@ -137,6 +137,14 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 <sub>画像はリポジトリ内の既存リソースを使用しています。実際の Flutter ウィジェットを架空の楽曲と隔離データでレンダリングしたもので、リアルタイム音声や Windows ネイティブ効果の動作検証を示すものではありません。掲載画像は中国語 UI ですが、アプリは英語・日本語・韓国語にも対応しています。明暗テーマ、ウィンドウ幅、その他の機能は<a href="docs/images/README.md">画像ギャラリー</a>で確認できます。</sub>
 
+### 分類タイルと初回ガイド
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="分類ごとの表示設定と複数サイズのカバー。架空のデモデータを使用" width="1200"></picture>
+
+| 初回ガイド：言語を選び、再生操作を体験 | プレーヤーデータとローカル音楽の選択復元 |
+| --- | --- |
+| ![初回ガイド：言語を選び、再生操作を体験](docs/images/feature-onboarding-ja.png) | ![プレーヤーデータとローカル音楽の選択復元](docs/images/feature-restore-ja.png) |
+
 <a id="quick-start"></a>
 
 ## 使い始める

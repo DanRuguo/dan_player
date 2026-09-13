@@ -54,8 +54,10 @@ class CategoriesPage extends StatefulWidget {
 
 class _CategoriesPageState extends State<CategoriesPage> {
   final _search = TextEditingController();
-  late CategoryPresentation _presentation =
+  late CategoryPresentation _presentations =
       AppPreference.instance.categoryPresentation;
+  CategoryPresentation get _presentation =>
+      _presentations.forCategory(_kind.name);
   late MusicCategoryKind _kind = widget.initialCategory;
   MusicCategories? _snapshot;
   int _snapshotLibraryRevision = -1;
@@ -192,8 +194,9 @@ class _CategoriesPageState extends State<CategoriesPage> {
   }
 
   void _setPresentation(CategoryPresentation value) {
-    setState(() => _presentation = value);
-    AppPreference.instance.categoryPresentation = value;
+    setState(
+        () => _presentations = _presentations.withCategory(_kind.name, value));
+    AppPreference.instance.categoryPresentation = _presentations;
     unawaited(AppPreference.instance.save());
   }
 
@@ -436,6 +439,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                                       ),
                                     ),
                                   CategoryTileGrid(
+                                    key: ValueKey(_kind),
                                     persistLayout: _query.trim().isEmpty,
                                     onChanged: _setPresentation,
                                     icon: categoryIcon(_kind),

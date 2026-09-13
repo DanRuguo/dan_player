@@ -23,7 +23,17 @@ class CategoryPresentation {
       this.layouts = const {},
       this.sort = CategorySort.standard,
       this.descending = false,
-      this.autoFill = true});
+      this.autoFill = true,
+      this.categories = const {}});
+
+  /// Legacy shared settings remain the initial defaults for each category.
+  final Map<String, CategoryPresentation> categories;
+  CategoryPresentation forCategory(String kind) => categories[kind] ?? this;
+  CategoryPresentation withCategory(String kind, CategoryPresentation value) =>
+      copyWith(categories: {
+        ...categories,
+        kind: value.copyWith(categories: const {})
+      });
 
   final CategoryCoverShape shape;
   final bool showTitle;
@@ -76,6 +86,13 @@ class CategoryPresentation {
               CategorySort.standard,
       descending: map['descending'] == true,
       autoFill: map['autoFill'] != false,
+      categories: {
+        if (map['categories'] is Map)
+          for (final entry in (map['categories'] as Map).entries)
+            if (entry.key is String && entry.value is Map)
+              entry.key: CategoryPresentation.fromMap(
+                  Map.of(entry.value as Map)..remove('categories')),
+      },
     );
   }
   Map<String, Object> toMap() => {
@@ -87,7 +104,10 @@ class CategoryPresentation {
         'layouts': layouts,
         'sort': sort.name,
         'descending': descending,
-        'autoFill': autoFill
+        'autoFill': autoFill,
+        if (categories.isNotEmpty)
+          'categories':
+              categories.map((key, value) => MapEntry(key, value.toMap())),
       };
   CategoryPresentation copyWith(
           {CategoryCoverShape? shape,
@@ -98,7 +118,8 @@ class CategoryPresentation {
           Map<String, List<int>>? layouts,
           CategorySort? sort,
           bool? descending,
-          bool? autoFill}) =>
+          bool? autoFill,
+          Map<String, CategoryPresentation>? categories}) =>
       CategoryPresentation(
           shape: shape ?? this.shape,
           showTitle: showTitle ?? this.showTitle,
@@ -108,5 +129,6 @@ class CategoryPresentation {
           layouts: layouts ?? this.layouts,
           sort: sort ?? this.sort,
           descending: descending ?? this.descending,
-          autoFill: autoFill ?? this.autoFill);
+          autoFill: autoFill ?? this.autoFill,
+          categories: categories ?? this.categories);
 }

@@ -55,6 +55,25 @@ class _CountBuilds extends StatelessWidget {
 }
 
 void main() {
+  testWidgets('compact entrance scales about its center and stops when settled',
+      (tester) async {
+    await tester.pumpWidget(_app(
+        child: const AppEntrance(
+      initialScale: .9,
+      translate: false,
+      child: SizedBox(width: 100, height: 100),
+    )));
+    Transform scale() => tester
+        .widgetList<Transform>(find.byType(Transform))
+        .firstWhere((widget) => widget.alignment == Alignment.center);
+    expect(scale().transform.storage[0], closeTo(.9, .001));
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(scale().transform.storage[0], greaterThan(.9));
+    await tester.pumpAndSettle();
+    expect(scale().transform.storage[0], 1);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    expect(tester.binding.transientCallbackCount, 0);
+  });
   testWidgets(
       'first appearance rises eight pixels without rebuilding its child',
       (tester) async {

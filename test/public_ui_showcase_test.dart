@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/category_presentation.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -95,6 +96,10 @@ final _showcaseCases = [
             '$page-${brightness.name}-${size.width > 640 ? 'wide' : 'narrow'}',
             brightness,
             size),
+  const _ShowcaseCase('tiles', 'feature-category-tiles-light', Brightness.light,
+      Size(1366, 900)),
+  const _ShowcaseCase(
+      'tiles', 'feature-category-tiles-dark', Brightness.dark, Size(1366, 900)),
   const _ShowcaseCase('categories', 'feature-categories-light',
       Brightness.light, Size(1366, 900)),
   const _ShowcaseCase(
@@ -139,10 +144,10 @@ class _DemoLyricWord extends SyncLyricWord {
 }
 
 class _DemoAudio extends Audio {
-  _DemoAudio(int index, this.demoCover)
+  _DemoAudio(int index, this.demoCover, {bool tileDemo = false})
       : super(
-          _titles[index],
-          '虚构演奏组 ${String.fromCharCode(65 + index % 3)}',
+          _titles[index % _titles.length],
+          '虚构演奏组 ${String.fromCharCode(65 + (tileDemo ? index : index % 3))}',
           '虚构专辑 ${index % 3 + 1} · 色彩习作',
           index + 1,
           168 + index * 13,
@@ -693,6 +698,7 @@ void main() {
       final previousLibrary = library.audioCollection;
       final previousFolders = library.folders;
       final previousPref = AppPreference.instance.audiosPagePref;
+      final previousCategory = AppPreference.instance.categoryPresentation;
       final previousFoldersPref = AppPreference.instance.foldersPagePref;
       final previousLanguage = uiLanguage.value;
       final previousLayout = AppSettings.instance.uiLayout.value;
@@ -702,9 +708,24 @@ void main() {
           AppSettings.instance.desktopLyricAppearance.value;
       final previousExperience = AppSettings.instance.experience.value;
       final audios = [
-        for (var index = 0; index < _titles.length; index++)
-          _DemoAudio(index, covers[index % 3]),
+        for (var index = 0;
+            index < (page == 'tiles' ? 24 : _titles.length);
+            index++)
+          _DemoAudio(index, covers[index % 3], tileDemo: page == 'tiles'),
       ];
+      if (page == 'tiles') {
+        final groups = MusicCategories(audios).groups(MusicCategoryKind.artist);
+        AppPreference.instance.categoryPresentation = CategoryPresentation(
+            shape: CategoryCoverShape.rounded,
+            showTitle: true,
+            autoFill: true,
+            sizes: {
+              groups[1].persistenceKey: CategoryTileSize.large,
+              groups[5].persistenceKey: CategoryTileSize.wide,
+              groups[8].persistenceKey: CategoryTileSize.tall,
+              groups[12].persistenceKey: CategoryTileSize.large,
+            });
+      }
       library.audioCollection = audios;
       library.folders = [
         AudioFolder(
@@ -744,6 +765,7 @@ void main() {
         library.audioCollection = previousLibrary;
         library.folders = previousFolders;
         AppPreference.instance.audiosPagePref = previousPref;
+        AppPreference.instance.categoryPresentation = previousCategory;
         AppPreference.instance.foldersPagePref = previousFoldersPref;
         uiLanguage.value = previousLanguage;
         AppSettings.instance.uiLayout.value = previousLayout;
@@ -769,7 +791,7 @@ void main() {
       final route = switch (page) {
         'library' => '/audios',
         'settings' || 'desktop' || 'appearance' || 'theme' => '/settings',
-        'categories' => '/categories',
+        'categories' || 'tiles' => '/categories',
         'folders' => '/folders',
         'statistics' => '/statistics',
         'search' => '/search/result',
@@ -852,9 +874,11 @@ void main() {
                             'appearance' ||
                             'theme' =>
                               const SettingsPage(),
-                            'categories' => CategoriesPage(
+                            'categories' || 'tiles' => CategoriesPage(
                                 audios: audios,
-                                initialCategory: MusicCategoryKind.bitrate,
+                                initialCategory: page == 'tiles'
+                                    ? MusicCategoryKind.artist
+                                    : MusicCategoryKind.bitrate,
                                 classificationScanner: classificationScanner,
                                 onOpenGroup: (_) {}),
                             'folders' => const FoldersPage(),
@@ -996,9 +1020,10 @@ void main() {
       } else if (page == 'playlists') {
         expect(find.byType(PlaylistBrowser), findsOneWidget);
         expect(find.text('演示歌单 1 · 色彩练习'), findsOneWidget);
-      } else if (page == 'categories') {
+      } else if (page == 'categories' || page == 'tiles') {
         expect(find.byType(CategoriesPage), findsOneWidget);
-        expect(find.text('257–320 kbps'), findsOneWidget);
+        if (page == 'categories')
+          expect(find.text('257–320 kbps'), findsOneWidget);
         expect(classificationReads, 0,
             reason: 'Complete fictional tags must not request lyric files.');
       } else if (page == 'mini') {

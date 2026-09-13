@@ -43,9 +43,13 @@ String backupByteLabel(int bytes) {
 /// everything that happened to be in its archive.
 class BackupSelectionDialog extends StatefulWidget {
   const BackupSelectionDialog(
-      {super.key, required this.contents, this.restoring = false});
+      {super.key,
+      required this.contents,
+      this.restoring = false,
+      this.firstUse = false});
   final BackupContents contents;
   final bool restoring;
+  final bool firstUse;
   @override
   State<BackupSelectionDialog> createState() => _BackupSelectionDialogState();
 }
@@ -134,6 +138,17 @@ class _BackupSelectionDialogState extends State<BackupSelectionDialog> {
                     ? '只恢复勾选的内容，其余当前数据保留。歌曲存入目标位置的新文件夹，不覆盖原音乐。'
                     : '音乐与播放器数据可分别选择，压缩保存为一个 .bak 文件。')),
                 const SizedBox(height: 16),
+                if (widget.restoring) ...[
+                  if (widget.firstUse)
+                    Text(ui('首次迁移建议选择包含音乐和播放器资料的完整备份，并恢复全部内容；也可以按需选择。')),
+                  if (_folders.isEmpty ||
+                      _folders.length < widget.contents.musicFolders.length)
+                    Text(ui(
+                        '未恢复全部音乐：索引不会包含音频本身。原路径不可用的歌曲无法播放，之后可导入音乐或修复路径；已有封面缓存仍可显示。')),
+                  if (!_components.contains(BackupComponent.resources))
+                    Text(ui('未选择完整缓存资源：随其他资料附带的封面仍可恢复；缺少的封面和歌词需要重新读取或获取。')),
+                  const SizedBox(height: 12),
+                ],
                 AppSegmentedControl<_BackupScope>(
                     value: _scope,
                     semanticLabel: ui('快速选择'),

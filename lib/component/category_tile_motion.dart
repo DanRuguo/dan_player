@@ -9,10 +9,12 @@ class CategoryTileMotion extends StatefulWidget {
       {super.key,
       required this.rect,
       required this.child,
-      this.linear = false});
+      this.linear = false,
+      this.scaleSize = true});
   final Rect rect;
   final Widget child;
   final bool linear;
+  final bool scaleSize;
   @override
   State<CategoryTileMotion> createState() => _CategoryTileMotionState();
 }
@@ -62,8 +64,11 @@ class _CategoryTileMotionState extends State<CategoryTileMotion>
             transform: Matrix4.identity()
               ..translateByDouble(rect.left - widget.rect.left,
                   rect.top - widget.rect.top, 0, 1)
-              ..scaleByDouble(rect.width / widget.rect.width,
-                  rect.height / widget.rect.height, 1, 1),
+              ..scaleByDouble(
+                  widget.scaleSize ? rect.width / widget.rect.width : 1,
+                  widget.scaleSize ? rect.height / widget.rect.height : 1,
+                  1,
+                  1),
             alignment: Alignment.topLeft,
             child: child);
       });

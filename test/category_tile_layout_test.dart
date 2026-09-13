@@ -7,6 +7,43 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+      'category choices remain independent after persistence and legacy migration',
+      () {
+    var state =
+        CategoryPresentation.fromMap({'shape': 'rounded', 'showDetails': true});
+    for (final kind in [
+      'artist',
+      'album',
+      'bitrate',
+      'duration',
+      'language',
+      'format',
+      'source'
+    ]) {
+      expect(state.forCategory(kind).shape, CategoryCoverShape.rounded);
+    }
+    state = state.withCategory(
+        'artist',
+        state.forCategory('artist').copyWith(
+            shape: CategoryCoverShape.circle,
+            showTitle: false,
+            showDetails: false,
+            sort: CategorySort.count,
+            descending: true,
+            autoFill: false));
+    state = CategoryPresentation.fromMap(state.toMap());
+    final artist = state.forCategory('artist');
+    expect(artist.shape, CategoryCoverShape.circle);
+    expect(artist.showTitle, isFalse);
+    expect(artist.showDetails, isFalse);
+    expect(artist.sort, CategorySort.count);
+    expect(artist.descending, isTrue);
+    expect(artist.autoFill, isFalse);
+    expect(state.forCategory('album').shape, CategoryCoverShape.rounded);
+    expect(state.forCategory('album').showDetails, isTrue);
+    expect(state.forCategory('album').autoFill, isTrue);
+  });
   testWidgets('tile motion stops scheduling frames after settling',
       (tester) async {
     var rect = const Rect.fromLTWH(0, 0, 100, 100);
