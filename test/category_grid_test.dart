@@ -1,4 +1,5 @@
-import 'package:dan_player/component/audio_artwork.dart';
+import 'package:dan_player/component/artwork_handoff.dart';
+import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/page/categories_page.dart';
@@ -38,8 +39,13 @@ Widget _host(Widget child) => MaterialApp(
       home: Scaffold(body: child),
     );
 
-Finder _artwork(_CardAudio audio) => find.byWidgetPredicate(
-    (widget) => widget is AudioArtwork && identical(widget.audio, audio));
+Finder _artwork(_CardAudio audio) {
+  final group =
+      MusicCategories([audio]).groups(MusicCategoryKind.artist).single;
+  return find.descendant(
+      of: find.byKey(ValueKey(('category-cover', group.id))),
+      matching: find.byType(ArtworkHandoff));
+}
 
 void main() {
   tearDown(() => expect(PlayService.isInitialized, isFalse));
@@ -60,21 +66,31 @@ void main() {
       await tester.pumpAndSettle();
       final cover = find.byKey(ValueKey(('category-cover', expected.id)));
       final rect = tester.getRect(cover);
-      expect(tester.widget<ClipRRect>(cover).borderRadius,
-          BorderRadius.circular(rect.width / 2));
-      expect(rect.width, rect.height);
-      expect(rect.width, inInclusiveRange(80, 112));
+      final decoration =
+          tester.widget<AnimatedContainer>(cover).decoration as BoxDecoration;
+      final radius = decoration.borderRadius! as BorderRadius;
+      for (final corner in [
+        radius.topLeft,
+        radius.topRight,
+        radius.bottomLeft,
+        radius.bottomRight
+      ]) {
+        expect(corner.x, closeTo(rect.width / 2, .001));
+        expect(corner.y, closeTo(rect.height / 2, .001));
+      }
+      expect(rect.width, closeTo(rect.height, .001));
+      expect(rect.width, inInclusiveRange(116, 160));
       final title = find.descendant(
-          of: find.byKey(ValueKey(('category-card', expected.id))),
+          of: find.byKey(ValueKey(('category-group', expected.id))),
           matching: find.text(expected.title));
       expect(
-          tester.getTopLeft(title).dy, greaterThanOrEqualTo(rect.bottom + 7.9));
+          tester.getTopLeft(title).dy, greaterThanOrEqualTo(rect.bottom + 3.9));
       expect(song.requests.single.width, greaterThanOrEqualTo(rect.width * 2));
       expect(
           song.requests.single.height, greaterThanOrEqualTo(rect.height * 2));
-      await tester.tap(cover);
+      await tester.tapAt(tester.getCenter(cover));
       await tester.pumpAndSettle();
-      await tester.tap(title);
+      await tester.tapAt(tester.getCenter(title));
       await tester.pumpAndSettle();
       expect(opened, hasLength(2));
       expect(opened.every((group) => group.kind == kind), isTrue);
@@ -93,8 +109,16 @@ void main() {
       onOpenGroup: (_) => opened++,
     )));
     await tester.pumpAndSettle();
-    Focus.of(tester.element(find.text('Keyboard artist'))).requestFocus();
-    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('category-search')));
+    bool cardFocused() =>
+        FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<AppItemInkWell>() !=
+        null;
+    for (var i = 0; i < 30 && !cardFocused(); i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+    }
+    expect(cardFocused(), isTrue, reason: 'The cover must be reachable by Tab');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(opened, 1);
