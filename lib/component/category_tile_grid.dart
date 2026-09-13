@@ -532,8 +532,8 @@ class _CategoryTileState extends State<_CategoryTile> {
                         CategoryPointerGlow(circle: circle, child: interaction),
                       ])),
             );
-            return Tooltip(
-                message:
+            return Semantics(
+                label:
                     '${categoryDisplayTitle(group)} · ${categorySourceSummary(group)}',
                 child: AdaptiveGridDragSource<String>(
                     dragKey: ValueKey(('category-drag', group.id)),

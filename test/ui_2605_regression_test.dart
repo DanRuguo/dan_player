@@ -303,6 +303,10 @@ void main() {
     await _render(tester, boundary, 'tiles-mixed-no-caption-background');
     final first = find.byKey(ValueKey(('category-group', groups[0].id)));
     final third = find.byKey(ValueKey(('category-group', groups[2].id)));
+    expect(find.descendant(of: first, matching: find.byType(Tooltip)),
+        findsNothing,
+        reason:
+            'Category covers retain accessible labels without hover popups');
     final oldThird = tester.widget<CategoryTileMotion>(third).rect;
     update(() => value = value.copyWith(sizes: {
           ...value.sizes,
@@ -380,8 +384,7 @@ void main() {
     expect(glowing, isNot(resting));
     await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
-    // OverlayPortal keeps a passive transform callback for the tooltip;
-    // it must not request another frame while the pointer stays still.
+    // Pointer feedback must not request another frame while the pointer stays still.
     expect(tester.binding.hasScheduledFrame, isFalse);
     await hover.moveTo(const Offset(1050, 750));
     await tester.pump(const Duration(seconds: 1));
