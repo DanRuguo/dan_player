@@ -2,6 +2,7 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_sort_button.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
+import 'package:dan_player/playlist_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,6 +25,8 @@ class _Fixture {
   bool canPlay = true;
   bool editingEnabled = true;
   bool gridView = false;
+  PlaylistViewMode? view;
+  bool songBackground = false;
   PlaylistSortMode sortMode = PlaylistSortMode.custom;
   bool addSongs = true;
   bool management = true;
@@ -44,6 +47,9 @@ class _Fixture {
         editingEnabled: editingEnabled,
         sortMode: sortMode,
         gridView: gridView,
+        view: view,
+        onToggleSongBackground:
+            songBackground ? () => calls.add('songBackground') : null,
         onCreate: () => calls.add('create'),
         onAddSongs: addSongs ? () => calls.add('addSongs') : null,
         onStartSelection: () => calls.add('startSelection'),
@@ -382,6 +388,28 @@ void main() {
       expect(fixture.calls.last, event);
     }
     expect(fixture.calls.length, 3);
+  });
+
+  testWidgets('song background is only available inside a circular playlist',
+      (tester) async {
+    final fixture = _Fixture()..songBackground = true;
+    for (final root in [true, false]) {
+      for (final view in PlaylistViewMode.values) {
+        fixture
+          ..isRoot = root
+          ..view = view;
+        await tester.pumpWidget(_app(fixture));
+        await tester.pumpAndSettle();
+        await _open(tester, 'playlist-current-settings');
+        expect(
+            find.text('歌曲底色：主题配色'),
+            !root && view == PlaylistViewMode.circular
+                ? findsOneWidget
+                : findsNothing);
+        await tester.tapAt(const Offset(10, 590));
+        await tester.pumpAndSettle();
+      }
+    }
   });
 
   testWidgets('root sort excludes track-only modes and reports current choice',

@@ -322,6 +322,19 @@ void main() {
         await tester.tap(find.byTooltip(ui('更多')));
         await tester.pumpAndSettle();
         expect(find.text(ui('显示歌曲标题')), findsOneWidget);
+        await tester.tapAt(const Offset(10, 740));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('playlist-breadcrumb-root')));
+        await _decode(tester);
+        toolbar().onViewChanged!(PlaylistViewMode.circular);
+        await _decode(tester);
+        await tester.tap(find.byTooltip(ui('更多')));
+        await tester.pumpAndSettle();
+        expect(find.text(ui('歌曲底色：主题配色')), findsNothing);
+        expect(find.text(ui('歌曲底色：封面配色')), findsNothing);
+        expect(find.text(ui('歌单视图')), findsNothing);
+        await tester.runAsync(() =>
+            _render(tester, boundary, 'root-circle-menu-${language.name}-$dark'));
         expect(tester.takeException(), isNull);
       });
       testWidgets(

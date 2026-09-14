@@ -260,7 +260,8 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
                   ? Icons.visibility_off_outlined
                   : Icons.visibility_outlined,
               onSelected: widget.onToggleSongTitles),
-        if (widget.view == PlaylistViewMode.circular &&
+        if (!widget.isRoot &&
+            widget.view == PlaylistViewMode.circular &&
             widget.onToggleSongBackground != null)
           _ToolbarMenuItem(
               value: _PlaylistToolbarAction.songBackground,
