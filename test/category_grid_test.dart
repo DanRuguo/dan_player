@@ -130,7 +130,8 @@ void main() {
     _viewport(tester);
     final alpha = _CardAudio('First', 'Alpha');
     final beta = _CardAudio('Second', 'Beta');
-    await tester.pumpWidget(_host(CategoriesPage(audios: [alpha, beta])));
+    await tester.pumpWidget(_host(CategoriesPage(
+        initialCategory: MusicCategoryKind.artist, audios: [alpha, beta])));
     await tester.pumpAndSettle();
     final state = tester.state(_artwork(beta));
     final requests = beta.requests.length;
@@ -148,7 +149,8 @@ void main() {
     _viewport(tester);
     final songs =
         List.generate(1000, (i) => _CardAudio('Song $i', 'Artist $i'));
-    await tester.pumpWidget(_host(CategoriesPage(audios: songs)));
+    await tester.pumpWidget(_host(CategoriesPage(
+        initialCategory: MusicCategoryKind.artist, audios: songs)));
     await tester.pumpAndSettle();
     expect(find.byType(SliverGrid), findsOneWidget);
     expect(
@@ -160,7 +162,8 @@ void main() {
       (tester) async {
     _viewport(tester);
     final song = _CardAudio('Fixture', 'Artist');
-    final page = CategoriesPage(audios: [song]);
+    final page = CategoriesPage(
+        initialCategory: MusicCategoryKind.artist, audios: [song]);
     await tester.pumpWidget(_host(page));
     await tester.pumpAndSettle();
     final state = tester.state(_artwork(song));

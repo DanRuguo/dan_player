@@ -178,6 +178,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(ChoiceChip), findsNWidgets(8));
       expect(
+          tester
+              .widget<ChoiceChip>(
+                  find.byKey(const ValueKey('category-kind-album')))
+              .selected,
+          isTrue);
+      expect(
           find.byKey(const ValueKey('category-kind-composer')), findsNothing);
       expect(
           find.byKey(const ValueKey('category-kind-bitrate')), findsOneWidget);
@@ -216,10 +222,10 @@ void main() {
     await tester.tap(source);
     await tester.pumpAndSettle();
     expect(tester.widget<ChoiceChip>(source).selected, isTrue);
-    await _choose(tester, MusicCategoryKind.artist);
+    await _choose(tester, MusicCategoryKind.album);
     final artistLabel = find.descendant(
-        of: find.byKey(const ValueKey('category-kind-artist')),
-        matching: find.text('艺术家'));
+        of: find.byKey(const ValueKey('category-kind-album')),
+        matching: find.text('专辑'));
     Focus.of(tester.element(artistLabel)).requestFocus();
     await tester.pump();
     for (var i = 0; i < MusicCategoryKind.browsableValues.length - 1; i++) {

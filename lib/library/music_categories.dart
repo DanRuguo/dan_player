@@ -29,8 +29,8 @@ enum MusicCategoryKind {
   /// Public category rail order. Keep this explicit so adding a compatibility
   /// projection cannot accidentally expose it in the interface.
   static const browsableValues = [
-    artist,
     album,
+    artist,
     bitrate,
     duration,
     language,
@@ -39,7 +39,8 @@ enum MusicCategoryKind {
   ];
 
   static MusicCategoryKind fromName(String? name) =>
-      values.where((kind) => kind.name == name).firstOrNull ?? artist;
+      values.where((kind) => kind.name == name).firstOrNull ??
+      browsableValues.first;
 }
 
 /// An immutable browsing projection. The Audio references are the originals;

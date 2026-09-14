@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_trim.dart';
+import 'package:dan_player/library/ffmpeg_runtime.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
@@ -72,11 +73,16 @@ List<String> trimPreviewArguments(String file, double start, double duration,
 Future<TrimPreviewProcess> _launchPreview(
     String file, double start, double duration) async {
   final executable = await audioToolPath('ffplay');
-  return _NativePreviewProcess(await Process.start(
-      executable,
-      trimPreviewArguments(file, start, duration,
-          volume: AppPreference.instance.playbackPref.volumeDsp),
-      runInShell: false));
+  try {
+    return _NativePreviewProcess(await Process.start(
+        executable,
+        trimPreviewArguments(file, start, duration,
+            volume: AppPreference.instance.playbackPref.volumeDsp),
+        runInShell: false));
+  } on ProcessException {
+    FfmpegRuntime.shared.invalidate();
+    throw const AudioTrimException('tools', '请先安装或修复裁剪组件');
+  }
 }
 
 class _ExistingMainPlayback extends TrimMainPlayback {
@@ -235,6 +241,10 @@ class ProcessAudioTrimPreview extends AudioTrimPreview {
     _playing = false;
     if (code != 0) {
       _error = '试听失败，请检查音频输出设备是否被独占，或稍后重试。';
+      if (code < 0 || code > 255) {
+        FfmpegRuntime.shared.invalidate();
+        _error = '请先安装或修复裁剪组件';
+      }
     }
     _releaseMain();
     _notify();

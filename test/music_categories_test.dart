@@ -9,6 +9,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/music_category_fixtures.dart';
 
 void main() {
+  test(
+      'category home follows the first public tab without changing saved kinds',
+      () {
+    expect(MusicCategoryKind.fromName(null),
+        MusicCategoryKind.browsableValues.first);
+    expect(MusicCategoryKind.fromName('invalid'), MusicCategoryKind.album);
+    expect(MusicCategoryKind.fromName('artist'), MusicCategoryKind.artist);
+    expect(MusicCategoryKind.artist.index, 0);
+  });
   test('empty libraries expose seven browsable classification kinds', () {
     final categories = MusicCategories([]);
     expect(MusicCategoryKind.browsableValues, hasLength(7));

@@ -1,4 +1,5 @@
 import 'package:dan_player/component/artwork_handoff.dart';
+import 'package:dan_player/component/category_cover_flight.dart';
 import 'package:dan_player/component/detail_header_backdrop.dart';
 
 import 'package:dan_player/app_preference.dart';
@@ -39,6 +40,7 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
     required this.pref,
     required this.primaryContent,
     required this.primaryPic,
+    this.coverFlightTag,
     required this.backgroundPic,
     required this.picShape,
     required this.title,
@@ -69,6 +71,7 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
 
   /// 用来展示内容图片，较高清
   final Future<ImageProvider?> primaryPic;
+  final Object? coverFlightTag;
 
   /// 当作毛玻璃的背景，较模糊
   final Future<ImageProvider?> backgroundPic;
@@ -301,6 +304,7 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                               child: _UniDetailPageHeader(
                                 key: ValueKey(widget.primaryContent),
                                 pic: widget.primaryPic,
+                                coverFlightTag: widget.coverFlightTag,
                                 backgroundPic: widget.backgroundPic,
                                 picShape: widget.picShape,
                                 title: widget.title,
@@ -528,6 +532,7 @@ class _UniDetailPageHeader extends StatelessWidget {
   const _UniDetailPageHeader({
     super.key,
     required this.pic,
+    this.coverFlightTag,
     required this.backgroundPic,
     required this.picShape,
     required this.title,
@@ -538,6 +543,7 @@ class _UniDetailPageHeader extends StatelessWidget {
   });
 
   final Future<ImageProvider?> pic;
+  final Object? coverFlightTag;
   final Future<ImageProvider?> backgroundPic;
   final PicShape picShape;
 
@@ -604,27 +610,33 @@ class _UniDetailPageHeader extends StatelessWidget {
       final cover = SizedBox.square(
         key: const ValueKey('uni-detail-cover'),
         dimension: coverSize,
-        child: ArtworkHandoff(
-          artworkKey: pic,
-          loadArtwork: () => pic,
-          placeholder: Icon(Symbols.broken_image,
-              size: coverSize, color: scheme.onSurface),
-          loading: const Center(child: CircularProgressIndicator()),
-          imageBuilder: (provider) {
-            final image = Image(
-                image: provider,
-                gaplessPlayback: true,
-                width: coverSize,
-                height: coverSize,
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.high,
-                errorBuilder: (_, __, ___) => Icon(Symbols.broken_image,
-                    size: coverSize, color: scheme.onSurface));
-            return picShape == PicShape.oval
-                ? ClipOval(child: image)
-                : ClipRRect(borderRadius: AppShape.surfaceRadius, child: image);
-          },
-        ),
+        child: CategoryCoverFlight(
+            tag: coverFlightTag,
+            radius: picShape == PicShape.oval
+                ? coverSize / 2
+                : AppShape.surfaceRadius.topLeft.x,
+            child: ArtworkHandoff(
+              artworkKey: pic,
+              loadArtwork: () => pic,
+              placeholder: Icon(Symbols.broken_image,
+                  size: coverSize, color: scheme.onSurface),
+              loading: const Center(child: CircularProgressIndicator()),
+              imageBuilder: (provider) {
+                final image = Image(
+                    image: provider,
+                    gaplessPlayback: true,
+                    width: coverSize,
+                    height: coverSize,
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.high,
+                    errorBuilder: (_, __, ___) => Icon(Symbols.broken_image,
+                        size: coverSize, color: scheme.onSurface));
+                return picShape == PicShape.oval
+                    ? ClipOval(child: image)
+                    : ClipRRect(
+                        borderRadius: AppShape.surfaceRadius, child: image);
+              },
+            )),
       );
       return ClipRRect(
         borderRadius: AppShape.surfaceRadius,
@@ -634,6 +646,7 @@ class _UniDetailPageHeader extends StatelessWidget {
                 child: DetailHeaderBackdrop(artwork: backgroundPic)),
             AppEntrance(
               identity: 'detail-header',
+              translate: coverFlightTag == null,
               child: Padding(
                 padding: EdgeInsets.all(wide ? 16 : 12),
                 child: wide

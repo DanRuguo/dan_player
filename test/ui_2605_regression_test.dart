@@ -144,7 +144,7 @@ void main() {
     final boundary = GlobalKey();
     await tester.pumpWidget(_app(RepaintBoundary(
         key: boundary,
-        child: CategoriesPage(audios: [
+        child: CategoriesPage(initialCategory: MusicCategoryKind.artist, audios: [
           CategoryTestAudio('One', artist: 'First'),
           CategoryTestAudio('Two', artist: 'Second'),
         ], onOpenGroup: (_) {}))));
@@ -182,7 +182,7 @@ void main() {
     final prior = AppPreference.instance.categoryPresentation;
     AppPreference.instance.categoryPresentation = const CategoryPresentation();
     addTearDown(() => AppPreference.instance.categoryPresentation = prior);
-    await tester.pumpWidget(_app(CategoriesPage(audios: [
+    await tester.pumpWidget(_app(CategoriesPage(initialCategory: MusicCategoryKind.artist, audios: [
       CategoryTestAudio('Song', artist: 'Unique Artist', album: 'Album'),
     ], onOpenGroup: (_) {})));
     await tester.pumpAndSettle();

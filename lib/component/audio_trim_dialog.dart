@@ -4,6 +4,8 @@ import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/component/ffmpeg_setup_card.dart';
+import 'package:dan_player/library/ffmpeg_runtime.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_trim.dart';
 import 'package:dan_player/library/audio_trim_preview.dart';
@@ -101,6 +103,7 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
   String? _error;
   String? _rangeError;
   bool _inspecting = true;
+  bool _needsTools = false;
   bool _busy = false;
   bool _closing = false;
   bool _overwrite = false;
@@ -116,7 +119,14 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
   }
 
   void _previewChanged() {
-    if (mounted) setState(() {});
+    if (mounted)
+      setState(() {
+        if (_preview.error != null &&
+            !FfmpegRuntime.shared.ready &&
+            widget.preview == null) {
+          _needsTools = true;
+        }
+      });
   }
 
   Future<void> _inspect() async {
@@ -126,6 +136,9 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
     });
     final cancellation = _inspectionCancellation = AudioTrimCancellation();
     try {
+      if (widget.inspect == null && !await FfmpegRuntime.shared.ensure()) {
+        throw const AudioTrimException('tools', '请先安装或修复裁剪组件');
+      }
       final info = await (widget.inspect?.call(widget.audio) ??
           inspectAudioForTrim(widget.audio, cancellation: cancellation));
       if (!mounted) return;
@@ -142,7 +155,10 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
       });
     } catch (error) {
       if (mounted) {
-        setState(() => _error = audioTrimErrorMessage(error));
+        setState(() {
+          _error = audioTrimErrorMessage(error);
+          _needsTools = error is AudioTrimException && error.code == 'tools';
+        });
       }
     } finally {
       if (identical(_inspectionCancellation, cancellation)) {
@@ -211,6 +227,7 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
   }
 
   bool get _canSave =>
+      !_needsTools &&
       !_busy &&
       !_closing &&
       !_inspecting &&
@@ -264,7 +281,10 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
       }
     } catch (error) {
       if (mounted) {
-        setState(() => _error = audioTrimErrorMessage(error));
+        setState(() {
+          _error = audioTrimErrorMessage(error);
+          _needsTools = error is AudioTrimException && error.code == 'tools';
+        });
       }
     } finally {
       _cancellation = null;
@@ -556,7 +576,15 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
                               padding: EdgeInsets.all(24),
                               child:
                                   Center(child: CircularProgressIndicator())),
-                        if (info != null) ...[
+                        if (_needsTools)
+                          FfmpegSetupCard(onReady: () {
+                            setState(() {
+                              _needsTools = false;
+                              _error = null;
+                            });
+                            if (_info == null) unawaited(_inspect());
+                          }),
+                        if (info != null && !_needsTools) ...[
                           _rangeCard(info),
                           const SizedBox(height: 12),
                           _destinationCard(info),
@@ -571,7 +599,7 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
                                       color: Theme.of(context)
                                           .colorScheme
                                           .error))),
-                        if (!_inspecting && info == null)
+                        if (!_inspecting && info == null && !_needsTools)
                           TextButton(
                               onPressed: _inspect, child: Text(ui('重试'))),
                       ],

@@ -13,6 +13,7 @@ import 'package:dan_player/component/playlist_cover_picker.dart';
 import 'package:dan_player/component/playlist_rectangle_tile.dart';
 import 'package:dan_player/component/playlist_tile_grid.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
+import 'package:dan_player/component/playlist_song_surface.dart';
 import 'package:dan_player/component/category_tile_motion.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/playlist.dart';
@@ -293,6 +294,18 @@ void main() {
             toolbar().onToggleSongBackground!();
             await _decode(tester);
           }
+          for (final element in find.byType(PlaylistSongSurface).evaluate()) {
+            final descendant = find.descendant(
+                of: find.byWidget(element.widget),
+                matching: find.byType(Theme));
+            expect(
+                tester
+                    .widget<Theme>(descendant.first)
+                    .data
+                    .colorScheme
+                    .brightness,
+                dark ? Brightness.dark : Brightness.light);
+          }
           await tester.tap(find.byTooltip(ui('更多')));
           await tester.pumpAndSettle();
           expect(find.text(ui(mode == 'artwork' ? '歌曲底色：封面配色' : '歌曲底色：主题配色')),
@@ -324,7 +337,8 @@ void main() {
         expect(find.text(ui('显示歌曲标题')), findsOneWidget);
         await tester.tapAt(const Offset(10, 740));
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('playlist-breadcrumb-root')));
+        await tester
+            .tap(find.byKey(const ValueKey('playlist-breadcrumb-root')));
         await _decode(tester);
         toolbar().onViewChanged!(PlaylistViewMode.circular);
         await _decode(tester);
@@ -333,8 +347,8 @@ void main() {
         expect(find.text(ui('歌曲底色：主题配色')), findsNothing);
         expect(find.text(ui('歌曲底色：封面配色')), findsNothing);
         expect(find.text(ui('歌单视图')), findsNothing);
-        await tester.runAsync(() =>
-            _render(tester, boundary, 'root-circle-menu-${language.name}-$dark'));
+        await tester.runAsync(() => _render(
+            tester, boundary, 'root-circle-menu-${language.name}-$dark'));
         expect(tester.takeException(), isNull);
       });
       testWidgets(

@@ -103,6 +103,7 @@ void main() {
       theme: ThemeData(platform: TargetPlatform.windows),
       home: Scaffold(
         body: CategoriesPage(
+          initialCategory: MusicCategoryKind.artist,
           audios: [audio],
           coverStore: covers,
           pickCover: () {
@@ -222,6 +223,7 @@ void main() {
       theme: ThemeData(platform: TargetPlatform.windows),
       home: Scaffold(
         body: CategoriesPage(
+          initialCategory: MusicCategoryKind.artist,
           audios: [audio],
           coverStore: recovered,
           onOpenGroup: (_) {},

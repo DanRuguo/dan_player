@@ -49,7 +49,7 @@ void main() {
 
       final title = tester.getRect(find.text(ui('分类')));
       final subtitle = tester.getRect(find.text(ui('{0} 首歌曲 · {1} {2}',
-          [0, 0, ui(MusicCategoryKind.artist.countLabel)])));
+          [0, 0, ui(MusicCategoryKind.album.countLabel)])));
       final selector =
           tester.getRect(find.byKey(const ValueKey('category-kind-scroll')));
       final identityRight = math.max(title.right, subtitle.right);

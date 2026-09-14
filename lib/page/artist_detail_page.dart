@@ -5,6 +5,7 @@ import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/page/uni_detail_page.dart';
 import 'package:dan_player/page/categories_page.dart';
 import 'package:dan_player/library/music_categories.dart';
+import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -93,9 +94,15 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     return UniDetailPage<String, Audio, MusicCategoryGroup>(
       pref: AppPreference.instance.artistDetailPagePref,
       primaryContent: current.id,
-      primaryPic: current.audios.first.coverForDisplay(
-          size: 200, devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
-      backgroundPic: current.audios.first.cover,
+      coverFlightTag: ('category-detail-cover', current.persistenceKey),
+      primaryPic: CategoryCoverStore.shared.hasCover(current)
+          ? CategoryCoverStore.shared.imageFor(current)
+          : current.coverAudio!.coverForDisplay(
+              size: 200,
+              devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
+      backgroundPic: CategoryCoverStore.shared.hasCover(current)
+          ? CategoryCoverStore.shared.imageFor(current)
+          : current.coverAudio!.cover,
       picShape: PicShape.oval,
       title: current.title,
       subtitle: ui("{0} 首作品", [current.audios.length]),

@@ -55,7 +55,7 @@ class _PlaylistSongSurfaceState extends State<PlaylistSongSurface> {
             _surfaceKey = surfaceKey;
             _scheme = widget.artworkColors
                 ? ColorScheme.fromSeed(
-                    seedColor: seed, brightness: Brightness.light)
+                    seedColor: seed, brightness: original.brightness)
                 : original;
             final brightness = seed.computeLuminance();
             _surface = widget.artworkColors

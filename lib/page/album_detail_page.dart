@@ -124,6 +124,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     return UniDetailPage<String, Audio, MusicCategoryGroup>(
       pref: AppPreference.instance.albumDetailPagePref,
       primaryContent: currentGroup.id,
+      coverFlightTag: ('category-detail-cover', currentGroup.persistenceKey),
       primaryPic: CategoryCoverStore.shared.hasCover(currentGroup)
           ? CategoryCoverStore.shared.imageFor(currentGroup)
           : currentGroup.coverAudio!.coverForDisplay(

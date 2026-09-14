@@ -14,6 +14,7 @@ import 'package:dan_player/component/category_labels.dart';
 import 'package:dan_player/component/category_tile_layout.dart';
 import 'package:dan_player/component/category_tile_motion.dart';
 import 'package:dan_player/component/cover_caption_colors.dart';
+import 'package:dan_player/component/category_cover_flight.dart';
 import 'package:dan_player/component/cover_repair_dialog.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/category_cover_store.dart';
@@ -416,24 +417,31 @@ class _CategoryTileState extends State<_CategoryTile> {
                 width: width,
                 top: 0,
                 height: circle ? width : height,
-                child: AnimatedContainer(
-                    key: ValueKey(('category-cover', group.id)),
-                    duration: duration,
-                    clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(circle ? width / 2 : 0)),
-                    child: ArtworkHandoff(
-                      artworkKey: _request!,
-                      loadArtwork: () => _artwork!,
-                      placeholder: placeholder,
-                      imageBuilder: (image) => Image(
-                          image: image,
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          filterQuality: FilterQuality.medium,
-                          errorBuilder: (_, __, ___) => placeholder),
-                    ))),
+                child: CategoryCoverFlight(
+                    tag: group.kind == MusicCategoryKind.artist ||
+                            group.kind == MusicCategoryKind.album
+                        ? ('category-detail-cover', group.persistenceKey)
+                        : null,
+                    radius: circle ? width / 2 : 0,
+                    image: image,
+                    child: AnimatedContainer(
+                        key: ValueKey(('category-cover', group.id)),
+                        duration: duration,
+                        clipBehavior: Clip.antiAlias,
+                        decoration: BoxDecoration(
+                            borderRadius:
+                                BorderRadius.circular(circle ? width / 2 : 0)),
+                        child: ArtworkHandoff(
+                          artworkKey: _request!,
+                          loadArtwork: () => _artwork!,
+                          placeholder: placeholder,
+                          imageBuilder: (image) => Image(
+                              image: image,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                              filterQuality: FilterQuality.medium,
+                              errorBuilder: (_, __, ___) => placeholder),
+                        )))),
             AnimatedPositioned(
                 duration: duration,
                 curve: AppMotion.standardCurve,

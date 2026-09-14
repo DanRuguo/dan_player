@@ -30,7 +30,7 @@ import 'package:dan_player/utils.dart';
 class CategoriesPage extends StatefulWidget {
   const CategoriesPage({
     super.key,
-    this.initialCategory = MusicCategoryKind.artist,
+    this.initialCategory = MusicCategoryKind.album,
     this.audios,
     this.onOpenGroup,
     this.classificationScanner,

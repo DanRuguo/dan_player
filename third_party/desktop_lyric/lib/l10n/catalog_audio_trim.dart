@@ -1,4 +1,29 @@
 const catalogAudioTrim = <String, List<String>>{
+  '请先安装或修复裁剪组件': [
+    'Install or repair the trimming component first.',
+    '先にトリミングコンポーネントをインストールまたは修復してください。',
+    '먼저 자르기 구성 요소를 설치하거나 복구하세요.'
+  ],
+  '安装裁剪组件': ['Set up trimming', 'トリミングの準備', '자르기 설정'],
+  '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用 Windows 系统代理。':
+      [
+    'Trimming requires FFmpeg, FFprobe and FFplay. A complete working toolset was not found. Download the approximately 70 MB component from GitHub using the Windows system proxy.',
+    'FFmpeg、FFprobe、FFplay が必要です。利用可能なツール一式が見つかりません。Windows のシステムプロキシを使用して GitHub から約 70 MB をダウンロードできます。',
+    'FFmpeg, FFprobe, FFplay가 필요합니다. 사용 가능한 도구 모음을 찾지 못했습니다. Windows 시스템 프록시를 사용하여 GitHub에서 약 70 MB를 다운로드할 수 있습니다.'
+  ],
+  '也可以从官网下载 Windows 完整编译包，将 bin 目录中的程序及 DLL 放到以下目录，然后点击“我已安装好”。': [
+    'Alternatively, get a complete Windows build from the official download page. Copy the programs and DLLs from its bin folder to the folder below, then select “I have installed it”.',
+    '公式ダウンロードページから Windows 用の完全なビルドを入手し、bin 内のプログラムと DLL を下のフォルダーにコピーして「インストール済み」を押してください。',
+    '공식 다운로드 페이지에서 Windows 전체 빌드를 받아 bin 폴더의 프로그램과 DLL을 아래 폴더에 복사한 뒤 “설치 완료”를 누르세요.'
+  ],
+  '正在检查并安装组件…': ['Checking and installing…', '確認・インストール中…', '확인 및 설치 중…'],
+  '组件仍不可用。请检查网络、工具是否完整及目录权限，或手动安装后重试。': [
+    'The component is still unavailable. Check the network, tool files and folder permissions, or install manually and retry.',
+    'まだ利用できません。ネットワーク、ツール一式、フォルダー権限を確認するか、手動でインストールして再試行してください。',
+    '구성 요소를 사용할 수 없습니다. 네트워크, 도구 파일, 폴더 권한을 확인하거나 수동 설치 후 다시 시도하세요.'
+  ],
+  '我已安装好': ['I have installed it', 'インストール済み', '설치 완료'],
+  '从 GitHub 下载': ['Download from GitHub', 'GitHub からダウンロード', 'GitHub에서 다운로드'],
   '此文件包含不支持的混合容器或标签布局，暂不能安全裁剪。原文件未修改。': [
     'This file uses an unsupported mixed container or tag layout and cannot be trimmed safely. The original is unchanged.',
     'このファイルは未対応の混在コンテナまたはタグ構造のため、安全にトリミングできません。元のファイルは変更されていません。',

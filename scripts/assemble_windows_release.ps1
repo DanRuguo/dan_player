@@ -242,7 +242,6 @@ $packageStem = 'DanPlayer-{0}-windows-x64' -f $version.Replace('+', '-')
 # Assembly is deliberately offline: downloading is an explicit separate step.
 $bass = & (Join-Path $PSScriptRoot 'prepare_bass_runtime.ps1') -CacheRoot $BassCacheRoot -Offline -VerifyOnly
 $bassFx = & (Join-Path $PSScriptRoot 'prepare_bass_fx_runtime.ps1') -CacheRoot $BassFxCacheRoot -Offline -VerifyOnly
-$ffmpeg = & (Join-Path $PSScriptRoot 'prepare_ffmpeg_runtime.ps1') -VerifyOnly
 $crtDirectory = Find-VcRuntimeDirectory
 Assert-TreeHasNoReparsePoints $crtDirectory
 if ((Split-Path -Leaf $crtDirectory) -notmatch '^Microsoft\.VC14[0-9]+\.CRT$' -or
@@ -282,12 +281,11 @@ $null = New-Item -ItemType Directory -Path $payloadDirectory
 try {
     # Build outputs may already have manually staged BASS/helper/CRT files for
     # QA. Always use the separately verified originals for those paths.
-    $mainExclusions = @('BASS', 'desktop_lyric', 'desktop_lyric.exe', 'desktop_lyric.pdb', 'DESKTOP-LYRIC-MODE', 'UN4SEEN-notices', 'FONT-INTEGRITY.json') + @($crtFiles.Name)
+    $mainExclusions = @('tools', 'tool', 'BASS', 'desktop_lyric', 'desktop_lyric.exe', 'desktop_lyric.pdb', 'DESKTOP-LYRIC-MODE', 'UN4SEEN-notices', 'FONT-INTEGRITY.json') + @($crtFiles.Name)
     Copy-ReleaseTree $MainReleaseDirectory $payloadDirectory $mainExclusions
     Write-NewUtf8File (Join-Path $payloadDirectory 'DESKTOP-LYRIC-MODE') "shared-executable-v1`n"
     Copy-Item -LiteralPath (Join-Path $bass.RuntimeDirectory 'BASS') -Destination (Join-Path $payloadDirectory 'BASS') -Recurse
     Copy-FileUnchanged $bassFx.DllPath (Join-Path $payloadDirectory 'BASS\bass_fx.dll')
-    $null = & (Join-Path $PSScriptRoot 'prepare_ffmpeg_runtime.ps1') -Destination (Join-Path $payloadDirectory 'tools/ffmpeg')
 
     foreach ($file in $crtFiles) {
         Copy-FileUnchanged $file.FullName (Join-Path $payloadDirectory $file.Name)
@@ -357,7 +355,7 @@ the verified Visual Studio runtime when rebuilding future application releases.
         FontIntegrityReports = @('FONT-INTEGRITY.json')
         Bass = @($bass.Packages | Select-Object Name, Version, Url, ArchiveSha256, Dll, DllSha256)
         BassFx = $bassFx.Package
-        Ffmpeg = $ffmpeg | Select-Object Version, Source, License, ManifestSha256, Files
+        Ffmpeg = @{ Optional = $true; Bundled = $false }
         MicrosoftCrt = $crtManifest
     }
     Write-NewUtf8File (Join-Path $payloadDirectory 'BUILD-PROVENANCE.json') (($buildProvenance | ConvertTo-Json -Depth 8) + "`n")
@@ -418,8 +416,8 @@ Working tree modified: $workingTreeDirty
         }).Count -gt 0) { throw 'Shared-executable ZIP contains a legacy desktop lyrics helper.' }
         Assert-ZipEntryHash $zip ($packageStem + '/DESKTOP-LYRIC-MODE') (Get-FileHash -LiteralPath (Join-Path $payloadDirectory 'DESKTOP-LYRIC-MODE') -Algorithm SHA256).Hash
         Assert-ZipEntryHash $zip ($packageStem + '/BASS/bass_fx.dll') $bassFx.Package.DllSha256
-        foreach ($file in $ffmpeg.Files) {
-            Assert-ZipEntryHash $zip ($packageStem + '/tools/ffmpeg/' + $file.Name) $file.Sha256
+        if (@($zip.Entries | Where-Object { $_.FullName -match '/tools?/ffmpeg/' }).Count -gt 0) {
+            throw 'Optional FFmpeg runtime must not be bundled.'
         }
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx24-2.4.12.6.zip') $bassFx.Package.ArchiveSha256
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx.txt') $bassFx.Package.NoticeSha256

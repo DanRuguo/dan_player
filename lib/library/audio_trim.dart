@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_trim_commit.dart';
+import 'package:dan_player/library/ffmpeg_runtime.dart';
 import 'package:path/path.dart' as p;
 
 /// Cancellation ends an encoder/decoder process, never an in-progress commit.
@@ -102,22 +103,15 @@ class AudioTrimResult {
   final String? warning;
 }
 
-/// Only the packaged tools (or an explicit development override) are used.
-/// A program placed in the current directory or PATH cannot replace a tool.
+/// Resolved once from explicit PATH entries or an installed optional module.
 Future<String> audioToolPath(String executable) async {
   if (!const {'ffmpeg', 'ffprobe', 'ffplay'}.contains(executable)) {
     throw ArgumentError.value(executable, 'executable');
   }
-  final override = Platform.environment['DAN_PLAYER_FFMPEG_DIR'];
-  final root = override == null || override.isEmpty
-      ? p.join(p.dirname(Platform.resolvedExecutable), 'tools', 'ffmpeg')
-      : override;
-  final candidate =
-      p.join(root, '$executable${Platform.isWindows ? '.exe' : ''}');
-  if (!await File(candidate).exists()) {
-    throw const AudioTrimException('tools', '裁剪组件不完整，请使用完整的便携包');
+  if (!await FfmpegRuntime.shared.ensure()) {
+    throw const AudioTrimException('tools', '请先安装或修复裁剪组件');
   }
-  return candidate;
+  return FfmpegRuntime.shared.path(executable);
 }
 
 /// Bounded output, explicit argv, no shell and no interactive console. The
@@ -132,7 +126,13 @@ Future<String> runAudioTool(
 }) async {
   cancellation?.check();
   final tool = await resolve(executable);
-  final process = await Process.start(tool, arguments, runInShell: false);
+  final Process process;
+  try {
+    process = await Process.start(tool, arguments, runInShell: false);
+  } on ProcessException {
+    FfmpegRuntime.shared.invalidate();
+    throw const AudioTrimException('tools', '请先安装或修复裁剪组件');
+  }
   void stop() => process.kill();
   cancellation?.addListener(stop);
   var timedOut = false;
@@ -163,6 +163,10 @@ Future<String> runAudioTool(
       throw const AudioTrimException('timeout', '音频处理超时，原文件未被修改');
     }
     if (exit != 0) {
+      if (exit < 0 || exit > 255) {
+        FfmpegRuntime.shared.invalidate();
+        throw const AudioTrimException('tools', '请先安装或修复裁剪组件');
+      }
       // Native stderr may contain user paths. Keep it out of persistent logs
       // and present a stable, translatable error in the dialog.
       throw AudioTrimException(
