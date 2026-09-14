@@ -70,12 +70,8 @@ class SideNav extends StatelessWidget {
       if (value == selected) return;
 
       final desPath = destinations[value].desPath;
-      // Existing preference index 1 still remains /artists. New categories
-      // use that compatible entry rather than shifting any saved indexes.
-      final index = app_paths.START_PAGES.indexOf(
-          desPath == app_paths.CATEGORIES_PAGE
-              ? app_paths.ARTISTS_PAGE
-              : desPath);
+      // The unified category home keeps the existing saved preference index 1.
+      final index = app_paths.START_PAGES.indexOf(desPath);
       if (index != -1) AppPreference.instance.startPage = index;
 
       // These are peer, top-level destinations. Replacing the location keeps

@@ -12,7 +12,7 @@ void main() {
       () {
     expect(app_paths.START_PAGES.take(4), [
       app_paths.AUDIOS_PAGE,
-      app_paths.ARTISTS_PAGE,
+      app_paths.CATEGORIES_PAGE,
       app_paths.COLLECTIONS_PAGE,
       app_paths.FOLDERS_PAGE,
     ]);

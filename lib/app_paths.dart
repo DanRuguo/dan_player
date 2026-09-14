@@ -37,10 +37,11 @@ const String WELCOMING_PAGE = "/welcoming";
 const String UPDATING_DIALOG = "/updating";
 
 /// 可以作为 start page 的 pages
-// Keep the existing saved indexes stable; new destinations append here.
+// Keep saved indexes stable. Index 1 now opens the unified category home;
+// explicit /artists deep links remain supported independently of startup.
 const List<String> START_PAGES = [
   AUDIOS_PAGE,
-  ARTISTS_PAGE,
+  CATEGORIES_PAGE,
   COLLECTIONS_PAGE,
   FOLDERS_PAGE,
   PLAYLISTS_PAGE,

@@ -1163,7 +1163,7 @@ void main() {
     await tester.tap(find.text('分类'));
     await tester.pumpAndSettle();
     expect(AppPreference.instance.startPage, 1);
-    expect(app_paths.START_PAGES[1], app_paths.ARTISTS_PAGE);
+    expect(app_paths.START_PAGES[1], app_paths.CATEGORIES_PAGE);
     expect(GoRouterState.of(tester.element(find.byType(SideNav))).uri.path,
         app_paths.CATEGORIES_PAGE);
     final selected = destinations
