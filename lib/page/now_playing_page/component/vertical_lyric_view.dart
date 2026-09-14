@@ -240,8 +240,10 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _preferences?.removeListener(_syncActivity);
       _preferences = preferences..addListener(_syncActivity);
     }
-    _treeVisible = TickerMode.valuesOf(context).enabled &&
-        (ModalRoute.isCurrentOf(context) ?? true);
+    // Popup routes leave this surface visible. Overlay already disables
+    // TickerMode when an opaque route covers it; isCurrent would also stop
+    // playback visuals behind ordinary dialogs and popup menus.
+    _treeVisible = TickerMode.valuesOf(context).enabled;
     _syncActivity();
   }
 

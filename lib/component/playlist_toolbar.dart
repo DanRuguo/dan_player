@@ -108,6 +108,8 @@ enum _PlaylistToolbarAction {
   smartPlaylists,
   trash,
   presentation,
+  titles,
+  songBackground,
 }
 
 /// Compact, descriptor-only playlist actions. No playback/library singleton is
@@ -128,6 +130,8 @@ class PlaylistToolbar extends StatefulWidget {
     this.gridView = false,
     this.view,
     this.onViewChanged,
+    this.autoFill = true,
+    this.onAutoFillChanged,
     required this.onCreate,
     this.onAddSongs,
     required this.onStartSelection,
@@ -149,6 +153,10 @@ class PlaylistToolbar extends StatefulWidget {
     this.onOpenSmartPlaylists,
     this.onTrash,
     this.onPresentation,
+    this.showSongTitles = true,
+    this.onToggleSongTitles,
+    this.artworkBackground = false,
+    this.onToggleSongBackground,
     this.selectionTools,
     this.playbackService,
     this.alignment = WrapAlignment.end,
@@ -165,6 +173,8 @@ class PlaylistToolbar extends StatefulWidget {
   final bool gridView;
   final PlaylistViewMode? view;
   final ValueChanged<PlaylistViewMode>? onViewChanged;
+  final bool autoFill;
+  final ValueChanged<bool>? onAutoFillChanged;
   final VoidCallback onCreate;
   final VoidCallback? onAddSongs;
   final VoidCallback onStartSelection;
@@ -185,6 +195,8 @@ class PlaylistToolbar extends StatefulWidget {
   final VoidCallback? onImportCue;
   final VoidCallback? onOpenSmartPlaylists;
   final VoidCallback? onTrash, onPresentation;
+  final bool showSongTitles, artworkBackground;
+  final VoidCallback? onToggleSongTitles, onToggleSongBackground;
   final Widget? selectionTools;
   final PlaybackService? playbackService;
   final WrapAlignment alignment;
@@ -239,7 +251,26 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
               label: ui('歌单回收站'),
               icon: Icons.restore_from_trash,
               onSelected: widget.onTrash),
-        if (widget.onPresentation != null)
+        if (widget.view == PlaylistViewMode.grid &&
+            widget.onToggleSongTitles != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.titles,
+              label: ui(widget.showSongTitles ? '关闭歌曲标题' : '显示歌曲标题'),
+              icon: widget.showSongTitles
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+              onSelected: widget.onToggleSongTitles),
+        if (widget.view == PlaylistViewMode.circular &&
+            widget.onToggleSongBackground != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.songBackground,
+              label: ui(widget.artworkBackground ? '歌曲底色：封面配色' : '歌曲底色：主题配色'),
+              icon: widget.artworkBackground
+                  ? Icons.palette_outlined
+                  : Icons.color_lens_outlined,
+              onSelected: widget.onToggleSongBackground),
+        if (widget.onPresentation != null &&
+            widget.view == PlaylistViewMode.list)
           _ToolbarMenuItem(
               value: _PlaylistToolbarAction.presentation,
               label: ui('歌单视图'),
@@ -435,7 +466,7 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
                 key: const ValueKey('playlist-view-list')),
             AppSegmentOption(
                 value: PlaylistViewMode.grid,
-                label: ui('方形网格'),
+                label: ui('矩形封面'),
                 icon: Icons.grid_view_outlined,
                 key: const ValueKey('playlist-view-grid')),
             AppSegmentOption(
@@ -469,6 +500,25 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
                     key: ValueKey(widget.gridView),
                   ),
                 ),
+        ),
+      if (widget.view == PlaylistViewMode.grid &&
+          widget.onAutoFillChanged != null)
+        IconButton.outlined(
+          key: const ValueKey('playlist-auto-fill'),
+          tooltip: ui('自动填充空隙'),
+          isSelected: widget.autoFill,
+          onPressed: widget.editingEnabled
+              ? () => widget.onAutoFillChanged!(!widget.autoFill)
+              : null,
+          style: appToolbarControlStyle(context, iconOnly: true).copyWith(
+            foregroundColor: WidgetStatePropertyAll(widget.autoFill
+                ? Theme.of(context).colorScheme.onPrimaryContainer
+                : Theme.of(context).colorScheme.primary),
+            backgroundColor: WidgetStatePropertyAll(widget.autoFill
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Colors.transparent),
+          ),
+          icon: const Icon(Icons.auto_awesome_mosaic_outlined),
         ),
       _ToolbarMenu<_PlaylistToolbarAction>(
         key: const ValueKey('playlist-current-settings'),

@@ -1,6 +1,5 @@
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
-import 'package:dan_player/page/settings_page/interface_settings.dart';
 import 'package:dan_player/page/settings_page/rendering_settings.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -126,14 +125,15 @@ void main() {
   }
 
   testWidgets(
-      'interface persists rendering immediately and reports save failure',
+      'visual effects persist rendering immediately and reports save failure',
       (tester) async {
     final original = AppSettings.instance.rendering.value;
     addTearDown(() => AppSettings.instance.rendering.value = original);
     AppSettings.instance.rendering.value = const RenderingPreferences();
     var calls = 0;
     await tester.pumpWidget(MaterialApp(home: Scaffold(
-      body: SingleChildScrollView(child: InterfaceSettings(persist: () async {
+      body:
+          SingleChildScrollView(child: VisualEffectsSettings(persist: () async {
         calls++;
         if (calls == 1) throw StateError('Synthetic save failure');
       })),

@@ -14,6 +14,7 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/utils.dart' show showAppNotice;
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:window_manager/window_manager.dart';
@@ -133,9 +134,7 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
                     whenIndexFailed: (error, _) {
                       if (!mounted) return;
                       setState(() => selecting = true);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(ui('扫描未完成，可以调整文件夹后重试。')),
-                      ));
+                      showAppNotice(ui('扫描未完成，可以调整文件夹后重试。'), context: context);
                     },
                     whenIndexBuilt: () async {
                       await Future.wait([

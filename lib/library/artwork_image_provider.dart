@@ -69,7 +69,7 @@ class CustomOnlineArtworkImageProvider
     CustomOnlineArtworkImageProvider key,
     ImageDecoderCallback decode,
   ) async {
-    final bytes = await OnlineArtworkRequest().loadPng(
+    final bytes = await OnlineArtworkRequest().loadCover(
       key.address,
       provider: key.expectedProfile.providerId,
       expectedProfile: key.expectedProfile,

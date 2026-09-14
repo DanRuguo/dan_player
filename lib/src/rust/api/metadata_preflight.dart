@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `metadata_fingerprint`
+// These functions are ignored because they are not marked as `pub`: `metadata_fingerprint`, `physical_source_key`
 
 /// Read-only preview, using exactly the container probe used by safe edits.
 /// Neither extension guesses nor the cached library are evidence of writability.

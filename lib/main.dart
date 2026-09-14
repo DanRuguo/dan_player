@@ -60,7 +60,7 @@ Future<void> prepareWindow() async {
   } catch (error, trace) {
     LOGGER.w('[window layout] $error', stackTrace: trace);
     showAppNotice(
-      ui('窗口尺寸锁定设置暂未应用，可在“设置 > 外观与背景”中重试。'),
+      ui('窗口尺寸锁定设置暂未应用，可在“设置 > 界面与主题”中重试。'),
       kind: AppNoticeKind.warning,
     );
   }

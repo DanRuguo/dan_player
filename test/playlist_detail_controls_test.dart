@@ -70,7 +70,7 @@ void main() {
       onViewChanged: (_) {},
     ))));
     expect(find.text('列表'), findsOneWidget);
-    expect(find.text('方形网格'), findsOneWidget);
+    expect(find.text('矩形封面'), findsOneWidget);
     expect(find.text('圆形封面'), findsOneWidget);
   });
 }

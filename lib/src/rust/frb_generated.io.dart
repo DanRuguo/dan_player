@@ -3,6 +3,8 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/audio_trim.dart';
+import 'api/cover_image.dart';
 import 'api/installed_font.dart';
 import 'api/logger.dart';
 import 'api/metadata_preflight.dart';
@@ -70,6 +72,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_i_32(dynamic raw);
 
   @protected
+  ImportedCoverImage dco_decode_imported_cover_image(dynamic raw);
+
+  @protected
   IndexActionState dco_decode_index_action_state(dynamic raw);
 
   @protected
@@ -80,6 +85,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<InstalledFont> dco_decode_list_installed_font(dynamic raw);
+
+  @protected
+  List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -160,6 +168,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
+  ImportedCoverImage sse_decode_imported_cover_image(
+      SseDeserializer deserializer);
+
+  @protected
   IndexActionState sse_decode_index_action_state(SseDeserializer deserializer);
 
   @protected
@@ -171,6 +183,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<InstalledFont> sse_decode_list_installed_font(
       SseDeserializer deserializer);
+
+  @protected
+  List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -254,6 +269,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_imported_cover_image(
+      ImportedCoverImage self, SseSerializer serializer);
+
+  @protected
   void sse_encode_index_action_state(
       IndexActionState self, SseSerializer serializer);
 
@@ -266,6 +285,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_installed_font(
       List<InstalledFont> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(

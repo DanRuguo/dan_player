@@ -428,10 +428,15 @@ void main() {
                 onTap: play,
                 trailing: action))));
         await tester.pumpAndSettle();
-        final action = find.byKey(ValueKey('playlist-menu-$id'));
+        final action = find.byKey(ValueKey(view == PlaylistViewMode.grid
+            ? 'playlist-rectangle-$id'
+            : view == PlaylistViewMode.circular
+                ? 'playlist-circle-open-$id'
+                : 'playlist-menu-$id'));
         await tester.ensureVisible(action);
         final actionRect = tester.getRect(action);
-        await tester.tap(action);
+        await tester.tap(action,
+            buttons: view == PlaylistViewMode.list ? 1 : 2);
         await tester.pumpAndSettle();
         final item =
             find.widgetWithText(MenuItemButton, isSong ? '从当前歌单移除' : '打开歌单');

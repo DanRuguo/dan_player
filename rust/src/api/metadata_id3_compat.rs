@@ -9,7 +9,7 @@ use std::ops::Range;
 const MAX_TAG_BYTES: usize = 64 * 1024 * 1024;
 const TEXT_IDS: [&[u8; 4]; 3] = [b"TIT2", b"TPE1", b"TALB"];
 
-pub(super) fn has_empty_text_frame(source: &Path) -> bool {
+pub(crate) fn has_empty_text_frame(source: &Path) -> bool {
     // Lofty 0.21 consumes a text frame's encoding byte before returning Skip,
     // then skips its declared size again. Depending on following bytes, this
     // can either error or silently omit later frames. Select the opaque path
@@ -31,7 +31,10 @@ pub(super) fn has_empty_text_frame(source: &Path) -> bool {
 /// and never rewrites tags or reads the MPEG payload.
 pub(super) fn read_picture(source: &Path, width: u32, height: u32) -> Option<Vec<u8>> {
     let file = fs::File::open(source).ok()?;
-    let raw = RawTag::read(&mut BufReader::new(file)).ok()?;
+    let raw = match RawTag::read(&mut BufReader::new(file)) {
+        Ok(raw) => raw,
+        Err(_) => return read_unsynced_picture(source, width, height),
+    };
     let version = if raw.version == 3 {
         lofty::id3::v2::Id3v2Version::V3
     } else {
@@ -61,6 +64,61 @@ pub(super) fn read_picture(source: &Path, width: u32, height: u32) -> Option<Vec
     None
 }
 
+fn read_unsynced_picture(source: &Path, width: u32, height: u32) -> Option<Vec<u8>> {
+    let mut file = fs::File::open(source).ok()?;
+    let mut header = [0; 10];
+    file.read_exact(&mut header).ok()?;
+    if &header[..3] != b"ID3" || header[3] != 4 || header[4] != 0 || header[5] & !0x80 != 0 {
+        return None;
+    }
+    let size = syncsafe(&header[6..])?;
+    if size > MAX_TAG_BYTES {
+        return None;
+    }
+    let mut body = vec![0; size];
+    file.read_exact(&mut body).ok()?;
+    let mut offset = 0;
+    let mut pictures = Vec::new();
+    while offset + 10 <= body.len() && body[offset] != 0 {
+        let frame = &body[offset..offset + 10];
+        let length = syncsafe(&frame[4..8])?;
+        let end = (offset + 10usize).checked_add(length)?;
+        let encoded = body.get(offset + 10..end)?;
+        if &frame[..4] == b"APIC" && frame[9] & !3 == 0 {
+            let mut payload = Vec::with_capacity(encoded.len());
+            let mut i = 0;
+            while i < encoded.len() {
+                let byte = encoded[i];
+                payload.push(byte);
+                i += 1;
+                if (header[5] & 0x80 != 0 || frame[9] & 2 != 0)
+                    && byte == 255
+                    && encoded.get(i) == Some(&0)
+                {
+                    i += 1;
+                }
+            }
+            let data = if frame[9] & 1 != 0 {
+                payload.get(4..)?
+            } else {
+                &payload
+            };
+            if let Ok(picture) = lofty::id3::v2::AttachedPictureFrame::parse(
+                &mut &data[..],
+                lofty::id3::v2::FrameFlags::default(),
+                lofty::id3::v2::Id3v2Version::V4,
+            ) {
+                pictures.push(picture.picture);
+            }
+        }
+        offset = end;
+    }
+    pictures.sort_by_key(|p| p.pic_type() != PictureType::CoverFront);
+    pictures
+        .iter()
+        .find_map(|p| resize_picture(p.data(), width, height))
+}
+
 fn unsupported() -> anyhow::Error {
     metadata_message(
         "TAG_LAYOUT_UNSUPPORTED",
@@ -70,15 +128,338 @@ fn unsupported() -> anyhow::Error {
 
 struct RawTag {
     version: u8,
+    flags: u8,
     body: Vec<u8>,
     frames: Vec<Range<usize>>,
 }
 
+/// Strict framing is retained even when a legacy frame's contents cannot be
+/// decoded by Lofty. Only the audio-property probe skips those opaque values.
+pub(crate) fn trim_probe(path: &Path) -> Option<TaggedFile> {
+    RawTag::read_trim(&mut BufReader::new(fs::File::open(path).ok()?)).ok()?;
+    let probe = Probe::new(BufReader::new(fs::File::open(path).ok()?))
+        .options(lofty::config::ParseOptions::default().read_tags(false))
+        .guess_file_type()
+        .ok()?;
+    if probe.file_type() != Some(FileType::Mpeg) {
+        return None;
+    }
+    probe.read().ok()
+}
+
+fn raw_text(encoding: u8, bytes: &[u8]) -> anyhow::Result<String> {
+    Ok(match encoding {
+        0 => bytes.iter().map(|b| char::from(*b)).collect(),
+        3 => std::str::from_utf8(bytes)?.to_string(),
+        1 | 2 => {
+            let (little, bytes) = if bytes.starts_with(&[0xff, 0xfe]) {
+                (true, &bytes[2..])
+            } else if bytes.starts_with(&[0xfe, 0xff]) {
+                (false, &bytes[2..])
+            } else if encoding == 2 {
+                (false, bytes)
+            } else {
+                return Err(unsupported());
+            };
+            if bytes.len() % 2 != 0 {
+                return Err(unsupported());
+            }
+            String::from_utf16(
+                &bytes
+                    .chunks_exact(2)
+                    .map(|b| {
+                        if little {
+                            u16::from_le_bytes([b[0], b[1]])
+                        } else {
+                            u16::from_be_bytes([b[0], b[1]])
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            )?
+        }
+        _ => return Err(unsupported()),
+    }
+    .trim_end_matches('\0')
+    .to_string())
+}
+
+fn encoded_text(version: u8, value: &str) -> Vec<u8> {
+    if version == 4 {
+        return value.as_bytes().to_vec();
+    }
+    let mut bytes = vec![0xff, 0xfe];
+    for unit in value.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes
+}
+fn raw_frame(version: u8, id: &[u8], payload: &[u8]) -> Vec<u8> {
+    let size = payload.len() as u32;
+    let mut frame = id.to_vec();
+    frame.extend_from_slice(&if version == 3 {
+        size.to_be_bytes()
+    } else {
+        [
+            ((size >> 21) & 127) as u8,
+            ((size >> 14) & 127) as u8,
+            ((size >> 7) & 127) as u8,
+            (size & 127) as u8,
+        ]
+    });
+    frame.extend_from_slice(&[0, 0]);
+    frame.extend_from_slice(payload);
+    frame
+}
+
+pub(crate) fn trim_text_fields(path: &Path) -> Option<[Option<String>; 3]> {
+    let raw = RawTag::read_trim(&mut BufReader::new(fs::File::open(path).ok()?)).ok()?;
+    Some(TEXT_IDS.map(|id| {
+        raw.frames
+            .iter()
+            .find(|f| &raw.body[f.start..f.start + 4] == id)
+            .and_then(|f| raw_text(raw.body[f.start + 10], &raw.body[f.start + 11..f.end]).ok())
+    }))
+}
+
+/// Copy bounded original frames verbatim, replacing only requested text and
+/// timestamps. This never opens the source for writing. The caller supplies a
+/// private, already encoded MPEG output, and verifies its stream properties.
+pub(crate) fn transfer_trim(
+    source: &Path,
+    destination: &Path,
+    edits: [&Option<String>; 3],
+    duration_ms: u128,
+    legacy: Option<[u8; 128]>,
+    transform: impl Fn(&str) -> (String, bool),
+) -> anyhow::Result<Vec<String>> {
+    let raw = RawTag::read_trim(&mut BufReader::new(fs::File::open(source)?))?;
+    let mut tail = fs::File::open(source)?;
+    let length = tail.metadata()?.len();
+    let tail_end = length - if legacy.is_some() { 128 } else { 0 };
+    let mut extras = Vec::new();
+    let mut legacy_warning = false;
+    if tail_end >= 32 {
+        tail.seek(SeekFrom::Start(tail_end - 32))?;
+        let mut footer = [0; 32];
+        tail.read_exact(&mut footer)?;
+        if &footer[..8] == b"APETAGEX" {
+            let size = u32::from_le_bytes(footer[12..16].try_into()?) as u64;
+            if size < 32 || size > MAX_TAG_BYTES as u64 || size > tail_end {
+                return Err(unsupported());
+            }
+            let mut start = tail_end - size;
+            if start >= 32 {
+                tail.seek(SeekFrom::Start(start - 32))?;
+                let mut signature = [0; 8];
+                tail.read_exact(&mut signature)?;
+                if &signature == b"APETAGEX" {
+                    start -= 32;
+                }
+            }
+            tail.seek(SeekFrom::Start(start))?;
+            (&mut tail)
+                .take(tail_end - start)
+                .read_to_end(&mut extras)?;
+        } else if &footer[23..] == b"LYRICS200" {
+            let size: usize = std::str::from_utf8(&footer[17..23])?.parse()?;
+            if size < 11 || size > MAX_TAG_BYTES || (size + 15) as u64 > tail_end {
+                return Err(unsupported());
+            }
+            tail.seek(SeekFrom::Start(tail_end - (size + 15) as u64))?;
+            let mut lyrics = vec![0; size];
+            tail.read_exact(&mut lyrics)?;
+            if !lyrics.starts_with(b"LYRICSBEGIN") {
+                return Err(unsupported());
+            }
+            extras.extend_from_slice(b"LYRICSBEGIN");
+            let mut offset = 11;
+            while offset < lyrics.len() {
+                let header = lyrics.get(offset..offset + 8).ok_or_else(unsupported)?;
+                let count: usize = std::str::from_utf8(&header[3..])?.parse()?;
+                let payload = lyrics
+                    .get(offset + 8..offset + 8 + count)
+                    .ok_or_else(unsupported)?;
+                let updated = if &header[..3] == b"LYR" {
+                    let text: String = payload.iter().map(|b| char::from(*b)).collect();
+                    let (updated, warning) = transform(&text);
+                    legacy_warning |= warning;
+                    updated
+                        .chars()
+                        .map(|c| u8::try_from(c as u32))
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    payload.to_vec()
+                };
+                if updated.len() > 99999 {
+                    return Err(unsupported());
+                }
+                extras.extend_from_slice(&header[..3]);
+                extras.extend_from_slice(format!("{:05}", updated.len()).as_bytes());
+                extras.extend(updated);
+                offset += 8 + count;
+            }
+            if extras.len() > 999999 {
+                return Err(unsupported());
+            }
+            extras.extend_from_slice(format!("{:06}LYRICS200", extras.len()).as_bytes());
+        }
+    }
+    let mut body = Vec::new();
+    let mut warnings = Vec::new();
+    if legacy_warning {
+        warnings.push("TRIM_LYRICS_UNSUPPORTED".into());
+    }
+    let warn = |warnings: &mut Vec<String>| {
+        if warnings.is_empty() {
+            warnings.push("TRIM_LYRICS_UNSUPPORTED".into());
+        }
+    };
+    for frame in &raw.frames {
+        let id = &raw.body[frame.start..frame.start + 4];
+        if TEXT_IDS
+            .iter()
+            .enumerate()
+            .any(|(i, key)| id == *key && edits[i].is_some())
+        {
+            continue;
+        }
+        if id == b"TLEN" {
+            let mut value = vec![if raw.version == 3 { 1 } else { 3 }];
+            value.extend(encoded_text(raw.version, &duration_ms.to_string()));
+            body.extend(raw_frame(raw.version, id, &value));
+            continue;
+        }
+        if id == b"USLT" {
+            let payload = &raw.body[frame.start + 10..frame.end];
+            let updated = (|| -> anyhow::Result<Vec<u8>> {
+                if payload.len() < 5 {
+                    return Err(unsupported());
+                }
+                let encoding = payload[0];
+                let width = if encoding == 1 || encoding == 2 { 2 } else { 1 };
+                let rest = &payload[4..];
+                let separator = rest
+                    .chunks_exact(width)
+                    .position(|part| part.iter().all(|b| *b == 0))
+                    .ok_or_else(unsupported)?
+                    * width;
+                let description = raw_text(encoding, &rest[..separator])?;
+                let text = raw_text(encoding, &rest[separator + width..])?;
+                let (text, unsupported_lyrics) = transform(&text);
+                if unsupported_lyrics {
+                    return Err(unsupported());
+                }
+                let mut result = vec![if raw.version == 3 { 1 } else { 3 }];
+                result.extend_from_slice(&payload[1..4]);
+                result.extend(encoded_text(raw.version, &description));
+                result.extend(vec![0; if raw.version == 3 { 2 } else { 1 }]);
+                result.extend(encoded_text(raw.version, &text));
+                Ok(raw_frame(raw.version, id, &result))
+            })();
+            if let Ok(updated) = updated {
+                body.extend(updated);
+                continue;
+            }
+            warn(&mut warnings);
+        } else if id == b"SYLT" {
+            warn(&mut warnings);
+        }
+        body.extend_from_slice(&raw.body[frame.clone()]);
+    }
+    for (i, value) in edits.iter().enumerate() {
+        if let Some(value) = value {
+            if value.contains('\0') {
+                return Err(unsupported());
+            }
+            let mut payload = vec![if raw.version == 3 { 1 } else { 3 }];
+            payload.extend(encoded_text(raw.version, value));
+            body.extend(raw_frame(raw.version, TEXT_IDS[i], &payload));
+        }
+    }
+    if body.len() > MAX_TAG_BYTES {
+        return Err(unsupported());
+    }
+    RawTag::parse_internal(raw.version, body.clone(), true)?;
+    let mut input = BufReader::new(fs::File::open(destination)?);
+    let existing = RawTag::read(&mut input)?;
+    let payload_offset = 10 + existing.body.len() as u64;
+    let staged = destination.with_extension("raw-trim-stage");
+    let result = (|| -> anyhow::Result<()> {
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        let size = body.len();
+        output.write_all(&[
+            b'I',
+            b'D',
+            b'3',
+            raw.version,
+            0,
+            raw.flags,
+            ((size >> 21) & 127) as u8,
+            ((size >> 14) & 127) as u8,
+            ((size >> 7) & 127) as u8,
+            (size & 127) as u8,
+        ])?;
+        output.write_all(&body)?;
+        io::copy(&mut input, &mut output)?;
+        output.write_all(&extras)?;
+        if let Some(bytes) = legacy {
+            output.write_all(&bytes)?;
+        }
+        output.sync_all()?;
+        drop(output);
+        let check = RawTag::read_trim(&mut BufReader::new(fs::File::open(&staged)?))?;
+        if check.body != body {
+            return Err(unsupported());
+        }
+        // The only tail appended above is the exact original ID3v1 block.
+        let mut copied = BufReader::new(fs::File::open(&staged)?);
+        copied.seek(SeekFrom::Start(10 + body.len() as u64))?;
+        input.seek(SeekFrom::Start(payload_offset))?;
+        let count = input.get_ref().metadata()?.len() - payload_offset;
+        let mut copied_audio = copied.take(count);
+        if !equal_remainder(&mut input, &mut copied_audio, count)? {
+            return Err(unsupported());
+        }
+        let mut expected_tail = extras.clone();
+        if let Some(bytes) = legacy {
+            expected_tail.extend_from_slice(&bytes);
+        }
+        let mut check_tail = fs::File::open(&staged)?;
+        check_tail.seek(SeekFrom::End(-(expected_tail.len() as i64)))?;
+        let mut actual_tail = Vec::new();
+        check_tail.read_to_end(&mut actual_tail)?;
+        if actual_tail != expected_tail {
+            return Err(unsupported());
+        }
+        drop(check_tail);
+        drop(input);
+        fs::rename(&staged, destination)?;
+        Ok(())
+    })();
+    if staged.exists() {
+        let _ = fs::remove_file(&staged);
+    }
+    result?;
+    Ok(warnings)
+}
+
 impl RawTag {
     fn read(reader: &mut impl Read) -> anyhow::Result<Self> {
+        Self::read_internal(reader, false)
+    }
+    fn read_trim(reader: &mut impl Read) -> anyhow::Result<Self> {
+        Self::read_internal(reader, true)
+    }
+    fn read_internal(reader: &mut impl Read, opaque: bool) -> anyhow::Result<Self> {
         let mut header = [0; 10];
         reader.read_exact(&mut header)?;
-        if &header[..3] != b"ID3" || !matches!(header[3], 3 | 4) || header[4] != 0 || header[5] != 0
+        if &header[..3] != b"ID3"
+            || !matches!(header[3], 3 | 4)
+            || header[4] != 0
+            || (header[5] != 0 && !(opaque && header[3] == 4 && header[5] == 0x80))
         {
             // Reject unsynchronisation, extended headers/CRCs, footer,
             // restrictions and unknown global flags, not merely ignore them.
@@ -90,10 +471,15 @@ impl RawTag {
         }
         let mut body = vec![0; size];
         reader.read_exact(&mut body)?;
-        Self::parse(header[3], body)
+        let mut raw = Self::parse_internal(header[3], body, opaque)?;
+        raw.flags = header[5];
+        Ok(raw)
     }
 
     fn parse(version: u8, body: Vec<u8>) -> anyhow::Result<Self> {
+        Self::parse_internal(version, body, false)
+    }
+    fn parse_internal(version: u8, body: Vec<u8>, opaque: bool) -> anyhow::Result<Self> {
         let mut frames = Vec::new();
         let mut seen = HashSet::new();
         let mut offset = 0usize;
@@ -109,7 +495,8 @@ impl RawTag {
             if !header[..4]
                 .iter()
                 .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
-                || header[8..10] != [0, 0]
+                || (header[8..10] != [0, 0]
+                    && !(opaque && version == 4 && header[8] == 0 && header[9] & !3 == 0))
             {
                 // Includes frame compression/encryption/grouping/unsync,
                 // read-only/alter-preservation flags and reserved bits.
@@ -135,6 +522,7 @@ impl RawTag {
         }
         Ok(Self {
             version,
+            flags: 0,
             body,
             frames,
         })
@@ -685,6 +1073,45 @@ mod tests {
         );
         assert_eq!(fs::read_dir(&root).unwrap().count(), 2);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn audio_trim_raw_tags_keep_opaque_frames_and_audio_payload() {
+        for version in [3, 4] {
+            let root = directory();
+            let source = root.join("source.mp3");
+            let target = root.join("clip.mp3");
+            let original = fixture(version);
+            fs::write(&source, &original).unwrap();
+            fs::write(&target, &original).unwrap();
+            let before = RawTag::read(&mut original.as_slice()).unwrap();
+            transfer_trim(
+                &source,
+                &target,
+                [&None, &None, &None],
+                7000,
+                None,
+                |text| (text.to_owned(), false),
+            )
+            .unwrap();
+            let saved = fs::read(&target).unwrap();
+            let after = RawTag::read(&mut saved.as_slice()).unwrap();
+            for frame in &before.frames {
+                let bytes = &before.body[frame.clone()];
+                if &bytes[..4] != b"TLEN" && &bytes[..4] != b"USLT" {
+                    assert!(after
+                        .frames
+                        .iter()
+                        .any(|range| &after.body[range.clone()] == bytes));
+                }
+            }
+            assert_eq!(
+                &saved[10 + after.body.len()..],
+                &original[10 + before.body.len()..]
+            );
+            assert_eq!(fs::read(&source).unwrap(), original);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

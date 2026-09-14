@@ -1,9 +1,62 @@
+import 'dart:async';
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:desktop_lyric/frame_pacing.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
+
+/// Owns visual-preference persistence separately from language and layout.
+class VisualEffectsSettings extends StatefulWidget {
+  const VisualEffectsSettings({super.key, this.persist});
+  final Future<void> Function()? persist;
+
+  @override
+  State<VisualEffectsSettings> createState() => _VisualEffectsSettingsState();
+}
+
+class _VisualEffectsSettingsState extends State<VisualEffectsSettings> {
+  bool _failed = false;
+  int _revision = 0;
+
+  Future<void> _save() async {
+    final revision = ++_revision;
+    setState(() => _failed = false);
+    try {
+      await (widget.persist ??
+          () => AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false))();
+    } catch (_) {
+      if (mounted && revision == _revision) setState(() => _failed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      ValueListenableBuilder<RenderingPreferences>(
+        valueListenable: AppSettings.instance.rendering,
+        builder: (context, value, _) => RenderingSettings(
+          value: value,
+          onChanged: (next) {
+            AppSettings.instance.rendering.value = next;
+            unawaited(_save());
+          },
+        ),
+      ),
+      if (_failed) ...[
+        const SizedBox(height: 8),
+        Text(ui('保存界面设置失败；本次会话仍然有效。'),
+            style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(onPressed: _save, child: Text(ui('重试')))),
+      ],
+    ]);
+  }
+}
 
 class RenderingSettings extends StatelessWidget {
   const RenderingSettings({
@@ -19,10 +72,29 @@ class RenderingSettings extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SettingsSwitchTile(
+        controlKey: const ValueKey('surface-blur'),
+        icon: Icons.blur_on,
+        title: Text(ui('界面面板毛玻璃')),
+        subtitle: Text(ui('控制播放条等面板的模糊效果；窗口背景单独设置。')),
+        value: value.surfaceBlur,
+        onChanged: (v) => onChanged(value.copyWith(surfaceBlur: v)),
+      ),
+      const SizedBox(height: 16),
+      _FrameRateSettings(value: value, onChanged: onChanged),
+      const SizedBox(height: 16),
       SettingsSurface(
           padding: EdgeInsets.zero,
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: SettingsHeader(
+                  icon: Icons.equalizer,
+                  title: ui('频谱显示'),
+                  subtitle: ui('分别控制歌词详情页与播放条的音柱，两项互不影响。')),
+            ),
+            const Divider(height: 1),
             SettingsSwitchTile(
                 surface: false,
                 controlKey: const ValueKey('lyric-spectrum'),
@@ -74,25 +146,17 @@ class RenderingSettings extends StatelessWidget {
                                       .colorScheme
                                       .onSurfaceVariant)),
                     ])),
+            const Divider(height: 1),
+            SettingsSwitchTile(
+              surface: false,
+              controlKey: const ValueKey('compact-spectrum'),
+              icon: Icons.bar_chart,
+              title: Text(ui('播放条七音频谱')),
+              subtitle: Text(ui('关闭后停止播放条的频谱采样与绘制，保留播放控制。')),
+              value: value.compactSpectrum,
+              onChanged: (v) => onChanged(value.copyWith(compactSpectrum: v)),
+            ),
           ])),
-      const SizedBox(height: 16),
-      SettingsSwitchTile(
-        controlKey: const ValueKey('compact-spectrum'),
-        icon: Icons.bar_chart,
-        title: Text(ui('播放条七音频谱')),
-        subtitle: Text(ui('关闭后停止播放条的频谱采样与绘制，保留播放控制。')),
-        value: value.compactSpectrum,
-        onChanged: (v) => onChanged(value.copyWith(compactSpectrum: v)),
-      ),
-      const SizedBox(height: 16),
-      SettingsSwitchTile(
-        controlKey: const ValueKey('surface-blur'),
-        icon: Icons.blur_on,
-        title: Text(ui('界面面板毛玻璃')),
-        subtitle: Text(ui('控制播放条等面板的模糊效果；窗口背景单独设置。')),
-        value: value.surfaceBlur,
-        onChanged: (v) => onChanged(value.copyWith(surfaceBlur: v)),
-      ),
       const SizedBox(height: 16),
       SettingsSwitchTile(
         controlKey: const ValueKey('pause-hidden-visuals'),
@@ -104,8 +168,6 @@ class RenderingSettings extends StatelessWidget {
         onChanged: (enabled) =>
             onChanged(value.copyWith(pauseWhenHidden: enabled)),
       ),
-      const SizedBox(height: 16),
-      _FrameRateSettings(value: value, onChanged: onChanged),
     ]);
   }
 }

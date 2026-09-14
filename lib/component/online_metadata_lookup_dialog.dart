@@ -20,11 +20,11 @@ import 'package:desktop_lyric/ui_language.dart';
 
 class OnlineMetadataSelection {
   const OnlineMetadataSelection(
-      {this.title, this.artist, this.album, this.artworkPng});
+      {this.title, this.artist, this.album, this.artworkBytes});
   final String? title;
   final String? artist;
   final String? album;
-  final Uint8List? artworkPng;
+  final Uint8List? artworkBytes;
 }
 
 typedef OnlineMetadataCandidateSearch = Future<OnlineSearchResponse> Function(
@@ -225,7 +225,7 @@ class _OnlineMetadataLookupDialogState
       if (_cover && selected.artworkUrl?.isNotEmpty == true) {
         final request = OnlineArtworkRequest();
         _artworkRequest = request;
-        artwork = await request.loadPng(
+        artwork = await request.loadCover(
           selected.artworkUrl!,
           provider: selected.onlineProvider,
         );
@@ -237,7 +237,7 @@ class _OnlineMetadataLookupDialogState
             title: _title ? selected.title : null,
             artist: _artist ? selected.artist : null,
             album: _album ? selected.album : null,
-            artworkPng: artwork,
+            artworkBytes: artwork,
           ));
     } catch (error, trace) {
       LOGGER.e('[metadata artwork] $error', stackTrace: trace);

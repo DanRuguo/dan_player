@@ -242,13 +242,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(fixture.samples.hasListener, isTrue);
     unawaited(navigator.currentState!.push<void>(PageRouteBuilder<void>(
-      opaque: false,
+      opaque: true,
       transitionDuration: Duration.zero,
       reverseTransitionDuration: Duration.zero,
       pageBuilder: (_, __, ___) => const Center(child: Text('overlay')),
     )));
     await tester.pumpAndSettle();
-    expect(find.byType(FullWidthSpectrumView), findsOneWidget);
+    expect(find.byType(FullWidthSpectrumView, skipOffstage: false),
+        findsOneWidget);
     expect(fixture.samples.hasListener, isFalse);
     fixture.current = [.9, .9];
     navigator.currentState!.pop();

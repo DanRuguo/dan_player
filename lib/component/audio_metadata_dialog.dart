@@ -7,6 +7,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/online_metadata_lookup_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_metadata_update.dart';
+import 'package:dan_player/library/cover_image_import.dart';
 import 'package:dan_player/utils.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -81,8 +82,10 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
   Future<void> _removeStagedArtwork(Directory? directory) async {
     if (directory == null) return;
     try {
-      final file = File(path_util.join(directory.path, 'cover.png'));
-      if (await file.exists()) await file.delete();
+      for (final extension in const ['png', 'jpg', 'webp']) {
+        final file = File(path_util.join(directory.path, 'cover.$extension'));
+        if (await file.exists()) await file.delete();
+      }
       await directory.delete();
     } catch (_) {
       // Never recursively remove a folder or a file selected by the user.
@@ -100,14 +103,17 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
           artist: artistController.text);
       if (selection == null || !mounted) return;
       String? downloadedPicture;
-      if (selection.artworkPng != null) {
+      if (selection.artworkBytes != null) {
+        final prepared =
+            await CoverImageImporter.shared.fromBytes(selection.artworkBytes!);
         final data = await getAppDataDir();
         final cache =
             await Directory(path_util.join(data.path, 'metadata_preview'))
                 .create(recursive: true);
         staged = await cache.createTemp('artwork-');
-        final file = File(path_util.join(staged.path, 'cover.png'));
-        await file.writeAsBytes(selection.artworkPng!, flush: true);
+        final file =
+            File(path_util.join(staged.path, 'cover.${prepared.extension}'));
+        await file.writeAsBytes(prepared.bytes, flush: true);
         downloadedPicture = file.path;
       }
       if (!mounted) {
@@ -142,24 +148,39 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
   Future<void> pickPicture() async {
     if (_busy) return;
     setState(() => _pickingPicture = true);
+    Directory? staged;
     try {
       final picker = OpenFilePicker();
       picker
         ..title = ui("选择专辑图片")
         ..filterSpecification = {
-          ui("图片文件"): "*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.gif;*.tif;*.tiff",
+          ui("图片文件"): "*.jpg;*.jpeg;*.png;*.webp;*.bmp",
           ui("所有文件"): "*.*",
         };
 
       final file = picker.getFile();
       if (file == null || !mounted) return;
+      final prepared = await CoverImageImporter.shared.fromFile(file.path);
+      final data = await getAppDataDir();
+      final cache =
+          await Directory(path_util.join(data.path, 'metadata_preview'))
+              .create(recursive: true);
+      staged = await cache.createTemp('artwork-');
+      final copy =
+          File(path_util.join(staged.path, 'cover.${prepared.extension}'));
+      await copy.writeAsBytes(prepared.bytes, flush: true);
+      if (!mounted) {
+        await _removeStagedArtwork(staged);
+        return;
+      }
       final previous = _stagedArtwork;
       setState(() {
-        _stagedArtwork = null;
-        picturePath = file.path;
+        _stagedArtwork = staged;
+        picturePath = copy.path;
       });
       await _removeStagedArtwork(previous);
     } catch (error, trace) {
+      await _removeStagedArtwork(staged);
       LOGGER.e('[metadata picture picker] $error', stackTrace: trace);
       if (mounted) showTextOnSnackBar("选择封面失败：{0}", arguments: [error]);
     } finally {
@@ -311,6 +332,12 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Text(ui('封面会保存为独立副本，长边最多 1600 像素、体积最多 2 MiB；不修改原图。'),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant)),
               ],
             ),
           ),

@@ -45,6 +45,11 @@ import 'catalog_track_resume.dart';
 import 'catalog_snapshot2_2605.dart';
 import 'catalog_lyric_search_2605.dart';
 import 'catalog_batch_a_2605.dart';
+import 'catalog_settings_organization.dart';
+import 'catalog_playlist_tiles.dart';
+import 'catalog_font_picker.dart';
+import 'catalog_audio_trim.dart';
+import 'catalog_cover_import.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogLyricSearch2605,
@@ -93,4 +98,9 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogUi2605,
   ...catalogStartup2605,
   ...catalogPerformancePresets,
+  ...catalogSettingsOrganization,
+  ...catalogPlaylistTiles,
+  ...catalogFontPicker,
+  ...catalogAudioTrim,
+  ...catalogCoverImport,
 });

@@ -335,6 +335,37 @@ class AudioLibrary {
     }
   }
 
+  /// Publish a locally exported file without a full library rescan. A new
+  /// destination folder becomes a retained scan root so later refreshes do
+  /// not silently remove the user's freshly saved copy.
+  void registerSavedAudio(Audio audio) {
+    final directory = path_util.dirname(audio.path);
+    final roots = List<String>.of(scanRoots);
+    if (!roots.any((root) => path_util.equals(root, directory) ||
+        path_util.isWithin(root, directory))) {
+      _scanRoots = [...roots, directory];
+    }
+    var replaced = false;
+    for (final folder in folders) {
+      for (var i = 0; i < folder.audios.length; i++) {
+        if (path_util.equals(folder.audios[i].path, audio.path)) {
+          folder.audios[i] = audio;
+          replaced = true;
+        }
+      }
+    }
+    if (!replaced) {
+      final matching = folders.where((folder) =>
+          path_util.equals(folder.path, directory));
+      if (matching.isNotEmpty) {
+        matching.first.audios.add(audio);
+      } else {
+        folders.add(AudioFolder([audio], directory, audio.modified, audio.modified));
+      }
+    }
+    rebuildDerivedCollections();
+  }
+
   @override
   String toString() {
     return folders.toString();

@@ -973,9 +973,9 @@ void main() {
         await tester.pumpAndSettle();
       }
       Future<List<Audio>?>? songPickerResult;
-      if (['settings', 'appearance', 'theme'].contains(page)) {
+      if (['settings', 'theme'].contains(page)) {
         await _selectSettingsCategory(tester, 'appearance');
-      } else if (page == 'desktop') {
+      } else if (page == 'desktop' || page == 'appearance') {
         await _selectSettingsCategory(tester, 'desktop');
       }
       if (page == 'appearance') {

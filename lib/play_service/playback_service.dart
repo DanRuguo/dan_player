@@ -889,7 +889,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   /// Restore playback when the operating system refuses to delete the file.
-  void cancelAudioDeletion(PlaybackAudioDeletionTicket ticket) {
+  void cancelAudioDeletion(PlaybackAudioDeletionTicket ticket, {double? restoredPosition}) {
     if (ticket._resolved) return;
     ticket._resolved = true;
     if (_sameAudioPath(_deletingAudioPath, ticket.path)) {
@@ -913,7 +913,7 @@ class PlaybackService extends ChangeNotifier {
     unawaited(_loadPaused(
       ticket.index,
       playlist.value,
-      ticket.position,
+      restoredPosition ?? ticket.position,
       resumeAfterLoad: ticket.wasPlaying,
     ));
   }

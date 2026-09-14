@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/font_preview_loader.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
 import 'package:dan_player/page/settings_page/check_update.dart';
@@ -247,7 +248,9 @@ void main() {
       await mount(tester, scale);
       var result = showAppDialog<InstalledFont>(
         context: pageContext,
-        builder: (_) => FontSelectorDialog(installedFont: fonts),
+        builder: (_) => FontSelectorDialog(
+            installedFont: fonts,
+            loader: FontPreviewLoader(load: (_) async {})),
       );
       await tester.pumpAndSettle();
       showAppNotice('选择字体不会修改字体文件。', duration: const Duration(seconds: 30));
@@ -263,12 +266,19 @@ void main() {
             )
             .first,
       );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('测试字体乙'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('测试字体乙'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('font-selector-apply')));
       await tester.pumpAndSettle();
       expect(await result, fonts[1]);
       result = showAppDialog<InstalledFont>(
         context: pageContext,
-        builder: (_) => FontSelectorDialog(installedFont: fonts),
+        builder: (_) => FontSelectorDialog(
+            installedFont: fonts,
+            loader: FontPreviewLoader(load: (_) async {})),
       );
       await tester.pumpAndSettle();
       expectActionAboveNotice(tester, '取消');

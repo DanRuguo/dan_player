@@ -132,7 +132,7 @@ void main() {
     await tester.pumpAndSettle();
     final state = tester.state(find.byType(VerticalLyricScrollView));
     unawaited(navigator.currentState!.push(PageRouteBuilder<void>(
-      opaque: false,
+      opaque: true,
       transitionDuration: Duration.zero,
       reverseTransitionDuration: Duration.zero,
       pageBuilder: (_, animation, secondary) => const Text('Overlay'),

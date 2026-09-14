@@ -4,7 +4,7 @@ import 'dart:io' show FileSystemException;
 import 'package:dan_player/component/app_action_icon.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
-import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/playlist_rectangle_tile.dart';
 import 'package:dan_player/component/playlist_browser.dart';
 import 'package:dan_player/component/playlist_circle_tile.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
@@ -16,7 +16,8 @@ import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/playlist_view.dart';
 import 'package:desktop_lyric/ui_language.dart';
-import 'package:flutter/gestures.dart' show kLongPressTimeout;
+import 'package:flutter/gestures.dart'
+    show kLongPressTimeout, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -177,14 +178,10 @@ void main() {
             final name =
                 find.descendant(of: tile, matching: find.text(displayed.name));
             expect(tester.widget<Text>(name).style!.color, scheme.onSurface);
-            final play = _key('playlist-play-${displayed.id}');
-            expect(tester.widget<AppIconActionButton>(play).glyph,
-                AppActionGlyph.play);
-            await tester.tap(play);
-            await _settle(tester);
-            expect(
-                fixture.played.single.queue, root ? [audio, audio] : [audio]);
-            await tester.tap(_key('playlist-menu-${displayed.id}'));
+            expect(_key('playlist-play-${displayed.id}'), findsNothing);
+            expect(_key('playlist-menu-${displayed.id}'), findsNothing);
+            await tester.tap(_key('playlist-circle-open-${displayed.id}'),
+                buttons: kSecondaryMouseButton);
             await _settle(tester);
             expect(find.text(ui('重命名')), findsWidgets);
             // Pointer-opened menus need not have keyboard focus. Dismiss using
@@ -195,7 +192,7 @@ void main() {
             await tester.tap(_key('playlist-circle-open-${displayed.id}'));
             expect(fixture.navigated.single, same(displayed));
             if (!root) {
-              final songPlay = _key('playlist-play-${direct.id}');
+              final songPlay = _key('playlist-circle-open-${direct.id}');
               await tester.ensureVisible(songPlay);
               await _settle(tester);
               await tester.tap(songPlay);
@@ -215,7 +212,7 @@ void main() {
         (tester) async {
       _size(tester, width);
       final fixture = _Fixture();
-      for (var i = 0; i < 80; i++) {
+      for (var i = 0; i < 120; i++) {
         fixture.tree.createPlaylist('Playlist $i', parent: fixture.parent);
       }
       await tester.pumpWidget(_app(fixture.browser()));
@@ -226,7 +223,7 @@ void main() {
       await tester.pump();
       await selectPlaylistView(tester, 'grid');
       expect(find.byType(PlaylistCircleTile), findsNothing);
-      expect(find.byType(MusicGridTileBody), findsWidgets);
+      expect(find.byType(PlaylistRectangleTile), findsWidgets);
       final squareScroll =
           tester.widget<GridView>(find.byType(GridView)).controller!;
       squareScroll.jumpTo(240);
@@ -239,13 +236,9 @@ void main() {
       await selectPlaylistView(tester, 'grid');
       expect(tester.widget<GridView>(find.byType(GridView)).controller!.offset,
           240);
-      expect(fixture.views, [
-        PlaylistViewMode.grid,
-        PlaylistViewMode.list,
-        PlaylistViewMode.circular,
-        PlaylistViewMode.grid
-      ]);
-      expect(fixture.saves, 0);
+      expect(fixture.views, isEmpty);
+      expect(fixture.parent.presentation['view'], 'grid');
+      expect(fixture.saves, 4);
       await _settle(tester);
     });
   }
@@ -377,7 +370,7 @@ void main() {
           kind: PointerDeviceKind.mouse);
       await mouse.moveBy(const Offset(40, 0));
       await tester.pump(const Duration(milliseconds: 16));
-      final bounds = tester.getRect(_key('playlist-menu-${children.first.id}'));
+      final bounds = tester.getRect(source);
       await mouse
           .moveTo(Offset(tester.getCenter(source).dx, bounds.bottom + 30));
       await tester.pump();
@@ -440,7 +433,7 @@ void main() {
     _size(tester, 1000);
     final fixture = _Fixture();
     final children = [
-      for (var i = 0; i < 80; i++)
+      for (var i = 0; i < 120; i++)
         fixture.tree.createPlaylist('Playlist $i', parent: fixture.parent),
     ];
     await tester.pumpWidget(_app(fixture.browser()));
@@ -522,7 +515,7 @@ void main() {
     await tester.pumpWidget(_app(gesturePage));
     await _settle(tester);
     final gesture = await tester.startGesture(
-        tester.getCenter(_key('playlist-drag-${source.id}')),
+        tester.getCenter(_key('playlist-circle-open-${source.id}')),
         kind: PointerDeviceKind.mouse);
     await tester.pump(const Duration(milliseconds: 260));
     await gesture.moveBy(const Offset(0, 20));
@@ -564,13 +557,18 @@ void main() {
     final fixture = _Fixture();
     final empty = fixture.tree.createPlaylist('Empty', parent: fixture.parent);
     for (final view in [PlaylistViewMode.circular, PlaylistViewMode.list]) {
+      await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpWidget(_app(fixture.browser(view: view)));
       await _settle(tester);
-      expect(
-          tester
-              .widget<AppIconActionButton>(_key('playlist-play-${empty.id}'))
-              .onPressed,
-          isNull);
+      if (view == PlaylistViewMode.circular) {
+        expect(_key('playlist-play-${empty.id}'), findsNothing);
+      } else {
+        expect(
+            tester
+                .widget<AppIconActionButton>(_key('playlist-play-${empty.id}'))
+                .onPressed,
+            isNull);
+      }
       expect(
           tester.widget<PlaylistToolbar>(find.byType(PlaylistToolbar)).canPlay,
           isFalse);
@@ -610,12 +608,10 @@ void main() {
     expect(find.byIcon(Icons.music_note), findsWidgets);
     expect(fixture.parent.entries.map((entry) => entry.id), ids);
     expect(nested.imagePath, imagePath);
-    expect(
-        tester
-            .widget<AppIconActionButton>(_key('playlist-play-${entry.id}'))
-            .onPressed,
-        isNotNull);
-    await tester.tap(_key('playlist-menu-${entry.id}'));
+    expect(_key('playlist-play-${entry.id}'), findsNothing);
+    expect(_key('playlist-menu-${entry.id}'), findsNothing);
+    await tester.tap(_key('playlist-circle-open-${entry.id}'),
+        buttons: kSecondaryMouseButton);
     await _settle(tester);
     expect(find.text(ui('从当前歌单移除')), findsWidgets);
     expect(fixture.saves, 0);

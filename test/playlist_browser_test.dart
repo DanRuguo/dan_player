@@ -84,7 +84,10 @@ Future<void> _tapPageAction(WidgetTester tester, String key) async {
 
 Future<TestGesture> _dragTo(
     WidgetTester tester, String id, Finder target) async {
-  final handle = find.byKey(ValueKey('playlist-drag-$id'));
+  final legacy = find.byKey(ValueKey('playlist-drag-$id'));
+  final handle = legacy.evaluate().isNotEmpty
+      ? legacy
+      : find.byKey(ValueKey('playlist-rectangle-$id'));
   final pointer = await tester.startGesture(tester.getCenter(handle),
       kind: PointerDeviceKind.mouse);
   await tester.pump(const Duration(milliseconds: 260));

@@ -279,6 +279,18 @@ class TrackResumeStore {
         _loaded = true;
       });
 
+  /// An in-place trim changes this track's timeline, invalidating its old
+  /// automatic resume position without touching any other track.
+  Future<void> remove(String track) => _exclusive(() async {
+        final key = trackKey(track);
+        if (key == null) return;
+        await _load();
+        if (!_items.containsKey(key)) return;
+        final next = Map<String, TrackResumePosition>.of(_items)..remove(key);
+        await _save(next);
+        _lastCapture.remove(key);
+      });
+
   Future<void> _save(Map<String, TrackResumePosition> input) async {
     final recent = input.values.toList()
       ..sort((a, b) => b.updatedMs.compareTo(a.updatedMs));

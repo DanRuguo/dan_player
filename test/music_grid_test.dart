@@ -2,6 +2,7 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/playlist_rectangle_tile.dart';
 import 'package:dan_player/component/playlist_browser.dart';
 import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/library/artwork_size.dart';
@@ -150,6 +151,18 @@ void main() {
           final song = _GridAudio('A long title for a compact song card');
           await tester.pumpWidget(_host(_page(kind, [song]), scale: scale));
           await tester.pumpAndSettle();
+          if (kind == 'playlist') {
+            final tile = find.byWidgetPredicate((widget) =>
+                widget is PlaylistRectangleTile && widget.title == song.title);
+            expect(tile, findsOneWidget);
+            final size = tester.getSize(tile);
+            expect(size.width, closeTo(size.height, .1));
+            expect(find.descendant(of: tile, matching: find.byType(IconButton)),
+                findsNothing);
+            expect(find.text('HIDDEN ARTIST - HIDDEN ALBUM'), findsNothing);
+            expect(tester.takeException(), isNull);
+            return;
+          }
           final tile = _gridTile(song);
           final grid = tester.widget<SliverGrid>(find.byType(SliverGrid));
           final delegate = grid.gridDelegate as CompactMusicGridDelegate;

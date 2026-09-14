@@ -18,6 +18,7 @@ class CategoryPresentation {
       {this.shape = CategoryCoverShape.circle,
       this.showTitle = true,
       this.showDetails = false,
+      this.artworkBackground = false,
       this.sizes = const {},
       this.orders = const {},
       this.layouts = const {},
@@ -38,6 +39,7 @@ class CategoryPresentation {
   final CategoryCoverShape shape;
   final bool showTitle;
   final bool showDetails;
+  final bool artworkBackground;
   final Map<String, CategoryTileSize> sizes;
   final Map<String, List<String>> orders;
 
@@ -55,6 +57,7 @@ class CategoryPresentation {
           : CategoryCoverShape.circle,
       showTitle: map['showTitle'] is bool ? map['showTitle'] : true,
       showDetails: map['showDetails'] is bool ? map['showDetails'] : false,
+      artworkBackground: map['artworkBackground'] == true,
       sizes: {
         if (map['sizes'] is Map)
           for (final entry in (map['sizes'] as Map).entries)
@@ -99,6 +102,7 @@ class CategoryPresentation {
         'shape': shape.name,
         'showTitle': showTitle,
         'showDetails': showDetails,
+        'artworkBackground': artworkBackground,
         'sizes': sizes.map((key, value) => MapEntry(key, value.name)),
         'orders': orders,
         'layouts': layouts,
@@ -113,6 +117,7 @@ class CategoryPresentation {
           {CategoryCoverShape? shape,
           bool? showTitle,
           bool? showDetails,
+          bool? artworkBackground,
           Map<String, CategoryTileSize>? sizes,
           Map<String, List<String>>? orders,
           Map<String, List<int>>? layouts,
@@ -124,6 +129,7 @@ class CategoryPresentation {
           shape: shape ?? this.shape,
           showTitle: showTitle ?? this.showTitle,
           showDetails: showDetails ?? this.showDetails,
+          artworkBackground: artworkBackground ?? this.artworkBackground,
           sizes: sizes ?? this.sizes,
           orders: orders ?? this.orders,
           layouts: layouts ?? this.layouts,

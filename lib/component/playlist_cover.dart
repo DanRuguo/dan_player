@@ -15,11 +15,13 @@ class PlaylistCover extends StatelessWidget {
     required this.playlist,
     this.size = 48,
     this.loadSongArtwork = true,
+    this.artworkWrapper,
   });
 
   final Playlist playlist;
   final double size;
   final bool loadSongArtwork;
+  final Widget Function(Widget)? artworkWrapper;
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +46,14 @@ class PlaylistCover extends StatelessWidget {
     }
 
     final path = playlist.imagePath;
+    final image = path == null || path.isEmpty
+        ? songArt()
+        : ArtworkImage(
+            image: FileImage(File(path)),
+            size: size,
+            revision: playlist.modifiedAt,
+            errorBuilder: (_, __, ___) => songArt(),
+          );
     return Semantics(
       image: true,
       label: ui("{0}的歌单封面", [playlist.name]),
@@ -51,14 +61,7 @@ class PlaylistCover extends StatelessWidget {
         dimension: size,
         child: ClipRRect(
           borderRadius: AppShape.smallRadius,
-          child: path == null || path.isEmpty
-              ? songArt()
-              : ArtworkImage(
-                  image: FileImage(File(path)),
-                  size: size,
-                  revision: playlist.modifiedAt,
-                  errorBuilder: (_, __, ___) => songArt(),
-                ),
+          child: artworkWrapper?.call(image) ?? image,
         ),
       ),
     );

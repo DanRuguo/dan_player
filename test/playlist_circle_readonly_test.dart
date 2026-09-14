@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
-import 'package:dan_player/component/app_action_icon.dart';
+import 'package:flutter/gestures.dart';
 import 'package:dan_player/component/playlist_browser.dart';
 import 'package:dan_player/component/playlist_circle_tile.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
@@ -94,20 +94,17 @@ void main() {
             .widget<PlaylistToolbar>(find.byType(PlaylistToolbar))
             .editingEnabled,
         isFalse);
-    final drag = tester.widget<Draggable<PlaylistDragData>>(
-        find.byKey(ValueKey('playlist-drag-${child.id}')));
-    expect(drag.maxSimultaneousDrags, 0);
-    await tester.tap(find.byKey(ValueKey('playlist-play-${child.id}')));
-    expect(played, 1);
-    expect(
-        tester
-            .widget<AppIconActionButton>(
-                find.byKey(ValueKey('playlist-play-${child.id}')))
-            .onPressed,
-        isNotNull);
-    await tester.tap(find.byKey(ValueKey('playlist-circle-open-${child.id}')));
-    expect(opened.single, same(child));
-    await tester.tap(find.byKey(ValueKey('playlist-menu-${child.id}')));
+    expect(find.byKey(ValueKey('playlist-play-${child.id}')), findsNothing);
+    final target = find.byKey(ValueKey('playlist-circle-open-${child.id}'));
+    final gesture = await tester.startGesture(tester.getCenter(target),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 300));
+    await gesture.moveBy(const Offset(300, 100));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(child.parent, same(parent));
+    expect(saves, 0);
+    await tester.tap(target, buttons: kSecondaryMouseButton);
     await tester.pumpAndSettle();
     for (final label in ['重命名', '移动到…', '删除歌单…']) {
       final item = find
@@ -117,6 +114,11 @@ void main() {
       expect(tester.widget<MenuItemButton>(item).onPressed, isNull,
           reason: label);
     }
+    await tester.tapAt(const Offset(990, 880));
+    await tester.pumpAndSettle();
+    await tester.tap(target);
+    expect(opened.single, same(child));
+    expect(played, 0);
     expect(saves, 0);
     expect(parent.entries.single.childPlaylist, same(child));
     final bytes = await tester.runAsync(source.readAsString);

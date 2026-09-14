@@ -2,6 +2,8 @@
 // Do not put code in `mod.rs`, but put in e.g. `simple.rs`.
 //
 
+pub mod audio_trim;
+pub mod cover_image;
 pub mod installed_font;
 pub mod logger;
 pub mod metadata_preflight;

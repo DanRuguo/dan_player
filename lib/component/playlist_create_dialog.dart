@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/playlist_song_picker.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/cover_image_import.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:flutter/material.dart';
@@ -51,6 +52,7 @@ class _PlaylistCreateDialogState extends State<PlaylistCreateDialog> {
   String? _imagePath;
   String? _error;
   List<Audio> _selected = [];
+  bool _loadingCover = false;
 
   @override
   void dispose() {
@@ -59,6 +61,7 @@ class _PlaylistCreateDialogState extends State<PlaylistCreateDialog> {
   }
 
   void _submit() {
+    if (_loadingCover) return;
     final name = _name.text.trim();
     if (name.isEmpty) {
       setState(() => _error = ui("请输入歌单名称"));
@@ -68,11 +71,21 @@ class _PlaylistCreateDialogState extends State<PlaylistCreateDialog> {
   }
 
   Future<void> _chooseImage() async {
+    if (_loadingCover) return;
+    setState(() => _loadingCover = true);
     try {
-      final path = await (widget.pickImage ?? pickPlaylistImage)();
-      if (mounted && path != null) setState(() => _imagePath = path);
-    } catch (_) {
-      if (mounted) setState(() => _error = ui("无法打开图片选择器，请稍后重试"));
+      final selected = await (widget.pickImage ?? pickPlaylistImage)();
+      if (selected == null || !mounted) return;
+      final prepared = await importPlaylistCoverFile(selected);
+      if (mounted) setState(() => _imagePath = prepared);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error is CoverImageException
+            ? error.toString()
+            : ui("无法打开图片选择器，请稍后重试"));
+      }
+    } finally {
+      if (mounted) setState(() => _loadingCover = false);
     }
   }
 
@@ -125,7 +138,7 @@ class _PlaylistCreateDialogState extends State<PlaylistCreateDialog> {
                 children: [
                   OutlinedButton.icon(
                     key: const ValueKey('playlist-create-cover'),
-                    onPressed: _chooseImage,
+                    onPressed: _loadingCover ? null : _chooseImage,
                     icon: const Icon(Icons.image_outlined),
                     label: Text(_imagePath == null ? ui("选择封面") : ui("更换封面")),
                   ),
@@ -161,7 +174,7 @@ class _PlaylistCreateDialogState extends State<PlaylistCreateDialog> {
         ),
         FilledButton(
           key: const ValueKey('playlist-confirm-create'),
-          onPressed: _submit,
+          onPressed: _loadingCover ? null : _submit,
           child: Text(ui("创建")),
         ),
       ],

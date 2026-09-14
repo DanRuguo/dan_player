@@ -6,8 +6,10 @@ import 'package:dan_player/library/artwork_size.dart';
 import 'package:flutter/material.dart';
 
 class CoverCaptionColors {
-  const CoverCaptionColors(this.foreground, this.background);
+  const CoverCaptionColors(this.foreground, this.background,
+      {this.seed = Colors.grey});
   final Color foreground, background;
+  final Color seed;
   static const fallback = CoverCaptionColors(Colors.white, Colors.transparent);
 }
 
@@ -90,7 +92,26 @@ class CoverCaptionCache {
                 bytes.getUint8(offset + 2)));
           }
         }
-        finish(captionColorsForSamples(colors));
+        final surfaceSamples = <Color>[];
+        // Card surfaces reflect the whole cover, not just its caption strip.
+        // Reuse the same 48px decode; 144 additional samples only on cache miss.
+        for (var y = 0; y < 12; y++) {
+          for (var x = 0; x < 12; x++) {
+            final px = (crop.left + (x + .5) * crop.width / 12)
+                .floor()
+                .clamp(0, info.image.width - 1);
+            final py = (crop.top + (y + .5) * crop.height / 12)
+                .floor()
+                .clamp(0, info.image.height - 1);
+            final offset = (py * info.image.width + px) * 4;
+            surfaceSamples.add(Color.fromARGB(
+                bytes.getUint8(offset + 3),
+                bytes.getUint8(offset),
+                bytes.getUint8(offset + 1),
+                bytes.getUint8(offset + 2)));
+          }
+        }
+        finish(captionColorsForSamples(colors, seedSamples: surfaceSamples));
       } catch (_) {
         finish(CoverCaptionColors.fallback);
       } finally {
@@ -105,7 +126,8 @@ class CoverCaptionCache {
 }
 
 @visibleForTesting
-CoverCaptionColors captionColorsForSamples(List<Color> samples) {
+CoverCaptionColors captionColorsForSamples(List<Color> samples,
+    {List<Color>? seedSamples}) {
   if (samples.isEmpty) return CoverCaptionColors.fallback;
   // A small bright illustration should not make text over the predominantly
   // dark caption area turn black. Median is robust to those local highlights.
@@ -118,6 +140,20 @@ CoverCaptionColors captionColorsForSamples(List<Color> samples) {
   // Choose the higher-contrast black/white text against the sampled region.
   // The text layer is fully transparent; never paint a caption rectangle.
   final darkText = (luminance + .05) / .05 >= 1.05 / (luminance + .05);
+  var red = 0.0, green = 0.0, blue = 0.0, weight = 0.0;
+  for (final sample in seedSamples ?? samples) {
+    red += sample.r * sample.a;
+    green += sample.g * sample.a;
+    blue += sample.b * sample.a;
+    weight += sample.a;
+  }
   return CoverCaptionColors(
-      darkText ? Colors.black : Colors.white, Colors.transparent);
+      darkText ? Colors.black : Colors.white, Colors.transparent,
+      seed: weight == 0
+          ? Colors.grey
+          : Color.from(
+              alpha: 1,
+              red: red / weight,
+              green: green / weight,
+              blue: blue / weight));
 }

@@ -21,6 +21,7 @@ import 'package:dan_player/library/playback_bookmarks.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/category_pointer_glow.dart';
 import 'package:go_router/go_router.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:dan_player/component/category_labels.dart';
@@ -417,8 +418,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
                           textAlign: TextAlign.center),
                     ))
                   : AppContentScrollbar(
-                      builder: (context, controller) =>
-                          GridEdgeAutoScrollRegion(
+                      builder: (context, controller) => CoverPointerScope(
+                          child: GridEdgeAutoScrollRegion(
                               controller: controller,
                               child: CustomScrollView(
                                 controller: controller,
@@ -454,7 +455,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                                   const SliverPadding(
                                       padding: EdgeInsets.only(bottom: 96)),
                                 ],
-                              )),
+                              ))),
                     ),
             ),
           ],

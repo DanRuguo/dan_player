@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/online_metadata_lookup_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/cover_image_import.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/online_artwork_request.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -54,7 +55,7 @@ void main() {
       'https://user:password@example.com/image',
       'not a url',
     ]) {
-      await expectLater(request.loadPng(address), throwsFormatException);
+      await expectLater(request.loadCover(address), throwsFormatException);
     }
     expect(opened, isFalse);
   });
@@ -66,7 +67,7 @@ void main() {
       return _Client((_) => _Response(const []));
     })
       ..cancel();
-    await expectLater(request.loadPng('https://example.com/cover'),
+    await expectLater(request.loadCover('https://example.com/cover'),
         throwsA(isA<HttpException>()));
     expect(opened, isFalse);
   });
@@ -76,7 +77,7 @@ void main() {
     final client = _Client((_) => _Response(fixture));
     final request = OnlineArtworkRequest(httpClientFactory: () => client);
 
-    final png = await request.loadPng('http://example.com/cover');
+    final png = await request.loadCover('http://example.com/cover');
 
     expect(client.requested.single.scheme, 'https');
     expect(client.closed, isTrue);
@@ -110,7 +111,7 @@ void main() {
     final client = _Client((_) => _Response(fixture));
     final request = OnlineArtworkRequest(httpClientFactory: () => client);
 
-    await request.loadPng(
+    await request.loadCover(
       'http://127.0.0.1:8123/cover?id=1',
       provider: profile.providerId,
       expectedProfile: profile,
@@ -147,7 +148,7 @@ void main() {
     });
 
     await expectLater(
-      request.loadPng(
+      request.loadCover(
         'http://127.0.0.1:8126/cover',
         provider: profile.providerId,
         expectedProfile: profile,
@@ -181,7 +182,7 @@ void main() {
       return _Client((_) => _Response(const []));
     });
     await expectLater(
-      request.loadPng(
+      request.loadCover(
         'http://192.168.1.5:8124/old-cover',
         provider: profile.providerId,
       ),
@@ -198,7 +199,7 @@ void main() {
       return _Client((_) => _Response(const []));
     });
     await expectLater(
-      request.loadPng(
+      request.loadCover(
         'https://127.0.0.1:8124/cover',
         provider: profile.providerId,
       ),
@@ -222,7 +223,7 @@ void main() {
         return _Client((_) => _Response(const []));
       });
       await expectLater(
-        request.loadPng(
+        request.loadCover(
           'https://127.0.0.1:8124/cover',
           provider: profile.providerId,
         ),
@@ -244,7 +245,7 @@ void main() {
         ));
     request = OnlineArtworkRequest(httpClientFactory: () => editingClient);
     await expectLater(
-      request.loadPng(
+      request.loadCover(
         'http://127.0.0.1:8124/cover',
         provider: profile.providerId,
       ),
@@ -262,7 +263,7 @@ void main() {
         ));
     request =
         OnlineArtworkRequest(httpClientFactory: () => completedBodyClient);
-    final pendingDecode = request.loadPng(
+    final pendingDecode = request.loadCover(
       'http://127.0.0.1:8124/cover',
       provider: profile.providerId,
     );
@@ -306,7 +307,7 @@ void main() {
         : _Response(fixture));
     final request = OnlineArtworkRequest(httpClientFactory: () => client);
 
-    await request.loadPng(
+    await request.loadCover(
       'http://127.0.0.1:8125/cover?id=1',
       provider: profile.providerId,
     );
@@ -322,7 +323,7 @@ void main() {
         _Response(const [], status: 302, location: 'http://example.com/plain'));
     final request = OnlineArtworkRequest(httpClientFactory: () => client);
 
-    await expectLater(request.loadPng('https://example.com/cover'),
+    await expectLater(request.loadCover('https://example.com/cover'),
         throwsA(isA<HttpException>()));
 
     expect(client.requested, [Uri.parse('https://example.com/cover')]);
@@ -334,7 +335,7 @@ void main() {
         _Client((_) => _Response(const [], status: 302, location: '/loop'));
     final request = OnlineArtworkRequest(httpClientFactory: () => client);
 
-    await expectLater(request.loadPng('https://example.com/cover'),
+    await expectLater(request.loadCover('https://example.com/cover'),
         throwsA(isA<HttpException>()));
 
     expect(client.requested, hasLength(6));
@@ -344,13 +345,13 @@ void main() {
   test('oversized and empty responses are rejected without an image result',
       () async {
     for (final response in [
-      _Response(const [], length: 10 * 1024 * 1024 + 1),
+      _Response(const [], length: maxCoverInputBytes + 1),
       _Response(const []),
     ]) {
       final client = _Client((_) => response);
       final request = OnlineArtworkRequest(httpClientFactory: () => client);
-      await expectLater(
-          request.loadPng('https://example.com/cover'), throwsFormatException);
+      await expectLater(request.loadCover('https://example.com/cover'),
+          throwsFormatException);
       expect(client.closed, isTrue);
     }
   });
@@ -360,7 +361,7 @@ void main() {
     final client = _Client((_) => _Response([1, 2, 3]));
     final request = OnlineArtworkRequest(httpClientFactory: () => client);
     await expectLater(
-        request.loadPng('https://example.com/cover'), throwsA(anything));
+        request.loadCover('https://example.com/cover'), throwsA(anything));
     expect(client.closed, isTrue);
   });
 
@@ -371,7 +372,7 @@ void main() {
     final client =
         _Client((_) => _Response(fixture, onListen: () => request.cancel()));
     request = OnlineArtworkRequest(httpClientFactory: () => client);
-    await expectLater(request.loadPng('https://example.com/cover'),
+    await expectLater(request.loadCover('https://example.com/cover'),
         throwsA(isA<HttpException>()));
     expect(client.closed, isTrue);
   });
@@ -393,7 +394,7 @@ void main() {
     );
 
     await expectLater(
-      request.loadPng('https://example.com/cover'),
+      request.loadCover('https://example.com/cover'),
       throwsA(isA<TimeoutException>()),
     );
 

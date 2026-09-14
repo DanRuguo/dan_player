@@ -3,6 +3,8 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/audio_trim.dart';
+import 'api/cover_image.dart';
 import 'api/installed_font.dart';
 import 'api/logger.dart';
 import 'api/metadata_preflight.dart';
@@ -74,7 +76,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 100673091;
+  int get rustContentHash => -1627660247;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -114,7 +116,24 @@ abstract class RustLibApi extends BaseApi {
 
   String crateApiTagReaderCancelIndexScanTask({required String taskId});
 
+  Future<String> crateApiAudioTrimCommitAudioTrim(
+      {required String sourcePath,
+      required String temporaryPath,
+      required String destinationPath,
+      required bool overwrite,
+      required String expectedFingerprint});
+
   String crateApiTagReaderCreateIndexScanTask();
+
+  Future<String> crateApiAudioTrimFinishAudioTrimMetadata(
+      {required String sourcePath,
+      required String temporaryPath,
+      required bool preserveMetadata,
+      String? title,
+      String? artist,
+      String? album,
+      required double startSeconds,
+      required double endSeconds});
 
   Future<List<InstalledFont>?> crateApiInstalledFontGetInstalledFonts();
 
@@ -127,16 +146,32 @@ abstract class RustLibApi extends BaseApi {
 
   Future<bool> crateApiUtilsLaunchInBrowser({required String uri});
 
+  Future<ImportedCoverImage> crateApiCoverImageNormalizeCoverImage(
+      {required List<int> data});
+
   Future<String?> crateApiUtilsPickSingleFolder();
 
   Future<String> crateApiMetadataPreflightPreflightAudioMetadata(
       {required String path});
+
+  Future<String> crateApiAudioTrimPrepareAudioTrim(
+      {required String sourcePath});
+
+  Future<String> crateApiAudioTrimReadAudioTrimFile({required String path});
+
+  Future<void> crateApiAudioTrimReleaseAudioTrim(
+      {required String temporaryPath});
 
   void crateApiTagReaderReleaseIndexScanTask({required String taskId});
 
   Future<bool> crateApiUtilsShowInExplorer({required String path});
 
   SystemTheme crateApiSystemThemeSystemThemeGetSystemTheme();
+
+  Future<String> crateApiAudioTrimTrimAudioLyricText(
+      {required String text,
+      required double startSeconds,
+      required double endSeconds});
 
   Future<String> crateApiTagReaderUpdateAudioMetadata(
       {required String path,
@@ -404,11 +439,57 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiAudioTrimCommitAudioTrim(
+      {required String sourcePath,
+      required String temporaryPath,
+      required String destinationPath,
+      required bool overwrite,
+      required String expectedFingerprint}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(sourcePath, serializer);
+        sse_encode_String(temporaryPath, serializer);
+        sse_encode_String(destinationPath, serializer);
+        sse_encode_bool(overwrite, serializer);
+        sse_encode_String(expectedFingerprint, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 9, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiAudioTrimCommitAudioTrimConstMeta,
+      argValues: [
+        sourcePath,
+        temporaryPath,
+        destinationPath,
+        overwrite,
+        expectedFingerprint
+      ],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiAudioTrimCommitAudioTrimConstMeta =>
+      const TaskConstMeta(
+        debugName: "commit_audio_trim",
+        argNames: [
+          "sourcePath",
+          "temporaryPath",
+          "destinationPath",
+          "overwrite",
+          "expectedFingerprint"
+        ],
+      );
+
+  @override
   String crateApiTagReaderCreateIndexScanTask() {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 9)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 10)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -427,12 +508,70 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiAudioTrimFinishAudioTrimMetadata(
+      {required String sourcePath,
+      required String temporaryPath,
+      required bool preserveMetadata,
+      String? title,
+      String? artist,
+      String? album,
+      required double startSeconds,
+      required double endSeconds}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(sourcePath, serializer);
+        sse_encode_String(temporaryPath, serializer);
+        sse_encode_bool(preserveMetadata, serializer);
+        sse_encode_opt_String(title, serializer);
+        sse_encode_opt_String(artist, serializer);
+        sse_encode_opt_String(album, serializer);
+        sse_encode_f_64(startSeconds, serializer);
+        sse_encode_f_64(endSeconds, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 11, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiAudioTrimFinishAudioTrimMetadataConstMeta,
+      argValues: [
+        sourcePath,
+        temporaryPath,
+        preserveMetadata,
+        title,
+        artist,
+        album,
+        startSeconds,
+        endSeconds
+      ],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiAudioTrimFinishAudioTrimMetadataConstMeta =>
+      const TaskConstMeta(
+        debugName: "finish_audio_trim_metadata",
+        argNames: [
+          "sourcePath",
+          "temporaryPath",
+          "preserveMetadata",
+          "title",
+          "artist",
+          "album",
+          "startSeconds",
+          "endSeconds"
+        ],
+      );
+
+  @override
   Future<List<InstalledFont>?> crateApiInstalledFontGetInstalledFonts() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 10, port: port_);
+            funcId: 12, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_list_installed_font,
@@ -457,7 +596,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 11, port: port_);
+            funcId: 13, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
@@ -485,7 +624,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_u_32(width, serializer);
         sse_encode_u_32(height, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 12, port: port_);
+            funcId: 14, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_list_prim_u_8_strict,
@@ -511,7 +650,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_StreamSink_String_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 13, port: port_);
+            funcId: 15, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -537,7 +676,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(uri, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 14, port: port_);
+            funcId: 16, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -556,12 +695,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<ImportedCoverImage> crateApiCoverImageNormalizeCoverImage(
+      {required List<int> data}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_list_prim_u_8_loose(data, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 17, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_imported_cover_image,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiCoverImageNormalizeCoverImageConstMeta,
+      argValues: [data],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiCoverImageNormalizeCoverImageConstMeta =>
+      const TaskConstMeta(
+        debugName: "normalize_cover_image",
+        argNames: ["data"],
+      );
+
+  @override
   Future<String?> crateApiUtilsPickSingleFolder() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 15, port: port_);
+            funcId: 18, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
@@ -587,7 +752,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 16, port: port_);
+            funcId: 19, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -606,12 +771,89 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiAudioTrimPrepareAudioTrim(
+      {required String sourcePath}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(sourcePath, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 20, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiAudioTrimPrepareAudioTrimConstMeta,
+      argValues: [sourcePath],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiAudioTrimPrepareAudioTrimConstMeta =>
+      const TaskConstMeta(
+        debugName: "prepare_audio_trim",
+        argNames: ["sourcePath"],
+      );
+
+  @override
+  Future<String> crateApiAudioTrimReadAudioTrimFile({required String path}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(path, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 21, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiAudioTrimReadAudioTrimFileConstMeta,
+      argValues: [path],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiAudioTrimReadAudioTrimFileConstMeta =>
+      const TaskConstMeta(
+        debugName: "read_audio_trim_file",
+        argNames: ["path"],
+      );
+
+  @override
+  Future<void> crateApiAudioTrimReleaseAudioTrim(
+      {required String temporaryPath}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(temporaryPath, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 22, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiAudioTrimReleaseAudioTrimConstMeta,
+      argValues: [temporaryPath],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiAudioTrimReleaseAudioTrimConstMeta =>
+      const TaskConstMeta(
+        debugName: "release_audio_trim",
+        argNames: ["temporaryPath"],
+      );
+
+  @override
   void crateApiTagReaderReleaseIndexScanTask({required String taskId}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(taskId, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 23)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -636,7 +878,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 18, port: port_);
+            funcId: 24, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -659,7 +901,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 19)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 25)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_system_theme,
@@ -675,6 +917,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "system_theme_get_system_theme",
         argNames: [],
+      );
+
+  @override
+  Future<String> crateApiAudioTrimTrimAudioLyricText(
+      {required String text,
+      required double startSeconds,
+      required double endSeconds}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(text, serializer);
+        sse_encode_f_64(startSeconds, serializer);
+        sse_encode_f_64(endSeconds, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 26, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiAudioTrimTrimAudioLyricTextConstMeta,
+      argValues: [text, startSeconds, endSeconds],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiAudioTrimTrimAudioLyricTextConstMeta =>
+      const TaskConstMeta(
+        debugName: "trim_audio_lyric_text",
+        argNames: ["text", "startSeconds", "endSeconds"],
       );
 
   @override
@@ -697,7 +969,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(picturePath, serializer);
         sse_encode_opt_String(expectedFingerprint, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 20, port: port_);
+            funcId: 27, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -742,7 +1014,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(taskId, serializer);
         sse_encode_StreamSink_index_action_state_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 21, port: port_);
+            funcId: 28, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -844,6 +1116,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ImportedCoverImage dco_decode_imported_cover_image(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return ImportedCoverImage(
+      bytes: dco_decode_list_prim_u_8_strict(arr[0]),
+      extension_: dco_decode_String(arr[1]),
+      width: dco_decode_u_32(arr[2]),
+      height: dco_decode_u_32(arr[3]),
+    );
+  }
+
+  @protected
   IndexActionState dco_decode_index_action_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -877,6 +1163,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<InstalledFont> dco_decode_list_installed_font(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_installed_font).toList();
+  }
+
+  @protected
+  List<int> dco_decode_list_prim_u_8_loose(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as List<int>;
   }
 
   @protected
@@ -1047,6 +1339,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ImportedCoverImage sse_decode_imported_cover_image(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_bytes = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_extension_ = sse_decode_String(deserializer);
+    var var_width = sse_decode_u_32(deserializer);
+    var var_height = sse_decode_u_32(deserializer);
+    return ImportedCoverImage(
+        bytes: var_bytes,
+        extension_: var_extension_,
+        width: var_width,
+        height: var_height);
+  }
+
+  @protected
   IndexActionState sse_decode_index_action_state(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_progress = sse_decode_f_64(deserializer);
@@ -1085,6 +1392,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ans_.add(sse_decode_installed_font(deserializer));
     }
     return ans_;
+  }
+
+  @protected
+  List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var len_ = sse_decode_i_32(deserializer);
+    return deserializer.buffer.getUint8List(len_);
   }
 
   @protected
@@ -1283,6 +1597,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_imported_cover_image(
+      ImportedCoverImage self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_prim_u_8_strict(self.bytes, serializer);
+    sse_encode_String(self.extension_, serializer);
+    sse_encode_u_32(self.width, serializer);
+    sse_encode_u_32(self.height, serializer);
+  }
+
+  @protected
   void sse_encode_index_action_state(
       IndexActionState self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1314,6 +1638,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     for (final item in self) {
       sse_encode_installed_font(item, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_list_prim_u_8_loose(
+      List<int> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    serializer.buffer
+        .putUint8List(self is Uint8List ? self : Uint8List.fromList(self));
   }
 
   @protected

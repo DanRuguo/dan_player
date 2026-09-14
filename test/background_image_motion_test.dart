@@ -193,7 +193,7 @@ void main() {
             find.byType(ValueListenableBuilder<double>))
         .valueListenable;
     navigator.currentState!.push(PageRouteBuilder<void>(
-      opaque: false,
+      opaque: true,
       transitionDuration: Duration.zero,
       pageBuilder: (_, __, ___) => const SizedBox.expand(),
     ));

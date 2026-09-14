@@ -125,9 +125,13 @@ class SettingsSwitchTile extends StatelessWidget {
       visualDensity: VisualDensity.standard,
       materialTapTargetSize: MaterialTapTargetSize.padded,
     );
+    final alignedRow = ListTileTheme.merge(
+      titleAlignment: ListTileTitleAlignment.top,
+      child: row,
+    );
     return surface
-        ? SettingsSurface(padding: EdgeInsets.zero, child: row)
-        : row;
+        ? SettingsSurface(padding: EdgeInsets.zero, child: alignedRow)
+        : alignedRow;
   }
 }
 

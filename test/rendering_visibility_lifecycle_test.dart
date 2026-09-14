@@ -4,6 +4,7 @@ import 'package:dan_player/component/background_image_motion.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/page/now_playing_page/component/detail_progress_slider.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -72,6 +73,14 @@ class _Fixture {
               hidden: hidden,
               child: const ColoredBox(color: Colors.blue),
             )),
+        DetailProgressSlider(
+          positions: positions.stream,
+          readPosition: () => current,
+          duration: 180,
+          trackIdentity: 'visible-playback',
+          onSeek: emit,
+          hidden: hidden,
+        ),
       ]);
 
   Widget app(
@@ -123,6 +132,99 @@ ValueListenable<List<double>> _levels(WidgetTester tester) => tester
     .levels;
 
 void main() {
+  for (final overlay in ['dialog', 'menu', 'bottom-sheet']) {
+    testWidgets('$overlay leaves visible playback live and hidden work stopped',
+        (tester) async {
+      final fixture = _Fixture();
+      final navigator = GlobalKey<NavigatorState>();
+      addTearDown(fixture.dispose);
+      await tester.pumpWidget(fixture.app(navigator: navigator));
+      final pageContext = tester.element(find.byType(DetailProgressSlider));
+      final original = tester.state(find.byType(DetailProgressSlider));
+      final position = _position(tester);
+      final phase = _phase(tester);
+      final levels = _levels(tester);
+      final reads = fixture.reads;
+      final fftReads = fixture.fftReads;
+      final Future<void> route;
+      switch (overlay) {
+        case 'dialog':
+          route = showDialog<void>(
+            context: pageContext,
+            builder: (_) => const AlertDialog(title: Text('Playback options')),
+          );
+        case 'menu':
+          route = showMenu<void>(
+            context: pageContext,
+            position: const RelativeRect.fromLTRB(600, 80, 20, 20),
+            items: const [PopupMenuItem(child: Text('Playback options'))],
+          );
+        default:
+          route = showModalBottomSheet<void>(
+            context: pageContext,
+            builder: (_) => const SizedBox(
+                height: 100, child: Center(child: Text('Playback options'))),
+          );
+      }
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(ModalRoute.of(pageContext)!.isCurrent, isFalse);
+      expect(TickerMode.valuesOf(pageContext).enabled, isTrue);
+      expect(fixture.positions.hasListener, isTrue);
+      expect(fixture.spectra.hasListener, isTrue);
+      final before = phase.value;
+      fixture.emit(1.2);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(position.value, const Duration(milliseconds: 1200));
+      expect(levels.value.first, .012);
+      expect(phase.value, greaterThan(before));
+      final slider = find.byKey(const ValueKey('detail-progress-slider'));
+      final elapsed = find.byKey(const ValueKey('detail-progress-elapsed'));
+      expect(tester.widget<Slider>(slider).value, 1.2);
+      expect(tester.widget<Text>(elapsed).data, '0:01');
+      fixture.emit(1.7);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(tester.widget<Slider>(slider).value, greaterThan(1.2));
+      expect(tester.widget<Slider>(slider).value, lessThan(1.7),
+          reason: 'the same finite interpolation continues below the popup');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.widget<Slider>(slider).value, 1.7);
+      expect(fixture.reads, reads,
+          reason:
+              'opening a popup must not reset lyric state or subscriptions');
+      expect(fixture.fftReads, fftReads);
+
+      fixture.hidden.value = true;
+      expect(fixture.positions.hasListener, isFalse);
+      expect(fixture.spectra.hasListener, isFalse);
+      final stopped = phase.value;
+      fixture.emit(20);
+      await tester.pump(const Duration(seconds: 1));
+      expect(position.value, const Duration(milliseconds: 1700));
+      expect(phase.value, stopped);
+      expect(tester.widget<Slider>(slider).value, 1.7);
+      expect(tester.widget<Text>(elapsed).data, '0:01');
+      fixture.hidden.value = false;
+      await tester.pump();
+      expect(position.value, const Duration(seconds: 20));
+      expect(tester.widget<Slider>(slider).value, 20);
+      expect(tester.widget<Text>(elapsed).data, '0:20');
+      navigator.currentState!.pop();
+      await route;
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      fixture.emit(20.4);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.widget<Slider>(slider).value, 20.4);
+      expect(tester.state(find.byType(DetailProgressSlider)), same(original));
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('visible blur keeps lyric spectrum and background clocks running',
       (tester) async {
     final fixture = _Fixture();
@@ -165,6 +267,54 @@ void main() {
     expect(fixture.positions.hasListener, isTrue);
     expect(fixture.spectra.hasListener, isTrue);
     expect(tester.state(find.byType(VerticalLyricScrollView)), same(original));
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('opaque page stops all playback surfaces until actually visible',
+      (tester) async {
+    final fixture = _Fixture();
+    final navigator = GlobalKey<NavigatorState>();
+    addTearDown(fixture.dispose);
+    await tester.pumpWidget(fixture.app(navigator: navigator));
+    final position = _position(tester);
+    final phase = _phase(tester);
+    final original = tester.state(find.byType(DetailProgressSlider));
+    unawaited(navigator.currentState!.push(PageRouteBuilder<void>(
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      pageBuilder: (_, animation, secondary) =>
+          const Scaffold(body: Text('Another full page')),
+    )));
+    await tester.pump();
+    await tester.pump();
+    expect(fixture.positions.hasListener, isFalse);
+    expect(fixture.spectra.hasListener, isFalse);
+    final stopped = phase.value;
+    fixture.emit(36);
+    await tester.pump(const Duration(seconds: 1));
+    expect(position.value, Duration.zero);
+    expect(phase.value, stopped);
+    expect(
+        tester
+            .widget<Slider>(find.byKey(const ValueKey('detail-progress-slider'),
+                skipOffstage: false))
+            .value,
+        0);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    navigator.currentState!.pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(position.value, const Duration(seconds: 36));
+    expect(
+        tester
+            .widget<Slider>(
+                find.byKey(const ValueKey('detail-progress-slider')))
+            .value,
+        36);
+    expect(tester.state(find.byType(DetailProgressSlider)), same(original));
+    expect(fixture.positions.hasListener, isTrue);
+    expect(fixture.spectra.hasListener, isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
     expect(tester.takeException(), isNull);
   });

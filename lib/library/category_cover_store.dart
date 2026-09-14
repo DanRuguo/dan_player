@@ -5,8 +5,7 @@ import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/background_image_store.dart';
-import 'package:dan_player/background_preferences.dart'
-    show isBackgroundImageId;
+import 'package:dan_player/library/cover_image_import.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -59,6 +58,7 @@ class CategoryCoverStore extends ChangeNotifier {
               persistedIds: () => _readPersistedImageIds(dataDirectory),
               maxStoredImages: 10000,
               maxStoredBytes: 512 * 1024 * 1024,
+              coverImages: true,
             );
 
   static final shared = CategoryCoverStore(dataDirectory: getAppDataDir);
@@ -386,7 +386,7 @@ class CategoryCoverStore extends ChangeNotifier {
           groupId.isEmpty ||
           groupId.length > 32768 ||
           imageId is! String ||
-          !isBackgroundImageId(imageId)) {
+          !isImportedCoverId(imageId)) {
         throw const FormatException('分类封面条目字段无效');
       }
       final matches =

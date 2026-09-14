@@ -129,7 +129,7 @@ void main() {
       expect(artwork.path, '/image');
       expect(artwork.queryParameters['id'], 'opaque/id with space');
       expect(artwork.queryParameters['size'], 'large');
-      final loaded = await OnlineArtworkRequest().loadPng(detailed.artworkUrl!,
+      final loaded = await OnlineArtworkRequest().loadCover(detailed.artworkUrl!,
           provider: profile.providerId, expectedProfile: profile);
       expect(loaded.take(8), [137, 80, 78, 71, 13, 10, 26, 10]);
       expect(requests.map((request) => request.path), ['/search', '/image']);

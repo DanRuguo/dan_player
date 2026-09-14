@@ -61,8 +61,10 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
       _preferences?.removeListener(_syncClock);
       _preferences = preferences..addListener(_syncClock);
     }
-    _treeVisible = TickerMode.valuesOf(context).enabled &&
-        (ModalRoute.isCurrentOf(context) ?? true);
+    // Popup routes leave this surface visible. Overlay already disables
+    // TickerMode when an opaque route covers it; isCurrent would also stop
+    // playback visuals behind ordinary dialogs and popup menus.
+    _treeVisible = TickerMode.valuesOf(context).enabled;
     _accessibilityAllowsMotion =
         !(MediaQuery.maybeDisableAnimationsOf(context) ?? false) &&
             !(MediaQuery.maybeHighContrastOf(context) ?? false);

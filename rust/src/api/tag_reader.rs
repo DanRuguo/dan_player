@@ -38,7 +38,7 @@ use crate::index_scan::ScanLease;
 use super::logger::log_to_dart;
 
 #[path = "metadata_id3_compat.rs"]
-mod id3_compat;
+pub(crate) mod id3_compat;
 #[path = "incremental_index.rs"]
 mod incremental_index;
 
@@ -714,7 +714,7 @@ fn save_edited_primary_tag(
     })
 }
 
-fn normalize_decoded_id3_flags(tag: &mut Id3v2Tag) -> anyhow::Result<()> {
+pub(crate) fn normalize_decoded_id3_flags(tag: &mut Id3v2Tag) -> anyhow::Result<()> {
     // The writer also emits plain decoded frame bytes, without the original
     // frame-level escape bytes or consumed data-length indicator. Never apply
     // this normalization to compression/encryption, which need their own
@@ -757,7 +757,7 @@ fn normalize_decoded_id3_flags(tag: &mut Id3v2Tag) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn preserve_legacy_language_frames(tag: &mut Id3v2Tag) {
+pub(crate) fn preserve_legacy_language_frames(tag: &mut Id3v2Tag) {
     // Some readable legacy files use spaces/NUL in the three language bytes.
     // Preserve those bytes, descriptor and text, rather than invent a language
     // or discard the untouched lyric. Binary frames bypass only Lofty's
@@ -959,9 +959,11 @@ fn verify_metadata_edit(
             "回读时找不到刚写入的主标签，已保留原文件",
         ));
     };
-    if tag.title().as_deref() != Some(title)
-        || tag.artist().as_deref() != Some(artist)
-        || tag.album().as_deref() != Some(album)
+    // Some containers omit empty text fields on serialization. An absent
+    // value and an explicitly cleared field have the same requested meaning.
+    if tag.title().as_deref().unwrap_or_default() != title
+        || tag.artist().as_deref().unwrap_or_default() != artist
+        || tag.album().as_deref().unwrap_or_default() != album
     {
         return Err(metadata_message(
             "TAG_VERIFY_FIELDS",
@@ -1157,9 +1159,9 @@ fn apply_tag_values(
     tag.set_album(album.to_string());
 
     if let Some(pic_path) = picture_path.filter(|value| !value.trim().is_empty()) {
-        let mut pic_file = fs::File::open(pic_path)
-            .map_err(|error| metadata_error("TAG_COVER_READ", "无法打开所选封面", error))?;
-        let mut picture = Picture::from_reader(&mut pic_file)
+        let prepared = super::cover_image::read_cover_file(pic_path)
+            .map_err(|error| metadata_error("TAG_COVER_INVALID", "无法准备所选封面", error))?;
+        let mut picture = Picture::from_reader(&mut Cursor::new(prepared.bytes))
             .map_err(|error| metadata_error("TAG_COVER_INVALID", "无法解析所选封面", error))?;
         if tag.tag_type() == TagType::Mp4Ilst {
             // MP4 covr has no front/back types. Replace the displayed first
@@ -1246,6 +1248,10 @@ fn first_tag_text_with_source(tags: &[&Tag], key: &ItemKey) -> Option<(String, T
         .find_map(|tag| text_from_tag(tag, key).map(|value| (value, tag.tag_type())))
 }
 
+pub(crate) fn has_indexed_title(file: &TaggedFile) -> bool {
+    first_tag_text_with_source(&ordered_tags(file), &ItemKey::TrackTitle).is_some()
+}
+
 fn artist_from_tags_with_source(tags: &[&Tag]) -> (String, Option<TagType>) {
     first_tag_text_with_source(tags, &ItemKey::TrackArtist)
         .or_else(|| first_tag_text_with_source(tags, &ItemKey::AlbumArtist))
@@ -1276,7 +1282,7 @@ fn text_looks_misdecoded(value: &str) -> bool {
 }
 
 #[derive(Debug)]
-struct Audio {
+pub(crate) struct Audio {
     title: String,
     artist: String,
     album: String,
@@ -1334,7 +1340,7 @@ impl Audio {
         })
     }
 
-    fn to_json_value(&self) -> serde_json::Value {
+    pub(crate) fn to_json_value(&self) -> serde_json::Value {
         serde_json::json!({
             "title": self.title,
             "artist": self.artist,
@@ -1365,6 +1371,12 @@ impl Audio {
         if is_metadata_transaction_path(path) {
             return None;
         }
+        Self::read_explicit_path(path)
+    }
+
+    // Explicit user operations may inspect their own hidden temporary output;
+    // the scanner retains the transaction-file exclusion above.
+    pub(crate) fn read_explicit_path(path: &Path) -> Option<Self> {
         let lofty_support: bool =
             *SUPPORT_FORMAT.get(&path.extension()?.to_ascii_lowercase().to_string_lossy())?;
 
@@ -2086,15 +2098,31 @@ mod tests {
     fn mp4_cover_replacement_keeps_additional_images() {
         let root = test_directory("mp4-cover");
         let cover = root.join("cover.png");
-        image::RgbaImage::from_pixel(8, 8, image::Rgba([31u8, 91, 171, 255])).save(&cover).unwrap();
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([31u8, 91, 171, 255]))
+            .save(&cover)
+            .unwrap();
         let mut tag = Tag::new(TagType::Mp4Ilst);
-        apply_tag_values(&mut tag, "Title", "Artist", "Album", Some(cover.to_str().unwrap())).unwrap();
+        apply_tag_values(
+            &mut tag,
+            "Title",
+            "Artist",
+            "Album",
+            Some(cover.to_str().unwrap()),
+        )
+        .unwrap();
         let first = edited_cover(&tag).unwrap().clone();
         let mut extra = first.clone();
         extra.set_description(Some("additional image".into()));
         tag.push_picture(extra.clone());
         for _ in 0..2 {
-            apply_tag_values(&mut tag, "Title", "Artist", "Album", Some(cover.to_str().unwrap())).unwrap();
+            apply_tag_values(
+                &mut tag,
+                "Title",
+                "Artist",
+                "Album",
+                Some(cover.to_str().unwrap()),
+            )
+            .unwrap();
             assert_eq!(tag.pictures(), &[first.clone(), extra.clone()]);
         }
         fs::remove_dir_all(root).unwrap();
@@ -3323,6 +3351,34 @@ mod tests {
     #[test]
     fn cover_resize_invalid_image_is_a_safe_miss() {
         assert!(resize_picture(b"not an image", 48, 48).is_none());
+    }
+
+    #[test]
+    fn cover_upload_is_bounded_before_embedding_and_keeps_source_image() {
+        let directory = std::env::temp_dir().join(format!(
+            "dan-cover-import-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let selected = directory.join("selected.png");
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(2000, 100)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        fs::write(&selected, encoded.get_ref()).unwrap();
+        let mut tag = Tag::new(TagType::Id3v2);
+        apply_tag_values(&mut tag, "Title", "Artist", "Album", selected.to_str()).unwrap();
+        let picture = tag.get_picture_type(PictureType::CoverFront).unwrap();
+        assert!(picture.data().len() <= 2 * 1024 * 1024);
+        let decoded = image::load_from_memory(picture.data()).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (1600, 80));
+        assert_eq!(fs::read(&selected).unwrap(), encoded.into_inner());
+        fs::remove_file(selected).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 
     #[test]

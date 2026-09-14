@@ -13,7 +13,8 @@ import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/frosted_surface.dart';
 import 'package:dan_player/component/rectangle_progress_indicator.dart';
 import 'package:dan_player/component/responsive_builder.dart';
-import 'package:dan_player/component/seven_tone_spectrum.dart';
+import 'package:dan_player/component/live_seven_tone_spectrum.dart';
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
@@ -282,22 +283,20 @@ class _NowPlayingSpectrum extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    if (!RenderingPreferencesScope.of(context).compactSpectrum) return const SizedBox.shrink();
+    if (!RenderingPreferencesScope.of(context).compactSpectrum)
+      return const SizedBox.shrink();
     final playbackService = PlayService.instance.playbackService;
     return StreamBuilder<PlayerState>(
       stream: playbackService.playerStateStream,
       initialData: playbackService.playerState,
       builder: (context, stateSnapshot) {
         final isPlaying = stateSnapshot.data == PlayerState.playing;
-        return StreamBuilder<List<double>>(
-          stream: playbackService.spectrumStream,
-          initialData: playbackService.spectrumLevels,
-          builder: (context, spectrumSnapshot) => SevenToneSpectrum(
-            levels: isPlaying
-                ? spectrumSnapshot.data ?? playbackService.spectrumLevels
-                : const [0, 0, 0, 0, 0, 0, 0],
-            color: color,
-          ),
+        return LiveSevenToneSpectrum(
+          samples: playbackService.spectrumStream,
+          readLevels: () => playbackService.spectrumLevels,
+          isPlaying: isPlaying,
+          color: color,
+          hidden: DesktopIntegration.instance.isHidden,
         );
       },
     );

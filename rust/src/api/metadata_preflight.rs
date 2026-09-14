@@ -2,7 +2,7 @@ use lofty::prelude::{Accessor, TaggedFileExt};
 use serde_json::json;
 use std::{fs, path::Path, time::UNIX_EPOCH};
 
-fn physical_source_key(path: &Path) -> anyhow::Result<String> {
+pub(crate) fn physical_source_key(path: &Path) -> anyhow::Result<String> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;

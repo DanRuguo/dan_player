@@ -106,6 +106,7 @@ class PlaybackPreference {
 
 class AppPreference {
   var categoryPresentation = const CategoryPresentation();
+  var playlistTilePresentation = const CategoryPresentation();
   var audiosPagePref = PagePreference(0, SortOrder.ascending, ContentView.list);
 
   var artistsPagePref =
@@ -165,6 +166,7 @@ class AppPreference {
 
       Map prefMap = {
         "categoryPresentation": categoryPresentation.toMap(),
+        "playlistTilePresentation": playlistTilePresentation.toMap(),
         "audiosPagePref": audiosPagePref.toMap(),
         "artistsPagePref": artistsPagePref.toMap(),
         "artistDetailPagePref": artistDetailPagePref.toMap(),
@@ -202,6 +204,8 @@ class AppPreference {
       final prefJson = await File(appPreferencePath).readAsString();
       final Map prefMap = json.decode(prefJson);
 
+      instance.playlistTilePresentation =
+          CategoryPresentation.fromMap(prefMap["playlistTilePresentation"]);
       instance.categoryPresentation =
           CategoryPresentation.fromMap(prefMap["categoryPresentation"]);
       instance.audiosPagePref =

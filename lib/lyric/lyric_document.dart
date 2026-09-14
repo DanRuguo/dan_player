@@ -503,6 +503,39 @@ class LyricDocumentStore extends ChangeNotifier {
           ..['noLyrics'] = false;
       }, expectedRevision: expectedRevision, archive: true);
 
+  /// Derives a destination document from the latest serialized source state.
+  /// A null result removes the destination override. Copies leave the source
+  /// untouched; overwrites publish a new revision under the same identity.
+  Future<void> replaceFromAudio(Audio source, Audio destination,
+          Map<String, dynamic>? Function(LyricDocument? source) transform) =>
+      _exclusive(() async {
+        await _load();
+        final sourceId = source.stableTrackId;
+        final destinationId = destination.stableTrackId;
+        final previous = _documents[destinationId];
+        final data = transform(_documents[sourceId]);
+        if (data == null && previous == null) return;
+        await _persistIdentity();
+        final next = {..._documents};
+        if (data == null) {
+          next.remove(destinationId);
+        } else {
+          data['trackId'] = destinationId;
+          data['path'] = destination.path;
+          data['revision'] = (previous?.revision ?? 0) + 1;
+          data['history'] = [
+            for (final item in data['history'] as List? ?? const [])
+              {
+                ...item as Map,
+                'trackId': destinationId,
+                'path': destination.path
+              }
+          ];
+          next[destinationId] = LyricDocument.fromJson(data);
+        }
+        await _write(next);
+      });
+
   Future<void> relocatePath(String oldPath, String newPath) =>
       _exclusive(() async {
         await _load();

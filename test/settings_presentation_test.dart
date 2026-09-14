@@ -2,6 +2,7 @@ import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/page/settings_page/grouped_settings.dart';
 import 'package:dan_player/page/settings_page/interface_settings.dart';
 import 'package:dan_player/page/settings_page/page.dart';
+import 'package:dan_player/page/settings_page/rendering_settings.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -46,8 +47,12 @@ void main() {
       (tester) async {
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
-      body:
-          SingleChildScrollView(child: InterfaceSettings(persist: () async {})),
+      body: SingleChildScrollView(
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        InterfaceSettings(persist: () async {}),
+        VisualEffectsSettings(persist: () async {}),
+      ])),
     )));
     final compact = find.text('紧凑歌单');
     final rendering = find.text('不可见时暂停视觉更新');
@@ -177,7 +182,7 @@ void main() {
     for (final width in [320.0, 1000.0]) {
       for (final scale in [1.0, 2.0]) {
         testWidgets(
-            'all six settings groups fit ${language.code} / $width / $scale',
+            'all seven settings groups fit ${language.code} / $width / $scale',
             (tester) async {
           final original = uiLanguage.value;
           uiLanguage.value = language;
@@ -203,6 +208,7 @@ void main() {
             'library',
             'lyrics',
             'appearance',
+            'effects',
             'desktop',
             'backup',
             'about'

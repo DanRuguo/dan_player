@@ -1,3 +1,5 @@
+import 'package:dan_player/category_presentation.dart';
+import 'package:dan_player/library/playlist.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -20,6 +22,7 @@ void main() {
   late PlaylistViewMode? previousDetailLayout;
   late int previousStartPage;
   late Map<String, String> previousSortModes;
+  late CategoryPresentation previousTiles;
 
   setUp(() async {
     expect(Platform.environment['DAN_PLAYER_DATA_DIR']?.trim() ?? '', isEmpty);
@@ -39,6 +42,7 @@ void main() {
     previousDetailLayout = preferences.unifiedPlaylistDetailsLayout;
     previousStartPage = preferences.startPage;
     previousSortModes = Map.of(preferences.unifiedPlaylistSortModes);
+    previousTiles = preferences.playlistTilePresentation;
   });
 
   tearDown(() async {
@@ -47,7 +51,8 @@ void main() {
       ..unifiedPlaylistDetailsView = previousDetailView
       ..unifiedPlaylistsLayout = previousRootLayout
       ..unifiedPlaylistDetailsLayout = previousDetailLayout
-      ..startPage = previousStartPage;
+      ..startPage = previousStartPage
+      ..playlistTilePresentation = previousTiles;
     AppPreference.instance.unifiedPlaylistSortModes
       ..clear()
       ..addAll(previousSortModes);
@@ -62,6 +67,54 @@ void main() {
       throw StateError('Refusing to remove an unverified test fixture');
     }
     await Directory(resolved).delete(recursive: true);
+  });
+
+  test(
+      'root and per-playlist tile choices persist; old records use safe defaults',
+      () async {
+    final choices = CategoryPresentation(autoFill: false, sizes: {
+      'root-cover': CategoryTileSize.large
+    }, layouts: {
+      'root-cover': [5, 2, 0]
+    });
+    final source = AppPreference()..playlistTilePresentation = choices;
+    await source.save();
+    await AppPreference.read();
+    expect(AppPreference.instance.playlistTilePresentation.toMap(),
+        choices.toMap());
+    final tree = PlaylistTree([]);
+    final parent = tree.createPlaylist('Parent');
+    final child = tree.createPlaylist('Child', parent: parent);
+    parent.presentation = {
+      'view': 'grid',
+      'artistColumn': false,
+      'tiles': choices.toMap()
+    };
+    child.presentation = {
+      'tiles':
+          CategoryPresentation(sizes: {'song': CategoryTileSize.wide}).toMap()
+    };
+    final decoded = decodePlaylists([parent.toMap()]).single;
+    expect(decoded.presentation, parent.presentation);
+    expect(
+        decoded.entries.single.childPlaylist!.presentation, child.presentation);
+    expect(
+        CategoryPresentation.fromMap(
+                decoded.entries.single.childPlaylist!.presentation['tiles'])
+            .autoFill,
+        isTrue);
+    final legacy = jsonDecode(await preferenceFile.readAsString()) as Map;
+    legacy.remove('playlistTilePresentation');
+    await preferenceFile.writeAsString(jsonEncode(legacy));
+    await AppPreference.read();
+    expect(AppPreference.instance.playlistTilePresentation.sizes, isEmpty);
+    expect(AppPreference.instance.playlistTilePresentation.autoFill, isTrue);
+    final oldNode = parent.toMap()..remove('presentation');
+    expect(
+        CategoryPresentation.fromMap(
+                decodePlaylists([oldNode]).single.presentation['tiles'])
+            .sizes,
+        isEmpty);
   });
 
   test('unified layout choices round trip without replacing legacy preferences',

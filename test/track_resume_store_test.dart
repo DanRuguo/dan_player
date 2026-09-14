@@ -83,6 +83,16 @@ void main() {
     expect(await file.exists(), isFalse);
   });
 
+  test('trimming clears only the changed timeline across restart', () async {
+    await remember(120, force: true);
+    const other = r'J:\Music\another.flac';
+    await remember(140, track: other, force: true);
+    await store.remove(song);
+    final reopened = TrackResumeStore(file);
+    expect(await reopened.resumePosition(track: song, duration: 3600, preferences: all), isNull);
+    expect(await reopened.resumePosition(track: other, duration: 3600, preferences: all), 140);
+  });
+
   test(
       'case-normalized local identity and CUE positions survive restart separately',
       () async {

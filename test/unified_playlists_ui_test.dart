@@ -10,6 +10,7 @@ import 'package:dan_player/component/playlist_create_dialog.dart';
 import 'package:dan_player/component/playlist_ui_actions.dart';
 import 'package:dan_player/component/side_nav.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/cover_image_import.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -89,9 +90,40 @@ Future<void> _settings(WidgetTester tester, String label) async {
 }
 
 void main() {
-  setUp(() {
+  const paths = MethodChannel('plugins.flutter.io/path_provider');
+  late Directory dataFixture;
+  setUp(() async {
+    final parent = await Directory('build/unified-playlist-cover-fixtures')
+        .absolute
+        .create(recursive: true);
+    dataFixture = await parent.createTemp('cover-');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(paths, (_) async => dataFixture.path);
     playlistUiSaveError.value = null;
     playlistUiSaving.value = false;
+  });
+  tearDown(() async {
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(paths, null);
+    final resolved = await dataFixture.resolveSymbolicLinks();
+    final parent = await Directory('build/unified-playlist-cover-fixtures')
+        .absolute
+        .resolveSymbolicLinks();
+    if (!resolved.startsWith('$parent${Platform.pathSeparator}')) {
+      throw StateError(
+          'Refusing to remove an unverified playlist test fixture.');
+    }
+    for (var attempt = 0;; attempt++) {
+      try {
+        await Directory(resolved).delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 9) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+      }
+    }
   });
 
   tearDown(() => expect(PlayService.isInitialized, isFalse,
@@ -109,7 +141,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('playlist-name-input')),
         '  Unified collection  ');
-    await tester.tap(find.byKey(const ValueKey('playlist-create-cover')));
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('playlist-create-cover')));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('playlist-create-songs')));
     await tester.pumpAndSettle();
@@ -120,11 +155,24 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('playlist-confirm-create')));
     await tester.pumpAndSettle();
     expect(fixture.roots.single.name, 'Unified collection');
-    expect(fixture.roots.single.imagePath, image);
+    final saved = fixture.roots.single.imagePath!;
+    expect(saved, isNot(image));
+    expect(isImportedCoverId(File(saved).uri.pathSegments.last), isTrue);
+    expect(await tester.runAsync(() => File(saved).readAsBytes()),
+        await tester.runAsync(() => File(image).readAsBytes()));
     expect(fixture.roots.single.flattenAudios(), [second]);
     expect(fixture.saves, 1);
     expect(find.byType(PlaylistCover), findsOneWidget);
     expect(tester.takeException(), isNull);
+    for (var frame = 0; frame < 8; frame++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+    await tester.pump();
   });
 
   testWidgets('cancelling the create dialog never adds a partial playlist',
@@ -200,7 +248,14 @@ void main() {
     await _show(
         tester, fixture.browser(current: parent, pickImage: () => image));
     await _settings(tester, '更改歌单封面');
-    expect(parent.imagePath, image);
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('playlist-cover-file')));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pumpAndSettle();
+    expect(parent.imagePath, isNot(image));
+    expect(isImportedCoverId(File(parent.imagePath!).uri.pathSegments.last),
+        isTrue);
     expect(parent.entries.map((entry) => entry.id), ids);
     await _settings(tester, '恢复默认封面');
     expect(parent.imagePath, isNull);
@@ -327,7 +382,7 @@ void main() {
           tester, fixture.browser(view: ContentView.table, onOpenAlbums: () {}),
           width: 440, height: 1100, textScale: scale);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.byKey(ValueKey('playlist-open-${parent.id}')));
+      await tester.tap(find.byKey(ValueKey('playlist-rectangle-${parent.id}')));
       await tester.pumpAndSettle();
       expect(find.byType(PlaylistCover), findsWidgets);
       expect(tester.takeException(), isNull);
@@ -412,7 +467,7 @@ void main() {
     final third = fixture.tree.createPlaylist('Third');
     await _show(tester, fixture.browser(view: ContentView.table));
     FocusNode rowFocus() => Focus.of(
-        tester.element(find.byKey(ValueKey('playlist-drag-${first.id}'))));
+        tester.element(find.byKey(ValueKey('playlist-card-drag-${first.id}'))));
     rowFocus().requestFocus();
     await tester.pump();
     for (var i = 0; i < 2; i++) {

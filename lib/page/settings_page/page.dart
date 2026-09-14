@@ -23,6 +23,7 @@ import 'package:dan_player/page/settings_page/theme_settings.dart';
 import 'package:dan_player/page/settings_page/uninstall_settings.dart';
 import 'package:flutter/material.dart';
 import 'interface_settings.dart';
+import 'rendering_settings.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -42,14 +43,14 @@ class SettingsPage extends StatelessWidget {
           children: [
             const AudioLibraryEditor(),
             const RefreshAudioLibraryTile(),
-            const LibraryWatchSettings(),
-            const LibraryHealthSettings(),
-            const ArtistSeparatorEditor(),
             const RestoreSessionSwitch(),
-            const PreventSleepSwitch(),
             const PlaybackSettings(),
-            const ReplayGainSettings(),
             const TrackResumeSettings(),
+            const ReplayGainSettings(),
+            const PreventSleepSwitch(),
+            const LibraryWatchSettings(),
+            const ArtistSeparatorEditor(),
+            const LibraryHealthSettings(),
           ],
         ),
         SettingsSection(
@@ -57,25 +58,31 @@ class SettingsPage extends StatelessWidget {
           title: ui("联网与歌词"),
           icon: Icons.lyrics_outlined,
           children: [
-            const MusicSourceSettings(),
             const DefaultLyricSourceControl(),
+            const LyricExperienceSettings(),
+            const MusicSourceSettings(),
             const CustomMusicSourceSettings(),
           ],
         ),
         SettingsSection(
           id: 'appearance',
-          title: ui("外观与背景"),
+          title: ui("界面与主题"),
           icon: Icons.palette_outlined,
           children: [
-            const InterfaceSettings(),
-            const WindowBackdropInfo(),
-            const DynamicThemeSwitch(),
-            const ThemeSelector(),
-            const ThemeModeControl(),
+            const InterfaceSettings(group: InterfaceSettingsGroup.language),
+            const ThemeAppearanceSettings(),
             const SelectFontCombobox(),
-            const LyricExperienceSettings(),
+            const InterfaceSettings(group: InterfaceSettingsGroup.layout),
             const SidebarLayoutSettings(),
-            const DesktopLyricSettings(),
+          ],
+        ),
+        SettingsSection(
+          id: 'effects',
+          title: ui("背景与动效"),
+          icon: Icons.blur_on,
+          children: const [
+            WindowBackdropInfo(),
+            VisualEffectsSettings(),
           ],
         ),
         SettingsSection(
@@ -83,6 +90,7 @@ class SettingsPage extends StatelessWidget {
           title: ui("桌面与快捷键"),
           icon: Icons.desktop_windows_outlined,
           children: [
+            const DesktopLyricSettings(),
             const DesktopIntegrationSettings(),
             const ShortcutSettings(),
           ],

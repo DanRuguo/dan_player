@@ -8,6 +8,7 @@ import 'dart:ui' as ui;
 import 'package:crypto/crypto.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/background_preferences.dart';
+import 'package:dan_player/library/cover_image_import.dart';
 import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as path;
 
@@ -44,6 +45,7 @@ class BackgroundImageStore {
     Future<Set<String>> Function()? persistedIds,
     this.maxStoredBytes = 96 * 1024 * 1024,
     this.maxStoredImages = 24,
+    this.coverImages = false,
   })  : _directoryProvider = directory,
         _persistedIds = persistedIds;
 
@@ -62,6 +64,9 @@ class BackgroundImageStore {
   final Future<Set<String>> Function()? _persistedIds;
   final int maxStoredBytes;
   final int maxStoredImages;
+  final bool coverImages;
+  bool _validImageId(Object? id) =>
+      coverImages ? isImportedCoverId(id) : isBackgroundImageId(id);
   final _images = <String, Future<ImageProvider?>>{};
   Future<void> _operation = Future.value();
 
@@ -131,46 +136,59 @@ class BackgroundImageStore {
     late Uint8List png;
     late int width;
     late int height;
-    try {
-      buffer = await ui.ImmutableBuffer.fromUint8List(encoded);
-      descriptor = await ui.ImageDescriptor.encoded(buffer);
-      if (descriptor.width <= 0 ||
-          descriptor.height <= 0 ||
-          descriptor.width * descriptor.height > maxInputPixels) {
-        throw const BackgroundImageException('图片像素数过大（最多 4000 万像素）。');
+    var extension = 'png';
+    if (coverImages) {
+      try {
+        final prepared = await CoverImageImporter.shared.fromBytes(encoded);
+        png = prepared.bytes;
+        width = prepared.width;
+        height = prepared.height;
+        extension = prepared.extension;
+      } on CoverImageException catch (error) {
+        throw BackgroundImageException(error.message);
       }
-      final scale = math.min(
-          1.0,
-          math.min(
-              maxOutputEdge / math.max(descriptor.width, descriptor.height),
-              math.sqrt(
-                  maxOutputPixels / (descriptor.width * descriptor.height))));
-      width = math.max(1, (descriptor.width * scale).floor());
-      height = math.max(1, (descriptor.height * scale).floor());
-      codec = await descriptor.instantiateCodec(
-          targetWidth: width, targetHeight: height);
-      if (codec.frameCount != 1) {
-        throw const BackgroundImageException('暂不支持动图；可为静态图片开启轻缓动态效果。');
+    } else {
+      try {
+        buffer = await ui.ImmutableBuffer.fromUint8List(encoded);
+        descriptor = await ui.ImageDescriptor.encoded(buffer);
+        if (descriptor.width <= 0 ||
+            descriptor.height <= 0 ||
+            descriptor.width * descriptor.height > maxInputPixels) {
+          throw const BackgroundImageException('图片像素数过大（最多 4000 万像素）。');
+        }
+        final scale = math.min(
+            1.0,
+            math.min(
+                maxOutputEdge / math.max(descriptor.width, descriptor.height),
+                math.sqrt(
+                    maxOutputPixels / (descriptor.width * descriptor.height))));
+        width = math.max(1, (descriptor.width * scale).floor());
+        height = math.max(1, (descriptor.height * scale).floor());
+        codec = await descriptor.instantiateCodec(
+            targetWidth: width, targetHeight: height);
+        if (codec.frameCount != 1) {
+          throw const BackgroundImageException('暂不支持动图；可为静态图片开启轻缓动态效果。');
+        }
+        image = (await codec.getNextFrame()).image;
+        final output = await image.toByteData(format: ui.ImageByteFormat.png);
+        if (output == null || output.lengthInBytes > maxInputBytes) {
+          throw const BackgroundImageException('无法生成受控的背景副本，请换一张图片。');
+        }
+        png = output.buffer
+            .asUint8List(output.offsetInBytes, output.lengthInBytes);
+      } on BackgroundImageException {
+        rethrow;
+      } catch (_) {
+        throw const BackgroundImageException('图片已损坏或无法解码，原背景未改变。');
+      } finally {
+        image?.dispose();
+        codec?.dispose();
+        descriptor?.dispose();
+        buffer?.dispose();
       }
-      image = (await codec.getNextFrame()).image;
-      final output = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (output == null || output.lengthInBytes > maxInputBytes) {
-        throw const BackgroundImageException('无法生成受控的背景副本，请换一张图片。');
-      }
-      png =
-          output.buffer.asUint8List(output.offsetInBytes, output.lengthInBytes);
-    } on BackgroundImageException {
-      rethrow;
-    } catch (_) {
-      throw const BackgroundImageException('图片已损坏或无法解码，原背景未改变。');
-    } finally {
-      image?.dispose();
-      codec?.dispose();
-      descriptor?.dispose();
-      buffer?.dispose();
     }
 
-    final id = '${sha256.convert(png)}.png';
+    final id = '${sha256.convert(png)}.$extension';
     final directory = await _directory(create: true);
     final destination = File(path.join(directory.path, id));
     final existing =
@@ -186,7 +204,7 @@ class BackgroundImageStore {
       var total = 0;
       var count = 0;
       await for (final entry in directory.list(followLinks: false)) {
-        if (entry is File && isBackgroundImageId(path.basename(entry.path))) {
+        if (entry is File && _validImageId(path.basename(entry.path))) {
           total += (await entry.stat()).size;
           count++;
         }
@@ -219,7 +237,7 @@ class BackgroundImageStore {
   }
 
   Future<ImageProvider?> imageFor(String? id) {
-    if (!isBackgroundImageId(id)) return Future.value();
+    if (!_validImageId(id)) return Future.value();
     final previous = _images.remove(id);
     final request = previous ?? _readImage(id!);
     _images[id!] = request;
@@ -272,7 +290,7 @@ class BackgroundImageStore {
         await for (final entry in directory.list(followLinks: false)) {
           final id = path.basename(entry.path);
           if (entry is! File ||
-              !isBackgroundImageId(id) ||
+              !_validImageId(id) ||
               persisted.contains(id) ||
               retainedIds().contains(id)) {
             continue;

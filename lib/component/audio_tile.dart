@@ -11,6 +11,7 @@ import 'package:dan_player/component/audio_delete_action.dart';
 import 'package:dan_player/statistics/library_statistics.dart'
     show classifySongComposer;
 import 'package:dan_player/component/audio_metadata_dialog.dart';
+import 'package:dan_player/component/audio_trim_dialog.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/next_play_animation.dart';
@@ -63,6 +64,8 @@ class AudioTile extends StatefulWidget {
     this.leading,
     this.action,
     this.menuActionBuilder,
+    this.presentationBuilder,
+    this.artworkWrapper,
     this.multiSelectController,
     this.additionalMenuItems = const [],
     this.selection,
@@ -80,6 +83,11 @@ class AudioTile extends StatefulWidget {
   /// Relationship actions share this tile's menu instead of opening a second
   /// nested menu controller for the same song.
   final Widget Function(BuildContext, MenuController)? menuActionBuilder;
+
+  /// Alternate visuals reuse the same menu, playback and selection handlers.
+  final Widget Function(BuildContext, MenuController, VoidCallback,
+      GestureTapDownCallback, VoidCallback, Widget)? presentationBuilder;
+  final Widget Function(Widget)? artworkWrapper;
   final MultiSelectController? multiSelectController;
 
   /// Relationship actions supplied by a playlist view. Source-specific music
@@ -106,14 +114,17 @@ class _AudioTileState extends State<AudioTile> {
           _artworkContext = context;
           return ClipRRect(
             borderRadius: AppShape.smallRadius,
-            child: AudioArtwork(
+            child: _wrapArtwork(AudioArtwork(
               audio: audio,
               size: 48,
               placeholder: placeholder,
-            ),
+            )),
           );
         },
       );
+
+  Widget _wrapArtwork(Widget child) =>
+      widget.artworkWrapper?.call(child) ?? child;
 
   Widget _metadataMenuLabel(String label) => ReadableEllipsisText(label);
 
@@ -288,6 +299,12 @@ class _AudioTileState extends State<AudioTile> {
           leadingIcon: const Icon(Symbols.lyrics),
           child: Text(ui("编辑歌词")),
         ),
+      if (audio.canEditLocalFile)
+        MenuItemButton(
+          onPressed: () => showAudioTrimDialog(context, audio: audio),
+          leadingIcon: const Icon(Symbols.content_cut),
+          child: Text(ui('歌曲裁剪')),
+        ),
       MenuItemButton(
         onPressed: () {
           context.push(app_paths.AUDIO_DETAIL_PAGE, extra: audio);
@@ -426,6 +443,60 @@ class _AudioTileState extends State<AudioTile> {
                       ),
                     );
 
+          void activate() {
+            if (controller.isOpen) {
+              controller.close();
+              return;
+            }
+
+            if (!selecting) {
+              if (PlayService
+                      .instance.playbackService.resolvingAudioPath.value ==
+                  audio.path) {
+                return;
+              }
+              PlayService.instance.playbackService
+                  .play(widget.audioIndex, widget.playlist);
+            } else {
+              if (widget.selection != null) {
+                widget.selection!.onToggle();
+                return;
+              }
+              if (widget.multiSelectController!.selected.contains(audio)) {
+                widget.multiSelectController!.unselect(audio);
+              } else {
+                widget.multiSelectController!.select(audio);
+              }
+            }
+          }
+
+          void longPress() {
+            if (selecting) {
+              return;
+            }
+            HapticFeedback.mediumImpact();
+            controller.open();
+          }
+
+          void secondaryTapDown(TapDownDetails details) {
+            if (selecting) {
+              return;
+            }
+
+            controller.open(position: details.localPosition);
+          }
+
+          if (widget.presentationBuilder != null) {
+            return widget.presentationBuilder!(
+                anchorContext,
+                controller,
+                activate,
+                secondaryTapDown,
+                longPress,
+                suppliedAction ??
+                    defaultListAction('audio-menu-${audio.path}'));
+          }
+
           return TweenAnimationBuilder<Color?>(
             tween: ColorTween(begin: Colors.transparent, end: tileColor),
             duration: AppMotion.quick,
@@ -456,47 +527,9 @@ class _AudioTileState extends State<AudioTile> {
                   }
                   return null;
                 }),
-                onTap: () {
-                  if (controller.isOpen) {
-                    controller.close();
-                    return;
-                  }
-
-                  if (!selecting) {
-                    if (PlayService.instance.playbackService.resolvingAudioPath
-                            .value ==
-                        audio.path) {
-                      return;
-                    }
-                    PlayService.instance.playbackService
-                        .play(widget.audioIndex, widget.playlist);
-                  } else {
-                    if (widget.selection != null) {
-                      widget.selection!.onToggle();
-                      return;
-                    }
-                    if (widget.multiSelectController!.selected
-                        .contains(audio)) {
-                      widget.multiSelectController!.unselect(audio);
-                    } else {
-                      widget.multiSelectController!.select(audio);
-                    }
-                  }
-                },
-                onLongPress: () {
-                  if (selecting) {
-                    return;
-                  }
-                  HapticFeedback.mediumImpact();
-                  controller.open();
-                },
-                onSecondaryTapDown: (details) {
-                  if (selecting) {
-                    return;
-                  }
-
-                  controller.open(position: details.localPosition);
-                },
+                onTap: activate,
+                onLongPress: longPress,
+                onSecondaryTapDown: secondaryTapDown,
                 child: widget.content ??
                     (compactGrid
                         ? MusicGridTileBody(

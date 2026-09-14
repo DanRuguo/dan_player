@@ -13,14 +13,7 @@ class PlaylistCircleGeometry {
   final double titleHeight;
   final double detailsHeight;
   double get extent =>
-      16 +
-      PlaylistCircleTile.coverSize +
-      8 +
-      titleHeight +
-      4 +
-      detailsHeight +
-      8 +
-      48;
+      16 + PlaylistCircleTile.coverSize + 8 + titleHeight + 4 + detailsHeight;
 }
 
 /// Portrait presentation only. The browser still owns navigation, playback,
@@ -33,7 +26,6 @@ class PlaylistCircleTile extends StatelessWidget {
     required this.title,
     required this.details,
     required this.artworkBuilder,
-    required this.actions,
     required this.geometry,
     this.contentWrapper,
   });
@@ -46,7 +38,6 @@ class PlaylistCircleTile extends StatelessWidget {
   final String title;
   final String details;
   final Widget Function(double size) artworkBuilder;
-  final Widget actions;
   final PlaylistCircleGeometry geometry;
   final Widget Function(Widget child)? contentWrapper;
 
@@ -106,8 +97,6 @@ class PlaylistCircleTile extends StatelessWidget {
                       message: '$title\n$details',
                       triggerMode: TooltipTriggerMode.manual,
                       child: identity)),
-          const SizedBox(height: 8),
-          SizedBox(height: 48, child: actions),
         ]);
       }),
     );
