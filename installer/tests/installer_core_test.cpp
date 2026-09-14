@@ -164,6 +164,37 @@ int wmain(int argc, wchar_t** argv) {
     transaction.Commit(f.manifest, f.manifest_path);
     Check(!transaction.pending() && !fs::exists(transaction.backup_directory()), "successful install left a backup");
   });
+  run("bundled trim tools install and roll back without allowing arbitrary tools", [&] {
+    for (bool commit : {false, true}) {
+      Fixture f(base / (commit ? L"trim-commit" : L"trim-rollback"));
+      f.Old();
+      for (const auto* name : {L"ffmpeg.exe", L"ffprobe.exe", L"ffplay.exe",
+           L"avcodec-61.dll", L"avdevice-61.dll", L"avfilter-10.dll",
+           L"avformat-61.dll", L"avutil-59.dll", L"postproc-58.dll",
+           L"swresample-5.dll", L"swscale-8.dll", L"LICENSE", L"README.txt"}) {
+        const auto relative = fs::path(L"tools/ffmpeg") / name;
+        Write(f.payload / relative, "synthetic trim runtime");
+        f.manifest.files.push_back({relative, Sha256(f.payload / relative), fs::file_size(f.payload / relative)});
+      }
+      Write(f.manifest_path, SerializeManifest(f.manifest));
+      Transaction transaction(f.context, f.registry);
+      transaction.Begin(f.manifest, f.manifest_path);
+      f.SimulateInno(transaction);
+      if (commit) {
+        transaction.Commit(f.manifest, f.manifest_path);
+        Check(IsRecognizedInstallation(f.context.target), "trim installation not recognized");
+      } else {
+        transaction.Rollback();
+        f.CheckOld();
+        Check(!fs::exists(f.context.target / L"tools/ffmpeg/ffmpeg.exe"), "trim tool survived rollback");
+      }
+      for (const auto* invalid : {L"tools/other.exe", L"tools/ffmpeg/unknown.exe", L"tools/ffmpeg/private.mp3", L"tools/ffmpeg/nested/ffmpeg.exe"}) {
+        auto bad = f.manifest;
+        bad.files.push_back({invalid, std::string(64, '0'), 1});
+        Reject([&] { SerializeManifest(bad); });
+      }
+    }
+  });
   run("repeated upgrades replace files without retained backups", [&] {
     Fixture f(base / L"repeat"); f.Old();
     for (int i = 0; i < 3; ++i) {

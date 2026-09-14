@@ -148,6 +148,16 @@ bool IsPayloadNamespace(const fs::path& relative) {
       extension == L".m4a" || extension == L".ogg" || extension == L".lrc") return false;
   if (first == L"data" || first == L"desktop_lyric" || first == L"bass" ||
       first == L"licenses") return true;
+  if (first == L"tools") {
+    if (Lower(relative.parent_path().generic_wstring()) != L"tools/ffmpeg") return false;
+    const auto name = Lower(relative.filename().wstring());
+    return name == L"ffmpeg.exe" || name == L"ffprobe.exe" || name == L"ffplay.exe" ||
+           name == L"avcodec-61.dll" || name == L"avdevice-61.dll" ||
+           name == L"avfilter-10.dll" || name == L"avformat-61.dll" ||
+           name == L"avutil-59.dll" || name == L"postproc-58.dll" ||
+           name == L"swresample-5.dll" || name == L"swscale-8.dll" ||
+           name == L"license" || name == L"readme.txt";
+  }
   if (first == L".dan-player-install") {
     return IsPrivateMetadata(relative) ||
            Lower(relative.filename().wstring()) == L"cleanup.exe";
