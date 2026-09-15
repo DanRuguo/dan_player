@@ -1,4 +1,5 @@
 const catalogAudioTrim = <String, List<String>>{
+  '正在下载…': ['Downloading…', 'ダウンロード中…', '다운로드 중…'],
   '请先安装或修复裁剪组件': [
     'Install or repair the trimming component first.',
     '先にトリミングコンポーネントをインストールまたは修復してください。',

@@ -904,7 +904,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                 );
           final active = candidates.isNotEmpty || rejected.isNotEmpty;
           return Material(
-            animationDuration: const Duration(milliseconds: 160),
+            animationDuration: appToolbarReduceMotion(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 160),
             color: candidates.isNotEmpty
                 ? scheme.primaryContainer.withValues(alpha: 0.5)
                 : rejected.isNotEmpty

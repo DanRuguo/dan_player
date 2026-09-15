@@ -122,6 +122,17 @@ void main() {
       'surfaceBlur': true,
       'spectrumDensity': 'high',
       'frameRate': {'mode': 'display', 'fps': 60},
+      'animations': {
+        'startup': true,
+        'nextTrack': true,
+        'tracking': true,
+        'entrance': true,
+        'transitions': true,
+        'layout': true,
+        'lyrics': true,
+        'feedback': true,
+        'theme': true,
+      },
     });
   });
 

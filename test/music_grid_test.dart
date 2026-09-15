@@ -419,6 +419,14 @@ void main() {
     final before = grid.controller!.offset;
     await tester.pump(const Duration(milliseconds: 500));
     expect(grid.controller!.offset, greaterThan(before + 40));
+    final maximum = grid.controller!.position.maxScrollExtent;
+    grid.controller!.jumpTo(maximum);
+    await tester.pump(const Duration(milliseconds: 32));
+    // A wheel/keyboard scroll away from a reached edge must not be pulled back
+    // by an idle drag timer. The fresh upper-edge drag below restarts scrolling.
+    grid.controller!.jumpTo(maximum - 80);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(grid.controller!.offset, maximum - 80);
     await gesture.cancel();
     await tester.pump();
 

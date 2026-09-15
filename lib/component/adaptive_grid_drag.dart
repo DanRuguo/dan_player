@@ -339,7 +339,11 @@ class _GridEdgeAutoScrollRegionState extends State<GridEdgeAutoScrollRegion> {
     final next = (position.pixels + _step)
         .clamp(position.minScrollExtent, position.maxScrollExtent)
         .toDouble();
-    if (next != position.pixels) widget.controller.jumpTo(next);
+    if (next == position.pixels) {
+      _stop();
+      return;
+    }
+    widget.controller.jumpTo(next);
   }
 
   void _stop() {
