@@ -81,6 +81,8 @@ class _PlaylistCoverTransitionHostState
   )..addStatusListener(_handoffStatus);
   late final Animation<double> _reveal =
       _handoff.drive(CurveTween(curve: Curves.easeOut));
+  late final Animation<double> _arrival = _animation.drive(
+      CurveTween(curve: const Interval(0, .7, curve: Curves.easeOutCubic)));
   Timer? _readinessTimeout;
   bool _waitingForImage = false;
   bool _readinessScheduled = false;
@@ -462,6 +464,75 @@ class _CoverTransitionScope extends InheritedWidget {
       owner != oldWidget.owner || !identical(hidden, oldWidget.hidden);
 }
 
+/// Reuses the flight clock; paint-only scaling leaves target geometry and
+/// drag hit boxes at their final layout positions throughout the transition.
+class PlaylistItemArrival extends StatelessWidget {
+  const PlaylistItemArrival({super.key, required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) {
+    final scope =
+        context.dependOnInheritedWidgetOfExactType<_CoverTransitionScope>();
+    final animation = scope != null && scope.hidden.isNotEmpty
+        ? scope.owner._arrival
+        : const AlwaysStoppedAnimation<double>(1);
+    return FadeTransition(
+        opacity: animation,
+        child: _ArrivalScale(animation: animation, child: child));
+  }
+}
+
+class _ArrivalScale extends SingleChildRenderObjectWidget {
+  const _ArrivalScale({required this.animation, required super.child});
+  final Animation<double> animation;
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderArrivalScale(animation);
+  @override
+  void updateRenderObject(
+      BuildContext context, _RenderArrivalScale renderObject) {
+    renderObject.animation = animation;
+  }
+}
+
+class _RenderArrivalScale extends RenderProxyBox {
+  _RenderArrivalScale(this._animation);
+  Animation<double> _animation;
+  set animation(Animation<double> value) {
+    if (identical(value, _animation)) return;
+    if (attached) _animation.removeListener(markNeedsPaint);
+    _animation = value;
+    if (attached) _animation.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _animation.addListener(markNeedsPaint);
+  }
+
+  @override
+  void detach() {
+    _animation.removeListener(markNeedsPaint);
+    super.detach();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final scale = .94 + .06 * _animation.value;
+    if (scale >= 1) {
+      super.paint(context, offset);
+      return;
+    }
+    final matrix = Matrix4.identity()
+      ..translateByDouble(
+          size.width * (1 - scale) / 2, size.height * (1 - scale) / 2, 0, 1)
+      ..scaleByDouble(scale, scale, 1, 1);
+    context.pushTransform(needsCompositing, offset, matrix, super.paint);
+  }
+}
+
 /// Wrap the raw image inside its existing shape clip. The marker does not change
 /// hit testing or clipping; [entryId] must be stable across all three layouts.
 class PlaylistCoverTransitionMarker extends StatefulWidget {
@@ -543,6 +614,7 @@ class _PlaylistCoverTransitionMarkerState
           key: _boundary,
           child: _CoverReadinessObserver(
               onChanged: () => _owner?._imageMayBeReady(),
+              hidePlaceholder: scope?.hidden.isNotEmpty ?? false,
               child: widget.child)),
     );
   }
@@ -636,21 +708,33 @@ bool _hasImage(RenderObject render) {
 /// target is fully transparent. Observe those events instead of polling frames.
 class _CoverReadinessObserver extends SingleChildRenderObjectWidget {
   const _CoverReadinessObserver(
-      {required this.onChanged, required super.child});
+      {required this.onChanged,
+      required this.hidePlaceholder,
+      required super.child});
   final VoidCallback onChanged;
+  final bool hidePlaceholder;
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderCoverReadiness(onChanged);
+      _RenderCoverReadiness(onChanged, hidePlaceholder);
   @override
   void updateRenderObject(
       BuildContext context, _RenderCoverReadiness renderObject) {
     renderObject.onChanged = onChanged;
+    renderObject.hidePlaceholder = hidePlaceholder;
+    renderObject.markNeedsPaint();
   }
 }
 
 class _RenderCoverReadiness extends RenderProxyBox {
-  _RenderCoverReadiness(this.onChanged);
+  _RenderCoverReadiness(this.onChanged, this.hidePlaceholder);
   VoidCallback onChanged;
+  bool hidePlaceholder;
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (hidePlaceholder && child != null && !_hasImage(child!)) return;
+    super.paint(context, offset);
+  }
+
   @override
   void markNeedsPaint() {
     super.markNeedsPaint();

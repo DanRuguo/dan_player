@@ -31,6 +31,63 @@ Widget _cover(Object id,
                 child: const ColoredBox(color: Colors.red))));
 
 void main() {
+  testWidgets(
+      'destination card arrives gradually without painting a temporary cover',
+      (tester) async {
+    final controller = PlaylistCoverTransitionController();
+    addTearDown(controller.dispose);
+    final boundary = GlobalKey();
+    late StateSetter change;
+    var moved = false;
+    await tester.pumpWidget(MaterialApp(
+        home: Center(
+            child: SizedBox.square(
+                dimension: 300,
+                child: StatefulBuilder(builder: (context, setState) {
+                  change = setState;
+                  return RepaintBoundary(
+                      key: boundary,
+                      child: ColoredBox(
+                          color: Colors.black,
+                          child: PlaylistCoverTransitionHost(
+                              controller: controller,
+                              child: Stack(children: [
+                                Positioned(
+                                    left: moved ? 160 : 10,
+                                    top: moved ? 160 : 10,
+                                    child: PlaylistItemArrival(
+                                        child: SizedBox.square(
+                                            dimension: 130,
+                                            child: ColoredBox(
+                                                color: Colors.blue,
+                                                child: Align(
+                                                    alignment:
+                                                        Alignment.topLeft,
+                                                    child: _cover('song'))))))
+                              ]))));
+                })))));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+        () => controller.transition(() => change(() => moved = true)));
+    await tester.pump();
+    await tester.pump();
+    expect(await _pixel(tester, boundary, 260, 260), Colors.black);
+    await tester.pump(const Duration(milliseconds: 55));
+    final partial = await _pixel(tester, boundary, 260, 260);
+    expect(partial.toARGB32(), isNot(Colors.black.toARGB32()));
+    expect(partial.toARGB32(), isNot(Colors.blue.toARGB32()));
+    // The original cover is still in flight. Its temporary destination is transparent.
+    expect((await _pixel(tester, boundary, 200, 180)).toARGB32(),
+        isNot(Colors.red.toARGB32()));
+    await tester.pumpAndSettle();
+    expect((await _pixel(tester, boundary, 260, 260)).toARGB32(),
+        Colors.blue.toARGB32());
+    expect(controller.busy, isFalse);
+    expect(controller.debugSnapshotCount, 0);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('scrolled lazy layouts retain the visible anchor across switches',
       (tester) async {
     final controller = PlaylistCoverTransitionController();

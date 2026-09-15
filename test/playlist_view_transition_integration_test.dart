@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:io';
 import 'dart:ui' as drawing;
 import 'package:dan_player/app_preference.dart';
@@ -522,49 +523,57 @@ void main() {
     });
   }
 
-  testWidgets(
-      'real playlist with reduced motion directly changes all three views',
-      (tester) async {
-    final tree = PlaylistTree([]);
-    final parent = tree.createPlaylist('Reduced motion');
-    final song = _PaintedAudio('Morning tide', MemoryImage(images[1]));
-    final entry = tree.addAudio(parent, song);
-    await tester.pumpWidget(MaterialApp(
-        home: MediaQuery(
-            data: const MediaQueryData(disableAnimations: true),
-            child: Scaffold(
-                body: AppEntranceScope(
-                    child: PlaylistBrowser(
-                        tree: tree,
-                        initialPlaylist: parent,
-                        initialView: PlaylistViewMode.list,
-                        persist: () async {},
-                        onPlay: (_, __) {}))))));
-    await tester.pumpAndSettle();
-    await _decode(tester);
-    for (final target in [
-      PlaylistViewMode.grid,
-      PlaylistViewMode.circular,
-      PlaylistViewMode.list
-    ]) {
-      tester
-          .widget<PlaylistToolbar>(find.byType(PlaylistToolbar))
-          .onViewChanged!(target);
+  for (final systemReduced in [true, false]) {
+    testWidgets(
+        'real playlist with reduced motion directly changes all three views ($systemReduced)',
+        (tester) async {
+      Widget motionScope(Widget child) => systemReduced
+          ? MediaQuery(
+              data: const MediaQueryData(disableAnimations: true), child: child)
+          : MotionPreferencesScope(
+              preferences:
+                  const MotionPreferences(disabled: {MotionKind.tracking}),
+              child: child);
+      final tree = PlaylistTree([]);
+      final parent = tree.createPlaylist('Reduced motion');
+      final song = _PaintedAudio('Morning tide', MemoryImage(images[1]));
+      final entry = tree.addAudio(parent, song);
+      await tester.pumpWidget(MaterialApp(
+          home: motionScope(Scaffold(
+              body: AppEntranceScope(
+                  child: PlaylistBrowser(
+                      tree: tree,
+                      initialPlaylist: parent,
+                      initialView: PlaylistViewMode.list,
+                      persist: () async {},
+                      onPlay: (_, __) {}))))));
       await tester.pumpAndSettle();
       await _decode(tester);
-      final controller = tester
-          .widget<PlaylistCoverTransitionHost>(
-              find.byType(PlaylistCoverTransitionHost))
-          .controller;
-      expect(controller.busy, isFalse);
-      expect(controller.debugSnapshotCount, 0);
-      expect(
-          find.descendant(of: _marker(entry.id), matching: find.byType(Image)),
-          findsOneWidget);
-      expect(tester.binding.hasScheduledFrame, isFalse);
-      expect(tester.takeException(), isNull);
-    }
-  });
+      for (final target in [
+        PlaylistViewMode.grid,
+        PlaylistViewMode.circular,
+        PlaylistViewMode.list
+      ]) {
+        tester
+            .widget<PlaylistToolbar>(find.byType(PlaylistToolbar))
+            .onViewChanged!(target);
+        await tester.pumpAndSettle();
+        await _decode(tester);
+        final controller = tester
+            .widget<PlaylistCoverTransitionHost>(
+                find.byType(PlaylistCoverTransitionHost))
+            .controller;
+        expect(controller.busy, isFalse);
+        expect(controller.debugSnapshotCount, 0);
+        expect(
+            find.descendant(
+                of: _marker(entry.id), matching: find.byType(Image)),
+            findsOneWidget);
+        expect(tester.binding.hasScheduledFrame, isFalse);
+        expect(tester.takeException(), isNull);
+      }
+    });
+  }
   testWidgets('ordinary missing covers finish without waiting for an image',
       (tester) async {
     final tree = PlaylistTree([]);

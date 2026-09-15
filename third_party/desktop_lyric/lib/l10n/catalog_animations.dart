@@ -20,10 +20,10 @@ const catalogAnimations = <String, List<String>>{
     '다음 재생에 추가할 때 표지가 재생 대기열로 이동합니다.'
   ],
   '封面追踪': ['Cover tracking', 'ジャケットの追従', '표지 추적'],
-  '切换歌单视图和进入分类详情时，封面移动并改变形状。': [
-    'Covers move and change shape between playlist views and category details.',
-    'プレイリスト表示の切り替えや分類の詳細を開く際に、ジャケットの位置と形が変化します。',
-    '재생목록 보기 전환 및 분류 상세 화면 진입 시 표지의 위치와 모양이 변합니다.'
+  '切换视图或进入详情时，封面追踪与卡片渐显。': [
+    'Cover tracking and card fades when switching views or opening details.',
+    '表示の切り替えや詳細を開く際のジャケット追従とカードのフェード。',
+    '보기 전환 또는 상세 화면 진입 시 표지 추적과 카드 페이드입니다.'
   ],
   '页面浮现': ['Item entrances', '項目の出現', '항목 등장'],
   '页面项目首次出现时渐显、上浮或展开。': [

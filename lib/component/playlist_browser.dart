@@ -1510,8 +1510,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             );
             return compact && folder != null && _view == PlaylistViewMode.list
                 ? Padding(
-                    padding: const EdgeInsets.only(bottom: 4), child: line)
-                : line;
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: PlaylistItemArrival(child: line))
+                : PlaylistItemArrival(child: line);
           },
         ),
       ),

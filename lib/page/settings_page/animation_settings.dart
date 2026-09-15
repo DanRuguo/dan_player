@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 const animationLabels = <MotionKind, (String, String, IconData)>{
   MotionKind.startup: ('开屏动画', '启动时的品牌展示与淡入淡出。', Icons.start),
   MotionKind.nextTrack: ('下一首动画', '添加下一首时，封面飞向播放队列。', Icons.skip_next),
-  MotionKind.tracking: ('封面追踪', '切换歌单视图和进入分类详情时，封面移动并改变形状。', Icons.open_with),
+  MotionKind.tracking: ('封面追踪', '切换视图或进入详情时，封面追踪与卡片渐显。', Icons.open_with),
   MotionKind.entrance: ('页面浮现', '页面项目首次出现时渐显、上浮或展开。', Icons.auto_awesome),
   MotionKind.transitions: ('页面切换', '页面、内容区与引导步骤之间的过渡。', Icons.swap_horiz),
   MotionKind.layout: (
@@ -94,16 +94,30 @@ class _AnimationSettingsState extends State<AnimationSettings> {
                       label: Text(ui('全部关闭'))),
                 ]),
                 const SizedBox(height: 8),
-                for (final entry in animationLabels.entries)
-                  SettingsSwitchTile(
-                      surface: false,
-                      controlKey: ValueKey('animation-${entry.key.name}'),
-                      icon: entry.value.$3,
-                      title: Text(ui(entry.value.$1)),
-                      subtitle: Text(ui(entry.value.$2)),
-                      value: value.allows(entry.key),
-                      onChanged: (enabled) =>
-                          _change(value.withKind(entry.key, enabled))),
+                LayoutBuilder(builder: (context, constraints) {
+                  final twoColumns = constraints.maxWidth >= 800 &&
+                      MediaQuery.textScalerOf(context).scale(1) <= 1.3;
+                  final width = twoColumns
+                      ? (constraints.maxWidth - 16) / 2
+                      : constraints.maxWidth;
+                  return Wrap(spacing: 16, runSpacing: 0, children: [
+                    for (final entry in animationLabels.entries)
+                      SizedBox(
+                          width: width,
+                          child: SettingsSwitchTile(
+                              surface: false,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              controlKey:
+                                  ValueKey('animation-${entry.key.name}'),
+                              icon: entry.value.$3,
+                              title: Text(ui(entry.value.$1)),
+                              subtitle: Text(ui(entry.value.$2)),
+                              value: value.allows(entry.key),
+                              onChanged: (enabled) =>
+                                  _change(value.withKind(entry.key, enabled)))),
+                  ]);
+                }),
                 if (_failed)
                   Text(ui('保存界面设置失败；本次会话仍然有效。'),
                       style: TextStyle(
