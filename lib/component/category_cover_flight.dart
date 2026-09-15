@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 
@@ -23,7 +24,8 @@ class _CategoryCoverFlightState extends State<CategoryCoverFlight> {
   final _contentKey = GlobalKey();
   @override
   Widget build(BuildContext context) {
-    if (widget.tag == null || MediaQuery.disableAnimationsOf(context)) {
+    if (widget.tag == null ||
+        (!AppMotion.enabled(context, MotionKind.tracking))) {
       return widget.child;
     }
     return Hero(

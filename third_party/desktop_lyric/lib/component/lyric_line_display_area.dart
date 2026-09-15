@@ -83,7 +83,7 @@ class DesktopLyricLineContent extends StatelessWidget {
         : (detailedLine!.sequence, detailedLine!.lineIndex);
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    final reduced = MediaQuery.disableAnimationsOf(context) ||
+    final reduced = !AppMotion.enabled(context, MotionKind.lyrics) ||
         features.disableAnimations ||
         features.reduceMotion ||
         !TickerMode.valuesOf(context).enabled;

@@ -122,7 +122,7 @@ class _DesktopLyricForegroundState extends State<DesktopLyricForeground> {
               }));
             });
           }
-          final reduced = MediaQuery.disableAnimationsOf(context) ||
+          final reduced = !AppMotion.enabled(context, MotionKind.layout) ||
               !TickerMode.valuesOf(context).enabled;
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),

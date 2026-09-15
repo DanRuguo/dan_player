@@ -129,7 +129,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     // TickerMode when an opaque route covers it; isCurrent would also stop
     // playback visuals behind ordinary dialogs and popup menus.
     _treeVisible = TickerMode.valuesOf(context).enabled;
-    _mediaReduced = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    _mediaReduced = !AppMotion.enabled(context, MotionKind.feedback);
     _syncActivity();
   }
 

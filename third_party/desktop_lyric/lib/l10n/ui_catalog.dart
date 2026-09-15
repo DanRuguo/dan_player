@@ -49,6 +49,7 @@ import 'catalog_settings_organization.dart';
 import 'catalog_playlist_tiles.dart';
 import 'catalog_font_picker.dart';
 import 'catalog_audio_trim.dart';
+import 'catalog_animations.dart';
 import 'catalog_cover_import.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
@@ -102,5 +103,6 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogPlaylistTiles,
   ...catalogFontPicker,
   ...catalogAudioTrim,
+  ...catalogAnimations,
   ...catalogCoverImport,
 });

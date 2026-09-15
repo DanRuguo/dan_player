@@ -83,7 +83,7 @@ class _UiLanguageTransitionState extends State<UiLanguageTransition>
   void _changed() {
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    if ((MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+    if (!AppMotion.enabled(context, MotionKind.theme) ||
         features.disableAnimations ||
         features.reduceMotion ||
         !TickerMode.valuesOf(context).enabled) {

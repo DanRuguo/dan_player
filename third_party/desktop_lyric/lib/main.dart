@@ -103,46 +103,60 @@ class _DesktopLyricAppState extends State<DesktopLyricApp> {
 
   @override
   Widget build(BuildContext context) {
-    return UiLanguageScope(
-        child: ValueListenableBuilder<UiLanguage>(
-            valueListenable: uiLanguage,
-            builder: (context, language, _) => ValueListenableBuilder(
-                  valueListenable: DesktopLyricController.instance.isDarkMode,
-                  builder: (context, isDarkMode, _) =>
-                      ValueListenableProvider.value(
-                    value: DesktopLyricController.instance.theme,
-                    child: MaterialApp(
-                      scrollBehavior: const AppScrollBehavior(),
-                      debugShowCheckedModeBanner: false,
-                      themeAnimationDuration: AppMotion.standard,
-                      themeAnimationCurve: AppMotion.standardCurve,
-                      themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
-                      theme: DesktopLyricTypography.theme(Brightness.light),
-                      darkTheme: DesktopLyricTypography.theme(Brightness.dark),
-                      localizationsDelegates:
-                          GlobalMaterialLocalizations.delegates,
-                      supportedLocales: supportedLocales,
-                      locale: language.locale,
-                      builder: (context, child) =>
-                          ValueListenableBuilder<ThemeChangedMessage>(
-                        valueListenable: DesktopLyricController.instance.theme,
-                        child: AppPresentationHost(
-                            child: UiLanguageTransition(
-                                child: child ?? const SizedBox.shrink())),
-                        builder: (context, colors, child) =>
-                            DesktopLyricThemeTransition(
-                          colors: colors,
-                          child: child,
-                          builder: (context, current, child) =>
-                              Provider<ThemeChangedMessage>.value(
-                                  value: current, child: child!),
+    return ValueListenableBuilder<MotionPreferences>(
+        valueListenable: desktopMotionPreferences,
+        builder: (context, motion, _) => UiLanguageScope(
+            child: ValueListenableBuilder<UiLanguage>(
+                valueListenable: uiLanguage,
+                builder: (context, language, _) => ValueListenableBuilder(
+                      valueListenable:
+                          DesktopLyricController.instance.isDarkMode,
+                      builder: (context, isDarkMode, _) =>
+                          ValueListenableProvider.value(
+                        value: DesktopLyricController.instance.theme,
+                        child: MaterialApp(
+                          scrollBehavior: const AppScrollBehavior(),
+                          debugShowCheckedModeBanner: false,
+                          themeAnimationDuration:
+                              motion.allows(MotionKind.theme)
+                                  ? AppMotion.standard
+                                  : Duration.zero,
+                          themeAnimationCurve: AppMotion.standardCurve,
+                          themeMode:
+                              isDarkMode ? ThemeMode.dark : ThemeMode.light,
+                          theme: AppMotion.controlTheme(
+                              DesktopLyricTypography.theme(Brightness.light),
+                              motion.allows(MotionKind.feedback)),
+                          darkTheme: AppMotion.controlTheme(
+                              DesktopLyricTypography.theme(Brightness.dark),
+                              motion.allows(MotionKind.feedback)),
+                          localizationsDelegates:
+                              GlobalMaterialLocalizations.delegates,
+                          supportedLocales: supportedLocales,
+                          locale: language.locale,
+                          builder: (context, child) => MotionPreferencesScope(
+                            preferences: motion,
+                            child: ValueListenableBuilder<ThemeChangedMessage>(
+                              valueListenable:
+                                  DesktopLyricController.instance.theme,
+                              child: AppPresentationHost(
+                                  child: UiLanguageTransition(
+                                      child: child ?? const SizedBox.shrink())),
+                              builder: (context, colors, child) =>
+                                  DesktopLyricThemeTransition(
+                                colors: colors,
+                                child: child,
+                                builder: (context, current, child) =>
+                                    Provider<ThemeChangedMessage>.value(
+                                        value: current, child: child!),
+                              ),
+                            ),
+                          ),
+                          home: DesktopLyricPaletteScope(
+                              host: _palette, child: const DesktopLyricBody()),
                         ),
                       ),
-                      home: DesktopLyricPaletteScope(
-                          host: _palette, child: const DesktopLyricBody()),
-                    ),
-                  ),
-                )));
+                    ))));
   }
 
   final supportedLocales = const [

@@ -338,8 +338,9 @@ class _CategoryTileState extends State<_CategoryTile> {
     final group = widget.group, p = widget.presentation;
     final circle = p.shape == CategoryCoverShape.circle;
     final scheme = Theme.of(context).colorScheme;
-    final duration =
-        appToolbarReduceMotion(context) ? Duration.zero : AppMotion.standard;
+    final duration = appToolbarReduceMotion(context, kind: MotionKind.layout)
+        ? Duration.zero
+        : AppMotion.standard;
     return LayoutBuilder(builder: (context, constraints) {
       final width = constraints.maxWidth, height = constraints.maxHeight;
       final target = ArtworkSize.forDisplay(

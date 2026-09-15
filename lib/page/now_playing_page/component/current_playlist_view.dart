@@ -182,7 +182,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
           _visibleIndices(latestQueue).indexOf(playbackService.playlistIndex);
       if (visibleIndex < 0) return;
       final target = _alignmentOffset(visibleIndex);
-      final reduced = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+      final reduced = !AppMotion.enabled(context, MotionKind.feedback);
       if (animate && !reduced) {
         scrollController.animateTo(
           target,
@@ -683,7 +683,7 @@ class _PlaylistViewItem extends StatelessWidget {
           : scheme.onSurfaceVariant,
     );
     final durationText = Duration(seconds: item.duration).toStringHMMSS();
-    final reduced = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final reduced = !AppMotion.enabled(context, MotionKind.feedback);
     final placeholder = ColoredBox(
       color: current
           ? scheme.primary.withValues(alpha: .08)

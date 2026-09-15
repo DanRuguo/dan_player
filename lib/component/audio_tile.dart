@@ -499,7 +499,8 @@ class _AudioTileState extends State<AudioTile> {
 
           return TweenAnimationBuilder<Color?>(
             tween: ColorTween(begin: Colors.transparent, end: tileColor),
-            duration: AppMotion.quick,
+            duration: AppMotion.duration(
+                context, MotionKind.feedback, AppMotion.quick),
             curve: AppMotion.standardCurve,
             builder: (context, color, child) => ConstrainedBox(
               constraints: const BoxConstraints(minHeight: 64),

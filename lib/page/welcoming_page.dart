@@ -115,7 +115,8 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
       width: 400,
       height: 400,
       child: AnimatedSwitcher(
-        duration: AppMotion.standard,
+        duration: AppMotion.duration(
+            context, MotionKind.transitions, AppMotion.standard),
         child: selecting
             ? folderSelector(scheme)
             : FutureBuilder(

@@ -58,7 +58,7 @@ class _DesktopLyricBodyState extends State<DesktopLyricBody> {
                   rect: frame,
                   child: ClipRect(
                       child: TweenAnimationBuilder<double>(
-                    duration: MediaQuery.disableAnimationsOf(context)
+                    duration: !AppMotion.enabled(context, MotionKind.feedback)
                         ? Duration.zero
                         : AppMotion.standard,
                     curve: AppMotion.standardCurve,

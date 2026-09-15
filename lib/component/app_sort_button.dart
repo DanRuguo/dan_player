@@ -289,9 +289,11 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
         menuPadding: const EdgeInsets.symmetric(vertical: 6),
         popUpAnimationStyle: reduced
             ? AnimationStyle.noAnimation
-            : const AnimationStyle(
-                duration: AppMotion.quick,
-                reverseDuration: AppMotion.quick,
+            : AnimationStyle(
+                duration: AppMotion.duration(
+                    context, MotionKind.feedback, AppMotion.quick),
+                reverseDuration: AppMotion.duration(
+                    context, MotionKind.feedback, AppMotion.quick),
                 curve: AppMotion.standardCurve,
                 reverseCurve: Curves.easeInCubic,
               ),
@@ -371,7 +373,8 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
                           ? arrow
                           : AnimatedRotation(
                               turns: _open ? .5 : 0,
-                              duration: AppMotion.quick,
+                              duration: AppMotion.duration(context,
+                                  MotionKind.feedback, AppMotion.quick),
                               curve: AppMotion.standardCurve,
                               child: arrow,
                             ),

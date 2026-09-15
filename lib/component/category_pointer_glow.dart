@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_motion.dart';
 
 /// Shared by a scrollable cover grid, including its empty gutters. Only mounted
 /// covers near the pointer change their paint notifier; no animation ticker.
@@ -28,7 +29,9 @@ class _CoverPointerScopeState extends State<CoverPointerScope> {
           child: MouseRegion(
               opaque: false,
               hitTestBehavior: HitTestBehavior.translucent,
-              onHover: (event) => position.value = event.position,
+              onHover: AppMotion.enabled(context, MotionKind.feedback)
+                  ? (event) => position.value = event.position
+                  : null,
               onExit: (_) => position.value = null,
               child: widget.child)));
 }
@@ -54,9 +57,12 @@ class CategoryPointerGlow extends StatefulWidget {
 class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
   final _position = ValueNotifier<Offset?>(null);
   ValueNotifier<Offset?>? _shared;
+  bool _enabled = true;
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _enabled = AppMotion.enabled(context, MotionKind.feedback);
+    if (!_enabled) _position.value = null;
     final next = context
         .dependOnInheritedWidgetOfExactType<_CoverPointerData>()
         ?.position;
@@ -67,7 +73,7 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
   }
 
   void _move() {
-    if (widget.circle) return;
+    if (widget.circle || !_enabled) return;
     final global = _shared?.value;
     final box = context.findRenderObject();
     if (global == null || box is! RenderBox || !box.hasSize) {
@@ -89,6 +95,7 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
   @override
   Widget build(BuildContext context) => MouseRegion(
         onHover: (event) {
+          if (!_enabled) return;
           if (widget.circle || _shared == null)
             _position.value = event.localPosition;
         },

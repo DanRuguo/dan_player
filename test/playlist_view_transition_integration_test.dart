@@ -141,6 +141,72 @@ void main() {
 
   for (final from in PlaylistViewMode.values) {
     for (final to in PlaylistViewMode.values.where((value) => value != from)) {
+      for (final depth in [.5, 1.0]) {
+        testWidgets('scrolled ${from.name} to ${to.name} at $depth',
+            (tester) async {
+          tester.view.physicalSize = const Size(1100, 850);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final tree = PlaylistTree([]);
+          final parent = tree.createPlaylist('Scroll anchors');
+          for (var i = 0; i < 150; i++) {
+            tree.addAudio(
+                parent, _PaintedAudio('Song $i', MemoryImage(images[i % 3])));
+          }
+          await tester.pumpWidget(MaterialApp(
+              home: Scaffold(
+                  body: PlaylistBrowser(
+                      tree: tree,
+                      initialPlaylist: parent,
+                      initialView: from,
+                      persist: () async {},
+                      onPlay: (_, __) {}))));
+          await tester.pumpAndSettle();
+          final host = find.byType(PlaylistCoverTransitionHost);
+          final scroll = tester.state<ScrollableState>(find
+              .descendant(of: host, matching: find.byType(Scrollable))
+              .first);
+          scroll.position.jumpTo(scroll.position.maxScrollExtent * depth);
+          await tester.pumpAndSettle();
+          await _decode(tester);
+          await tester.pumpAndSettle();
+          final viewport = tester.getRect(host);
+          final visible = find
+              .byType(PlaylistCoverTransitionMarker)
+              .evaluate()
+              .where((e) =>
+                  tester.getRect(find.byWidget(e.widget)).overlaps(viewport))
+              .toList()
+            ..sort((a, b) {
+              final ar = tester.getRect(find.byWidget(a.widget));
+              final br = tester.getRect(find.byWidget(b.widget));
+              final vertical = ar.top.compareTo(br.top);
+              return vertical != 0 ? vertical : ar.left.compareTo(br.left);
+            });
+          expect(visible, isNotEmpty);
+          final id =
+              (visible.first.widget as PlaylistCoverTransitionMarker).entryId;
+          final controller =
+              tester.widget<PlaylistCoverTransitionHost>(host).controller;
+          final toolbar =
+              tester.widget<PlaylistToolbar>(find.byType(PlaylistToolbar));
+          await tester.runAsync(() async {
+            toolbar.onViewChanged!(to);
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          });
+          for (var i = 0; i < 10; i++) {
+            await tester.pump();
+          }
+          expect(controller.active, isTrue);
+          expect(_marker(id), findsOneWidget);
+          expect(tester.getRect(_marker(id)).overlaps(viewport), isTrue);
+          await _decode(tester);
+          await tester.pumpAndSettle();
+          expect(controller.busy, isFalse);
+          expect(tester.takeException(), isNull);
+        });
+      }
       testWidgets(
           'real playlist ${from.name} to ${to.name} keeps song and folder artwork',
           (tester) async {

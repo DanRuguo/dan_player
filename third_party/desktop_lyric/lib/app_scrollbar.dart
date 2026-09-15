@@ -97,7 +97,7 @@ class _AppScrollbarState extends RawScrollbarState<AppScrollbar>
       if (controller is AnimationController) {
         final features =
             WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-        final reduced = MediaQuery.disableAnimationsOf(context) ||
+        final reduced = !AppMotion.enabled(context, MotionKind.feedback) ||
             features.disableAnimations ||
             features.reduceMotion;
         controller.duration = reduced ? Duration.zero : AppMotion.standard;

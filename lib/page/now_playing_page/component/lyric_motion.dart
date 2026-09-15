@@ -32,7 +32,7 @@ abstract final class LyricMotion {
   static bool reducedOf(BuildContext context) {
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    return (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+    return (!AppMotion.enabled(context, MotionKind.lyrics)) ||
         features.disableAnimations ||
         features.reduceMotion ||
         !TickerMode.valuesOf(context).enabled;

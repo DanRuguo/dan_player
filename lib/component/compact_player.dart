@@ -486,7 +486,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
   bool get _reduced {
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    return (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+    return (!AppMotion.enabled(context, MotionKind.feedback)) ||
         features.disableAnimations ||
         features.reduceMotion ||
         !TickerMode.valuesOf(context).enabled;

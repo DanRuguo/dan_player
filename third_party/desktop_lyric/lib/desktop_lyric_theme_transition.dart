@@ -72,7 +72,7 @@ class _DesktopLyricThemeTransitionState
   void didChangeDependencies() {
     super.didChangeDependencies();
     _contextAnimations = TickerMode.valuesOf(context).enabled &&
-        MediaQuery.maybeDisableAnimationsOf(context) != true;
+        AppMotion.enabled(context, MotionKind.theme);
     if (!_canAnimate) _animation.value = 1;
   }
 

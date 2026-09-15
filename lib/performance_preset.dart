@@ -81,6 +81,7 @@ class PerformanceSnapshot {
     }
     return PerformanceSnapshot(
         rendering: rendering.copyWith(
+            animations: rendering.animations.all(high),
             pauseWhenHidden: true,
             lyricSpectrum: high,
             compactSpectrum: high,

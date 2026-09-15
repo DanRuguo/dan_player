@@ -31,6 +31,54 @@ Widget _cover(Object id,
                 child: const ColoredBox(color: Colors.red))));
 
 void main() {
+  testWidgets('scrolled lazy layouts retain the visible anchor across switches',
+      (tester) async {
+    final controller = PlaylistCoverTransitionController();
+    final scroll = ScrollController();
+    addTearDown(controller.dispose);
+    addTearDown(scroll.dispose);
+    bool grid = false;
+    late StateSetter change;
+    await tester.pumpWidget(
+        MaterialApp(home: StatefulBuilder(builder: (context, setState) {
+      change = setState;
+      return PlaylistCoverTransitionHost(
+          controller: controller,
+          itemIds: List.generate(200, (i) => i),
+          child: grid
+              ? GridView.builder(
+                  key: const ValueKey('grid'),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 4),
+                  itemCount: 200,
+                  itemBuilder: (_, i) => _cover(i, size: 100))
+              : ListView.builder(
+                  key: const ValueKey('list'),
+                  controller: scroll,
+                  itemExtent: 72,
+                  itemCount: 200,
+                  itemBuilder: (_, i) => Align(
+                      alignment: Alignment.centerLeft,
+                      child: _cover(i, size: 48))));
+    })));
+    await tester.pumpAndSettle();
+    scroll.jumpTo(72 * 100);
+    await tester.pumpAndSettle();
+    await tester
+        .runAsync(() => controller.transition(() => change(() => grid = true)));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump();
+    }
+    final marker = find.byWidgetPredicate(
+        (w) => w is PlaylistCoverTransitionMarker && w.entryId == 100);
+    expect(marker, findsOneWidget);
+    expect(tester.getRect(marker).top, closeTo(0, 1));
+    expect(controller.active, isTrue);
+    await tester.pumpAndSettle();
+    expect(controller.busy, isFalse);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
       'visible cover travels and changes shape without rebuilding per tick',
       (tester) async {

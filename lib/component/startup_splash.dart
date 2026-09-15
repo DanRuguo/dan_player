@@ -64,16 +64,18 @@ class _StartupSplashState extends State<StartupSplash>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _reducedMotion = (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+    _reducedMotion = (!AppMotion.enabled(context, MotionKind.startup)) ||
         _platformReducesMotion;
+    if (!MotionPreferencesScope.of(context).allows(MotionKind.startup)) {
+      _timeline.value = 1;
+    }
   }
 
   @override
   void didChangeAccessibilityFeatures() {
     setState(() {
-      _reducedMotion =
-          (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
-              _platformReducesMotion;
+      _reducedMotion = (!AppMotion.enabled(context, MotionKind.startup)) ||
+          _platformReducesMotion;
     });
   }
 

@@ -61,7 +61,7 @@ class _AppRouteTransitionState extends State<AppRouteTransition> {
   Widget build(BuildContext context) {
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    final reduced = MediaQuery.disableAnimationsOf(context) ||
+    final reduced = (!AppMotion.enabled(context, MotionKind.transitions)) ||
         features.disableAnimations ||
         features.reduceMotion;
     return AnimatedBuilder(

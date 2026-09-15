@@ -93,7 +93,8 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final disableAnimations = MediaQuery.disableAnimationsOf(context);
+    final disableAnimations =
+        (!AppMotion.enabled(context, MotionKind.feedback));
     if (_disableAnimations != disableAnimations) {
       _disableAnimations = disableAnimations;
       _highlightBoundary.value = _highlightWanted ? 1 : 0;

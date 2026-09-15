@@ -50,7 +50,7 @@ import 'package:provider/provider.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 
 class SlideTransitionPage<T> extends CustomTransitionPage<T> {
-  const SlideTransitionPage({
+  SlideTransitionPage({
     required super.child,
     super.name,
     super.arguments,
@@ -59,9 +59,17 @@ class SlideTransitionPage<T> extends CustomTransitionPage<T> {
     super.maintainState,
   }) : super(
           transitionsBuilder: _transitionsBuilder,
-          transitionDuration: AppRouteTransition.enterDuration,
-          reverseTransitionDuration: AppRouteTransition.exitDuration,
+          transitionDuration: _duration,
+          reverseTransitionDuration: _duration,
         );
+
+  static Duration get _duration {
+    final motion = AppSettings.instance.rendering.value.animations;
+    return motion.allows(MotionKind.transitions) ||
+            motion.allows(MotionKind.tracking)
+        ? AppRouteTransition.enterDuration
+        : Duration.zero;
+  }
 
   static Widget _transitionsBuilder(
     BuildContext context,
@@ -190,50 +198,63 @@ class Entry extends StatelessWidget {
                   value: ThemeProvider.instance,
                   builder: (context, _) {
                     final theme = Provider.of<ThemeProvider>(context);
-                    return MaterialApp.router(
-                      themeAnimationDuration: AppMotion.standard,
-                      themeAnimationCurve: AppMotion.standardCurve,
-                      title: "Dan Player",
-                      scaffoldMessengerKey: SCAFFOLD_MESSAGER,
-                      debugShowCheckedModeBanner: false,
-                      theme: fromSchemeAndFontFamily(
-                        fontFamily: theme.fontFamily,
-                        colorScheme: theme.lightScheme,
-                      ),
-                      darkTheme: fromSchemeAndFontFamily(
-                        fontFamily: theme.fontFamily,
-                        colorScheme: theme.darkScheme,
-                      ),
-                      themeMode: theme.themeMode,
-                      localizationsDelegates:
-                          GlobalMaterialLocalizations.delegates,
-                      supportedLocales: supportedLocales,
-                      locale: language.locale,
-                      scrollBehavior: const DanPlayerScrollBehavior(),
-                      routerConfig: config,
-                      builder: (context, child) => RenderingPreferencesScope(
-                        preferences: AppSettings.instance.rendering,
-                        child: UiLanguageTransition(
-                            child: ValueListenableBuilder<UiLayoutPreferences>(
-                                valueListenable: AppSettings.instance.uiLayout,
-                                builder: (context, layout, _) => UiLayoutScope(
-                                    preferences: layout,
-                                    child: WindowBackdropThemeSync(
-                                      child: PlayerShortcuts(
-                                        child: DesktopVisibilityHost(
-                                          child: StartupSplash(
-                                            child: AppPresentationHost(
-                                              child: AppWindowModeHost(
-                                                child: child ??
-                                                    const SizedBox.shrink(),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    )))),
-                      ),
-                    );
+                    return ValueListenableBuilder<RenderingPreferences>(
+                        valueListenable: AppSettings.instance.rendering,
+                        builder: (context, rendering, _) => MaterialApp.router(
+                              themeAnimationDuration:
+                                  rendering.animations.allows(MotionKind.theme)
+                                      ? AppMotion.standard
+                                      : Duration.zero,
+                              themeAnimationCurve: AppMotion.standardCurve,
+                              title: "Dan Player",
+                              scaffoldMessengerKey: SCAFFOLD_MESSAGER,
+                              debugShowCheckedModeBanner: false,
+                              theme: fromSchemeAndFontFamily(
+                                fontFamily: theme.fontFamily,
+                                colorScheme: theme.lightScheme,
+                              ),
+                              darkTheme: fromSchemeAndFontFamily(
+                                fontFamily: theme.fontFamily,
+                                colorScheme: theme.darkScheme,
+                              ),
+                              themeMode: theme.themeMode,
+                              localizationsDelegates:
+                                  GlobalMaterialLocalizations.delegates,
+                              supportedLocales: supportedLocales,
+                              locale: language.locale,
+                              scrollBehavior: const DanPlayerScrollBehavior(),
+                              routerConfig: config,
+                              builder: (context, child) =>
+                                  RenderingPreferencesScope(
+                                preferences: AppSettings.instance.rendering,
+                                child: UiLanguageTransition(
+                                    child: ValueListenableBuilder<
+                                            UiLayoutPreferences>(
+                                        valueListenable:
+                                            AppSettings.instance.uiLayout,
+                                        builder: (context, layout, _) =>
+                                            UiLayoutScope(
+                                                preferences: layout,
+                                                child: WindowBackdropThemeSync(
+                                                  child: PlayerShortcuts(
+                                                    child:
+                                                        DesktopVisibilityHost(
+                                                      child: StartupSplash(
+                                                        child:
+                                                            AppPresentationHost(
+                                                          child:
+                                                              AppWindowModeHost(
+                                                            child: child ??
+                                                                const SizedBox
+                                                                    .shrink(),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                )))),
+                              ),
+                            ));
                   },
                 )));
   }

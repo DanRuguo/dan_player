@@ -28,7 +28,7 @@ class NowPlayingInfo extends StatelessWidget {
           (controller ?? DesktopLyricController.instance).nowPlaying,
       builder: (context, nowPlaying, _) {
         return AnimatedSwitcher(
-          duration: MediaQuery.disableAnimationsOf(context) ||
+          duration: !AppMotion.enabled(context, MotionKind.transitions) ||
                   !TickerMode.valuesOf(context).enabled
               ? Duration.zero
               : AppMotion.standard,

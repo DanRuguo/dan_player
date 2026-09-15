@@ -64,7 +64,7 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _animationsEnabled = TickerMode.valuesOf(context).enabled &&
-        !MediaQuery.disableAnimationsOf(context);
+        !(!AppMotion.enabled(context, MotionKind.theme));
     if (!_animationsEnabled || _platformReducesMotion) _transition.value = 1;
     _resolve();
   }

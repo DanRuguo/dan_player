@@ -502,7 +502,8 @@ class _TrackSpectrum extends StatelessWidget {
   Widget _content(BuildContext context, bool active) {
     UiLanguageScope.watch(context);
     return AnimatedContainer(
-        duration: AppMotion.emphasized,
+        duration: AppMotion.duration(
+            context, MotionKind.layout, AppMotion.emphasized),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
         decoration: BoxDecoration(
             color: Theme.of(context)

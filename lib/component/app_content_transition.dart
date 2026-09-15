@@ -39,7 +39,7 @@ class _AppContentTransitionState extends State<AppContentTransition>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _enabled = TickerMode.valuesOf(context).enabled &&
-        !MediaQuery.disableAnimationsOf(context);
+        !(!AppMotion.enabled(context, MotionKind.transitions));
     if (!_enabled || _platformReducesMotion) _controller.value = 1;
   }
 

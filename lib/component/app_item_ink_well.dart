@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'app_motion.dart';
 import 'package:flutter/material.dart';
 
 /// Item ink must end with the pointer sequence, including a long press won by
@@ -47,6 +48,9 @@ class _AppItemInkWellState extends State<AppItemInkWell> {
       onPointerUp: (_) => _release(),
       onPointerCancel: (_) => _release(),
       child: InkWell(
+          splashFactory: AppMotion.enabled(context, MotionKind.feedback)
+              ? null
+              : NoSplash.splashFactory,
           statesController: _states,
           borderRadius: widget.borderRadius,
           focusColor: widget.focusColor,

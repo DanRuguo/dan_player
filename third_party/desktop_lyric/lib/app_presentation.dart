@@ -77,9 +77,10 @@ void showPresentationNotice(
         ),
       ),
       snackBarAnimationStyle: AnimationStyle(
-        duration: media.disableAnimations ? Duration.zero : AppMotion.quick,
-        reverseDuration:
-            media.disableAnimations ? Duration.zero : AppMotion.quick,
+        duration: AppMotion.duration(
+            themeContext, MotionKind.transitions, AppMotion.quick),
+        reverseDuration: AppMotion.duration(
+            themeContext, MotionKind.transitions, AppMotion.quick),
       ));
 }
 
@@ -375,7 +376,7 @@ Future<T?> showAppDialog<T>({
   final navigator = Navigator.of(context, rootNavigator: useRootNavigator);
   final features =
       WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-  final duration = (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+  final duration = !AppMotion.enabled(context, MotionKind.transitions) ||
           features.disableAnimations ||
           features.reduceMotion
       ? Duration.zero
@@ -635,7 +636,7 @@ class _NoticeBubble extends StatelessWidget {
           ui("错误")
         ),
     };
-    final reduced = MediaQuery.disableAnimationsOf(context);
+    final reduced = !AppMotion.enabled(context, MotionKind.transitions);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: reduced ? 1 : 0, end: 1),
       duration: reduced ? Duration.zero : AppMotion.quick,

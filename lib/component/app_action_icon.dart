@@ -67,7 +67,7 @@ class AppIconActionButton extends StatelessWidget {
   bool _reduceMotion(BuildContext context) {
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    return (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+    return (!AppMotion.enabled(context, MotionKind.feedback)) ||
         features.disableAnimations ||
         features.reduceMotion ||
         !TickerMode.valuesOf(context).enabled;

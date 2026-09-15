@@ -257,7 +257,8 @@ class _ColorChoice extends StatelessWidget {
               dimension: 44,
               child: Center(
                 child: AnimatedContainer(
-                  duration: AppMotion.quick,
+                  duration: AppMotion.duration(
+                      context, MotionKind.feedback, AppMotion.quick),
                   width: 30,
                   height: 30,
                   padding: const EdgeInsets.all(2),

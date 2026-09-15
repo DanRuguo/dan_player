@@ -145,7 +145,7 @@ class _AppEntranceState extends State<AppEntrance>
     final scope = scopeData?.owner;
     final nested =
         context.dependOnInheritedWidgetOfExactType<_EntranceBoundary>() != null;
-    final reduced = (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+    final reduced = (!AppMotion.enabled(context, MotionKind.entrance)) ||
         _platformReducesMotion;
     final enabled = TickerMode.valuesOf(context).enabled;
 

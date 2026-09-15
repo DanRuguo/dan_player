@@ -312,8 +312,9 @@ class _NowPlayingCover extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     if (nowPlaying == null) {
-      return const AnimatedSwitcher(
-        duration: AppMotion.standard,
+      return AnimatedSwitcher(
+        duration:
+            AppMotion.duration(context, MotionKind.theme, AppMotion.standard),
         child: _CoverPlaceholder(key: ValueKey("idle-cover")),
       );
     }

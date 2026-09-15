@@ -40,12 +40,18 @@ class _CategoryTileMotionState extends State<CategoryTileMotion>
           old.linear
               ? _controller.value
               : AppMotion.standardCurve.transform(_controller.value))!;
-      if (appToolbarReduceMotion(context)) {
+      if (appToolbarReduceMotion(context, kind: MotionKind.layout)) {
         _controller.value = 1;
       } else {
         _controller.forward(from: 0);
       }
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!AppMotion.enabled(context, MotionKind.layout)) _controller.value = 1;
   }
 
   @override

@@ -24,6 +24,7 @@ import 'package:dan_player/page/settings_page/uninstall_settings.dart';
 import 'package:flutter/material.dart';
 import 'interface_settings.dart';
 import 'rendering_settings.dart';
+import 'animation_settings.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -83,6 +84,7 @@ class SettingsPage extends StatelessWidget {
           children: const [
             WindowBackdropInfo(),
             VisualEffectsSettings(),
+            AnimationSettings(),
           ],
         ),
         SettingsSection(

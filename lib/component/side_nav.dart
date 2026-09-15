@@ -338,7 +338,8 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
                   onPointerCancel: (_) => _pointerEnd(),
                   child: Center(
                     child: AnimatedContainer(
-                      duration: AppMotion.quick,
+                      duration: AppMotion.duration(
+                          context, MotionKind.feedback, AppMotion.quick),
                       width: _dragging || _hovering ? 3 : 1,
                       height: _dragging || _hovering ? 56 : 28,
                       decoration: BoxDecoration(

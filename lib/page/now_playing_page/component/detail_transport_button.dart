@@ -1,6 +1,5 @@
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
-import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:flutter/material.dart';
 
 /// A detail-page treatment. All three controls share the scene's background;
@@ -107,7 +106,7 @@ class DetailTransportButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final reduced = LyricMotion.reducedOf(context);
+    final reduced = !AppMotion.enabled(context, MotionKind.feedback);
     return IconButton(
       tooltip: tooltip,
       onPressed: buffering ? null : onPressed,

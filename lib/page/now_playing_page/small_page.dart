@@ -76,7 +76,8 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
                   ),
                   Expanded(
                     child: AnimatedSwitcher(
-                      duration: AppMotion.standard,
+                      duration: AppMotion.duration(
+                          context, MotionKind.layout, AppMotion.standard),
                       child: switch (views[1]) {
                         NowPlayingViewMode.onlyMain => const _NowPlayingInfo(),
                         NowPlayingViewMode.withLyric =>
@@ -160,7 +161,8 @@ class _NowPlayingSmallViewSwitchState
           borderRadius: AppShape.controlRadius,
           type: MaterialType.transparency,
           child: AnimatedOpacity(
-            duration: AppMotion.quick,
+            duration:
+                AppMotion.duration(context, MotionKind.layout, AppMotion.quick),
             // Keep view navigation discoverable without a mouse hover.
             opacity: visible ? 1.0 : 0.7,
             child: InkWell(

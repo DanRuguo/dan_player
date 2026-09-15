@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/performance_preset.dart';
 import 'package:dan_player/player_experience_preferences.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   PerformanceSnapshot baseline() => PerformanceSnapshot.capture(
       const RenderingPreferences(
+          animations: MotionPreferences(disabled: {MotionKind.tracking}),
           frameRate: FrameRatePreference(mode: FrameRateMode.fixed, fps: 90)),
       const BackgroundPreferences(
           main: BackgroundAppearance(
@@ -36,6 +38,7 @@ void main() {
     await controller.select(PerformanceMode.economy);
     expect(commits.length, 2);
     expect(live.rendering.compactSpectrum, false);
+    expect(live.rendering.animations.allDisabled, true);
     expect(live.rendering.surfaceBlur, false);
     expect(live.rendering.frameRate.target(144, interacting: true), 30);
     expect(live.backgrounds.main.source, BackgroundSource.solid);
@@ -44,6 +47,7 @@ void main() {
     await controller.select(PerformanceMode.performance);
     expect(controller.value.before!.toMap(), original.toMap());
     expect(live.rendering.lyricSpectrum, true);
+    expect(live.rendering.animations.allEnabled, true);
     expect(live.rendering.frameRate.mode, FrameRateMode.display);
     expect(live.backgrounds.main.source, BackgroundSource.customImage);
     controller.value = PerformancePresetState.fromMap(commits.last);

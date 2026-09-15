@@ -58,7 +58,7 @@ class _CompactLyricViewState extends State<CompactLyricView>
   bool get _reduced {
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    return (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+    return (!AppMotion.enabled(context, MotionKind.lyrics)) ||
         features.disableAnimations ||
         features.reduceMotion ||
         !TickerMode.valuesOf(context).enabled;

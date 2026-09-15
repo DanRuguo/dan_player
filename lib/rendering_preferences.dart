@@ -1,6 +1,7 @@
 import 'package:desktop_lyric/frame_pacing.dart';
+import 'package:desktop_lyric/app_motion.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 enum SpectrumDensity {
   low(36),
@@ -19,6 +20,7 @@ class RenderingPreferences {
       this.lyricSpectrum = true,
       this.compactSpectrum = true,
       this.surfaceBlur = true,
+      this.animations = const MotionPreferences(),
       this.spectrumDensity = SpectrumDensity.high,
       this.frameRate = const FrameRatePreference()});
 
@@ -28,6 +30,7 @@ class RenderingPreferences {
   final bool surfaceBlur;
   final SpectrumDensity spectrumDensity;
   final FrameRatePreference frameRate;
+  final MotionPreferences animations;
 
   RenderingPreferences copyWith(
           {bool? pauseWhenHidden,
@@ -35,7 +38,8 @@ class RenderingPreferences {
           bool? compactSpectrum,
           bool? surfaceBlur,
           SpectrumDensity? spectrumDensity,
-          FrameRatePreference? frameRate}) =>
+          FrameRatePreference? frameRate,
+          MotionPreferences? animations}) =>
       RenderingPreferences(
         pauseWhenHidden: pauseWhenHidden ?? this.pauseWhenHidden,
         lyricSpectrum: lyricSpectrum ?? this.lyricSpectrum,
@@ -43,6 +47,7 @@ class RenderingPreferences {
         surfaceBlur: surfaceBlur ?? this.surfaceBlur,
         spectrumDensity: spectrumDensity ?? this.spectrumDensity,
         frameRate: frameRate ?? this.frameRate,
+        animations: animations ?? this.animations,
       );
 
   Map<String, Object> toMap() => {
@@ -51,10 +56,13 @@ class RenderingPreferences {
         'compactSpectrum': compactSpectrum,
         'surfaceBlur': surfaceBlur,
         'spectrumDensity': spectrumDensity.name,
-        'frameRate': frameRate.toMap()
+        'frameRate': frameRate.toMap(),
+        'animations': animations.toMap()
       };
 
   factory RenderingPreferences.fromMap(Object? value) => RenderingPreferences(
+        animations: MotionPreferences.fromMap(
+            value is Map ? value['animations'] : null),
         compactSpectrum: value is Map && value['compactSpectrum'] is bool
             ? value['compactSpectrum']
             : true,
@@ -102,33 +110,54 @@ class RenderingPreferences {
       lyricSpectrum == other.lyricSpectrum &&
       compactSpectrum == other.compactSpectrum &&
       surfaceBlur == other.surfaceBlur &&
+      animations == other.animations &&
       spectrumDensity == other.spectrumDensity &&
       frameRate == other.frameRate;
 
   @override
   int get hashCode => Object.hash(pauseWhenHidden, lyricSpectrum,
-      compactSpectrum, surfaceBlur, spectrumDensity, frameRate);
+      compactSpectrum, surfaceBlur, spectrumDensity, frameRate, animations);
 }
 
 /// A listenable lets stream/timer owners apply a change synchronously even
 /// while a native-hidden window is not producing Flutter frames.
-class RenderingPreferencesScope
-    extends InheritedNotifier<ValueListenable<RenderingPreferences>> {
+class RenderingPreferencesScope extends StatelessWidget {
   const RenderingPreferencesScope({
     super.key,
-    required ValueListenable<RenderingPreferences> preferences,
-    required super.child,
-  }) : super(notifier: preferences);
+    required this.preferences,
+    required this.child,
+  });
+  final ValueListenable<RenderingPreferences> preferences;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) =>
+      ValueListenableBuilder<RenderingPreferences>(
+          valueListenable: preferences,
+          child: child,
+          builder: (_, value, child) => _RenderingPreferencesData(
+              notifier: preferences,
+              child: MotionPreferencesScope(
+                  preferences: value.animations,
+                  child: Theme(
+                      data: AppMotion.controlTheme(Theme.of(context),
+                          value.animations.allows(MotionKind.feedback)),
+                      child: child!))));
 
   static const _defaults = AlwaysStoppedAnimation(RenderingPreferences());
 
   static ValueListenable<RenderingPreferences> listenableOf(
           BuildContext context) =>
       context
-          .dependOnInheritedWidgetOfExactType<RenderingPreferencesScope>()
+          .dependOnInheritedWidgetOfExactType<_RenderingPreferencesData>()
           ?.notifier ??
       _defaults;
 
   static RenderingPreferences of(BuildContext context) =>
       listenableOf(context).value;
+}
+
+class _RenderingPreferencesData
+    extends InheritedNotifier<ValueListenable<RenderingPreferences>> {
+  const _RenderingPreferencesData(
+      {required super.notifier, required super.child});
 }

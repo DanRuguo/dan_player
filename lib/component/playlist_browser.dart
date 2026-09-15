@@ -1903,6 +1903,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                 Expanded(
                   child: PlaylistCoverTransitionHost(
                     controller: _coverTransition,
+                    itemIds: [for (final row in rows) row.id],
                     child: Material(
                       type: MaterialType.transparency,
                       child: rows.isEmpty

@@ -51,10 +51,11 @@ class AppToolbarLabel extends StatelessWidget {
       );
 }
 
-bool appToolbarReduceMotion(BuildContext context) {
+bool appToolbarReduceMotion(BuildContext context,
+    {MotionKind kind = MotionKind.feedback}) {
   final features =
       WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-  return (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+  return (!AppMotion.enabled(context, kind)) ||
       features.disableAnimations ||
       features.reduceMotion ||
       !TickerMode.valuesOf(context).enabled;

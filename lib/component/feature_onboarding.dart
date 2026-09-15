@@ -108,9 +108,10 @@ class _FeatureOnboardingState extends State<FeatureOnboarding> {
                         ?.copyWith(color: scheme.onSurfaceVariant)),
                 const SizedBox(height: 24),
                 AnimatedSwitcher(
-                  duration: MediaQuery.disableAnimationsOf(context)
-                      ? Duration.zero
-                      : AppMotion.standard,
+                  duration:
+                      (!AppMotion.enabled(context, MotionKind.transitions))
+                          ? Duration.zero
+                          : AppMotion.standard,
                   child: Container(
                     key: ValueKey('onboarding-preview-$_step'),
                     width: double.infinity,

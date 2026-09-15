@@ -1,8 +1,10 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:dan_player/component/app_toolbar_style.dart';
+import 'category_tile_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -43,10 +45,12 @@ class PlaylistCoverTransitionHost extends StatefulWidget {
     super.key,
     required this.controller,
     required this.child,
+    this.itemIds = const [],
   });
 
   final PlaylistCoverTransitionController controller;
   final Widget child;
+  final List<Object> itemIds;
   static const duration = Duration(milliseconds: 220);
   static const maximumSnapshots = 40;
   static const maximumSnapshotSide = 384.0;
@@ -106,7 +110,7 @@ class _PlaylistCoverTransitionHostState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_busy && appToolbarReduceMotion(context)) {
+    if (_busy && appToolbarReduceMotion(context, kind: MotionKind.tracking)) {
       // Dependency changes run during build; clear this frame without setState.
       _cancel(notify: false);
     }
@@ -119,7 +123,8 @@ class _PlaylistCoverTransitionHostState
         : null;
   }
 
-  _CoverGeometry? _geometry(_PlaylistCoverTransitionMarkerState marker) {
+  _CoverGeometry? _geometry(_PlaylistCoverTransitionMarkerState marker,
+      {bool visibleOnly = true}) {
     final host = _hostBox;
     final render = marker._boundary.currentContext?.findRenderObject();
     if (host == null ||
@@ -139,7 +144,7 @@ class _PlaylistCoverTransitionHostState
       visible = visible.intersect(MatrixUtils.transformRect(
           viewport.getTransformTo(host), Offset.zero & viewport.size));
     }
-    if (!visible.overlaps(rect)) return null;
+    if (visibleOnly && !visible.overlaps(rect)) return null;
     return _CoverGeometry(rect, marker.widget.borderRadius, render);
   }
 
@@ -150,7 +155,8 @@ class _PlaylistCoverTransitionHostState
       update();
       return;
     }
-    if (appToolbarReduceMotion(context) || _hostBox == null) {
+    if (appToolbarReduceMotion(context, kind: MotionKind.tracking) ||
+        _hostBox == null) {
       update();
       return;
     }
@@ -225,8 +231,23 @@ class _PlaylistCoverTransitionHostState
       _handoff.value = 0;
     });
     update();
+    sources.sort((a, b) {
+      final vertical = a.$2.rect.top.compareTo(b.$2.rect.top);
+      return vertical != 0
+          ? vertical
+          : a.$2.rect.left.compareTo(b.$2.rect.left);
+    });
+    _land(generation, sources.first.$1, 0);
+  }
+
+  void _land(int generation, Object anchor, int attempt) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || generation != _generation) return;
+      if (attempt < 8 && _seekAnchor(anchor)) {
+        _land(generation, anchor, attempt + 1);
+        WidgetsBinding.instance.ensureVisualUpdate();
+        return;
+      }
       for (final flight in _flights) {
         final marker = _markers[flight.id];
         flight.target = marker == null ? null : _geometry(marker);
@@ -234,6 +255,55 @@ class _PlaylistCoverTransitionHostState
       _starting = false;
       _animation.forward(from: 0);
     });
+  }
+
+  // Reposition only the lazy viewport. Never build the full playlist to find a
+  // destination, and never change model order or per-level view preferences.
+  bool _seekAnchor(Object id) {
+    final targetIndex = widget.itemIds.indexOf(id);
+    if (targetIndex < 0 || _markers.isEmpty) return false;
+    final marker = _markers[id] ?? _markers.values.first;
+    final scroll = Scrollable.maybeOf(marker.context);
+    final geometry = _geometry(marker, visibleOnly: false);
+    if (scroll == null || geometry == null) return false;
+    final position = scroll.position;
+    if (!position.hasContentDimensions) return false;
+    double offset;
+    if (marker.widget.entryId == id) {
+      offset = position.pixels + geometry.rect.top;
+    } else {
+      RenderObject? child = marker._boundary.currentContext?.findRenderObject();
+      while (child != null && child.parent is! RenderSliverMultiBoxAdaptor) {
+        child = child.parent;
+      }
+      final sliver = child?.parent;
+      if (sliver is RenderSliverGrid) {
+        var index = targetIndex;
+        final delegate = sliver.gridDelegate;
+        if (delegate is CategoryTileGridDelegate) {
+          index =
+              delegate.tiles.indexWhere((tile) => tile.index == targetIndex);
+        }
+        if (index < 0) return false;
+        offset = delegate
+            .getLayout(sliver.constraints)
+            .getGeometryForChildIndex(index)
+            .scrollOffset;
+      } else if (child is RenderBox) {
+        final index = widget.itemIds.indexOf(marker.widget.entryId);
+        if (index < 0) return false;
+        offset = position.pixels +
+            geometry.rect.top +
+            (targetIndex - index) * child.size.height;
+      } else {
+        return false;
+      }
+    }
+    final target =
+        offset.clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((position.pixels - target).abs() < 1) return false;
+    position.jumpTo(target);
+    return true;
   }
 
   void _motionTick() {

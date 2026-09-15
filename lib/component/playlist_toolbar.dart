@@ -238,7 +238,7 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
   bool get _reduceMotion {
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    return (MediaQuery.maybeDisableAnimationsOf(context) ?? false) ||
+    return (!AppMotion.enabled(context, MotionKind.feedback)) ||
         features.disableAnimations ||
         features.reduceMotion ||
         !TickerMode.valuesOf(context).enabled;
@@ -491,7 +491,8 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
                   ? Icons.view_list_outlined
                   : Icons.grid_view_outlined)
               : AnimatedSwitcher(
-                  duration: AppMotion.quick,
+                  duration: AppMotion.duration(
+                      context, MotionKind.feedback, AppMotion.quick),
                   switchInCurve: AppMotion.standardCurve,
                   switchOutCurve: AppMotion.standardCurve,
                   child: Icon(
@@ -599,7 +600,8 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
         if (reduced) return content;
         return AnimatedSwitcher(
           key: const ValueKey('playlist-toolbar-switcher'),
-          duration: AppMotion.standard,
+          duration: AppMotion.duration(
+              context, MotionKind.feedback, AppMotion.standard),
           switchInCurve: AppMotion.standardCurve,
           switchOutCurve: AppMotion.standardCurve,
           layoutBuilder: (current, previous) => Stack(
@@ -795,9 +797,11 @@ class _ToolbarMenuState<T> extends State<_ToolbarMenu<T>> {
         menuPadding: const EdgeInsets.symmetric(vertical: 6),
         popUpAnimationStyle: widget.reduced
             ? AnimationStyle.noAnimation
-            : const AnimationStyle(
-                duration: AppMotion.quick,
-                reverseDuration: AppMotion.quick,
+            : AnimationStyle(
+                duration: AppMotion.duration(
+                    context, MotionKind.feedback, AppMotion.quick),
+                reverseDuration: AppMotion.duration(
+                    context, MotionKind.feedback, AppMotion.quick),
                 curve: AppMotion.standardCurve,
                 reverseCurve: Curves.easeInCubic,
               ),

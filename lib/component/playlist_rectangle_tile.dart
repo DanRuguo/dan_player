@@ -147,7 +147,7 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
                         right: 4,
                         bottom: 5,
                         child: AnimatedSwitcher(
-                            duration: MediaQuery.disableAnimationsOf(context)
+                            duration: (!AppMotion.enabled(context, MotionKind.layout))
                                 ? Duration.zero
                                 : AppMotion.standard,
                             switchInCurve: Curves.easeOut,
@@ -165,7 +165,7 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
                                         : CoverCaptionCache.resolve(
                                             provider, aspect),
                                     builder: (context, colors) => AnimatedDefaultTextStyle(
-                                        duration: MediaQuery.disableAnimationsOf(context)
+                                        duration: (!AppMotion.enabled(context, MotionKind.layout))
                                             ? Duration.zero
                                             : AppMotion.standard,
                                         style: Theme.of(context)
@@ -174,9 +174,7 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
                                             .copyWith(
                                                 color: provider == null
                                                     ? scheme.onSurface
-                                                    : (CoverCaptionCache.cached(provider, aspect) ??
-                                                            colors.data ??
-                                                            CoverCaptionColors.fallback)
+                                                    : (CoverCaptionCache.cached(provider, aspect) ?? colors.data ?? CoverCaptionColors.fallback)
                                                         .foreground,
                                                 height: 1.3,
                                                 fontWeight: FontWeight.w600),

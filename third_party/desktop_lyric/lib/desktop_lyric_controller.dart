@@ -1,4 +1,5 @@
 import 'frame_pacing.dart';
+import 'app_motion.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -242,6 +243,8 @@ class DesktopLyricController {
 
       if (type == getMessageTypeName<FrameRateMessage>()) {
         frameRatePreference.value = FrameRatePreference.fromMap(content);
+        desktopMotionPreferences.value =
+            MotionPreferences.fromMap(content['animations']);
       } else if (type == getMessageTypeName<UiLanguageMessage>()) {
         uiLanguage.value = UiLanguage.parse(content['language']);
       } else if (type == getMessageTypeName<PlayerStateChangedMessage>()) {

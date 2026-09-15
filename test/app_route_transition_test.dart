@@ -94,7 +94,7 @@ void main() {
   }
 
   test('route durations include a finite return transition', () {
-    const page = SlideTransitionPage(child: SizedBox());
+    final page = SlideTransitionPage(child: const SizedBox());
     expect(page.transitionDuration, AppRouteTransition.enterDuration);
     expect(page.reverseTransitionDuration, AppRouteTransition.exitDuration);
     expect(page.transitionDuration, const Duration(milliseconds: 240));

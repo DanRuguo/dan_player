@@ -326,8 +326,11 @@ class DesktopLyricService extends ChangeNotifier {
   }
 
   void _syncFrameRate() {
-    sendMessage(msg.FrameRateMessage(
-        AppSettings.instance.rendering.value.frameRate.toMap()));
+    final rendering = AppSettings.instance.rendering.value;
+    sendMessage(msg.FrameRateMessage({
+      ...rendering.frameRate.toMap(),
+      'animations': rendering.animations.toMap(),
+    }));
   }
 
   void _syncDisplayPreference() {

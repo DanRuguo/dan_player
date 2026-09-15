@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -30,7 +31,7 @@ class NextPlayAnimation {
   }) {
     cancel();
     if (!context.mounted || !sourceContext.mounted) return false;
-    if (MediaQuery.maybeOf(context)?.disableAnimations == true) return false;
+    if (!AppMotion.enabled(context, MotionKind.nextTrack)) return false;
 
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     final overlayBox = overlay?.context.findRenderObject();
@@ -214,6 +215,17 @@ class _NextPlayFlightState extends State<_NextPlayFlight>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final NextPlayFlightPath _path;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!AppMotion.enabled(context, MotionKind.nextTrack)) {
+      _controller.stop();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onFinished();
+      });
+    }
+  }
 
   @override
   void initState() {
