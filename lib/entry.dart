@@ -1,3 +1,4 @@
+import 'package:dan_player/startup_progress.dart';
 import 'package:dan_player/component/app_route_transition.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -240,6 +241,13 @@ class Entry extends StatelessWidget {
                                                     child:
                                                         DesktopVisibilityHost(
                                                       child: StartupSplash(
+                                                        progress:
+                                                            StartupProgress
+                                                                .instance,
+                                                        showProgress: layout
+                                                                .startupFooter ==
+                                                            StartupFooter
+                                                                .progress,
                                                         child:
                                                             AppPresentationHost(
                                                           child:

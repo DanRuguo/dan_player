@@ -26,6 +26,7 @@ import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/playlist_cover.dart';
 import 'package:dan_player/component/playlist_circle_tile.dart';
 import 'package:dan_player/component/playlist_song_surface.dart';
+import 'package:dan_player/component/playing_audio_list_row.dart';
 import 'package:dan_player/component/playlist_header.dart';
 import 'package:dan_player/component/playlist_create_dialog.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
@@ -1321,7 +1322,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                               wrapGridIdentity(child),
                           child: track,
                         )
-                  : track;
+                  : PlayingAudioListRow(audioPath: audio.path, child: track);
             } else {
               content = AppItemInkWell(
                 key: ValueKey('playlist-open-${row.id}'),

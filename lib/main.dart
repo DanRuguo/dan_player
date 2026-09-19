@@ -1,3 +1,4 @@
+import 'package:dan_player/startup_progress.dart';
 import 'package:desktop_lyric/frame_pacing.dart';
 import 'package:dan_player/data/snapshot3_upgrade.dart';
 import 'dart:io';
@@ -134,6 +135,7 @@ Future<void> desktopLyricAppearanceMain(List<String> arguments) =>
 
 Future<void> _startMainPlayer() async {
   FramePacedWidgetsBinding();
+  StartupProgress.instance.begin();
   // Artwork is already decoded to physical display buckets. Keep Flutter's
   // decoded cache bounded as a second line of defence for large libraries.
   PaintingBinding.instance.imageCache
@@ -180,6 +182,7 @@ Future<void> _startMainPlayer() async {
 }
 
 Future<void> _startPlayer(Directory dataDirectory) async {
+  StartupProgress.instance.begin();
   final supportPath = dataDirectory.path;
   void syncFrameRate() {
     final prefs = AppSettings.instance.rendering.value;
@@ -203,7 +206,10 @@ Future<void> _startPlayer(Directory dataDirectory) async {
   final welcome = !File("$supportPath\\index.json").existsSync();
 
   syncFrameRate();
+  StartupProgress.instance.advance(StartupStage.window);
   await prepareWindow();
+  StartupProgress.instance
+      .advance(welcome ? StartupStage.ready : StartupStage.checkingLibrary);
   runApp(Entry(welcome: welcome));
   await showPreparedWindow();
   HotkeysHelper.registerHotKeys();

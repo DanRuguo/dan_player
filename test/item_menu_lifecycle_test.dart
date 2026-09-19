@@ -68,7 +68,7 @@ void main() {
     await tester.pumpAndSettle();
     final ink = tester.widget<InkWell>(find.byType(InkWell));
     expect(ink.statesController!.value.contains(WidgetState.pressed), isFalse);
-    expect(ink.overlayColor!.resolve({}), Colors.transparent);
+    expect(ink.highlightColor, Colors.transparent);
     expect(tester.takeException(), isNull);
   });
 }

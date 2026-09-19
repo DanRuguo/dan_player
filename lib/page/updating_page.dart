@@ -1,3 +1,4 @@
+import 'package:dan_player/startup_progress.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
@@ -77,6 +78,12 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
   LibraryRefreshTask? _task;
 
   void _scanPhaseChanged() {
+    final task = _task;
+    if (task != null) {
+      StartupProgress.instance.scan(task.lastAction?.progress ?? 0,
+          cancel: task.canCancel ? () => unawaited(task.requestCancel()) : null,
+          cancelling: task.phase == LibraryRefreshPhase.cancelling);
+    }
     if (mounted) setState(() {});
   }
 
@@ -114,6 +121,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
           });
       _task = task;
       task.addListener(_scanPhaseChanged);
+      _scanPhaseChanged();
       if (mounted) setState(() {});
       yield* task.stream;
     } catch (error) {
@@ -147,11 +155,13 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
     if (_settled) return;
     _settled = true;
     try {
+      StartupProgress.instance.advance(StartupStage.loadingLibrary);
       await AudioLibrary.initFromIndex();
       // 联网曲目必须先并入总乐库，随后统一迁移的歌单和播放会话才能正确解析
       // online:// 稳定标识，不会把它们误判为失效条目。
       await OnlineLibrary.instance.initialize();
       await PlaybackStatistics.instance.initialize();
+      StartupProgress.instance.advance(StartupStage.playlists);
       await Future.wait([
         readCustomAudioOrder(),
         readPlaylists(),
@@ -167,10 +177,12 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
           ),
         ),
       );
+      StartupProgress.instance.advance(StartupStage.playback);
       await PlayService.instance.playbackService.restoreLastSessionOnce();
       await WindowsShell.instance.markLibraryReady();
       LibraryAutoRefresh.instance.start();
       await _subscription?.cancel();
+      StartupProgress.instance.advance(StartupStage.ready);
       if (mounted) {
         context.go(app_paths.START_PAGES[AppPreference.instance.startPage]);
         if (_usingCachedIndex) {
@@ -190,6 +202,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
     LOGGER.e("[update index] $error", stackTrace: stackTrace);
     _settled = true;
     _error = error;
+    StartupProgress.instance.fail();
     if (mounted) {
       setState(() {});
     }

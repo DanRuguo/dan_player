@@ -1,4 +1,10 @@
 const catalogAnimations = <String, List<String>>{
+  '播放时图标旋转': ['Rotate logo during playback', '再生中にアイコンを回転', '재생 중 아이콘 회전'],
+  '歌曲播放时，左上角播放器图标缓慢旋转；暂停或隐藏时停止。': [
+    'The top-left player icon rotates slowly during playback and stops when paused or hidden.',
+    '再生中は左上のアイコンがゆっくり回転し、一時停止中や非表示時は止まります。',
+    '재생 중 왼쪽 위 아이콘이 천천히 회전하며 일시 정지하거나 창을 숨기면 멈춥니다.'
+  ],
   '动画管理': ['Animation controls', 'アニメーション管理', '애니메이션 관리'],
   '独立控制每类动画。关闭动画不影响播放、点击、拖动和实时进度。': [
     'Control each animation separately. Playback, clicks, dragging and live progress remain available.',

@@ -9,7 +9,8 @@ enum MotionKind {
   layout,
   lyrics,
   feedback,
-  theme
+  theme,
+  playingLogo
 }
 
 final desktopMotionPreferences = ValueNotifier(const MotionPreferences());
@@ -33,7 +34,16 @@ class MotionPreferences {
   factory MotionPreferences.fromMap(Object? raw) => MotionPreferences(
           disabled: Set.unmodifiable({
         for (final kind in MotionKind.values)
-          if (raw is Map && raw[kind.name] == false) kind
+          if (raw is Map &&
+              (raw[kind.name] == false ||
+                  // Preserve an older version's explicit "disable all" choice
+                  // when introducing a new animation category.
+                  (kind == MotionKind.playingLogo &&
+                      !raw.containsKey(kind.name) &&
+                      MotionKind.values
+                          .where((v) => v != kind)
+                          .every((v) => raw[v.name] == false))))
+            kind
       }));
   @override
   bool operator ==(Object other) =>

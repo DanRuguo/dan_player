@@ -1,5 +1,47 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'app_motion.dart';
+
+/// Consume the most recent hardware sample once per rendered frame. Gaming
+/// mice can deliver hundreds of samples between frames; none need a separate
+/// walk of the mounted grid's coordinate transforms.
+class _FramePointer extends ValueNotifier<Offset?> {
+  _FramePointer() : super(null);
+  int? _callback;
+  Offset? _pending;
+
+  void move(Offset point) {
+    if (point == (_callback == null ? value : _pending)) return;
+    _pending = point;
+    _callback ??= SchedulerBinding.instance.scheduleFrameCallback((_) {
+      _callback = null;
+      value = _pending;
+    });
+  }
+
+  void clear() {
+    final hadPendingSample = _callback != null;
+    if (_callback case final callback?) {
+      SchedulerBinding.instance.cancelFrameCallbackWithId(callback);
+      _callback = null;
+    }
+    _pending = null;
+    if (value != null) {
+      value = null;
+    } else if (hadPendingSample) {
+      // A first hover can be cancelled before the shared sample is published.
+      // Circles also queue a local sample, so they still need this reset even
+      // though ValueNotifier would suppress the unchanged null value.
+      notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    clear();
+    super.dispose();
+  }
+}
 
 /// Shared by a scrollable cover grid, including its empty gutters. Only mounted
 /// covers near the pointer change their paint notifier; no animation ticker.
@@ -11,7 +53,7 @@ class CoverPointerScope extends StatefulWidget {
 }
 
 class _CoverPointerScopeState extends State<CoverPointerScope> {
-  final position = ValueNotifier<Offset?>(null);
+  final position = _FramePointer();
   @override
   void dispose() {
     position.dispose();
@@ -23,16 +65,16 @@ class _CoverPointerScopeState extends State<CoverPointerScope> {
       position: position,
       child: NotificationListener<ScrollNotification>(
           onNotification: (_) {
-            position.value = null;
+            position.clear();
             return false;
           },
           child: MouseRegion(
               opaque: false,
               hitTestBehavior: HitTestBehavior.translucent,
               onHover: AppMotion.enabled(context, MotionKind.feedback)
-                  ? (event) => position.value = event.position
+                  ? (event) => position.move(event.position)
                   : null,
-              onExit: (_) => position.value = null,
+              onExit: (_) => position.clear(),
               child: widget.child)));
 }
 
@@ -55,14 +97,14 @@ class CategoryPointerGlow extends StatefulWidget {
 }
 
 class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
-  final _position = ValueNotifier<Offset?>(null);
+  final _position = _FramePointer();
   ValueNotifier<Offset?>? _shared;
   bool _enabled = true;
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _enabled = AppMotion.enabled(context, MotionKind.feedback);
-    if (!_enabled) _position.value = null;
+    if (!_enabled) _position.clear();
     final next = context
         .dependOnInheritedWidgetOfExactType<_CoverPointerData>()
         ?.position;
@@ -73,16 +115,26 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
   }
 
   void _move() {
-    if (widget.circle || !_enabled) return;
     final global = _shared?.value;
+    if (global == null) {
+      _position.clear();
+      return;
+    }
+    if (widget.circle || !_enabled) return;
     final box = context.findRenderObject();
-    if (global == null || box is! RenderBox || !box.hasSize) {
-      _position.value = null;
+    if (box is! RenderBox || !box.hasSize) {
+      _position.clear();
       return;
     }
     final point = box.globalToLocal(global);
     _position.value =
         (Offset.zero & box.size).inflate(72).contains(point) ? point : null;
+  }
+
+  @override
+  void didUpdateWidget(CategoryPointerGlow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.circle != widget.circle) _position.clear();
   }
 
   @override
@@ -96,17 +148,20 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
   Widget build(BuildContext context) => MouseRegion(
         onHover: (event) {
           if (!_enabled) return;
-          if (widget.circle || _shared == null)
-            _position.value = event.localPosition;
+          if (widget.circle || _shared == null) {
+            _position.move(event.localPosition);
+          }
         },
         onExit: (_) {
-          if (widget.circle || _shared == null) _position.value = null;
+          if (widget.circle || _shared == null) _position.clear();
         },
         child: RepaintBoundary(
             child: CustomPaint(
           foregroundPainter: _GlowPainter(
               _position, Theme.of(context).colorScheme.primary, widget.circle),
-          child: widget.child,
+          // The foreground is volatile, but decoded artwork, text and ink are
+          // independent layers. Hover must not repaint the entire cover.
+          child: RepaintBoundary(child: widget.child),
         )),
       );
 }

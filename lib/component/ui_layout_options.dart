@@ -56,6 +56,38 @@ class UiLayoutOptions extends StatelessWidget {
           onChanged: (enabled) =>
               onChanged(value.copyWith(compactPlaylists: enabled)),
         ),
+        const SizedBox(height: 12),
+        SettingsSurface(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SettingsHeader(
+                title: ui('开屏底部内容'),
+                icon: Icons.hourglass_bottom_outlined,
+                subtitle: ui('显示播放器标识，或显示实际加载进度与当前步骤。下次启动生效。'),
+              ),
+              const SizedBox(height: 8),
+              AppSegmentedControl<StartupFooter>(
+                value: value.startupFooter,
+                semanticLabel: ui('开屏底部内容'),
+                options: [
+                  AppSegmentOption(
+                    value: StartupFooter.brand,
+                    icon: Icons.music_note_outlined,
+                    label: ui('播放器标识'),
+                  ),
+                  AppSegmentOption(
+                    value: StartupFooter.progress,
+                    icon: Icons.linear_scale,
+                    label: ui('加载进度'),
+                  ),
+                ],
+                onChanged: (footer) =>
+                    onChanged(value.copyWith(startupFooter: footer)),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }

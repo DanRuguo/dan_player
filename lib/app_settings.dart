@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dan_player/library/artist_separators.dart';
 import 'package:dan_player/data/app_data_location.dart';
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/performance_preset.dart';
@@ -268,7 +269,7 @@ class AppSettings {
   String? fontFamily;
   String? fontPath;
 
-  late String artistSplitPattern = artistSeparator.join("|");
+  late String artistSplitPattern = artistSeparatorPattern(artistSeparator);
 
   static final AppSettings _instance = AppSettings._();
 
@@ -318,7 +319,8 @@ class AppSettings {
 
     _instance.dynamicTheme = settingsMap["DynamicTheme"] == 1 ? true : false;
     _instance.artistSeparator = settingsMap["ArtistSeparator"];
-    _instance.artistSplitPattern = _instance.artistSeparator.join("|");
+    _instance.artistSplitPattern =
+        artistSeparatorPattern(_instance.artistSeparator);
 
     final llf = settingsMap["LocalLyricFirst"];
     if (llf != null) {
@@ -428,7 +430,8 @@ class AppSettings {
       final as = settingsMap["ArtistSeparator"];
       if (as != null) {
         _instance.artistSeparator = as;
-        _instance.artistSplitPattern = _instance.artistSeparator.join("|");
+        _instance.artistSplitPattern =
+            artistSeparatorPattern(_instance.artistSeparator);
       }
 
       final llf = settingsMap["LocalLyricFirst"];

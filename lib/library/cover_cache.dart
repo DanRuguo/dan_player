@@ -95,7 +95,7 @@ class CoverCache {
   int get activeReadCount => _activeReads;
 
   Future<Uint8List?> _produceBounded(
-      Future<Uint8List?> Function() produce) async {
+      String key, Future<Uint8List?> Function() produce) async {
     if (_activeReads >= maxConcurrentReads) {
       final waiter = Completer<void>();
       _readWaiters.add(waiter);
@@ -104,6 +104,10 @@ class CoverCache {
       _activeReads++;
     }
     try {
+      // A queued decode may have been superseded by a cover edit or cache
+      // clear. Retire it before entering the native decoder, while still
+      // handing its semaphore slot to the next valid request in finally.
+      if (!_inflight.containsKey(key)) return null;
       return await produce();
     } finally {
       if (_readWaiters.isEmpty) {
@@ -213,7 +217,7 @@ class CoverCache {
         await file.delete();
       }
 
-      final bytes = await _produceBounded(produce);
+      final bytes = await _produceBounded(key, produce);
       if (bytes == null || bytes.isEmpty) return null;
       if (!_inflight.containsKey(key)) {
         return MemoryImage(bytes);
@@ -339,6 +343,10 @@ class CoverCache {
       final dir = await _cacheDir();
       await for (final entity in dir.list()) {
         if (entity is! File) continue;
+        // Visible tiles may already have produced fresh thumbnails while the
+        // asynchronous directory listing was in progress. Those belong to the
+        // new cache epoch and may already be referenced by _ready.
+        if (path_util.basename(entity.path).contains('_e${_epoch}g')) continue;
         try {
           await entity.delete();
         } catch (_) {}

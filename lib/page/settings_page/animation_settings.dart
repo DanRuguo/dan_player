@@ -24,6 +24,11 @@ const animationLabels = <MotionKind, (String, String, IconData)>{
     Icons.touch_app_outlined
   ),
   MotionKind.theme: ('主题与封面渐变', '主题、语言和封面更新时的渐变过渡。', Icons.palette_outlined),
+  MotionKind.playingLogo: (
+    '播放时图标旋转',
+    '歌曲播放时，左上角播放器图标缓慢旋转；暂停或隐藏时停止。',
+    Icons.rotate_right
+  ),
 };
 
 class AnimationSettings extends StatefulWidget {

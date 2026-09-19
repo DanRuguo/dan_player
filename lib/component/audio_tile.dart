@@ -18,6 +18,8 @@ import 'package:dan_player/component/next_play_animation.dart';
 import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/component/readable_ellipsis_text.dart';
+import 'package:dan_player/component/song_artist_menu.dart';
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/cover_repair_dialog.dart';
@@ -128,6 +130,30 @@ class _AudioTileState extends State<AudioTile> {
 
   Widget _metadataMenuLabel(String label) => ReadableEllipsisText(label);
 
+  Widget _artistMenu(BuildContext context, Audio audio) => Builder(
+        // Re-evaluate only when the menu is mounted. Playlist-only remote or
+        // missing-file entries can retain Audio copies outside the live index.
+        builder: (_) => SongArtistMenu(
+          artists: audio.artist
+              .split(RegExp(AppSettings.instance.artistSplitPattern)),
+          onSelected: (artistName) {
+            final name = artistName.trim();
+            // Category identities normalize surrounding whitespace, unlike the
+            // legacy artist map's raw split keys. Online search results may not
+            // belong to the library yet, so retain a scoped initial group.
+            final group =
+                LibraryMusicCategories.groups(MusicCategoryKind.artist)
+                        .where((group) => group.title == name)
+                        .firstOrNull ??
+                    MusicCategories([audio])
+                        .groups(MusicCategoryKind.artist)
+                        .where((group) => group.title == name)
+                        .firstOrNull;
+            if (group != null) context.push(group.location, extra: group);
+          },
+        ),
+      );
+
   Future<void> _toggleOnlineLibrary(Audio audio) async {
     try {
       final library = OnlineLibrary.instance;
@@ -230,6 +256,7 @@ class _AudioTileState extends State<AudioTile> {
       final downloadReason =
           OnlineMusicService.instance.downloadUnavailableReason(audio);
       return [
+        _artistMenu(context, audio),
         MenuItemButton(
           onPressed: null,
           leadingIcon: const Icon(Symbols.cloud),
@@ -263,17 +290,7 @@ class _AudioTileState extends State<AudioTile> {
     }
 
     return [
-      for (final artistName in audio.splitedArtists)
-        MenuItemButton(
-          onPressed: () {
-            final artist = AudioLibrary.instance.artistCollection[artistName];
-            if (artist != null) {
-              context.push(app_paths.ARTIST_DETAIL_PAGE, extra: artist);
-            }
-          },
-          leadingIcon: const Icon(Symbols.artist),
-          child: _metadataMenuLabel(artistName),
-        ),
+      _artistMenu(context, audio),
       MenuItemButton(
         onPressed: () {
           final album = MusicCategories.albumGroupFor(

@@ -1,3 +1,5 @@
+import 'catalog_artist_separators.dart';
+import 'catalog_startup_progress.dart';
 import 'catalog_backup_v2.dart';
 import 'catalog_ui_2605.dart';
 import 'catalog_startup_2605.dart';
@@ -53,6 +55,8 @@ import 'catalog_animations.dart';
 import 'catalog_cover_import.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
+  ...catalogStartupProgress,
+  ...catalogArtistSeparators,
   ...catalogLyricSearch2605,
   ...catalogBatchA2605,
   ...catalogSelectionRelease,

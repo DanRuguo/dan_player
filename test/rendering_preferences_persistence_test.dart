@@ -132,6 +132,7 @@ void main() {
         'lyrics': true,
         'feedback': true,
         'theme': true,
+        'playingLogo': true,
       },
     });
   });

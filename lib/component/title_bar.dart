@@ -4,6 +4,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/component/playing_logo.dart';
 import 'package:dan_player/component/horizontal_lyric_view.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
@@ -242,7 +243,7 @@ class _TitleBar_Large extends StatelessWidget {
                       order: 1,
                       child: Row(
                         children: [
-                          Image.asset("app_icon.ico", width: 24, height: 24),
+                          const PlayingLogo(),
                           const SizedBox(width: 8.0),
                           Text(
                             "Dan Player",

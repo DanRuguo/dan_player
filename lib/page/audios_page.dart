@@ -3,6 +3,8 @@ import 'package:dan_player/page/audio_sort_methods.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/audio_columns.dart';
+import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/playing_audio_list_row.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -50,13 +52,18 @@ class _AudiosPageState extends State<AudiosPage> {
       title: ui("音乐"),
       subtitle: ui("{0} 首乐曲", [contentList.length]),
       contentList: contentList,
-      contentBuilder: (context, item, i, multiSelectController) => AudioTile(
-        audioIndex: i,
-        playlist: contentList,
-        focus: item == widget.locateTo,
-        multiSelectController: multiSelectController,
-        columns: AudioColumnsScope.of(context),
-      ),
+      contentBuilder: (context, item, i, multiSelectController) {
+        final tile = AudioTile(
+          audioIndex: i,
+          playlist: contentList,
+          focus: item == widget.locateTo,
+          multiSelectController: multiSelectController,
+          columns: AudioColumnsScope.of(context),
+        );
+        return MusicGridScope.of(context)
+            ? tile
+            : PlayingAudioListRow(audioPath: item.path, child: tile);
+      },
       primaryAction: Wrap(
         spacing: 8,
         runSpacing: 8,

@@ -28,7 +28,19 @@ class AppItemInkWell extends StatefulWidget {
 
 class _AppItemInkWellState extends State<AppItemInkWell> {
   final _states = WidgetStatesController();
+  final _focus = FocusNode(debugLabel: 'item ink');
   TapDownDetails? _secondary;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_focusChanged);
+  }
+
+  void _focusChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _release() {
     scheduleMicrotask(() {
       if (!mounted) return;
@@ -37,8 +49,23 @@ class _AppItemInkWellState extends State<AppItemInkWell> {
     });
   }
 
+  Color _stateColor(BuildContext context, Set<WidgetState> states) {
+    final active = Set<WidgetState>.of(states);
+    if (!_focus.hasPrimaryFocus) active.remove(WidgetState.focused);
+    if (!active.contains(WidgetState.pressed) &&
+        !active.contains(WidgetState.hovered) &&
+        !active.contains(WidgetState.focused)) {
+      return Colors.transparent;
+    }
+    return widget.overlayColor?.resolve(active) ??
+        (active.contains(WidgetState.focused) ? widget.focusColor : null) ??
+        Theme.of(context).colorScheme.primary.withValues(
+            alpha: active.contains(WidgetState.pressed) ? .12 : .06);
+  }
+
   @override
   void dispose() {
+    _focus.dispose();
     _states.dispose();
     super.dispose();
   }
@@ -47,37 +74,53 @@ class _AppItemInkWellState extends State<AppItemInkWell> {
   Widget build(BuildContext context) => Listener(
       onPointerUp: (_) => _release(),
       onPointerCancel: (_) => _release(),
-      child: InkWell(
-          splashFactory: AppMotion.enabled(context, MotionKind.feedback)
-              ? null
-              : NoSplash.splashFactory,
-          statesController: _states,
-          borderRadius: widget.borderRadius,
-          focusColor: widget.focusColor,
-          overlayColor: WidgetStateProperty.resolveWith((states) {
-            if (!states.contains(WidgetState.pressed) &&
-                !states.contains(WidgetState.hovered) &&
-                !states.contains(WidgetState.focused))
-              return Colors.transparent;
-            return widget.overlayColor?.resolve(states) ??
-                Theme.of(context).colorScheme.primary.withValues(
-                    alpha: states.contains(WidgetState.pressed) ? .12 : .06);
-          }),
-          onTap: widget.onTap,
-          onLongPress: widget.onLongPress,
-          onSecondaryTapDown:
-              widget.onSecondaryTapDown == null && widget.onSecondaryTap == null
+      child: ListenableBuilder(
+          listenable: _states,
+          // Flutter's InkHighlight keeps its creation-time opacity independently
+          // of WidgetStatesController. Reparenting into a drag overlay can leave
+          // that highlight alive after a missing mouse-exit event. Own the state
+          // layer explicitly; keep InkWell's gestures, keyboard and splash ink.
+          builder: (context, child) => TweenAnimationBuilder<Color?>(
+                tween: ColorTween(end: _stateColor(context, _states.value)),
+                duration: AppMotion.duration(context, MotionKind.feedback,
+                    const Duration(milliseconds: 50)),
+                builder: (_, color, child) => Ink(
+                  decoration: BoxDecoration(
+                      color: color, borderRadius: widget.borderRadius),
+                  child: child,
+                ),
+                child: child,
+              ),
+          child: InkWell(
+              splashFactory: AppMotion.enabled(context, MotionKind.feedback)
+                  ? null
+                  : NoSplash.splashFactory,
+              statesController: _states,
+              focusNode: _focus,
+              borderRadius: widget.borderRadius,
+              highlightColor: Colors.transparent,
+              hoverColor: Colors.transparent,
+              // The visible state layer above owns the original 50 ms hover
+              // fade; do not run another invisible hover/focus ticker here.
+              hoverDuration: Duration.zero,
+              focusColor: Colors.transparent,
+              splashColor: _stateColor(context, {WidgetState.pressed}),
+              onTap: widget.onTap,
+              onLongPress: widget.onLongPress,
+              onSecondaryTapDown: widget.onSecondaryTapDown == null &&
+                      widget.onSecondaryTap == null
                   ? null
                   : (details) => _secondary = details,
-          // Do not open an overlay on pointer-down: let InkWell finish the gesture
-          // before moving focus/hit testing into a different overlay.
-          onSecondaryTap:
-              widget.onSecondaryTapDown == null && widget.onSecondaryTap == null
+              // Do not open an overlay on pointer-down: let InkWell finish the gesture
+              // before moving focus/hit testing into a different overlay.
+              onSecondaryTap: widget.onSecondaryTapDown == null &&
+                      widget.onSecondaryTap == null
                   ? null
                   : () {
-                      if (_secondary != null)
+                      if (_secondary != null) {
                         widget.onSecondaryTapDown?.call(_secondary!);
+                      }
                       widget.onSecondaryTap?.call();
                     },
-          child: widget.child));
+              child: widget.child)));
 }

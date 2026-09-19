@@ -1,7 +1,10 @@
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/brand_logo.dart';
+import 'package:dan_player/startup_progress.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 class StartupSplash extends StatefulWidget {
   const StartupSplash({
@@ -10,6 +13,8 @@ class StartupSplash extends StatefulWidget {
     this.minimumVisibleDuration = const Duration(milliseconds: 950),
     this.fadeDuration = AppMotion.long,
     this.logoTransitionDuration = AppMotion.emphasized,
+    this.progress,
+    this.showProgress = false,
   });
 
   static const totalDuration = Duration(milliseconds: 1250);
@@ -22,8 +27,12 @@ class StartupSplash extends StatefulWidget {
   static const playerSignatureKey = ValueKey('startup-player-signature');
   static const playerIconKey = ValueKey('startup-player-icon');
   static const playerNameKey = ValueKey('startup-player-name');
+  static const progressKey = ValueKey('startup-progress');
+  static const progressLabelKey = ValueKey('startup-progress-label');
 
   final Widget child;
+  final StartupProgress? progress;
+  final bool showProgress;
 
   /// Time before the final fade begins; the fade is part of the 1.25-second
   /// sequence, rather than an extra delay after both brand presentations.
@@ -40,6 +49,10 @@ class _StartupSplashState extends State<StartupSplash>
   late final AnimationController _timeline;
   bool _removed = false;
   bool _reducedMotion = false;
+  double? _loadingFinishedAt;
+
+  StartupProgressValue get _loading =>
+      widget.progress?.value ?? const StartupProgressValue();
 
   bool get _platformReducesMotion {
     final features =
@@ -58,7 +71,39 @@ class _StartupSplashState extends State<StartupSplash>
       // time. Otherwise Flutter may shorten this entire clock to a few frames.
       animationBehavior: AnimationBehavior.preserve,
     )..addListener(_onTimelineTick);
-    _timeline.forward();
+    widget.progress?.addListener(_onProgress);
+    if (_loading.ready) _loadingFinishedAt = 0;
+    if (_loading.failed) {
+      _removed = true;
+    } else {
+      _timeline.forward();
+    }
+  }
+
+  @override
+  void didUpdateWidget(StartupSplash oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.progress != oldWidget.progress) {
+      oldWidget.progress?.removeListener(_onProgress);
+      widget.progress?.addListener(_onProgress);
+      _onProgress();
+    }
+  }
+
+  void _onProgress() {
+    if (!mounted || _removed) return;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onProgress());
+      return;
+    }
+    if (_loading.ready) _loadingFinishedAt ??= _timeline.value;
+    setState(() {
+      if (_loading.failed || (_loading.ready && _timeline.value >= 1)) {
+        _timeline.stop(canceled: false);
+        _removed = true;
+      }
+    });
   }
 
   @override
@@ -68,6 +113,9 @@ class _StartupSplashState extends State<StartupSplash>
         _platformReducesMotion;
     if (!MotionPreferencesScope.of(context).allows(MotionKind.startup)) {
       _timeline.value = 1;
+      // Disabling the splash exposes the ordinary loading/recovery page;
+      // it never conceals or blocks unfinished initialization work.
+      _removed = true;
     }
   }
 
@@ -85,13 +133,16 @@ class _StartupSplashState extends State<StartupSplash>
     // value reaches its endpoint so the 1250 ms frame is already interactive.
     if (_timeline.value >= 1 && !_removed && mounted) {
       _timeline.stop(canceled: false);
-      setState(() => _removed = true);
+      if (_loading.ready || _loading.failed) {
+        setState(() => _removed = true);
+      }
     }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.progress?.removeListener(_onProgress);
     _timeline.dispose();
     super.dispose();
   }
@@ -114,14 +165,18 @@ class _StartupSplashState extends State<StartupSplash>
           ),
         ),
         if (!_removed)
-          AbsorbPointer(
+          Listener(
             key: StartupSplash.overlayKey,
+            behavior: HitTestBehavior.opaque,
             child: RepaintBoundary(
               child: _StartupSplashOverlay(
                 timeline: _timeline,
                 fadeDuration: widget.fadeDuration,
                 logoTransitionDuration: widget.logoTransitionDuration,
                 reducedMotion: _reducedMotion,
+                loading: _loading,
+                loadingFinishedAt: _loadingFinishedAt,
+                showProgress: widget.showProgress,
               ),
             ),
           ),
@@ -136,12 +191,18 @@ class _StartupSplashOverlay extends StatelessWidget {
     required this.fadeDuration,
     required this.logoTransitionDuration,
     required this.reducedMotion,
+    required this.loading,
+    required this.loadingFinishedAt,
+    required this.showProgress,
   });
 
   final AnimationController timeline;
   final Duration fadeDuration;
   final Duration logoTransitionDuration;
   final bool reducedMotion;
+  final StartupProgressValue loading;
+  final double? loadingFinishedAt;
+  final bool showProgress;
 
   @override
   Widget build(BuildContext context) {
@@ -152,6 +213,7 @@ class _StartupSplashOverlay extends StatelessWidget {
     final fadeFraction = total == 0
         ? 0.0
         : (fadeDuration.inMicroseconds / total).clamp(0.0, 1.0);
+    final fadeStart = (loadingFinishedAt ?? 1.0).clamp(1 - fadeFraction, 1.0);
     final handoff = StartupSplash.rcePhaseDuration.inMicroseconds /
         StartupSplash.totalDuration.inMicroseconds;
 
@@ -167,11 +229,13 @@ class _StartupSplashOverlay extends StatelessWidget {
                         transitionFraction)
                     .clamp(0.0, 1.0),
               );
-        final fade = reducedMotion || fadeFraction == 0
+        final fade = reducedMotion ||
+                fadeFraction == 0 ||
+                !loading.ready ||
+                fadeStart >= 1
             ? 0.0
             : Curves.easeInOutCubic.transform(
-                ((progress - (1 - fadeFraction)) / fadeFraction)
-                    .clamp(0.0, 1.0),
+                ((progress - fadeStart) / (1 - fadeStart)).clamp(0.0, 1.0),
               );
 
         return Opacity(
@@ -206,12 +270,31 @@ class _StartupSplashOverlay extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(height: 16),
-                              const _PlayerSignature(),
+                              if (!showProgress) const _PlayerSignature(),
                             ],
                           ),
                         ),
                       ),
                     ),
+                    if (showProgress)
+                      SafeArea(
+                        minimum: const EdgeInsets.all(16),
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: _StartupProgressFooter(value: loading),
+                        ),
+                      ),
+                    if (!showProgress && loading.cancelScan != null)
+                      SafeArea(
+                        minimum: const EdgeInsets.all(16),
+                        child: Align(
+                          alignment: Alignment.bottomRight,
+                          child: TextButton(
+                            onPressed: loading.cancelScan,
+                            child: Text(ui('取消扫描')),
+                          ),
+                        ),
+                      ),
                     ExcludeSemantics(
                       excluding: !secondBrand,
                       child: Opacity(
@@ -234,6 +317,44 @@ class _StartupSplashOverlay extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _StartupProgressFooter extends StatelessWidget {
+  const _StartupProgressFooter({required this.value});
+  final StartupProgressValue value;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 148,
+          child: LinearProgressIndicator(
+            key: StartupSplash.progressKey,
+            value: value.progress,
+            minHeight: 3,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          ui(value.label),
+          key: StartupSplash.progressLabelKey,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+        ),
+        if (value.cancelScan != null || value.cancelling)
+          TextButton(
+            onPressed: value.cancelScan,
+            child: Text(ui(value.cancelling ? '正在取消扫描' : '取消扫描')),
+          ),
+      ],
     );
   }
 }
