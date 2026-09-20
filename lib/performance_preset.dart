@@ -77,6 +77,7 @@ class PerformanceSnapshot {
                     ? BackgroundSource.artwork
                     : original.source,
             motion: high,
+            layeredMotion: high,
           ));
     }
     return PerformanceSnapshot(

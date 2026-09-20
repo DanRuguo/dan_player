@@ -169,9 +169,16 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
           // The outgoing image stays fully opaque underneath: fading both
           // images would expose the dark fallback halfway through the change.
           if (_previous != null)
-            ExcludeSemantics(child: widget.imageBuilder(_previous!)),
+            FadeTransition(
+                key: ValueKey(_previous),
+                opacity: const AlwaysStoppedAnimation(1.0),
+                child:
+                    ExcludeSemantics(child: widget.imageBuilder(_previous!))),
           FadeTransition(
-              opacity: _opacity, child: widget.imageBuilder(_displayed!)),
+              key: ValueKey(_displayed),
+              opacity: _opacity,
+              child: ExcludeSemantics(
+                  excluding: false, child: widget.imageBuilder(_displayed!))),
         ])
       : _loading
           ? widget.loading ?? widget.placeholder

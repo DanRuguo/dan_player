@@ -169,8 +169,8 @@ void main() {
     settings.backgrounds.value = const BackgroundPreferences(
       main:
           BackgroundAppearance(source: BackgroundSource.artwork, motion: true),
-      nowPlaying:
-          BackgroundAppearance(source: BackgroundSource.artwork, motion: true),
+      nowPlaying: BackgroundAppearance(
+          source: BackgroundSource.artwork, motion: true, layeredMotion: false),
       mini:
           BackgroundAppearance(source: BackgroundSource.artwork, motion: false),
     );
@@ -212,6 +212,7 @@ void main() {
     _expectWordSampling(tester, fixture, false);
     for (final scene in BackgroundScene.values) {
       expect(settings.backgrounds.value.forScene(scene).motion, isFalse);
+      expect(settings.backgrounds.value.forScene(scene).layeredMotion, isFalse);
     }
     await tester.runAsync(
         () => settings.performancePresets.select(PerformanceMode.performance));
@@ -221,6 +222,7 @@ void main() {
     expect(settings.rendering.value.animations.allEnabled, isTrue);
     for (final scene in BackgroundScene.values) {
       expect(settings.backgrounds.value.forScene(scene).motion, isTrue);
+      expect(settings.backgrounds.value.forScene(scene).layeredMotion, isTrue);
     }
     await tester.runAsync(
         () => settings.performancePresets.select(PerformanceMode.custom));
@@ -294,7 +296,7 @@ void main() {
         tester.getRect(find.byKey(const ValueKey('vertical-lyric-scroll')));
     final row = tester.getRect(find.byType(LyricViewTile).at(16));
     expect(
-        row.top, closeTo(scroll.top + (scroll.height - row.height) * .25, .1));
+        row.top, closeTo(scroll.top + (scroll.height - row.height) * .34, .1));
     expect(
         tester
             .widgetList<LyricFollowEffects>(find.byType(LyricFollowEffects))

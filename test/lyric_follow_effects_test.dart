@@ -100,6 +100,65 @@ Future<void> _advance(
 }
 
 void main() {
+  test('interlude pose grows and closes as one group on the media timeline',
+      () {
+    const length = Duration(seconds: 12);
+    final entry =
+        LyricMotion.interludePose(const Duration(milliseconds: 750), length);
+    final middle =
+        LyricMotion.interludePose(const Duration(seconds: 6), length);
+    final closing =
+        LyricMotion.interludePose(const Duration(milliseconds: 11900), length);
+    expect(entry.opacity, .5);
+    expect(middle.scale, inInclusiveRange(.95, 1.05));
+    expect(closing.scale, lessThan(.2));
+    expect(closing.opacity, lessThan(.3));
+    expect(LyricMotion.interludePose(length, length).scale, 0);
+    expect(
+        LyricMotion.interludePose(Duration.zero, length, reduced: true).scale,
+        1);
+    for (var ms = 1; ms < 12000; ms += 7) {
+      final pose =
+          LyricMotion.interludePose(Duration(milliseconds: ms), length);
+      expect(pose.scale, inInclusiveRange(0, 1.10));
+      expect(pose.opacity, inInclusiveRange(0, 1));
+    }
+  });
+
+  testWidgets('hover clears context blur smoothly without moving the timeline',
+      (tester) async {
+    final fixture = _Fixture();
+    await tester.pumpWidget(fixture.app());
+    await tester.pumpAndSettle();
+    final offset = _controller(tester).offset;
+    expect(_enabledFilters(tester), isNotEmpty);
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await pointer.addPointer(location: const Offset(10, 10));
+    await pointer.moveTo(tester.getCenter(_scroll));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(_enabledFilters(tester), isNotEmpty);
+    await tester.pumpAndSettle();
+    expect(_enabledFilters(tester), isNotEmpty);
+    expect(
+        _effects(tester)
+            .where((effect) => effect.reading != null)
+            .every((effect) => effect.reading!.value == 0),
+        isTrue);
+    expect(_controller(tester).offset, offset);
+    await pointer.moveTo(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(_enabledFilters(tester), isNotEmpty);
+    await pointer.moveTo(tester.getCenter(_scroll));
+    await tester.pump();
+    fixture.hidden.value = true;
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.binding.transientCallbackCount, 0);
+    await pointer.removePointer();
+    await tester.pumpWidget(const SizedBox());
+  });
+
   test('follow trajectory is continuous, bounded and ends exactly at rest', () {
     for (final distance in [-4000.0, -80.0, 80.0, 4000.0]) {
       final flight = LyricFollowTransition(
@@ -127,7 +186,17 @@ void main() {
     await tester.pumpWidget(fixture.app());
     await tester.pumpAndSettle();
     final rowHeight = tester.getSize(find.byType(LyricViewTile).at(101)).height;
+    final previousTiles =
+        tester.widgetList<LyricViewTile>(find.byType(LyricViewTile)).toList();
     await _advance(tester, fixture, 404.1);
+    final nextTiles =
+        tester.widgetList<LyricViewTile>(find.byType(LyricViewTile)).toList();
+    expect(
+        [
+          for (var i = 0; i < previousTiles.length; i++)
+            if (!identical(previousTiles[i], nextTiles[i])) i
+        ].length,
+        lessThanOrEqualTo(9));
     final effects = _effects(tester);
     final flying = effects.where((effect) => effect.transition != null);
     expect(flying.length, inInclusiveRange(2, LyricMotion.maximumFollowRows));
@@ -179,7 +248,7 @@ void main() {
     final row = tester.getRect(find.byType(LyricViewTile).at(150));
     final viewport = tester.getRect(_scroll);
     expect(row.top,
-        closeTo(viewport.top + .25 * (viewport.height - row.height), .01));
+        closeTo(viewport.top + .34 * (viewport.height - row.height), .01));
     expect(tester.binding.transientCallbackCount, 0);
   });
 
@@ -266,7 +335,7 @@ void main() {
     final row = tester.getRect(find.byType(LyricViewTile).at(200));
     final viewport = tester.getRect(_scroll);
     expect(row.top,
-        closeTo(viewport.top + .25 * (viewport.height - row.height), .01));
+        closeTo(viewport.top + .34 * (viewport.height - row.height), .01));
     expect(
         _effects(tester).every((effect) => effect.transition == null), isTrue);
     expect(tester.binding.transientCallbackCount, 0);

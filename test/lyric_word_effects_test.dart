@@ -143,7 +143,7 @@ void main() {
         final pose = LyricWordEffects.sustain(
             progress: progress, durationMilliseconds: length, fontSize: 120);
         expect(pose.lift, inInclusiveRange(0, 3));
-        expect(pose.scale, inInclusiveRange(1, 1.018));
+        expect(pose.scale, inInclusiveRange(1, 1.03));
         if (length <= 650 || progress <= 0 || progress >= 1) {
           expect(pose, (lift: 0.0, scale: 1.0));
         }

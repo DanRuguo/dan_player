@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' as drawing;
 
 import 'package:dan_player/component/app_shape.dart';
@@ -92,6 +91,9 @@ class LyricViewTile extends StatelessWidget {
       child: ExcludeSemantics(
         child: RepaintBoundary(
           child: InkWell(
+            // Context deblur is the hover feedback. Tinting beneath fractional
+            // glyph edges can change perceived ink bounds by a physical pixel.
+            hoverColor: Colors.transparent,
             onTap: onTap,
             borderRadius: AppShape.controlRadius,
             child: ConstrainedBox(
@@ -549,7 +551,9 @@ class LyricWordHighlightPainter extends CustomPainter {
       canvas.translate(-word.bounds.center.dx, -word.bounds.center.dy);
       if (glowAllowed) {
         // One small diffuse mask per active long word, never the whole line.
-        final intensity = ((pose.scale - 1) / .018).clamp(0.0, 1.0);
+        final intensity =
+            ((pose.scale - 1) / LyricWordEffects.maximumScaleExpansion)
+                .clamp(0.0, 1.0);
         canvas.saveLayer(
             word.bounds.inflate(4),
             Paint()
@@ -639,20 +643,20 @@ class _LyricInterludePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final elapsed = math.max(0, (position.value - start).inMilliseconds) / 1000;
-    final progress = LyricMotion.progress(position.value, start, length);
+    final pose = LyricMotion.interludePose(position.value - start, length,
+        reduced: reducedMotion);
     final paint = Paint();
+    canvas.save();
+    canvas.translate(36, 12);
+    canvas.scale(pose.scale);
+    canvas.translate(-36, -12);
     for (var index = 0; index < 3; index++) {
-      final amount =
-          reducedMotion ? 1.0 : (progress * 3 - index).clamp(0.0, 1.0);
+      final amount = (pose.progress * 3 - index).clamp(0.0, 1.0);
       final eased = amount * amount * (3 - 2 * amount);
-      final breath =
-          reducedMotion ? 0.0 : math.sin(elapsed * math.pi - index * .5);
-      final radius = reducedMotion ? 4.0 : 3.7 + .5 * eased + .28 * breath;
-      paint.color = color.withValues(alpha: .28 + .72 * eased);
-      canvas.drawCircle(
-          Offset(12 + 24.0 * index, 12 - .45 * breath), radius, paint);
+      paint.color = color.withValues(alpha: pose.opacity * (.28 + .72 * eased));
+      canvas.drawCircle(Offset(12 + 24.0 * index, 12), 4.2, paint);
     }
+    canvas.restore();
   }
 
   @override

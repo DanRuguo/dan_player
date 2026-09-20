@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui' show Tristate;
+import 'dart:ui' as drawing;
 
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -46,6 +47,7 @@ class _Harness {
     addTearDown(() async {
       await positions.close();
       settings.dispose();
+      hidden.dispose();
     });
   }
 
@@ -54,6 +56,7 @@ class _Harness {
   late Future<Lyric?> future;
   double position;
   bool failSeek = false;
+  final hidden = ValueNotifier(false);
   final seekRequests = <double>[];
 
   void seek(double value) {
@@ -71,6 +74,7 @@ class _Harness {
         value: settings,
         child: VerticalLyricContent(
           lyricFuture: future,
+          hidden: hidden,
           positionStream: positions.stream,
           readPosition: () => position,
           onSeek: seek,
@@ -154,6 +158,128 @@ Future<void> _wheel(WidgetTester tester, double delta) async {
 }
 
 void main() {
+  for (final dpi in [1.0, 1.25, 1.5, 2.0]) {
+    testWidgets('hover leaves painted text anchored at DPI $dpi',
+        (tester) async {
+      tester.view.devicePixelRatio = dpi;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final harness = _Harness();
+      final boundary = GlobalKey();
+      await tester.pumpWidget(RepaintBoundary(
+          key: boundary, child: _app(harness, width: 419.5, height: 300)));
+      await tester.pumpAndSettle();
+      Future<({int left, int right, double center})> ink() async {
+        return (await tester.runAsync(() async {
+          final image = await (boundary.currentContext!.findRenderObject()
+                  as RenderRepaintBoundary)
+              .toImage(pixelRatio: dpi);
+          try {
+            final bytes = (await image.toByteData(
+                    format: drawing.ImageByteFormat.rawRgba))!
+                .buffer
+                .asUint8List();
+            var left = image.width, right = -1, total = 0, count = 0;
+
+            for (var i = 0; i < bytes.length; i += 4) {
+              if (bytes[i + 2] > bytes[i] + 40 &&
+                  bytes[i + 2] > 100 &&
+                  bytes[i + 1] < 160) {
+                final x = (i ~/ 4) % image.width;
+                if (x < left) left = x;
+                if (x > right) right = x;
+                total += x;
+                count++;
+              }
+            }
+            expect(count, greaterThan(20));
+            return (left: left, right: right, center: total / count);
+          } finally {
+            image.dispose();
+          }
+        }))!;
+      }
+
+      final before = await ink();
+      final textPosition = tester.getTopLeft(find.text('Line 0'));
+      final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await pointer.addPointer(location: const Offset(1, 1));
+      await pointer.moveTo(tester.getCenter(find.text('Line 0')));
+      await tester.pumpAndSettle();
+      final hovered = await ink();
+      expect(hovered.left, before.left);
+      expect(hovered.right, before.right);
+      expect(hovered.center, closeTo(before.center, .1));
+      expect(tester.getTopLeft(find.text('Line 0')), textPosition);
+      await pointer.moveTo(const Offset(1, 1));
+      await tester.pumpAndSettle();
+      expect(await ink(), before);
+      await pointer.removePointer();
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  for (final dpi in [1.0, 1.25, 1.5, 2.0]) {
+    testWidgets('context ink stays anchored through deblur at DPI $dpi',
+        (tester) async {
+      tester.view.devicePixelRatio = dpi;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final harness = _Harness();
+      final boundary = GlobalKey();
+      await tester.pumpWidget(RepaintBoundary(
+          key: boundary, child: _app(harness, width: 419.5, height: 480)));
+      await tester.pumpAndSettle();
+      Future<List<double>> centers() async => (await tester.runAsync(() async {
+            final image = await (boundary.currentContext!.findRenderObject()
+                    as RenderRepaintBoundary)
+                .toImage(pixelRatio: dpi);
+            final bytes = (await image.toByteData(
+                    format: drawing.ImageByteFormat.rawRgba))!
+                .buffer
+                .asUint8List();
+            final result = <double>[];
+            for (final row in [1, 2, 3]) {
+              final rect = tester.getRect(_row(row));
+              double mass = 0, moment = 0;
+              for (var y = ((rect.top + 3) * dpi).ceil();
+                  y < ((rect.bottom - 3) * dpi).floor() && y < image.height;
+                  y++) {
+                final bg =
+                    (y * image.width + (rect.right * dpi).floor() - 1) * 4;
+                for (var x = (rect.left * dpi).floor();
+                    x < (rect.right * dpi).floor();
+                    x++) {
+                  final at = (y * image.width + x) * 4;
+                  final weight = (bytes[at] - bytes[bg]).abs() +
+                      (bytes[at + 1] - bytes[bg + 1]).abs() +
+                      (bytes[at + 2] - bytes[bg + 2]).abs();
+                  mass += weight;
+                  moment += weight * x;
+                }
+              }
+              expect(mass, greaterThan(100));
+              result.add(moment / mass);
+            }
+            image.dispose();
+            return result;
+          }))!;
+      final before = await centers();
+      final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await pointer.addPointer(location: const Offset(1, 1));
+      await pointer.moveTo(tester.getCenter(find.text('Line 1')));
+      await tester.pump();
+      for (final ms in [80, 80, 120]) {
+        await tester.pump(Duration(milliseconds: ms));
+        final after = await centers();
+        for (var i = 0; i < before.length; i++) {
+          expect(after[i], closeTo(before[i], .25),
+              reason: 'row ${i + 1}, DPI $dpi');
+        }
+      }
+      await pointer.removePointer();
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
   testWidgets('focused text is larger, extra-bold and distinct from context',
       (tester) async {
     final harness = _Harness();
@@ -161,16 +287,16 @@ void main() {
     final focused = tester.widget<Text>(find.text('Line 0')).style!;
     final contextStyle = tester.widget<Text>(find.text('Line 1')).style!;
     expect(focused.fontWeight, FontWeight.w800);
-    expect(focused.fontSize, closeTo(22 * 1.12, .000001));
+    expect(focused.fontSize, closeTo(22 * 1.24, .000001));
     final focusedSize = focused.fontSize! * _scale(tester, 0);
     final contextSize = contextStyle.fontSize! * _scale(tester, 1);
-    expect(focusedSize / contextSize, greaterThan(1.13));
-    expect(_opacity(tester, 0) / _opacity(tester, 1), greaterThan(2));
+    expect(focusedSize / contextSize, greaterThanOrEqualTo(1.24));
+    expect(_opacity(tester, 0) / _opacity(tester, 1), greaterThan(1.4));
     expect(_opacity(tester, 1), greaterThan(_opacity(tester, 3)));
     expect(_opacity(tester, 3), greaterThan(_opacity(tester, 5)));
   });
 
-  testWidgets('scroll travels quickly then decelerates into the next line',
+  testWidgets('scroll starts smoothly then settles into the next line',
       (tester) async {
     final harness = _Harness();
     await _mount(tester, harness);
@@ -191,8 +317,8 @@ void main() {
       expect(current, inInclusiveRange(start, start + distance + .001));
       previous = current;
     }
-    expect(intervals.first / distance, greaterThan(.65));
-    expect(intervals[0], greaterThan(intervals[1]));
+    expect(intervals.first / distance, inInclusiveRange(.25, .60));
+    expect(LyricMotion.scrollCurve.transform(16 / 600), lessThan(.02));
     expect(intervals[1], greaterThan(intervals[2]));
     expect(intervals[2], greaterThan(intervals[3]));
     expect(previous - start, closeTo(distance, .001));
@@ -323,16 +449,16 @@ void main() {
     expect(tester.state(_motion(0)), same(firstState));
     expect(tester.state(_motion(1)), same(nextState));
     expect(_opacity(tester, 0), 1);
-    expect(_opacity(tester, 1), .46);
+    expect(_opacity(tester, 1), .64);
     var lastOldOpacity = 1.0;
-    var lastNewOpacity = .46;
-    var lastNewScale = .88;
+    var lastNewOpacity = .64;
+    var lastNewScale = .80;
     for (var frame = 0; frame < 14; frame++) {
       await tester.pump(const Duration(milliseconds: 40));
       final oldOpacity = _opacity(tester, 0);
       final newOpacity = _opacity(tester, 1);
       final newScale = _scale(tester, 1);
-      expect(oldOpacity, inInclusiveRange(.46, lastOldOpacity + .000001));
+      expect(oldOpacity, inInclusiveRange(.64, lastOldOpacity + .000001));
       expect(newOpacity, inInclusiveRange(lastNewOpacity - .000001, 1));
       expect(newScale, inInclusiveRange(lastNewScale - .000001, 1));
       lastOldOpacity = oldOpacity;
@@ -341,7 +467,7 @@ void main() {
       expect(tester.getSize(_row(0)), sizes[0]);
       expect(tester.getSize(_row(1)), sizes[1]);
     }
-    expect(lastOldOpacity, .46);
+    expect(lastOldOpacity, .64);
     expect(lastNewOpacity, 1);
     expect(lastNewScale, 1);
   });
@@ -356,7 +482,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 140));
     final beforeOpacity = _opacity(tester, 1);
     final beforeScale = _scale(tester, 1);
-    expect(beforeOpacity, inExclusiveRange(.46, 1));
+    expect(beforeOpacity, inExclusiveRange(.64, 1));
     harness.emit(21.0);
     await tester.pump();
     expect(_opacity(tester, 1), closeTo(beforeOpacity, .000001));
@@ -364,14 +490,14 @@ void main() {
     for (var frame = 0; frame < 16; frame++) {
       await tester.pump(const Duration(milliseconds: 40));
       for (var row = 0; row < 6; row++) {
-        expect(_scale(tester, row), inInclusiveRange(.84, 1));
-        expect(_opacity(tester, row), inInclusiveRange(.16, 1));
+        expect(_scale(tester, row), inInclusiveRange(.76, 1));
+        expect(_opacity(tester, row), inInclusiveRange(.32, 1));
       }
     }
     expect(_active(tester), 4);
     final expectedTop = tester.getTopLeft(_scroll()).dy +
         (tester.getSize(_scroll()).height - tester.getSize(_row(4)).height) *
-            .25;
+            .34;
     expect(tester.getTopLeft(_row(4)).dy, closeTo(expectedTop, .5));
   });
 
@@ -497,7 +623,7 @@ void main() {
     await tester.pump();
     expect(_active(tester), 4);
     expect(_opacity(tester, 4), 1);
-    expect(_opacity(tester, 0), .16);
+    expect(_opacity(tester, 0), .32);
     expect(_scale(tester, 4), 1);
     expect(_scale(tester, 0), 1);
     expect(_controller(tester).position.isScrollingNotifier.value, isFalse);
@@ -511,11 +637,11 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(_opacity(tester, 1), inExclusiveRange(.46, 1));
+    expect(_opacity(tester, 1), inExclusiveRange(.64, 1));
     await tester.pumpWidget(_app(harness, reduced: true));
     await tester.pump();
     expect(_opacity(tester, 1), 1);
-    expect(_opacity(tester, 0), .46);
+    expect(_opacity(tester, 0), .64);
     expect(_scale(tester, 0), 1);
     expect(tester.binding.transientCallbackCount, 0);
     await tester.pumpWidget(_app(harness));
@@ -630,6 +756,28 @@ void main() {
     expect(tester.widget<Text>(find.text('Line 0')).style!.color, color);
   });
 
+  testWidgets(
+      'replacement freezes old rows until ready without a spinner flash',
+      (tester) async {
+    final harness = _Harness(position: 25);
+    await _mount(tester, harness);
+    final offset = _controller(tester).offset;
+    final next = Completer<Lyric?>();
+    harness.future = next.future;
+    await tester.pumpWidget(_app(harness));
+    harness.emit(0);
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(_controller(tester).offset, offset);
+    expect(_active(tester), 5);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    next.complete(_plainLyric(3));
+    await tester.pumpAndSettle();
+    expect(find.byType(LyricViewTile), findsNWidgets(3));
+    expect(_active(tester), 0);
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('old lyric futures cannot restore stale rows or failures',
       (tester) async {
     final harness = _Harness();
@@ -647,10 +795,29 @@ void main() {
     expect(find.textContaining('歌词加载失败'), findsNothing);
     harness.future = Future.value(null);
     await tester.pumpWidget(_app(harness, reduced: true));
-    expect(find.byType(LyricViewTile), findsNothing);
+    expect(find.byType(LyricViewTile), findsNWidgets(2));
     await tester.pumpAndSettle();
     expect(find.text('无歌词'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('hidden lyric handoff suspends all finite fades and resumes',
+      (tester) async {
+    final harness = _Harness();
+    await _mount(tester, harness);
+    harness.future = Future.value(_plainLyric(4));
+    await tester.pumpWidget(_app(harness));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    harness.hidden.value = true;
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(harness.positions.hasListener, isFalse);
+    harness.hidden.value = false;
+    await tester.pumpAndSettle();
+    expect(find.byType(VerticalLyricScrollView), findsOneWidget);
+    expect(harness.positions.hasListener, isTrue);
   });
 
   testWidgets('a current source error is readable and never opens a player',

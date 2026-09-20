@@ -37,6 +37,7 @@ class BackgroundAppearance {
     this.customImageId,
     this.customImageName,
     this.motion = false,
+    this.layeredMotion = true,
   });
 
   final BackgroundSource source;
@@ -53,6 +54,7 @@ class BackgroundAppearance {
 
   /// Optional image drift. Desktop glass and solid backgrounds ignore it.
   final bool motion;
+  final bool layeredMotion;
 
   static const minOpacity = .25;
   static const maxOpacity = .95;
@@ -67,6 +69,7 @@ class BackgroundAppearance {
     String? customImageName,
     bool clearCustomImage = false,
     bool? motion,
+    bool? layeredMotion,
   }) =>
       BackgroundAppearance(
         source: source ?? this.source,
@@ -77,6 +80,7 @@ class BackgroundAppearance {
         customImageName:
             clearCustomImage ? null : customImageName ?? this.customImageName,
         motion: motion ?? this.motion,
+        layeredMotion: layeredMotion ?? this.layeredMotion,
       );
 
   Map<String, Object> toMap() => {
@@ -84,6 +88,7 @@ class BackgroundAppearance {
         'opacity': opacity,
         'blur': blur,
         'motion': motion,
+        'layeredMotion': layeredMotion,
         if (isBackgroundImageId(customImageId)) 'customImageId': customImageId!,
         if (customImageName != null && isBackgroundImageId(customImageId))
           'customImageName': customImageName!,
@@ -108,6 +113,9 @@ class BackgroundAppearance {
       customImageName: _imageName(value['customImageName']),
       clearCustomImage: !isBackgroundImageId(value['customImageId']),
       motion: value['motion'] is bool ? value['motion'] as bool : false,
+      layeredMotion: value['layeredMotion'] is bool
+          ? value['layeredMotion'] as bool
+          : fallback.layeredMotion,
     );
   }
 
@@ -133,11 +141,12 @@ class BackgroundAppearance {
       blur == other.blur &&
       customImageId == other.customImageId &&
       customImageName == other.customImageName &&
-      motion == other.motion;
+      motion == other.motion &&
+      layeredMotion == other.layeredMotion;
 
   @override
-  int get hashCode => Object.hash(
-      source, opacity, blur, customImageId, customImageName, motion);
+  int get hashCode => Object.hash(source, opacity, blur, customImageId,
+      customImageName, motion, layeredMotion);
 }
 
 @immutable

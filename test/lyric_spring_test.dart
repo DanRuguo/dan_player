@@ -93,7 +93,7 @@ double _targetForLine(WidgetTester tester, int index) {
   return _scroll(tester).offset +
       row.top -
       viewport.top -
-      (viewport.height - row.height) * .25;
+      (viewport.height - row.height) * .34;
 }
 
 Future<void> _startLine(

@@ -12,6 +12,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart'
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -77,17 +78,14 @@ class _Fixture {
           preferences: const MotionPreferences().all(!reduced),
           child: Scaffold(
             body: Stack(fit: StackFit.expand, children: [
-              RepaintBoundary(
-                child: CustomPaint(
-                  painter: FluidArtworkPainter(const [
-                    Color(0xff8447a8),
-                    Color(0xff358b9a),
-                    Color(0xffc06a85),
-                    Color(0xff28446e),
-                  ], backgroundPhase),
+              FluidArtwork(
+                phase: backgroundPhase,
+                child: ImageFiltered(
+                  imageFilter: drawing.ImageFilter.blur(sigmaX: 48, sigmaY: 48),
+                  child: Image.asset('app_icon.ico', fit: BoxFit.cover),
                 ),
               ),
-              ColoredBox(color: scheme.surface.withValues(alpha: .76)),
+              ColoredBox(color: scheme.surface.withValues(alpha: .54)),
               SafeArea(
                 child: Column(children: [
                   Padding(
@@ -187,6 +185,9 @@ void main() {
             of: find.byType(PlayerLogo), matching: find.byType(Image)));
         await tester.runAsync(() =>
             precacheImage(logo.image, tester.element(find.byType(PlayerLogo))));
+        await tester.runAsync(() => precacheImage(
+            const AssetImage('app_icon.ico'),
+            tester.element(find.byType(FluidArtwork))));
         await tester.pumpAndSettle();
         final prefix = '${language.name}-${brightness.name}';
         await tester.runAsync(() => _capture(boundary, '$prefix-held'));
@@ -194,10 +195,10 @@ void main() {
             brightness == Brightness.dark &&
             const String.fromEnvironment('DAN_NATIVE_LYRIC_RENDER')
                 .isNotEmpty) {
-          for (var frame = 0; frame < 96; frame++) {
-            fixture.emit(9.8 + frame * .04);
-            fixture.backgroundPhase.value = .16 + frame * .04 / 36;
-            await tester.pump(const Duration(milliseconds: 40));
+          for (var frame = 0; frame < 240; frame++) {
+            fixture.emit(9.8 + frame / 60);
+            fixture.backgroundPhase.value = .16 + frame / 60 / 36;
+            await tester.pump(const Duration(microseconds: 16667));
             await tester.runAsync(() => _capture(boundary,
                 'sequence/frame-${frame.toString().padLeft(3, '0')}'));
           }
@@ -227,6 +228,34 @@ void main() {
       });
     }
   }
+
+  testWidgets('hover reading renders a gradual clear and restore',
+      (tester) async {
+    final fixture = _Fixture();
+    addTearDown(fixture.dispose);
+    final boundary = GlobalKey();
+    await tester.pumpWidget(
+        RepaintBoundary(key: boundary, child: fixture.build(Brightness.dark)));
+    await tester.runAsync(() => precacheImage(const AssetImage('app_icon.ico'),
+        tester.element(find.byType(FluidArtwork))));
+    await tester.pumpAndSettle();
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await pointer.addPointer(location: const Offset(10, 10));
+    await pointer
+        .moveTo(tester.getCenter(find.byType(VerticalLyricScrollView)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.runAsync(() => _capture(boundary, 'hover-mid'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => _capture(boundary, 'hover-clear'));
+    await pointer.moveTo(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => _capture(boundary, 'hover-restored'));
+    expect(tester.takeException(), isNull);
+    expect(tester.binding.transientCallbackCount, 0);
+    await pointer.removePointer();
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('lyric disabled state and seek remain readable without motion',
       (tester) async {

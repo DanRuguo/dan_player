@@ -574,10 +574,17 @@ const Map<String, List<String>> uiCatalogB = {
     "앨범 아트 블러 강도 {0}"
   ],
   "轻缓动态背景": ["Gentle background motion", "ゆるやかな背景アニメーション", "부드러운 배경 움직임"],
-  "让封面配色缓慢流动。暂停、窗口隐藏或减少动态效果时停止；不会移动文字与按钮。": [
-    "Let artwork colours flow slowly. It stops when playback is paused, the window is hidden or reduced motion is enabled. Text and buttons do not move.",
-    "ジャケットの色がゆっくり流れます。一時停止中、ウィンドウ非表示時、動きを減らす設定の有効時には停止します。文字やボタンは動きません。",
-    "앨범 아트 색상이 천천히 흐릅니다. 재생 일시 정지, 창 숨김 또는 동작 줄이기 설정 시 멈추며 텍스트와 버튼은 움직이지 않습니다."
+  "多层流动": ["Layered flow", "多層フロー", "다층 흐름"],
+  "柔和漂移": ["Gentle drift", "ゆるやかな移動", "부드러운 이동"],
+  "多层流动保留模糊封面的层次并更流畅地更新；柔和漂移减少图层与刷新频率。": [
+    "Layered flow preserves blurred artwork detail with smoother updates; gentle drift uses fewer layers and updates.",
+    "多層フローはぼかした画像の奥行きを保ち滑らかに更新します。ゆるやかな移動はレイヤー数と更新頻度を抑えます。",
+    "다층 흐름은 흐린 표지의 깊이를 유지하며 더 매끄럽게 갱신합니다. 부드러운 이동은 레이어 수와 갱신 빈도를 줄입니다."
+  ],
+  "让模糊封面缓慢流动。暂停、窗口隐藏或减少动态效果时停止；不会移动文字与按钮。": [
+    "Let blurred artwork flow slowly. It stops when playback is paused, the window is hidden or reduced motion is enabled. Text and buttons do not move.",
+    "ぼかしたジャケット画像がゆっくり流れます。一時停止中、ウィンドウ非表示時、動きを減らす設定の有効時には停止します。文字やボタンは動きません。",
+    "흐린 앨범 아트가 천천히 흐릅니다. 재생 일시 정지, 창 숨김 또는 동작 줄이기 설정 시 멈추며 텍스트와 버튼은 움직이지 않습니다."
   ],
   "让背景图片缓慢漂移。暂停、窗口隐藏或减少动态效果时停止；不会移动文字与按钮。": [
     "Let the background drift slowly. It stops when playback is paused, the window is hidden or reduced motion is enabled. Text and buttons do not move.",

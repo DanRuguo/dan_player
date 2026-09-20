@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Slow, bounded drift of an already decoded background image. No audio samples,
-/// shaders, image IO, or page layout are performed by the 20-Hz clock.
+/// shaders, image IO, or page layout are performed by the presentation clock.
 ///
 /// Native desktop glass is never passed through this widget. The caller owns
 /// source selection; only the background texture, not its veil/content, moves.
@@ -19,9 +19,11 @@ class BackgroundImageMotion extends StatefulWidget {
     this.isVisible = true,
     this.hidden,
     this.phaseBuilder,
+    this.refreshInterval = frameInterval,
   });
 
   final Widget child;
+  final Duration refreshInterval;
 
   /// Alternative native rendering sharing this exact playback/visibility clock.
   final Widget Function(ValueListenable<double> phase,
@@ -80,6 +82,10 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
   @override
   void didUpdateWidget(covariant BackgroundImageMotion oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshInterval != widget.refreshInterval) {
+      _timer?.cancel();
+      _timer = null;
+    }
     if (!identical(oldWidget.hidden, widget.hidden)) {
       oldWidget.hidden?.removeListener(_syncClock);
       widget.hidden?.addListener(_syncClock);
@@ -118,9 +124,9 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
       _timer = null;
       return;
     }
-    _timer ??= Timer.periodic(BackgroundImageMotion.frameInterval, (_) {
+    _timer ??= Timer.periodic(widget.refreshInterval, (_) {
       _phase.value = (_phase.value +
-              BackgroundImageMotion.frameInterval.inMicroseconds /
+              widget.refreshInterval.inMicroseconds /
                   BackgroundImageMotion.cycle.inMicroseconds) %
           1.0;
     });

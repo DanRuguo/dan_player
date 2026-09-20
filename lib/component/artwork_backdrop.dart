@@ -125,12 +125,12 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                                 isPlaying: widget.isPlaying,
                                 isVisible: widget.isVisible,
                                 hidden: widget.hidden,
+                                refreshInterval: widget.fluid
+                                    ? const Duration(milliseconds: 16)
+                                    : BackgroundImageMotion.frameInterval,
                                 phaseBuilder: widget.fluid
-                                    ? (phase, active, child) => FluidArtwork(
-                                        image: provider,
-                                        phase: phase,
-                                        active: active,
-                                        fallback: child)
+                                    ? (phase, active, child) =>
+                                        FluidArtwork(phase: phase, child: child)
                                     : null,
                                 child: ImageFiltered(
                                   imageFilter: ui.ImageFilter.blur(
