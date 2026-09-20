@@ -50,6 +50,13 @@ void main() {
     position = 1.016;
     await tester.pump(const Duration(milliseconds: 8));
     expect(row.position.value, const Duration(milliseconds: 1016));
+    source.add(1.0);
+    expect(row.position.value, const Duration(milliseconds: 1016),
+        reason: 'A delayed stream event must not rewind the display clock');
+    position = .5;
+    source.add(.5);
+    expect(row.position.value, const Duration(milliseconds: 500),
+        reason: 'A real native seek must still take effect immediately');
     playing.value = false;
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));

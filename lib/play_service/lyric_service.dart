@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:dan_player/lyric/online_lyric_cache.dart';
 import 'package:dan_player/search/lyric_search_index.dart';
 
 import 'package:dan_player/app_settings.dart';
@@ -223,6 +225,39 @@ class LyricService extends ChangeNotifier {
     );
   }
 
+  Future<Lyric?> _cachedOnline(Audio audio, Future<Lyric?> Function() fetch,
+      {LyricSource? source, bool refresh = false}) {
+    final settings = AppSettings.instance;
+    // Metadata/provider changes naturally select a new cache entry. Do not
+    // include the display offset: cached timestamps must remain canonical.
+    final identity = jsonEncode([
+      1,
+      audio.stableTrackId,
+      audio.title,
+      audio.artist,
+      audio.album,
+      audio.duration,
+      source?.toMap(),
+      settings.onlineSources.value.toJson(),
+      settings.customMusicSources.value
+          .map((profile) => profile.toJson())
+          .toList(),
+    ]);
+    return OnlineLyricCache.instance.resolve(identity, fetch, refresh: refresh);
+  }
+
+  Future<Lyric?> _resolveOnline(Audio audio, {bool refresh = false}) =>
+      _cachedOnline(audio, () async {
+        final direct = switch (audio.onlineProvider) {
+          "qq" => await getOnlineLyric(
+              qqSongId: audio.onlineNumericId, qqSongMid: audio.onlineId),
+          "netease" => await getOnlineLyric(neteaseSongId: audio.onlineId),
+          _ => null,
+        };
+        if (_disposed) return null;
+        return direct ?? await getMostMatchedLyric(audio);
+      }, refresh: refresh);
+
   Future<Lyric?> _getLyricDefault(bool localFirst) async {
     if (_disposed) return null;
     final resolve = _resolveDefaultForTesting;
@@ -230,25 +265,14 @@ class LyricService extends ChangeNotifier {
     final nowPlaying = _getNowPlaying();
     if (nowPlaying == null) return Future.value(null);
 
-    if (nowPlaying.isOnline) {
-      final direct = switch (nowPlaying.onlineProvider) {
-        "qq" => await getOnlineLyric(
-            qqSongId: nowPlaying.onlineNumericId,
-            qqSongMid: nowPlaying.onlineId,
-          ),
-        "netease" => await getOnlineLyric(neteaseSongId: nowPlaying.onlineId),
-        _ => null,
-      };
-      if (_disposed) return null;
-      return direct ?? await getMostMatchedLyric(nowPlaying);
-    }
+    if (nowPlaying.isOnline) return _resolveOnline(nowPlaying);
 
     if (localFirst) {
       final local = await Lrc.fromAudioPath(nowPlaying);
       if (_disposed) return null;
-      return local ?? (await getMostMatchedLyric(nowPlaying));
+      return local ?? (await _resolveOnline(nowPlaying));
     }
-    final matched = await getMostMatchedLyric(nowPlaying);
+    final matched = await _resolveOnline(nowPlaying);
     if (_disposed) return null;
     return matched ?? (await Lrc.fromAudioPath(nowPlaying));
   }
@@ -299,13 +323,16 @@ class LyricService extends ChangeNotifier {
       if (lyricSource.source == LyricSourceType.local) {
         raw = Lrc.fromAudioPath(nowPlaying);
       } else {
-        raw = getOnlineLyric(
-          qqSongId: lyricSource.qqSongId,
-          qqSongMid: lyricSource.qqSongMid,
-          kugouSongHash: lyricSource.kugouSongHash,
-          neteaseSongId: lyricSource.neteaseSongId,
-          lrclibId: lyricSource.lrclibId,
-        );
+        raw = _cachedOnline(
+            nowPlaying,
+            () => getOnlineLyric(
+                  qqSongId: lyricSource.qqSongId,
+                  qqSongMid: lyricSource.qqSongMid,
+                  kugouSongHash: lyricSource.kugouSongHash,
+                  neteaseSongId: lyricSource.neteaseSongId,
+                  lrclibId: lyricSource.lrclibId,
+                ),
+            source: lyricSource);
       }
     }
     _useRawFuture(raw, offsetMs: store?.forAudio(nowPlaying)?.offsetMs ?? 0);
@@ -339,9 +366,8 @@ class LyricService extends ChangeNotifier {
     final nowPlaying = _getNowPlaying();
     if (nowPlaying == null) return;
 
-    final raw = nowPlaying.isOnline
-        ? _getLyricDefault(false)
-        : getMostMatchedLyric(nowPlaying);
+    // This is an explicit re-search, unlike the automatic playback lookup.
+    final raw = _resolveOnline(nowPlaying, refresh: true);
     _useExplicitFuture(nowPlaying, raw);
   }
 

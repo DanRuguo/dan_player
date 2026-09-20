@@ -231,12 +231,21 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
   _TimedLyricLayout? _layout;
 
   @override
+  void didUpdateWidget(_TimedLyricText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.active || widget.reducedMotion || !widget.glowAllowed) {
+      _layout?.releaseGlowMasks();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final direction = Directionality.of(context);
         final scaler = MediaQuery.textScalerOf(context);
+        final pixelRatio = MediaQuery.devicePixelRatioOf(context);
         final width = constraints.hasBoundedWidth
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
@@ -247,6 +256,7 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
           widget.textAlign,
           direction,
           scaler,
+          pixelRatio,
           width,
         );
         if (_layoutIdentity != identity) {
@@ -257,6 +267,7 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
             textAlign: widget.textAlign,
             direction: direction,
             scaler: scaler,
+            pixelRatio: pixelRatio,
             maxWidth: width,
           );
           _layoutIdentity = identity;
@@ -299,6 +310,7 @@ class _TimedLyricLayout {
     required TextAlign textAlign,
     required TextDirection direction,
     required TextScaler scaler,
+    required this.pixelRatio,
     required this.maxWidth,
   })  : base = TextPainter(
           textDirection: direction,
@@ -388,6 +400,7 @@ class _TimedLyricLayout {
   final SyncLyricLine line;
   final TextStyle style;
   final double maxWidth;
+  final double pixelRatio;
   final TextPainter base;
   final double fontSize;
   late final drawing.Picture glyphs;
@@ -396,7 +409,56 @@ class _TimedLyricLayout {
   static final _joiningLetter = RegExp(r'^[A-Za-z\u00c0-\u024f]{2}$');
   static final _joiningScript = RegExp(r'[\u0590-\u109f]');
 
+  // Long-note glow is a static white mask: only its transform/tint changes.
+  // Rasterize the tiny diffuse mask once instead of running a Gaussian pass
+  // every display frame. Keep at most four masks, and release them with layout.
+  final _glowMasks = <int, (drawing.Image, Rect)>{};
+  (drawing.Image, Rect)? glowMask(int index) {
+    final cached = _glowMasks.remove(index);
+    if (cached != null) {
+      _glowMasks[index] = cached;
+      return cached;
+    }
+    final word = words[index];
+    final bounds = word.bounds.inflate(4);
+    final ratio = (pixelRatio * 1.3).clamp(1.0, 5.0);
+    final width = (bounds.width * ratio).ceil();
+    final height = (bounds.height * ratio).ceil();
+    if (width <= 0 || height <= 0 || width * height > 1024 * 1024) return null;
+    final recorder = drawing.PictureRecorder();
+    final canvas = Canvas(recorder)
+      ..scale(ratio)
+      ..translate(-bounds.left, -bounds.top);
+    canvas.saveLayer(
+        bounds,
+        Paint()
+          ..imageFilter = drawing.ImageFilter.blur(sigmaX: 1.1, sigmaY: 1.1));
+    canvas.clipRect(word.bounds, doAntiAlias: false);
+    canvas.drawPicture(glyphs);
+    canvas.restore();
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(width, height);
+    picture.dispose();
+    while (_glowMasks.length >= 4) {
+      _glowMasks.remove(_glowMasks.keys.first)!.$1.dispose();
+    }
+    final mask = (
+      image,
+      Rect.fromLTWH(bounds.left, bounds.top, width / ratio, height / ratio)
+    );
+    _glowMasks[index] = mask;
+    return mask;
+  }
+
+  void releaseGlowMasks() {
+    for (final mask in _glowMasks.values) {
+      mask.$1.dispose();
+    }
+    _glowMasks.clear();
+  }
+
   void dispose() {
+    releaseGlowMasks();
     base.dispose();
     glyphs.dispose();
   }
@@ -566,18 +628,19 @@ class LyricWordHighlightPainter extends CustomPainter {
         final intensity =
             ((pose.scale - 1) / LyricWordEffects.maximumScaleExpansion)
                 .clamp(0.0, 1.0);
-        canvas.saveLayer(
-            word.bounds.inflate(4),
-            Paint()
-              ..imageFilter = drawing.ImageFilter.blur(sigmaX: 1.1, sigmaY: 1.1)
-              ..colorFilter = ColorFilter.mode(
-                  playedColor.withValues(alpha: .18 * intensity),
-                  BlendMode.srcIn));
-        canvas.save();
-        canvas.clipRect(word.bounds, doAntiAlias: false);
-        canvas.drawPicture(_layout.glyphs);
-        canvas.restore();
-        canvas.restore();
+        final mask = _layout.glowMask(pose.index);
+        if (mask != null) {
+          canvas.drawImageRect(
+              mask.$1,
+              Rect.fromLTWH(
+                  0, 0, mask.$1.width.toDouble(), mask.$1.height.toDouble()),
+              mask.$2,
+              Paint()
+                ..filterQuality = FilterQuality.low
+                ..colorFilter = ColorFilter.mode(
+                    playedColor.withValues(alpha: .18 * intensity),
+                    BlendMode.srcIn));
+        }
       }
       canvas.saveLayer(word.bounds, Paint());
       canvas.clipRect(word.bounds, doAntiAlias: false);

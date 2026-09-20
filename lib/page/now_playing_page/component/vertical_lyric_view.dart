@@ -449,7 +449,10 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _listeningTo = widget.positionStream;
     _positionSubscription = widget.positionStream.listen((position) {
       if (!mounted || generation != _sourceGeneration) return;
-      _receivePosition(position);
+      // A queued low-frequency event can predate the latest display frame.
+      // Read the same authoritative clock while frame sampling is active;
+      // never rewind the word reveal to an older stream sample.
+      _receivePosition(_mediaTicker.isActive ? widget.readPosition() : position);
     });
   }
 
