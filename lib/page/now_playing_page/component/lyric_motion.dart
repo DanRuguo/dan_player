@@ -38,7 +38,9 @@ abstract final class LyricMotion {
     required double distance,
   }) =>
       spring
-          ? _LyricSpringCurve(maxOvershoot: 8 / math.max(1, distance.abs()))
+          ? _LyricSpringCurve(
+              overshoot: math.min(8, distance.abs() * .06) /
+                  math.max(1, distance.abs()))
           : scrollCurve;
 
   static bool reducedOf(BuildContext context) {
@@ -129,10 +131,10 @@ class LyricFollowTransition {
     final delayed = curve.transform(((t - delay) / (1 - delay)).clamp(0, 1));
     final rawLag = distance * (common - delayed);
     // Smooth saturation avoids the velocity corner produced by a hard clamp.
-    final lag = rawLag / math.sqrt(1 + rawLag * rawLag / 900);
+    final lag = rawLag / math.sqrt(1 + rawLag * rawLag / 1764);
     final settle = LyricMotion.curve.transform(t);
     return (
-      offset: (initialOffset * (1 - settle) + lag).clamp(-36.0, 36.0),
+      offset: (initialOffset * (1 - settle) + lag).clamp(-48.0, 48.0),
       blur: ui.lerpDouble(initialBlur, finalBlur, settle)!,
     );
   }
@@ -175,17 +177,24 @@ class LyricFollowEffects extends StatelessWidget {
           // a focus handoff would discard the timed paragraph's glyph cache.
           return Transform.translate(
             offset: Offset(0, offset),
-            child: ImageFiltered(
+            // Cache the filtered row, not only the glyphs beneath it. Moving
+            // the scroll/lag transform must not rerun an unchanged blur.
+            child: RepaintBoundary(
+                child: ImageFiltered(
               // Keep the context filter path during hover reading. A zero blur
               // is optimized away below Flutter; after cache warm-up that path
               // can shift scaled glyphs by one pixel on Windows. Sigma .1 is
               // visually clear but retains stable sampling. Reduced motion /
               // disabled blur still bypass the filter entirely.
-              enabled: blurEnabled && (blur > 0 || transition != null),
+              // The caller restricts this to the visible follow band. Keep
+              // the focused row on the same sampling path after its finite
+              // transition is released; removing the layer at zero blur can
+              // move fractional glyph edges even though geometry is unchanged.
+              enabled: blurEnabled,
               imageFilter: ui.ImageFilter.blur(
                   sigmaX: math.max(.1, sigma), sigmaY: math.max(.1, sigma)),
               child: child,
-            ),
+            )),
           );
         },
       );
@@ -255,23 +264,28 @@ class _RenderLyricViewportFade extends RenderProxyBox {
   }
 }
 
-/// An independently implemented damped spring. Only scroll/paint transforms
-/// use this curve; paragraph size, opacity and word timing never overshoot.
+/// A finite spring-shaped trajectory with one visible return. Both segments
+/// meet at zero velocity, as does the endpoint. Unlike clipping an oscillator,
+/// this has no flat cap or tiny secondary rebound during the final frames.
 class _LyricSpringCurve extends Curve {
-  const _LyricSpringCurve({required this.maxOvershoot});
+  const _LyricSpringCurve({required this.overshoot});
 
-  final double maxOvershoot;
+  final double overshoot;
 
   @override
   double transformInternal(double t) {
     if (t <= 0) return 0;
     if (t >= 1) return 1;
-    double value(double time) =>
-        1 -
-        math.exp(-10 * time) *
-            (math.cos(7 * time) + 10 / 7 * math.sin(7 * time));
-    return (value(t) / value(1)).clamp(0.0, 1 + maxOvershoot);
+    const peak = .66;
+    double smooth(double x) => x * x * x * (10 + x * (-15 + 6 * x));
+    if (t < peak) {
+      return (1 + overshoot) * scrollEase(t / peak);
+    }
+    return 1 + overshoot * (1 - smooth((t - peak) / (1 - peak)));
   }
+
+  // The shared cubic accelerates naturally and reaches the peak at rest.
+  double scrollEase(double t) => LyricMotion.scrollCurve.transform(t);
 }
 
 /// One stable animation state per lyric occurrence. A retargeted transition

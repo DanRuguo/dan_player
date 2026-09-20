@@ -464,11 +464,12 @@ class LyricWordHighlightPainter extends CustomPainter {
   @visibleForTesting
   int get movingWordCount => _movingWords().length;
 
-  List<({int index, double lift, double scale})> _movingWords() {
+  List<({int index, double lift, double scale, double anchorX})>
+      _movingWords() {
     if (!active || reducedMotion || activation <= 0 || !_layout.allowLift) {
       return const [];
     }
-    final result = <({int index, double lift, double scale})>[];
+    final result = <({int index, double lift, double scale, double anchorX})>[];
     for (var index = 0; index < _layout.words.length; index++) {
       final word = _layout.words[index];
       if (!word.canLift) continue;
@@ -478,10 +479,22 @@ class LyricWordHighlightPainter extends CustomPainter {
           durationMilliseconds: word.length.inMilliseconds,
           fontSize: _layout.fontSize);
       if (pose.lift <= .001) continue;
+      // Edge words grow away from their neighbour. Inner words express the
+      // note by lifting without expanding across adjacent shaped glyphs.
+      final first = index == 0;
+      final last = index == _layout.words.length - 1;
+      final expansion = first || last
+          ? (pose.scale - 1).clamp(0, 10 / word.bounds.width)
+          : 0.0;
       result.add((
         index: index,
         lift: pose.lift * activation,
-        scale: 1 + (pose.scale - 1) * activation
+        scale: 1 + expansion * activation,
+        anchorX: first && !last
+            ? word.bounds.right
+            : last && !first
+                ? word.bounds.left
+                : word.bounds.center.dx,
       ));
     }
     return result;
@@ -545,11 +558,10 @@ class LyricWordHighlightPainter extends CustomPainter {
     for (final pose in moving) {
       final word = _layout.words[pose.index];
       canvas.save();
-      canvas.translate(
-          word.bounds.center.dx, word.bounds.center.dy - pose.lift);
+      canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
       canvas.scale(pose.scale);
-      canvas.translate(-word.bounds.center.dx, -word.bounds.center.dy);
-      if (glowAllowed) {
+      canvas.translate(-pose.anchorX, -word.bounds.center.dy);
+      if (glowAllowed && pose.scale > 1.00001) {
         // One small diffuse mask per active long word, never the whole line.
         final intensity =
             ((pose.scale - 1) / LyricWordEffects.maximumScaleExpansion)

@@ -142,8 +142,8 @@ void main() {
       ]) {
         final pose = LyricWordEffects.sustain(
             progress: progress, durationMilliseconds: length, fontSize: 120);
-        expect(pose.lift, inInclusiveRange(0, 3));
-        expect(pose.scale, inInclusiveRange(1, 1.03));
+        expect(pose.lift, inInclusiveRange(0, 6));
+        expect(pose.scale, inInclusiveRange(1, 1.08));
         if (length <= 650 || progress <= 0 || progress >= 1) {
           expect(pose, (lift: 0.0, scale: 1.0));
         }
@@ -205,7 +205,8 @@ void main() {
     expect(raised.top, lessThan(original.top));
     expect(raised.bottom, lessThan(original.bottom),
         reason: 'An untransformed duplicate would still occupy the old bottom');
-    expect(raised.count / original.count, inInclusiveRange(.97, 1.07));
+    expect(raised.count / original.count, inInclusiveRange(.97, 1.18),
+        reason: '8% scale permits 1.08 squared ink, never a second copy');
     expect(tester.getSize(_paintFinder()), size);
     final paused = await _pixels(tester);
     await tester.pump(const Duration(seconds: 3));

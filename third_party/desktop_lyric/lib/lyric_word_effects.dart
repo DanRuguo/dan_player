@@ -4,7 +4,7 @@ import 'dart:ui' as ui;
 /// Paint-only effects driven by supplied word timestamps, never by a ticker or
 /// guessed LRC syllables. Shared by the player and desktop lyric renderers.
 abstract final class LyricWordEffects {
-  static const maximumScaleExpansion = .03;
+  static const maximumScaleExpansion = .08;
   static double softEdgeWidth(
           {required double fontSize, required double extent}) =>
       math.min(math.max(0, extent) * .35, fontSize.clamp(10, 120) * .22);
@@ -69,7 +69,7 @@ abstract final class LyricWordEffects {
     final envelope =
         smooth(progress / .24) * smooth((1 - progress) / .28) * weight;
     return (
-      lift: math.min(3, fontSize * .055) * envelope,
+      lift: math.min(6, fontSize * .10) * envelope,
       scale: 1 + maximumScaleExpansion * envelope
     );
   }

@@ -5,17 +5,20 @@ import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/lyric_timeline.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
@@ -50,13 +53,18 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
                 valueListenable: AppSettings.instance.experience,
                 builder: (context, experience, _) => ListenableBuilder(
                   listenable: lyrics,
-                  builder: (context, _) => VerticalLyricContent(
-                    lyricFuture: lyrics.currLyricFuture,
-                    positionStream: playback.positionStream,
-                    readPosition: () => playback.position,
-                    onSeek: playback.seek,
-                    springLyrics: experience.springLyrics,
-                    hidden: DesktopIntegration.instance.isHidden,
+                  builder: (context, _) => StreamBuilder<PlayerState>(
+                    stream: playback.playerStateStream,
+                    initialData: playback.playerState,
+                    builder: (context, state) => VerticalLyricContent(
+                      lyricFuture: lyrics.currLyricFuture,
+                      positionStream: playback.positionStream,
+                      readPosition: () => playback.position,
+                      onSeek: playback.seek,
+                      springLyrics: experience.springLyrics,
+                      hidden: DesktopIntegration.instance.isHidden,
+                      playing: state.data == PlayerState.playing,
+                    ),
                   ),
                 ),
               ),
@@ -91,6 +99,7 @@ class VerticalLyricContent extends StatefulWidget {
     required this.onSeek,
     this.springLyrics = false,
     this.hidden,
+    this.playing = false,
   });
 
   final Future<Lyric?>? lyricFuture;
@@ -99,6 +108,7 @@ class VerticalLyricContent extends StatefulWidget {
   final ValueChanged<double> onSeek;
   final bool springLyrics;
   final ValueListenable<bool>? hidden;
+  final bool playing;
 
   @override
   State<VerticalLyricContent> createState() => _VerticalLyricContentState();
@@ -172,6 +182,7 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
               onSeek: widget.onSeek,
               springLyrics: widget.springLyrics,
               hidden: widget.hidden,
+              playing: widget.playing,
             );
           } else {
             final label = waiting
@@ -249,6 +260,7 @@ class VerticalLyricScrollView extends StatefulWidget {
     required this.onSeek,
     this.springLyrics = false,
     this.hidden,
+    this.playing = false,
     this.suspended = false,
   });
 
@@ -258,6 +270,7 @@ class VerticalLyricScrollView extends StatefulWidget {
   final ValueChanged<double> onSeek;
   final bool springLyrics;
   final ValueListenable<bool>? hidden;
+  final bool playing;
   final bool suspended;
 
   @override
@@ -287,6 +300,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   bool _active = false;
   late final AnimationController _followClock;
   late final AnimationController _readingClock;
+  late final Ticker _mediaTicker;
   bool _pointerReading = false;
 
   void _setPointerReading(bool reading) {
@@ -320,6 +334,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   @override
   void initState() {
     super.initState();
+    // Native playback time remains authoritative. The low-frequency position
+    // stream still drives nonanimated/hidden states; no extrapolated clock.
+    _mediaTicker = createTicker((_) {
+      if (_active && widget.playing && !_exiting) {
+        _receivePosition(widget.readPosition());
+      }
+    });
     _readingClock = AnimationController(vsync: this, value: 1);
     _followClock = AnimationController(vsync: this)
       ..addStatusListener((status) {
@@ -435,6 +456,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   @override
   void didUpdateWidget(VerticalLyricScrollView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!widget.playing) _mediaTicker.stop();
     if (!identical(oldWidget.lyric, widget.lyric)) _resetLyric();
     if (oldWidget.suspended != widget.suspended) _syncActivity();
     if (!identical(oldWidget.hidden, widget.hidden)) {
@@ -581,6 +603,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _cancelFollowEffects() {
+    _mediaTicker.stop();
     _followClock.stop();
     _readingClock.value = _pointerReading ? 0 : 1;
     _followTransitions = {};
@@ -641,7 +664,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         final previous = _followTransitions[index]?.sample(_followClock.value);
         transitions[index] = LyricFollowTransition(
           distance: offset - _scrollController.offset,
-          delay: ((index - _currentLine).abs() * .035).clamp(0, .20),
+          delay: ((index - _currentLine).abs() * .055).clamp(0, .26),
           curve: curve,
           initialOffset: previous?.offset ?? 0,
           initialBlur: previous?.blur ?? _restBlur[index] ?? 0,
@@ -680,6 +703,20 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final reduced = !_active || _motionHidden || LyricMotion.reducedOf(context);
+    final current =
+        _currentLine >= 0 && _currentLine < widget.lyric.lines.length
+            ? widget.lyric.lines[_currentLine]
+            : null;
+    final frameSampled = !reduced &&
+        widget.playing &&
+        (current is SyncLyricLine &&
+                (current.content.trim().isNotEmpty ||
+                    current.length > const Duration(seconds: 5)) ||
+            current is LrcLine &&
+                current.content.trim().isEmpty &&
+                current.length > const Duration(seconds: 5));
+    if (frameSampled && !_mediaTicker.isActive) _mediaTicker.start();
+    if (!frameSampled) _mediaTicker.stop();
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
     final followEnabled = !reduced && !_manualScrollActive;
     final blurEnabled = followEnabled &&
@@ -781,7 +818,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                                         : null,
                                     blur:
                                         blurEnabled ? _restBlur[index] ?? 0 : 0,
-                                    blurEnabled: blurEnabled,
+                                    blurEnabled: blurEnabled &&
+                                        _restBlur.containsKey(index),
                                     reading: (_restBlur[index] ?? 0) > 0 ||
                                             _followTransitions
                                                 .containsKey(index)
@@ -816,6 +854,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _positionSubscription?.cancel();
     _manualScrollTimer?.cancel();
     _readingClock.dispose();
+    _mediaTicker.dispose();
     _followClock.dispose();
     _scrollController.dispose();
     _position.dispose();

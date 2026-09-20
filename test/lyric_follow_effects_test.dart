@@ -172,7 +172,7 @@ void main() {
       expect(flight.sample(0), (offset: 12.0, blur: .65));
       for (var frame = 0; frame <= 100; frame++) {
         final sample = flight.sample(frame / 100);
-        expect(sample.offset.abs(), lessThanOrEqualTo(36));
+        expect(sample.offset.abs(), lessThanOrEqualTo(48));
         expect(sample.blur, inInclusiveRange(0, .65));
       }
       expect(flight.sample(1), (offset: 0.0, blur: 0.0));
