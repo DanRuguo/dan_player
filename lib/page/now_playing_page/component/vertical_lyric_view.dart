@@ -155,38 +155,23 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
     return TickerMode(
       enabled: active,
       child: FutureBuilder<Lyric?>(
-        // Retain the last resolved data during a replacement; FutureBuilder still
-        // rejects completions from superseded futures. Its old view is frozen.
+        // A pending replacement must not retain the preceding song on screen.
         future: widget.lyricFuture,
         builder: (context, snapshot) {
           final waiting = widget.lyricFuture != null &&
               snapshot.connectionState != ConnectionState.done;
-          final lyric = widget.lyricFuture == null ? null : snapshot.data;
+          final lyric =
+              waiting || widget.lyricFuture == null ? null : snapshot.data;
           Widget content;
-          if (lyric != null &&
-              lyric.lines.isNotEmpty &&
-              (!snapshot.hasError || waiting)) {
-            content = IgnorePointer(
+          if (lyric != null && lyric.lines.isNotEmpty && !snapshot.hasError) {
+            content = VerticalLyricScrollView(
               key: ObjectKey(lyric),
-              ignoring: waiting,
-              child: ExcludeSemantics(
-                excluding: waiting,
-                child: AnimatedOpacity(
-                  opacity: waiting ? .55 : 1,
-                  duration: reduced
-                      ? Duration.zero
-                      : const Duration(milliseconds: 240),
-                  child: VerticalLyricScrollView(
-                    lyric: lyric,
-                    suspended: waiting,
-                    positionStream: widget.positionStream,
-                    readPosition: widget.readPosition,
-                    onSeek: widget.onSeek,
-                    springLyrics: widget.springLyrics,
-                    hidden: widget.hidden,
-                  ),
-                ),
-              ),
+              lyric: lyric,
+              positionStream: widget.positionStream,
+              readPosition: widget.readPosition,
+              onSeek: widget.onSeek,
+              springLyrics: widget.springLyrics,
+              hidden: widget.hidden,
             );
           } else {
             final label = waiting
@@ -206,9 +191,9 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
           }
           return AnimatedSwitcher(
             duration:
-                reduced ? Duration.zero : const Duration(milliseconds: 280),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
+                reduced ? Duration.zero : const Duration(milliseconds: 320),
+            switchInCurve: const Interval(.5, 1, curve: Curves.easeOutCubic),
+            switchOutCurve: const Interval(.5, 1, curve: Curves.easeInCubic),
             transitionBuilder: (child, animation) => AnimatedBuilder(
               animation: animation,
               child: child,
@@ -221,7 +206,9 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
                       child: ExcludeSemantics(
                           excluding: leaving,
                           child: FadeTransition(
-                              opacity: animation, child: child))),
+                              opacity: animation,
+                              child: _LyricExitScope(
+                                  exiting: leaving, child: child!)))),
                 );
               },
             ),
@@ -238,6 +225,16 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
+}
+
+// An outgoing surface must stop consuming the new song's timeline even when
+// the user allows offscreen visuals. This scope changes only at entry/exit.
+class _LyricExitScope extends InheritedWidget {
+  const _LyricExitScope({required this.exiting, required super.child});
+  final bool exiting;
+  @override
+  bool updateShouldNotify(_LyricExitScope oldWidget) =>
+      exiting != oldWidget.exiting;
 }
 
 /// Scrollable rows keep their identity for the life of one resolved lyric.
@@ -284,6 +281,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   Object? _layoutIdentity;
   bool? _wasReduced;
   AppLifecycleState? _lifecycle;
+  bool _exiting = false;
   bool _treeVisible = false;
   ValueListenable<RenderingPreferences>? _preferences;
   bool _active = false;
@@ -349,6 +347,10 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     // TickerMode when an opaque route covers it; isCurrent would also stop
     // playback visuals behind ordinary dialogs and popup menus.
     _treeVisible = TickerMode.valuesOf(context).enabled;
+    _exiting = context
+            .dependOnInheritedWidgetOfExactType<_LyricExitScope>()
+            ?.exiting ??
+        false;
     _syncActivity();
   }
 
@@ -361,6 +363,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
 
   void _syncActivity() {
     final active = !widget.suspended &&
+        !_exiting &&
         (_preferences?.value ?? const RenderingPreferences())
             .allowsVisualUpdates(
           lifecycle: _lifecycle,

@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric_source_exception.dart';
+import 'package:dan_player/lyric/krc_decoder.dart';
+import 'package:dan_player/lyric/online_lyric_parser.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 
@@ -172,45 +174,76 @@ class KugouMusicApi {
       if (lyricId == null || accessKey == null) {
         throw const LyricUnavailableException();
       }
-      final content = await session.get(
-        _query(base.resolve('download'), {
-          ...endpoint.queryParameters,
-          'ver': '1',
-          'client': 'pc',
-          'id': lyricId,
-          'accesskey': accessKey,
-          'fmt': 'lrc',
-          'charset': 'utf8',
-        }),
-        byteLimit: _lyricsByteLimit,
-      );
-      final payload = _payload(content);
-      if (!content.containsKey('content') && !payload.containsKey('content')) {
-        throw _invalid();
-      }
-      final raw = content['content'] ?? payload['content'];
-      if (raw == null || raw is String && raw.trim().isEmpty) {
-        throw const LyricUnavailableException();
-      }
-      if (raw is! String) throw _invalid();
-      String lyric;
-      if (raw.contains('[') || RegExp(r'[^\x00-\x7f]').hasMatch(raw)) {
-        lyric = raw;
-      } else {
-        try {
-          lyric = utf8.decode(base64Decode(raw.replaceAll(RegExp(r'\s+'), '')));
-        } on FormatException {
+      final selectedId = lyricId;
+      final selectedAccessKey = accessKey;
+      Future<CustomMusicLyricsResult> download(String format) async {
+        final content = await session.get(
+          _query(base.resolve('download'), {
+            ...endpoint.queryParameters,
+            'ver': '1',
+            'client': 'pc',
+            'id': selectedId,
+            'accesskey': selectedAccessKey,
+            'fmt': format,
+            'charset': 'utf8',
+          }),
+          byteLimit: _lyricsByteLimit,
+        );
+        final payload = _payload(content);
+        if (!content.containsKey('content') &&
+            !payload.containsKey('content')) {
           throw _invalid();
         }
+        final raw = content['content'] ?? payload['content'];
+        if (raw == null || raw is String && raw.trim().isEmpty) {
+          throw const LyricUnavailableException();
+        }
+        if (raw is! String) throw _invalid();
+        String lyric;
+        var type = 'lrc';
+        if (raw.contains('[') || RegExp(r'[^\x00-\x7f]').hasMatch(raw)) {
+          lyric = raw;
+          if (hasWordTiming(
+              parseOnlineLyricPayload({'type': 'krc', 'lyric': raw}))) {
+            type = 'krc';
+          }
+        } else {
+          try {
+            if (format == 'krc') {
+              try {
+                lyric = decodeKrcContainer(raw);
+                type = 'krc';
+              } on FormatException {
+                lyric = utf8
+                    .decode(base64Decode(raw.replaceAll(RegExp(r'\s+'), '')));
+              }
+            } else {
+              lyric =
+                  utf8.decode(base64Decode(raw.replaceAll(RegExp(r'\s+'), '')));
+            }
+          } on FormatException {
+            throw _invalid();
+          }
+        }
+        if (lyric.trim().isEmpty) throw const LyricUnavailableException();
+        final normalized = <String, dynamic>{'type': type, 'lyric': lyric};
+        if (parseOnlineLyricPayload(normalized) == null) throw _invalid();
+        return CustomMusicLyricsResult(
+          rawBody: jsonEncode(normalized),
+          json: normalized,
+          lyric: lyric,
+          type: type,
+        );
       }
-      if (lyric.trim().isEmpty) throw const LyricUnavailableException();
-      final normalized = <String, dynamic>{'type': 'lrc', 'lyric': lyric};
-      return CustomMusicLyricsResult(
-        rawBody: jsonEncode(normalized),
-        json: normalized,
-        lyric: lyric,
-        type: 'lrc',
-      );
+
+      try {
+        return await download('krc');
+      } on CustomMusicSourceCancelled {
+        rethrow;
+      } catch (_) {
+        cancellation?.check();
+        return download('lrc');
+      }
     });
   }
 

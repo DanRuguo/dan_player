@@ -1,4 +1,5 @@
-﻿import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lrc.dart';
 
 class Qrc extends Lyric {
   Qrc(super.lines);
@@ -15,26 +16,15 @@ class Qrc extends Lyric {
     }
 
     if (transRawStr != null) {
-      int lineIt = 0;
-      final splitedTrans = transRawStr.split("\n");
-      for (var transLine in splitedTrans) {
-        if (lineIt > lines.length - 1) {
-          break;
+      final translated = <Duration, String>{};
+      for (final raw in transRawStr.split('\n')) {
+        final line = LrcLine.fromLine(raw);
+        if (line != null && line.content.isNotEmpty) {
+          translated[line.start] = line.content;
         }
-
-        final timeStr = transLine.substring(
-          transLine.indexOf("[") + 1,
-          transLine.indexOf("]"),
-        );
-        // 如果是翻译行就加到歌词去
-        if (int.tryParse(timeStr.split(":").first) != null) {
-          final t =
-              transLine.replaceAll(RegExp(r"\[\d{2}:\d{2}\.\d{2,}\]"), "");
-          if (t.isNotEmpty) {
-            lines[lineIt].translation = t;
-            lineIt += 1;
-          }
-        }
+      }
+      for (final line in lines) {
+        line.translation = translated[line.start];
       }
     }
 
@@ -70,30 +60,16 @@ class QrcLine extends SyncLyricLine {
   QrcLine(super.start, super.length, super.words, [super.translation]);
 
   static QrcLine? fromLine(String line, [String? translation]) {
-    final splitedLine = line.split("]");
-    final from = splitedLine[0].indexOf("[") + 1;
-    final splitedTime = splitedLine[0].substring(from).split(",");
-
-    if (splitedTime.length != 2) return null;
-
-    final Duration start = Duration(
-      milliseconds: int.tryParse(splitedTime[0]) ?? 0,
-    );
-    final Duration length = Duration(
-      milliseconds: int.tryParse(splitedTime[1]) ?? 0,
-    );
-
-    final splitedContent = splitedLine[1].split(")");
-    final List<QrcWord> words = [];
-    for (final item in splitedContent) {
-      final qrcWord = QrcWord.fromWord(item);
-
-      if (qrcWord == null) continue;
-
-      words.add(qrcWord);
-    }
-
-    return QrcLine(start, length, words, translation);
+    final header = RegExp(r'^\[(\d+),(\d+)\]').firstMatch(line.trimLeft());
+    if (header == null) return null;
+    final content = line.trimLeft().substring(header.end);
+    final words = <QrcWord>[
+      for (final match in RegExp(r'(.*?)\((\d+),(\d+)\)').allMatches(content))
+        QrcWord(Duration(milliseconds: int.parse(match[2]!)),
+            Duration(milliseconds: int.parse(match[3]!)), match[1]!),
+    ];
+    return QrcLine(Duration(milliseconds: int.parse(header[1]!)),
+        Duration(milliseconds: int.parse(header[2]!)), words, translation);
   }
 }
 

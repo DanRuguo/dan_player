@@ -6,6 +6,8 @@ void main() {
   test('menu and online lyric actions are translated in every UI language', () {
     const keys = {
       '填入联网歌词',
+      '正在加载歌词',
+      '歌词加载失败，请切换来源或重试',
       '选择歌词来源',
       '删除',
       '搜索歌词候选失败，请检查网络后重试。',

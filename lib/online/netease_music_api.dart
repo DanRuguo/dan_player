@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/lyric/online_lyric_parser.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 
@@ -86,11 +87,36 @@ class NeteaseMusicApi {
 
   Future<CustomMusicLyricsResult> lyrics(Audio audio,
       {CustomMusicSourceCancellation? cancellation}) async {
-    final root = await _request(
-        CustomMusicSourceCapability.lyrics, {'id': _ownedId(audio)},
-        byteLimit: 128 * 1024, cancellation: cancellation);
-    final lrc = root['lrc'];
-    final translated = root['tlyric'];
+    final query = {'id': _ownedId(audio), 'yv': '0', 'ytv': '0', 'yrv': '0'};
+    Map root;
+    final endpoint = profile.endpointFor(CustomMusicSourceCapability.lyrics);
+    if (endpoint?.path.endsWith('/lyric') == true) {
+      try {
+        root = await _request(CustomMusicSourceCapability.lyrics, query,
+            byteLimit: 128 * 1024,
+            cancellation: cancellation,
+            wordLyrics: true);
+        if (parseOnlineLyricPayload(root) == null) {
+          throw _unavailable('该歌曲暂无可用歌词');
+        }
+      } on CustomMusicSourceCancelled {
+        rethrow;
+      } on CustomMusicSourceException catch (error) {
+        if (error.statusCode == 401 || error.statusCode == 403) rethrow;
+        cancellation?.check();
+        root = await _request(CustomMusicSourceCapability.lyrics, query,
+            byteLimit: 128 * 1024, cancellation: cancellation);
+      }
+    } else {
+      // Respect explicitly configured endpoints such as /lyric/new.
+      root = await _request(CustomMusicSourceCapability.lyrics, query,
+          byteLimit: 128 * 1024, cancellation: cancellation);
+    }
+    final useWords =
+        hasWordTiming(parseOnlineLyricPayload({'yrc': root['yrc']}));
+    final lrc = useWords ? root['yrc'] : root['lrc'];
+    final translated =
+        useWords ? root['ytlrc'] ?? root['tlyric'] : root['tlyric'];
     final lyric = lrc is Map ? _text(lrc['lyric']) : null;
     if (lyric == null) {
       throw _unavailable('该歌曲暂无可用歌词');
@@ -100,7 +126,7 @@ class NeteaseMusicApi {
         json: Map<String, dynamic>.from(root),
         lyric: lyric,
         translation: translated is Map ? _text(translated['lyric']) : null,
-        type: 'lrc');
+        type: useWords ? 'yrc' : 'lrc');
   }
 
   Future<CustomMusicCommentsResult> comments(Audio audio,
@@ -204,9 +230,11 @@ class NeteaseMusicApi {
       CustomMusicSourceCapability capability, Map<String, String> query,
       {required int byteLimit,
       required CustomMusicSourceCancellation? cancellation,
-      bool hotComments = false}) async {
+      bool hotComments = false,
+      bool wordLyrics = false}) async {
     var endpoint = profile.endpointFor(capability);
     if (endpoint == null) throw _unavailable('请配置网易云增强 API 接口地址');
+    if (wordLyrics) endpoint = endpoint.replace(path: '${endpoint.path}/new');
     if (hotComments) {
       endpoint = endpoint.resolve('hot').replace(query: endpoint.query);
     }

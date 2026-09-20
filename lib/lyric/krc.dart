@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:dan_player/lyric/lyric.dart';
 
@@ -11,16 +11,10 @@ class Krc extends Lyric {
 
     final splited = krc.split("\n");
     for (final item in splited) {
-      if (languageFrame == null) {
-        final tag = item.substring(
-          item.indexOf("[") + 1,
-          item.indexOf("]"),
-        );
-        var splitedTag = tag.split(":");
-        final tagName = splitedTag.firstOrNull;
-        if (tagName?.contains("language") == true) {
-          languageFrame = splitedTag[1];
-        }
+      if (languageFrame == null &&
+          item.startsWith('[language:') &&
+          item.endsWith(']')) {
+        languageFrame = item.substring(10, item.length - 1);
       }
 
       final krcLine = KrcLine.fromLine(item);
@@ -31,23 +25,29 @@ class Krc extends Lyric {
     }
 
     if (languageFrame != null) {
-      final Map languageMap =
-          json.decode(utf8.decode(base64.decode(languageFrame)));
-      List trans = [];
-      for (var item in languageMap["content"]) {
-        if (item["type"] == 1) {
-          final List transContent = item["lyricContent"];
-          for (List transLine in transContent) {
-            trans.add(transLine.first);
+      // Translation metadata is optional; a broken/mismatched frame must not
+      // discard the correctly timed original words.
+      try {
+        final decoded = json.decode(utf8.decode(base64.decode(languageFrame)));
+        if (decoded is Map && decoded['content'] is List) {
+          for (final item in decoded['content']) {
+            if (item is! Map ||
+                item['type'] != 1 ||
+                item['lyricContent'] is! List) {
+              continue;
+            }
+            final trans = item['lyricContent'] as List;
+            for (var i = 0; i < lines.length && i < trans.length; i++) {
+              if (trans[i] is List &&
+                  (trans[i] as List).isNotEmpty &&
+                  trans[i][0] is String) {
+                lines[i].translation = trans[i][0];
+              }
+            }
+            break;
           }
         }
-      }
-      int linesIt = 0, transIt = 0;
-      while ((linesIt < lines.length) || (transIt < trans.length)) {
-        lines[linesIt].translation = trans[transIt];
-        linesIt += 1;
-        transIt += 1;
-      }
+      } catch (_) {}
     }
 
     // 添加空白
@@ -82,30 +82,23 @@ class KrcLine extends SyncLyricLine {
   KrcLine(super.start, super.length, super.words, [super.translation]);
 
   static KrcLine? fromLine(String line, [String? translation]) {
-    final splitedLine = line.split("]");
-    final from = splitedLine[0].indexOf("[") + 1;
-    final splitedTime = splitedLine[0].substring(from).split(",");
-
-    if (splitedTime.length != 2) return null;
-
-    final Duration start = Duration(
-      milliseconds: int.tryParse(splitedTime[0]) ?? 0,
-    );
-    final Duration length = Duration(
-      milliseconds: int.tryParse(splitedTime[1]) ?? 0,
-    );
-
-    final splitedContent = splitedLine[1].split("<");
-    final List<KrcWord> words = [];
-    for (final item in splitedContent) {
-      final qrcWord = KrcWord.fromWord(item, start);
-
-      if (qrcWord == null) continue;
-
-      words.add(qrcWord);
-    }
-
-    return KrcLine(start, length, words, translation);
+    final header = RegExp(r'^\[(\d+),(\d+)\]').firstMatch(line.trimLeft());
+    if (header == null) return null;
+    final start = Duration(milliseconds: int.parse(header[1]!));
+    final content = line.trimLeft().substring(header.end);
+    final tags = RegExp(r'<(\d+),(\d+),\d+>')
+        .allMatches(content)
+        .toList(growable: false);
+    final words = <KrcWord>[
+      for (var i = 0; i < tags.length; i++)
+        KrcWord(
+            start + Duration(milliseconds: int.parse(tags[i][1]!)),
+            Duration(milliseconds: int.parse(tags[i][2]!)),
+            content.substring(tags[i].end,
+                i + 1 < tags.length ? tags[i + 1].start : content.length)),
+    ];
+    return KrcLine(start, Duration(milliseconds: int.parse(header[2]!)), words,
+        translation);
   }
 }
 

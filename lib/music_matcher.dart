@@ -6,7 +6,7 @@ import 'dart:typed_data';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
-import 'package:dan_player/lyric/krc.dart';
+import 'package:dan_player/lyric/online_lyric_parser.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_source_exception.dart';
@@ -827,12 +827,16 @@ Future<List<SongSearchResult>> uniSearch(Audio audio) async =>
     (await searchLyricCandidates(audio)).candidates;
 
 Future<Object?> _loadNeteaseLyricPayload(String songId) async {
-  final uri = Uri.https('music.163.com', '/api/song/lyric', {
+  final uri = Uri.https('music.163.com', '/api/song/lyric/v1', {
     'id': songId,
-    'lv': '-1',
-    'kv': '-1',
-    'tv': '-1',
-    'rv': '-1',
+    'cp': 'false',
+    'lv': '0',
+    'kv': '0',
+    'tv': '0',
+    'rv': '0',
+    'yv': '0',
+    'ytv': '0',
+    'yrv': '0',
   });
   final client = HttpClient()..connectionTimeout = _providerTimeout;
   try {
@@ -867,26 +871,14 @@ Future<Object?> _loadNeteaseLyricPayload(String songId) async {
   }
 }
 
-Lrc? parseNeteaseLyricPayload(Object? payload) {
+Lyric? parseNeteaseLyricPayload(Object? payload) {
   if (payload is! Map) return null;
   final code = _integer(payload['code']);
   if (code != null && code != 200) return null;
-  if (payload['nolyric'] == true || payload['uncollected'] == true) return null;
-  final lrcSection = payload['lrc'];
-  final lrcText = lrcSection is Map ? _stringText(lrcSection['lyric']) : null;
-  if (lrcText == null) return null;
-  final translationSection = payload['tlyric'];
-  final translation = translationSection is Map
-      ? _stringText(translationSection['lyric'])
-      : null;
-  return _validLyric(Lrc.fromLrcText(
-    translation == null ? lrcText : '$lrcText\n$translation',
-    LrcSource.web,
-    separator: '┃',
-  ));
+  return parseOnlineLyricPayload(payload);
 }
 
-Future<Lrc?> getNeteaseLyric(
+Future<Lyric?> getNeteaseLyric(
   String neteaseSongId, {
   NeteaseLyricPayloadLoader? payloadLoader,
 }) async {
@@ -1148,21 +1140,32 @@ Future<Lyric?> getOnlineLyric({
   String? neteaseSongId,
   int? lrclibId,
   bool throwOnFailure = false,
+  Future<Lyric?> Function(int)? qqWordLoader,
+  QqLyricPayloadLoader? qqPayloadLoader,
 }) async {
   try {
     Lyric? lyric;
     if (qqSongId != null || qqSongMid != null) {
+      if (qqSongId != null) {
+        try {
+          lyric = await (qqWordLoader ?? _getQQSyncLyric)(qqSongId)
+              .timeout(const Duration(seconds: 3));
+          if (hasWordTiming(lyric)) return lyric;
+        } catch (_) {
+          /* A failed word endpoint must retain ordinary fallback. */
+        }
+      }
       Object? publicFailure;
       StackTrace? publicFailureTrace;
       try {
         lyric = await getQqPublicLyric(
-            songId: qqSongId, songMid: qqSongMid, throwOnFailure: true);
+            songId: qqSongId,
+            songMid: qqSongMid,
+            throwOnFailure: true,
+            payloadLoader: qqPayloadLoader);
       } catch (error, trace) {
         publicFailure = error;
         publicFailureTrace = trace;
-      }
-      if (lyric == null && qqSongId != null) {
-        lyric = await _getQQSyncLyric(qqSongId);
       }
       if (lyric == null && qqSongMid != null && qqSongMid.trim().isNotEmpty) {
         lyric = await _getQQUnsyncLyric(qqSongMid.trim());
@@ -1235,6 +1238,7 @@ Future<Lyric?> getLyricForCustomSourceChoice(
 }
 
 Future<Lyric?> _getCustomLyric(Audio audio) async {
+  Lyric? fallback;
   final profiles = AppSettings.instance.customMusicSources.value;
   final deadline = DateTime.now().add(_customLyricSweepTimeout);
   for (final profile in profiles) {
@@ -1270,7 +1274,8 @@ Future<Lyric?> _getCustomLyric(Audio audio) async {
         return null;
       }
       final lyric = _parseCustomLyricResponse(response.rawBody);
-      if (lyric != null) return lyric;
+      if (hasWordTiming(lyric)) return lyric;
+      fallback ??= lyric;
     } on TimeoutException {
       cancellation.cancel();
       break;
@@ -1285,7 +1290,7 @@ Future<Lyric?> _getCustomLyric(Audio audio) async {
       deadlineTimer.cancel();
     }
   }
-  return null;
+  return fallback;
 }
 
 bool _isCurrentCustomLyricProfile(CustomMusicSourceProfile expected) {
@@ -1373,94 +1378,8 @@ Lyric? _parseCustomLyricResponse(String body) {
   }
 }
 
-Lyric? _lyricFromCustomPayload(dynamic payload) {
-  if (payload is String) {
-    return _validLyric(
-      Lrc.fromLrcText(payload, LrcSource.web, separator: "┃"),
-    );
-  }
-  if (payload is! Map) return null;
-
-  final nestedData = payload["data"];
-  if (nestedData != null && !_hasKnownLyricField(payload)) {
-    final nestedLyric = _lyricFromCustomPayload(nestedData);
-    if (nestedLyric != null) return nestedLyric;
-  }
-
-  String? type = _stringValue(payload["type"]) ??
-      _stringValue(payload["format"]) ??
-      _stringValue(payload["source"]);
-  String? lyricText = _stringValue(payload["lyric"]);
-  String? translation =
-      _stringValue(payload["translation"]) ?? _stringValue(payload["trans"]);
-
-  for (final format in const ["qrc", "krc", "lrc"]) {
-    final value = payload[format];
-    if (value is Map) {
-      lyricText ??= _stringValue(value["lyric"]);
-      translation ??=
-          _stringValue(value["translation"]) ?? _stringValue(value["trans"]);
-      type ??= format;
-    } else {
-      lyricText ??= _stringValue(value);
-      if (value is String) type ??= format;
-    }
-  }
-
-  final tlyric = payload["tlyric"];
-  if (tlyric is Map) {
-    translation ??= _stringValue(tlyric["lyric"]);
-  } else {
-    translation ??= _stringValue(tlyric);
-  }
-
-  if (lyricText == null) return null;
-
-  try {
-    switch ((type ?? "lrc").toLowerCase()) {
-      case "qrc":
-        return _validLyric(Qrc.fromQrcText(lyricText, translation));
-      case "krc":
-        return _validLyric(Krc.fromKrcText(lyricText));
-      case "lrc":
-      default:
-        return _validLyric(
-          Lrc.fromLrcText(
-            translation == null ? lyricText : "$lyricText\n$translation",
-            LrcSource.web,
-            separator: "┃",
-          ),
-        );
-    }
-  } catch (err, trace) {
-    LOGGER.e("Failed to parse custom lyric API payload");
-    LOGGER.e(err, stackTrace: trace);
-    return null;
-  }
-}
-
-bool _hasKnownLyricField(Map payload) {
-  for (final key in const [
-    "lyric",
-    "lrc",
-    "qrc",
-    "krc",
-    "translation",
-    "trans",
-    "tlyric",
-  ]) {
-    if (payload.containsKey(key)) return true;
-  }
-  return false;
-}
-
-String? _stringValue(dynamic value) {
-  if (value == null) return null;
-  if (value is! String) return value.toString();
-
-  final trimmed = value.trim();
-  return trimmed.isEmpty ? null : trimmed;
-}
+Lyric? _lyricFromCustomPayload(dynamic payload) =>
+    parseOnlineLyricPayload(payload);
 
 T? _validLyric<T extends Lyric>(T? lyric) {
   if (lyric == null || lyric.lines.isEmpty) return null;
@@ -1479,31 +1398,68 @@ Future<Lyric?> getMostMatchedLyric(
   } catch (err, trace) {
     LOGGER.w('[lyric/custom] 自定义歌词来源失败', stackTrace: trace);
   }
-  if (customLyric != null) return customLyric;
+  if (hasWordTiming(customLyric)) return customLyric;
 
   LyricSearchResponse response;
   try {
     response = await (candidateSearch ?? searchLyricCandidates).call(audio);
   } catch (err, trace) {
     LOGGER.w('[lyric/search] 候选搜索失败', stackTrace: trace);
-    return null;
+    return customLyric;
   }
   final load = candidateLyricLoader ?? getLyricForCandidate;
-  for (final candidate in response.candidates
-      .where(
-          (candidate) => isAutomaticLyricCandidateCompatible(audio, candidate))
-      .take(5)) {
-    try {
-      final lyric = await load(candidate);
-      if (lyric != null && lyric.lines.isNotEmpty) return lyric;
-    } catch (err, trace) {
-      LOGGER.w(
-        '[lyric/${candidate.source.name}] 候选歌词读取失败',
-        stackTrace: trace,
-      );
+  final candidates = response.candidates
+      .where((candidate) =>
+          isAutomaticLyricCandidateCompatible(audio, candidate) &&
+          (customLyric == null || candidate.score >= 1 - 1e-9))
+      .toList()
+    ..sort((a, b) => b.score.compareTo(a.score));
+  final deadline = DateTime.now().add(_customLyricSweepTimeout);
+  var attempted = 0;
+  for (var start = 0; start < candidates.length && attempted < 20;) {
+    var end = start + 1;
+    while (end < candidates.length &&
+        (candidates[end].score - candidates[start].score).abs() < 1e-9) {
+      end++;
     }
+    // Round-robin equal matches across sources so many duplicates from one
+    // provider cannot consume the entire budget before another is considered.
+    final sources = <String, List<SongSearchResult>>{};
+    for (final candidate in candidates.sublist(start, end)) {
+      (sources[candidate.customProfile?.id ?? candidate.source.name] ??= [])
+          .add(candidate);
+    }
+    final group = <SongSearchResult>[];
+    for (var row = 0; group.length < end - start; row++) {
+      for (final source in sources.values) {
+        if (row < source.length) group.add(source[row]);
+      }
+    }
+    Lyric? fallback = customLyric;
+    for (var index = 0; index < group.length && attempted < 20; index += 3) {
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) return fallback;
+      final batch = group.skip(index).take(min(3, 20 - attempted)).toList();
+      attempted += batch.length;
+      final values = await Future.wait(batch.map((candidate) async {
+        try {
+          return await load(candidate).timeout(remaining);
+        } catch (err, trace) {
+          LOGGER.w('[lyric/${candidate.source.name}] 候选歌词读取失败',
+              stackTrace: trace);
+          return null;
+        }
+      }));
+      for (final lyric in values) {
+        if (lyric == null || lyric.lines.isEmpty) continue;
+        if (hasWordTiming(lyric)) return lyric;
+        fallback ??= lyric;
+      }
+    }
+    if (fallback != null) return fallback;
+    start = end;
   }
-  return null;
+  return customLyric;
 }
 
 String? _songVersionKind(String title) {

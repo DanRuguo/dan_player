@@ -163,11 +163,11 @@ const Map<String, List<String>> uiCatalogC = {
     "API 백업을 불러왔습니다. 저장을 눌러 적용하세요."
   ],
   "接口地址": ["Endpoint URL", "API の URL", "API 주소"],
-  "请求方式：GET；参数：title、artist、album、duration、fileName、displayTitle。返回 JSON 支持 {type:\"lrc\", lyric:\"...\", translation:\"...\"}，type 可为 lrc/qrc/krc。":
+  "请求方式：GET；参数：title、artist、album、duration、fileName、displayTitle。返回 JSON 支持 {type:\"lrc\", lyric:\"...\", translation:\"...\"}，type 可为 lrc/qrc/krc/yrc。":
       [
-    "Method: GET; parameters: title, artist, album, duration, fileName, displayTitle. JSON responses support {type:\"lrc\", lyric:\"...\", translation:\"...\"}; type may be lrc/qrc/krc.",
-    "リクエスト方式：GET。パラメーター：title、artist、album、duration、fileName、displayTitle。JSON 応答は {type:\"lrc\", lyric:\"...\", translation:\"...\"} に対応し、type は lrc/qrc/krc を指定できます。",
-    "요청 방식: GET. 매개변수: title, artist, album, duration, fileName, displayTitle. JSON 응답은 {type:\"lrc\", lyric:\"...\", translation:\"...\"} 형식을 지원하며 type은 lrc/qrc/krc를 사용할 수 있습니다."
+    "Method: GET; parameters: title, artist, album, duration, fileName, displayTitle. JSON responses support {type:\"lrc\", lyric:\"...\", translation:\"...\"}; type may be lrc/qrc/krc/yrc.",
+    "リクエスト方式：GET。パラメーター：title、artist、album、duration、fileName、displayTitle。JSON 応答は {type:\"lrc\", lyric:\"...\", translation:\"...\"} に対応し、type は lrc/qrc/krc/yrc を指定できます。",
+    "요청 방식: GET. 매개변수: title, artist, album, duration, fileName, displayTitle. JSON 응답은 {type:\"lrc\", lyric:\"...\", translation:\"...\"} 형식을 지원하며 type은 lrc/qrc/krc/yrc를 사용할 수 있습니다."
   ],
   "恢复默认": ["Restore defaults", "初期設定に戻す", "기본값 복원"],
   "请输入 http 或 https 接口地址": [

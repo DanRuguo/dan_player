@@ -152,7 +152,7 @@ void main() {
           ['/lyric-service/search', '/lyric-service/download']);
       expect(requests.first.queryParameters['keyword'], 'Song Artist');
       expect(requests.first.queryParameters['duration'], '180000');
-      expect(requests.last.queryParameters['fmt'], 'lrc');
+      expect(requests.last.queryParameters['fmt'], 'krc');
       expect(requests.join(), isNot(contains('private')));
       expect(result.toString(), isNot(contains('public-lyric-access')));
     });

@@ -315,7 +315,7 @@ class _LyricApiEditorState extends State<LyricApiEditor> {
                       ),
                       const SizedBox(height: 12.0),
                       Text(
-                        ui("请求方式：GET；参数：title、artist、album、duration、fileName、displayTitle。返回 JSON 支持 {type:\"lrc\", lyric:\"...\", translation:\"...\"}，type 可为 lrc/qrc/krc。"),
+                        ui("请求方式：GET；参数：title、artist、album、duration、fileName、displayTitle。返回 JSON 支持 {type:\"lrc\", lyric:\"...\", translation:\"...\"}，type 可为 lrc/qrc/krc/yrc。"),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],

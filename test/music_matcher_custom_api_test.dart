@@ -93,7 +93,9 @@ void main() {
         null,
       );
 
-      final lyric = await getMostMatchedLyric(audio);
+      final lyric = await getMostMatchedLyric(audio,
+          candidateSearch: (_) async =>
+              LyricSearchResponse(candidates: [], failures: {}));
 
       expect(lyric, isA<Lrc>());
       expect(requests, hasLength(1));
@@ -218,7 +220,9 @@ void main() {
       null,
     );
 
-    final lyric = await getMostMatchedLyric(audio);
+    final lyric = await getMostMatchedLyric(audio,
+        candidateSearch: (_) async =>
+            LyricSearchResponse(candidates: [], failures: {}));
 
     expect(((lyric as Lrc).lines.single as LrcLine).content, 'Second source');
     expect(requests, ['/first', '/second']);

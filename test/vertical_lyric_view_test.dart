@@ -759,7 +759,7 @@ void main() {
   });
 
   testWidgets(
-      'replacement freezes old rows until ready without a spinner flash',
+      'replacement fades old rows away while the next lyrics are pending',
       (tester) async {
     final harness = _Harness(position: 25);
     await _mount(tester, harness);
@@ -772,6 +772,11 @@ void main() {
     expect(_controller(tester).offset, offset);
     expect(_active(tester), 5);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(harness.positions.hasListener, isFalse);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(VerticalLyricScrollView), findsNothing);
+    expect(find.text('正在加载歌词'), findsOneWidget);
+    expect(tester.binding.transientCallbackCount, 0);
     next.complete(_plainLyric(3));
     await tester.pumpAndSettle();
     expect(find.byType(LyricViewTile), findsNWidgets(3));
@@ -797,7 +802,6 @@ void main() {
     expect(find.textContaining('歌词加载失败'), findsNothing);
     harness.future = Future.value(null);
     await tester.pumpWidget(_app(harness, reduced: true));
-    expect(find.byType(LyricViewTile), findsNWidgets(2));
     await tester.pumpAndSettle();
     expect(find.text('无歌词'), findsOneWidget);
     expect(tester.takeException(), isNull);

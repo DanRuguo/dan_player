@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/online_lyric_parser.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -361,11 +362,26 @@ class CustomMusicSourceTransport {
     }
     final root = Map<String, dynamic>.from(decoded);
     final payload = _payload(root);
-    final lyric = _firstText(<Object?>[
-      payload['lyric'],
-      payload['lrc'],
-      payload['content'],
-    ]);
+    String? section(Object? value) =>
+        value is Map ? _firstText([value['lyric']]) : _firstText([value]);
+    String? wordText;
+    String? wordType;
+    for (final format in const ['qrc', 'krc', 'yrc']) {
+      final text = section(payload[format]);
+      if (text != null &&
+          hasWordTiming(
+              parseOnlineLyricPayload({'type': format, 'lyric': text}))) {
+        wordText = text;
+        wordType = format;
+        break;
+      }
+    }
+    final lyric = wordText ??
+        _firstText(<Object?>[
+          section(payload['lyric']),
+          section(payload['lrc']),
+          payload['content'],
+        ]);
     if (lyric == null) {
       throw _invalid('自定义歌源响应中没有歌词内容');
     }
@@ -378,7 +394,8 @@ class CustomMusicSourceTransport {
         payload['translatedLyric'],
         payload['tlyric'],
       ]),
-      type: _firstText(<Object?>[payload['type'], payload['format']]),
+      type:
+          wordType ?? _firstText(<Object?>[payload['type'], payload['format']]),
     );
   }
 

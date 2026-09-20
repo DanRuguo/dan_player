@@ -8,6 +8,41 @@ import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+      'word lyrics use the new endpoint and retain YRC instead of ordinary LRC',
+      () async {
+    final paths = <String>[];
+    await _server((request) {
+      paths.add(request.uri.path);
+      return {
+        'code': 200,
+        'yrc': {'lyric': '[1000,1000](1000,500,0)Hi (1500,500,0)there'},
+        'lrc': {'lyric': '[00:01.00]Hi there'}
+      };
+    }, (transport) async {
+      final result = await transport.lyrics(_track());
+      expect(result.type, 'yrc');
+      expect(paths, ['/api/lyric/new']);
+    });
+  });
+  test('old service without word endpoint falls back to its ordinary endpoint',
+      () async {
+    final paths = <String>[];
+    await _server((request) {
+      paths.add(request.uri.path);
+      return request.uri.path.endsWith('/new')
+          ? {'code': 404}
+          : {
+              'code': 200,
+              'lrc': {'lyric': '[00:01.00]Hi there'}
+            };
+    }, (transport) async {
+      final result = await transport.lyrics(_track());
+      expect(result.type, 'lrc');
+      expect(paths, ['/api/lyric/new', '/api/lyric']);
+    });
+  });
+
   test('NetEase preset is discoverable, disabled and round-trips all endpoints',
       () {
     final preset = CustomMusicSourceProfile.neteaseApiPreset();
