@@ -204,6 +204,26 @@ void main() {
     }
   });
 
+  testWidgets('new mini lyric rises four pixels and stops after settling',
+      (tester) async {
+    final future =
+        Future<Lyric?>.value(_Lyric([_Line(0, 'Old'), _Line(10, 'New')]));
+    await tester.pumpWidget(_app(future: future, reduced: false));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(_app(future: future, position: 11, reduced: false));
+    Finder offset() => find
+        .ancestor(of: find.text('New'), matching: find.byType(Transform))
+        .first;
+    expect(tester.widget<Transform>(offset()).transform.storage[13], 4);
+    await tester.pump(AppMotion.emphasized * .75);
+    final mid = tester.widget<Transform>(offset()).transform.storage[13];
+    expect(mid, greaterThan(0));
+    expect(mid, lessThan(4));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Transform>(offset()).transform.storage[13], 0);
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
   testWidgets('line changes fade only text and exclude outgoing semantics',
       (tester) async {
     final future = Future<Lyric?>.value(_Lyric([
@@ -224,8 +244,8 @@ void main() {
       ),
       findsWidgets,
     );
-    expect(
-        tester.widget<AnimatedSwitcher>(_switcher()).duration, AppMotion.quick);
+    expect(tester.widget<AnimatedSwitcher>(_switcher()).duration,
+        AppMotion.emphasized);
     for (var frame = 0; frame < 5; frame++) {
       final visible = tester
           .widgetList<FadeTransition>(find.descendant(

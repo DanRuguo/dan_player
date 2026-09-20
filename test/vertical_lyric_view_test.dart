@@ -287,7 +287,8 @@ void main() {
     final focused = tester.widget<Text>(find.text('Line 0')).style!;
     final contextStyle = tester.widget<Text>(find.text('Line 1')).style!;
     expect(focused.fontWeight, FontWeight.w800);
-    expect(focused.fontSize, closeTo(22 * 1.24, .000001));
+    expect(
+        focused.fontSize, closeTo(22 * LyricMotion.focusedFontScale, .000001));
     final focusedSize = focused.fontSize! * _scale(tester, 0);
     final contextSize = contextStyle.fontSize! * _scale(tester, 1);
     expect(focusedSize / contextSize, greaterThanOrEqualTo(1.24));
@@ -452,7 +453,7 @@ void main() {
     expect(_opacity(tester, 1), .64);
     var lastOldOpacity = 1.0;
     var lastNewOpacity = .64;
-    var lastNewScale = .80;
+    var lastNewScale = LyricMotion.scaleForDistance(1);
     for (var frame = 0; frame < 14; frame++) {
       await tester.pump(const Duration(milliseconds: 40));
       final oldOpacity = _opacity(tester, 0);
@@ -490,7 +491,8 @@ void main() {
     for (var frame = 0; frame < 16; frame++) {
       await tester.pump(const Duration(milliseconds: 40));
       for (var row = 0; row < 6; row++) {
-        expect(_scale(tester, row), inInclusiveRange(.76, 1));
+        expect(_scale(tester, row),
+            inInclusiveRange(LyricMotion.scaleForDistance(4), 1));
         expect(_opacity(tester, row), inInclusiveRange(.32, 1));
       }
     }

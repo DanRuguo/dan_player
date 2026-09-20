@@ -188,14 +188,11 @@ class PlaybackRateButton extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final playback = PlayService.instance.playbackService;
-    final scheme = Theme.of(context).colorScheme;
     return ValueListenableBuilder<double>(
       valueListenable: playback.playbackRate,
-      builder: (context, rate, _) => PopupMenuButton<double>(
-        tooltip: ui("播放速度（保音高）"),
+      builder: (context, rate, _) => PlaybackRateMenu(
+        rate: rate,
         enabled: playback.supportsPlaybackRate,
-        initialValue: rate,
-        shape: AppShape.control,
         onSelected: (value) async {
           if (!playback.setPlaybackRate(value)) return;
           try {
@@ -205,19 +202,62 @@ class PlaybackRateButton extends StatelessWidget {
                 kind: AppNoticeKind.error);
           }
         },
-        itemBuilder: (context) => [
-          for (final value in PlaybackRate.presets)
-            CheckedPopupMenuItem(
-              value: value,
-              checked: value == rate,
-              height: 48,
-              child: Text(PlaybackRate.label(value)),
-            ),
-        ],
+      ),
+    );
+  }
+}
+
+/// A local overlay keeps speed selection off the navigator's route transition
+/// path. The menu has a stable check column and no per-item check animations.
+class PlaybackRateMenu extends StatelessWidget {
+  const PlaybackRateMenu(
+      {super.key,
+      required this.rate,
+      required this.onSelected,
+      this.enabled = true});
+  final double rate;
+  final ValueChanged<double> onSelected;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return MenuAnchor(
+      style: const MenuStyle(shape: WidgetStatePropertyAll(AppShape.control)),
+      menuChildren: [
+        for (final value in PlaybackRate.presets)
+          MenuItemButton(
+            key: ValueKey(('playback-rate', value)),
+            onPressed: () => onSelected(value),
+            leadingIcon: SizedBox(
+                width: 20,
+                height: 20,
+                child:
+                    value == rate ? const Icon(Icons.check, size: 20) : null),
+            child: Semantics(
+                selected: value == rate,
+                child: Text(PlaybackRate.label(value))),
+          ),
+      ],
+      builder: (context, controller, _) => Tooltip(
+        message: ui("播放速度（保音高）"),
         child: SizedBox(
           width: 48,
           height: 48,
-          child: Center(child: PlaybackRateLabel(rate: rate, scheme: scheme)),
+          child: TextButton(
+            key: const ValueKey('playback-rate-menu'),
+            style: TextButton.styleFrom(padding: EdgeInsets.zero),
+            onPressed: enabled
+                ? () {
+                    if (controller.isOpen) {
+                      controller.close();
+                    } else {
+                      controller.open();
+                    }
+                  }
+                : null,
+            child: PlaybackRateLabel(rate: rate),
+          ),
         ),
       ),
     );

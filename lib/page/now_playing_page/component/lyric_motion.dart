@@ -19,7 +19,7 @@ abstract final class LyricMotion {
   // Keep this separate from the shared line/title fade curve: a scroll must
   // decelerate, remain monotonic and never spring past its target.
   static const scrollCurve = Cubic(0.22, 0.0, 0.24, 1.0);
-  static const focusedFontScale = 1.24;
+  static const focusedFontScale = 1.34;
   static const focusedFontWeight = FontWeight.w800;
   static const maximumFollowRows = 24;
 
@@ -62,9 +62,9 @@ abstract final class LyricMotion {
   // beyond that box or change wrapping while the focus moves between lines.
   static double scaleForDistance(int distance) => switch (distance.abs()) {
         0 => 1,
-        1 => .80,
-        2 => .78,
-        _ => .76,
+        1 => .80 * 1.24 / focusedFontScale,
+        2 => .78 * 1.24 / focusedFontScale,
+        _ => .76 * 1.24 / focusedFontScale,
       };
 
   /// One shared pose for all three waiting dots, sampled from media time.

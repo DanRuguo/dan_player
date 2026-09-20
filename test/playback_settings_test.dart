@@ -4,6 +4,12 @@ import 'package:dan_player/play_service/playback_rate.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+class _RouteCounter extends NavigatorObserver {
+  int pushes = 0;
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) => pushes++;
+}
+
 void main() {
   Future<void> mount(WidgetTester tester, Widget panel,
       {double width = 720, double scale = 1}) async {
@@ -20,6 +26,39 @@ void main() {
       home: Scaffold(body: SingleChildScrollView(child: panel)),
     ));
   }
+
+  testWidgets('rate overlay changes tempo without pushing a player route',
+      (tester) async {
+    final routes = _RouteCounter();
+    final selected = <double>[];
+    await tester.pumpWidget(MaterialApp(
+        navigatorObservers: [routes],
+        home: Scaffold(
+            body: Center(
+                child: PlaybackRateMenu(rate: 1, onSelected: selected.add)))));
+    final initialPushes = routes.pushes;
+    await tester.tap(find.byKey(const ValueKey('playback-rate-menu')));
+    await tester.pumpAndSettle();
+    expect(find.byType(MenuItemButton), findsNWidgets(7));
+    expect(routes.pushes, initialPushes);
+    expect(find.byType(CheckedPopupMenuItem<double>), findsNothing);
+    await tester.tap(find.byKey(const ValueKey(('playback-rate', 1.25))));
+    await tester.pumpAndSettle();
+    expect(selected, [1.25]);
+    expect(find.byType(MenuItemButton), findsNothing);
+    expect(PlayService.isInitialized, isFalse);
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
+  testWidgets('disabled speed menu stays closed', (tester) async {
+    await mount(
+        tester,
+        PlaybackRateMenu(
+            rate: 1, enabled: false, onSelected: (_) => fail('disabled')));
+    await tester.tap(find.byKey(const ValueKey('playback-rate-menu')));
+    await tester.pumpAndSettle();
+    expect(find.byType(MenuItemButton), findsNothing);
+  });
 
   testWidgets('opening the real settings does not initialize BASS or SMTC',
       (tester) async {

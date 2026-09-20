@@ -187,9 +187,9 @@ class _CompactLyricViewState extends State<CompactLyricView>
         if (_reduced) return content;
         return AnimatedSwitcher(
           key: const ValueKey('compact-lyric-switcher'),
-          duration: AppMotion.quick,
-          switchInCurve: Curves.linear,
-          switchOutCurve: Curves.linear,
+          duration: AppMotion.emphasized,
+          switchInCurve: const Interval(.25, 1, curve: Curves.easeOutCubic),
+          switchOutCurve: const Interval(.75, 1, curve: Curves.easeInCubic),
           layoutBuilder: (current, previous) => Stack(
             alignment: Alignment.center,
             children: [...previous, if (current != null) current],
@@ -198,12 +198,18 @@ class _CompactLyricViewState extends State<CompactLyricView>
             ignoring: child.key != content.key,
             child: ExcludeSemantics(
               excluding: child.key != content.key,
-              // Fade through an empty midpoint so dense lyrics never paint
-              // over each other when a line or loading status changes.
+              // The old text clears in 60ms; the new line then rises/fades
+              // for 180ms like desktop lyrics, without stacking dense text.
               child: FadeTransition(
-                opacity: animation.drive(CurveTween(
-                    curve: const Interval(.5, 1, curve: Curves.easeOutCubic))),
-                child: child,
+                opacity: animation,
+                child: AnimatedBuilder(
+                  animation: animation,
+                  child: child,
+                  builder: (context, child) => Transform.translate(
+                    offset: Offset(0, 4 * (1 - animation.value)),
+                    child: child,
+                  ),
+                ),
               ),
             ),
           ),

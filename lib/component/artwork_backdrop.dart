@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:dan_player/component/background_image_motion.dart';
 import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/component/fluid_artwork.dart';
+import 'package:dan_player/component/cached_artwork_blur.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:flutter/foundation.dart';
@@ -132,23 +133,26 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                                     ? (phase, active, child) =>
                                         FluidArtwork(phase: phase, child: child)
                                     : null,
-                                child: ImageFiltered(
-                                  imageFilter: ui.ImageFilter.blur(
-                                    sigmaX: widget.blur.clamp(0, 100),
-                                    sigmaY: widget.blur.clamp(0, 100),
-                                    tileMode: ui.TileMode.clamp,
-                                  ),
-                                  child: Image(
-                                    image: provider,
-                                    fit: BoxFit.cover,
-                                    alignment: Alignment.topCenter,
-                                    filterQuality: FilterQuality.low,
-                                    excludeFromSemantics: true,
-                                    gaplessPlayback: true,
-                                    errorBuilder: (_, __, ___) =>
-                                        const SizedBox.expand(),
-                                  ),
-                                ),
+                                child: widget.fluid
+                                    ? CachedArtworkBlur(
+                                        image: provider, blur: widget.blur)
+                                    : ImageFiltered(
+                                        imageFilter: ui.ImageFilter.blur(
+                                          sigmaX: widget.blur.clamp(0, 100),
+                                          sigmaY: widget.blur.clamp(0, 100),
+                                          tileMode: ui.TileMode.clamp,
+                                        ),
+                                        child: Image(
+                                          image: provider,
+                                          fit: BoxFit.cover,
+                                          alignment: Alignment.topCenter,
+                                          filterQuality: FilterQuality.low,
+                                          excludeFromSemantics: true,
+                                          gaplessPlayback: true,
+                                          errorBuilder: (_, __, ___) =>
+                                              const SizedBox.expand(),
+                                        ),
+                                      ),
                               ),
                               if (widget.opacity != null)
                                 ColoredBox(
