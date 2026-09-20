@@ -25,11 +25,12 @@ Future<bool> showEditAudioMetadataDialog(
       applyAudioMetadataEdit,
 }) async {
   if (audio.isCueTrack) {
-    showTextOnSnackBar('CUE 分轨信息由 CUE 文件提供，不能修改整轨音频。');
+    showAppNotice(ui('CUE 分轨信息由 CUE 文件提供，不能修改整轨音频。'),
+        kind: AppNoticeKind.warning);
     return false;
   }
   if (audio.isOnline) {
-    showTextOnSnackBar("联网歌曲信息由来源提供，不能修改其标签");
+    showAppNotice(ui("联网歌曲信息由来源提供，不能修改其标签"), kind: AppNoticeKind.warning);
     return false;
   }
   final result = await showAppDialog<bool>(
@@ -135,11 +136,13 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
         if (selection.album != null) albumController.text = selection.album!;
         if (downloadedPicture != null) picturePath = downloadedPicture;
       });
-      showTextOnSnackBar("已填入候选信息，尚未写入文件。请核对后点击“保存”。");
+      showAppNotice(ui("已填入候选信息，尚未写入文件。请核对后点击“保存”。"),
+          kind: AppNoticeKind.success);
     } catch (error, trace) {
       await _removeStagedArtwork(staged);
       LOGGER.e('[metadata preview] $error', stackTrace: trace);
-      if (mounted) showTextOnSnackBar("准备歌曲信息失败：{0}", arguments: [error]);
+      if (mounted)
+        showAppNotice(ui("准备歌曲信息失败：{0}", [error]), kind: AppNoticeKind.error);
     } finally {
       if (mounted) setState(() => _lookingUp = false);
     }
@@ -182,7 +185,8 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
     } catch (error, trace) {
       await _removeStagedArtwork(staged);
       LOGGER.e('[metadata picture picker] $error', stackTrace: trace);
-      if (mounted) showTextOnSnackBar("选择封面失败：{0}", arguments: [error]);
+      if (mounted)
+        showAppNotice(ui("选择封面失败：{0}", [error]), kind: AppNoticeKind.error);
     } finally {
       if (mounted) setState(() => _pickingPicture = false);
     }
@@ -199,7 +203,7 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
         ? "UNKNOWN"
         : albumController.text.trim();
     if (fileName.isEmpty || title.isEmpty) {
-      showTextOnSnackBar("文件名和标题不能为空");
+      showAppNotice(ui("文件名和标题不能为空"), kind: AppNoticeKind.warning);
       return;
     }
 
@@ -218,7 +222,7 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
         ),
       );
       if (!mounted) return;
-      showTextOnSnackBar("已更新歌曲信息");
+      showAppNotice(ui("已更新歌曲信息"), kind: AppNoticeKind.success);
       Navigator.of(context).pop(true);
     } catch (err) {
       if (!mounted) return;
@@ -227,13 +231,15 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
       });
       if (err is AudioMetadataEditException) {
         if (err.fileWasUpdated) {
-          showTextOnSnackBar(err.userMessage, context: context);
+          showAppNotice(ui(err.userMessage),
+              context: context, kind: AppNoticeKind.warning);
         } else {
-          showTextOnSnackBar("更新歌曲信息失败：{0}",
-              arguments: [ui(err.userMessage)], context: context);
+          showAppNotice(ui("更新歌曲信息失败：{0}", [ui(err.userMessage)]),
+              context: context, kind: AppNoticeKind.error);
         }
       } else {
-        showTextOnSnackBar("更新歌曲信息失败：{0}", arguments: [err], context: context);
+        showAppNotice(ui("更新歌曲信息失败：{0}", [err]),
+            context: context, kind: AppNoticeKind.error);
       }
     } finally {
       if (!mounted) await _removeStagedArtwork(_stagedArtwork);

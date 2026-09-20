@@ -74,8 +74,8 @@ void main() {
 
   test('every explicit UI template has translations', () {
     final missing = <String>{};
-    final pattern = RegExp(
-        r'''\b(?:ui|showTextOnSnackBar)\(\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')''');
+    final pattern =
+        RegExp(r'''\bui\(\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')''');
     for (final root in [
       'lib',
       'third_party/desktop_lyric/lib',
@@ -325,8 +325,8 @@ void main() {
         noticeContext = context;
         return const SizedBox.shrink();
       })));
-      showTextOnSnackBar('更新歌曲信息失败：{0}',
-          arguments: ['曲名 😀 {1}'], context: noticeContext);
+      showAppNotice(ui('更新歌曲信息失败：{0}', ['曲名 😀 {1}']),
+          kind: AppNoticeKind.error, context: noticeContext);
       await tester.pumpAndSettle();
       expect(find.byIcon(Icons.error_outline), findsOneWidget);
       expect(find.text(translateUi('更新歌曲信息失败：{0}', language, ['曲名 😀 {1}'])),

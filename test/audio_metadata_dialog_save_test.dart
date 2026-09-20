@@ -108,6 +108,7 @@ void main() {
     expect(find.text('编辑歌曲信息'), findsOneWidget);
     expect(find.textContaining('歌曲文件已保存'), findsOneWidget);
     expect(find.textContaining('更新歌曲信息失败'), findsNothing);
+    expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
     expect(
         tester.widget<TextField>(find.byType(TextField).at(1)).controller!.text,
         'Changed');

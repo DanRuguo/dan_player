@@ -294,9 +294,12 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                   controlKey: const ValueKey('background-motion'),
                   contentPadding: SettingsSurface.embeddedRowPadding,
                   title: Text(ui("轻缓动态背景")),
-                  subtitle: Text(value.source.usesImage
-                      ? ui("让背景图片缓慢漂移。暂停、窗口隐藏或减少动态效果时停止；不会移动文字与按钮。")
-                      : ui("仅适用于专辑封面或自定义图片，不改变真实窗后背景。")),
+                  subtitle: Text(_scene == BackgroundScene.nowPlaying &&
+                          value.source == BackgroundSource.artwork
+                      ? ui("让封面配色缓慢流动。暂停、窗口隐藏或减少动态效果时停止；不会移动文字与按钮。")
+                      : value.source.usesImage
+                          ? ui("让背景图片缓慢漂移。暂停、窗口隐藏或减少动态效果时停止；不会移动文字与按钮。")
+                          : ui("仅适用于专辑封面或自定义图片，不改变真实窗后背景。")),
                   value: value.motion,
                   onChanged: value.source.usesImage
                       ? (motion) => _update(value.copyWith(motion: motion))

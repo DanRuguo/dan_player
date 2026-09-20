@@ -235,9 +235,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     super.dispose();
   }
 
-  void _message(String text) {
+  void _message(String text, {AppNoticeKind kind = AppNoticeKind.error}) {
     if (!mounted) return;
-    showTextOnSnackBar(text, context: context);
+    showAppNotice(text, context: context, kind: kind);
   }
 
   void _navigate(Playlist? playlist) {
@@ -335,7 +335,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
       {bool preserveCoverTransition = false}) async {
     if (_busy) return false;
     if (_readBlocked) {
-      _message(ui("歌单读取尚未完成，请先修复数据文件并重新读取；原文件没有改动。"));
+      _message(ui("歌单读取尚未完成，请先修复数据文件并重新读取；原文件没有改动。"),
+          kind: AppNoticeKind.warning);
       return false;
     }
     // A stored flight targets the old geometry and image. User edits can move
@@ -443,7 +444,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
   void _play(List<Audio> queue, [int index = 0]) {
     if (queue.isEmpty || index < 0 || index >= queue.length) {
-      _message(ui("这个歌单还没有可播放的歌曲。"));
+      _message(ui("这个歌单还没有可播放的歌曲。"), kind: AppNoticeKind.warning);
       return;
     }
     final snapshot = List<Audio>.unmodifiable(queue);
@@ -1730,7 +1731,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
       await readPlaylists();
       if (!playlistsReadBlocked) playlistUiSaveError.value = null;
       playlistUiRevision.value++;
-      if (playlistStorageWarning == null) _message(ui("歌单已重新读取"));
+      if (playlistStorageWarning == null) {
+        _message(ui("歌单已重新读取"), kind: AppNoticeKind.success);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

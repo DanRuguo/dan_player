@@ -93,8 +93,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
 
   void _deduplicateQueue() {
     final removed = playbackService.deduplicateQueue();
-    showTextOnSnackBar(removed == 0 ? '队列中没有重复歌曲' : '已移除 {0} 个重复项，可撤销整理',
-        arguments: [removed], context: context);
+    showAppNotice(
+        ui(removed == 0 ? '队列中没有重复歌曲' : '已移除 {0} 个重复项，可撤销整理', [removed]),
+        context: context,
+        kind: removed == 0 ? AppNoticeKind.info : AppNoticeKind.success);
   }
 
   KeyEventResult _queueShortcut(FocusNode node, KeyEvent event) {
@@ -118,8 +120,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         : playbackService.canUndoQueueEdit) {
       redo ? playbackService.redoQueueEdit() : playbackService.undoQueueEdit();
     } else {
-      showTextOnSnackBar(playbackService.queueHistoryReason(redo: redo),
-          context: context);
+      showAppNotice(ui(playbackService.queueHistoryReason(redo: redo)),
+          context: context, kind: AppNoticeKind.warning);
     }
     return KeyEventResult.handled;
   }
@@ -140,14 +142,16 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
       created = true;
       await savePlaylistUiChanges();
       if (mounted) {
-        showTextOnSnackBar('已保存 {0} 首歌曲到“{1}”',
-            arguments: [snapshot.length, name], context: context);
+        showAppNotice(ui('已保存 {0} 首歌曲到“{1}”', [snapshot.length, name]),
+            context: context, kind: AppNoticeKind.success);
       }
     } catch (error, trace) {
       LOGGER.e('[queue] save playlist failed: $error', stackTrace: trace);
       if (mounted) {
-        showTextOnSnackBar(created ? '歌单已创建，但保存失败；请在歌单页重试保存' : '无法保存队列为歌单：{0}',
-            arguments: [error], context: context);
+        showAppNotice(
+            ui(created ? '歌单已创建，但保存失败；请在歌单页重试保存' : '无法保存队列为歌单：{0}', [error]),
+            context: context,
+            kind: AppNoticeKind.error);
       }
     } finally {
       if (mounted) setState(() => _savingQueue = false);
@@ -749,11 +753,11 @@ class _PlaylistViewItem extends StatelessWidget {
             onPressed: () async {
               try {
                 await OnlineLibrary.instance.add(item);
-                showTextOnSnackBar("已加入总乐库");
+                showAppNotice(ui("已加入总乐库"), kind: AppNoticeKind.success);
               } catch (error, trace) {
                 LOGGER.e('[queue] add online track failed: $error',
                     stackTrace: trace);
-                showTextOnSnackBar("加入总乐库失败，请重试");
+                showAppNotice(ui("加入总乐库失败，请重试"), kind: AppNoticeKind.error);
               }
             },
             leadingIcon: const Icon(Symbols.library_add),

@@ -126,22 +126,31 @@ Future<bool> showDeleteAudioConfirmation(
         outcome.fullyPersisted ? '已删除歌曲“{0}”' : '歌曲文件已删除，但部分列表状态尚未保存；刷新后可重试同步。';
     final arguments = outcome.fullyPersisted ? [audio.displayTitle] : const [];
     if (context.mounted) {
-      showTextOnSnackBar(message, arguments: arguments, context: context);
+      showAppNotice(ui(message, arguments),
+          context: context,
+          kind: outcome.fullyPersisted
+              ? AppNoticeKind.success
+              : AppNoticeKind.warning);
     } else {
-      showTextOnSnackBar(message, arguments: arguments);
+      showAppNotice(ui(message, arguments),
+          kind: outcome.fullyPersisted
+              ? AppNoticeKind.success
+              : AppNoticeKind.warning);
     }
     return true;
   } on AudioDeletionException catch (error) {
     if (context.mounted) {
-      showTextOnSnackBar(error.message, context: context);
+      showAppNotice(ui(error.message),
+          context: context, kind: AppNoticeKind.error);
     } else {
-      showTextOnSnackBar(error.message);
+      showAppNotice(ui(error.message), kind: AppNoticeKind.error);
     }
   } catch (error) {
     if (context.mounted) {
-      showTextOnSnackBar('删除歌曲失败：{0}', arguments: [error], context: context);
+      showAppNotice(ui('删除歌曲失败：{0}', [error]),
+          context: context, kind: AppNoticeKind.error);
     } else {
-      showTextOnSnackBar('删除歌曲失败：{0}', arguments: [error]);
+      showAppNotice(ui('删除歌曲失败：{0}', [error]), kind: AppNoticeKind.error);
     }
   }
   return false;

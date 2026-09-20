@@ -41,6 +41,7 @@ class SceneBackground extends StatelessWidget {
                         appearance: appearance,
                         status: status,
                         neutralFallback: scene == BackgroundScene.main,
+                        fluidArtwork: scene == BackgroundScene.nowPlaying,
                         isPlaying: playing,
                         isVisible: !hidden,
                         hidden:
@@ -85,6 +86,7 @@ class BackgroundLayer extends StatelessWidget {
     this.isPlaying = false,
     this.isVisible = true,
     this.hidden,
+    this.fluidArtwork = false,
   });
 
   final BackgroundAppearance appearance;
@@ -96,6 +98,7 @@ class BackgroundLayer extends StatelessWidget {
   final bool isPlaying;
   final bool isVisible;
   final ValueListenable<bool>? hidden;
+  final bool fluidArtwork;
 
   @override
   Widget build(BuildContext context) {
@@ -129,6 +132,7 @@ class BackgroundLayer extends StatelessWidget {
                 isPlaying: isPlaying,
                 isVisible: isVisible,
                 hidden: hidden,
+                fluidArtwork: fluidArtwork,
               );
       case BackgroundSource.customImage:
         final id = appearance.customImageId;
@@ -153,6 +157,7 @@ class BackgroundLayer extends StatelessWidget {
         blur: appearance.blur,
         opacity: appearance.opacity,
         motion: appearance.motion,
+        fluid: fluidArtwork && !displaySized,
         isPlaying: isPlaying,
         isVisible: isVisible,
         displaySized: displaySized,
@@ -167,11 +172,13 @@ class _CurrentArtworkBackground extends StatelessWidget {
     required this.isPlaying,
     required this.isVisible,
     this.hidden,
+    this.fluidArtwork = false,
   });
   final BackgroundAppearance appearance;
   final bool isPlaying;
   final bool isVisible;
   final ValueListenable<bool>? hidden;
+  final bool fluidArtwork;
 
   @override
   Widget build(BuildContext context) => PlaybackReadyBuilder(
@@ -202,6 +209,7 @@ class _CurrentArtworkBackground extends StatelessWidget {
           blur: appearance.blur,
           opacity: appearance.opacity,
           motion: appearance.motion,
+          fluid: fluidArtwork,
           isPlaying: isPlaying,
           isVisible: isVisible,
           hidden: hidden,

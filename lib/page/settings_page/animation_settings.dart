@@ -17,7 +17,11 @@ const animationLabels = <MotionKind, (String, String, IconData)>{
     '封面尺寸、排序、自动填充及标题显隐的过渡。',
     Icons.dashboard_customize_outlined
   ),
-  MotionKind.lyrics: ('歌词动画', '歌词滚动与逐字变化；关闭后仍更新当前歌词。', Icons.lyrics_outlined),
+  MotionKind.lyrics: (
+    '歌词动画',
+    '逐词渐亮、长音浮动与行跟随；关闭后仍更新当前歌词。',
+    Icons.lyrics_outlined
+  ),
   MotionKind.feedback: (
     '交互反馈动画',
     '悬停光效、水波纹、按钮和控件的状态过渡。',

@@ -1,24 +1,10 @@
+import 'package:desktop_lyric/app_fonts.dart';
 import 'package:flutter/material.dart';
 
-const String danEmbeddedFontFamily = "DanPingFangSC";
+export 'package:desktop_lyric/app_fonts.dart';
+
 const String danEmbeddedFontDisplayName = ".PingFang SC Regular";
 const String danCjkFontFamily = danEmbeddedFontFamily;
-
-const List<String> danFontFamilyFallback = [
-  danEmbeddedFontFamily,
-  ".PingFang SC Regular",
-  "PingFang SC Regular",
-  "PingFang SC",
-  "Noto Sans SC",
-  "Noto Sans CJK SC",
-  "Microsoft YaHei UI",
-  "Microsoft YaHei",
-  "SimHei",
-  "Yu Gothic UI",
-  "Malgun Gothic",
-  "Segoe UI Symbol",
-  "Segoe UI Emoji",
-];
 
 String danFontDisplayName(String? fontFamily) {
   final family = fontFamily?.trim();

@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/component/foreground.dart';
 import 'package:desktop_lyric/component/lyric_line_display_area.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
@@ -120,7 +121,7 @@ class _LyricLineViewState extends State<LyricLineView>
     final settings = context.watch<TextDisplayController>();
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    _reduced = MediaQuery.disableAnimationsOf(context) ||
+    _reduced = !AppMotion.enabled(context, MotionKind.lyrics) ||
         features.disableAnimations ||
         features.reduceMotion ||
         !TickerMode.valuesOf(context).enabled;

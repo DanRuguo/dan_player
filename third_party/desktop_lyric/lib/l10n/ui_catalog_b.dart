@@ -574,6 +574,11 @@ const Map<String, List<String>> uiCatalogB = {
     "앨범 아트 블러 강도 {0}"
   ],
   "轻缓动态背景": ["Gentle background motion", "ゆるやかな背景アニメーション", "부드러운 배경 움직임"],
+  "让封面配色缓慢流动。暂停、窗口隐藏或减少动态效果时停止；不会移动文字与按钮。": [
+    "Let artwork colours flow slowly. It stops when playback is paused, the window is hidden or reduced motion is enabled. Text and buttons do not move.",
+    "ジャケットの色がゆっくり流れます。一時停止中、ウィンドウ非表示時、動きを減らす設定の有効時には停止します。文字やボタンは動きません。",
+    "앨범 아트 색상이 천천히 흐릅니다. 재생 일시 정지, 창 숨김 또는 동작 줄이기 설정 시 멈추며 텍스트와 버튼은 움직이지 않습니다."
+  ],
   "让背景图片缓慢漂移。暂停、窗口隐藏或减少动态效果时停止；不会移动文字与按钮。": [
     "Let the background drift slowly. It stops when playback is paused, the window is hidden or reduced motion is enabled. Text and buttons do not move.",
     "背景画像をゆっくり動かします。一時停止中、ウィンドウ非表示時、動きを減らす設定の有効時には停止します。文字やボタンは動きません。",

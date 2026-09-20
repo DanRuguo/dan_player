@@ -84,13 +84,13 @@ void main() {
     });
   }
 
-  testWidgets('legacy entry classifies common success and failure wording',
+  testWidgets('notice displays explicit success and failure kinds',
       (tester) async {
     await mount(tester);
-    showTextOnSnackBar('保存失败：fixture');
+    showAppNotice('保存失败：fixture', kind: AppNoticeKind.error);
     await tester.pump();
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
-    showTextOnSnackBar('已保存歌曲信息');
+    showAppNotice('已保存歌曲信息', kind: AppNoticeKind.success);
     await tester.pump();
     expect(find.byIcon(Icons.error_outline), findsNothing);
     expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);

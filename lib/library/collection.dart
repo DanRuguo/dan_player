@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/ui_language.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -121,7 +122,7 @@ class CustomAudioOrder {
       _paths = previous;
       applyTo(audios);
       LOGGER.e(error, stackTrace: trace);
-      showTextOnSnackBar('自定义顺序保存失败，原有顺序已恢复。');
+      showAppNotice(ui('自定义顺序保存失败，原有顺序已恢复。'), kind: AppNoticeKind.error);
     }
   }
 

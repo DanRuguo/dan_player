@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
+import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
+import 'package:desktop_lyric/lyric_word_effects.dart';
 import 'package:desktop_lyric/message.dart';
 import 'package:flutter/material.dart';
 
@@ -137,6 +139,8 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
   Widget build(BuildContext context) {
     final direction = Directionality.of(context);
     final scaler = MediaQuery.textScalerOf(context);
+    final reducedMotion =
+        widget.reducedMotion || !AppMotion.enabled(context, MotionKind.lyrics);
     // TextPainter does not inherit the app's font as Text does. Merge the real
     // desktop typography before caching so CJK/fallback fonts stay identical.
     final style = DefaultTextStyle.of(context).style.merge(widget.style);
@@ -176,9 +180,9 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
         painter: DesktopLyricTextPainter._(
             layout: _layout!,
             clock: widget.clock,
-            reducedMotion: widget.reducedMotion),
+            reducedMotion: reducedMotion),
         isComplex: true,
-        willChange: widget.words.isNotEmpty && !widget.reducedMotion,
+        willChange: widget.words.isNotEmpty && !reducedMotion,
       )),
     );
   }
@@ -214,6 +218,7 @@ class _DesktopLyricTextLayout {
       required Color? strokeColor,
       required TextDirection direction,
       required TextScaler scaler}) {
+    fontSize = scaler.scale(style.fontSize ?? 22);
     final width = !vertical && maxHorizontalWidth != null
         ? math.max(0.0, maxHorizontalWidth)
         : double.infinity;
@@ -338,7 +343,20 @@ class _DesktopLyricTextLayout {
   TextPainter? highlight;
   TextPainter? stroke;
   late final Size size;
+  late final double fontSize;
   final List<List<({Rect rect, bool rtl, bool horizontal})>> wordBoxes = [];
+  late final List<double> wordExtents = [
+    for (final boxes in wordBoxes)
+      boxes.fold<double>(
+          0,
+          (total, box) =>
+              total +
+              (vertical && !box.horizontal ? box.rect.height : box.rect.width))
+  ];
+  late final List<double> wordSoftness = [
+    for (final extent in wordExtents)
+      LyricWordEffects.softEdgeWidth(fontSize: fontSize, extent: extent)
+  ];
 
   // A separate cached pass under both fills. Word clipping never cuts an
   // outline in half and no paragraphs are laid out on playback clock ticks.
@@ -417,12 +435,7 @@ class DesktopLyricTextPainter extends CustomPainter {
 
   List<Rect> highlightRectsForWord(int index) {
     final boxes = _layout.wordBoxes[index];
-    final total = boxes.fold<double>(
-        0,
-        (sum, box) =>
-            sum +
-            (vertical && !box.horizontal ? box.rect.height : box.rect.width));
-    var remaining = total * progressForWord(index);
+    var remaining = _layout.wordExtents[index] * progressForWord(index);
     final result = <Rect>[];
     for (final box in boxes) {
       if (remaining <= 0) break;
@@ -450,19 +463,75 @@ class DesktopLyricTextPainter extends CustomPainter {
       return;
     }
     _layout.paint(canvas, played: false);
-    final path = Path();
-    var hasHighlight = false;
+    final completed = Path();
+    var hasCompleted = false;
+    final active = <({
+      Rect bounds,
+      int word,
+      double progress,
+      double offset,
+      bool reverse,
+      bool vertical,
+    })>[];
     for (var index = 0; index < _layout.words.length; index++) {
-      for (final rect in highlightRectsForWord(index)) {
-        path.addRect(rect);
-        hasHighlight = true;
+      final progress = progressForWord(index);
+      if (progress <= 0) continue;
+      final extent = _layout.wordExtents[index];
+      if (extent <= 0) continue;
+      final edges = LyricWordEffects.revealEdges(
+          progress: progress,
+          extent: extent,
+          softness: _layout.wordSoftness[index]);
+      var offset = 0.0;
+      for (final box in _layout.wordBoxes[index]) {
+        final vertical = _layout.vertical && !box.horizontal;
+        final end = offset + (vertical ? box.rect.height : box.rect.width);
+        if (progress >= 1 || edges.start >= end) {
+          completed.addRect(box.rect);
+          hasCompleted = true;
+        } else if (edges.end > offset && !box.rect.isEmpty) {
+          active.add((
+            bounds: box.rect,
+            word: index,
+            progress: progress,
+            offset: offset,
+            reverse: box.rtl,
+            vertical: vertical,
+          ));
+        }
+        offset = end;
       }
     }
-    if (!hasHighlight) return;
-    canvas.save();
-    canvas.clipPath(path);
-    _layout.paint(canvas, played: true);
-    canvas.restore();
+    if (hasCompleted) {
+      canvas.save();
+      canvas.clipPath(completed);
+      _layout.paint(canvas, played: true);
+      canvas.restore();
+    }
+    // Only unfinished word fragments need an alpha mask. Completed text is
+    // one cached pass; the outline remains a single untouched pass beneath.
+    // Bounds stay local to each shaped fragment, including vertical foreign
+    // words and RTL runs, rather than allocating a window-sized layer.
+    for (final fragment in active) {
+      canvas.save();
+      canvas.clipRect(fragment.bounds);
+      canvas.saveLayer(fragment.bounds, Paint());
+      _layout.paint(canvas, played: true);
+      canvas.drawRect(
+          fragment.bounds,
+          Paint()
+            ..blendMode = BlendMode.dstIn
+            ..shader = LyricWordEffects.revealShader(
+                bounds: fragment.bounds,
+                progress: fragment.progress,
+                extent: _layout.wordExtents[fragment.word],
+                offset: fragment.offset,
+                softness: _layout.wordSoftness[fragment.word],
+                reverse: fragment.reverse,
+                vertical: fragment.vertical));
+      canvas.restore();
+      canvas.restore();
+    }
   }
 
   @override

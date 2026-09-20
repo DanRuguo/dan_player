@@ -117,7 +117,7 @@ class _ThemeModeControlState extends State<ThemeModeControl> {
                 captureWindowSize: false, throwOnError: true);
           } catch (_) {
             if (mounted) {
-              showTextOnSnackBar('主题模式保存失败，当前选择仅在本次运行生效。',
+              showAppNotice(ui('主题模式保存失败，当前选择仅在本次运行生效。'),
                   context: this.context, kind: AppNoticeKind.error);
             }
           }
@@ -195,7 +195,7 @@ class _SelectFontComboboxState extends State<SelectFontCombobox> {
                 try {
                   final installedFont = await getInstalledFonts();
                   if (installedFont == null || installedFont.isEmpty) {
-                    showTextOnSnackBar("无法获取字体");
+                    showAppNotice(ui("无法获取字体"), kind: AppNoticeKind.error);
                     return;
                   }
 
@@ -230,7 +230,7 @@ class _SelectFontComboboxState extends State<SelectFontCombobox> {
                       settings.fontPath = previousPath;
                       LOGGER.e("[select font] $err");
                       if (context.mounted) {
-                        showTextOnSnackBar('字体应用失败，已保留原字体。',
+                        showAppNotice(ui('字体应用失败，已保留原字体。'),
                             context: context, kind: AppNoticeKind.error);
                       }
                     } finally {
@@ -240,7 +240,7 @@ class _SelectFontComboboxState extends State<SelectFontCombobox> {
                 } catch (err) {
                   LOGGER.e('[installed fonts] $err');
                   if (context.mounted) {
-                    showTextOnSnackBar('无法获取字体',
+                    showAppNotice(ui('无法获取字体'),
                         context: context, kind: AppNoticeKind.error);
                   }
                 } finally {

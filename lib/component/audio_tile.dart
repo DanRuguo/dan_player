@@ -159,23 +159,23 @@ class _AudioTileState extends State<AudioTile> {
       final library = OnlineLibrary.instance;
       if (library.contains(audio)) {
         await library.remove(audio);
-        showTextOnSnackBar("已从总乐库移除");
+        showAppNotice(ui("已从总乐库移除"), kind: AppNoticeKind.success);
       } else {
         await library.add(audio);
-        showTextOnSnackBar("已加入总乐库");
+        showAppNotice(ui("已加入总乐库"), kind: AppNoticeKind.success);
       }
       if (mounted) setState(() {});
     } catch (error, trace) {
       LOGGER.e("[online library] $error", stackTrace: trace);
-      showTextOnSnackBar("更新总乐库失败：{0}", arguments: [error]);
+      showAppNotice(ui("更新总乐库失败：{0}", [error]), kind: AppNoticeKind.error);
     }
   }
 
   Future<void> _downloadOnlineAudio(Audio audio) async {
     final service = OnlineMusicService.instance;
     if (!service.canDownload(audio)) {
-      showTextOnSnackBar(
-          service.downloadUnavailableReason(audio) ?? "当前来源不支持下载");
+      showAppNotice(ui(service.downloadUnavailableReason(audio) ?? "当前来源不支持下载"),
+          kind: AppNoticeKind.warning);
       return;
     }
     final picker = SaveFilePicker()
@@ -189,15 +189,15 @@ class _AudioTileState extends State<AudioTile> {
     final file = picker.getFile();
     if (file == null) return;
 
-    showTextOnSnackBar("正在下载 {0}…", arguments: [audio.title]);
+    showAppNotice(ui("正在下载 {0}…", [audio.title]), kind: AppNoticeKind.info);
     try {
       await OnlineMusicService.instance.download(audio, file);
-      showTextOnSnackBar("下载完成：{0}", arguments: [file.path]);
+      showAppNotice(ui("下载完成：{0}", [file.path]), kind: AppNoticeKind.success);
     } on OnlineMusicException catch (error) {
-      showTextOnSnackBar(error.message);
+      showAppNotice(ui(error.message), kind: AppNoticeKind.error);
     } catch (error, trace) {
       LOGGER.e("[online download] $error", stackTrace: trace);
-      showTextOnSnackBar("下载失败：{0}", arguments: [error]);
+      showAppNotice(ui("下载失败：{0}", [error]), kind: AppNoticeKind.error);
     }
   }
 

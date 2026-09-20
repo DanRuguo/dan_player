@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/component/action_row.dart';
 import 'package:desktop_lyric/component/desktop_lyric_text.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
@@ -28,6 +29,12 @@ class TaskbarLyricRow extends StatelessWidget {
     UiLanguageScope.watch(context);
     final theme = context.watch<ThemeChangedMessage>();
     final primary = Color(theme.primary);
+    final features =
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    final reducedMotion = !AppMotion.enabled(context, MotionKind.lyrics) ||
+        features.disableAnimations ||
+        features.reduceMotion ||
+        !TickerMode.valuesOf(context).enabled;
     void send(ControlEvent event) => (sendMessage ??
         stdout.write)(ControlEventMessage(event).buildMessageJson());
     Widget button(String label, IconData icon, VoidCallback onPressed) =>
@@ -131,8 +138,7 @@ class TaskbarLyricRow extends StatelessWidget {
                           words: translated
                               ? const []
                               : detailed?.words ?? const [],
-                          reducedMotion:
-                              MediaQuery.disableAnimationsOf(context),
+                          reducedMotion: reducedMotion,
                         )),
                   )));
             })),

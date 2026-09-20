@@ -1,24 +1,11 @@
+import 'app_fonts.dart';
 import 'app_input_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/app_motion.dart';
 
 abstract final class DesktopLyricTypography {
-  static const String fontFamily = "DanPingFangSC";
-  static const List<String> fontFamilyFallback = [
-    fontFamily,
-    ".PingFang SC Regular",
-    "PingFang SC Regular",
-    "PingFang SC",
-    "Noto Sans SC",
-    "Noto Sans CJK SC",
-    "Microsoft YaHei UI",
-    "Microsoft YaHei",
-    "SimHei",
-    "Yu Gothic UI",
-    "Malgun Gothic",
-    "Segoe UI Symbol",
-    "Segoe UI Emoji",
-  ];
+  static const String fontFamily = danEmbeddedFontFamily;
+  static const List<String> fontFamilyFallback = danFontFamilyFallback;
 
   static ThemeData theme(Brightness brightness) {
     final scheme = ColorScheme.fromSeed(

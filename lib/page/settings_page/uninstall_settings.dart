@@ -27,7 +27,7 @@ class _UninstallSettingsState extends State<UninstallSettings> {
         await WindowsShell.instance.openAppFolder();
       } catch (_) {
         if (mounted) {
-          showTextOnSnackBar('无法打开程序目录，请稍后重试。',
+          showAppNotice(ui('无法打开程序目录，请稍后重试。'),
               context: context, kind: AppNoticeKind.error);
         }
       }
@@ -58,7 +58,7 @@ class _UninstallSettingsState extends State<UninstallSettings> {
     } catch (error, trace) {
       LOGGER.w('Uninstall handoff: $error', stackTrace: trace);
       if (mounted) {
-        showTextOnSnackBar('无法启动卸载向导，请在 Windows“已安装的应用”中卸载 Dan Player。',
+        showAppNotice(ui('无法启动卸载向导，请在 Windows“已安装的应用”中卸载 Dan Player。'),
             context: context, kind: AppNoticeKind.error);
         setState(() => _busy = false);
       }

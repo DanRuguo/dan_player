@@ -85,7 +85,8 @@ class OnlineIdentitySummary extends StatelessWidget {
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: fullIdentity));
             if (context.mounted) {
-              showTextOnSnackBar('已复制联网标识', context: context);
+              showAppNotice(ui('已复制联网标识'),
+                  context: context, kind: AppNoticeKind.success);
             }
           },
           icon: const Icon(Symbols.content_copy),

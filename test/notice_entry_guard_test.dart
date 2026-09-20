@@ -8,7 +8,8 @@ void main() {
         .whereType<File>()
         .where((file) =>
             file.path.endsWith('.dart') &&
-            RegExp(r'\.showSnackBar\s*\(').hasMatch(file.readAsStringSync()))
+            RegExp(r'\bshowTextOnSnackBar\b|\.showSnackBar\s*\(')
+                .hasMatch(file.readAsStringSync()))
         .map((file) => file.path)
         .toList();
     expect(bypasses, isEmpty,

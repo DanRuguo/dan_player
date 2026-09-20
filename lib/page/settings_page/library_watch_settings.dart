@@ -29,7 +29,7 @@ class LibraryWatchSettings extends StatelessWidget {
                 AppSettings.instance.saveSettings(throwOnError: true));
           } catch (_) {
             if (context.mounted) {
-              showTextOnSnackBar('自动更新设置尚未保存，请重试。',
+              showAppNotice(ui('自动更新设置尚未保存，请重试。'),
                   context: context, kind: AppNoticeKind.error);
             }
           }

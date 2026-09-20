@@ -126,7 +126,7 @@ Future<bool> showLyricEditorDialog(
   OnlineLyricEditorCustomCandidateLoader? customLyricCandidateLoader,
 }) async {
   if (audio.isOnline) {
-    showTextOnSnackBar("联网音乐的歌词为只读，不能修改");
+    showAppNotice(ui("联网音乐的歌词为只读，不能修改"), kind: AppNoticeKind.warning);
     return false;
   }
   return await showAppDialog<bool>(
@@ -322,16 +322,16 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   Future<void> _save() async {
     final text = controller.text.trim();
     if (text.isEmpty) {
-      showTextOnSnackBar("歌词不能为空");
+      showAppNotice(ui("歌词不能为空"), kind: AppNoticeKind.warning);
       return;
     }
     try {
       if (Lrc.fromLrcText(text, LrcSource.local) == null) {
-        showTextOnSnackBar("没有识别到有效的 LRC 时间戳");
+        showAppNotice(ui("没有识别到有效的 LRC 时间戳"), kind: AppNoticeKind.info);
         return;
       }
     } on FormatException {
-      showTextOnSnackBar("没有识别到有效的 LRC 时间戳");
+      showAppNotice(ui("没有识别到有效的 LRC 时间戳"), kind: AppNoticeKind.info);
       return;
     }
     setState(() => saving = true);
@@ -342,7 +342,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
           expectedRevision: _documentRevision);
     } catch (error, trace) {
       LOGGER.e("[lyric editor] save failed: $error", stackTrace: trace);
-      showTextOnSnackBar("保存歌词失败：{0}", arguments: [error]);
+      showAppNotice(ui("保存歌词失败：{0}", [error]), kind: AppNoticeKind.error);
       if (mounted) setState(() => saving = false);
       return;
     }
@@ -359,7 +359,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       LOGGER.w("[lyric editor] refresh after save failed: $error",
           stackTrace: trace);
     }
-    showTextOnSnackBar("歌词修订已保存并锁定", kind: AppNoticeKind.success);
+    showAppNotice(ui("歌词修订已保存并锁定"), kind: AppNoticeKind.success);
     if (mounted) Navigator.pop(context, true);
   }
 
@@ -391,7 +391,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   Future<void> _exportSidecar() async {
     final text = controller.text.trim();
     if (text.isEmpty || Lrc.fromLrcText(text, LrcSource.local) == null) {
-      showTextOnSnackBar('没有识别到有效的 LRC 时间戳');
+      showAppNotice(ui('没有识别到有效的 LRC 时间戳'), kind: AppNoticeKind.info);
       return;
     }
     final confirmed = await showAppDialog<bool>(
@@ -418,11 +418,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
           sidecarPath: sidecarPath,
           text: text,
           persistSource: (_, __) async {});
-      showTextOnSnackBar('歌词已保存到 {0}',
-          arguments: [sidecarPath], kind: AppNoticeKind.success);
+      showAppNotice(ui('歌词已保存到 {0}', [sidecarPath]),
+          kind: AppNoticeKind.success);
     } catch (error) {
-      showTextOnSnackBar('导出歌词失败：{0}',
-          arguments: [error], kind: AppNoticeKind.error);
+      showAppNotice(ui('导出歌词失败：{0}', [error]), kind: AppNoticeKind.error);
     } finally {
       if (mounted) setState(() => saving = false);
     }

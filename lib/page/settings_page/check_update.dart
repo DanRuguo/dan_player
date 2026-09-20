@@ -41,7 +41,7 @@ Future<void> checkForUpdateAndPresent(
     }
     if (update == null) {
       if (!silent) {
-        showTextOnSnackBar("所选通道暂无新版本",
+        showAppNotice(ui("所选通道暂无新版本"),
             context: context, kind: AppNoticeKind.info);
       }
       return;
@@ -73,14 +73,13 @@ Future<void> checkForUpdateAndPresent(
   } on UpdateException catch (error, stackTrace) {
     LOGGER.e(error.cause ?? error, stackTrace: stackTrace);
     if (!silent && context.mounted) {
-      showTextOnSnackBar(error.message,
-          arguments: error.arguments,
-          context: context,
-          kind: AppNoticeKind.error);
+      showAppNotice(ui(error.message, error.arguments),
+          context: context, kind: AppNoticeKind.error);
     }
   } catch (error, stackTrace) {
     LOGGER.e(error, stackTrace: stackTrace);
-    if (!silent && context.mounted) showTextOnSnackBar("检查更新失败，请稍后重试");
+    if (!silent && context.mounted)
+      showAppNotice(ui("检查更新失败，请稍后重试"), kind: AppNoticeKind.error);
   }
 }
 
@@ -99,11 +98,11 @@ Future<void> _openSafeLink(String raw, {bool githubOnly = false}) async {
       uri?.scheme == 'https' || (!githubOnly && uri?.scheme == 'http');
   final allowedHost = !githubOnly || uri?.host.toLowerCase() == 'github.com';
   if (uri == null || !allowedScheme || !allowedHost || uri.host.isEmpty) {
-    showTextOnSnackBar("已阻止不安全的外部链接");
+    showAppNotice(ui("已阻止不安全的外部链接"), kind: AppNoticeKind.warning);
     return;
   }
   if (!await launchInBrowser(uri: uri.toString())) {
-    showTextOnSnackBar("无法打开链接");
+    showAppNotice(ui("无法打开链接"), kind: AppNoticeKind.error);
   }
 }
 
@@ -190,7 +189,7 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
       }
       LOGGER.e(error, stackTrace: trace);
       if (mounted) {
-        showTextOnSnackBar("更新偏好保存失败，请重试",
+        showAppNotice(ui("更新偏好保存失败，请重试"),
             context: context, kind: AppNoticeKind.error);
       }
     } finally {
@@ -410,7 +409,7 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
     if (result == null) return;
     final opened = await (widget.revealFile?.call(result.file.path) ??
         showInExplorer(path: result.file.path));
-    if (!opened) showTextOnSnackBar("无法打开资源管理器");
+    if (!opened) showAppNotice(ui("无法打开资源管理器"), kind: AppNoticeKind.error);
   }
 
   Future<void> _ignore() async {
@@ -540,7 +539,6 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                   Flexible(
                     child: AppScrollbar(
                       controller: _detailsScroll,
-
                       child: SingleChildScrollView(
                         key: const ValueKey('update-details-scroll'),
                         controller: _detailsScroll,
@@ -660,7 +658,6 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                       Flexible(
                         child: AppScrollbar(
                           controller: _actionsScroll,
-
                           child: SingleChildScrollView(
                             key: const ValueKey('update-actions-scroll'),
                             controller: _actionsScroll,

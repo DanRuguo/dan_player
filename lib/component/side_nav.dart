@@ -290,7 +290,7 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
             () => AppSettings.instance.saveSettings(throwOnError: true))()
         .catchError((Object error, StackTrace trace) {
       LOGGER.e('[sidebar] failed to save width: $error', stackTrace: trace);
-      showTextOnSnackBar("侧栏宽度保存失败；本次会话仍保留当前宽度");
+      showAppNotice(ui("侧栏宽度保存失败；本次会话仍保留当前宽度"), kind: AppNoticeKind.error);
     }));
   }
 

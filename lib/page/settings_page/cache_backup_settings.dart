@@ -140,8 +140,8 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
       });
     } catch (error) {
       if (mounted)
-        showTextOnSnackBar('无法读取曲库，请等待扫描完成后重试',
-            kind: AppNoticeKind.error, context: context);
+        showAppNotice(ui('无法读取曲库，请等待扫描完成后重试'),
+            context: context, kind: AppNoticeKind.error);
       return;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -195,20 +195,22 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
       );
     } on CacheBackupEncryptionTooLarge {
       if (mounted)
-        showTextOnSnackBar('加密备份的压缩后大小必须小于 64 GiB，请减少所选文件夹并分批备份。',
-            kind: AppNoticeKind.error, context: context);
+        showAppNotice(ui('加密备份的压缩后大小必须小于 64 GiB，请减少所选文件夹并分批备份。'),
+            context: context, kind: AppNoticeKind.error);
     } on CacheBackupCancelled {
-      if (mounted) showTextOnSnackBar('操作已取消，原有文件保持不变', context: context);
+      if (mounted)
+        showAppNotice(ui('操作已取消，原有文件保持不变'),
+            context: context, kind: AppNoticeKind.info);
     } on LibraryMutationBusy {
       if (mounted) {
-        showTextOnSnackBar('曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试',
-            kind: AppNoticeKind.warning, context: context);
+        showAppNotice(ui('曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试'),
+            context: context, kind: AppNoticeKind.warning);
       }
     } catch (error, trace) {
       LOGGER.e('[cache backup] $error', stackTrace: trace);
       if (mounted) {
-        showTextOnSnackBar('备份失败，未替换原有备份文件；请稍后重试',
-            kind: AppNoticeKind.error, context: context);
+        showAppNotice(ui('备份失败，未替换原有备份文件；请稍后重试'),
+            context: context, kind: AppNoticeKind.error);
       }
     } finally {
       if (mounted)
@@ -252,8 +254,8 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
       return;
     } catch (error) {
       if (mounted)
-        showTextOnSnackBar('无法读取备份，请检查密码或文件完整性',
-            kind: AppNoticeKind.error, context: context);
+        showAppNotice(ui('无法读取备份，请检查密码或文件完整性'),
+            context: context, kind: AppNoticeKind.error);
       return;
     } finally {
       if (mounted)
@@ -353,20 +355,22 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
         } catch (error, trace) {
           LOGGER.e('[cache restore exit] $error', stackTrace: trace);
           if (mounted) {
-            showTextOnSnackBar('恢复已准备完成，但未能自动退出；请手动退出并重新打开播放器',
-                kind: AppNoticeKind.warning, context: context);
+            showAppNotice(ui('恢复已准备完成，但未能自动退出；请手动退出并重新打开播放器'),
+                context: context, kind: AppNoticeKind.warning);
           }
         }
       }
     } on CacheBackupCancelled {
-      if (mounted) showTextOnSnackBar('操作已取消，原有文件保持不变', context: context);
+      if (mounted)
+        showAppNotice(ui('操作已取消，原有文件保持不变'),
+            context: context, kind: AppNoticeKind.info);
     } catch (error, trace) {
       LOGGER.e('[cache restore] $error', stackTrace: trace);
       if (mounted) {
-        showTextOnSnackBar(
-            restorePrepared ? '恢复已准备完成；请退出并重新打开播放器' : '恢复失败，当前缓存与缓存位置均未改变',
-            kind: AppNoticeKind.error,
-            context: context);
+        showAppNotice(
+            ui(restorePrepared ? '恢复已准备完成；请退出并重新打开播放器' : '恢复失败，当前缓存与缓存位置均未改变'),
+            context: context,
+            kind: AppNoticeKind.error);
       }
     } finally {
       if (mounted)

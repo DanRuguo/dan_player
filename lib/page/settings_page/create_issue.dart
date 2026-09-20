@@ -66,9 +66,10 @@ class _SettingsIssuePageState extends State<SettingsIssuePage> {
         },
       );
       await launchInBrowser(uri: issueUri.toString());
-      if (mounted) showTextOnSnackBar("已打开 GitHub 问题页面");
+      if (mounted)
+        showAppNotice(ui("已打开 GitHub 问题页面"), kind: AppNoticeKind.success);
     } catch (err, trace) {
-      if (mounted) showTextOnSnackBar(err.toString());
+      if (mounted) showAppNotice(ui(err.toString()), kind: AppNoticeKind.error);
       LOGGER.e(err, stackTrace: trace);
     }
 

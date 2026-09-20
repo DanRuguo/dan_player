@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:dan_player/component/background_image_motion.dart';
 import 'package:dan_player/component/artwork_handoff.dart';
+import 'package:dan_player/component/fluid_artwork.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:flutter/foundation.dart';
@@ -26,6 +27,7 @@ class ArtworkBackdrop extends StatefulWidget {
     this.isVisible = true,
     this.displaySized = false,
     this.hidden,
+    this.fluid = false,
   });
 
   final Object artworkKey;
@@ -36,6 +38,7 @@ class ArtworkBackdrop extends StatefulWidget {
   /// Null retains the legacy detail-page readability gradient.
   final double? opacity;
   final bool motion;
+  final bool fluid;
   final bool isPlaying;
   final bool isVisible;
 
@@ -122,6 +125,13 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                                 isPlaying: widget.isPlaying,
                                 isVisible: widget.isVisible,
                                 hidden: widget.hidden,
+                                phaseBuilder: widget.fluid
+                                    ? (phase, active, child) => FluidArtwork(
+                                        image: provider,
+                                        phase: phase,
+                                        active: active,
+                                        fallback: child)
+                                    : null,
                                 child: ImageFiltered(
                                   imageFilter: ui.ImageFilter.blur(
                                     sigmaX: widget.blur.clamp(0, 100),

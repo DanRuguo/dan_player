@@ -14,6 +14,7 @@ import 'package:dan_player/theme_provider.dart';
 import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/message.dart' as msg;
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 enum DesktopLyricState {
@@ -31,11 +32,15 @@ class DesktopLyricService extends ChangeNotifier {
     bool Function(String)? executableExists,
     Future<void> Function()? saveAppearance,
     ColorScheme Function()? readTheme,
+    ValueListenable<bool>? playbackReady,
+    Duration Function()? elapsed,
   })  : _startProcess = startProcess ??
             ((executable, arguments) => Process.start(executable, arguments)),
         _executableExists =
             executableExists ?? ((executable) => File(executable).existsSync()),
         _readTheme = readTheme ?? (() => ThemeProvider.instance.currScheme),
+        _playbackReady = playbackReady ?? PlayService.playbackReady,
+        _elapsed = elapsed,
         _saveAppearance = saveAppearance ??
             (() => AppSettings.instance
                 .saveSettings(throwOnError: true, captureWindowSize: false)) {
@@ -43,7 +48,7 @@ class DesktopLyricService extends ChangeNotifier {
     AppSettings.instance.experience.addListener(_syncDisplayPreference);
     AppSettings.instance.desktopLyricAppearance.addListener(_syncAppearance);
     uiLanguage.addListener(_syncLanguage);
-    PlayService.playbackReady.addListener(_handlePlaybackReady);
+    _playbackReady.addListener(_handlePlaybackReady);
   }
 
   final PlayService playService;
@@ -51,13 +56,16 @@ class DesktopLyricService extends ChangeNotifier {
   final bool Function(String) _executableExists;
   final Future<void> Function() _saveAppearance;
   final ColorScheme Function() _readTheme;
+  final ValueListenable<bool> _playbackReady;
+  final Duration Function()? _elapsed;
+  final Stopwatch _syncClock = Stopwatch()..start();
 
   PlaybackService get _playbackService => playService.playbackService;
 
   // Listening to settings/starting an empty lyric window must not initialize
   // the lazy native player. Readiness is published after its construction.
   PlaybackService? get _readyPlayback =>
-      PlayService.playbackReady.value ? _playbackService : null;
+      _playbackReady.value ? _playbackService : null;
 
   static const _playbackSyncInterval = Duration(milliseconds: 400);
   static const _maximumRecoveryAttempts = 2;
@@ -66,7 +74,11 @@ class DesktopLyricService extends ChangeNotifier {
   StreamSubscription<String>? _desktopLyricSubscription;
   StreamSubscription<String>? _desktopLyricErrorSubscription;
   Process? _desktopLyricProcess;
-  Timer? _playbackSyncTimer;
+  StreamSubscription<double>? _positionSubscription;
+  StreamSubscription<PlayerState>? _stateSubscription;
+  PlaybackService? _observedPlayback;
+  Duration? _lastTimelineAt;
+  ({int sequence, int position, bool playing, double rate})? _lastTimeline;
   Timer? _recoveryTimer;
   Timer? _recoveryBudgetResetTimer;
   Timer? _appearanceSaveTimer;
@@ -288,7 +300,8 @@ class DesktopLyricService extends ChangeNotifier {
             .saveSettings(throwOnError: true)
             .catchError((Object error, StackTrace trace) {
           LOGGER.e('[desktop lyric preference] $error', stackTrace: trace);
-          showTextOnSnackBar('桌面歌词方向保存失败；当前会话仍生效，请在设置中重试。');
+          showAppNotice(ui('桌面歌词方向保存失败；当前会话仍生效，请在设置中重试。'),
+              kind: AppNoticeKind.error);
         }));
       }
     } catch (error, trace) {
@@ -330,6 +343,8 @@ class DesktopLyricService extends ChangeNotifier {
     sendMessage(msg.FrameRateMessage({
       ...rendering.frameRate.toMap(),
       'animations': rendering.animations.toMap(),
+      'panelBlur': rendering.surfaceBlur,
+      'pauseWhenHidden': rendering.pauseWhenHidden,
     }));
   }
 
@@ -366,7 +381,8 @@ class DesktopLyricService extends ChangeNotifier {
       saved = false;
       LOGGER.e('[desktop lyric appearance save] $error', stackTrace: trace);
       if (!_disposed) {
-        showTextOnSnackBar('桌面歌词外观保存失败；当前会话仍生效，可在歌词外观中重试保存。');
+        showAppNotice(ui('桌面歌词外观保存失败；当前会话仍生效，可在歌词外观中重试保存。'),
+            kind: AppNoticeKind.error);
       }
     }
     // A save can finish after close/relaunch. Never report it to another helper.
@@ -379,18 +395,44 @@ class DesktopLyricService extends ChangeNotifier {
   }
 
   void _handlePlaybackReady() {
-    if (_disposed || !PlayService.playbackReady.value || !isRunning) return;
+    if (_disposed || !_playbackReady.value || !isRunning) return;
+    _startPlaybackSync();
     unawaited(_syncCurrentState().catchError((Object error, StackTrace trace) {
       LOGGER.e('[desktop lyric ready sync] $error', stackTrace: trace);
     }));
   }
 
   void _startPlaybackSync() {
-    _playbackSyncTimer?.cancel();
-    _playbackSyncTimer = Timer.periodic(
-      _playbackSyncInterval,
-      (_) => sendPlaybackTimelineMessage(),
-    );
+    final playback = _readyPlayback;
+    if (identical(playback, _observedPlayback)) return;
+    _stopPlaybackSync();
+    if (playback == null) return;
+    _observedPlayback = playback;
+    // Reuse the native player's source instead of waking a second clock while
+    // paused/empty. Successful paused seeks also publish through this stream.
+    _positionSubscription = playback.positionStream.listen((_) {
+      final elapsed = _elapsed?.call() ?? _syncClock.elapsed;
+      if (_lastTimeline?.playing == true &&
+          _lastTimelineAt != null &&
+          elapsed - _lastTimelineAt! < _playbackSyncInterval) return;
+      sendPlaybackTimelineMessage();
+    });
+    // State notifications are immediate, including a seek while playing.
+    _stateSubscription = playback.playerStateStream.listen((state) {
+      sendPlayerStateMessage(state == PlayerState.playing);
+    });
+    playback.playbackRate.addListener(sendPlaybackTimelineMessage);
+  }
+
+  void _stopPlaybackSync() {
+    unawaited(_positionSubscription?.cancel());
+    unawaited(_stateSubscription?.cancel());
+    _positionSubscription = null;
+    _stateSubscription = null;
+    _observedPlayback?.playbackRate.removeListener(sendPlaybackTimelineMessage);
+    _observedPlayback = null;
+    _lastTimeline = null;
+    _lastTimelineAt = null;
   }
 
   void _handleProcessExit(Process process, int exitCode) {
@@ -421,8 +463,7 @@ class DesktopLyricService extends ChangeNotifier {
 
     _desktopLyricProcess = null;
     desktopLyric = Future.value(null);
-    _playbackSyncTimer?.cancel();
-    _playbackSyncTimer = null;
+    _stopPlaybackSync();
     _recoveryBudgetResetTimer?.cancel();
     _recoveryBudgetResetTimer = null;
     unawaited(_desktopLyricSubscription?.cancel());
@@ -462,8 +503,7 @@ class DesktopLyricService extends ChangeNotifier {
     _desiredActive = false;
     _recoveryTimer?.cancel();
     _recoveryTimer = null;
-    _playbackSyncTimer?.cancel();
-    _playbackSyncTimer = null;
+    _stopPlaybackSync();
     _recoveryBudgetResetTimer?.cancel();
     _recoveryBudgetResetTimer = null;
     _desktopLyricProcess = null;
@@ -472,7 +512,7 @@ class DesktopLyricService extends ChangeNotifier {
     lastError = error;
     isLocked = false;
     notifyListeners();
-    showTextOnSnackBar('桌面歌词启动失败：{0}', arguments: [error]);
+    showAppNotice(ui('桌面歌词启动失败：{0}', [error]), kind: AppNoticeKind.error);
   }
 
   Future<bool> get canSendMessage async => isRunning;
@@ -508,8 +548,7 @@ class DesktopLyricService extends ChangeNotifier {
       unawaited(process.stdin.close().catchError((_) {}));
       process.kill();
     } else {
-      _playbackSyncTimer?.cancel();
-      _playbackSyncTimer = null;
+      _stopPlaybackSync();
       desktopLyric = Future.value(null);
       isLocked = false;
     }
@@ -580,12 +619,23 @@ class DesktopLyricService extends ChangeNotifier {
 
     final playback = _readyPlayback;
     final sequence = _ensureTrackSequence(playback?.nowPlaying);
+    final snapshot = (
+      sequence: sequence,
+      position: ((playback?.position ?? 0) * 1000).round(),
+      playing: playback?.playerState == PlayerState.playing,
+      rate: playback?.playbackRate.value ?? 1.0,
+    );
+    // Direct playback actions and source events can describe the same change.
+    // Keep one canonical snapshot, including when a stalled source repeats it.
+    if (snapshot == _lastTimeline) return;
+    _lastTimeline = snapshot;
+    _lastTimelineAt = _elapsed?.call() ?? _syncClock.elapsed;
     sendMessage(
       msg.PlaybackTimelineMessage(
-        sequence,
-        ((playback?.position ?? 0) * 1000).round(),
-        playback?.playerState == PlayerState.playing,
-        playbackRate: playback?.playbackRate.value ?? 1.0,
+        snapshot.sequence,
+        snapshot.position,
+        snapshot.playing,
+        playbackRate: snapshot.rate,
       ),
     );
   }
@@ -670,7 +720,7 @@ class DesktopLyricService extends ChangeNotifier {
     AppSettings.instance.experience.removeListener(_syncDisplayPreference);
     AppSettings.instance.desktopLyricAppearance.removeListener(_syncAppearance);
     uiLanguage.removeListener(_syncLanguage);
-    PlayService.playbackReady.removeListener(_handlePlaybackReady);
+    _playbackReady.removeListener(_handlePlaybackReady);
     killDesktopLyric();
     super.dispose();
   }

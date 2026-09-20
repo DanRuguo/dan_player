@@ -53,6 +53,8 @@ void main() {
     first.completeError(const FileSystemException('synthetic denied'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    expect(find.text(ui('刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试')), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
     expect(
         tester
             .widget<TextButton>(find.widgetWithText(TextButton, ui('取消')))

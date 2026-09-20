@@ -79,8 +79,9 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                               ? () {
                                   if (!loop.setEnd(
                                       service.position, service.length)) {
-                                    showTextOnSnackBar('B 点必须在 A 点至少 1 秒之后',
-                                        context: context);
+                                    showAppNotice(ui('B 点必须在 A 点至少 1 秒之后'),
+                                        context: context,
+                                        kind: AppNoticeKind.info);
                                   }
                                 }
                               : null,

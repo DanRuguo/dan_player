@@ -201,7 +201,8 @@ class PlaybackRateButton extends StatelessWidget {
           try {
             await AppSettings.instance.saveSettings(throwOnError: true);
           } catch (error) {
-            showTextOnSnackBar("速度已应用，但设置保存失败：{0}", arguments: [error]);
+            showAppNotice(ui("速度已应用，但设置保存失败：{0}", [error]),
+                kind: AppNoticeKind.error);
           }
         },
         itemBuilder: (context) => [

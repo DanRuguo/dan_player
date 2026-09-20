@@ -115,7 +115,7 @@ class _LyricApiEditorState extends State<LyricApiEditor> {
   Future<void> _backupCurrentApis() async {
     final currentApi = settings.lyricApiUrl?.trim();
     if (currentApi == null || currentApi.isEmpty) {
-      showTextOnSnackBar("当前没有已保存的歌词API可备份");
+      showAppNotice(ui("当前没有已保存的歌词API可备份"), kind: AppNoticeKind.info);
       return;
     }
 
@@ -149,10 +149,10 @@ class _LyricApiEditorState extends State<LyricApiEditor> {
         const JsonEncoder.withIndent("  ").convert(backup),
         encoding: utf8,
       );
-      showTextOnSnackBar("歌词API备份已保存");
+      showAppNotice(ui("歌词API备份已保存"), kind: AppNoticeKind.success);
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
-      showTextOnSnackBar("备份歌词API失败");
+      showAppNotice(ui("备份歌词API失败"), kind: AppNoticeKind.error);
     }
   }
 
@@ -173,13 +173,13 @@ class _LyricApiEditorState extends State<LyricApiEditor> {
       final text = await file.readAsString(encoding: utf8);
       final url = _extractLyricApiUrlFromBackup(text);
       if (url == null || url.trim().isEmpty) {
-        showTextOnSnackBar("备份文件中没有可用的歌词API");
+        showAppNotice(ui("备份文件中没有可用的歌词API"), kind: AppNoticeKind.info);
         return null;
       }
       return url.trim();
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
-      showTextOnSnackBar("加载歌词API备份失败");
+      showAppNotice(ui("加载歌词API备份失败"), kind: AppNoticeKind.error);
       return null;
     }
   }
@@ -297,7 +297,8 @@ class _LyricApiEditorState extends State<LyricApiEditor> {
                                 controller.text = loadedApi;
                                 errorText = null;
                               });
-                              showTextOnSnackBar("已读取API备份，请点击保存应用");
+                              showAppNotice(ui("已读取API备份，请点击保存应用"),
+                                  kind: AppNoticeKind.success);
                             },
                           ),
                         ],
@@ -362,9 +363,9 @@ class _LyricApiEditorState extends State<LyricApiEditor> {
       settings.lyricApiUrl = value.isEmpty ? null : value;
     });
     await settings.saveSettings();
-    showTextOnSnackBar(
-      settings.lyricApiUrl == null ? ui("已恢复默认歌词API") : ui("歌词API已更新"),
-    );
+    showAppNotice(
+        settings.lyricApiUrl == null ? ui("已恢复默认歌词API") : ui("歌词API已更新"),
+        kind: AppNoticeKind.success);
   }
 
   @override
@@ -637,7 +638,7 @@ class _RefreshAudioLibraryTileState extends State<RefreshAudioLibraryTile> {
       }
       final folders = AudioLibrary.instance.scanRoots;
       if (folders.isEmpty) {
-        showTextOnSnackBar("当前没有可刷新的音乐文件夹");
+        showAppNotice(ui("当前没有可刷新的音乐文件夹"), kind: AppNoticeKind.info);
         return;
       }
       final before =
@@ -653,7 +654,9 @@ class _RefreshAudioLibraryTileState extends State<RefreshAudioLibraryTile> {
       );
       await _showTask(task);
     } catch (_) {
-      if (mounted) showTextOnSnackBar("刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试");
+      if (mounted)
+        showAppNotice(ui("刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试"),
+            kind: AppNoticeKind.error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -718,18 +721,23 @@ class _RefreshSyncFailure implements Exception {}
 void _reportRefreshOutcome(LibraryRefreshTask task) {
   if (!task.takeCompletionNotice()) return;
   if (task.phase == LibraryRefreshPhase.cancelled) {
-    showTextOnSnackBar('扫描已取消，原曲库未改变');
+    showAppNotice(ui('扫描已取消，原曲库未改变'), kind: AppNoticeKind.info);
   } else if (task.error != null) {
-    showTextOnSnackBar(task.error is LibraryMutationBusy
-        ? '曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试'
-        : task.error is _RefreshSyncFailure
-            ? '索引已更新，但界面同步未完成，请重新打开应用'
-            : '刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试');
+    showAppNotice(
+        ui(task.error is LibraryMutationBusy
+            ? '曲库操作正在进行，请等待刷新或歌曲信息保存完成后重试'
+            : task.error is _RefreshSyncFailure
+                ? '索引已更新，但界面同步未完成，请重新打开应用'
+                : '刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试'),
+        kind: task.error is LibraryMutationBusy ||
+                task.error is _RefreshSyncFailure
+            ? AppNoticeKind.warning
+            : AppNoticeKind.error);
   } else if (task.pendingMetadata == 0) {
-    showTextOnSnackBar('音乐库已刷新');
+    showAppNotice(ui('音乐库已刷新'), kind: AppNoticeKind.success);
   } else {
-    showTextOnSnackBar('音乐库已刷新，{0}首暂时保留原信息或文件名，下次刷新会重试',
-        arguments: [task.pendingMetadata]);
+    showAppNotice(ui('音乐库已刷新，{0}首暂时保留原信息或文件名，下次刷新会重试', [task.pendingMetadata]),
+        kind: AppNoticeKind.warning);
   }
 }
 
@@ -859,7 +867,8 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
           error: error, stackTrace: trace);
       if (!mounted) return;
       setState(() => editing = true);
-      showTextOnSnackBar("刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试", context: context);
+      showAppNotice(ui("刷新未完成，原曲库仍保留，请检查文件夹访问权限后重试"),
+          context: context, kind: AppNoticeKind.error);
     }
   }
 

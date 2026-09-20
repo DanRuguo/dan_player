@@ -47,7 +47,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
 
   bool _ownsEq() {
     if (_ownedRevision == playbackService.eqEditRevision) return true;
-    showTextOnSnackBar('EQ 或输出已由其他入口更改，请重新打开对比');
+    showAppNotice(ui('EQ 或输出已由其他入口更改，请重新打开对比'), kind: AppNoticeKind.info);
     return false;
   }
 
@@ -130,7 +130,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
     final applied = playbackService.setEqEnabled(value);
     _ownedRevision = playbackService.eqEditRevision;
     if (!applied) {
-      showTextOnSnackBar("当前输出模式不支持均衡器");
+      showAppNotice(ui("当前输出模式不支持均衡器"), kind: AppNoticeKind.warning);
     }
     setState(() => enabled = playbackService.eqEnabled.value);
   }

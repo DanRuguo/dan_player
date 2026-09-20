@@ -14,13 +14,17 @@ class DesktopLyricWindowBinding with WidgetsBindingObserver {
   final DesktopLyricWindowLayout layout;
   static const channel = MethodChannel('dan_player/desktop_lyric_geometry');
   bool _disposed = false;
+  bool _attached = false;
   bool _fitScheduled = false;
 
   void attach() {
-    if (_disposed) return;
+    if (_disposed || _attached) return;
+    _attached = true;
     controller.vertical.addListener(_syncDirection);
     controller.appearance.addListener(_syncAppearance);
     WidgetsBinding.instance.addObserver(this);
+    controller.setWindowLifecycle(WidgetsBinding.instance.lifecycleState);
+    didChangeAccessibilityFeatures();
     channel.setMethodCallHandler((call) async {
       if (call.method == 'workAreaChanged') {
         didChangeMetrics();
@@ -28,6 +32,20 @@ class DesktopLyricWindowBinding with WidgetsBindingObserver {
     });
     _syncDirection();
     _syncAppearance();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_disposed) controller.setWindowLifecycle(state);
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (_disposed) return;
+    final features =
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    controller.setSystemAnimationsEnabled(
+        !features.disableAnimations && !features.reduceMotion);
   }
 
   void _run(Future<void> future) =>
@@ -72,6 +90,7 @@ class DesktopLyricWindowBinding with WidgetsBindingObserver {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    controller.setWindowLifecycle(AppLifecycleState.detached);
     controller.vertical.removeListener(_syncDirection);
     controller.appearance.removeListener(_syncAppearance);
     WidgetsBinding.instance.removeObserver(this);

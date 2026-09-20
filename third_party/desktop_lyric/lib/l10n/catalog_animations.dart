@@ -50,10 +50,10 @@ const catalogAnimations = <String, List<String>>{
     '표지 크기, 정렬, 자동 채우기 및 제목 표시 전환입니다.'
   ],
   '歌词动画': ['Lyric motion', '歌詞アニメーション', '가사 애니메이션'],
-  '歌词滚动与逐字变化；关闭后仍更新当前歌词。': [
-    'Lyric scrolling and word-by-word changes. Current lyrics still update when disabled.',
-    '歌詞のスクロールと文字ごとの変化。オフでも現在の歌詞は更新されます。',
-    '가사 스크롤과 단어별 변화입니다. 꺼도 현재 가사는 갱신됩니다.'
+  '逐词渐亮、长音浮动与行跟随；关闭后仍更新当前歌词。': [
+    'Word highlighting, sustained-note lift and line following. Current lyrics still update when disabled.',
+    '単語のハイライト、ロングトーンの浮き上がり、行の追従。オフでも現在の歌詞は更新されます。',
+    '단어별 강조, 긴 음의 떠오름과 행 따라가기입니다. 꺼도 현재 가사는 갱신됩니다.'
   ],
   '交互反馈动画': ['Interaction feedback', '操作フィードバック', '상호작용 피드백'],
   '悬停光效、水波纹、按钮和控件的状态过渡。': [

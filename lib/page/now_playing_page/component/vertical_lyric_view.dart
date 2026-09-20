@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/rendering_preferences.dart';
 
 import 'package:dan_player/app_settings.dart';
@@ -198,7 +199,7 @@ class VerticalLyricScrollView extends StatefulWidget {
 }
 
 class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final _scrollController = ScrollController();
   late final ValueNotifier<Duration> _position;
   StreamSubscription<double>? _positionSubscription;
@@ -216,6 +217,16 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   bool _treeVisible = false;
   ValueListenable<RenderingPreferences>? _preferences;
   bool _active = false;
+  late final AnimationController _followClock;
+  Map<int, LyricFollowTransition> _followTransitions = {};
+  Map<int, double> _restBlur = {};
+  Object? _tileCacheIdentity;
+  List<LyricViewTile> _tileCache = [];
+  bool get _motionHidden =>
+      widget.hidden?.value == true ||
+      _lifecycle == AppLifecycleState.hidden ||
+      _lifecycle == AppLifecycleState.paused ||
+      _lifecycle == AppLifecycleState.detached;
 
   Duration _safePosition(double seconds) => Duration(
         milliseconds:
@@ -225,6 +236,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   @override
   void initState() {
     super.initState();
+    _followClock = AnimationController(vsync: this)
+      ..addStatusListener((status) {
+        if (status == AnimationStatus.completed &&
+            _followTransitions.isNotEmpty) {
+          setState(() => _followTransitions = {});
+        }
+      });
     WidgetsBinding.instance.addObserver(this);
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     widget.hidden?.addListener(_syncActivity);
@@ -261,7 +279,15 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       treeVisible: _treeVisible,
       nativeHidden: widget.hidden?.value ?? false,
     );
-    if (active == _active) return;
+    if (active == _active) {
+      if (!active ||
+          _motionHidden ||
+          !(_preferences?.value.animations.allows(MotionKind.lyrics) ?? true)) {
+        _cancelFollowEffects();
+      }
+      if (mounted) setState(() {});
+      return;
+    }
     _active = active;
     setState(() {});
     if (active) {
@@ -271,6 +297,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _receivePosition(widget.readPosition(),
           forceFollow: true, immediate: true);
     } else {
+      _cancelFollowEffects();
       _sourceGeneration++;
       unawaited(_positionSubscription?.cancel());
       _positionSubscription = null;
@@ -288,6 +315,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _resetLyric() {
+    _cancelFollowEffects();
     _manualScrollTimer?.cancel();
     _manualScrollActive = false;
     _dragging = false;
@@ -394,29 +422,38 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
           .getOffsetToReveal(target, alignment)
           .offset
           .clamp(position.minScrollExtent, position.maxScrollExtent);
+      final reduced = _motionHidden || LyricMotion.reducedOf(context);
+      final spring = widget.springLyrics && !seek;
+      final duration = seek
+          ? LyricMotion.seekScrollDuration
+          : spring
+              ? LyricMotion.springScrollDuration
+              : LyricMotion.scrollDuration;
+      final curve = LyricMotion.scrollCurveFor(
+        spring: spring,
+        distance: offset - position.pixels,
+      );
+      _prepareFollowEffects(
+        offset: offset,
+        duration: duration,
+        curve: curve,
+        animate: !immediate && !reduced && !seek,
+      );
       if ((offset - position.pixels).abs() < .5) {
         if (position.isScrollingNotifier.value) {
           _scrollController.jumpTo(offset);
         }
         return;
       }
-      if (immediate || LyricMotion.reducedOf(context)) {
+      if (immediate || reduced) {
         _scrollController.jumpTo(offset);
       } else {
         // A new animateTo starts at the current offset and cancels the previous
         // activity. Seeks stay monotonic even when the optional spring is on.
-        final spring = widget.springLyrics && !seek;
         unawaited(_scrollController.animateTo(
           offset,
-          duration: seek
-              ? LyricMotion.seekScrollDuration
-              : spring
-                  ? LyricMotion.springScrollDuration
-                  : LyricMotion.scrollDuration,
-          curve: LyricMotion.scrollCurveFor(
-            spring: spring,
-            distance: offset - position.pixels,
-          ),
+          duration: duration,
+          curve: curve,
         ));
       }
     });
@@ -426,6 +463,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     if (!_active) return;
     _followGeneration++;
     _manualScrollActive = true;
+    _cancelFollowEffects();
+    if (_scrollController.hasClients &&
+        _scrollController.position.isScrollingNotifier.value &&
+        !dragging) {
+      _scrollController.jumpTo(_scrollController.offset);
+    }
+    setState(() {});
     _manualScrollTimer?.cancel();
     if (dragging) _dragging = true;
     if (!_dragging) _resumeAfterGrace();
@@ -437,10 +481,90 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _manualScrollTimer = Timer(LyricMotion.manualScrollGrace, () {
       if (!mounted || !_active || _dragging) return;
       _manualScrollActive = false;
+      setState(() {});
       _scheduleFollow();
       // Timer callbacks can arrive while paused, without a new position frame.
       WidgetsBinding.instance.ensureVisualUpdate();
     });
+  }
+
+  void _cancelFollowEffects() {
+    _followClock.stop();
+    _followTransitions = {};
+    _restBlur = {};
+  }
+
+  /// Find the viewport band by binary search over already-laid-out rows. No
+  /// whole-song geometry scan or per-frame position lookup is needed.
+  List<int> _visibleFollowRows(double offset) {
+    final position = _scrollController.position;
+    double top(int index) {
+      final row = _lineKeys[index].currentContext?.findRenderObject();
+      if (row is! RenderBox || !row.hasSize) return double.infinity;
+      return RenderAbstractViewport.of(row).getOffsetToReveal(row, 0).offset;
+    }
+
+    var low = 0;
+    var high = _lineKeys.length;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      if (top(middle) < offset) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    final rows = <int>[];
+    for (var i = (low - 1).clamp(0, _lineKeys.length);
+        i < _lineKeys.length && rows.length < LyricMotion.maximumFollowRows;
+        i++) {
+      if (top(i) > offset + position.viewportDimension + 48) break;
+      rows.add(i);
+    }
+    return rows;
+  }
+
+  void _prepareFollowEffects({
+    required double offset,
+    required Duration duration,
+    required Curve curve,
+    required bool animate,
+  }) {
+    final reduced = _motionHidden || LyricMotion.reducedOf(context);
+    final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
+    final blurAllowed =
+        !reduced && !highContrast && (_preferences?.value.surfaceBlur ?? true);
+    final rows = <int>{
+      ..._visibleFollowRows(offset),
+      ..._visibleFollowRows(_scrollController.offset),
+    }.take(LyricMotion.maximumFollowRows).toList();
+    final transitions = <int, LyricFollowTransition>{};
+    final blur = <int, double>{};
+    for (final index in rows) {
+      final targetBlur =
+          blurAllowed ? LyricMotion.blurForDistance(index - _currentLine) : 0.0;
+      blur[index] = targetBlur;
+      if (animate) {
+        final previous = _followTransitions[index]?.sample(_followClock.value);
+        transitions[index] = LyricFollowTransition(
+          distance: offset - _scrollController.offset,
+          delay: ((index - _currentLine).abs() * .035).clamp(0, .20),
+          curve: curve,
+          initialOffset: previous?.offset ?? 0,
+          initialBlur: previous?.blur ?? _restBlur[index] ?? 0,
+          finalBlur: targetBlur,
+        );
+      }
+    }
+    _followClock.stop();
+    setState(() {
+      _followTransitions = transitions;
+      _restBlur = blur;
+    });
+    if (transitions.isNotEmpty) {
+      _followClock.duration = duration;
+      _followClock.forward(from: 0);
+    }
   }
 
   bool _onScrollNotification(ScrollNotification notification) {
@@ -462,12 +586,34 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final reduced = !_active || LyricMotion.reducedOf(context);
+    final reduced = !_active || _motionHidden || LyricMotion.reducedOf(context);
+    final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
+    final followEnabled = !reduced && !_manualScrollActive;
+    final blurEnabled = followEnabled &&
+        !highContrast &&
+        (_preferences?.value.surfaceBlur ?? true);
     if (_wasReduced != null && reduced != _wasReduced && reduced) {
+      _cancelFollowEffects();
       _scheduleFollow(immediate: true);
     }
     _wasReduced = reduced;
     final settings = context.watch<LyricViewController>();
+    final tileIdentity = (widget.lyric, _currentLine, reduced);
+    if (_tileCacheIdentity != tileIdentity) {
+      _tileCacheIdentity = tileIdentity;
+      _tileCache = [
+        for (var index = 0; index < widget.lyric.lines.length; index++)
+          LyricViewTile(
+            key: ValueKey(index),
+            line: widget.lyric.lines[index],
+            position: _position,
+            distance: (index - _currentLine).abs(),
+            opacity: LyricMotion.opacityForDistance(index - _currentLine),
+            reducedMotion: reduced,
+            onTap: widget.lyric is PlainLyric ? null : () => _seekToLine(index),
+          ),
+      ];
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final height = constraints.maxHeight.isFinite
@@ -502,42 +648,42 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
             onNotification: _onScrollNotification,
             child: ScrollConfiguration(
               behavior: const ScrollBehavior().copyWith(scrollbars: false),
-              child: CustomScrollView(
-                key: const ValueKey('vertical-lyric-scroll'),
-                controller: _scrollController,
-                slivers: [
-                  SliverToBoxAdapter(child: SizedBox(height: height * .25)),
-                  SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    sliver: SliverToBoxAdapter(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (var index = 0;
-                              index < widget.lyric.lines.length;
-                              index++)
-                            SizedBox(
-                              key: _lineKeys[index],
-                              width: double.infinity,
-                              child: LyricViewTile(
-                                key: ValueKey(index),
-                                line: widget.lyric.lines[index],
-                                position: _position,
-                                distance: (index - _currentLine).abs(),
-                                opacity: LyricMotion.opacityForDistance(
-                                    index - _currentLine),
-                                reducedMotion: reduced,
-                                onTap: widget.lyric is PlainLyric
-                                    ? null
-                                    : () => _seekToLine(index),
+              child: LyricViewportFade(
+                enabled: followEnabled && !highContrast,
+                child: CustomScrollView(
+                  key: const ValueKey('vertical-lyric-scroll'),
+                  controller: _scrollController,
+                  slivers: [
+                    SliverToBoxAdapter(child: SizedBox(height: height * .25)),
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (var index = 0;
+                                index < widget.lyric.lines.length;
+                                index++)
+                              SizedBox(
+                                key: _lineKeys[index],
+                                width: double.infinity,
+                                child: LyricFollowEffects(
+                                  clock: _followClock,
+                                  transition: followEnabled
+                                      ? _followTransitions[index]
+                                      : null,
+                                  blur: blurEnabled ? _restBlur[index] ?? 0 : 0,
+                                  blurEnabled: blurEnabled,
+                                  child: _tileCache[index],
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  SliverToBoxAdapter(child: SizedBox(height: height * .75)),
-                ],
+                    SliverToBoxAdapter(child: SizedBox(height: height * .75)),
+                  ],
+                ),
               ),
             ),
           ),
@@ -555,6 +701,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _preferences?.removeListener(_syncActivity);
     _positionSubscription?.cancel();
     _manualScrollTimer?.cancel();
+    _followClock.dispose();
     _scrollController.dispose();
     _position.dispose();
     super.dispose();

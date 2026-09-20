@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:dan_player/play_service/named_queue_store.dart';
 import 'dart:async';
 import 'dart:io';
@@ -110,7 +111,7 @@ class PlaybackService extends ChangeNotifier {
         PlaybackStatistics.instance.pause();
         unawaited(_captureTrackResume(force: true));
         _syncPausedToSystem();
-        showTextOnSnackBar(event.problem.toString(), kind: AppNoticeKind.error);
+        showAppNotice(ui(event.problem.toString()), kind: AppNoticeKind.error);
       }
       if (event.reason == PlaybackEndReason.userStop) {
         PlaybackStatistics.instance.finish(markCompleted: false);
@@ -130,7 +131,7 @@ class PlaybackService extends ChangeNotifier {
           stopAfterCurrent.value = false;
           _syncPausedToSystem();
           _schedulePlaybackStateSave();
-          showTextOnSnackBar('已播完停止目标，本次停止已完成');
+          showAppNotice(ui('已播完停止目标，本次停止已完成'), kind: AppNoticeKind.success);
           return;
         }
         // An old track may finish while a user-selected source is still
@@ -231,7 +232,7 @@ class PlaybackService extends ChangeNotifier {
       return true;
     } catch (error, trace) {
       LOGGER.w('[playback rate] $error', stackTrace: trace);
-      showTextOnSnackBar('调整播放速度失败：{0}', arguments: [error]);
+      showAppNotice(ui('调整播放速度失败：{0}', [error]), kind: AppNoticeKind.error);
       return false;
     }
   }
@@ -241,7 +242,7 @@ class PlaybackService extends ChangeNotifier {
     if (_closed) return;
     if (exclusive == _player.wasapiExclusive) return;
     if (resolvingAudioPath.value != null || isChangingOutput.value) {
-      showTextOnSnackBar('请等待当前音乐加载完成后再切换输出模式');
+      showAppNotice(ui('请等待当前音乐加载完成后再切换输出模式'), kind: AppNoticeKind.warning);
       return;
     }
     segmentLoop.setEnabled(false);
@@ -272,7 +273,8 @@ class PlaybackService extends ChangeNotifier {
         } catch (error, trace) {
           LOGGER.w('[save output preference] $error', stackTrace: trace);
           if (_isCurrentSourceRequest(token)) {
-            showTextOnSnackBar('音频输出已切换，但设置保存失败：{0}', arguments: [error]);
+            showAppNotice(ui('音频输出已切换，但设置保存失败：{0}', [error]),
+                kind: AppNoticeKind.error);
           }
         }
       }
@@ -280,7 +282,7 @@ class PlaybackService extends ChangeNotifier {
       if (_isCurrentSourceRequest(token)) {
         _recordProblem(err, output: true);
         LOGGER.e('[change output mode] $err', stackTrace: trace);
-        showTextOnSnackBar('切换音频输出失败：{0}', arguments: [err]);
+        showAppNotice(ui('切换音频输出失败：{0}', [err]), kind: AppNoticeKind.error);
       }
     } finally {
       if (!_closed) isChangingOutput.value = false;
@@ -438,7 +440,7 @@ class PlaybackService extends ChangeNotifier {
   bool stopAfterQueueItem(int index) {
     final blocked = queueStopBlockedReason;
     if (blocked != null) {
-      showTextOnSnackBar(blocked);
+      showAppNotice(ui(blocked), kind: AppNoticeKind.warning);
       return false;
     }
     final id = queueOccurrenceId(index);
@@ -454,7 +456,7 @@ class PlaybackService extends ChangeNotifier {
 
   void setStopAfterCurrent(bool enabled) {
     if (enabled && queueStopBlockedReason != null) {
-      showTextOnSnackBar(queueStopBlockedReason!);
+      showAppNotice(ui(queueStopBlockedReason!), kind: AppNoticeKind.warning);
       return;
     }
     if (enabled) cancelQueueStop();
@@ -464,14 +466,22 @@ class PlaybackService extends ChangeNotifier {
   void _onQueueStopChanged() {
     final reason = queueStopBoundary.lastCancellation;
     if (reason != null && !_closed) {
-      showTextOnSnackBar(switch (reason) {
-        QueueStopCancelReason.removed => '停止目标已被移除，本次停止已取消',
-        QueueStopCancelReason.sourceReplaced => '播放来源已替换，本次停止已取消',
-        QueueStopCancelReason.manuallyPassed => '已手动越过停止目标，本次停止已取消',
-        QueueStopCancelReason.targetFailed => '停止目标播放失败，本次停止已取消',
-        QueueStopCancelReason.sleepTimer => '睡眠定时已到，本次停止目标已取消',
-        QueueStopCancelReason.userCancelled => '已取消本次停止目标',
-      });
+      showAppNotice(
+          ui(switch (reason) {
+            QueueStopCancelReason.removed => '停止目标已被移除，本次停止已取消',
+            QueueStopCancelReason.sourceReplaced => '播放来源已替换，本次停止已取消',
+            QueueStopCancelReason.manuallyPassed => '已手动越过停止目标，本次停止已取消',
+            QueueStopCancelReason.targetFailed => '停止目标播放失败，本次停止已取消',
+            QueueStopCancelReason.sleepTimer => '睡眠定时已到，本次停止目标已取消',
+            QueueStopCancelReason.userCancelled => '已取消本次停止目标',
+          }),
+          kind: switch (reason) {
+            QueueStopCancelReason.manuallyPassed ||
+            QueueStopCancelReason.userCancelled =>
+              AppNoticeKind.success,
+            QueueStopCancelReason.targetFailed => AppNoticeKind.error,
+            _ => AppNoticeKind.info,
+          });
     }
     if (!_closed) notifyListeners();
   }
@@ -566,7 +576,7 @@ class PlaybackService extends ChangeNotifier {
     _applyQueueSnapshot(after);
     if (!recorded &&
         _queueEditHistory.invalidation == QueueHistoryInvalidation.capacity) {
-      showTextOnSnackBar(queueHistoryReason());
+      showAppNotice(ui(queueHistoryReason()), kind: AppNoticeKind.warning);
     }
   }
 
@@ -617,7 +627,7 @@ class PlaybackService extends ChangeNotifier {
       } catch (error, trace) {
         LOGGER.w('[practice end] $error', stackTrace: trace);
       }
-      showTextOnSnackBar('练习次数已完成，已暂停');
+      showAppNotice(ui('练习次数已完成，已暂停'), kind: AppNoticeKind.success);
     } else if (segmentLoop.intervalSeconds > 0) {
       pause();
       _practiceToken = _sourceRequestToken;
@@ -657,7 +667,7 @@ class PlaybackService extends ChangeNotifier {
     } catch (error, trace) {
       segmentLoop.setEnabled(false);
       LOGGER.w('[segment loop] $error', stackTrace: trace);
-      showTextOnSnackBar('片段循环跳转失败，已关闭循环');
+      showAppNotice(ui('片段循环跳转失败，已关闭循环'), kind: AppNoticeKind.error);
     }
   }
 
@@ -665,7 +675,7 @@ class PlaybackService extends ChangeNotifier {
     if (!canUseSegmentLoop) return false;
     segmentLoop.setEnabled(enabled);
     if (segmentLoop.enabled && queueStopBoundary.active) {
-      showTextOnSnackBar('停止目标已保留；请关闭 A-B 循环以继续前进');
+      showAppNotice(ui('停止目标已保留；请关闭 A-B 循环以继续前进'), kind: AppNoticeKind.info);
     }
     if (segmentLoop.enabled) _repeatSegment();
     return segmentLoop.enabled;
@@ -889,7 +899,8 @@ class PlaybackService extends ChangeNotifier {
   }
 
   /// Restore playback when the operating system refuses to delete the file.
-  void cancelAudioDeletion(PlaybackAudioDeletionTicket ticket, {double? restoredPosition}) {
+  void cancelAudioDeletion(PlaybackAudioDeletionTicket ticket,
+      {double? restoredPosition}) {
     if (ticket._resolved) return;
     ticket._resolved = true;
     if (_sameAudioPath(_deletingAudioPath, ticket.path)) {
@@ -925,7 +936,7 @@ class PlaybackService extends ChangeNotifier {
     if (_closed || this.playMode.value == playMode) return;
     this.playMode.value = playMode;
     if (playMode == PlayMode.singleLoop && queueStopBoundary.active) {
-      showTextOnSnackBar('停止目标已保留；请关闭单曲循环以继续前进');
+      showAppNotice(ui('停止目标已保留；请关闭单曲循环以继续前进'), kind: AppNoticeKind.info);
     }
     _pref.playMode = playMode;
     _scheduleModePreferenceSave();
@@ -1252,9 +1263,9 @@ class PlaybackService extends ChangeNotifier {
         final occurrence = queueOccurrenceId(audioIndex);
         if (occurrence != null) queueStopBoundary.failed(occurrence, token);
         _recordProblem(err);
-        showTextOnSnackBar(
-          err is OnlineMusicException ? err.message : "播放失败：$err",
-        );
+        showAppNotice(
+            ui(err is OnlineMusicException ? err.message : "播放失败：$err"),
+            kind: AppNoticeKind.error);
         if (playerState != PlayerState.playing) {
           _smtc.updateState(state: SMTCState.paused);
           notifyListeners();
@@ -1577,7 +1588,7 @@ class PlaybackService extends ChangeNotifier {
         } catch (err, trace) {
           restoredPosition = 0;
           LOGGER.w('[restore session] 无法恢复播放位置：$err', stackTrace: trace);
-          showTextOnSnackBar('已恢复歌曲，但原播放位置暂不可用');
+          showAppNotice(ui('已恢复歌曲，但原播放位置暂不可用'), kind: AppNoticeKind.warning);
         }
       }
       if (resumeAfterLoad) {
@@ -1613,8 +1624,9 @@ class PlaybackService extends ChangeNotifier {
       // A failed/stale restore must never clear a successfully opened newer
       // song. Native source replacement itself is transactional as well.
       LOGGER.e("[restore session] $err", stackTrace: trace);
-      showTextOnSnackBar(
-          err is OnlineMusicException ? err.message : '恢复播放失败：$err');
+      showAppNotice(
+          ui(err is OnlineMusicException ? err.message : '恢复播放失败：$err'),
+          kind: AppNoticeKind.error);
     } finally {
       if (_isCurrentSourceRequest(token)) {
         isBuffering.value = false;
@@ -1740,7 +1752,7 @@ class PlaybackService extends ChangeNotifier {
   /// 下一首播放
   void addToNext(Audio audio) {
     if (!enqueueAudios([audio], next: true)) {
-      showTextOnSnackBar('歌曲正在加载，请稍后重试');
+      showAppNotice(ui('歌曲正在加载，请稍后重试'), kind: AppNoticeKind.info);
     }
   }
 
@@ -1940,7 +1952,7 @@ class PlaybackService extends ChangeNotifier {
     } catch (err) {
       _recordProblem(err);
       LOGGER.e("[pause] $err");
-      showTextOnSnackBar(err.toString());
+      showAppNotice(ui(err.toString()), kind: AppNoticeKind.error);
     }
   }
 
@@ -1980,7 +1992,7 @@ class PlaybackService extends ChangeNotifier {
       _recordProblem(err, output: true);
       _syncPausedToSystem();
       LOGGER.e("[start]: $err");
-      showTextOnSnackBar(err.toString());
+      showAppNotice(ui(err.toString()), kind: AppNoticeKind.error);
     }
   }
 
@@ -2007,9 +2019,11 @@ class PlaybackService extends ChangeNotifier {
       _schedulePlaybackStateSave(positionOverride: position);
     } catch (error, trace) {
       LOGGER.w('[seek] $error', stackTrace: trace);
-      showTextOnSnackBar(nowPlaying?.isOnline == true
-          ? '暂时无法跳到此位置，在线音频可能尚未缓冲完成'
-          : '调整播放位置失败，请重新打开歌曲后重试');
+      showAppNotice(
+          ui(nowPlaying?.isOnline == true
+              ? '暂时无法跳到此位置，在线音频可能尚未缓冲完成'
+              : '调整播放位置失败，请重新打开歌曲后重试'),
+          kind: AppNoticeKind.error);
     }
   }
 

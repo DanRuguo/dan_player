@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/ui_language.dart';
 import 'spectrum_analysis.dart';
 // ignore_for_file: constant_identifier_names
 
@@ -1141,7 +1142,7 @@ class BassPlayer {
           seek(lastPos);
         } catch (err, trace) {
           LOGGER.w('[use exclusive mode] 无法恢复播放位置：$err', stackTrace: trace);
-          showTextOnSnackBar('输出模式已切换，但暂时无法恢复原播放位置');
+          showAppNotice(ui('输出模式已切换，但暂时无法恢复原播放位置'), kind: AppNoticeKind.error);
         }
       }
       if (wasPlaying) {
@@ -1169,16 +1170,19 @@ class BassPlayer {
           if (lastPos > 0) seek(lastPos);
           if (wasPlaying) start();
           _publishState(playerState);
-          showTextOnSnackBar('输出模式切换失败，已恢复原模式：{0}', arguments: [err]);
+          showAppNotice(ui('输出模式切换失败，已恢复原模式：{0}', [err]),
+              kind: AppNoticeKind.error);
         } catch (restoreError, restoreTrace) {
           if (!_isCurrentSource(generation)) return false;
           LOGGER.e('[restore output mode] $restoreError',
               stackTrace: restoreTrace);
-          showTextOnSnackBar('音频设备不可用，原模式也未能恢复；请检查设备后重试');
+          showAppNotice(ui('音频设备不可用，原模式也未能恢复；请检查设备后重试'),
+              kind: AppNoticeKind.error);
           _publishState(playerState);
         }
       } else {
-        showTextOnSnackBar('切换音频输出失败，原模式保持不变：{0}', arguments: [err]);
+        showAppNotice(ui('切换音频输出失败，原模式保持不变：{0}', [err]),
+            kind: AppNoticeKind.error);
       }
       _publishState(playerState,
           problem: err is PlaybackProblem

@@ -1,7 +1,9 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:dan_player/component/app_motion.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 /// Motion local to lyric surfaces. Playback time remains the sole clock for
 /// word highlighting; these durations only describe presentation transitions.
@@ -18,6 +20,14 @@ abstract final class LyricMotion {
   static const scrollCurve = Cubic(0.16, 1.0, 0.30, 1.0);
   static const focusedFontScale = 1.12;
   static const focusedFontWeight = FontWeight.w800;
+  static const maximumFollowRows = 24;
+
+  static double blurForDistance(int distance) => switch (distance.abs()) {
+        0 || 1 => 0,
+        2 => .35,
+        3 => .65,
+        _ => .9,
+      };
 
   /// A subtle optional settle on ordinary line advances, never on a seek.
   /// The overshoot is capped in pixels, including very long translated rows.
@@ -59,6 +69,145 @@ abstract final class LyricMotion {
     if (length <= Duration.zero) return position >= start ? 1 : 0;
     return ((position - start).inMicroseconds / length.inMicroseconds)
         .clamp(0.0, 1.0);
+  }
+}
+
+/// One finite, paint-only trajectory driven by the scroll surface's clock.
+/// Delaying each row's travel slightly gives a continuous wave without a
+/// separate spring/ticker for every lyric or changing any paragraph geometry.
+@immutable
+class LyricFollowTransition {
+  const LyricFollowTransition({
+    required this.distance,
+    required this.delay,
+    required this.curve,
+    required this.initialOffset,
+    required this.initialBlur,
+    required this.finalBlur,
+  });
+
+  final double distance;
+  final double delay;
+  final Curve curve;
+  final double initialOffset;
+  final double initialBlur;
+  final double finalBlur;
+
+  ({double offset, double blur}) sample(double progress) {
+    final t = progress.clamp(0.0, 1.0);
+    if (t >= 1) return (offset: 0, blur: finalBlur);
+    final common = curve.transform(t);
+    final delayed = curve.transform(((t - delay) / (1 - delay)).clamp(0, 1));
+    final lag = (distance * (common - delayed)).clamp(-30.0, 30.0);
+    final settle = LyricMotion.curve.transform(t);
+    return (
+      offset: (initialOffset * (1 - settle) + lag).clamp(-36.0, 36.0),
+      blur: ui.lerpDouble(initialBlur, finalBlur, settle)!,
+    );
+  }
+}
+
+/// Only the bounded viewport band receives a live animation. The paragraph is
+/// an AnimatedBuilder child and does not rebuild on these presentation frames.
+class LyricFollowEffects extends StatelessWidget {
+  const LyricFollowEffects({
+    super.key,
+    required this.clock,
+    required this.transition,
+    required this.blur,
+    this.blurEnabled = true,
+    required this.child,
+  });
+
+  final Animation<double> clock;
+  final LyricFollowTransition? transition;
+  final double blur;
+  final bool blurEnabled;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: transition == null ? kAlwaysCompleteAnimation : clock,
+        child: child,
+        builder: (context, child) {
+          final sample = transition?.sample(clock.value);
+          final sigma = blurEnabled ? sample?.blur ?? blur : 0.0;
+          final offset = sample?.offset ?? 0;
+          // Keep the subtree shape stable while crossing zero blur; otherwise
+          // a focus handoff would discard the timed paragraph's glyph cache.
+          return Transform.translate(
+            offset: Offset(0, offset),
+            child: ImageFiltered(
+              enabled: sigma > .01,
+              imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+              child: child,
+            ),
+          );
+        },
+      );
+}
+
+/// One viewport mask with short edge ramps, disabled for manual reading and
+/// reduced motion/high contrast. No timer or animation is owned by this mask.
+class LyricViewportFade extends SingleChildRenderObjectWidget {
+  const LyricViewportFade({
+    super.key,
+    required this.enabled,
+    required super.child,
+  });
+
+  final bool enabled;
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderLyricViewportFade(enabled);
+
+  @override
+  void updateRenderObject(
+          BuildContext context, covariant RenderProxyBox renderObject) =>
+      (renderObject as _RenderLyricViewportFade).enabled = enabled;
+}
+
+class _RenderLyricViewportFade extends RenderProxyBox {
+  _RenderLyricViewportFade(this._enabled);
+
+  bool _enabled;
+  set enabled(bool value) {
+    if (_enabled == value) return;
+    _enabled = value;
+    markNeedsPaint();
+    markNeedsCompositingBitsUpdate();
+  }
+
+  @override
+  bool get alwaysNeedsCompositing => child != null && _enabled;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (!_enabled || child == null) {
+      layer = null;
+      super.paint(context, offset);
+      return;
+    }
+    final edge = math.min(24.0, size.height * .05) / math.max(1.0, size.height);
+    final mask = layer is ShaderMaskLayer
+        ? layer! as ShaderMaskLayer
+        : ShaderMaskLayer();
+    mask
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: const [
+          Colors.transparent,
+          Colors.white,
+          Colors.white,
+          Colors.transparent
+        ],
+        stops: [0, edge, 1 - edge, 1],
+      ).createShader(Offset.zero & size)
+      ..maskRect = offset & size
+      ..blendMode = BlendMode.dstIn;
+    layer = mask;
+    context.pushLayer(mask, super.paint, offset);
   }
 }
 

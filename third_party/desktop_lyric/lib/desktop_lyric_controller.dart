@@ -29,6 +29,7 @@ class PlaybackClock extends ChangeNotifier {
   bool _playing = false;
   double _playbackRate = 1.0;
   int _revision = 0;
+  bool _samplingEnabled = true;
 
   int get positionMilliseconds =>
       _anchorPositionMilliseconds +
@@ -41,6 +42,15 @@ class PlaybackClock extends ChangeNotifier {
   bool get playing => _playing;
   double get playbackRate => _playbackRate;
   int get revision => _revision;
+
+  /// Stops visual sampling, never the monotonic playback timeline. Explicit
+  /// seeks and playback changes still notify immediately while sampling is off.
+  void setSamplingEnabled(bool value) {
+    if (_samplingEnabled == value) return;
+    _samplingEnabled = value;
+    _updateTicker();
+    if (value) notifyListeners();
+  }
 
   void sync(PlaybackTimelineMessage message) {
     _revision++;
@@ -65,7 +75,7 @@ class PlaybackClock extends ChangeNotifier {
   }
 
   void _updateTicker() {
-    if (!_playing || !automaticTicks) {
+    if (!_playing || !automaticTicks || !_samplingEnabled) {
       _ticker?.cancel();
       _ticker = null;
       return;
@@ -80,6 +90,32 @@ class PlaybackClock extends ChangeNotifier {
     _elapsed.stop();
     super.dispose();
   }
+}
+
+/// A read-only mirror of the owning player's existing rendering settings.
+/// Absent or malformed fields use the player's defaults, keeping older
+/// frame-rate messages compatible without creating another settings store.
+@immutable
+class DesktopLyricRenderingPolicy {
+  const DesktopLyricRenderingPolicy(
+      {this.panelBlur = true, this.pauseWhenHidden = true});
+  final bool panelBlur;
+  final bool pauseWhenHidden;
+
+  factory DesktopLyricRenderingPolicy.fromMap(Map<String, dynamic> value) =>
+      DesktopLyricRenderingPolicy(
+        panelBlur: value['panelBlur'] is bool ? value['panelBlur'] : true,
+        pauseWhenHidden:
+            value['pauseWhenHidden'] is bool ? value['pauseWhenHidden'] : true,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is DesktopLyricRenderingPolicy &&
+      other.panelBlur == panelBlur &&
+      other.pauseWhenHidden == pauseWhenHidden;
+  @override
+  int get hashCode => Object.hash(panelBlur, pauseWhenHidden);
 }
 
 class DesktopLyricController {
@@ -102,6 +138,7 @@ class DesktopLyricController {
       ValueNotifier(null);
   final ValueNotifier<bool> vertical = ValueNotifier(false);
   final ValueNotifier<bool> locked = ValueNotifier(false);
+  final renderingPolicy = ValueNotifier(const DesktopLyricRenderingPolicy());
   late final appearance = TextDisplayController(onChanged: _appearanceChanged);
   final appearanceSaveError = ValueNotifier<String?>(null);
   int _appearanceRevision = 0;
@@ -115,8 +152,35 @@ class DesktopLyricController {
   int _lockRevision = 0;
   bool _disposed = false;
   bool _inputClosed = false;
+  AppLifecycleState? _windowLifecycle;
+  bool _lyricAnimationsEnabled = true;
+  bool _systemAnimationsEnabled = true;
 
   bool get inputClosed => _inputClosed;
+
+  /// The helper's own engine lifecycle, never the main player's visibility.
+  void setWindowLifecycle(AppLifecycleState? value) {
+    if (_disposed) return;
+    _windowLifecycle = value;
+    _updateClockSampling();
+  }
+
+  void setSystemAnimationsEnabled(bool value) {
+    if (_disposed) return;
+    _systemAnimationsEnabled = value;
+    _updateClockSampling();
+  }
+
+  void _updateClockSampling() {
+    final visible = _windowLifecycle == null ||
+        _windowLifecycle == AppLifecycleState.resumed ||
+        _windowLifecycle == AppLifecycleState.inactive;
+    playbackClock.setSamplingEnabled(_lyricAnimationsEnabled &&
+        _systemAnimationsEnabled &&
+        _windowLifecycle != AppLifecycleState.paused &&
+        _windowLifecycle != AppLifecycleState.detached &&
+        (!renderingPolicy.value.pauseWhenHidden || visible));
+  }
 
   static void initWithArgs(List<String> args) {
     if (args.length != 1) return;
@@ -243,8 +307,11 @@ class DesktopLyricController {
 
       if (type == getMessageTypeName<FrameRateMessage>()) {
         frameRatePreference.value = FrameRatePreference.fromMap(content);
-        desktopMotionPreferences.value =
-            MotionPreferences.fromMap(content['animations']);
+        final motion = MotionPreferences.fromMap(content['animations']);
+        desktopMotionPreferences.value = motion;
+        _lyricAnimationsEnabled = motion.allows(MotionKind.lyrics);
+        renderingPolicy.value = DesktopLyricRenderingPolicy.fromMap(content);
+        _updateClockSampling();
       } else if (type == getMessageTypeName<UiLanguageMessage>()) {
         uiLanguage.value = UiLanguage.parse(content['language']);
       } else if (type == getMessageTypeName<PlayerStateChangedMessage>()) {
@@ -340,5 +407,6 @@ class DesktopLyricController {
     locked.dispose();
     appearance.dispose();
     appearanceSaveError.dispose();
+    renderingPolicy.dispose();
   }
 }

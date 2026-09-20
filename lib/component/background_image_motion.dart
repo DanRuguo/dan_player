@@ -18,9 +18,14 @@ class BackgroundImageMotion extends StatefulWidget {
     this.isPlaying = false,
     this.isVisible = true,
     this.hidden,
+    this.phaseBuilder,
   });
 
   final Widget child;
+
+  /// Alternative native rendering sharing this exact playback/visibility clock.
+  final Widget Function(ValueListenable<double> phase,
+      ValueListenable<bool> active, Widget child)? phaseBuilder;
   final bool enabled;
   final bool isPlaying;
   final bool isVisible;
@@ -39,6 +44,7 @@ class BackgroundImageMotion extends StatefulWidget {
 class _BackgroundImageMotionState extends State<BackgroundImageMotion>
     with WidgetsBindingObserver {
   final _phase = ValueNotifier(0.0);
+  final _active = ValueNotifier(false);
   Timer? _timer;
   AppLifecycleState? _lifecycle;
   bool _treeVisible = false;
@@ -106,6 +112,7 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
         !features.disableAnimations &&
         !features.reduceMotion &&
         !features.highContrast;
+    _active.value = active;
     if (!active) {
       _timer?.cancel();
       _timer = null;
@@ -122,6 +129,10 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
   @override
   Widget build(BuildContext context) {
     if (!widget.enabled) return widget.child;
+    if (widget.phaseBuilder != null) {
+      return ClipRect(
+          child: widget.phaseBuilder!(_phase, _active, widget.child));
+    }
     return ClipRect(
       child: LayoutBuilder(builder: (context, constraints) {
         final width = constraints.hasBoundedWidth ? constraints.maxWidth : 0.0;
@@ -156,6 +167,7 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
     _preferences?.removeListener(_syncClock);
     WidgetsBinding.instance.removeObserver(this);
     _phase.dispose();
+    _active.dispose();
     super.dispose();
   }
 }

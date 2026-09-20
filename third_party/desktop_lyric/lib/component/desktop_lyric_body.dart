@@ -33,8 +33,11 @@ class _DesktopLyricBodyState extends State<DesktopLyricBody> {
     final window = widget.windowLayout ?? DesktopLyricWindowLayout.instance;
 
     return ListenableBuilder(
-        listenable:
-            Listenable.merge([source.appearance, window.palettePresentation]),
+        listenable: Listenable.merge([
+          source.appearance,
+          source.renderingPolicy,
+          window.palettePresentation
+        ]),
         builder: (context, _) => LayoutBuilder(builder: (context, constraints) {
               final appearance = source.appearance.value;
               final presentation = window.palettePresentation.value;
@@ -80,8 +83,8 @@ class _DesktopLyricBodyState extends State<DesktopLyricBody> {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(14.0),
                         child: BackdropFilter(
-                          enabled:
-                              value > 0 || appearance.backgroundOpacity > 0,
+                          enabled: source.renderingPolicy.value.panelBlur &&
+                              (value > 0 || appearance.backgroundOpacity > 0),
                           filter: ImageFilter.blur(sigmaX: 18.0, sigmaY: 18.0),
                           child: DecoratedBox(
                             key: const ValueKey('desktop-lyric-background'),

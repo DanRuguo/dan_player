@@ -35,10 +35,10 @@ class _PlaybackDiagnosticsPanelState extends State<PlaybackDiagnosticsPanel> {
       await file.writeAsString(
           const JsonEncoder.withIndent('  ').convert(snapshot),
           flush: true);
-      if (mounted) showTextOnSnackBar('已导出脱敏播放诊断', kind: AppNoticeKind.success);
+      if (mounted) showAppNotice(ui('已导出脱敏播放诊断'), kind: AppNoticeKind.success);
     } catch (_) {
       if (mounted) {
-        showTextOnSnackBar('导出诊断失败，请检查保存位置', kind: AppNoticeKind.error);
+        showAppNotice(ui('导出诊断失败，请检查保存位置'), kind: AppNoticeKind.error);
       }
     }
   }

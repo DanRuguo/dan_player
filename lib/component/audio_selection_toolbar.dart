@@ -238,4 +238,4 @@ void _enqueue(BuildContext context, List<Audio> audios, {required bool next}) {
 
 void _notice(BuildContext context, String text,
         {AppNoticeKind kind = AppNoticeKind.success}) =>
-    showTextOnSnackBar(text, context: context, kind: kind);
+    showAppNotice(text, context: context, kind: kind);

@@ -8,7 +8,6 @@ export 'package:dan_player/component/app_presentation.dart' show AppNoticeKind;
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:pinyin/pinyin.dart';
-import 'package:desktop_lyric/ui_language.dart';
 
 extension StringHMMSS on Duration {
   /// Returns a string with hours, minutes, seconds,
@@ -124,47 +123,6 @@ void showAppNotice(
       actionLabel: actionLabel,
       onAction: onAction,
       fallbackMessenger: SCAFFOLD_MESSAGER.currentState);
-}
-
-/// Compatibility entry for existing call sites. New code should provide an
-/// explicit [AppNoticeKind]; conservative wording inference keeps old success
-/// and error feedback visually distinct until each feature is migrated.
-void showTextOnSnackBar(
-  String text, {
-  AppNoticeKind? kind,
-  BuildContext? context,
-  List<Object?> arguments = const [],
-}) {
-  showAppNotice(
-    ui(text, arguments),
-    context: context,
-    kind: kind ?? _noticeKindForText(text),
-  );
-}
-
-AppNoticeKind _noticeKindForText(String text) {
-  final normalized = text.toLowerCase();
-  if (text.contains('失败') ||
-      text.contains('错误') ||
-      text.contains('无法') ||
-      text.contains('未能') ||
-      text.contains('异常') ||
-      normalized.contains('exception') ||
-      normalized.contains('error')) {
-    return AppNoticeKind.error;
-  }
-  if (text.contains('不可用') ||
-      text.contains('请等待') ||
-      text.contains('已阻止') ||
-      text.contains('不能') ||
-      text.contains('不支持') ||
-      text.contains('只读')) {
-    return AppNoticeKind.warning;
-  }
-  if (text.startsWith('已') || text.contains('成功') || text.contains('完成')) {
-    return AppNoticeKind.success;
-  }
-  return AppNoticeKind.info;
 }
 
 final LOGGER_MEMORY = MemoryOutput(

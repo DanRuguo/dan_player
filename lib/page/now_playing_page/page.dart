@@ -175,14 +175,15 @@ class _NowPlayingMoreAction extends StatelessWidget {
                   try {
                     if (OnlineLibrary.instance.contains(onlinePlaying)) {
                       await OnlineLibrary.instance.remove(onlinePlaying);
-                      showTextOnSnackBar("已从总乐库移除");
+                      showAppNotice(ui("已从总乐库移除"), kind: AppNoticeKind.success);
                     } else {
                       await OnlineLibrary.instance.add(onlinePlaying);
-                      showTextOnSnackBar("已加入总乐库");
+                      showAppNotice(ui("已加入总乐库"), kind: AppNoticeKind.success);
                     }
                   } catch (error, stackTrace) {
                     LOGGER.e("[online library] $error", stackTrace: stackTrace);
-                    showTextOnSnackBar("更新总乐库失败：{0}", arguments: [error]);
+                    showAppNotice(ui("更新总乐库失败：{0}", [error]),
+                        kind: AppNoticeKind.error);
                   }
                 },
                 leadingIcon: const Icon(Symbols.library_add),

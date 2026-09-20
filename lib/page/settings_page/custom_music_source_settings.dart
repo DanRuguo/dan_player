@@ -89,10 +89,11 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
     final index = next.indexWhere((item) => item.id == result.id);
     if (index < 0) {
       if (next.length >= CustomMusicSourceProfileCodec.maximumProfiles) {
-        showTextOnSnackBar('最多可保存 {0} 个自定义歌源',
-            arguments: [CustomMusicSourceProfileCodec.maximumProfiles],
-            kind: AppNoticeKind.warning,
-            context: context);
+        showAppNotice(
+            ui('最多可保存 {0} 个自定义歌源',
+                [CustomMusicSourceProfileCodec.maximumProfiles]),
+            context: context,
+            kind: AppNoticeKind.warning);
         return;
       }
       next.add(result);
@@ -213,8 +214,8 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
       return;
     }
     if (!profile.capabilities.contains(CustomMusicSourceCapability.search)) {
-      showTextOnSnackBar('该歌源需在实际歌曲上测试',
-          kind: AppNoticeKind.warning, context: context);
+      showAppNotice(ui('该歌源需在实际歌曲上测试'),
+          context: context, kind: AppNoticeKind.warning);
       return;
     }
     setState(() => _testingId = profile.id);
@@ -227,16 +228,14 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
             .search('Dan Player Test', limit: 1);
       }
       if (mounted) {
-        showTextOnSnackBar('搜索接口连接正常；其他能力需使用实际歌曲验证',
-            kind: AppNoticeKind.success, context: context);
+        showAppNotice(ui('搜索接口连接正常；其他能力需使用实际歌曲验证'),
+            context: context, kind: AppNoticeKind.success);
       }
     } catch (error, trace) {
       LOGGER.w('[custom source settings] probe failed', stackTrace: trace);
       if (mounted) {
-        showTextOnSnackBar('歌源测试失败：{0}',
-            arguments: [_localizedProbeFailure(error)],
-            kind: AppNoticeKind.error,
-            context: context);
+        showAppNotice(ui('歌源测试失败：{0}', [_localizedProbeFailure(error)]),
+            context: context, kind: AppNoticeKind.error);
       }
     } finally {
       if (mounted) setState(() => _testingId = null);
@@ -299,8 +298,8 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
       }
       final imported = CustomMusicSourceProfileCodec.decodeBackup(decoded);
       if (imported.isEmpty) {
-        showTextOnSnackBar('文件中没有可用的歌源配置',
-            kind: AppNoticeKind.warning, context: context);
+        showAppNotice(ui('文件中没有可用的歌源配置'),
+            context: context, kind: AppNoticeKind.warning);
         return;
       }
 
@@ -367,19 +366,20 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
               .length
           : 0;
       final skipped = candidate.length - next.length;
-      showTextOnSnackBar(
-          skipped == 0
-              ? '已导入 {0} 个新配置，更新 {1} 个配置'
-              : '已导入 {0} 个新配置，更新 {1} 个配置；{2} 个配置因达到上限未导入',
-          arguments: [added, updated, skipped],
-          kind: AppNoticeKind.success,
-          context: context);
+      showAppNotice(
+          ui(
+              skipped == 0
+                  ? '已导入 {0} 个新配置，更新 {1} 个配置'
+                  : '已导入 {0} 个新配置，更新 {1} 个配置；{2} 个配置因达到上限未导入',
+              [added, updated, skipped]),
+          context: context,
+          kind: AppNoticeKind.success);
     } catch (error, trace) {
       LOGGER.e('[custom source settings] import failed',
           error: error, stackTrace: trace);
       if (mounted) {
-        showTextOnSnackBar('导入失败，请选择有效的 Dan Player 歌源配置',
-            kind: AppNoticeKind.error, context: context);
+        showAppNotice(ui('导入失败，请选择有效的 Dan Player 歌源配置'),
+            context: context, kind: AppNoticeKind.error);
       }
     } finally {
       if (mounted) setState(() => _transferring = false);
@@ -395,15 +395,15 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
       );
       final written = await _writeExportFile(json);
       if (mounted && written) {
-        showTextOnSnackBar('歌源配置已导出；请勿在地址或公开请求头中填写密钥',
-            kind: AppNoticeKind.success, context: context);
+        showAppNotice(ui('歌源配置已导出；请勿在地址或公开请求头中填写密钥'),
+            context: context, kind: AppNoticeKind.success);
       }
     } catch (error, trace) {
       LOGGER.e('[custom source settings] export failed',
           error: error, stackTrace: trace);
       if (mounted) {
-        showTextOnSnackBar('导出歌源配置失败',
-            kind: AppNoticeKind.error, context: context);
+        showAppNotice(ui('导出歌源配置失败'),
+            context: context, kind: AppNoticeKind.error);
       }
     } finally {
       if (mounted) setState(() => _transferring = false);
