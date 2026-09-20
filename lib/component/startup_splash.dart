@@ -1,6 +1,7 @@
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/brand_logo.dart';
+import 'package:dan_player/component/player_logo.dart';
 import 'package:dan_player/startup_progress.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -370,18 +371,8 @@ class _PlayerSignature extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: [
-          Image.asset(
-            'app_icon.ico',
+          const PlayerLogo(
             key: StartupSplash.playerIconKey,
-            width: 24,
-            height: 24,
-            excludeFromSemantics: true,
-            filterQuality: FilterQuality.high,
-            errorBuilder: (context, error, stackTrace) => Icon(
-              Icons.music_note,
-              size: 24,
-              color: Theme.of(context).colorScheme.primary,
-            ),
           ),
           // Keep the name intact even in a window narrower than the text. The
           // Wrap moves it beneath the icon before this last-resort scaling.

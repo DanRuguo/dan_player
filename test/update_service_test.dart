@@ -301,6 +301,32 @@ void main() {
           throwsA(isA<UpdateException>()
               .having((error) => error.message, 'message', contains('无法识别'))));
     });
+
+    test('response failure after a real file write preserves the network error',
+        () async {
+      Stream<List<int>> interrupted() async* {
+        yield const [1, 2, 3];
+        throw const SocketException('Synthetic response interrupted');
+      }
+
+      final service = UpdateService.forTesting(
+        appDataDirectory: () async => scratch,
+        httpClientFactory: () => _FakeHttpClient(
+            (_, __) => _FakeHttpResponse(interrupted(), contentLength: 12)),
+      );
+      await expectLater(
+        service.download(_update(List<int>.filled(12, 0))),
+        throwsA(isA<UpdateException>()
+            .having((error) => error.message, 'message', contains('网络连接中断'))
+            .having((error) => error.cause, 'cause', isA<SocketException>())),
+      );
+      expect(
+          await scratch
+              .list(recursive: true)
+              .where((item) => item is File)
+              .toList(),
+          isEmpty);
+    });
   });
 }
 

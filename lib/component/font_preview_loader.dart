@@ -87,6 +87,10 @@ class FontPreviewLoader {
       return null;
     }
     final bytes = await _sizeOf(entry.font);
+    // A row/dialog can disappear while its file is being checked. Registering
+    // the font after that would retain it in the engine for this whole process.
+    // A new visible/selected consumer can still share the pending check.
+    if (entry.users == 0) return null;
     if (!entry.explicit &&
         (_loadedFonts >= maximumAutomaticFonts ||
             _loadedBytes + bytes > maximumAutomaticBytes)) {

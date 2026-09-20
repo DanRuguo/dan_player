@@ -20,13 +20,18 @@ class OnlineLibrary extends ChangeNotifier {
   List<Audio> get audios => List.unmodifiable(_audios);
   Future<void> _operationTail = Future.value();
   bool _preserveBackup = false;
+  Object? _readFailure;
 
   bool contains(Audio audio) =>
       _audios.any((item) => item.path == audio.path && item.isOnline);
 
-  Future<void> initialize() async {
-    _audios.clear();
+  // Reads share the mutation queue: a late reload must not replace a track
+  // added while it was waiting for disk, or race the recovery .tmp file.
+  Future<void> initialize() => _enqueue(_initialize);
+
+  Future<void> _initialize() async {
     _preserveBackup = false;
+    final next = <Audio>[];
     var recoveredFromBackup = false;
     var loaded = false;
     try {
@@ -42,6 +47,16 @@ class OnlineLibrary extends ChangeNotifier {
             throw const FormatException(
                 "Online library root must be an object");
           }
+          final version = decoded['version'];
+          if (version is int && version > 1) {
+            // A future primary is not corrupt. Falling back to an old backup
+            // would silently downgrade it on the next collection edit.
+            throw UnsupportedError(
+                'Online library was created by a newer version');
+          }
+          if (version != null && version != 1) {
+            throw const FormatException('Invalid online library version');
+          }
           final entries = decoded["tracks"];
           if (entries is! List) {
             throw const FormatException("Online library tracks must be a list");
@@ -51,7 +66,7 @@ class OnlineLibrary extends ChangeNotifier {
             if (entry is! Map) continue;
             try {
               final audio = Audio.fromOnlineMap(entry);
-              if (seen.add(audio.path)) _audios.add(audio);
+              if (seen.add(audio.path)) next.add(audio);
             } catch (error) {
               LOGGER.w("[online library] skipped invalid entry: $error");
             }
@@ -62,17 +77,26 @@ class OnlineLibrary extends ChangeNotifier {
             LOGGER.w("[online library] recovered from backup");
           }
           break;
+        } on UnsupportedError {
+          rethrow;
         } catch (error) {
           targetError ??= error;
-          _audios.clear();
+          next.clear();
         }
       }
       if (!loaded && targetError != null) throw targetError;
+      // Commit a complete readable snapshot only. Failed reloads retain the
+      // last published collection and leave both disk files untouched.
+      _audios
+        ..clear()
+        ..addAll(next);
+      _readFailure = null;
       if (recoveredFromBackup) {
         _preserveBackup = true;
         await _save();
       }
     } catch (error, trace) {
+      if (!loaded) _readFailure = error;
       LOGGER.e("[online library] failed to load: $error", stackTrace: trace);
     }
     _publish();
@@ -83,6 +107,7 @@ class OnlineLibrary extends ChangeNotifier {
       throw ArgumentError.value(audio.path, "audio", "must be an online track");
     }
     return _enqueue(() async {
+      if (_readFailure case final failure?) throw failure;
       final previous = List<Audio>.from(_audios);
       final index = _audios.indexWhere((item) => item.path == audio.path);
       if (index >= 0) {
@@ -127,6 +152,7 @@ class OnlineLibrary extends ChangeNotifier {
 
   Future<void> remove(Audio audio) async {
     return _enqueue(() async {
+      if (_readFailure case final failure?) throw failure;
       final previous = List<Audio>.from(_audios);
       _audios.removeWhere((item) => item.path == audio.path);
       if (_audios.length == previous.length) return;

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/data/stream_file_transfer.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
@@ -1109,14 +1110,14 @@ class OnlineMusicService {
       await destination.parent.create(recursive: true);
       requireCurrentDownloadProfile();
       sink = temporary.openWrite();
-      var received = 0;
       final total = response.contentLength >= 0 ? response.contentLength : null;
-      await for (final chunk in response.timeout(_downloadReadTimeout)) {
-        requireCurrentDownloadProfile();
-        sink.add(chunk);
-        received += chunk.length;
-        onProgress?.call(received, total);
-      }
+      final received = await writeStreamToFileSink(
+        response.timeout(_downloadReadTimeout),
+        sink,
+        checkCurrent: requireCurrentDownloadProfile,
+        total: total,
+        onProgress: onProgress,
+      );
       requireCurrentDownloadProfile();
       await sink.flush();
       requireCurrentDownloadProfile();

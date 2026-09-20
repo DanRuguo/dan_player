@@ -633,6 +633,8 @@ void main() {
     final small = tester.getSize(
         find.byKey(ValueKey('playlist-rectangle-${children.last.id}')));
     expect(large.width, closeTo(small.width * 2 + 4, .1));
+    await tester.tap(find.byKey(const ValueKey('playlist-current-settings')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('playlist-auto-fill')));
     await tester.pumpAndSettle();
     final before = tester.getTopLeft(
@@ -642,6 +644,8 @@ void main() {
         tester.getTopLeft(
             find.byKey(ValueKey('playlist-rectangle-${children.last.id}'))),
         before);
+    await tester.tap(find.byKey(const ValueKey('playlist-current-settings')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('playlist-auto-fill')));
     await tester.pumpAndSettle();
     expect(CategoryPresentation.fromMap(parent.presentation['tiles']).autoFill,

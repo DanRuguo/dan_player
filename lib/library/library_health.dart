@@ -48,18 +48,52 @@ class LibraryHealthService {
   LibraryHealthService(this.directory);
   final Directory directory;
   File get _file => File(p.join(directory.path, 'library_health.json'));
-  Future<Map<String, dynamic>> _read() async {
-    if (!await _file.exists()) return {};
-    final raw = jsonDecode(await _file.readAsString());
-    if (raw is! Map<String, dynamic>) {
-      throw const FormatException('来源状态记录无法读取。');
+  Future<({Map<String, dynamic> data, bool recovered})> _read() async {
+    Object? failure;
+    for (final candidate in [_file, File('${_file.path}.bak')]) {
+      if (!await candidate.exists()) continue;
+      try {
+        final raw = jsonDecode(await candidate.readAsString());
+        if (raw is! Map<String, dynamic>) {
+          throw const FormatException('来源状态记录无法读取。');
+        }
+        final version = raw['version'];
+        if (version is int && version > 1) {
+          throw UnsupportedError(
+              'Library health data was created by a newer version');
+        }
+        final sources = raw['sources'];
+        if ((version != null && version != 1) ||
+            (sources != null && sources is! Map)) {
+          throw const FormatException('来源状态记录无法读取。');
+        }
+        for (final source in (sources as Map?)?.values ?? const []) {
+          if (source is! Map ||
+              const [
+                'lastSuccess',
+                'lastAttempt',
+                'failure'
+              ].any((key) => source[key] != null && source[key] is! String)) {
+            throw const FormatException('来源状态记录无法读取。');
+          }
+        }
+        return (data: raw, recovered: candidate.path != _file.path);
+      } on UnsupportedError {
+        // A future primary is not a corrupt snapshot. Never replace it with
+        // an older backup on the next scan record.
+        rethrow;
+      } catch (error) {
+        failure ??= error;
+      }
     }
-    return raw;
+    if (failure != null) throw failure;
+    return (data: <String, dynamic>{}, recovered: false);
   }
 
   Future<void> recordScan(Iterable<String> roots, {String? failure}) async {
-    final raw = await _read();
-    final sources = Map<String, dynamic>.from(raw['sources'] as Map? ?? {});
+    final snapshot = await _read();
+    final sources =
+        Map<String, dynamic>.from(snapshot.data['sources'] as Map? ?? {});
     final now = DateTime.now().toUtc().toIso8601String();
     for (final root in roots) {
       final old = Map<String, dynamic>.from(sources[root] as Map? ?? {});
@@ -72,19 +106,29 @@ class LibraryHealthService {
     }
     await directory.create(recursive: true);
     final temporary = File('${_file.path}.tmp');
-    await temporary.writeAsString(
-        jsonEncode({'version': 1, 'sources': sources}),
-        flush: true);
     final backup = File('${_file.path}.bak');
-    if (await backup.exists()) await backup.delete();
-    if (await _file.exists()) await _file.rename(backup.path);
     try {
+      await temporary.writeAsString(
+          jsonEncode({'version': 1, 'sources': sources}),
+          flush: true);
+      // Inspection never repairs files. The next successful record repairs
+      // the primary while retaining the only known-good recovery copy.
+      if (!snapshot.recovered && await _file.exists()) {
+        if (await backup.exists()) await backup.delete();
+        await _file.rename(backup.path);
+      }
       await temporary.rename(_file.path);
     } catch (_) {
       if (!await _file.exists() && await backup.exists()) {
-        await backup.rename(_file.path);
+        await backup.copy(_file.path);
       }
       rethrow;
+    } finally {
+      try {
+        if (await temporary.exists()) await temporary.delete();
+      } on FileSystemException {
+        // A cleanup failure must not replace the commit/rollback result.
+      }
     }
   }
 
@@ -92,7 +136,7 @@ class LibraryHealthService {
       {bool files = false,
       bool Function()? cancelled,
       void Function(int)? onProgress}) async {
-    final previous = (await _read())['sources'] as Map? ?? {};
+    final previous = (await _read()).data['sources'] as Map? ?? {};
     final sources = <LibrarySourceHealth>[];
     for (final root in library.scanRoots) {
       if (cancelled?.call() == true) break;

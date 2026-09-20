@@ -24,22 +24,19 @@ class _CategoryTileMotionState extends State<CategoryTileMotion>
   late final AnimationController _controller =
       AnimationController(vsync: this, duration: AppMotion.standard, value: 1);
   late Rect _from = widget.rect;
-  Rect get _current => Rect.lerp(
-      _from,
-      widget.rect,
-      widget.linear
-          ? _controller.value
-          : AppMotion.standardCurve.transform(_controller.value))!;
+  // A fill-mode toggle may change the requested curve without moving this tile.
+  // Keep the active segment's curve until a new target starts another flight.
+  late bool _activeLinear = widget.linear;
+  double get _progress => _activeLinear
+      ? _controller.value
+      : AppMotion.standardCurve.transform(_controller.value);
+  Rect get _current => Rect.lerp(_from, widget.rect, _progress)!;
   @override
   void didUpdateWidget(CategoryTileMotion old) {
     super.didUpdateWidget(old);
     if (old.rect != widget.rect) {
-      _from = Rect.lerp(
-          _from,
-          old.rect,
-          old.linear
-              ? _controller.value
-              : AppMotion.standardCurve.transform(_controller.value))!;
+      _from = Rect.lerp(_from, old.rect, _progress)!;
+      _activeLinear = widget.linear;
       if (appToolbarReduceMotion(context, kind: MotionKind.layout)) {
         _controller.value = 1;
       } else {
@@ -51,7 +48,11 @@ class _CategoryTileMotionState extends State<CategoryTileMotion>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!AppMotion.enabled(context, MotionKind.layout)) _controller.value = 1;
+    // Settle while hidden, rather than exposing a stale transform on the first
+    // visible frame before the resumed ticker catches up to elapsed wall time.
+    if (appToolbarReduceMotion(context, kind: MotionKind.layout)) {
+      _controller.value = 1;
+    }
   }
 
   @override

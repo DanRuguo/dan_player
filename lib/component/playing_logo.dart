@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/player_logo.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -11,7 +12,7 @@ class PlayingLogo extends StatelessWidget {
   const PlayingLogo({super.key});
   @override
   Widget build(BuildContext context) {
-    final icon = Image.asset('app_icon.ico', width: 24, height: 24);
+    const icon = PlayerLogo();
     return PlaybackReadyBuilder(
       waitingBuilder: (_) => icon,
       readyBuilder: (_) {

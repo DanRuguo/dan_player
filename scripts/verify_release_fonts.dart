@@ -93,6 +93,7 @@ Future<void> main(List<String> arguments) async {
       // logo explicitly instead of attributing every blank image to subsetting.
       for (final relative in const [
         'app_icon.ico',
+        'app_icon_dark.ico',
         'assets/images/RCE_logo_transparent.png',
         'assets/images/RCE_logo_white.png',
         'assets/branding/danruguo_light.png',

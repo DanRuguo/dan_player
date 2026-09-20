@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/data/stream_file_transfer.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:github/github.dart';
 import 'package:path/path.dart' as path;
@@ -579,17 +580,19 @@ class UpdateService {
 
       final total =
           response.contentLength > 0 ? response.contentLength : expectedSize;
-      var received = 0;
       sink = file.openWrite();
-      await for (final chunk in response.timeout(_downloadIdleTimeout)) {
-        _throwIfCancelled(cancellation);
-        sink.add(chunk);
-        received += chunk.length;
-        onProgress?.call(
-          UpdateDownloadProgress(receivedBytes: received, totalBytes: total),
-        );
-        _throwIfCancelled(cancellation);
-      }
+      final received = await writeStreamToFileSink(
+        response.timeout(_downloadIdleTimeout),
+        sink,
+        checkCurrent: () => _throwIfCancelled(cancellation),
+        total: total,
+        onProgress: (received, total) {
+          onProgress?.call(
+            UpdateDownloadProgress(receivedBytes: received, totalBytes: total),
+          );
+          _throwIfCancelled(cancellation);
+        },
+      );
       _throwIfCancelled(cancellation);
       await sink.flush();
       _throwIfCancelled(cancellation);
@@ -606,7 +609,13 @@ class UpdateService {
       }
     } finally {
       try {
-        await sink?.close();
+        try {
+          await sink?.close();
+        } catch (_) {
+          // addStream can close the file consumer on error. Cleanup must not
+          // replace that error with a second "File closed" failure. The normal
+          // successful path already awaits close above and still reports it.
+        }
       } finally {
         cancellation?.detach();
         client.close(force: true);

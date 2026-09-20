@@ -3,6 +3,7 @@ import 'dart:ui' as raster;
 
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/brand_logo.dart';
+import 'package:dan_player/component/player_logo.dart';
 import 'package:dan_player/component/startup_splash.dart';
 import 'package:dan_player/page/settings_page/about_brand.dart';
 import 'package:dan_player/page/settings_page/create_issue.dart';
@@ -323,7 +324,7 @@ void main() {
           for (final asset in [
             BrandLogo.assetFor(AppBrand.rce, brightness),
             BrandLogo.assetFor(AppBrand.danRuguo, brightness),
-            'app_icon.ico',
+            PlayerLogo.assetFor(brightness),
           ]) {
             await precacheImage(AssetImage(asset), context);
           }

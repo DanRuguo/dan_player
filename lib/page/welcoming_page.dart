@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/build_index_state_view.dart';
 import 'package:dan_player/component/feature_onboarding.dart';
+import 'package:dan_player/component/player_logo.dart';
 import 'package:dan_player/page/settings_page/cache_backup_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/library_auto_refresh.dart';
@@ -249,9 +250,9 @@ class _TitleBar extends StatelessWidget {
             Expanded(
               child: Row(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                    child: Image.asset("app_icon.ico", width: 24, height: 24),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8.0),
+                    child: PlayerLogo(),
                   ),
                   Text(
                     "Dan Player",

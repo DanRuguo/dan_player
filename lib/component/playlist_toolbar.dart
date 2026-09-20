@@ -109,6 +109,7 @@ enum _PlaylistToolbarAction {
   trash,
   presentation,
   titles,
+  autoFill,
   songBackground,
 }
 
@@ -259,7 +260,20 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
               icon: widget.showSongTitles
                   ? Icons.visibility_off_outlined
                   : Icons.visibility_outlined,
-              onSelected: widget.onToggleSongTitles),
+              onSelected:
+                  widget.editingEnabled ? widget.onToggleSongTitles : null),
+        if (widget.view == PlaylistViewMode.grid &&
+            widget.onAutoFillChanged != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.autoFill,
+              key: const ValueKey('playlist-auto-fill'),
+              label: ui(widget.autoFill ? '自动填充空隙' : '保留封面空隙'),
+              icon: widget.autoFill
+                  ? Icons.auto_awesome_mosaic_outlined
+                  : Icons.space_dashboard_outlined,
+              onSelected: widget.editingEnabled
+                  ? () => widget.onAutoFillChanged!(!widget.autoFill)
+                  : null),
         if (!widget.isRoot &&
             widget.view == PlaylistViewMode.circular &&
             widget.onToggleSongBackground != null)
@@ -269,7 +283,8 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
               icon: widget.artworkBackground
                   ? Icons.palette_outlined
                   : Icons.color_lens_outlined,
-              onSelected: widget.onToggleSongBackground),
+              onSelected:
+                  widget.editingEnabled ? widget.onToggleSongBackground : null),
         if (widget.onPresentation != null &&
             widget.view == PlaylistViewMode.list)
           _ToolbarMenuItem(
@@ -502,25 +517,6 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
                     key: ValueKey(widget.gridView),
                   ),
                 ),
-        ),
-      if (widget.view == PlaylistViewMode.grid &&
-          widget.onAutoFillChanged != null)
-        IconButton.outlined(
-          key: const ValueKey('playlist-auto-fill'),
-          tooltip: ui('自动填充空隙'),
-          isSelected: widget.autoFill,
-          onPressed: widget.editingEnabled
-              ? () => widget.onAutoFillChanged!(!widget.autoFill)
-              : null,
-          style: appToolbarControlStyle(context, iconOnly: true).copyWith(
-            foregroundColor: WidgetStatePropertyAll(widget.autoFill
-                ? Theme.of(context).colorScheme.onPrimaryContainer
-                : Theme.of(context).colorScheme.primary),
-            backgroundColor: WidgetStatePropertyAll(widget.autoFill
-                ? Theme.of(context).colorScheme.primaryContainer
-                : Colors.transparent),
-          ),
-          icon: const Icon(Icons.auto_awesome_mosaic_outlined),
         ),
       _ToolbarMenu<_PlaylistToolbarAction>(
         key: const ValueKey('playlist-current-settings'),

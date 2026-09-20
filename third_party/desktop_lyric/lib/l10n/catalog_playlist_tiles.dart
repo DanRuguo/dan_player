@@ -1,6 +1,7 @@
 const Map<String, List<String>> catalogPlaylistTiles = {
   '显示歌曲标题': ['Show song titles', '曲名を表示', '곡 제목 표시'],
   '关闭歌曲标题': ['Hide song titles', '曲名を非表示', '곡 제목 숨기기'],
+  '保留封面空隙': ['Preserve cover gaps', '画像の隙間を維持', '커버 간격 유지'],
   '歌曲底色：封面配色': ['Song background: cover colors', '曲の背景：画像の配色', '곡 배경: 커버 색상'],
   '歌曲底色：主题配色': ['Song background: theme colors', '曲の背景：テーマの配色', '곡 배경: 테마 색상'],
   '矩形封面': ['Rectangle covers', '長方形の画像', '직사각형 커버'],
