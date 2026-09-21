@@ -58,12 +58,15 @@ class LyricViewTile extends StatelessWidget {
     final text = syncLine?.content ??
         (line is UnsyncLyricLine ? (line as UnsyncLyricLine).content : '');
     final parts = text.split('┃');
-    final translations = syncLine == null
-        ? parts.skip(1).where((text) => text.trim().isNotEmpty).toList()
-        : [
-            if (syncLine.translation?.trim().isNotEmpty ?? false)
-              syncLine.translation!,
-          ];
+    final translations = <String>[
+      ...(syncLine == null
+          ? parts.skip(1).where((text) => text.trim().isNotEmpty).toList()
+          : [
+              if (syncLine.translation?.trim().isNotEmpty ?? false)
+                syncLine.translation!,
+            ]),
+      if (line.romanization?.trim().isNotEmpty ?? false) line.romanization!,
+    ];
     final blank = text.trim().isEmpty;
     final duration = switch (line) {
       LrcLine value => value.length,
@@ -233,7 +236,7 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
   @override
   void didUpdateWidget(_TimedLyricText oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.active || widget.reducedMotion || !widget.glowAllowed) {
+    if (widget.activation <= 0 || widget.reducedMotion || !widget.glowAllowed) {
       _layout?.releaseGlowMasks();
     }
   }
@@ -353,6 +356,42 @@ class _TimedLyricLayout {
           boxHeightStyle: drawing.BoxHeightStyle.includeLineSpacingMiddle);
       if (boxes.isEmpty) continue;
       final text = line.content.substring(startOffset, offset);
+      final characters = text.characters.toList(growable: false);
+      // CJK graphemes have independent glyphs. Keep Latin ligatures, joining
+      // scripts and emoji clusters intact. Splitting is visual only: every
+      // slice retains the provider word's original time and reveal distance.
+      if (characters.length > 1 &&
+          characters.length <= 24 &&
+          _independentCharacters.hasMatch(text)) {
+        final extent =
+            boxes.fold<double>(0, (sum, box) => sum + box.right - box.left);
+        var characterOffset = startOffset;
+        var revealOffset = 0.0;
+        for (var c = 0; c < characters.length; c++) {
+          final nextOffset = characterOffset + characters[c].length;
+          final pieces = base.getBoxesForSelection(
+              TextSelection(
+                  baseOffset: characterOffset, extentOffset: nextOffset),
+              boxHeightStyle: drawing.BoxHeightStyle.includeLineSpacingMiddle);
+          if (pieces.isNotEmpty) {
+            words.add(_TimedWordShape(
+                start: start,
+                length: end - start,
+                boxes: pieces,
+                group: index,
+                phase: .28 * c / characters.length,
+                revealExtent: extent,
+                revealOffset: revealOffset,
+                canLift: pieces.length == 1 &&
+                    characters[c].trim().isNotEmpty &&
+                    pieces.single.direction == TextDirection.ltr));
+            revealOffset += pieces.fold<double>(
+                0, (sum, box) => sum + box.right - box.left);
+          }
+          characterOffset = nextOffset;
+        }
+        continue;
+      }
       // A transformed slice must never separate a joining script or ligature
       // from its neighbours. Such words still receive the full soft reveal.
       bool joinsAt(int position) =>
@@ -364,6 +403,7 @@ class _TimedLyricLayout {
         start: start,
         length: end - start,
         boxes: boxes,
+        group: index,
         canLift: boxes.length == 1 &&
             text.trim().isNotEmpty &&
             boxes.single.direction == TextDirection.ltr &&
@@ -372,29 +412,30 @@ class _TimedLyricLayout {
             !_joiningScript.hasMatch(text),
       ));
     }
-    // Decide the layer budget once for this layout, not when a fifth note
-    // happens to enter/leave its envelope. A sampling-time cutoff would snap
-    // the other four raised words back to their baseline and up again.
-    final events = <({int time, int delta})>[];
-    for (final word in words) {
-      if (!word.canLift || word.length.inMilliseconds <= 650) continue;
-      events.add((time: word.start.inMicroseconds, delta: 1));
-      events.add((time: (word.start + word.length).inMicroseconds, delta: -1));
-    }
-    events.sort((a, b) {
-      final order = a.time.compareTo(b.time);
-      return order == 0 ? a.delta.compareTo(b.delta) : order;
-    });
-    var simultaneous = 0;
-    var liftAllowed = true;
-    for (final event in events) {
-      simultaneous += event.delta;
-      if (simultaneous > 4) {
-        liftAllowed = false;
-        break;
+    // Reserve four non-overlapping presentation lanes once per layout.
+    // A fifth overlapping note keeps its reveal, but must neither suppress
+    // all motion in the paragraph nor interrupt the four existing poses.
+    final ordered = [for (var i = 0; i < words.length; i++) i]..sort((a, b) {
+        final order = words[a].start.compareTo(words[b].start);
+        return order == 0 ? a.compareTo(b) : order;
+      });
+    final laneEnds = List<Duration?>.filled(4, null);
+    final reservedGroups = <int>{};
+    movingIndices = <int>{};
+    for (final index in ordered) {
+      final word = words[index];
+      if (!word.canLift || word.length <= Duration.zero) continue;
+      if (reservedGroups.contains(word.group)) {
+        movingIndices.add(index);
+        continue;
       }
+      final lane =
+          laneEnds.indexWhere((end) => end == null || end <= word.start);
+      if (lane < 0) continue;
+      movingIndices.add(index);
+      reservedGroups.add(word.group);
+      laneEnds[lane] = word.start + word.length;
     }
-    allowLift = liftAllowed;
   }
 
   final SyncLyricLine line;
@@ -405,14 +446,17 @@ class _TimedLyricLayout {
   final double fontSize;
   late final drawing.Picture glyphs;
   late final List<_TimedWordShape> words;
-  late final bool allowLift;
+  late final Set<int> movingIndices;
   static final _joiningLetter = RegExp(r'^[A-Za-z\u00c0-\u024f]{2}$');
   static final _joiningScript = RegExp(r'[\u0590-\u109f]');
+  static final _independentCharacters =
+      RegExp(r'^[\u2e80-\u9fff\uac00-\ud7af\s]+$');
 
   // Long-note glow is a static white mask: only its transform/tint changes.
   // Rasterize the tiny diffuse mask once instead of running a Gaussian pass
-  // every display frame. Keep at most four masks, and release them with layout.
+  // every display frame. Bound both count and total pixels; release on exit.
   final _glowMasks = <int, (drawing.Image, Rect)>{};
+  int _glowPixels = 0;
   (drawing.Image, Rect)? glowMask(int index) {
     final cached = _glowMasks.remove(index);
     if (cached != null) {
@@ -439,14 +483,19 @@ class _TimedLyricLayout {
     final picture = recorder.endRecording();
     final image = picture.toImageSync(width, height);
     picture.dispose();
-    while (_glowMasks.length >= 4) {
-      _glowMasks.remove(_glowMasks.keys.first)!.$1.dispose();
+    while (_glowMasks.isNotEmpty &&
+        (_glowMasks.length >= 96 ||
+            _glowPixels + width * height > 4 * 1024 * 1024)) {
+      final old = _glowMasks.remove(_glowMasks.keys.first)!.$1;
+      _glowPixels -= old.width * old.height;
+      old.dispose();
     }
     final mask = (
       image,
       Rect.fromLTWH(bounds.left, bounds.top, width / ratio, height / ratio)
     );
     _glowMasks[index] = mask;
+    _glowPixels += width * height;
     return mask;
   }
 
@@ -455,6 +504,7 @@ class _TimedLyricLayout {
       mask.$1.dispose();
     }
     _glowMasks.clear();
+    _glowPixels = 0;
   }
 
   void dispose() {
@@ -469,14 +519,21 @@ class _TimedWordShape {
       {required this.start,
       required this.length,
       required this.boxes,
+      required this.group,
+      this.phase = 0,
+      double? revealExtent,
+      this.revealOffset = 0,
       required this.canLift})
-      : extent =
+      : extent = revealExtent ??
             boxes.fold<double>(0, (sum, box) => sum + box.right - box.left),
         bounds = boxes
             .map((box) => box.toRect())
             .reduce((a, b) => a.expandToInclude(b));
   final Duration start;
   final Duration length;
+  final int group;
+  final double phase;
+  final double revealOffset;
   final List<TextBox> boxes;
   final bool canLift;
   final double extent;
@@ -526,23 +583,33 @@ class LyricWordHighlightPainter extends CustomPainter {
   @visibleForTesting
   int get movingWordCount => _movingWords().length;
 
-  List<({int index, double lift, double scale, double anchorX})>
+  @visibleForTesting
+  List<double> get movingWordLifts =>
+      [for (final pose in _movingWords()) pose.lift];
+
+  List<({int index, double lift, double scale, double scaleY, double anchorX})>
       _movingWords() {
-    if (!active || reducedMotion || activation <= 0 || !_layout.allowLift) {
+    if (reducedMotion || activation <= 0) {
       return const [];
     }
-    final result = <({int index, double lift, double scale, double anchorX})>[];
+    final result = <({
+      int index,
+      double lift,
+      double scale,
+      double scaleY,
+      double anchorX
+    })>[];
     for (var index = 0; index < _layout.words.length; index++) {
       final word = _layout.words[index];
-      if (!word.canLift) continue;
+      if (!_layout.movingIndices.contains(index)) continue;
       final progress = LyricMotion.progress(position, word.start, word.length);
       final pose = LyricWordEffects.sustain(
-          progress: progress,
+          progress: ((progress - word.phase) / (1 - word.phase)).clamp(0, 1),
           durationMilliseconds: word.length.inMilliseconds,
           fontSize: _layout.fontSize);
       if (pose.lift <= .001) continue;
-      // Edge words grow away from their neighbour. Inner words express the
-      // note by lifting without expanding across adjacent shaped glyphs.
+      // Edge words grow away from their neighbour. Inner words stretch only
+      // vertically: they remain expressive without crossing adjacent glyphs.
       final first = index == 0;
       final last = index == _layout.words.length - 1;
       final expansion = first || last
@@ -552,6 +619,7 @@ class LyricWordHighlightPainter extends CustomPainter {
         index: index,
         lift: pose.lift * activation,
         scale: 1 + expansion * activation,
+        scaleY: 1 + (pose.scale - 1) * activation,
         anchorX: first && !last
             ? word.bounds.right
             : last && !first
@@ -567,7 +635,7 @@ class LyricWordHighlightPainter extends CustomPainter {
     final progress = LyricMotion.progress(position, word.start, word.length);
     if (progress <= 0 && blendMode == BlendMode.srcATop) return;
     final paint = Paint()..blendMode = blendMode;
-    var offset = 0.0;
+    var offset = word.revealOffset;
     final softness = LyricWordEffects.softEdgeWidth(
         fontSize: _layout.fontSize, extent: word.extent);
     for (final box in word.boxes) {
@@ -595,38 +663,18 @@ class LyricWordHighlightPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final bounds = Offset.zero & size;
     final moving = _movingWords();
-    canvas.save();
-    for (final pose in moving) {
-      canvas.clipRect(_layout.words[pose.index].bounds,
-          clipOp: drawing.ClipOp.difference, doAntiAlias: false);
-    }
-    canvas.saveLayer(bounds, Paint());
-    canvas.drawPicture(_layout.glyphs);
-    canvas.drawRect(
-        bounds,
-        Paint()
-          ..blendMode = BlendMode.srcIn
-          ..color = reducedMotion && activation > 0 ? playedColor : baseColor);
-    if (activation > 0 && !reducedMotion) {
-      for (var index = 0; index < _layout.words.length; index++) {
-        if (!moving.any((pose) => pose.index == index)) {
-          _paintWordColor(canvas, _layout.words[index]);
-        }
-      }
-    }
-    canvas.restore();
-    canvas.restore();
-
     for (final pose in moving) {
       final word = _layout.words[pose.index];
       canvas.save();
       canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
-      canvas.scale(pose.scale);
+      canvas.scale(pose.scale, pose.scaleY);
       canvas.translate(-pose.anchorX, -word.bounds.center.dy);
-      if (glowAllowed && pose.scale > 1.00001) {
+      if (glowAllowed &&
+          pose.scaleY > 1.00001 &&
+          word.length.inMilliseconds > 650) {
         // One small diffuse mask per active long word, never the whole line.
         final intensity =
-            ((pose.scale - 1) / LyricWordEffects.maximumScaleExpansion)
+            ((pose.scaleY - 1) / LyricWordEffects.maximumScaleExpansion)
                 .clamp(0.0, 1.0);
         final mask = _layout.glowMask(pose.index);
         if (mask != null) {
@@ -642,13 +690,51 @@ class LyricWordHighlightPainter extends CustomPainter {
                     BlendMode.srcIn));
         }
       }
-      canvas.saveLayer(word.bounds, Paint());
-      canvas.clipRect(word.bounds, doAntiAlias: false);
-      canvas.drawPicture(_layout.glyphs);
-      _paintWordColor(canvas, word, blendMode: BlendMode.srcIn);
-      canvas.restore();
       canvas.restore();
     }
+    // Compose all white glyph slices first, then tint them in one paragraph
+    // layer. A separate offscreen surface per character scales poorly and is
+    // unnecessary because the glyph geometry already supplies the alpha mask.
+    final paintBounds = bounds.inflate(12);
+    canvas.saveLayer(paintBounds, Paint());
+    canvas.save();
+    for (final pose in moving) {
+      canvas.clipRect(_layout.words[pose.index].bounds,
+          clipOp: drawing.ClipOp.difference, doAntiAlias: false);
+    }
+    canvas.drawPicture(_layout.glyphs);
+    canvas.restore();
+    for (final pose in moving) {
+      final word = _layout.words[pose.index];
+      canvas.save();
+      canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
+      canvas.scale(pose.scale, pose.scaleY);
+      canvas.translate(-pose.anchorX, -word.bounds.center.dy);
+      canvas.clipRect(word.bounds, doAntiAlias: false);
+      canvas.drawPicture(_layout.glyphs);
+      canvas.restore();
+    }
+    canvas.drawRect(
+        paintBounds,
+        Paint()
+          ..blendMode = BlendMode.srcIn
+          ..color = reducedMotion && activation > 0 ? playedColor : baseColor);
+    if (activation > 0 && !reducedMotion) {
+      final poses = {for (final pose in moving) pose.index: pose};
+      for (var index = 0; index < _layout.words.length; index++) {
+        final word = _layout.words[index];
+        final pose = poses[index];
+        canvas.save();
+        if (pose != null) {
+          canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
+          canvas.scale(pose.scale, pose.scaleY);
+          canvas.translate(-pose.anchorX, -word.bounds.center.dy);
+        }
+        _paintWordColor(canvas, word);
+        canvas.restore();
+      }
+    }
+    canvas.restore();
   }
 
   @override

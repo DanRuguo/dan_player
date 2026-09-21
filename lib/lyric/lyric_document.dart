@@ -35,6 +35,7 @@ class LyricSnapshot {
           for (final line in lyric.lines)
             {
               'start': line.start.inMicroseconds,
+              if (line.romanization != null) 'romanization': line.romanization,
               if (line is SyncLyricLine) ...{
                 'length': line.length.inMicroseconds,
                 'translation': line.translation,
@@ -95,6 +96,7 @@ class LyricSnapshot {
         lines.add(
             LrcLine(start, text, isBlank: text.trim().isEmpty, length: length));
       }
+      lines.last.romanization = item['romanization'] as String?;
     }
     return switch (format) {
       'qrc' => Qrc(lines),

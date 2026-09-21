@@ -130,8 +130,12 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                                     ? const Duration(milliseconds: 16)
                                     : BackgroundImageMotion.frameInterval,
                                 phaseBuilder: widget.fluid
-                                    ? (phase, active, child) =>
-                                        FluidArtwork(phase: phase, child: child)
+                                    ? (phase, active, child) => FluidArtwork(
+                                        phase: phase,
+                                        child: CachedArtworkBlur(
+                                            image: provider,
+                                            blur: widget.blur,
+                                            phase: phase))
                                     : null,
                                 child: widget.fluid
                                     ? CachedArtworkBlur(

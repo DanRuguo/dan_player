@@ -62,10 +62,22 @@ Lyric? parseOnlineLyricPayload(Object? payload) {
     final parsed = parseOnlineLyricPayload(nested);
     if (parsed != null) candidates.add(parsed);
   }
-  for (final lyric in candidates) {
-    if (hasWordTiming(lyric)) return lyric;
+  final selected =
+      candidates.where(hasWordTiming).firstOrNull ?? candidates.firstOrNull;
+  final roman = _section(payload['yromalrc']) ?? _section(payload['romalrc']);
+  if (selected != null && roman != null) {
+    final byTime = <Duration, String>{};
+    for (final text in const LineSplitter().convert(roman)) {
+      final row = LrcLine.fromLine(text);
+      if (row != null && row.content.trim().isNotEmpty) {
+        byTime[row.start] = row.content;
+      }
+    }
+    for (final row in selected.lines) {
+      row.romanization = byTime[row.start];
+    }
   }
-  return candidates.firstOrNull;
+  return selected;
 }
 
 Lyric? _parse(String type, String text, String? translation) {

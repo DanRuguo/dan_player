@@ -6,6 +6,7 @@ import 'package:dan_player/lyric/krc_decoder.dart';
 import 'package:dan_player/lyric/krc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lrc.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +17,26 @@ Lyric ordinary() => Lrc.fromLrcText('[00:01.00]Hello world', LrcSource.web)!;
 Audio audio() => Audio(
     'Song', 'Artist', 'Album', 0, 180, null, null, 'song.mp3', 0, 0, null);
 void main() {
+  test('authored romanization stays aligned through cache and offset', () {
+    final lyric = parseOnlineLyricPayload({
+      'yrc': {'lyric': '[1000,2000](1000,2000,0)光'},
+      'ytlrc': {'lyric': '[00:01.00]光芒'},
+      'yromalrc': {'lyric': '[00:01.00]hikari'},
+    })!;
+    final restored =
+        LyricSnapshot.fromJson(LyricSnapshot.capture(lyric).toJson())!
+            .toLyric(offsetMs: 250);
+    expect(restored.lines.single.romanization, 'hikari');
+    expect(restored.lines.single.start.inMilliseconds, 1250);
+    expect((restored.lines.single as SyncLyricLine).translation, '光芒');
+    expect(
+        (restored.lines.single as SyncLyricLine)
+            .words
+            .single
+            .start
+            .inMilliseconds,
+        1250);
+  });
   test('an unresponsive QQ word endpoint does not consume the fallback budget',
       () async {
     final pending = Completer<Lyric?>();

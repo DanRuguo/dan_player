@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 /// Slow, bounded drift of an already decoded background image. No audio samples,
 /// shaders, image IO, or page layout are performed by the presentation clock.
@@ -44,10 +45,12 @@ class BackgroundImageMotion extends StatefulWidget {
 }
 
 class _BackgroundImageMotionState extends State<BackgroundImageMotion>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final _phase = ValueNotifier(0.0);
   final _active = ValueNotifier(false);
   Timer? _timer;
+  late final Ticker _ticker;
+  Duration _lastFrame = Duration.zero;
   AppLifecycleState? _lifecycle;
   bool _treeVisible = false;
   bool _accessibilityAllowsMotion = false;
@@ -56,6 +59,14 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
   @override
   void initState() {
     super.initState();
+    _ticker = createTicker((elapsed) {
+      final delta = elapsed - _lastFrame;
+      _lastFrame = elapsed;
+      _phase.value = (_phase.value +
+              delta.inMicroseconds /
+                  BackgroundImageMotion.cycle.inMicroseconds) %
+          1;
+    });
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     widget.hidden?.addListener(_syncClock);
@@ -85,6 +96,8 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
     if (oldWidget.refreshInterval != widget.refreshInterval) {
       _timer?.cancel();
       _timer = null;
+      _ticker.stop();
+      _lastFrame = Duration.zero;
     }
     if (!identical(oldWidget.hidden, widget.hidden)) {
       oldWidget.hidden?.removeListener(_syncClock);
@@ -122,6 +135,17 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
     if (!active) {
       _timer?.cancel();
       _timer = null;
+      _ticker.stop();
+      _lastFrame = Duration.zero;
+      return;
+    }
+    if (widget.refreshInterval <= const Duration(milliseconds: 16)) {
+      _timer?.cancel();
+      _timer = null;
+      if (!_ticker.isActive) {
+        _lastFrame = Duration.zero;
+        _ticker.start();
+      }
       return;
     }
     _timer ??= Timer.periodic(widget.refreshInterval, (_) {
@@ -169,6 +193,7 @@ class _BackgroundImageMotionState extends State<BackgroundImageMotion>
   @override
   void dispose() {
     _timer?.cancel();
+    _ticker.dispose();
     widget.hidden?.removeListener(_syncClock);
     _preferences?.removeListener(_syncClock);
     WidgetsBinding.instance.removeObserver(this);

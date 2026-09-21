@@ -50,14 +50,15 @@ abstract final class LyricWordEffects {
         point(edges.start), point(edges.end), [leading, trailing]);
   }
 
-  /// Long notes rise and settle with zero endpoint velocity. Brief syllables
-  /// remain anchored; a seek evaluates the same bounded pose immediately.
+  /// Every timed syllable rises and settles with zero endpoint velocity.
+  /// Very short timings taper smoothly, while held notes retain a wider pose.
+  /// This is presentation only: a seek samples the original word interval.
   static ({double lift, double scale}) sustain({
     required double progress,
     required int durationMilliseconds,
     required double fontSize,
   }) {
-    if (durationMilliseconds <= 650 || progress <= 0 || progress >= 1) {
+    if (durationMilliseconds <= 0 || progress <= 0 || progress >= 1) {
       return (lift: 0, scale: 1);
     }
     double smooth(double value) {
@@ -65,7 +66,8 @@ abstract final class LyricWordEffects {
       return t * t * (3 - 2 * t);
     }
 
-    final weight = smooth((durationMilliseconds - 650) / 1100);
+    final weight = smooth(durationMilliseconds / 180) *
+        (.45 + .55 * smooth((durationMilliseconds - 650) / 1100));
     final envelope =
         smooth(progress / .24) * smooth((1 - progress) / .28) * weight;
     return (

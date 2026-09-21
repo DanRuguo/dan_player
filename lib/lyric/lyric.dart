@@ -6,6 +6,7 @@ abstract class Lyric {
 
 abstract class LyricLine {
   Duration start;
+  String? romanization;
 
   LyricLine(this.start);
 }

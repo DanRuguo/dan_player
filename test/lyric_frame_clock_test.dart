@@ -8,6 +8,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('overlapping API lines retain both highlights until authored end',
+      (tester) async {
+    final source = StreamController<double>.broadcast(sync: true);
+    final settings = LyricViewController();
+    var position = 2.5;
+    final lyric = parseOnlineLyricPayload({
+      'qrc':
+          '[0,4000]前声(0,4000)\n[2000,4000]后声(2000,4000)\n[6000,4000]尾声(6000,4000)'
+    })!;
+    await tester.pumpWidget(MaterialApp(
+        home: Material(
+            child: ChangeNotifierProvider.value(
+                value: settings,
+                child: VerticalLyricScrollView(
+                    lyric: lyric,
+                    positionStream: source.stream,
+                    readPosition: () => position,
+                    onSeek: (_) {},
+                    playing: false)))));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widgetList<LyricViewTile>(find.byType(LyricViewTile))
+            .where((row) => row.distance == 0),
+        hasLength(2));
+    position = 4.1;
+    source.add(position);
+    await tester.pumpAndSettle();
+    final rows = tester.widgetList<LyricViewTile>(find.byType(LyricViewTile));
+    expect(rows.where((row) => row.distance == 0).single.line.start,
+        const Duration(seconds: 2));
+    expect(tester.binding.transientCallbackCount, 0);
+    await tester.pumpWidget(const SizedBox());
+    await source.close();
+    settings.dispose();
+  });
   testWidgets(
       'word visuals sample authoritative time each frame and stop on pause or hide',
       (tester) async {

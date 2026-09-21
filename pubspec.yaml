@@ -53,6 +53,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  shaders:
+    - assets/shaders/artwork_flow.frag
   assets:
     - app_icon.ico
     - app_icon_dark.ico

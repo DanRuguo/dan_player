@@ -40,6 +40,7 @@ class _Position extends ValueNotifier<Duration> {
 
 Widget _host(LyricLine line, _Position position, LyricViewController settings,
         {bool reduced = false,
+        int distance = 0,
         double width = 340,
         ValueNotifier<RenderingPreferences>? preferences,
         TextDirection direction = TextDirection.ltr}) =>
@@ -67,7 +68,7 @@ Widget _host(LyricLine line, _Position position, LyricViewController settings,
                                     line: line,
                                     position: position,
                                     opacity: 1,
-                                    distance: 0,
+                                    distance: distance,
                                     reducedMotion: reduced))))))));
 
 Finder _paintFinder() => find.byWidgetPredicate((widget) =>
@@ -144,7 +145,7 @@ void main() {
             progress: progress, durationMilliseconds: length, fontSize: 120);
         expect(pose.lift, inInclusiveRange(0, 6));
         expect(pose.scale, inInclusiveRange(1, 1.08));
-        if (length <= 650 || progress <= 0 || progress >= 1) {
+        if (length <= 0 || progress <= 0 || progress >= 1) {
           expect(pose, (lift: 0.0, scale: 1.0));
         }
         if (progress == .000001 || progress == .999999) {
@@ -155,10 +156,49 @@ void main() {
     }
   });
 
+  test('brief syllables have a visible bounded pose without a 650ms cliff', () {
+    final brief = LyricWordEffects.sustain(
+        progress: .5, durationMilliseconds: 240, fontSize: 40);
+    expect(brief.lift, greaterThan(1.5));
+    expect(brief.scale, greaterThan(1.03));
+    final before = LyricWordEffects.sustain(
+        progress: .5, durationMilliseconds: 650, fontSize: 40);
+    final after = LyricWordEffects.sustain(
+        progress: .5, durationMilliseconds: 651, fontSize: 40);
+    expect(after.lift, closeTo(before.lift, .001));
+  });
+
+  testWidgets('short inner syllable animates without changing layout or clock',
+      (tester) async {
+    final line =
+        _Line([_Word(0, 240, '你'), _Word(240, 240, '好'), _Word(480, 240, '呀')]);
+    await tester.pumpWidget(_host(line, position, settings));
+    await tester.pumpAndSettle();
+    final layout = _painter(tester).layoutIdentity;
+    final size = tester.getSize(_paintFinder());
+    position.value = const Duration(milliseconds: 360);
+    await tester.pump();
+    expect(_painter(tester).movingWordCount, 1);
+    expect(_painter(tester).progressForWord(1), .5);
+    expect(_painter(tester).layoutIdentity, same(layout));
+    expect(tester.getSize(_paintFinder()), size);
+    expect(tester.binding.transientCallbackCount, 0);
+    await tester.pumpWidget(_host(line, position, settings, reduced: true));
+    await tester.pumpAndSettle();
+    expect(_painter(tester).movingWordCount, 0);
+    expect(position.listeners, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final rtl in [false, true]) {
     testWidgets('main lyric edge is feathered without relayout rtl=$rtl',
         (tester) async {
-      final line = _Line([_Word(0, 500, rtl ? 'אבגד' : 'HHHH')]);
+      // Joining text keeps its shape fixed so this isolates the reveal edge
+      // from the separately tested syllable transform.
+      final line = _Line([
+        _Word(0, 500, rtl ? 'אבגד' : 'HHHH'),
+        if (!rtl) _Word(500, 0, 'H'),
+      ]);
       await tester.pumpWidget(_host(line, position, settings,
           direction: rtl ? TextDirection.rtl : TextDirection.ltr));
       await tester.pumpAndSettle();
@@ -173,8 +213,11 @@ void main() {
       final complete = await _pixels(tester);
       final columns = <int>{};
       for (var index = 0; index < middle.bytes.length; index += 4) {
-        if (initial.bytes[index + 3] < 250 || complete.bytes[index + 3] < 250)
+        if (initial.bytes[index + 3] < 250 ||
+            complete.bytes[index + 3] < 250 ||
+            middle.bytes[index + 3] < 250) {
           continue;
+        }
         if ((middle.bytes[index] - initial.bytes[index]).abs() > 8 &&
             (middle.bytes[index] - complete.bytes[index]).abs() > 8) {
           columns.add((index ~/ 4) % middle.width);
@@ -187,6 +230,36 @@ void main() {
       await tester.pump();
       expect((await _pixels(tester)).bytes, orderedEquals(initial.bytes));
       expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  for (final text in ['微风轻轻吹过我的心', 'きらきらひかるよ', '우리함께노래해']) {
+    testWidgets(
+        'authored CJK word staggers graphemes without splitting time $text',
+        (tester) async {
+      final line = _Line([_Word(0, 2400, text)]);
+      await tester.pumpWidget(_host(line, position, settings, width: 780));
+      await tester.pumpAndSettle();
+      final layout = _painter(tester).layoutIdentity;
+      final size = tester.getSize(_paintFinder());
+      position.value = const Duration(milliseconds: 360);
+      await tester.pump();
+      final entry = _painter(tester).movingWordCount;
+      expect(entry, greaterThan(0));
+      expect(entry, lessThan(text.characters.length));
+      position.value = const Duration(milliseconds: 800);
+      await tester.pump();
+      expect(_painter(tester).movingWordCount, text.characters.length);
+      expect(_painter(tester).movingWordLifts.toSet().length, greaterThan(1));
+      expect(_painter(tester).progressForWord(0), closeTo(1 / 3, .00001));
+      expect(line.words, hasLength(1));
+      expect(_painter(tester).layoutIdentity, same(layout));
+      expect(tester.getSize(_paintFinder()), size);
+      position.value = const Duration(milliseconds: 2400);
+      await tester.pump();
+      expect(_painter(tester).movingWordCount, 0);
+      expect(tester.binding.transientCallbackCount, 0);
       await tester.pumpWidget(const SizedBox.shrink());
     });
   }
@@ -217,6 +290,25 @@ void main() {
     expect(_painter(tester).movingWordCount, 0);
     expect(_ink(await _pixels(tester)), original);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('departing focus releases held-word pose through finite fade',
+      (tester) async {
+    final line = _Line([_Word(0, 2400, 'HHH')]);
+    position.value = const Duration(milliseconds: 1200);
+    await tester.pumpWidget(_host(line, position, settings));
+    await tester.pumpAndSettle();
+    final lift = _painter(tester).movingWordLifts.single;
+    await tester.pumpWidget(_host(line, position, settings, distance: 1));
+    expect(_painter(tester).movingWordCount, 1);
+    expect(_painter(tester).movingWordLifts.single, closeTo(lift, .001));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(_painter(tester).movingWordLifts.single, lessThan(lift));
+    await tester.pumpAndSettle();
+    expect(_painter(tester).movingWordCount, 0);
+    expect(position.listeners, 0);
+    expect(tester.binding.transientCallbackCount, 0);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('graphemes, joining scripts and wrapped words stay shaped',
@@ -251,7 +343,7 @@ void main() {
     await tester.pumpAndSettle();
     position.value = const Duration(milliseconds: 1200);
     await tester.pump();
-    expect(_painter(tester).movingWordCount, 0);
+    expect(_painter(tester).movingWordCount, 4);
     expect(position.listeners, 1);
     await tester
         .pumpWidget(_host(line, position, settings, reduced: true, width: 780));
@@ -278,7 +370,7 @@ void main() {
     for (final milliseconds in [1200, 2490, 2510, 3250, 3990, 4010, 6000]) {
       position.value = Duration(milliseconds: milliseconds);
       await tester.pump();
-      expect(_painter(tester).movingWordCount, 0,
+      expect(_painter(tester).movingWordCount, 4,
           reason:
               'The layer policy cannot change when the fifth word enters/exits');
       expect(_painter(tester).layoutIdentity, same(layout));

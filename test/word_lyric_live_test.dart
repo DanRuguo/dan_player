@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/online_lyric_parser.dart';
 import 'package:dan_player/online/kugou_music_api.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
@@ -109,6 +110,15 @@ void main() {
         'selectedLines': selected?.lines.length,
         'selectedWordTiming': hasWordTiming(selected)
       };
+      final renderDirectory = Platform.environment['DAN_LYRIC_RENDER_SAMPLES'];
+      if (renderDirectory != null && selected != null) {
+        final file = File('$renderDirectory/${samples.indexOf(sample)}.json');
+        await file.parent.create(recursive: true);
+        await file.writeAsString(jsonEncode({
+          'sample': sample.$1,
+          'snapshot': LyricSnapshot.capture(selected).toJson(),
+        }));
+      }
       stdout.writeln('LIVE_RESULT ${jsonEncode(report)}');
       expect(response.candidates, isNotEmpty, reason: sample.$1);
     },

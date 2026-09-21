@@ -54,6 +54,37 @@ class _Hidden extends ValueNotifier<bool> {
 }
 
 void main() {
+  testWidgets('fluid phase follows display frames and freezes across hide',
+      (tester) async {
+    final hidden = ValueNotifier(false);
+    late ValueListenable<double> phase;
+    await tester.pumpWidget(MaterialApp(
+        home: BackgroundImageMotion(
+            enabled: true,
+            isPlaying: true,
+            hidden: hidden,
+            refreshInterval: const Duration(milliseconds: 16),
+            phaseBuilder: (value, active, child) {
+              phase = value;
+              return child;
+            },
+            child: const SizedBox.expand())));
+    await tester.pump();
+    final before = phase.value;
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(phase.value - before, closeTo(.008 / 36, 1e-10));
+    hidden.value = true;
+    final paused = phase.value;
+    await tester.pump(const Duration(seconds: 2));
+    expect(phase.value, paused);
+    expect(tester.binding.transientCallbackCount, 0);
+    hidden.value = false;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(phase.value - paused, closeTo(.008 / 36, 1e-10));
+    await tester.pumpWidget(const SizedBox());
+    hidden.dispose();
+  });
   testWidgets(
       'a low-frequency clock updates only the transform, not its texture',
       (tester) async {

@@ -318,6 +318,12 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   Stream<double>? _listeningTo;
   List<GlobalKey> _lineKeys = [];
   int _currentLine = -1;
+  late LyricOverlapTimeline _overlaps;
+  Set<int> _singingLines = {};
+  int _singingRevision = 0;
+  int _visualDistance(int index) => _singingLines.contains(index)
+      ? 0
+      : (index - _currentLine).abs().clamp(0, 4);
   int _sourceGeneration = 0;
   int _followGeneration = 0;
   Timer? _manualScrollTimer;
@@ -490,6 +496,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     if (_active) _position.value = _safePosition(widget.readPosition());
     _currentLine =
         findCurrentLyricLineIndex(widget.lyric.lines, _position.value);
+    _overlaps = LyricOverlapTimeline(widget.lyric.lines);
+    _singingLines = _overlaps.activeIndices(_position.value, _currentLine);
+    _singingRevision++;
     _scheduleFollow(immediate: true);
   }
 
@@ -542,9 +551,17 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _position.value = nextPosition;
     final nextLine =
         findCurrentLyricLineIndex(widget.lyric.lines, nextPosition);
-    if (nextLine == _currentLine && !forceFollow) return;
+    final singing = _overlaps.activeIndices(nextPosition, nextLine);
+    final voicesChanged = !setEquals(singing, _singingLines);
+    if (nextLine == _currentLine && !forceFollow && !voicesChanged) return;
     final seek = (nextLine - _currentLine).abs() > 1;
-    if (nextLine != _currentLine) setState(() => _currentLine = nextLine);
+    if (nextLine != _currentLine || voicesChanged) {
+      setState(() {
+        _currentLine = nextLine;
+        _singingLines = singing;
+        _singingRevision++;
+      });
+    }
     if (!_manualScrollActive) {
       _scheduleFollow(seek: seek || forceFollow, immediate: immediate);
     }
@@ -712,8 +729,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     final transitions = <int, LyricFollowTransition>{};
     final blur = <int, double>{};
     for (final index in rows) {
-      final targetBlur =
-          blurAllowed ? LyricMotion.blurForDistance(index - _currentLine) : 0.0;
+      final targetBlur = blurAllowed
+          ? LyricMotion.blurForDistance(_visualDistance(index))
+          : 0.0;
       blur[index] = targetBlur;
       if (animate) {
         final previous = _followTransitions[index]?.sample(_followClock.value);
@@ -786,7 +804,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     }
     _wasReduced = reduced;
     final settings = context.watch<LyricViewController>();
-    final tileIdentity = (widget.lyric, _currentLine, reduced);
+    final tileIdentity =
+        (widget.lyric, _currentLine, _singingRevision, reduced);
     if (_tileCacheIdentity != tileIdentity) {
       final previous = _tileCache;
       _tileCacheIdentity = tileIdentity;
@@ -794,8 +813,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         for (var index = 0; index < widget.lyric.lines.length; index++)
           if (index < previous.length &&
               identical(previous[index].line, widget.lyric.lines[index]) &&
-              previous[index].distance ==
-                  (index - _currentLine).abs().clamp(0, 4) &&
+              previous[index].distance == _visualDistance(index) &&
               previous[index].reducedMotion == reduced)
             previous[index]
           else
@@ -803,8 +821,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               key: ValueKey(index),
               line: widget.lyric.lines[index],
               position: _position,
-              distance: (index - _currentLine).abs().clamp(0, 4),
-              opacity: LyricMotion.opacityForDistance(index - _currentLine),
+              distance: _visualDistance(index),
+              opacity: LyricMotion.opacityForDistance(_visualDistance(index)),
               reducedMotion: reduced,
               onTap:
                   widget.lyric is PlainLyric ? null : () => _seekToLine(index),
