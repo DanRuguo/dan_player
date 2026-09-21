@@ -13,6 +13,7 @@ import 'package:dan_player/play_service/replay_gain.dart';
 import 'package:dan_player/src/bass/bass_replay_gain.dart';
 import 'package:dan_player/src/bass/bass_mix.dart';
 import 'package:dan_player/src/bass/bass_tempo.dart';
+import 'package:dan_player/src/bass/bass_volume.dart';
 import 'package:dan_player/src/bass/audio_segment.dart';
 import 'package:dan_player/src/bass/wasapi_output_policy.dart';
 import 'package:dan_player/src/bass/bass_wasapi.dart' as BASS;
@@ -372,6 +373,7 @@ class BassPlayer {
   late final ffi.DynamicLibrary _bassLib;
   late final ffi.DynamicLibrary _bassWasapiLib;
   late final BASS.Bass _bass;
+  late final BassPlaybackVolume _playbackVolume;
   late final BASS.BassWasapi _bassWasapi;
   BassMixLibrary? _mix;
   BassTempoLibrary? _tempo;
@@ -390,6 +392,7 @@ class BassPlayer {
   double? _segmentLength;
   int? _fstream;
   double _userVolumeDsp = 1;
+  double _volumeDspBase = 1;
   ReplayGainPreferences _replayGain = const ReplayGainPreferences();
   ReplayGainTags _replayGainTags = const ReplayGainTags();
 
@@ -591,7 +594,7 @@ class BassPlayer {
   /// User volume stays independent of the current song's ReplayGain tags.
   double get volumeDsp => _fstream == null ? 0 : _userVolumeDsp;
 
-  /// Actual native DSP multiplier, useful for output diagnostics.
+  /// Composed native DSP/output multiplier, useful for output diagnostics.
   double get effectiveVolumeDsp {
     return _readEffectiveVolume() ?? 0;
   }
@@ -606,7 +609,14 @@ class BassPlayer {
         BASS.BASS_ATTRIB_VOLDSP,
         volDsp,
       );
-      return read != 0 && volDsp.value.isFinite ? volDsp.value : null;
+      if (read == 0 || !volDsp.value.isFinite) return null;
+      final dsp = volDsp.value;
+      final output = _bass.BASS_ChannelGetAttribute(
+        _fstream!,
+        BassPlaybackVolume.playbackAttribute,
+        volDsp,
+      );
+      return output != 0 && volDsp.value.isFinite ? dsp * volDsp.value : null;
     } finally {
       ffi.malloc.free(volDsp);
     }
@@ -833,6 +843,20 @@ class BassPlayer {
     if (!sampleRate.isFinite || sampleRate <= 0) sampleRate = 48000.0;
 
     final fft = _fftBuffer.asTypedList(_fftValueCount);
+    // Shared-mode FFT is taken before the output VOL attribute. Preserve its
+    // previous audible-volume response; exclusive WASAPI data already includes
+    // the mixer's volume and must not be multiplied a second time.
+    if (!wasapiExclusive &&
+        _bass.BASS_ChannelGetAttribute(_fstream!,
+                BassPlaybackVolume.playbackAttribute, _frequencyBuffer) ==
+            BASS.TRUE) {
+      final gain = _frequencyBuffer.value;
+      if (gain.isFinite && gain >= 0 && gain != 1) {
+        for (var index = 0; index < fft.length; index++) {
+          fft[index] *= gain;
+        }
+      }
+    }
     _spectrumAnalysis.update(fft, sampleRate,
         frequencyDemand: _frequencySpectrumStreamController.hasListener,
         toneDemand: _spectrumStreamController.hasListener);
@@ -1021,6 +1045,7 @@ class BassPlayer {
     );
     _bassLib = ffi.DynamicLibrary.open(_bassLibraryPath);
     _bass = BASS.Bass(_bassLib);
+    _playbackVolume = BassPlaybackVolume.native(_bassLib);
 
     final bassWasapiLibPath = path.join(
       path.dirname(Platform.resolvedExecutable),
@@ -1379,10 +1404,11 @@ class BassPlayer {
       final segmentLength = segment?.duration(_bass.BASS_ChannelBytes2Seconds(
           uncommittedHandle,
           _bass.BASS_ChannelGetLength(uncommittedHandle, BASS.BASS_POS_BYTE)));
-      // Only the final stream receives the composed multiplier. Applying it
-      // to both the raw decoder and its tempo wrapper would double the gain.
-      _setNativeVolume(uncommittedHandle,
-          openedReplayGain.volume(_userVolumeDsp, _replayGain));
+      // Only the final stream receives these factors, never both its decoder
+      // and tempo wrapper. Set the target before publishing/playing the source
+      // so a previous stream's unfinished slide cannot leak into the new song.
+      final openedDspBase = _playbackVolume.initialize(
+          uncommittedHandle, _userVolumeDsp, openedReplayGain, _replayGain);
       onBeforeCommit?.call();
       // A metadata rename may land while this same source is rebuilding its
       // output. Keep the verified new location rather than restoring a stale
@@ -1403,6 +1429,7 @@ class BassPlayer {
       _segment = segment;
       _segmentLength = segmentLength;
       _replayGainTags = openedReplayGain;
+      _volumeDspBase = openedDspBase;
       _sourceFormat = openedFormat;
       _eventBoundary.replace();
       _lastEvent = null;
@@ -1476,14 +1503,16 @@ class BassPlayer {
         nativeCode: code);
   }
 
-  /// [BASS_ATTRIB_VOLDSP] attribute does have direct effect on decoding/recording channels.
+  /// Apply user volume at playback/mixing, after buffered decoding. The legacy
+  /// method name and stored preference remain compatible with existing data.
   void setVolumeDsp(double volume) {
     if (!volume.isFinite || volume < 0) {
       throw ArgumentError.value(
           volume, 'volume', 'Must be finite and nonnegative');
     }
     if (_fstream != null) {
-      _setNativeVolume(_fstream!, _replayGainTags.volume(volume, _replayGain));
+      _playbackVolume.target(_fstream!, volume, _replayGainTags, _replayGain,
+          dspBase: _volumeDspBase, smooth: playerState == PlayerState.playing);
     }
     _userVolumeDsp = volume;
   }
@@ -1499,34 +1528,19 @@ class BassPlayer {
     if (_freed) return false;
     try {
       if (_fstream != null) {
-        _setNativeVolume(
-            _fstream!, _replayGainTags.volume(_userVolumeDsp, preferences));
+        // Keep the source's DSP base fixed: decoded buffers retain that gain.
+        // Only change the final factor, so buffered old samples and newly
+        // decoded samples can never receive mismatched ReplayGain factors.
+        _playbackVolume.target(
+            _fstream!, _userVolumeDsp, _replayGainTags, preferences,
+            dspBase: _volumeDspBase,
+            smooth: playerState == PlayerState.playing);
       }
       _replayGain = preferences;
       return true;
     } catch (error, trace) {
       LOGGER.w('[replay gain] $error', stackTrace: trace);
       return false;
-    }
-  }
-
-  void _setNativeVolume(int stream, double volume) {
-    if (_bass.BASS_ChannelSetAttribute(
-          stream,
-          BASS.BASS_ATTRIB_VOLDSP,
-          volume,
-        ) ==
-        0) {
-      switch (_bass.BASS_ErrorGetCode()) {
-        case BASS.BASS_ERROR_HANDLE:
-          throw const FormatException("handle is not a valid channel.");
-        case BASS.BASS_ERROR_ILLTYPE:
-          throw const FormatException("attrib is not valid.");
-        case BASS.BASS_ERROR_ILLPARAM:
-          throw const FormatException("value is not valid.");
-        default:
-          throw const FormatException('Unable to apply DSP volume.');
-      }
     }
   }
 

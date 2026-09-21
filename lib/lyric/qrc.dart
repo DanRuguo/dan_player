@@ -1,5 +1,6 @@
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lrc.dart';
+import 'package:dan_player/lyric/lyric_timeline.dart';
 
 class Qrc extends Lyric {
   Qrc(super.lines);
@@ -18,9 +19,8 @@ class Qrc extends Lyric {
     if (transRawStr != null) {
       final translated = <Duration, String>{};
       for (final raw in transRawStr.split('\n')) {
-        final line = LrcLine.fromLine(raw);
-        if (line != null && line.content.isNotEmpty) {
-          translated[line.start] = line.content;
+        for (final line in LrcLine.fromLineAll(raw)) {
+          if (line.content.isNotEmpty) translated[line.start] = line.content;
         }
       }
       for (final line in lines) {
@@ -28,26 +28,8 @@ class Qrc extends Lyric {
       }
     }
 
-    // 添加空白
-    final List<QrcLine> fommatedLines = [];
-    final firstLine = lines.firstOrNull;
-    if (firstLine != null && firstLine.start > const Duration(seconds: 5)) {
-      fommatedLines.add(QrcLine(Duration.zero, firstLine.start, []));
-    }
-    for (int i = 0; i < lines.length - 1; ++i) {
-      fommatedLines.add(lines[i]);
-      final transitionStart = lines[i].start + lines[i].length;
-      final transitionLength = lines[i + 1].start - transitionStart;
-      if (transitionLength > const Duration(seconds: 5)) {
-        fommatedLines.add(QrcLine(transitionStart, transitionLength, []));
-      }
-    }
-    final lastLine = lines.lastOrNull;
-    if (lastLine != null) {
-      fommatedLines.add(lastLine);
-    }
-
-    return Qrc(fommatedLines);
+    return Qrc(normalizeSyncLyricLines(
+        lines, (start, length) => QrcLine(start, length, [])));
   }
 
   @override

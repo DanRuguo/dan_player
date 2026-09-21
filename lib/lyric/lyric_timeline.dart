@@ -1,5 +1,39 @@
 import 'package:dan_player/lyric/lyric.dart';
 
+/// Provider order is not guaranteed. Keep equal-time source rows together in
+/// their authored order without the quadratic cost of insertion sorting.
+List<T> stableSortedLyricLines<T extends LyricLine>(List<T> lines) {
+  final indexed = lines.indexed.toList();
+  indexed.sort((a, b) {
+    final time = a.$2.start.compareTo(b.$2.start);
+    return time != 0 ? time : a.$1.compareTo(b.$1);
+  });
+  return [for (final item in indexed) item.$2];
+}
+
+Duration syncLyricLineEnd(SyncLyricLine line) => line.words.fold<Duration>(
+      line.start + line.length,
+      (end, word) =>
+          word.start + word.length > end ? word.start + word.length : end,
+    );
+
+/// An interlude starts only after every preceding authored voice has ended.
+/// Word ends can extend past a provider's approximate line duration.
+List<T> normalizeSyncLyricLines<T extends SyncLyricLine>(
+    List<T> lines, T Function(Duration start, Duration length) blank) {
+  final result = <T>[];
+  var end = Duration.zero;
+  for (final line in stableSortedLyricLines(lines)) {
+    if (line.start - end > const Duration(seconds: 5)) {
+      result.add(blank(end, line.start - end));
+    }
+    result.add(line);
+    final lineEnd = syncLyricLineEnd(line);
+    if (lineEnd > end) end = lineEnd;
+  }
+  return result;
+}
+
 /// Returns the lyric line that should be active at [position].
 ///
 /// The search uses the last line whose start time is not after the current
@@ -30,11 +64,7 @@ class LyricOverlapTimeline {
       : ends = [
           for (final line in lines)
             if (line is SyncLyricLine && line.content.trim().isNotEmpty)
-              line.words.fold<Duration>(
-                  line.start + line.length,
-                  (end, word) => word.start + word.length > end
-                      ? word.start + word.length
-                      : end)
+              syncLyricLineEnd(line)
             else
               null
         ];

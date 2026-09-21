@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/foundation.dart';
@@ -158,7 +159,7 @@ class LyricViewTile extends StatelessWidget {
                                 else
                                   // LRC has line times only. A uniform focus
                                   // transition does not invent word timing.
-                                  Text(
+                                  BalancedLyricText(
                                     parts.first,
                                     textAlign: textAlign,
                                     style: primaryStyle.copyWith(
@@ -325,7 +326,7 @@ class _TimedLyricLayout {
     // Sampling playback never rebuilds paragraphs or changes line breaks.
     base.text = TextSpan(
         text: line.content, style: style.copyWith(color: Colors.white));
-    base.layout(maxWidth: maxWidth);
+    layoutBalancedLyric(base, maxWidth);
     final recorder = drawing.PictureRecorder();
     base.paint(Canvas(recorder), Offset.zero);
     glyphs = recorder.endRecording();

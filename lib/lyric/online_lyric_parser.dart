@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dan_player/lyric/krc.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_timeline.dart';
 import 'package:dan_player/lyric/qrc.dart';
 
 bool hasWordTiming(Lyric? lyric) =>
@@ -68,9 +69,8 @@ Lyric? parseOnlineLyricPayload(Object? payload) {
   if (selected != null && roman != null) {
     final byTime = <Duration, String>{};
     for (final text in const LineSplitter().convert(roman)) {
-      final row = LrcLine.fromLine(text);
-      if (row != null && row.content.trim().isNotEmpty) {
-        byTime[row.start] = row.content;
+      for (final row in LrcLine.fromLineAll(text)) {
+        if (row.content.trim().isNotEmpty) byTime[row.start] = row.content;
       }
     }
     for (final row in selected.lines) {
@@ -113,8 +113,9 @@ Qrc _yrc(String text, String? translation) {
   final lines = <QrcLine>[];
   final translated = <Duration, String>{};
   for (final raw in const LineSplitter().convert(translation ?? '')) {
-    final line = LrcLine.fromLine(raw);
-    if (line != null) translated[line.start] = line.content;
+    for (final line in LrcLine.fromLineAll(raw)) {
+      translated[line.start] = line.content;
+    }
   }
   for (final line in const LineSplitter().convert(text)) {
     final match = header.firstMatch(line);
@@ -135,15 +136,6 @@ Qrc _yrc(String text, String? translation) {
         ],
         translated[start]));
   }
-  lines.sort((a, b) => a.start.compareTo(b.start));
-  final result = <QrcLine>[];
-  var end = Duration.zero;
-  for (final line in lines) {
-    if (line.start - end > const Duration(seconds: 5)) {
-      result.add(QrcLine(end, line.start - end, []));
-    }
-    result.add(line);
-    if (line.start + line.length > end) end = line.start + line.length;
-  }
-  return Qrc(result);
+  return Qrc(normalizeSyncLyricLines(
+      lines, (start, length) => QrcLine(start, length, [])));
 }

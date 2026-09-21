@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_timeline.dart';
 
 class Krc extends Lyric {
   Krc(super.lines);
@@ -9,7 +10,7 @@ class Krc extends Lyric {
     final List<KrcLine> lines = [];
     String? languageFrame;
 
-    final splited = krc.split("\n");
+    final splited = const LineSplitter().convert(krc);
     for (final item in splited) {
       if (languageFrame == null &&
           item.startsWith('[language:') &&
@@ -50,26 +51,9 @@ class Krc extends Lyric {
       } catch (_) {}
     }
 
-    // 添加空白
-    final List<KrcLine> fommatedLines = [];
-    final firstLine = lines.firstOrNull;
-    if (firstLine != null && firstLine.start > const Duration(seconds: 5)) {
-      fommatedLines.add(KrcLine(Duration.zero, firstLine.start, []));
-    }
-    for (int i = 0; i < lines.length - 1; ++i) {
-      fommatedLines.add(lines[i]);
-      final transitionStart = lines[i].start + lines[i].length;
-      final transitionLength = lines[i + 1].start - transitionStart;
-      if (transitionLength > const Duration(seconds: 5)) {
-        fommatedLines.add(KrcLine(transitionStart, transitionLength, []));
-      }
-    }
-    final lastLine = lines.lastOrNull;
-    if (lastLine != null) {
-      fommatedLines.add(lastLine);
-    }
-
-    return Krc(fommatedLines);
+    // Apply position-based translation metadata before reordering its rows.
+    return Krc(normalizeSyncLyricLines(
+        lines, (start, length) => KrcLine(start, length, [])));
   }
 
   @override

@@ -148,13 +148,35 @@ class SmartPlaylist {
       DateTime? now}) async {
     final failure = validate();
     if (failure != null) throw FormatException(failure);
-    final personal = condition == null
+    if (shouldCancel?.call() == true) return const [];
+    final referencedPlaylists = <String>{};
+    var needsPersonalData = false;
+    void collectDependencies(SmartCondition value) {
+      if (value.isGroup) {
+        for (final child in value.children) {
+          collectDependencies(child);
+        }
+      } else if (value.field == SmartField.playlist) {
+        referencedPlaylists.add(value.value);
+      } else {
+        needsPersonalData = true;
+      }
+    }
+
+    if (condition != null) collectDependencies(condition!);
+    // A membership rule does not depend on ratings/tags storage, and a
+    // personal rule does not need every playlist subtree expanded. Apart from
+    // avoiding unrelated disk failures, this bounds preparation to the data
+    // actually referenced by the (possibly nested or excluded) conditions.
+    final personal = !needsPersonalData
         ? <String, PersonalTrack>{}
         : await (await PersonalLibrary.instance).snapshot();
+    if (shouldCancel?.call() == true) return const [];
     final members = <String, Set<String>>{
-      if (condition != null)
+      if (referencedPlaylists.isNotEmpty)
         for (final p in playlistTree.allPlaylists)
-          p.id: p.flattenAudios().map((a) => a.stableTrackId).toSet()
+          if (referencedPlaylists.contains(p.id))
+            p.id: p.flattenAudios().map((a) => a.stableTrackId).toSet()
     };
     final words = query
         .toLowerCase()
@@ -235,7 +257,7 @@ class SmartPlaylist {
       }
       if (extensions.isNotEmpty &&
           !extensions.contains(p.windows
-              .extension(audio.path)
+              .extension(audio.localFilePath)
               .toLowerCase()
               .replaceFirst('.', ''))) {
         continue;

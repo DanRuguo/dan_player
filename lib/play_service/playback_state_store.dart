@@ -39,12 +39,27 @@ class SavedPlaybackState {
   static SavedPlaybackState? fromMap(Map map) {
     final rawQueue = map["queuePaths"];
     if (rawQueue is! List || rawQueue.isEmpty) return null;
-    final queue = rawQueue.whereType<String>().toList();
+    final savedIndex = map["index"] is int ? map["index"] as int : 0;
+    final queue = <String>[];
+    var currentIndex = -1;
+    for (var i = 0; i < rawQueue.length; i++) {
+      final path = rawQueue[i];
+      if (path is! String || path.isEmpty) continue;
+      // Keep the saved occurrence while recovering valid entries. Filtering
+      // an invalid prefix must not attach its successor's position to a
+      // different track, or silently select the first duplicate instead.
+      if (i == savedIndex) currentIndex = queue.length;
+      queue.add(path);
+    }
     if (queue.isEmpty) return null;
 
     final rawBackup = map["backupPaths"];
-    final backup =
-        rawBackup is List ? rawBackup.whereType<String>().toList() : queue;
+    final backup = rawBackup is List
+        ? rawBackup
+            .whereType<String>()
+            .where((path) => path.isNotEmpty)
+            .toList()
+        : queue;
     final cueTracks = <Audio>[];
     final rawCue = map['cueTracks'];
     if (rawCue is List) {
@@ -62,9 +77,10 @@ class SavedPlaybackState {
     return SavedPlaybackState(
       queuePaths: queue,
       backupPaths: backup.isEmpty ? queue : backup,
-      index: map["index"] is int ? map["index"] as int : 0,
-      position:
-          map["position"] is num ? (map["position"] as num).toDouble() : 0,
+      index: currentIndex,
+      position: currentIndex >= 0 && map["position"] is num
+          ? (map["position"] as num).toDouble()
+          : 0,
       shuffle: map["shuffle"] == true,
       cueTracks: List.unmodifiable(cueTracks),
     );

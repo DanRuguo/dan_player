@@ -76,6 +76,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   final _elapsed = ValueNotifier<int>(0);
   StreamSubscription<double>? _subscription;
   AppLifecycleState? _lifecycle;
+  ValueListenable<RenderingPreferences>? _preferences;
   bool _treeVisible = false;
   bool _mediaReduced = false;
   bool _active = false;
@@ -125,6 +126,11 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final preferences = RenderingPreferencesScope.listenableOf(context);
+    if (!identical(preferences, _preferences)) {
+      _preferences?.removeListener(_syncActivity);
+      _preferences = preferences..addListener(_syncActivity);
+    }
     // Popup routes leave this surface visible. Overlay already disables
     // TickerMode when an opaque route covers it; isCurrent would also stop
     // playback visuals behind ordinary dialogs and popup menus.
@@ -167,7 +173,8 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
     _reduced =
         _mediaReduced || features.disableAnimations || features.reduceMotion;
-    final active = const RenderingPreferences().allowsVisualUpdates(
+    final active = (_preferences?.value ?? const RenderingPreferences())
+        .allowsVisualUpdates(
       lifecycle: _lifecycle,
       treeVisible: _treeVisible,
       nativeHidden: widget.hidden?.value ?? false,
@@ -248,6 +255,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _detach();
     WidgetsBinding.instance.removeObserver(this);
     widget.hidden?.removeListener(_syncActivity);
+    _preferences?.removeListener(_syncActivity);
     _smoothing.dispose();
     _display.dispose();
     _elapsed.dispose();

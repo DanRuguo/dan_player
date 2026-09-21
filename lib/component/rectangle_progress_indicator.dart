@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/rendering_preferences.dart';
 import 'dart:async';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -15,6 +16,8 @@ class RectangleProgressIndicator extends StatefulWidget {
     this.positionStream,
     this.lengthProvider,
     this.initialPosition = 0,
+    this.readPosition,
+    this.hidden,
     this.trackIdentity,
     this.onSeek,
   });
@@ -27,6 +30,8 @@ class RectangleProgressIndicator extends StatefulWidget {
   final Stream<double>? positionStream;
   final double Function()? lengthProvider;
   final double initialPosition;
+  final double Function()? readPosition;
+  final ValueListenable<bool>? hidden;
   final Object? trackIdentity;
   final ValueChanged<double>? onSeek;
 
@@ -36,9 +41,13 @@ class RectangleProgressIndicator extends StatefulWidget {
 }
 
 class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
-    with SingleTickerProviderStateMixin {
-  /// [positionStream] 的订阅，在dispose取消订阅
-  late StreamSubscription<double> subscription;
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  StreamSubscription<double>? _subscription;
+  ValueListenable<RenderingPreferences>? _preferences;
+  AppLifecycleState? _lifecycle;
+  bool _treeVisible = false;
+  bool _active = false;
+  int _generation = 0;
 
   /// position / length, [0, 1]
   final progress = ValueNotifier<double>(0);
@@ -68,12 +77,17 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
       : 0;
 
   void _attach() {
-    _latestFraction = _fraction(widget.initialPosition);
+    final position = widget.readPosition?.call() ??
+        (widget.positionStream == null
+            ? PlayService.instance.playbackService.position
+            : widget.initialPosition);
+    _latestFraction = _fraction(position);
     progress.value = _latestFraction;
-    subscription = (widget.positionStream ??
+    final generation = _generation;
+    _subscription = (widget.positionStream ??
             PlayService.instance.playbackService.positionStream)
         .listen((event) {
-      if (_disposed) return;
+      if (_disposed || !_active || generation != _generation) return;
       _latestFraction = _fraction(event);
       if (!_dragging) {
         progress.value = _latestFraction;
@@ -82,17 +96,59 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
     });
   }
 
+  void _detach() {
+    _generation++;
+    unawaited(_subscription?.cancel());
+    _subscription = null;
+  }
+
+  void _syncActivity() {
+    if (_disposed) return;
+    final active = (_preferences?.value ?? const RenderingPreferences())
+        .allowsVisualUpdates(
+      lifecycle: _lifecycle,
+      treeVisible: _treeVisible,
+      nativeHidden: widget.hidden?.value ?? false,
+    );
+    if (active == _active) return;
+    _active = active;
+    _detach();
+    if (active) {
+      _attach();
+    } else {
+      // Native capture can disappear without delivering a final pointer event.
+      // An old drag must neither keep a visual clock alive nor seek on return.
+      _cancelSeek();
+      _highlightBoundary.value = 0;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
+    _syncActivity();
+  }
+
   @override
   void initState() {
     super.initState();
     _highlightBoundary = AnimationController(vsync: this);
     _seekFocus.addListener(_onSeekFocusChanged);
-    _attach();
+    _lifecycle = WidgetsBinding.instance.lifecycleState;
+    WidgetsBinding.instance.addObserver(this);
+    widget.hidden?.addListener(_syncActivity);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final preferences = RenderingPreferencesScope.listenableOf(context);
+    if (!identical(preferences, _preferences)) {
+      _preferences?.removeListener(_syncActivity);
+      _preferences = preferences..addListener(_syncActivity);
+    }
+    _treeVisible = TickerMode.valuesOf(context).enabled;
+    _syncActivity();
     final disableAnimations =
         (!AppMotion.enabled(context, MotionKind.feedback));
     if (_disableAnimations != disableAnimations) {
@@ -104,11 +160,16 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   @override
   void didUpdateWidget(RectangleProgressIndicator oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.positionStream != widget.positionStream) {
-      subscription.cancel();
-      _cancelSeek();
-      _attach();
+    if (!identical(oldWidget.hidden, widget.hidden)) {
+      oldWidget.hidden?.removeListener(_syncActivity);
+      widget.hidden?.addListener(_syncActivity);
     }
+    if (oldWidget.positionStream != widget.positionStream) {
+      _detach();
+      _active = false;
+      _cancelSeek();
+    }
+    _syncActivity();
     if (oldWidget.trackIdentity != widget.trackIdentity) {
       _dragCandidate = false;
       _dragging = false;
@@ -124,7 +185,9 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   }
 
   void _beginSeek() {
-    if (!_dragCandidate || widget.onSeek == null || _length == 0) return;
+    if (!_active || !_dragCandidate || widget.onSeek == null || _length == 0) {
+      return;
+    }
     _dragging = true;
     _dragIdentity = widget.trackIdentity;
     _pointerFocus = true;
@@ -181,7 +244,8 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
 
   void _updateHighlight() {
     if (_disposed) return;
-    final wanted = widget.onSeek != null &&
+    final wanted = _active &&
+        widget.onSeek != null &&
         _length > 0 &&
         (_dragging ||
             (_hoveringBoundary && !_suppressHoverUntilExit) ||
@@ -372,7 +436,10 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   @override
   void dispose() {
     _disposed = true;
-    subscription.cancel();
+    _detach();
+    widget.hidden?.removeListener(_syncActivity);
+    _preferences?.removeListener(_syncActivity);
+    WidgetsBinding.instance.removeObserver(this);
     _seekFocus.dispose();
     _highlightBoundary.dispose();
     progress.dispose();

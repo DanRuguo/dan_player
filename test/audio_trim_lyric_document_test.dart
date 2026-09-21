@@ -145,6 +145,46 @@ void main() {
   });
 
   test(
+      'repeated chorus with parser and application offsets survives snapshot '
+      'and trims the second occurrence', () async {
+    const text = '[ti:Repeated chorus]\n[offset:250]\n'
+        '[00:01.001][00:10.001]Chorus\n'
+        '[00:01.001][00:10.001]副歌译文\n'
+        '[00:03.001]Verse\n[00:12.001]After';
+    final parsed = Lrc.fromLrcText(text, LrcSource.local, separator: '┃')!;
+    final restored = LyricSnapshot.fromJson(
+            jsonDecode(jsonEncode(LyricSnapshot.capture(parsed).toJson())))!
+        .toLyric();
+    expect(restored.lines.map((line) => line.start.inMilliseconds),
+        [751, 2751, 9751, 11751]);
+    await store.select(source, restored);
+    await store.edit(source, text, originalText: text);
+    await store.setOffset(source, 125);
+    final unchanged = jsonEncode(store.forAudio(source)!.toJson());
+
+    // The selected interval contains the end of the verse and the second
+    // chorus. The first occurrence must not be shifted into the clip.
+    await trim(9.5, 11.5);
+    final document = store.forAudio(saved)!;
+    final lines = document.render()!.lines.cast<LrcLine>().toList();
+    expect(lines.map((line) => line.content), ['Verse', 'Chorus┃副歌译文']);
+    expect(lines.map((line) => line.start.inMilliseconds), [0, 376]);
+    expect(lines.map((line) => line.length.inMilliseconds), [376, 1624]);
+    expect(document.offsetMs, 0);
+    expect(document.editedText, contains('[00:00.376000]Chorus┃副歌译文'));
+    final editable = Lrc.fromLrcText(document.editedText!, LrcSource.local)!;
+    expect(editable.lines.last.start.inMilliseconds, 376);
+    expect(jsonEncode(store.forAudio(source)!.toJson()), unchanged);
+
+    final reopened = LyricDocumentStore(storageDirectory: directory);
+    addTearDown(reopened.dispose);
+    await reopened.load();
+    final savedLine = reopened.forAudio(saved)!.render()!.lines.last as LrcLine;
+    expect(savedLine.start.inMilliseconds, 376);
+    expect(savedLine.content, 'Chorus┃副歌译文');
+  });
+
+  test(
       'turning off preservation removes the destination override including '
       'offset, manual lock and history but leaves the source copy untouched',
       () async {

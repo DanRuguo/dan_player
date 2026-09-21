@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_text_codec.dart';
+import 'package:dan_player/lyric/lyric_timeline.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
 import 'package:path/path.dart' as path;
@@ -28,51 +29,55 @@ class LrcLine extends UnsyncLyricLine {
   }
 
   /// line: [mm:ss.msmsms]content
-  static LrcLine? fromLine(String line, [int? offset]) {
+  static LrcLine? fromLine(String line, [int? offset]) =>
+      fromLineAll(line, offset).firstOrNull;
+
+  /// A chorus may use several leading timestamps for the same text. Expand
+  /// each occurrence before sorting, while preserving brackets in the text.
+  static List<LrcLine> fromLineAll(String line, [int? offset]) {
     if (line.trim().isEmpty) {
-      return null;
+      return const [];
     }
 
     final left = line.indexOf("[");
     final right = line.indexOf("]");
 
     if (left == -1 || right <= left) {
-      return null;
+      return const [];
     }
-
-    var lrcTimeString = line.substring(left + 1, right);
-
-    // replace [mm:ss.msms...] with ""
-    var content = line
-        .substring(right + 1)
-        .trim()
-        .replaceAll(RegExp(r"\[\d{2}:\d{2}\.\d{2,}\]"), "");
-
-    var timeList = lrcTimeString.split(":");
-    int? minute;
-    double? second;
-    if (timeList.length >= 2) {
-      minute = int.tryParse(timeList[0]);
-      second = double.tryParse(timeList[1]);
+    final times = <Duration>[];
+    var cursor = left;
+    final pattern = RegExp(r'\[(\d+):(\d+)(?:\.(\d+))?\]');
+    const maxTimestampMillis = 9007199254740991;
+    while (true) {
+      final tag = pattern.matchAsPrefix(line, cursor);
+      if (tag == null) break;
+      final minute = int.tryParse(tag[1]!);
+      final second = int.tryParse(tag[2]!);
+      if (minute == null ||
+          second == null ||
+          minute > maxTimestampMillis ~/ 60000 ||
+          second > maxTimestampMillis ~/ 1000) {
+        break;
+      }
+      // Decimal parsing via double can turn 1.001 seconds into 1000 ms,
+      // breaking exact translation/romanization alignment with word formats.
+      final fraction = (tag[3] ?? '').padRight(3, '0').substring(0, 3);
+      final millis = minute * 60000 + second * 1000 + int.parse(fraction);
+      if (millis > maxTimestampMillis) break;
+      times.add(Duration(milliseconds: max(millis - (offset ?? 0), 0)));
+      cursor = tag.end;
+      while (cursor < line.length &&
+          (line.codeUnitAt(cursor) == 32 || line.codeUnitAt(cursor) == 9)) {
+        cursor++;
+      }
     }
-
-    if (minute == null ||
-        second == null ||
-        minute < 0 ||
-        !second.isFinite ||
-        second < 0) {
-      return null;
-    }
-
-    var inMilliseconds = ((minute * 60 + second) * 1000).toInt();
-
-    return LrcLine(
-      Duration(
-        milliseconds: max(inMilliseconds - (offset ?? 0), 0),
-      ),
-      content,
-      isBlank: content.isEmpty,
-    );
+    if (times.isEmpty) return const [];
+    final content = line.substring(cursor).trim();
+    return [
+      for (final time in times)
+        LrcLine(time, content, isBlank: content.isEmpty),
+    ];
   }
 }
 
@@ -97,18 +102,9 @@ class Lrc extends Lyric {
     return {"type": source, "lyric": lines}.toString();
   }
 
-  /// 歌词一般是有序的
-  /// 按照时间升序排序，保留原文和译文的顺序，需要使用稳定的排序算法
-  /// 这里使用插入排序
+  /// Preserve the authored order of original/translation at equal timestamps.
   void _sort() {
-    for (int i = 1; i < lines.length; i++) {
-      var temp = lines[i];
-      int j;
-      for (j = i; j > 0 && lines[j - 1].start > temp.start; j--) {
-        lines[j] = lines[j - 1];
-      }
-      lines[j] = temp;
-    }
+    lines = stableSortedLyricLines(lines);
   }
 
   /// line_1 and line_2时间戳相同，合并成line_1[separator]line_2
@@ -158,11 +154,7 @@ class Lrc extends Lyric {
 
     var lines = <LrcLine>[];
     for (int i = 0; i < lrcLines.length; i++) {
-      var lyricLine = LrcLine.fromLine(lrcLines[i], offsetInMilliseconds);
-      if (lyricLine == null) {
-        continue;
-      }
-      lines.add(lyricLine);
+      lines.addAll(LrcLine.fromLineAll(lrcLines[i], offsetInMilliseconds));
     }
 
     if (lines.isEmpty) {

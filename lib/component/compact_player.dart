@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/component/app_entrance.dart';
@@ -5,14 +7,17 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/compact_lyric_view.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/player_shortcut_preferences.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/window_mode_controller.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -63,6 +68,8 @@ class _CompactPlayerState extends State<CompactPlayer> {
     Audio? audio,
     Future<Lyric?>? lyricFuture,
     double position = 0,
+    Stream<double>? positions,
+    double Function()? readPosition,
     double duration = 0,
     bool isPlaying = false,
     bool isBuffering = false,
@@ -78,6 +85,9 @@ class _CompactPlayerState extends State<CompactPlayer> {
         audio: audio,
         lyricFuture: lyricFuture,
         position: position,
+        positions: positions,
+        readPosition: readPosition,
+        hidden: DesktopIntegration.instance.isHidden,
         duration: duration,
         isPlaying: isPlaying,
         isBuffering: isBuffering,
@@ -116,44 +126,42 @@ class _CompactPlayerState extends State<CompactPlayer> {
               return StreamBuilder<PlayerState>(
                 stream: playback.playerStateStream,
                 initialData: playback.playerState,
-                builder: (context, state) => StreamBuilder<double>(
-                  stream: playback.positionStream,
-                  initialData: playback.position,
-                  builder: (context, position) {
-                    final playing = state.data == PlayerState.playing;
-                    return _view(
-                      title: audio?.displayTitle ?? 'Dan Player',
-                      artist: audio?.artist ?? ui("尚未选择歌曲"),
-                      // Every load gets a new lyric future, even when the next
-                      // queue occurrence has the same audio path. Cancelling a
-                      // pending seek also on a source change is conservative:
-                      // an old drag must never seek the newly loaded session.
-                      trackIdentity: audio == null
-                          ? null
-                          : (audio.path, lyricService.currLyricFuture),
-                      audio: audio,
-                      lyricFuture: lyricService.currLyricFuture,
-                      position: position.data ?? 0,
-                      duration: playback.length,
-                      isPlaying: playing,
-                      isBuffering: playback.isBuffering.value,
-                      onPrevious: playback.playlist.value.isEmpty
-                          ? null
-                          : playback.lastAudio,
-                      onPlayPause: audio == null
-                          ? null
-                          : playing
-                              ? playback.pause
-                              : state.data == PlayerState.completed
-                                  ? playback.playAgain
-                                  : playback.start,
-                      onNext: playback.playlist.value.isEmpty
-                          ? null
-                          : playback.nextAudio,
-                      onSeek: audio == null ? null : playback.seek,
-                    );
-                  },
-                ),
+                builder: (context, state) {
+                  final playing = state.data == PlayerState.playing;
+                  return _view(
+                    title: audio?.displayTitle ?? 'Dan Player',
+                    artist: audio?.artist ?? ui("尚未选择歌曲"),
+                    // Every load gets a new lyric future, even when the next
+                    // queue occurrence has the same audio path. Cancelling a
+                    // pending seek also on a source change is conservative:
+                    // an old drag must never seek the newly loaded session.
+                    trackIdentity: audio == null
+                        ? null
+                        : (audio.path, lyricService.currLyricFuture),
+                    audio: audio,
+                    lyricFuture: lyricService.currLyricFuture,
+                    position: playback.position,
+                    positions: playback.positionStream,
+                    readPosition: () => playback.position,
+                    duration: playback.length,
+                    isPlaying: playing,
+                    isBuffering: playback.isBuffering.value,
+                    onPrevious: playback.playlist.value.isEmpty
+                        ? null
+                        : playback.lastAudio,
+                    onPlayPause: audio == null
+                        ? null
+                        : playing
+                            ? playback.pause
+                            : state.data == PlayerState.completed
+                                ? playback.playAgain
+                                : playback.start,
+                    onNext: playback.playlist.value.isEmpty
+                        ? null
+                        : playback.nextAudio,
+                    onSeek: audio == null ? null : playback.seek,
+                  );
+                },
               );
             },
           );
@@ -179,6 +187,9 @@ class CompactPlayerView extends StatefulWidget {
     this.audio,
     this.lyricFuture,
     this.position = 0,
+    this.positions,
+    this.readPosition,
+    this.hidden,
     this.duration = 0,
     this.isPlaying = false,
     this.isBuffering = false,
@@ -202,6 +213,12 @@ class CompactPlayerView extends StatefulWidget {
   final Audio? audio;
   final Future<Lyric?>? lyricFuture;
   final double position;
+
+  /// A live adapter updates only lyrics and progress. The static [position]
+  /// interface remains usable without creating a playback service.
+  final Stream<double>? positions;
+  final double Function()? readPosition;
+  final ValueListenable<bool>? hidden;
   final double duration;
   final bool isPlaying;
   final bool isBuffering;
@@ -223,6 +240,13 @@ class CompactPlayerView extends StatefulWidget {
 
 class _CompactPlayerViewState extends State<CompactPlayerView>
     with WidgetsBindingObserver {
+  final _livePosition = ValueNotifier<double>(0);
+  StreamSubscription<double>? _positionSubscription;
+  ValueListenable<RenderingPreferences>? _preferences;
+  AppLifecycleState? _lifecycle;
+  bool _treeVisible = false;
+  bool _active = false;
+  int _positionGeneration = 0;
   double? _dragPosition;
   Object? _dragTrackIdentity;
   bool _dragging = false;
@@ -230,7 +254,67 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
   @override
   void initState() {
     super.initState();
+    _livePosition.value = widget.position;
+    _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
+    widget.hidden?.addListener(_syncPositionActivity);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final preferences = RenderingPreferencesScope.listenableOf(context);
+    if (!identical(preferences, _preferences)) {
+      _preferences?.removeListener(_syncPositionActivity);
+      _preferences = preferences..addListener(_syncPositionActivity);
+    }
+    _treeVisible = TickerMode.valuesOf(context).enabled;
+    _syncPositionActivity();
+  }
+
+  void _detachPosition() {
+    _positionGeneration++;
+    unawaited(_positionSubscription?.cancel());
+    _positionSubscription = null;
+  }
+
+  void _syncPositionActivity() {
+    if (!mounted) return;
+    final active = (_preferences?.value ?? const RenderingPreferences())
+        .allowsVisualUpdates(
+      lifecycle: _lifecycle,
+      treeVisible: _treeVisible,
+      nativeHidden: widget.hidden?.value ?? false,
+    );
+    if (active == _active) return;
+    _active = active;
+    _detachPosition();
+    if (active) {
+      _livePosition.value = widget.readPosition?.call() ?? widget.position;
+      final generation = _positionGeneration;
+      _positionSubscription = widget.positions?.listen((position) {
+        if (mounted && _active && generation == _positionGeneration) {
+          _livePosition.value = position;
+        }
+      }, onError: (Object _, StackTrace __) {
+        // Preserve the last valid visual sample, just as the former
+        // StreamBuilder did, without surfacing a transient native read error.
+      });
+    } else if (_dragging) {
+      // Hide/minimize can interrupt capture without a pointer cancel. Retain
+      // native progress, not a pending preview, and never seek on its late end.
+      setState(() {
+        _dragging = false;
+        _dragPosition = null;
+        _dragTrackIdentity = null;
+      });
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
+    _syncPositionActivity();
   }
 
   @override
@@ -240,6 +324,10 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
 
   @override
   void dispose() {
+    _detachPosition();
+    widget.hidden?.removeListener(_syncPositionActivity);
+    _preferences?.removeListener(_syncPositionActivity);
+    _livePosition.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -248,7 +336,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
       widget.duration.isFinite && widget.duration > 0 ? widget.duration : 0;
 
   double get _position {
-    final value = _dragPosition ?? widget.position;
+    final value = _dragPosition ?? _livePosition.value;
     return value.isFinite ? value.clamp(0, _duration).toDouble() : 0;
   }
 
@@ -258,11 +346,26 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
   @override
   void didUpdateWidget(CompactPlayerView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.trackIdentity != widget.trackIdentity || !_canSeek) {
+    if (!identical(oldWidget.hidden, widget.hidden)) {
+      oldWidget.hidden?.removeListener(_syncPositionActivity);
+      widget.hidden?.addListener(_syncPositionActivity);
+    }
+    if (!identical(oldWidget.positions, widget.positions)) {
+      _detachPosition();
+      _active = false;
+    }
+    if (widget.positions == null ||
+        oldWidget.trackIdentity != widget.trackIdentity) {
+      _livePosition.value = widget.readPosition?.call() ?? widget.position;
+    }
+    if (oldWidget.trackIdentity != widget.trackIdentity ||
+        !identical(oldWidget.positions, widget.positions) ||
+        !_canSeek) {
       _dragPosition = null;
       _dragTrackIdentity = null;
       _dragging = false;
     }
+    _syncPositionActivity();
   }
 
   @override
@@ -298,10 +401,15 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
                             child: _track(scheme),
                           ),
                           const SizedBox(height: 6),
-                          CompactLyricView(
-                            trackIdentity: widget.trackIdentity,
-                            lyricFuture: widget.lyricFuture,
-                            position: _dragPosition ?? widget.position,
+                          RepaintBoundary(
+                            child: ValueListenableBuilder<double>(
+                              valueListenable: _livePosition,
+                              builder: (_, position, __) => CompactLyricView(
+                                trackIdentity: widget.trackIdentity,
+                                lyricFuture: widget.lyricFuture,
+                                position: _dragPosition ?? position,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -317,7 +425,12 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
               AppEntrance(
                 identity: 'compact-progress',
                 order: 2,
-                child: _progress(scheme),
+                child: RepaintBoundary(
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: _livePosition,
+                    builder: (_, position, __) => _progress(scheme),
+                  ),
+                ),
               ),
             ],
           ),

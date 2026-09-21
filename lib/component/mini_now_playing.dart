@@ -69,6 +69,8 @@ class MiniNowPlaying extends StatelessWidget {
                     builder: (context, child) => RectangleProgressIndicator(
                       size: Size(constraints.maxWidth, constraints.maxHeight),
                       initialPosition: playback.position,
+                      readPosition: () => playback.position,
+                      hidden: DesktopIntegration.instance.isHidden,
                       trackIdentity: (
                         playback.nowPlaying?.path,
                         lyrics.currLyricFuture
