@@ -304,6 +304,23 @@ int wmain(int argc, wchar_t** argv) {
     Write(f.manifest_path, "DANPLAYER_PAYLOAD_V1\n26.0.4\n" + first.sha256 + "\t1\t../outside.txt\n");
     Reject([&] { ReadManifest(f.manifest_path); });
   });
+  run("shell action helper installs and rolls back without allowing arbitrary executables", [&] {
+    Fixture f(base / L"shell-action");
+    const fs::path relative = L"dan_player_shell_action.exe";
+    Write(f.payload / relative, "synthetic-shell-helper");
+    f.manifest.files.push_back({relative, Sha256(f.payload / relative), fs::file_size(f.payload / relative)});
+    Write(f.manifest_path, SerializeManifest(f.manifest));
+    Check(ReadManifest(f.manifest_path).files.size() == 4, "Shell helper rejected");
+    Transaction transaction(f.context, f.registry);
+    transaction.Begin(f.manifest, f.manifest_path); f.SimulateInno(transaction);
+    transaction.VerifyInstalled(f.manifest, f.manifest_path);
+    transaction.Rollback();
+    Check(!fs::exists(f.context.target / relative), "New shell helper survived rollback");
+    for (const auto* invalid : {"other.exe", "dan_player_shell_action.exe.bak", "nested/dan_player_shell_action.exe"}) {
+      Write(f.manifest_path, "DANPLAYER_PAYLOAD_V1\n26.0.5\n" + f.manifest.files.front().sha256 + "\t1\t" + invalid + "\n");
+      Reject([&] { ReadManifest(f.manifest_path); });
+    }
+  });
   run("Flutter native asset manifest is installed and rolled back", [&] {
     Fixture f(base / L"native-assets");
     const fs::path relative = L"native_assets.json";

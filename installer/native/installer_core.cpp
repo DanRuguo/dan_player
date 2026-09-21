@@ -164,6 +164,7 @@ bool IsPayloadNamespace(const fs::path& relative) {
   }
   if (relative.has_parent_path()) return false;
   return extension == L".dll" || first == L"dan player.exe" ||
+         first == L"dan_player_shell_action.exe" ||
          first == L"license" || first == L"sha256sums" ||
          first == L"build-provenance.json" || first == L"font-integrity.json" ||
          first == L"native_assets.json" || first == L"desktop-lyric-mode" ||
