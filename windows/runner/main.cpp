@@ -67,8 +67,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
-  ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-
   PlayerInstanceLease instance_lease(command_line_arguments);
   if (!instance_lease.is_primary()) {
     if (!instance_lease.forwarded()) {
@@ -76,9 +74,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
           L"Dan Player 正在启动或暂未响应，请稍后重试。",
           L"Dan Player", MB_OK | MB_ICONINFORMATION);
     }
-    ::CoUninitialize();
     return instance_lease.forwarded() ? EXIT_SUCCESS : EXIT_FAILURE;
   }
+
+  // A Jump List invocation only forwards to the existing player. Avoid COM
+  // apartment initialization on that short-lived, latency-sensitive path.
+  ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
   project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnSeparateThread);

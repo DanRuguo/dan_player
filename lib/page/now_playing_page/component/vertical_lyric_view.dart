@@ -117,9 +117,35 @@ class VerticalLyricContent extends StatefulWidget {
 class _VerticalLyricContentState extends State<VerticalLyricContent>
     with WidgetsBindingObserver {
   AppLifecycleState? _lifecycle;
+  bool _entered = false;
+  bool _wasVisible = false;
+  bool _hasPresented = false;
+
+  void _syncEntrance() {
+    final visible =
+        TickerMode.valuesOf(context).enabled && widget.hidden?.value != true;
+    if (visible == _wasVisible) return;
+    _wasVisible = visible;
+    _entered = false;
+    _hasPresented = false;
+    if (visible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _wasVisible) setState(() => _entered = true);
+      });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncEntrance();
+  }
 
   void _visibilityChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      _syncEntrance();
+      setState(() {});
+    }
   }
 
   @override
@@ -200,10 +226,14 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
                           Theme.of(context).colorScheme.onSecondaryContainer)),
             );
           }
+          final firstPresentation = !_hasPresented;
+          if (_entered) _hasPresented = true;
           return AnimatedSwitcher(
             duration:
                 reduced ? Duration.zero : const Duration(milliseconds: 320),
-            switchInCurve: const Interval(.5, 1, curve: Curves.easeOutCubic),
+            switchInCurve: firstPresentation
+                ? Curves.easeOutCubic
+                : const Interval(.5, 1, curve: Curves.easeOutCubic),
             switchOutCurve: const Interval(.5, 1, curve: Curves.easeInCubic),
             transitionBuilder: (child, animation) => AnimatedBuilder(
               animation: animation,
@@ -223,7 +253,9 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
                 );
               },
             ),
-            child: content,
+            child: _entered
+                ? content
+                : const SizedBox(key: ValueKey('lyric-entry')),
           );
         },
       ),
@@ -383,6 +415,25 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _syncActivity() {
+    if (_exiting) {
+      // Freeze presentation at the painted pose while the parent fades it.
+      // Stopping media is not the same as requesting reduced-motion styling.
+      _active = false;
+      _mediaTicker.stop();
+      _followClock.stop();
+      _readingClock.stop();
+      _sourceGeneration++;
+      unawaited(_positionSubscription?.cancel());
+      _positionSubscription = null;
+      _listeningTo = null;
+      _followGeneration++;
+      _manualScrollTimer?.cancel();
+      if (_scrollController.hasClients &&
+          _scrollController.position.isScrollingNotifier.value) {
+        _scrollController.jumpTo(_scrollController.offset);
+      }
+      return;
+    }
     final active = !widget.suspended &&
         !_exiting &&
         (_preferences?.value ?? const RenderingPreferences())
@@ -452,7 +503,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       // A queued low-frequency event can predate the latest display frame.
       // Read the same authoritative clock while frame sampling is active;
       // never rewind the word reveal to an older stream sample.
-      _receivePosition(_mediaTicker.isActive ? widget.readPosition() : position);
+      _receivePosition(
+          _mediaTicker.isActive ? widget.readPosition() : position);
     });
   }
 
@@ -705,12 +757,15 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final reduced = !_active || _motionHidden || LyricMotion.reducedOf(context);
+    final reduced = _exiting
+        ? (_wasReduced ?? false)
+        : !_active || _motionHidden || LyricMotion.reducedOf(context);
     final current =
         _currentLine >= 0 && _currentLine < widget.lyric.lines.length
             ? widget.lyric.lines[_currentLine]
             : null;
-    final frameSampled = !reduced &&
+    final frameSampled = !_exiting &&
+        !reduced &&
         widget.playing &&
         (current is SyncLyricLine &&
                 (current.content.trim().isNotEmpty ||

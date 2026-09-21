@@ -173,6 +173,10 @@ HRESULT RegisterTasks(const EncodableMap& labels) {
       {"previous", IDI_TASK_PREVIOUS}, {"next", IDI_TASK_NEXT},
       {"showMini", IDI_TASK_MINI}}};
   const auto executable = ModulePath();
+  const auto bridge = fs::path(executable).parent_path() / L"dan_player_shell_action.exe";
+  // Keep manually renamed/single-file copies on the established fallback.
+  const auto command = SamePath(fs::path(executable).filename(), L"Dan Player.exe") &&
+      GetFileAttributesW(bridge.c_str()) != INVALID_FILE_ATTRIBUTES ? bridge.wstring() : executable;
   for (const auto& task : actions) {
     if (FAILED(result)) break;
     const auto entry = labels.find(EncodableValue(task.first));
@@ -193,7 +197,7 @@ HRESULT RegisterTasks(const EncodableMap& labels) {
                               IID_PPV_ARGS(&link));
     if (FAILED(result)) break;
     std::wstring action(task.first, task.first + strlen(task.first));
-    result = link->SetPath(executable.c_str());
+    result = link->SetPath(command.c_str());
     if (SUCCEEDED(result)) result = link->SetArguments((L"--shell-action=" + action).c_str());
     if (SUCCEEDED(result)) result = link->SetWorkingDirectory(fs::path(executable).parent_path().c_str());
     if (SUCCEEDED(result)) result = link->SetIconLocation(executable.c_str(), -task.second);

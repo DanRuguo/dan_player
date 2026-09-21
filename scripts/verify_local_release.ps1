@@ -96,6 +96,10 @@ if (-not $sharedExecutable) {
     $sourcePairs['desktop_lyric\desktop_lyric.exe'] = 'third_party\desktop_lyric\build\windows\x64\runner\Release\desktop_lyric.exe'
     $sourcePairs['desktop_lyric\data\app.so'] = 'third_party\desktop_lyric\build\windows\x64\runner\Release\data\app.so'
 }
+if (Test-Path -LiteralPath (Join-Path $payload 'dan_player_shell_action.exe')) {
+    $ownedBinaries += 'dan_player_shell_action.exe'
+    $sourcePairs['dan_player_shell_action.exe'] = 'build\windows\x64\runner\Release\dan_player_shell_action.exe'
+}
 foreach ($relative in $sourcePairs.Keys) {
     if ((Get-FileHash -LiteralPath (Join-Path $payload $relative) -Algorithm SHA256).Hash -ne
         (Get-FileHash -LiteralPath (Join-Path $repo $sourcePairs[$relative]) -Algorithm SHA256).Hash) {

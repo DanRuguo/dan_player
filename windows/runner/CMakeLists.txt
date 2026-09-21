@@ -249,3 +249,8 @@ set_target_properties(window_backdrop_transition_test PROPERTIES
   CXX_STANDARD_REQUIRED YES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/backdrop_tests"
 )
+
+# Jump List invocations must not cold-load the Flutter/audio dependency graph.
+add_executable(dan_player_shell_action WIN32 "shell_action_bridge.cpp")
+apply_standard_settings(dan_player_shell_action)
+target_link_libraries(dan_player_shell_action PRIVATE shell32 user32)

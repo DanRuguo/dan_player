@@ -1,48 +1,27 @@
-"""Generate original 24-grid, rounded Material-style Windows task icons.
-
-Requires Pillow. These geometric assets use no downloaded artwork or font data.
-The ICOs are committed so ordinary Windows builds need no Python dependency.
+"""Generate neutral Jump List ICOs from the same Material Symbols as the tray.
+Requires Pillow and the restored material_symbols_icons dependency (Apache-2.0).
+Ordinary builds use the committed ICOs and do not require Python.
 """
+import json
+import re
 from pathlib import Path
-from PIL import Image, ImageDraw
+from urllib.parse import unquote, urlparse
+from PIL import Image, ImageDraw, ImageFont
 
-DESTINATION = Path(__file__).resolve().parents[1] / "windows/runner/resources"
-COLOR = (89, 120, 123, 255)
-SCALE = 8
-
-
-def icon(name):
-    image = Image.new("RGBA", (24 * SCALE, 24 * SCALE))
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG = ROOT / ".dart_tool/package_config.json"
+entry = next(p for p in json.loads(CONFIG.read_text())["packages"]
+             if p["name"] == "material_symbols_icons")
+uri = urlparse(entry["rootUri"])
+package = Path(unquote(uri.path).lstrip("/") if uri.scheme == "file" else CONFIG.parent / entry["rootUri"])
+source = (package / "lib/symbols.dart").read_text(encoding="utf-8")
+font = ImageFont.truetype(str(package / "lib/fonts/MaterialSymbolsOutlined.ttf"), 160)
+for task, name in {"window": "open_in_new", "mini": "picture_in_picture_alt",
+                   "play": "play_arrow", "previous": "skip_previous", "next": "skip_next"}.items():
+    code = re.search(r"static const IconData " + name + r"\s*=\s*IconData\((0x[0-9a-fA-F]+)", source)
+    glyph = chr(int(code[1], 16))
+    image = Image.new("RGBA", (192, 192))
     draw = ImageDraw.Draw(image)
-
-    def box(bounds, filled=False):
-        draw.rounded_rectangle(tuple(round(v * SCALE) for v in bounds),
-                               radius=SCALE, fill=COLOR if filled else None,
-                               outline=COLOR, width=2 * SCALE)
-
-    def triangle(points):
-        draw.polygon([(round(x * SCALE), round(y * SCALE)) for x, y in points], fill=COLOR)
-
-    if name == "window":
-        box((3, 4, 21, 20))
-        draw.line((4 * SCALE, 9 * SCALE, 20 * SCALE, 9 * SCALE), fill=COLOR, width=2 * SCALE)
-    elif name == "mini":
-        box((3, 4, 21, 20))
-        box((12, 12, 18, 17), True)
-    elif name == "play":
-        triangle(((4, 5), (13, 12), (4, 19)))
-        box((15, 5, 17, 19), True)
-        box((20, 5, 22, 19), True)
-    elif name == "previous":
-        box((4, 5, 6, 19), True)
-        triangle(((18, 5), (8, 12), (18, 19)))
-    elif name == "next":
-        triangle(((6, 5), (16, 12), (6, 19)))
-        box((18, 5, 20, 19), True)
-
-    image.save(DESTINATION / f"task_{name}.ico", sizes=[(n, n) for n in (16, 24, 32, 48, 64)])
-
-
-if __name__ == "__main__":
-    for task in ("window", "play", "previous", "next", "mini"):
-        icon(task)
+    left, top, right, bottom = draw.textbbox((0, 0), glyph, font=font)
+    draw.text(((192-right+left)/2-left, (192-bottom+top)/2-top), glyph, font=font, fill=(85,85,85,255))
+    image.save(ROOT / f"windows/runner/resources/task_{task}.ico", sizes=[(n,n) for n in (16,24,32,48,64)])

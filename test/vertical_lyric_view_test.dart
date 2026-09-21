@@ -680,10 +680,12 @@ void main() {
     await _mount(tester, harness);
     harness.emit(5.1);
     await tester.pump();
+    final opacityBeforeHide = _opacity(tester, 1);
+    final scaleBeforeHide = _scale(tester, 0);
     await tester.pumpWidget(_app(harness, tickerEnabled: false));
     await tester.pump();
-    expect(_opacity(tester, 1), 1);
-    expect(_scale(tester, 0), 1);
+    expect(_opacity(tester, 1), opacityBeforeHide);
+    expect(_scale(tester, 0), scaleBeforeHide);
     expect(tester.binding.transientCallbackCount, 0);
   });
 

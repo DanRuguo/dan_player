@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/lyric/lrc.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
@@ -94,8 +96,21 @@ void main() {
       }
 
       await tester.pumpWidget(app());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      final entrance = tester.widget<FadeTransition>(find
+          .ancestor(
+              of: find.byType(VerticalLyricScrollView),
+              matching: find.byType(FadeTransition))
+          .first);
+      expect(entrance.opacity.value, greaterThan(0));
+      expect(entrance.opacity.value, lessThan(1));
       await tester.pumpAndSettle();
       await capture('before');
+      final priorBlur = tester
+          .widgetList<LyricFollowEffects>(find.byType(LyricFollowEffects))
+          .map((row) => (row.blurEnabled, row.blur))
+          .toList();
       final pending = Completer<Lyric?>();
       future = pending.future;
       await tester.pumpWidget(app());
@@ -103,6 +118,17 @@ void main() {
       expect(clock.hasListener, isFalse,
           reason:
               'Outgoing lyrics must stop even when hidden-page updates are allowed');
+      expect(
+          tester
+              .widgetList<LyricViewTile>(find.byType(LyricViewTile))
+              .every((row) => !row.reducedMotion),
+          isTrue);
+      expect(
+          tester
+              .widgetList<LyricFollowEffects>(find.byType(LyricFollowEffects))
+              .map((row) => (row.blurEnabled, row.blur))
+              .toList(),
+          priorBlur);
       await capture('fading');
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.byType(VerticalLyricScrollView), findsNothing);
