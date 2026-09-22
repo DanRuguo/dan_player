@@ -38,6 +38,7 @@ class BackgroundAppearance {
     this.customImageName,
     this.motion = false,
     this.layeredMotion = true,
+    this.bassReactive = false,
   });
 
   final BackgroundSource source;
@@ -56,6 +57,9 @@ class BackgroundAppearance {
   final bool motion;
   final bool layeredMotion;
 
+  /// Lyric artwork may respond to an already-running frequency spectrum.
+  final bool bassReactive;
+
   static const minOpacity = .25;
   static const maxOpacity = .95;
   static const minBlur = 8.0;
@@ -70,6 +74,7 @@ class BackgroundAppearance {
     bool clearCustomImage = false,
     bool? motion,
     bool? layeredMotion,
+    bool? bassReactive,
   }) =>
       BackgroundAppearance(
         source: source ?? this.source,
@@ -81,6 +86,7 @@ class BackgroundAppearance {
             clearCustomImage ? null : customImageName ?? this.customImageName,
         motion: motion ?? this.motion,
         layeredMotion: layeredMotion ?? this.layeredMotion,
+        bassReactive: bassReactive ?? this.bassReactive,
       );
 
   Map<String, Object> toMap() => {
@@ -89,6 +95,7 @@ class BackgroundAppearance {
         'blur': blur,
         'motion': motion,
         'layeredMotion': layeredMotion,
+        'bassReactive': bassReactive,
         if (isBackgroundImageId(customImageId)) 'customImageId': customImageId!,
         if (customImageName != null && isBackgroundImageId(customImageId))
           'customImageName': customImageName!,
@@ -116,6 +123,9 @@ class BackgroundAppearance {
       layeredMotion: value['layeredMotion'] is bool
           ? value['layeredMotion'] as bool
           : fallback.layeredMotion,
+      bassReactive: value['bassReactive'] is bool
+          ? value['bassReactive'] as bool
+          : fallback.bassReactive,
     );
   }
 
@@ -142,11 +152,12 @@ class BackgroundAppearance {
       customImageId == other.customImageId &&
       customImageName == other.customImageName &&
       motion == other.motion &&
-      layeredMotion == other.layeredMotion;
+      layeredMotion == other.layeredMotion &&
+      bassReactive == other.bassReactive;
 
   @override
   int get hashCode => Object.hash(source, opacity, blur, customImageId,
-      customImageName, motion, layeredMotion);
+      customImageName, motion, layeredMotion, bassReactive);
 }
 
 @immutable

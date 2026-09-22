@@ -210,6 +210,8 @@ class _CurrentArtworkBackground extends StatelessWidget {
           opacity: appearance.opacity,
           motion: appearance.motion,
           fluid: fluidArtwork && appearance.layeredMotion,
+          readLowFrequency:
+              appearance.bassReactive ? () => playback.lowFrequencyLevel : null,
           isPlaying: isPlaying,
           isVisible: isVisible,
           hidden: hidden,

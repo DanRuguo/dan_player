@@ -7,6 +7,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
+import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/window_backdrop.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/foundation.dart';
@@ -325,6 +326,26 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                   const SizedBox(height: 6),
                   Text(ui('多层流动保留模糊封面的层次并更流畅地更新；柔和漂移减少图层与刷新频率。'),
                       style: Theme.of(context).textTheme.bodySmall),
+                  if (value.layeredMotion) ...[
+                    const SizedBox(height: 8),
+                    ValueListenableBuilder<RenderingPreferences>(
+                      valueListenable: AppSettings.instance.rendering,
+                      builder: (_, rendering, __) => SettingsSwitchTile(
+                        surface: false,
+                        icon: Icons.graphic_eq,
+                        controlKey: const ValueKey('background-bass-reactive'),
+                        contentPadding: SettingsSurface.embeddedRowPadding,
+                        title: Text(ui('低频律动背景')),
+                        subtitle:
+                            Text(ui('复用歌词页实时频谱，让背景随低频轻缓缩放；关闭该频谱时不启用，不额外采样。')),
+                        value: value.bassReactive,
+                        onChanged: rendering.lyricSpectrum
+                            ? (enabled) =>
+                                _update(value.copyWith(bassReactive: enabled))
+                            : null,
+                      ),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 8),
                 ValueListenableBuilder<WindowBackdropStatus>(

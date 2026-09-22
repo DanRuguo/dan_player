@@ -574,6 +574,12 @@ const Map<String, List<String>> uiCatalogB = {
     "앨범 아트 블러 강도 {0}"
   ],
   "轻缓动态背景": ["Gentle background motion", "ゆるやかな背景アニメーション", "부드러운 배경 움직임"],
+  "低频律动背景": ["Bass-reactive background", "低音に反応する背景", "저음 반응 배경"],
+  "复用歌词页实时频谱，让背景随低频轻缓缩放；关闭该频谱时不启用，不额外采样。": [
+    "Gently scale the background with bass from the lyric page's live spectrum. Inactive when that spectrum is off; no extra audio sampling.",
+    "歌詞ページのリアルタイムスペクトラムを再利用し、低音に合わせて背景を緩やかに拡大縮小します。スペクトラムがオフのときは動作せず、追加の音声解析は行いません。",
+    "가사 페이지의 실시간 스펙트럼을 재사용하여 저음에 맞춰 배경 크기를 부드럽게 조절합니다. 해당 스펙트럼을 끄면 작동하지 않으며 추가 오디오 샘플링을 하지 않습니다."
+  ],
   "多层流动": ["Layered flow", "多層フロー", "다층 흐름"],
   "柔和漂移": ["Gentle drift", "ゆるやかな移動", "부드러운 이동"],
   "多层流动保留模糊封面的层次并更流畅地更新；柔和漂移减少图层与刷新频率。": [

@@ -7,6 +7,7 @@ import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filter.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -106,7 +107,7 @@ void _expectStopped(WidgetTester tester) {
       isTrue);
   expect(
       tester
-          .widgetList<ImageFiltered>(find.byType(ImageFiltered))
+          .widgetList<LyricFractionalFilter>(find.byType(LyricFractionalFilter))
           .where((filter) => filter.enabled),
       isEmpty);
   expect(

@@ -2,6 +2,8 @@ import 'dart:ui' as ui;
 
 import 'package:dan_player/component/background_image_motion.dart';
 import 'package:dan_player/component/artwork_handoff.dart';
+import 'package:dan_player/component/artwork_dither.dart';
+import 'package:dan_player/component/artwork_vignette.dart';
 import 'package:dan_player/component/fluid_artwork.dart';
 import 'package:dan_player/component/cached_artwork_blur.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
@@ -29,6 +31,7 @@ class ArtworkBackdrop extends StatefulWidget {
     this.displaySized = false,
     this.hidden,
     this.fluid = false,
+    this.readLowFrequency,
   });
 
   final Object artworkKey;
@@ -40,6 +43,7 @@ class ArtworkBackdrop extends StatefulWidget {
   final double? opacity;
   final bool motion;
   final bool fluid;
+  final double Function()? readLowFrequency;
   final bool isPlaying;
   final bool isVisible;
 
@@ -132,6 +136,9 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                                 phaseBuilder: widget.fluid
                                     ? (phase, active, child) => FluidArtwork(
                                         phase: phase,
+                                        active: active,
+                                        readLowFrequency:
+                                            widget.readLowFrequency,
                                         child: CachedArtworkBlur(
                                             image: provider,
                                             blur: widget.blur,
@@ -158,6 +165,13 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                                         ),
                                       ),
                               ),
+                              // Keep this after both moving covers, before the
+                              // user's readability veil. The image builder is
+                              // not used for the empty-artwork placeholder.
+                              if (widget.fluid) ...[
+                                const ArtworkDither(),
+                                const ArtworkVignette(),
+                              ],
                               if (widget.opacity != null)
                                 ColoredBox(
                                   color: scheme.surface.withValues(

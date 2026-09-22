@@ -152,7 +152,12 @@ class LyricViewTile extends StatelessWidget {
                                     reducedMotion: reducedMotion,
                                     style: primaryStyle,
                                     textAlign: textAlign,
-                                    baseColor: foreground,
+                                    baseColor: foreground.withValues(
+                                      alpha: highContrast || reducedMotion
+                                          ? foreground.a
+                                          : foreground.a *
+                                              (1 - .58 * activation),
+                                    ),
                                     playedColor: primaryColor,
                                     glowAllowed: glowAllowed,
                                   )
@@ -413,11 +418,16 @@ class _TimedLyricLayout {
             !_joiningScript.hasMatch(text),
       ));
     }
+    final lastGroup =
+        line.words.lastIndexWhere((word) => word.content.trim().isNotEmpty);
+    for (final word in words) {
+      word.phraseEnd = word.group == lastGroup;
+    }
     // Reserve four non-overlapping presentation lanes once per layout.
     // A fifth overlapping note keeps its reveal, but must neither suppress
     // all motion in the paragraph nor interrupt the four existing poses.
     final ordered = [for (var i = 0; i < words.length; i++) i]..sort((a, b) {
-        final order = words[a].start.compareTo(words[b].start);
+        final order = words[a].motionStart.compareTo(words[b].motionStart);
         return order == 0 ? a.compareTo(b) : order;
       });
     final laneEnds = List<Duration?>.filled(4, null);
@@ -431,11 +441,11 @@ class _TimedLyricLayout {
         continue;
       }
       final lane =
-          laneEnds.indexWhere((end) => end == null || end <= word.start);
+          laneEnds.indexWhere((end) => end == null || end <= word.motionStart);
       if (lane < 0) continue;
       movingIndices.add(index);
       reservedGroups.add(word.group);
-      laneEnds[lane] = word.start + word.length;
+      laneEnds[lane] = word.motionEnd;
     }
   }
 
@@ -539,6 +549,22 @@ class _TimedWordShape {
   final bool canLift;
   final double extent;
   final Rect bounds;
+  bool phraseEnd = false;
+  Duration get motionStart =>
+      start -
+      Duration(
+          microseconds: (LyricWordEffects.presentationLeadMs(
+                      length.inMilliseconds, phraseEnd) *
+                  1000)
+              .round());
+  Duration get motionEnd =>
+      start +
+      length +
+      Duration(
+          microseconds: (LyricWordEffects.presentationTailMs(
+                      length.inMilliseconds, phraseEnd) *
+                  1000)
+              .round());
 }
 
 /// Paints only the actual timed words; updates repaint the active paragraph,
@@ -603,9 +629,10 @@ class LyricWordHighlightPainter extends CustomPainter {
     for (var index = 0; index < _layout.words.length; index++) {
       final word = _layout.words[index];
       if (!_layout.movingIndices.contains(index)) continue;
-      final progress = LyricMotion.progress(position, word.start, word.length);
-      final pose = LyricWordEffects.sustain(
-          progress: ((progress - word.phase) / (1 - word.phase)).clamp(0, 1),
+      final pose = LyricWordEffects.timedPose(
+          elapsedMilliseconds: (position - word.start).inMicroseconds / 1000,
+          phase: word.phase,
+          phraseEnd: word.phraseEnd,
           durationMilliseconds: word.length.inMilliseconds,
           fontSize: _layout.fontSize);
       if (pose.lift <= .001) continue;
@@ -631,11 +658,11 @@ class LyricWordHighlightPainter extends CustomPainter {
     return result;
   }
 
-  void _paintWordColor(Canvas canvas, _TimedWordShape word,
-      {BlendMode blendMode = BlendMode.srcATop}) {
+  void _paintWordColor(Canvas canvas, _TimedWordShape word) {
     final progress = LyricMotion.progress(position, word.start, word.length);
-    if (progress <= 0 && blendMode == BlendMode.srcATop) return;
-    final paint = Paint()..blendMode = blendMode;
+    // Build a color plane, then mask it once with the complete paragraph.
+    // srcATop over a dim base would cap the sung highlight at the unsung alpha.
+    final paint = Paint()..blendMode = BlendMode.src;
     var offset = word.revealOffset;
     final softness = LyricWordEffects.softEdgeWidth(
         fontSize: _layout.fontSize, extent: word.extent);
@@ -687,17 +714,36 @@ class LyricWordHighlightPainter extends CustomPainter {
               Paint()
                 ..filterQuality = FilterQuality.low
                 ..colorFilter = ColorFilter.mode(
-                    playedColor.withValues(alpha: .18 * intensity),
+                    playedColor.withValues(
+                        alpha: (word.phraseEnd ? .27 : .18) * intensity),
                     BlendMode.srcIn));
         }
       }
       canvas.restore();
     }
-    // Compose all white glyph slices first, then tint them in one paragraph
-    // layer. A separate offscreen surface per character scales poorly and is
-    // unnecessary because the glyph geometry already supplies the alpha mask.
-    final paintBounds = bounds.inflate(12);
+    // One color plane and one shared paragraph mask, never a layer per word.
+    // Masking after the colors preserves anti-aliased glyph edges and lets the
+    // sung alpha reach one independently from the dim unsung alpha.
+    final paintBounds = bounds.inflate(20);
     canvas.saveLayer(paintBounds, Paint());
+    final timed = activation > 0 && !reducedMotion;
+    if (timed) {
+      canvas.drawRect(paintBounds, Paint()..color = baseColor);
+      final poses = {for (final pose in moving) pose.index: pose};
+      for (var index = 0; index < _layout.words.length; index++) {
+        final word = _layout.words[index];
+        final pose = poses[index];
+        canvas.save();
+        if (pose != null) {
+          canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
+          canvas.scale(pose.scale, pose.scaleY);
+          canvas.translate(-pose.anchorX, -word.bounds.center.dy);
+        }
+        _paintWordColor(canvas, word);
+        canvas.restore();
+      }
+      canvas.saveLayer(paintBounds, Paint()..blendMode = BlendMode.dstIn);
+    }
     canvas.save();
     for (final pose in moving) {
       canvas.clipRect(_layout.words[pose.index].bounds,
@@ -715,25 +761,15 @@ class LyricWordHighlightPainter extends CustomPainter {
       canvas.drawPicture(_layout.glyphs);
       canvas.restore();
     }
-    canvas.drawRect(
-        paintBounds,
-        Paint()
-          ..blendMode = BlendMode.srcIn
-          ..color = reducedMotion && activation > 0 ? playedColor : baseColor);
-    if (activation > 0 && !reducedMotion) {
-      final poses = {for (final pose in moving) pose.index: pose};
-      for (var index = 0; index < _layout.words.length; index++) {
-        final word = _layout.words[index];
-        final pose = poses[index];
-        canvas.save();
-        if (pose != null) {
-          canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
-          canvas.scale(pose.scale, pose.scaleY);
-          canvas.translate(-pose.anchorX, -word.bounds.center.dy);
-        }
-        _paintWordColor(canvas, word);
-        canvas.restore();
-      }
+    if (timed) {
+      canvas.restore();
+    } else {
+      canvas.drawRect(
+          paintBounds,
+          Paint()
+            ..blendMode = BlendMode.srcIn
+            ..color =
+                reducedMotion && activation > 0 ? playedColor : baseColor);
     }
     canvas.restore();
   }
@@ -813,9 +849,12 @@ class _LyricInterludePainter extends CustomPainter {
     canvas.scale(pose.scale);
     canvas.translate(-36, -12);
     for (var index = 0; index < 3; index++) {
-      final amount = (pose.progress * 3 - index).clamp(0.0, 1.0);
-      final eased = amount * amount * (3 - 2 * amount);
-      paint.color = color.withValues(alpha: pose.opacity * (.28 + .72 * eased));
+      final dotOpacity = switch (index) {
+        0 => pose.dotOpacities.$1,
+        1 => pose.dotOpacities.$2,
+        _ => pose.dotOpacities.$3,
+      };
+      paint.color = color.withValues(alpha: pose.opacity * dotOpacity);
       canvas.drawCircle(Offset(12 + 24.0 * index, 12), 4.2, paint);
     }
     canvas.restore();

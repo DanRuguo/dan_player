@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_motion.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'lyric_fractional_filter.dart';
 
 /// Motion local to lyric surfaces. Playback time remains the sole clock for
 /// word highlighting; these durations only describe presentation transitions.
@@ -71,28 +72,80 @@ abstract final class LyricMotion {
 
   /// One shared pose for all three waiting dots, sampled from media time.
   /// Brightness advances per dot; geometry breathes and exits as a group.
-  static ({double scale, double opacity, double progress}) interludePose(
-      Duration elapsed, Duration length,
-      {bool reduced = false}) {
-    if (reduced) return (scale: 1, opacity: 1, progress: 1);
-    final duration = length.inMilliseconds.toDouble();
-    final time = elapsed.inMilliseconds.toDouble();
-    if (duration <= 0 || time <= 0 || time >= duration) {
-      return (scale: 0, opacity: 0, progress: time > 0 ? 1 : 0);
+  static ({
+    double scale,
+    double opacity,
+    double progress,
+    (double, double, double) dotOpacities,
+  }) interludePose(Duration elapsed, Duration length, {bool reduced = false}) {
+    if (reduced) {
+      return (scale: 1, opacity: 1, progress: 1, dotOpacities: (1, 1, 1));
     }
-    final remaining = duration - time;
-    final cycle = duration / math.max(1, (duration / 4500).ceil());
-    final breathing = 1 - .05 * math.cos(time / cycle * 2 * math.pi);
-    final entry = Curves.easeOutCubic.transform((time / 2000).clamp(0.0, 1.0));
-    final end = ((750 - remaining) / 750).clamp(0.0, 1.0);
-    final exit = end < .35
-        ? 1 + .04 * math.sin(end / .35 * math.pi / 2)
-        : 1.04 * (1 - Curves.easeInOutCubic.transform((end - .35) / .65));
+    final duration = length.inMilliseconds.toDouble();
+    final time = elapsed.inMicroseconds / 1000;
+    const enterHold = 500.0;
+    const enterFade = 180.0;
+    const dotEnter = 750.0;
+    const dotStagger = 80.0;
+    const exitGrow = 750.0;
+    const exitShrink = 250.0;
+    const exitDuration = exitGrow + exitShrink;
+    final body = duration - enterHold - exitDuration;
+    if (duration <= 0 || time <= 0 || time >= duration) {
+      return (
+        scale: 0,
+        opacity: 0,
+        progress: time > 0 ? 1 : 0,
+        dotOpacities: (0, 0, 0),
+      );
+    }
+    // A short remainder cannot fit the three staggered entrances plus exit.
+    // Keep the existing row geometry, but do not flash a partial performance.
+    if (body < dotEnter + 2 * dotStagger || time < enterHold) {
+      return (scale: 1, opacity: 0, progress: 0, dotOpacities: (0, 0, 0));
+    }
+    double smooth(double value) {
+      final t = value.clamp(0.0, 1.0);
+      return t * t * (3 - 2 * t);
+    }
+
+    final internal = time - enterHold;
+    final exiting = internal >= body;
+    final exitTime = internal - body;
+    final shortBody = body < 3000;
+    final cycle = body / math.max(1, (body / 4000).floor());
+    final cyclePhase = (internal % cycle) / cycle;
+    // Complete cycles meet the exit at scale 1 with zero velocity. The 25%
+    // expansion remains visible even with small dots, without another ticker.
+    final breathing = 1 + .125 * (1 - math.cos(2 * math.pi * cyclePhase));
+    final scale = exiting
+        ? exitTime < exitGrow
+            ? 1 + .25 * smooth(exitTime / exitGrow)
+            : 1.25 - .85 * smooth((exitTime - exitGrow) / exitShrink)
+        : shortBody
+            ? 1.0
+            : breathing;
+    final opacity = smooth(internal / enterFade) *
+        (1 - smooth((exitTime - exitGrow) / exitShrink));
+    // The last dot finishes brightening during the visible grow phase, before
+    // the group contracts. All three use the real interlude interval only.
+    final segment = (body + exitGrow) / 3;
+    double dotOpacity(int index) {
+      final bodyFraction = shortBody
+          ? 1.0
+          : smooth((math.min(internal, body) - index * segment) / segment);
+      final fraction = exiting && index == 2
+          ? bodyFraction + (1 - bodyFraction) * smooth(exitTime / exitGrow)
+          : bodyFraction;
+      final entry = smooth((internal - index * dotStagger) / dotEnter);
+      return entry * (.2 + .7 * fraction);
+    }
+
     return (
-      scale: breathing * entry * exit,
-      opacity: ((time - 500) / 500).clamp(0.0, 1.0) *
-          (remaining / 375).clamp(0.0, 1.0),
-      progress: (time / math.max(1, duration - 750)).clamp(0.0, 1.0),
+      scale: scale,
+      opacity: opacity,
+      progress: (internal / (body + exitGrow)).clamp(0.0, 1.0),
+      dotOpacities: (dotOpacity(0), dotOpacity(1), dotOpacity(2)),
     );
   }
 
@@ -149,6 +202,7 @@ class LyricFollowEffects extends StatelessWidget {
     required this.transition,
     required this.blur,
     this.blurEnabled = true,
+    this.blurAnimation,
     this.reading,
     required this.child,
   });
@@ -157,6 +211,7 @@ class LyricFollowEffects extends StatelessWidget {
   final LyricFollowTransition? transition;
   final double blur;
   final bool blurEnabled;
+  final Animation<double>? blurAnimation;
   final Animation<double>? reading;
   final Widget child;
 
@@ -164,37 +219,33 @@ class LyricFollowEffects extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: Listenable.merge([
           if (transition != null) clock,
+          if (blurAnimation != null) blurAnimation!,
           if (reading != null) reading!,
         ]),
         child: child,
         builder: (context, child) {
           final sample = transition?.sample(clock.value);
           final sigma = blurEnabled
-              ? (sample?.blur ?? blur) * (reading?.value ?? 1)
+              ? (blurAnimation?.value ?? sample?.blur ?? blur) *
+                  (reading?.value ?? 1)
               : 0.0;
           final offset = sample?.offset ?? 0;
           // Keep the subtree shape stable while crossing zero blur; otherwise
           // a focus handoff would discard the timed paragraph's glyph cache.
           return Transform.translate(
             offset: Offset(0, offset),
-            // Cache the filtered row, not only the glyphs beneath it. Moving
-            // the scroll/lag transform must not rerun an unchanged blur.
-            child: RepaintBoundary(
-                child: ImageFiltered(
-              // Keep the context filter path during hover reading. A zero blur
-              // is optimized away below Flutter; after cache warm-up that path
-              // can shift scaled glyphs by one pixel on Windows. Sigma .1 is
-              // visually clear but retains stable sampling. Reduced motion /
-              // disabled blur still bypass the filter entirely.
-              // The caller restricts this to the visible follow band. Keep
-              // the focused row on the same sampling path after its finite
-              // transition is released; removing the layer at zero blur can
-              // move fractional glyph edges even though geometry is unchanged.
+            // Keep the cached paragraph, but sample its fractional position
+            // inside the filter. ImageFiltered rounds the incoming scroll/lag
+            // transform in the Windows raster cache: the slow spring return
+            // otherwise stalls, then jumps by a physical pixel.
+            child: LyricFractionalFilter(
               enabled: blurEnabled,
-              imageFilter: ui.ImageFilter.blur(
-                  sigmaX: math.max(.1, sigma), sigmaY: math.max(.1, sigma)),
+              dpr: View.of(context).devicePixelRatio,
+              // Preserve the same clear-filter path during hover and after
+              // follow cleanup; zero blur changes glyph sampling on Windows.
+              sigma: math.max(.1, sigma),
               child: child,
-            )),
+            ),
           );
         },
       );
@@ -346,6 +397,10 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
         child: Transform.scale(
           scale: _scale!.evaluate(animation),
           alignment: widget.alignment,
+          // Sample the cached text image instead of rerasterizing glyphs at
+          // every intermediate scale. Reduced motion adds no sampling layer.
+          filterQuality:
+              widget.duration == Duration.zero ? null : FilterQuality.low,
           child: RepaintBoundary(
               child: widget.builder(context, _activation!.evaluate(animation))),
         ),

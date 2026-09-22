@@ -8,6 +8,18 @@ class SpectrumAnalysis {
   static const fftValues = fftSize ~/ 2;
   final tones = List<double>.filled(7, 0);
   final frequencies = List<double>.filled(48, 0);
+
+  /// Reuse the 40–180 Hz portion of the existing logarithmic display bands.
+  /// Reading this snapshot never requests FFT data or allocates a level list.
+  double get lowFrequencyLevel {
+    var total = 0.0;
+    for (var index = 0; index < 12; index++) {
+      final value = frequencies[index];
+      if (value.isFinite) total += value.clamp(0.0, 1.0);
+    }
+    return total / 12;
+  }
+
   double? _sampleRate;
   List<({int start, int end})> _bands = const [];
   List<({int start, int end, int pitch})> _notes = const [];

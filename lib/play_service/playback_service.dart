@@ -1054,6 +1054,9 @@ class PlaybackService extends ChangeNotifier {
 
   List<double> get frequencySpectrumLevels => _player.frequencySpectrumLevels;
 
+  /// Read already-computed bass bands without subscribing or requesting FFT.
+  double get lowFrequencyLevel => _player.lowFrequencyLevel;
+
   /// Capture values synchronously before replacing a source. While a source
   /// is opening the decoder and nowPlaying may briefly describe different
   /// files, so progress notifications must not create a mixed snapshot.

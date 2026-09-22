@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:io';
 import 'dart:ui' as drawing;
 
 import 'package:dan_player/lyric/lrc.dart';
@@ -42,34 +43,29 @@ Widget _host(LyricLine line, _Position position, LyricViewController settings,
         {bool reduced = false,
         int distance = 0,
         double width = 340,
+        bool highContrast = false,
+        Brightness brightness = Brightness.light,
         ValueNotifier<RenderingPreferences>? preferences,
         TextDirection direction = TextDirection.ltr}) =>
     MaterialApp(
-        builder: preferences == null
-            ? null
-            : (context, child) => RenderingPreferencesScope(
-                preferences: preferences, child: child!),
+        builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(highContrast: highContrast),
+            child: preferences == null
+                ? child!
+                : RenderingPreferencesScope(
+                    preferences: preferences, child: child!)),
         theme: ThemeData(
             fontFamily: 'Ahem',
             colorScheme: const ColorScheme.light(
-                primary: Color(0xff00ffff),
-                onSecondaryContainer: Color(0xffff0000))),
+                    primary: Color(0xff00ffff),
+                    onSecondaryContainer: Color(0xffff0000))
+                .copyWith(brightness: brightness)),
         home: Directionality(
             textDirection: direction,
             child: Center(
                 child: SizedBox(
                     width: width,
-                    child: Material(
-                        color: Colors.transparent,
-                        child: ChangeNotifierProvider.value(
-                            value: settings,
-                            child: SingleChildScrollView(
-                                child: LyricViewTile(
-                                    line: line,
-                                    position: position,
-                                    opacity: 1,
-                                    distance: distance,
-                                    reducedMotion: reduced))))))));
+                    child: Material(color: Colors.transparent, child: ChangeNotifierProvider.value(value: settings, child: SingleChildScrollView(child: LyricViewTile(line: line, position: position, opacity: 1, distance: distance, reducedMotion: reduced))))))));
 
 Finder _paintFinder() => find.byWidgetPredicate((widget) =>
     widget is CustomPaint && widget.painter is LyricWordHighlightPainter);
@@ -77,8 +73,8 @@ LyricWordHighlightPainter _painter(WidgetTester tester) =>
     tester.widget<CustomPaint>(_paintFinder()).painter!
         as LyricWordHighlightPainter;
 
-Future<({Uint8List bytes, int width, int height})> _pixels(
-    WidgetTester tester) async {
+Future<({Uint8List bytes, int width, int height})> _pixels(WidgetTester tester,
+    {String? name}) async {
   final size = tester.getSize(_paintFinder());
   final recorder = drawing.PictureRecorder();
   _painter(tester).paint(Canvas(recorder), size);
@@ -88,6 +84,15 @@ Future<({Uint8List bytes, int width, int height})> _pixels(
   final bytes = await tester.runAsync(() async {
     final image = await picture.toImage(width, height);
     try {
+      const output = String.fromEnvironment('DAN_WORD_RENDER');
+      if (output.isNotEmpty && name != null) {
+        final file = File('$output/$name.png');
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(
+            (await image.toByteData(format: drawing.ImageByteFormat.png))!
+                .buffer
+                .asUint8List());
+      }
       return (await image.toByteData())!.buffer.asUint8List();
     } finally {
       image.dispose();
@@ -168,6 +173,66 @@ void main() {
     expect(after.lift, closeTo(before.lift, .001));
   });
 
+  test('phrase ending anticipates and releases without changing word time', () {
+    ({double lift, double scale}) pose(double time, bool ending) =>
+        LyricWordEffects.timedPose(
+            elapsedMilliseconds: time,
+            durationMilliseconds: 2400,
+            fontSize: 40,
+            phraseEnd: ending);
+    expect(pose(-400, true), (lift: 0.0, scale: 1.0));
+    expect(pose(-150, true).lift, greaterThan(0));
+    expect(pose(-150, false).lift, 0);
+    expect(pose(1200, true).lift, closeTo(pose(1200, false).lift * 1.6, .001));
+    expect(pose(2450, true).lift, greaterThan(0));
+    expect(pose(2450, false).lift, 0);
+    expect(pose(2800, true), (lift: 0.0, scale: 1.0));
+    expect(pose(2799.999, true).lift, lessThan(.00001));
+    expect(pose(-399.999, true).lift, lessThan(.00001));
+    expect(pose(1200, true), pose(1200, true));
+  });
+
+  for (final brightness in Brightness.values) {
+    testWidgets('unsung words dim but sung mask keeps full alpha $brightness',
+        (tester) async {
+      final line = _Line([_Word(0, 500, 'HHHH '), _Word(1500, 2400, 'HHHH')]);
+      position.value = const Duration(milliseconds: 750);
+      await tester.pumpWidget(
+          _host(line, position, settings, width: 780, brightness: brightness));
+      await tester.pumpAndSettle();
+      final image = await _pixels(tester);
+      final redAlpha = <int>[], cyanAlpha = <int>[];
+      for (var i = 0; i < image.bytes.length; i += 4) {
+        if (image.bytes[i] > 30 && image.bytes[i + 1] == 0) {
+          redAlpha.add(image.bytes[i + 3]);
+        }
+        if (image.bytes[i] == 0 &&
+            image.bytes[i + 1] > 30 &&
+            image.bytes[i + 2] > 30) {
+          cyanAlpha.add(image.bytes[i + 3]);
+        }
+      }
+      expect(redAlpha.length, greaterThan(100));
+      expect(cyanAlpha.length, greaterThan(100));
+      expect(
+          redAlpha.reduce((a, b) => a > b ? a : b), inInclusiveRange(106, 108));
+      expect(cyanAlpha.reduce((a, b) => a > b ? a : b), 255,
+          reason: 'Highlight must not inherit the unsung mask alpha');
+      expect(_painter(tester).progressForWord(0), 1);
+      expect(_painter(tester).progressForWord(1), 0);
+      for (final accessibility in [true, false]) {
+        await tester.pumpWidget(_host(line, position, settings,
+            width: 780,
+            brightness: brightness,
+            highContrast: accessibility,
+            reduced: !accessibility));
+        await tester.pumpAndSettle();
+        expect(_painter(tester).baseColor.a, 1);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
   testWidgets('short inner syllable animates without changing layout or clock',
       (tester) async {
     final line =
@@ -213,9 +278,9 @@ void main() {
       final complete = await _pixels(tester);
       final columns = <int>{};
       for (var index = 0; index < middle.bytes.length; index += 4) {
-        if (initial.bytes[index + 3] < 250 ||
+        if (initial.bytes[index + 3] < 100 ||
             complete.bytes[index + 3] < 250 ||
-            middle.bytes[index + 3] < 250) {
+            middle.bytes[index + 3] < 100) {
           continue;
         }
         if ((middle.bytes[index] - initial.bytes[index]).abs() > 8 &&
@@ -258,6 +323,9 @@ void main() {
       expect(tester.getSize(_paintFinder()), size);
       position.value = const Duration(milliseconds: 2400);
       await tester.pump();
+      expect(_painter(tester).movingWordCount, greaterThan(0));
+      position.value = const Duration(milliseconds: 2800);
+      await tester.pump();
       expect(_painter(tester).movingWordCount, 0);
       expect(tester.binding.transientCallbackCount, 0);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -267,25 +335,27 @@ void main() {
   testWidgets('long word lifts as one mask with no original glyph left behind',
       (tester) async {
     final line = _Line([_Word(0, 2400, 'HHH')]);
-    await tester.pumpWidget(_host(line, position, settings));
+    position.value = const Duration(milliseconds: -400);
+    // Isolate geometry from the separately checked dim-to-bright alpha ramp.
+    await tester.pumpWidget(_host(line, position, settings, highContrast: true));
     await tester.pumpAndSettle();
     final size = tester.getSize(_paintFinder());
-    final original = _ink(await _pixels(tester));
+    final original = _ink(await _pixels(tester, name: 'word-before'));
     position.value = const Duration(milliseconds: 1200);
     await tester.pump();
     expect(_painter(tester).movingWordCount, 1);
-    final raised = _ink(await _pixels(tester));
+    final raised = _ink(await _pixels(tester, name: 'word-held'));
     expect(raised.top, lessThan(original.top));
     expect(raised.bottom, lessThan(original.bottom),
         reason: 'An untransformed duplicate would still occupy the old bottom');
-    expect(raised.count / original.count, inInclusiveRange(.97, 1.18),
-        reason: '8% scale permits 1.08 squared ink, never a second copy');
+    expect(raised.count / original.count, inInclusiveRange(.97, 1.30),
+        reason: 'The 1.6x phrase-ending emphasis permits 1.128 squared ink');
     expect(tester.getSize(_paintFinder()), size);
     final paused = await _pixels(tester);
     await tester.pump(const Duration(seconds: 3));
     expect((await _pixels(tester)).bytes, orderedEquals(paused.bytes));
     expect(tester.binding.transientCallbackCount, 0);
-    position.value = const Duration(milliseconds: 2400);
+    position.value = const Duration(milliseconds: 2800);
     await tester.pump();
     expect(_painter(tester).movingWordCount, 0);
     expect(_ink(await _pixels(tester)), original);

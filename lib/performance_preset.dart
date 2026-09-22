@@ -78,6 +78,9 @@ class PerformanceSnapshot {
                     : original.source,
             motion: high,
             layeredMotion: high,
+            bassReactive: scene == BackgroundScene.nowPlaying
+                ? high
+                : original.bassReactive,
           ));
     }
     return PerformanceSnapshot(

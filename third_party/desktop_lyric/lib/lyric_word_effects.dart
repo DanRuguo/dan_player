@@ -5,6 +5,41 @@ import 'dart:ui' as ui;
 /// guessed LRC syllables. Shared by the player and desktop lyric renderers.
 abstract final class LyricWordEffects {
   static const maximumScaleExpansion = .08;
+  static double presentationLeadMs(int durationMilliseconds, bool phraseEnd) =>
+      phraseEnd && durationMilliseconds > 650
+          ? math.min(400, durationMilliseconds * .18)
+          : 0;
+
+  static double presentationTailMs(int durationMilliseconds, bool phraseEnd) =>
+      phraseEnd && durationMilliseconds > 650
+          ? math.min(400, durationMilliseconds * .2)
+          : 0;
+
+  /// Phrase-ending held notes anticipate and release around their real timing.
+  /// Highlight progress still uses the unmodified provider interval. Keeping
+  /// this a pure media-time sample makes pause, reverse seek and hidden resume
+  /// deterministic without a second animation clock.
+  static ({double lift, double scale}) timedPose({
+    required double elapsedMilliseconds,
+    required int durationMilliseconds,
+    required double fontSize,
+    bool phraseEnd = false,
+    double phase = 0,
+  }) {
+    final lead = presentationLeadMs(durationMilliseconds, phraseEnd);
+    final tail = presentationTailMs(durationMilliseconds, phraseEnd);
+    final span = durationMilliseconds + lead + tail;
+    if (span <= 0) return (lift: 0, scale: 1);
+    final progress = (elapsedMilliseconds + lead) / span;
+    final pose = sustain(
+      progress: (progress - phase) / (1 - phase),
+      durationMilliseconds: durationMilliseconds,
+      fontSize: fontSize,
+    );
+    final strength = phraseEnd && durationMilliseconds > 650 ? 1.6 : 1.0;
+    return (lift: pose.lift * strength, scale: 1 + (pose.scale - 1) * strength);
+  }
+
   static double softEdgeWidth(
           {required double fontSize, required double extent}) =>
       math.min(math.max(0, extent) * .35, fontSize.clamp(10, 120) * .22);

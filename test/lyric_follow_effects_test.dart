@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filter.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -87,8 +88,8 @@ ScrollController _controller(WidgetTester tester) =>
     tester.widget<CustomScrollView>(_scroll).controller!;
 double _offset(LyricFollowEffects effect) =>
     effect.transition?.sample(effect.clock.value).offset ?? 0;
-Iterable<ImageFiltered> _enabledFilters(WidgetTester tester) => tester
-    .widgetList<ImageFiltered>(find.byType(ImageFiltered))
+Iterable<LyricFractionalFilter> _enabledFilters(WidgetTester tester) => tester
+    .widgetList<LyricFractionalFilter>(find.byType(LyricFractionalFilter))
     .where((filter) => filter.enabled);
 
 Future<void> _advance(
@@ -109,10 +110,10 @@ void main() {
         LyricMotion.interludePose(const Duration(seconds: 6), length);
     final closing =
         LyricMotion.interludePose(const Duration(milliseconds: 11900), length);
-    expect(entry.opacity, .5);
-    expect(middle.scale, inInclusiveRange(.95, 1.05));
-    expect(closing.scale, lessThan(.2));
-    expect(closing.opacity, lessThan(.3));
+    expect(entry.opacity, 1);
+    expect(middle.scale, inInclusiveRange(1, 1.25));
+    expect(closing.scale * closing.opacity, lessThan(.3));
+    expect(closing.opacity, lessThan(.4));
     expect(LyricMotion.interludePose(length, length).scale, 0);
     expect(
         LyricMotion.interludePose(Duration.zero, length, reduced: true).scale,
@@ -120,7 +121,7 @@ void main() {
     for (var ms = 1; ms < 12000; ms += 7) {
       final pose =
           LyricMotion.interludePose(Duration(milliseconds: ms), length);
-      expect(pose.scale, inInclusiveRange(0, 1.10));
+      expect(pose.scale, inInclusiveRange(0, 1.25));
       expect(pose.opacity, inInclusiveRange(0, 1));
     }
   });

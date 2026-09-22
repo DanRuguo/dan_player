@@ -658,6 +658,14 @@ class BassPlayer {
   List<double> get frequencySpectrumLevels =>
       List.unmodifiable(_frequencySpectrumLevels);
 
+  /// A passive snapshot for background motion. Only an existing frequency
+  /// spectrum listener can demand FFT work; this getter makes no native call.
+  double get lowFrequencyLevel => !_freed &&
+          _lastEvent?.state == PlayerState.playing &&
+          _frequencySpectrumStreamController.hasListener
+      ? _spectrumAnalysis.lowFrequencyLevel
+      : 0;
+
   Timer _getPositionUpdater() {
     final stamp = _eventBoundary.stamp;
     var lastObserved = playerState;

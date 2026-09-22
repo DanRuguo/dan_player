@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show Tristate;
 import 'dart:ui' as drawing;
 
+import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
@@ -12,6 +13,7 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
@@ -89,10 +91,12 @@ Widget _app(_Harness harness,
         double width = 420,
         double height = 480,
         bool highContrast = false,
+        String? fontFamily,
         Widget? body}) =>
     MaterialApp(
       theme: ThemeData(
         platform: TargetPlatform.windows,
+        fontFamily: fontFamily,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
       ),
       builder: (context, child) => MediaQuery(
@@ -158,6 +162,12 @@ Future<void> _wheel(WidgetTester tester, double delta) async {
 }
 
 void main() {
+  setUpAll(() async {
+    await (FontLoader(danEmbeddedFontFamily)
+          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+        .load();
+  });
+
   for (final dpi in [1.0, 1.25, 1.5, 2.0]) {
     testWidgets('hover leaves painted text anchored at DPI $dpi',
         (tester) async {
@@ -226,7 +236,9 @@ void main() {
       final harness = _Harness();
       final boundary = GlobalKey();
       await tester.pumpWidget(RepaintBoundary(
-          key: boundary, child: _app(harness, width: 419.5, height: 480)));
+          key: boundary,
+          child: _app(harness,
+              width: 419.5, height: 480, fontFamily: danEmbeddedFontFamily)));
       await tester.pumpAndSettle();
       Future<List<double>> centers() async => (await tester.runAsync(() async {
             final image = await (boundary.currentContext!.findRenderObject()

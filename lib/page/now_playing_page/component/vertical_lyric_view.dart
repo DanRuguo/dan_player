@@ -5,9 +5,9 @@ import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/lyric/lyric.dart';
-import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/lyric_timeline.dart';
+import 'package:dan_player/lyric/lyric_presentation_timeline.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
@@ -319,7 +319,10 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   List<GlobalKey> _lineKeys = [];
   int _currentLine = -1;
   late LyricOverlapTimeline _overlaps;
+  late LyricPresentationTimeline _presentationTimeline;
   Set<int> _singingLines = {};
+  final Set<int> _releasingVoices = {};
+  bool _presentationEnabled = false;
   int _singingRevision = 0;
   int _visualDistance(int index) => _singingLines.contains(index)
       ? 0
@@ -336,7 +339,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   bool _treeVisible = false;
   ValueListenable<RenderingPreferences>? _preferences;
   bool _active = false;
+  bool? _blurWasAllowed;
   late final AnimationController _followClock;
+  late final AnimationController _voiceBlurClock;
   late final AnimationController _readingClock;
   late final Ticker _mediaTicker;
   bool _pointerReading = false;
@@ -356,6 +361,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
 
   Map<int, LyricFollowTransition> _followTransitions = {};
   Map<int, double> _restBlur = {};
+  Map<int, Animation<double>> _voiceBlurs = {};
   Object? _tileCacheIdentity;
   List<LyricViewTile> _tileCache = [];
   bool get _motionHidden =>
@@ -380,6 +386,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       }
     });
     _readingClock = AnimationController(vsync: this, value: 1);
+    _voiceBlurClock =
+        AnimationController(vsync: this, duration: LyricMotion.lineDuration)
+          ..addStatusListener((status) {
+            if (status == AnimationStatus.completed && _voiceBlurs.isNotEmpty) {
+              setState(() => _voiceBlurs = {});
+            }
+          });
     _followClock = AnimationController(vsync: this)
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed &&
@@ -427,6 +440,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _active = false;
       _mediaTicker.stop();
       _followClock.stop();
+      _voiceBlurClock.stop();
       _readingClock.stop();
       _sourceGeneration++;
       unawaited(_positionSubscription?.cancel());
@@ -440,6 +454,10 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       }
       return;
     }
+    final blurAllowed = (_preferences?.value.surfaceBlur ?? true) &&
+        !(MediaQuery.maybeHighContrastOf(context) ?? false);
+    final restoreBlur = _blurWasAllowed == false && blurAllowed;
+    _blurWasAllowed = blurAllowed;
     final active = !widget.suspended &&
         !_exiting &&
         (_preferences?.value ?? const RenderingPreferences())
@@ -453,6 +471,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
           _motionHidden ||
           !(_preferences?.value.animations.allows(MotionKind.lyrics) ?? true)) {
         _cancelFollowEffects();
+      } else if (restoreBlur) {
+        _refreshVoiceBlur();
       }
       if (mounted) setState(() {});
       return;
@@ -497,6 +517,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _currentLine =
         findCurrentLyricLineIndex(widget.lyric.lines, _position.value);
     _overlaps = LyricOverlapTimeline(widget.lyric.lines);
+    _presentationTimeline = LyricPresentationTimeline(widget.lyric.lines);
+    _releasingVoices.clear();
     _singingLines = _overlaps.activeIndices(_position.value, _currentLine);
     _singingRevision++;
     _scheduleFollow(immediate: true);
@@ -512,8 +534,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       // A queued low-frequency event can predate the latest display frame.
       // Read the same authoritative clock while frame sampling is active;
       // never rewind the word reveal to an older stream sample.
-      _receivePosition(
-          _mediaTicker.isActive ? widget.readPosition() : position);
+      _receivePosition(_presentationEnabled ? widget.readPosition() : position);
     });
   }
 
@@ -553,8 +574,21 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         findCurrentLyricLineIndex(widget.lyric.lines, nextPosition);
     final singing = _overlaps.activeIndices(nextPosition, nextLine);
     final voicesChanged = !setEquals(singing, _singingLines);
-    if (nextLine == _currentLine && !forceFollow && !voicesChanged) return;
+    _releasingVoices.removeWhere((index) =>
+        singing.contains(index) ||
+        widget.lyric.lines[index].start > nextPosition ||
+        _presentationTimeline.endFor(index) <= nextPosition);
+    if (voicesChanged) {
+      _releasingVoices.addAll(_singingLines.difference(singing).where((index) =>
+          widget.lyric.lines[index].start <= nextPosition &&
+          _presentationTimeline.endFor(index) > nextPosition));
+    }
+    if (nextLine == _currentLine && !forceFollow && !voicesChanged) {
+      _syncPresentationTicker();
+      return;
+    }
     final seek = (nextLine - _currentLine).abs() > 1;
+    final anchorChanged = nextLine != _currentLine;
     if (nextLine != _currentLine || voicesChanged) {
       setState(() {
         _currentLine = nextLine;
@@ -562,9 +596,67 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         _singingRevision++;
       });
     }
+    _syncPresentationTicker();
     if (!_manualScrollActive) {
-      _scheduleFollow(seek: seek || forceFollow, immediate: immediate);
+      if (anchorChanged || forceFollow) {
+        _scheduleFollow(seek: seek || forceFollow, immediate: immediate);
+      } else if (voicesChanged) {
+        _refreshVoiceBlur();
+      }
     }
+  }
+
+  void _syncPresentationTicker() {
+    final needsFrames = _active &&
+        _presentationEnabled &&
+        (_singingLines.any((index) =>
+                _presentationTimeline.needsFrames(index, _position.value)) ||
+            _releasingVoices.any((index) =>
+                _presentationTimeline.needsFrames(index, _position.value)));
+    if (needsFrames && !_mediaTicker.isActive) _mediaTicker.start();
+    if (!needsFrames) _mediaTicker.stop();
+  }
+
+  // A voice can finish (or rejoin after a short seek) while the scroll anchor
+  // stays on the same line. Fade only its focus blur: restarting the viewport
+  // or lag clock here interrupts an otherwise continuous spring return.
+  void _refreshVoiceBlur() {
+    if (_restBlur.isEmpty) return;
+    final animate = !_motionHidden &&
+        !LyricMotion.reducedOf(context) &&
+        !(MediaQuery.maybeHighContrastOf(context) ?? false) &&
+        (_preferences?.value.surfaceBlur ?? true);
+    final next = <int, Animation<double>>{};
+    for (final index in _restBlur.keys.toList()) {
+      final target = LyricMotion.blurForDistance(_visualDistance(index));
+      final previousVoice = _voiceBlurs[index];
+      if (target == _restBlur[index] && previousVoice == null) continue;
+      final flight = _followTransitions[index];
+      final begin = previousVoice?.value ??
+          flight?.sample(_followClock.value).blur ??
+          _restBlur[index]!;
+      _restBlur[index] = target;
+      if (flight != null) {
+        // Its offset still samples the original follow clock. The independent
+        // fade owns blur until completion, then hands off to this exact value.
+        _followTransitions[index] = LyricFollowTransition(
+          distance: flight.distance,
+          delay: flight.delay,
+          curve: flight.curve,
+          initialOffset: flight.initialOffset,
+          initialBlur: target,
+          finalBlur: target,
+        );
+      }
+      if (animate && begin != target) {
+        next[index] = Tween<double>(begin: begin, end: target)
+            .chain(CurveTween(curve: LyricMotion.curve))
+            .animate(_voiceBlurClock);
+      }
+    }
+    _voiceBlurClock.stop();
+    setState(() => _voiceBlurs = next);
+    if (next.isNotEmpty) _voiceBlurClock.forward(from: 0);
   }
 
   void _seekToLine(int index) {
@@ -677,9 +769,12 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   void _cancelFollowEffects() {
     _mediaTicker.stop();
     _followClock.stop();
+    _voiceBlurClock.stop();
     _readingClock.value = _pointerReading ? 0 : 1;
     _followTransitions = {};
     _restBlur = {};
+    _voiceBlurs = {};
+    _releasingVoices.clear();
   }
 
   /// Find the viewport band by binary search over already-laid-out rows. No
@@ -740,13 +835,18 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
           delay: ((index - _currentLine).abs() * .055).clamp(0, .26),
           curve: curve,
           initialOffset: previous?.offset ?? 0,
-          initialBlur: previous?.blur ?? _restBlur[index] ?? 0,
+          initialBlur: _voiceBlurs[index]?.value ??
+              previous?.blur ??
+              _restBlur[index] ??
+              0,
           finalBlur: targetBlur,
         );
       }
     }
     _followClock.stop();
+    _voiceBlurClock.stop();
     setState(() {
+      _voiceBlurs = {};
       _followTransitions = transitions;
       _restBlur = blur;
     });
@@ -778,26 +878,17 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     final reduced = _exiting
         ? (_wasReduced ?? false)
         : !_active || _motionHidden || LyricMotion.reducedOf(context);
-    final current =
-        _currentLine >= 0 && _currentLine < widget.lyric.lines.length
-            ? widget.lyric.lines[_currentLine]
-            : null;
-    final frameSampled = !_exiting &&
-        !reduced &&
-        widget.playing &&
-        (current is SyncLyricLine &&
-                (current.content.trim().isNotEmpty ||
-                    current.length > const Duration(seconds: 5)) ||
-            current is LrcLine &&
-                current.content.trim().isEmpty &&
-                current.length > const Duration(seconds: 5));
-    if (frameSampled && !_mediaTicker.isActive) _mediaTicker.start();
-    if (!frameSampled) _mediaTicker.stop();
+    _presentationEnabled = !_exiting && !reduced && widget.playing;
+    _syncPresentationTicker();
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
     final followEnabled = !reduced && !_manualScrollActive;
     final blurEnabled = followEnabled &&
         !highContrast &&
         (_preferences?.value.surfaceBlur ?? true);
+    if (!blurEnabled && _voiceBlurs.isNotEmpty) {
+      _voiceBlurClock.stop();
+      _voiceBlurs = {};
+    }
     if (_wasReduced != null && reduced != _wasReduced && reduced) {
       _cancelFollowEffects();
       _scheduleFollow(immediate: true);
@@ -894,6 +985,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                                         : null,
                                     blur:
                                         blurEnabled ? _restBlur[index] ?? 0 : 0,
+                                    blurAnimation: _voiceBlurs[index],
                                     blurEnabled: blurEnabled &&
                                         _restBlur.containsKey(index),
                                     reading: (_restBlur[index] ?? 0) > 0 ||
@@ -932,6 +1024,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _readingClock.dispose();
     _mediaTicker.dispose();
     _followClock.dispose();
+    _voiceBlurClock.dispose();
     _scrollController.dispose();
     _position.dispose();
     super.dispose();

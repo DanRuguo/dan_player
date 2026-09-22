@@ -70,12 +70,17 @@ class ArtworkMeshPainter extends SnapshotPainter {
       return;
     }
     if (_shader case final shader?) {
+      // These values are constant across both dimensions of the artwork.
+      // Compute them once per draw, rather than twice per output fragment.
+      final t = _phase!.value * math.pi * 2;
       shader
         ..setFloat(0, size.width)
         ..setFloat(1, size.height)
         ..setFloat(2, sourceSize.width / image.width)
         ..setFloat(3, sourceSize.height / image.height)
-        ..setFloat(4, _phase!.value)
+        ..setFloat(4, t)
+        ..setFloat(5, math.sin(t))
+        ..setFloat(6, math.sin(t * 2))
         ..setImageSampler(0, image);
       context.canvas.save();
       context.canvas.translate(offset.dx, offset.dy);

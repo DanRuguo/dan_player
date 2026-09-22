@@ -52,7 +52,12 @@ class _AnimationSettingsState extends State<AnimationSettings> {
     var backgrounds = settings.backgrounds.value;
     for (final scene in BackgroundScene.values) {
       backgrounds = backgrounds.withScene(
-          scene, backgrounds.forScene(scene).copyWith(motion: enabled));
+          scene,
+          backgrounds.forScene(scene).copyWith(
+              motion: enabled,
+              bassReactive: scene == BackgroundScene.nowPlaying
+                  ? enabled
+                  : backgrounds.forScene(scene).bassReactive));
     }
     settings.backgrounds.value = backgrounds;
     settings.experience.value =
