@@ -7,6 +7,7 @@ import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/lyric/online_lyric_cache.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/play_service/lyric_service.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 
@@ -14,8 +15,14 @@ import 'package:path/path.dart' as path;
 /// never music files, the library index or a user's selected lyric document.
 class LyricCacheBatch extends ChangeNotifier {
   LyricCacheBatch(
-      {this.scan, this.hasSaved, this.fetchAndCache, this.cache, this.lookup});
+      {this.scan,
+      this.hasSaved,
+      this.fetchAndCache,
+      this.cache,
+      this.lookup,
+      this.taskbarProgress});
   static final instance = LyricCacheBatch();
+  final TaskbarProgress? taskbarProgress;
   final OnlineLyricCache? cache;
   final Future<Lyric?> Function(Audio audio, bool Function() active)? lookup;
   final Future<List<Audio>> Function(String folder, bool Function() active)?
@@ -47,6 +54,7 @@ class LyricCacheBatch extends ChangeNotifier {
 
   Future<void> start(String selected) async {
     if (running) return;
+    final taskbar = (taskbarProgress ?? TaskbarProgress.instance).begin();
     running = true;
     cancelling = false;
     scanning = true;
@@ -59,6 +67,7 @@ class LyricCacheBatch extends ChangeNotifier {
       final tracks = await (scan ?? _scan)(selected, () => _active);
       total = tracks.length;
       scanning = false;
+      taskbar.update(total == 0 ? null : 0);
       for (final audio in tracks) {
         if (!_active) break;
         currentTitle = audio.title;
@@ -82,12 +91,14 @@ class LyricCacheBatch extends ChangeNotifier {
         }
         if (!_active) break;
         completed++;
+        taskbar.update(completed / total);
         notifyListeners();
       }
       status = cancelling ? '已取消，已缓存的歌词会保留。' : '批量缓存完成';
     } catch (_) {
       status = cancelling ? '已取消，已缓存的歌词会保留。' : '读取失败，请重新选择已导入的文件夹。';
     } finally {
+      taskbar.dispose();
       running = false;
       scanning = false;
       currentTitle = '';

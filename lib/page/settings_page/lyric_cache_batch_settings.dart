@@ -1,4 +1,6 @@
 import 'package:dan_player/component/app_dialog_title.dart';
+import 'package:dan_player/component/app_shape.dart';
+import 'package:path/path.dart' as path;
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -24,33 +26,122 @@ class _LyricCacheBatchSettingsState extends State<LyricCacheBatchSettings> {
 
   Future<void> _choose() async {
     final choices = _folders;
+    String? pending = _selected ?? _task.folder;
     final selected = await showAppDialog<String>(
         context: context,
-        builder: (context) => AlertDialog(
-              title: AppDialogTitle(ui('选择已导入的文件夹'),
-                  leading: const Icon(Symbols.folder)),
-              content: SizedBox(
+        builder: (context) => StatefulBuilder(builder: (context, selectFolder) {
+              final theme = Theme.of(context);
+              final colors = theme.colorScheme;
+              return AlertDialog(
+                insetPadding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                title: AppDialogTitle(ui('选择已导入的文件夹'),
+                    leading: const Icon(Symbols.folder_open)),
+                content: SizedBox(
                   width: 560,
-                  height: 320,
-                  child: choices.isEmpty
-                      ? Center(child: Text(ui('请先将音乐文件夹导入乐库。')))
-                      : ListView.builder(
-                          itemCount: choices.length,
-                          itemBuilder: (context, index) => ListTile(
-                            leading: const Icon(Symbols.folder),
-                            title: Text(choices[index],
-                                maxLines: 3, overflow: TextOverflow.ellipsis),
-                            selected: _selected == choices[index],
-                            onTap: () => Navigator.pop(context, choices[index]),
-                          ),
-                        )),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(ui('取消')))
-              ],
-            ));
-    if (mounted && selected != null) setState(() => _selected = selected);
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxHeight: MediaQuery.sizeOf(context).height * .55),
+                    child: choices.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 32),
+                            child: Text(ui('请先将音乐文件夹导入乐库。'),
+                                textAlign: TextAlign.center))
+                        : ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: choices.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final folder = choices[index];
+                              final selected = pending == folder;
+                              final name = path.posix
+                                  .basename(folder.replaceAll('\\', '/'));
+                              return Material(
+                                color: selected
+                                    ? colors.secondaryContainer
+                                    : colors.surfaceContainerLow,
+                                shape: AppShape.control.copyWith(
+                                    side: BorderSide(
+                                        color: selected
+                                            ? colors.primary
+                                            : colors.outlineVariant
+                                                .withValues(alpha: .45))),
+                                clipBehavior: Clip.antiAlias,
+                                child: InkWell(
+                                  onTap: () =>
+                                      selectFolder(() => pending = folder),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(14),
+                                    child: Row(children: [
+                                      Container(
+                                          padding: const EdgeInsets.all(10),
+                                          decoration: BoxDecoration(
+                                              color: colors.primary
+                                                  .withValues(alpha: .10),
+                                              borderRadius:
+                                                  AppShape.smallRadius),
+                                          child: Icon(Symbols.folder_open,
+                                              size: 22, color: colors.primary)),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                          child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                            Text(name.isEmpty ? folder : name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style:
+                                                    theme.textTheme.titleSmall),
+                                            const SizedBox(height: 4),
+                                            Tooltip(
+                                                message: folder,
+                                                child: Text(folder,
+                                                    maxLines: 2,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: theme
+                                                        .textTheme.bodySmall
+                                                        ?.copyWith(
+                                                            color: colors
+                                                                .onSurfaceVariant))),
+                                          ])),
+                                      const SizedBox(width: 12),
+                                      Icon(
+                                          selected
+                                              ? Symbols.check_circle
+                                              : Symbols.radio_button_unchecked,
+                                          size: 22,
+                                          color: selected
+                                              ? colors.primary
+                                              : colors.onSurfaceVariant),
+                                    ]),
+                                  ),
+                                ),
+                              );
+                            }),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(ui('取消'))),
+                  FilledButton.icon(
+                      key: const ValueKey('lyric-batch-start'),
+                      onPressed: pending != null && choices.contains(pending)
+                          ? () => Navigator.pop(context, pending)
+                          : null,
+                      icon: const Icon(Symbols.download),
+                      label: Text(ui('开始缓存'))),
+                ],
+              );
+            }));
+    if (mounted && selected != null && _folders.contains(selected)) {
+      setState(() => _selected = selected);
+      await _task.start(selected);
+    }
   }
 
   @override
@@ -90,16 +181,7 @@ class _LyricCacheBatchSettingsState extends State<LyricCacheBatchSettings> {
                         TextButton(
                             key: const ValueKey('lyric-batch-cancel'),
                             onPressed: task.cancelling ? null : task.cancel,
-                            child: Text(ui('取消')))
-                      else
-                        FilledButton.icon(
-                            key: const ValueKey('lyric-batch-start'),
-                            onPressed: selection != null &&
-                                    _folders.contains(selection)
-                                ? () => task.start(selection)
-                                : null,
-                            icon: const Icon(Symbols.download),
-                            label: Text(ui('开始缓存'))),
+                            child: Text(ui('取消'))),
                     ]),
                 const SizedBox(height: 12),
                 Text(ui(task.status)),

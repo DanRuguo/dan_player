@@ -1,6 +1,7 @@
 import 'package:dan_player/lyric/online_lyric_cache.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'dart:async';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric_cache_batch.dart';
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
@@ -9,6 +10,54 @@ import 'package:flutter_test/flutter_test.dart';
 Audio audio(String file) =>
     Audio(file, 'Artist', 'Album', 0, 120, null, null, file, 0, 0, null);
 void main() {
+  test('taskbar follows scan and completed tracks then restores other tasks',
+      () async {
+    final progress = TaskbarProgress();
+    final older = progress.begin()..update(.25);
+    final scanning = Completer<List<Audio>>();
+    final second = Completer<bool>();
+    final values = <TaskbarProgressValue?>[];
+    progress.addListener(() => values.add(progress.value));
+    final task = LyricCacheBatch(
+        taskbarProgress: progress,
+        scan: (_, __) => scanning.future,
+        hasSaved: (a) async => a.path == 'one',
+        fetchAndCache: (_, __) => second.future);
+    final job = task.start('J:/music');
+    expect(progress.value, TaskbarProgressValue.indeterminate);
+    scanning.complete([audio('one'), audio('two')]);
+    await Future<void>.delayed(Duration.zero);
+    expect(progress.value, TaskbarProgressValue.fraction(.5));
+    second.complete(true);
+    await job;
+    expect(values, contains(TaskbarProgressValue.fraction(1)));
+    expect(progress.value, TaskbarProgressValue.fraction(.25));
+    older.dispose();
+    expect(progress.value, isNull);
+    task.dispose();
+    progress.dispose();
+  });
+  test('taskbar releases on cancellation empty folder and scan failure',
+      () async {
+    for (final mode in ['cancel', 'empty', 'error']) {
+      final progress = TaskbarProgress();
+      final pending = Completer<List<Audio>>();
+      final task = LyricCacheBatch(
+          taskbarProgress: progress, scan: (_, __) => pending.future);
+      final job = task.start('J:/music');
+      if (mode == 'cancel') task.cancel();
+      if (mode == 'error') {
+        pending.completeError(StateError('scan failed'));
+      } else {
+        pending.complete([]);
+      }
+      await job;
+      expect(progress.value, isNull, reason: mode);
+      expect(task.running, isFalse);
+      task.dispose();
+      progress.dispose();
+    }
+  });
   test(
       'a readable network result is not counted as cached when disk writes fail',
       () async {

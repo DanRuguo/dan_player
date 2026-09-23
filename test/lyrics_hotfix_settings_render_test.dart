@@ -39,6 +39,68 @@ void main() {
   });
 
   for (final language in UiLanguage.values) {
+    testWidgets('folder picker polish ${language.name}', (tester) async {
+      tester.view.physicalSize = const Size(900, 760);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      uiLanguage.value = language;
+      addTearDown(() => uiLanguage.value = UiLanguage.zh);
+      final task = LyricCacheBatch(scan: (_, __) async => [])
+        ..folder = 'J:/Music/收藏';
+      addTearDown(task.dispose);
+      final boundary = GlobalKey();
+      await tester.pumpWidget(RepaintBoundary(
+          key: boundary,
+          child: MaterialApp(
+              theme: applyAppControlTheme(ThemeData(
+                  fontFamily: danEmbeddedFontFamily,
+                  fontFamilyFallback: danFontFamilyFallback,
+                  colorScheme: ColorScheme.fromSeed(
+                      seedColor: Colors.orange, brightness: Brightness.dark))),
+              home: Scaffold(
+                  body: SingleChildScrollView(
+                      child:
+                          LyricCacheBatchSettings(task: task, folders: const [
+                'J:/Music/收藏',
+                'J:/download/onedrive/OneDrive - wsd123/FengPuai Files/音乐/Original Soundtracks and Concert Recordings',
+                'J:/Music/日本語・한국어・Français'
+              ]))))));
+      await tester.tap(find.byKey(const ValueKey('lyric-batch-folder')));
+      await tester.pumpAndSettle();
+      for (final width in [900.0, 420.0]) {
+        tester.view.physicalSize = Size(width, 760);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        const output = String.fromEnvironment('DAN_SETTING_RENDER');
+        if (output.isNotEmpty) {
+          await tester.runAsync(() async {
+            final image = await (boundary.currentContext!.findRenderObject()
+                    as RenderRepaintBoundary)
+                .toImage();
+            final bytes =
+                await image.toByteData(format: drawing.ImageByteFormat.png);
+            final file =
+                File('$output/folders-${language.name}-${width.toInt()}.png');
+            await file.parent.create(recursive: true);
+            await file.writeAsBytes(bytes!.buffer.asUint8List());
+            image.dispose();
+          });
+        }
+      }
+      await tester.tap(find.text('日本語・한국어・Français'));
+      await tester.pumpAndSettle();
+      expect(find.text('J:/Music/日本語・한국어・Français'), findsOneWidget);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('lyric-batch-start')));
+      await tester.pumpAndSettle();
+      expect(task.folder, 'J:/Music/日本語・한국어・Français');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byKey(const ValueKey('lyric-batch-start')), findsNothing);
+    });
+  }
+
+  for (final language in UiLanguage.values) {
     testWidgets(
         'hotfix settings ${language.name} real-font layout and moving source cards',
         (tester) async {
@@ -123,6 +185,8 @@ void main() {
                   find.byKey(const ValueKey('lyric-batch-start')))
               .onPressed,
           isNotNull);
+      await tester.tap(find.byKey(const ValueKey('lyric-batch-start')));
+      await tester.pumpAndSettle();
       tester.view.physicalSize = const Size(460, 1400);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
