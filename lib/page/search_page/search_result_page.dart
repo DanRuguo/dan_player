@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dan_player/page/search_page/settings_search_results.dart';
 import 'package:dan_player/page/search_page/lyric_search_results.dart';
 
 import 'package:dan_player/app_paths.dart' as app_paths;
@@ -213,7 +214,8 @@ enum _SearchResultFilter {
   online("联网"),
   artist("艺术家"),
   album("专辑"),
-  lyrics("歌词");
+  lyrics("歌词"),
+  settings("设置");
 
   const _SearchResultFilter(this.label);
   final String label;
@@ -376,6 +378,9 @@ class _SearchResultBody extends StatelessWidget {
     if (filter == _SearchResultFilter.lyrics) {
       return LyricSearchResultsView(query: result.query);
     }
+    if (filter == _SearchResultFilter.settings) {
+      return SettingsSearchResultsView(query: result.query);
+    }
     final slivers = <Widget>[];
     switch (filter) {
       case _SearchResultFilter.all:
@@ -397,6 +402,7 @@ class _SearchResultBody extends StatelessWidget {
         slivers.addAll(_albumSlivers(context, showHeader: false));
         break;
       case _SearchResultFilter.lyrics:
+      case _SearchResultFilter.settings:
         break;
     }
     slivers.add(const SliverPadding(padding: EdgeInsets.only(bottom: 96.0)));

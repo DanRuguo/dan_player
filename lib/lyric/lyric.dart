@@ -49,3 +49,11 @@ abstract class SyncLyricWord {
     return "(${start.inMilliseconds},${length.inMilliseconds})$content";
   }
 }
+
+/// Timestamp-only/whitespace payloads are not usable lyrics or cache hits.
+bool hasLyricContent(Lyric lyric) => lyric.lines.any((line) => switch (line) {
+      UnsyncLyricLine() => line.content.trim().isNotEmpty,
+      SyncLyricLine() => line.content.trim().isNotEmpty ||
+          (line.translation?.trim().isNotEmpty ?? false),
+      _ => false,
+    });

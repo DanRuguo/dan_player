@@ -590,7 +590,7 @@ Future<LyricSearchResponse> searchManualLyricCandidates(Audio audio,
       .map((choice) async {
     try {
       final lyric = await getLyricForCustomSourceChoice(audio, choice);
-      if (lyric == null || lyric.lines.isEmpty) return null;
+      if (lyric == null || !hasLyricContent(lyric)) return null;
       return SongSearchResult(
           ResultSource.kugou, audio.title, audio.artist, audio.album, 0,
           scoreVerified: false,
@@ -1480,7 +1480,7 @@ Lyric? _lyricFromCustomPayload(dynamic payload) =>
     parseOnlineLyricPayload(payload);
 
 T? _validLyric<T extends Lyric>(T? lyric) {
-  if (lyric == null || lyric.lines.isEmpty) return null;
+  if (lyric == null || !hasLyricContent(lyric)) return null;
   return lyric;
 }
 
@@ -1522,7 +1522,7 @@ Future<Lyric?> getMostMatchedLyric(
       try {
         final lyric = await load(candidate).timeout(_providerTimeout);
         if (!current()) return null;
-        if (lyric == null || lyric.lines.isEmpty) continue;
+        if (lyric == null || !hasLyricContent(lyric)) continue;
         if (hasWordTiming(lyric)) return lyric;
         fallback ??= lyric;
       } on InstrumentalLyric {

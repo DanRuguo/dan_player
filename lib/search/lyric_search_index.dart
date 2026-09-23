@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:dan_player/lyric/cached_lyric.dart';
+import 'package:dan_player/lyric/online_lyric_cache.dart';
+import 'package:dan_player/lyric/lyric_source.dart';
 
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -63,20 +67,27 @@ class LyricSearchIndex extends ChangeNotifier {
     required List<Audio> Function() audios,
     required int Function() libraryRevision,
     Listenable? libraryChanges,
+    this.cache,
   })  : _audios = audios,
         _libraryRevision = libraryRevision,
         _libraryChanges = libraryChanges {
+    cache?.changes.addListener(_cacheChanged);
     documents.changes.addListener(_documentsChanged);
     libraryChanges?.addListener(_libraryChanged);
   }
 
   static final instance = LyricSearchIndex(
     documents: LyricDocumentStore.instance,
+    cache: OnlineLyricCache.instance,
     audios: () => AudioLibrary.instance.audioCollection,
     libraryRevision: () => AudioLibrary.searchRevision,
     libraryChanges: AudioLibrary.changes,
   );
   final LyricDocumentStore documents;
+  final OnlineLyricCache? cache;
+  final _cached = <String, Lyric>{};
+  final _cacheDirty = <String>{};
+  Future<void>? _hydrating;
   final List<Audio> Function() _audios;
   final int Function() _libraryRevision;
   final Listenable? _libraryChanges;
@@ -137,12 +148,17 @@ class LyricSearchIndex extends ChangeNotifier {
     final next = {for (final audio in _audios()) audio.stableTrackId: audio};
     _songs.removeWhere((id, _) => !next.containsKey(id));
     _loaded.removeWhere((id, _) => !next.containsKey(id));
+    _cached.removeWhere((id, _) => !next.containsKey(id));
+    _cacheDirty.removeWhere((id) => !next.containsKey(id));
     final previous = Map<String, Audio>.of(_audioById);
     _audioById
       ..clear()
       ..addAll(next);
     for (final entry in next.entries) {
-      if (!identical(previous[entry.key], entry.value)) _project(entry.key);
+      if (!identical(previous[entry.key], entry.value)) {
+        _cacheDirty.add(entry.key);
+        _project(entry.key);
+      }
     }
   }
 
@@ -155,9 +171,82 @@ class LyricSearchIndex extends ChangeNotifier {
       if (document?.effective != null || document?.noLyrics == true) {
         _loaded.remove(id);
       }
+      _cacheDirty.add(id);
       _project(id);
     }
     _changed();
+  }
+
+  void _cacheChanged() {
+    if (_disposed) return;
+    final identities = cache!.changes.value;
+    if (identities.isEmpty) {
+      _cacheDirty
+          .addAll(_audioById.keys.where((id) => !_loaded.containsKey(id)));
+    } else {
+      for (final identity in identities) {
+        try {
+          final decoded = jsonDecode(identity);
+          if (decoded is List &&
+              decoded.length > 1 &&
+              decoded[1] is String &&
+              _audioById.containsKey(decoded[1]) &&
+              !_loaded.containsKey(decoded[1]) &&
+              documents.forAudio(_audioById[decoded[1]]!)?.effective == null) {
+            _cacheDirty.add(decoded[1] as String);
+          }
+        } catch (_) {}
+      }
+    }
+    if (_cacheDirty.isNotEmpty) _changed();
+  }
+
+  Future<void> _hydrateCache() async {
+    if (cache == null || _disposed) return;
+    if (_hydrating != null) return _hydrating;
+    final work = _readDirtyCache();
+    _hydrating = work;
+    try {
+      await work;
+    } finally {
+      if (identical(_hydrating, work)) _hydrating = null;
+    }
+  }
+
+  Future<void> _readDirtyCache() async {
+    final budget = Stopwatch()..start();
+    while (!_disposed && _cacheDirty.isNotEmpty) {
+      final id = _cacheDirty.first;
+      _cacheDirty.remove(id);
+      final audio = _audioById[id];
+      if (audio == null) continue;
+      final document = documents.forAudio(audio);
+      Lyric? raw;
+      if (document?.noLyrics != true && document?.effective == null) {
+        final source = document?.source ?? LYRIC_SOURCES[audio.path];
+        raw =
+            await readAvailableCachedLyric(audio, source: source, cache: cache);
+      }
+      if (_disposed) return;
+      // A cache/document/library update during disk I/O must win over this read.
+      if (_cacheDirty.contains(id) || !identical(_audioById[id], audio)) {
+        continue;
+      }
+      final previous = _cached[id];
+      if (raw == null) {
+        _cached.remove(id);
+      } else {
+        _cached[id] = raw;
+      }
+      if ((raw == null) != (previous == null) ||
+          (raw != null && previous != null && !_sameLyrics(previous, raw))) {
+        _project(id);
+      }
+      if (budget.elapsedMilliseconds >= 6) {
+        await Future<void>.delayed(Duration.zero);
+        budget.reset();
+      }
+    }
   }
 
   void _changed() {
@@ -171,7 +260,7 @@ class LyricSearchIndex extends ChangeNotifier {
     final document = documents.forAudio(audio);
     final raw = document?.noLyrics == true
         ? null
-        : document?.effective?.toLyric() ?? _loaded[id]?.$1;
+        : document?.effective?.toLyric() ?? _loaded[id]?.$1 ?? _cached[id];
     if (raw == null) {
       _songs.remove(id);
       return;
@@ -206,13 +295,14 @@ class LyricSearchIndex extends ChangeNotifier {
         document?.revision ?? 0,
         document?.edited != null
             ? '人工修订'
-            : document?.sourceLabel ?? _loaded[id]?.$2 ?? '本地',
+            : document?.sourceLabel ?? _loaded[id]?.$2 ?? '缓存',
         document?.offsetMs ?? 0,
         List.unmodifiable(lines));
   }
 
   bool isCurrent(LyricSearchSong song) =>
       !_disposed &&
+      (cache == null || !_cacheDirty.contains(song.audio.stableTrackId)) &&
       identical(_songs[song.audio.stableTrackId], song) &&
       documents.revisionFor(song.audio) == song.revision &&
       _audioById.containsKey(song.audio.stableTrackId);
@@ -228,6 +318,7 @@ class LyricSearchIndex extends ChangeNotifier {
       _audioById.clear();
     }
     if (_seenLibrary != _libraryRevision()) _syncLibrary();
+    await _hydrateCache();
     final generation = _generation;
     void check() {
       checkCancelled?.call();
@@ -280,6 +371,7 @@ class LyricSearchIndex extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    cache?.changes.removeListener(_cacheChanged);
     documents.changes.removeListener(_documentsChanged);
     _libraryChanges?.removeListener(_libraryChanged);
     super.dispose();

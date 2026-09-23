@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:path/path.dart' as path;
 
-/// Disposable online results, separate from user edits and calibrated copies.
+/// Unified disposable lyric snapshots, separate from user edits/calibration.
+/// The historical class/directory name remains compatible with existing data.
 /// Only raw timestamps are saved; each consumer receives a fresh lyric model.
 class OnlineLyricCache {
   OnlineLyricCache({Future<Directory> Function()? directory})
@@ -18,6 +20,9 @@ class OnlineLyricCache {
 
   static final instance = OnlineLyricCache();
   final Future<Directory> Function() _directory;
+
+  /// Committed identities; an empty set invalidates all entries after eviction.
+  final changes = ValueNotifier<Set<String>>(const {});
   final _pending = <String, Future<LyricSnapshot?>>{};
   static const maxEntryBytes = 2 * 1024 * 1024;
   static const maxTotalBytes = 64 * 1024 * 1024;
@@ -34,7 +39,7 @@ class OnlineLyricCache {
         final snapshot =
             LyricSnapshot.fromJson(jsonDecode(await file.readAsString()));
         final lyric = snapshot?.toLyric();
-        if (lyric != null && lyric.lines.isNotEmpty) return lyric;
+        if (lyric != null && hasLyricContent(lyric)) return lyric;
       }
     } catch (_) {}
     if (legacyIdentity == null) return null;
@@ -47,7 +52,7 @@ class OnlineLyricCache {
   }
 
   Future<Lyric?> resolve(String identity, Future<Lyric?> Function() fetch,
-      {bool refresh = false}) async {
+      {bool refresh = false, bool Function()? shouldStore}) async {
     final key = sha256.convert(utf8.encode(identity)).toString();
     // Serialize a forced refresh after a pending lookup so the older response
     // cannot overwrite the new choice. Ordinary readers share the same fetch.
@@ -61,7 +66,7 @@ class OnlineLyricCache {
           await previous;
         } catch (_) {}
       }
-      return _resolve(key, fetch, refresh);
+      return _resolve(key, identity, fetch, refresh, shouldStore);
     }();
     _pending[key] = future;
     try {
@@ -72,7 +77,11 @@ class OnlineLyricCache {
   }
 
   Future<LyricSnapshot?> _resolve(
-      String key, Future<Lyric?> Function() fetch, bool refresh) async {
+      String key,
+      String identity,
+      Future<Lyric?> Function() fetch,
+      bool refresh,
+      bool Function()? shouldStore) async {
     File? file;
     try {
       file = File(path.join((await _directory()).path, '$key.json'));
@@ -80,25 +89,33 @@ class OnlineLyricCache {
         if (await file.length() <= maxEntryBytes) {
           final value =
               LyricSnapshot.fromJson(jsonDecode(await file.readAsString()));
-          if (value != null && value.toLyric().lines.isNotEmpty) return value;
+          if (value != null && hasLyricContent(value.toLyric())) return value;
         }
       }
     } catch (_) {
       // Missing, corrupt or inaccessible cache never prevents lyric playback.
     }
     final lyric = await fetch();
-    if (lyric == null || lyric.lines.isEmpty) return null;
+    if (lyric == null || !hasLyricContent(lyric)) return null;
+    if (shouldStore?.call() == false) return null;
     final snapshot = LyricSnapshot.capture(lyric);
     if (file != null) {
       File? temporary;
       try {
         final bytes = utf8.encode(jsonEncode(snapshot.toJson()));
         if (bytes.length <= maxEntryBytes) {
+          if (await file.exists() &&
+              await file.length() == bytes.length &&
+              listEquals(await file.readAsBytes(), bytes)) {
+            return snapshot;
+          }
           await file.parent.create(recursive: true);
           temporary = File(
               '${file.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp');
           await temporary.writeAsBytes(bytes, flush: true);
+          if (shouldStore?.call() == false) return null;
           await temporary.rename(file.path);
+          changes.value = {identity};
           await _prune(file.parent, file.path);
         }
       } catch (_) {
@@ -130,11 +147,14 @@ class OnlineLyricCache {
       entries.add((entry, stat));
     }
     entries.sort((a, b) => a.$2.modified.compareTo(b.$2.modified));
+    var removed = false;
     for (final (file, stat) in entries) {
       if (size <= maxTotalBytes) break;
       if (file.path == keep) continue;
       await file.delete();
+      removed = true;
       size -= stat.size;
     }
+    if (removed) changes.value = <String>{};
   }
 }

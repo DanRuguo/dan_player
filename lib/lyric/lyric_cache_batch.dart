@@ -6,7 +6,8 @@ import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/lyric/online_lyric_cache.dart';
 import 'package:dan_player/music_matcher.dart';
-import 'package:dan_player/play_service/lyric_service.dart';
+import 'package:dan_player/lyric/cached_lyric.dart';
+import 'package:dan_player/search/lyric_search_index.dart';
 import 'package:dan_player/taskbar_progress.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
@@ -20,9 +21,16 @@ class LyricCacheBatch extends ChangeNotifier {
       this.fetchAndCache,
       this.cache,
       this.lookup,
-      this.taskbarProgress});
+      this.taskbarProgress,
+      this.documents,
+      this.readLocal,
+      this.searchIndex});
   static final instance = LyricCacheBatch();
   final TaskbarProgress? taskbarProgress;
+  final LyricDocumentStore? documents;
+  final Future<Lyric?> Function(Audio)? readLocal;
+  final LyricSearchIndex? searchIndex;
+  LyricDocumentStore get _documents => documents ?? LyricDocumentStore.instance;
   final OnlineLyricCache? cache;
   final Future<Lyric?> Function(Audio audio, bool Function() active)? lookup;
   final Future<List<Audio>> Function(String folder, bool Function() active)?
@@ -137,33 +145,47 @@ class LyricCacheBatch extends ChangeNotifier {
           : [];
 
   Future<bool> _hasSaved(Audio audio) async {
-    final document = LyricDocumentStore.instance.forAudio(audio);
+    await _documents.load();
+    final document = _documents.forAudio(audio);
     if (document?.noLyrics == true || document?.effective != null) return true;
-    if (await Lrc.fromAudioPath(audio) != null) return true;
     final source = document?.source ?? LYRIC_SOURCES[audio.path];
-    if (source != null &&
-        await readCachedOnlineLyric(audio, source: source) != null) {
+    if (await readAvailableCachedLyric(audio, source: source, cache: cache) !=
+        null) {
       return true;
     }
-    return await readCachedOnlineLyric(audio) != null;
+    if (!_active) return false;
+    final local = await (readLocal ?? Lrc.fromAudioPath)(audio);
+    if (local == null || !hasLyricContent(local)) return false;
+    (searchIndex ?? LyricSearchIndex.instance)
+        .rememberLoadedLocal(audio, local);
+    await cacheLocalLyric(audio, local,
+        cache: cache, shouldStore: () => _active);
+    return true;
   }
 
   Future<bool> _fetchAndCache(Audio audio, bool Function() active) async {
     final storage = cache ?? OnlineLyricCache.instance;
     final identity = onlineLyricCacheIdentity(audio);
+    final revision = _documents.revisionFor(audio);
+    bool unchanged() => active() && _documents.revisionFor(audio) == revision;
     final lyric = await storage.resolve(identity, () async {
-      if (!active() || await (hasSaved ?? _hasSaved)(audio)) return null;
+      if (!unchanged() ||
+          _documents.forAudio(audio)?.effective != null ||
+          _documents.forAudio(audio)?.noLyrics == true) {
+        return null;
+      }
       final result = await (lookup ??
-          ((audio, active) =>
-              getMostMatchedLyric(audio, stillCurrent: active)))(audio, active);
+              ((audio, active) =>
+                  getMostMatchedLyric(audio, stillCurrent: active)))(
+          audio, unchanged);
       // A user edit while matching must win; cancellation must not write late.
-      if (!active() ||
-          LyricDocumentStore.instance.forAudio(audio)?.effective != null ||
-          LyricDocumentStore.instance.forAudio(audio)?.noLyrics == true) {
+      if (!unchanged() ||
+          _documents.forAudio(audio)?.effective != null ||
+          _documents.forAudio(audio)?.noLyrics == true) {
         return null;
       }
       return result;
-    });
+    }, shouldStore: unchanged);
     if (lyric == null) return false;
     // Playback may use a downloaded lyric even if saving fails. A batch job
     // must not count it as cached unless it can actually be read back.

@@ -29,7 +29,8 @@ import 'animation_settings.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.initialSection, this.initialSetting});
+  final String? initialSection, initialSetting;
 
   @override
   Widget build(BuildContext context) {
@@ -37,90 +38,159 @@ class SettingsPage extends StatelessWidget {
     return PageScaffold(
       title: ui("设置"),
       actions: const [],
-      body: GroupedSettings(sections: [
-        SettingsSection(
-          id: 'library',
-          title: ui("曲库与播放"),
-          icon: Icons.library_music_outlined,
-          children: [
-            const AudioLibraryEditor(),
-            const RefreshAudioLibraryTile(),
-            const RestoreSessionSwitch(),
-            const PlaybackSettings(),
-            const TrackResumeSettings(),
-            const ReplayGainSettings(),
-            const PreventSleepSwitch(),
-            const LibraryWatchSettings(),
-            const ArtistSeparatorEditor(),
-            const LibraryHealthSettings(),
-          ],
-        ),
-        SettingsSection(
-          id: 'lyrics',
-          title: ui("联网与歌词"),
-          icon: Icons.lyrics_outlined,
-          children: [
-            const AutomaticOnlineLyricsSwitch(),
-            const DefaultLyricSourceControl(),
-            const LyricCacheBatchSettings(),
-            const LyricExperienceSettings(),
-            const MusicSourceSettings(),
-            const CustomMusicSourceSettings(),
-          ],
-        ),
-        SettingsSection(
-          id: 'appearance',
-          title: ui("界面与主题"),
-          icon: Icons.palette_outlined,
-          children: [
-            const InterfaceSettings(group: InterfaceSettingsGroup.language),
-            const ThemeAppearanceSettings(),
-            const SelectFontCombobox(),
-            const InterfaceSettings(group: InterfaceSettingsGroup.layout),
-            const SidebarLayoutSettings(),
-          ],
-        ),
-        SettingsSection(
-          id: 'effects',
-          title: ui("背景与动效"),
-          icon: Icons.blur_on,
-          children: const [
-            WindowBackdropInfo(),
-            VisualEffectsSettings(),
-            AnimationSettings(),
-          ],
-        ),
-        SettingsSection(
-          id: 'desktop',
-          title: ui("桌面与快捷键"),
-          icon: Icons.desktop_windows_outlined,
-          children: [
-            const DesktopLyricSettings(),
-            const DesktopIntegrationSettings(),
-            const ShortcutSettings(),
-          ],
-        ),
-        SettingsSection(
-          id: 'backup',
-          title: ui("备份与恢复"),
-          icon: Icons.settings_backup_restore_outlined,
-          children: const [
-            CacheBackupSettings(),
-            PerformancePresetSettings(),
-          ],
-        ),
-        SettingsSection(
-          id: 'about',
-          title: ui("更新与关于"),
-          icon: Icons.info_outline,
-          children: [
-            const CheckForUpdate(),
-            const UninstallSettings(),
-            const CreateIssueTile(),
-            const AboutBrand()
-          ],
-        ),
-      ]),
+      body: GroupedSettings(
+          initialSection: initialSection,
+          initialSetting: initialSetting,
+          sections: [
+            SettingsSection(
+              id: 'library',
+              title: ui("曲库与播放"),
+              icon: Icons.library_music_outlined,
+              children: [
+                const AudioLibraryEditor(
+                  key: ValueKey('setting-folders'),
+                ),
+                const RefreshAudioLibraryTile(
+                  key: ValueKey('setting-refresh'),
+                ),
+                const RestoreSessionSwitch(
+                  key: ValueKey('setting-session'),
+                ),
+                const PlaybackSettings(
+                  key: ValueKey('setting-playback'),
+                ),
+                const TrackResumeSettings(
+                  key: ValueKey('setting-resume'),
+                ),
+                const ReplayGainSettings(
+                  key: ValueKey('setting-gain'),
+                ),
+                const PreventSleepSwitch(
+                  key: ValueKey('setting-sleep'),
+                ),
+                const LibraryWatchSettings(
+                  key: ValueKey('setting-watch'),
+                ),
+                const ArtistSeparatorEditor(
+                  key: ValueKey('setting-artists'),
+                ),
+                const LibraryHealthSettings(
+                  key: ValueKey('setting-health'),
+                ),
+              ],
+            ),
+            SettingsSection(
+              id: 'lyrics',
+              title: ui("联网与歌词"),
+              icon: Icons.lyrics_outlined,
+              children: [
+                const AutomaticOnlineLyricsSwitch(
+                  key: ValueKey('setting-automatic'),
+                ),
+                const DefaultLyricSourceControl(
+                  key: ValueKey('setting-source'),
+                ),
+                const LyricCacheBatchSettings(
+                  key: ValueKey('setting-batch'),
+                ),
+                const LyricExperienceSettings(
+                  key: ValueKey('setting-experience'),
+                ),
+                const MusicSourceSettings(
+                  key: ValueKey('setting-platforms'),
+                ),
+                const CustomMusicSourceSettings(
+                  key: ValueKey('setting-custom'),
+                ),
+              ],
+            ),
+            SettingsSection(
+              id: 'appearance',
+              title: ui("界面与主题"),
+              icon: Icons.palette_outlined,
+              children: [
+                const InterfaceSettings(
+                    key: ValueKey('setting-language'),
+                    group: InterfaceSettingsGroup.language),
+                const ThemeAppearanceSettings(
+                  key: ValueKey('setting-theme'),
+                ),
+                const SelectFontCombobox(
+                  key: ValueKey('setting-font'),
+                ),
+                const InterfaceSettings(
+                    key: ValueKey('setting-layout'),
+                    group: InterfaceSettingsGroup.layout),
+                const SidebarLayoutSettings(
+                  key: ValueKey('setting-sidebar'),
+                ),
+              ],
+            ),
+            SettingsSection(
+              id: 'effects',
+              title: ui("背景与动效"),
+              icon: Icons.blur_on,
+              children: const [
+                WindowBackdropInfo(
+                  key: ValueKey('setting-background'),
+                ),
+                VisualEffectsSettings(
+                  key: ValueKey('setting-rendering'),
+                ),
+                AnimationSettings(
+                  key: ValueKey('setting-animation'),
+                ),
+              ],
+            ),
+            SettingsSection(
+              id: 'desktop',
+              title: ui("桌面与快捷键"),
+              icon: Icons.desktop_windows_outlined,
+              children: [
+                const DesktopLyricSettings(
+                  key: ValueKey('setting-desktop-lyrics'),
+                ),
+                const DesktopIntegrationSettings(
+                  key: ValueKey('setting-integration'),
+                ),
+                const ShortcutSettings(
+                  key: ValueKey('setting-shortcuts'),
+                ),
+              ],
+            ),
+            SettingsSection(
+              id: 'backup',
+              title: ui("备份与恢复"),
+              icon: Icons.settings_backup_restore_outlined,
+              children: const [
+                CacheBackupSettings(
+                  key: ValueKey('setting-backup'),
+                ),
+                PerformancePresetSettings(
+                  key: ValueKey('setting-performance'),
+                ),
+              ],
+            ),
+            SettingsSection(
+              id: 'about',
+              title: ui("更新与关于"),
+              icon: Icons.info_outline,
+              children: [
+                const CheckForUpdate(
+                  key: ValueKey('setting-updates'),
+                ),
+                const UninstallSettings(
+                  key: ValueKey('setting-uninstall'),
+                ),
+                const CreateIssueTile(
+                  key: ValueKey('setting-issues'),
+                ),
+                const AboutBrand(
+                  key: ValueKey('setting-about'),
+                )
+              ],
+            ),
+          ]),
     );
   }
 }

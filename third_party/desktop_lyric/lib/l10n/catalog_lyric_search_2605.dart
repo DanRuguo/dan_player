@@ -1,4 +1,9 @@
 const catalogLyricSearch2605 = <String, List<String>>{
+  '没有匹配设置项': ['No matching settings', '一致する設定はありません', '일치하는 설정이 없습니다'],
+  '界面布局': ['Interface layout', '画面レイアウト', '화면 레이아웃'],
+  '检查更新': ['Check for updates', '更新を確認', '업데이트 확인'],
+  '关于': ['About', '情報', '정보'],
+  '缓存': ['Cached', 'キャッシュ', '캐시'],
   '人工修订': ['Manual revision', '手動修正', '수동 수정'],
   '歌词已更新，请使用最新搜索结果。': [
     'Lyrics changed. Use the latest search results.',
@@ -15,10 +20,10 @@ const catalogLyricSearch2605 = <String, List<String>>{
     '有効な歌詞の索引：{0} 曲',
     '현재 가사 색인: {0}곡'
   ],
-  '仅检索已保存或已加载的本地歌词；尚未索引不代表没有歌词。': [
-    'Searches saved lyrics and local lyrics already loaded. Unindexed tracks may still have lyrics.',
-    '保存済みの歌詞と読み込み済みのローカル歌詞を検索します。未索引の曲にも歌詞がある場合があります。',
-    '저장된 가사와 이미 불러온 로컬 가사만 검색합니다. 색인되지 않은 곡에도 가사가 있을 수 있습니다.'
+  '检索已保存、已缓存和已加载的本地歌词，不会联网；尚未索引不代表没有歌词。': [
+    'Searches saved, cached and already loaded local lyrics without going online. Unindexed tracks may still have lyrics.',
+    '保存済み・キャッシュ済み・読み込み済みのローカル歌詞をオフラインで検索します。未索引の曲にも歌詞がある場合があります。',
+    '저장·캐시된 가사와 이미 불러온 로컬 가사를 오프라인으로 검색합니다. 색인되지 않은 곡에도 가사가 있을 수 있습니다.'
   ],
   '歌词检索暂时不可用，点击重试': [
     'Lyric search unavailable. Retry',

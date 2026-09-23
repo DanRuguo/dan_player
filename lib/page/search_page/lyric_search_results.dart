@@ -102,7 +102,7 @@ class _LyricSearchResultsViewState extends State<LyricSearchResultsView> {
                           [results?.indexedSongs ?? index.indexedSongs]),
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 6),
-                  Text(ui('仅检索已保存或已加载的本地歌词；尚未索引不代表没有歌词。'),
+                  Text(ui('检索已保存、已缓存和已加载的本地歌词，不会联网；尚未索引不代表没有歌词。'),
                       style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 16),
                   if (_error != null)

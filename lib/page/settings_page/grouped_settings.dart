@@ -2,6 +2,7 @@ import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -24,7 +25,12 @@ class SettingsSection {
 /// Inactive sections cannot accept focus or expose duplicate semantics. Their
 /// ticker gate follows the visual-update preference; unvisited sections stay lazy.
 class GroupedSettings extends StatefulWidget {
-  const GroupedSettings({super.key, required this.sections});
+  const GroupedSettings(
+      {super.key,
+      required this.sections,
+      this.initialSection,
+      this.initialSetting});
+  final String? initialSection, initialSetting;
   final List<SettingsSection> sections;
 
   @override
@@ -41,7 +47,9 @@ class _GroupedSettingsState extends State<GroupedSettings> {
     assert(widget.sections.isNotEmpty);
     assert(widget.sections.map((section) => section.id).toSet().length ==
         widget.sections.length);
-    _selected = widget.sections.first.id;
+    _selected = widget.sections.any((s) => s.id == widget.initialSection)
+        ? widget.initialSection!
+        : widget.sections.first.id;
     _visited.add(_selected);
   }
 
@@ -49,6 +57,10 @@ class _GroupedSettingsState extends State<GroupedSettings> {
   void didUpdateWidget(covariant GroupedSettings oldWidget) {
     super.didUpdateWidget(oldWidget);
     final ids = widget.sections.map((section) => section.id).toSet();
+    if (oldWidget.initialSection != widget.initialSection &&
+        ids.contains(widget.initialSection)) {
+      _selected = widget.initialSection!;
+    }
     _visited.removeWhere((id) => !ids.contains(id));
     if (!ids.contains(_selected)) _selected = widget.sections.first.id;
     _visited.add(_selected);
@@ -154,7 +166,11 @@ class _GroupedSettingsState extends State<GroupedSettings> {
                                     .pauseWhenHidden,
                             child: ExcludeFocus(
                               excluding: _selected != section.id,
-                              child: _SectionContent(section: section),
+                              child: _SectionContent(
+                                  section: section,
+                                  target: section.id == widget.initialSection
+                                      ? widget.initialSetting
+                                      : null),
                             ),
                           )
                         else
@@ -173,7 +189,8 @@ class _GroupedSettingsState extends State<GroupedSettings> {
 }
 
 class _SectionContent extends StatefulWidget {
-  const _SectionContent({required this.section});
+  const _SectionContent({required this.section, this.target});
+  final String? target;
   final SettingsSection section;
 
   @override
@@ -182,6 +199,29 @@ class _SectionContent extends StatefulWidget {
 
 class _SectionContentState extends State<_SectionContent> {
   final _scroll = ScrollController();
+  final _target = GlobalKey();
+  @override
+  void initState() {
+    super.initState();
+    _reveal();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SectionContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.target != oldWidget.target) _reveal();
+  }
+
+  void _reveal() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = _target.currentContext;
+      if (!mounted || target == null) return;
+      Scrollable.ensureVisible(target,
+          alignment: 0,
+          duration: AppMotion.duration(
+              context, MotionKind.transitions, AppMotion.standard));
+    });
+  }
 
   @override
   void dispose() {
@@ -194,7 +234,6 @@ class _SectionContentState extends State<_SectionContent> {
     UiLanguageScope.watch(context);
     return AppScrollbar(
       controller: _scroll,
-
       child: SingleChildScrollView(
         key: PageStorageKey('settings-scroll-${widget.section.id}'),
         controller: _scroll,
@@ -205,15 +244,27 @@ class _SectionContentState extends State<_SectionContent> {
           children: [
             for (final entry in widget.section.children.indexed) ...[
               if (entry.$1 != 0) const SizedBox(height: 16),
-              AppEntrance(
-                identity: (
-                  'settings-row',
-                  widget.section.id,
-                  entry.$2.runtimeType,
-                  entry.$1
+              Container(
+                key: entry.$2.key == ValueKey('setting-${widget.target}')
+                    ? _target
+                    : null,
+                decoration: entry.$2.key == ValueKey('setting-${widget.target}')
+                    ? BoxDecoration(
+                        borderRadius: AppShape.surfaceRadius,
+                        border: Border.all(
+                            color: Theme.of(context).colorScheme.primary,
+                            width: 2))
+                    : null,
+                child: AppEntrance(
+                  identity: (
+                    'settings-row',
+                    widget.section.id,
+                    entry.$2.runtimeType,
+                    entry.$1
+                  ),
+                  order: entry.$1,
+                  child: entry.$2,
                 ),
-                order: entry.$1,
-                child: entry.$2,
               ),
             ],
           ],

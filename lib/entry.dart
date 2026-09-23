@@ -502,7 +502,9 @@ class Entry extends StatelessWidget {
               path: app_paths.SETTINGS_PAGE,
               pageBuilder: (context, state) => SlideTransitionPage(
                     key: state.pageKey,
-                    child: const SettingsPage(),
+                    child: SettingsPage(
+                        initialSection: state.uri.queryParameters['section'],
+                        initialSetting: state.uri.queryParameters['setting']),
                   ),
               routes: [
                 GoRoute(

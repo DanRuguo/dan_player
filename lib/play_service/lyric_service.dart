@@ -1,6 +1,7 @@
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'dart:async';
-import 'dart:convert';
+import 'package:dan_player/lyric/cached_lyric.dart';
+export 'package:dan_player/lyric/cached_lyric.dart';
 import 'package:dan_player/lyric/online_lyric_cache.dart';
 import 'package:dan_player/search/lyric_search_index.dart';
 
@@ -46,36 +47,6 @@ Future<Lyric?> resolveMissingLyricOnline({
   if (lyric != null || !allowed()) return lyric;
   return search();
 }
-
-/// Editable tags and provider preferences must not turn an existing saved
-/// result into another automatic network search for the same library track.
-String onlineLyricCacheIdentity(Audio audio, {LyricSource? source}) =>
-    jsonEncode([2, audio.stableTrackId, source?.toMap()]);
-
-String _legacyOnlineCacheIdentity(Audio audio, {LyricSource? source}) {
-  final settings = AppSettings.instance;
-  // Metadata/provider changes naturally select a new cache entry. Do not
-  // include the display offset: cached timestamps must remain canonical.
-  return jsonEncode([
-    1,
-    audio.stableTrackId,
-    audio.title,
-    audio.artist,
-    audio.album,
-    audio.duration,
-    source?.toMap(),
-    settings.onlineSources.value.toJson(),
-    settings.customMusicSources.value
-        .map((profile) => profile.toJson())
-        .toList(),
-  ]);
-}
-
-Future<Lyric?> readCachedOnlineLyric(Audio audio, {LyricSource? source}) =>
-    OnlineLyricCache.instance.read(
-      onlineLyricCacheIdentity(audio, source: source),
-      legacyIdentity: () => _legacyOnlineCacheIdentity(audio, source: source),
-    );
 
 /// 只通知 lyric 变更
 class LyricService extends ChangeNotifier {
@@ -163,6 +134,7 @@ class LyricService extends ChangeNotifier {
             value is Lrc &&
             value.source == LrcSource.local) {
           LyricSearchIndex.instance.rememberLoadedLocal(audio, value);
+          cacheLocalLyric(audio, value).ignore();
         }
       }
       return value == null || offsetMs == 0
@@ -335,7 +307,8 @@ class LyricService extends ChangeNotifier {
     return resolveAutomaticLyricSources(
       localFirst: localFirst,
       local: () => Lrc.fromAudioPath(nowPlaying),
-      cachedOnline: () => readCachedOnlineLyric(nowPlaying),
+      cachedOnline: () =>
+          readAvailableCachedLyric(nowPlaying, localFirst: false),
       stillCurrent: () => _isPlaying(nowPlaying),
     );
   }
@@ -389,8 +362,8 @@ class LyricService extends ChangeNotifier {
         raw = resolveAutomaticLyricSources(
           localFirst: false,
           stillCurrent: () => _isPlaying(nowPlaying),
-          cachedOnline: () =>
-              readCachedOnlineLyric(nowPlaying, source: lyricSource),
+          cachedOnline: () => readAvailableCachedLyric(nowPlaying,
+              source: lyricSource, localFirst: false),
           local: () => Lrc.fromAudioPath(nowPlaying),
         );
       }

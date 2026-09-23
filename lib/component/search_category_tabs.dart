@@ -18,6 +18,7 @@ class SearchCategoryTabs extends StatelessWidget {
       ('艺术家', Symbols.person),
       ('专辑', Symbols.album),
       ('歌词', Symbols.lyrics),
+      ('设置', Symbols.settings),
     ];
     return Align(
       alignment: AlignmentDirectional.centerStart,
