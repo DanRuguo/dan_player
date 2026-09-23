@@ -19,7 +19,7 @@ use windows::{
 
 use crate::frb_generated::StreamSink;
 
-use super::{logger::log_to_dart, tag_reader};
+use super::{logger::log_to_dart, tag_reader, utils::windows_storage_path};
 
 pub struct SMTCFlutter {
     _smtc: SystemMediaTransportControls,
@@ -230,7 +230,10 @@ impl SMTCFlutter {
                 Self::_ras_ref_from_pic_data(&pic_data)?
             } else {
                 log_to_dart(format!("no embedded picture found for file: {}", path));
-                let file = StorageFile::GetFileFromPathAsync(&path)?.get()?;
+                let file = StorageFile::GetFileFromPathAsync(&windows_storage_path(
+                    std::path::Path::new(&path.to_os_string()),
+                )?)?
+                .get()?;
                 let thumbnail = file
                     .GetThumbnailAsyncOverloadDefaultSizeDefaultOptions(ThumbnailMode::MusicView)?
                     .get()?;

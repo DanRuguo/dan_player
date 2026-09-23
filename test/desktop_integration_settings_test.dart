@@ -104,6 +104,37 @@ void main() {
     expect(find.textContaining('保存桌面设置失败'), findsOneWidget);
   });
 
+  testWidgets(
+      'playback progress is independent of taskbar preview and controls',
+      (tester) async {
+    final rig = DesktopTestRig();
+    addTearDown(rig.dispose);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    rig.preferences.value = rig.preferences.value
+        .copyWith(taskbarControls: false, taskbarSongPreview: false);
+    var saves = 0;
+    await mount(tester, rig, persist: () async => saves++);
+    final progress =
+        find.byKey(const ValueKey('taskbar-playback-progress-setting'));
+    await tester.ensureVisible(progress);
+    await tester.tap(progress);
+    await tester.pumpAndSettle();
+    expect(rig.preferences.value.taskbarPlaybackProgress, isFalse);
+    expect(rig.preferences.value.taskbarControls, isFalse);
+    expect(rig.preferences.value.taskbarSongPreview, isFalse);
+    expect(saves, 1);
+    await tester.tap(progress);
+    await tester.pumpAndSettle();
+    expect(rig.preferences.value.taskbarPlaybackProgress, isTrue);
+    expect(rig.preferences.value.taskbarControls, isFalse);
+    expect(rig.preferences.value.taskbarSongPreview, isFalse);
+    expect(saves, 2);
+    expect(rig.native.calls, isEmpty);
+    expect(rig.playback.starts, 0);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
   for (final width in [320.0, 440.0, 720.0]) {
     for (final scale in [1.0, 2.0]) {
       testWidgets('desktop settings remain reachable at $width / text $scale',
@@ -116,7 +147,9 @@ void main() {
         expect(tester.takeException(), isNull);
         for (final key in [
           'close-to-tray-setting',
-          'taskbar-controls-setting'
+          'taskbar-controls-setting',
+          'taskbar-song-preview-setting',
+          'taskbar-playback-progress-setting',
         ]) {
           final tile = find.byKey(ValueKey(key));
           await tester.ensureVisible(tile);

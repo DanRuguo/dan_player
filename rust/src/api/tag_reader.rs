@@ -35,7 +35,7 @@ use windows::{
 use crate::frb_generated::StreamSink;
 use crate::index_scan::ScanLease;
 
-use super::logger::log_to_dart;
+use super::{logger::log_to_dart, utils::windows_storage_path};
 
 #[path = "metadata_id3_compat.rs"]
 pub(crate) mod id3_compat;
@@ -1539,7 +1539,8 @@ impl Audio {
     ) -> Result<Self, windows::core::Error> {
         let _apartment = ComApartment::multithreaded();
         let path = path.as_ref();
-        let storage_file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.get()?;
+        let storage_file =
+            StorageFile::GetFileFromPathAsync(&windows_storage_path(path)?)?.get()?;
         let music_properties = storage_file
             .Properties()?
             .GetMusicPropertiesAsync()?
@@ -1657,7 +1658,7 @@ fn _get_picture_by_windows(
     requested_size: u32,
 ) -> Result<Option<Vec<u8>>, windows::core::Error> {
     let _apartment = ComApartment::multithreaded();
-    let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.get()?;
+    let file = StorageFile::GetFileFromPathAsync(&windows_storage_path(Path::new(path))?)?.get()?;
     let thumbnail = file
         // The default MusicView thumbnail is small. Pass physical pixels, not
         // logical pixels/UseCurrentScale (Dart already accounts for View DPR).
@@ -3265,6 +3266,119 @@ mod tests {
         assert!(text_looks_misdecoded("ËÉ±¾ÎÄ¼o"));
         assert!(!text_looks_misdecoded("赤尾ひかる"));
         assert!(!text_looks_misdecoded("松本文紀"));
+    }
+
+    #[test]
+    fn windows_storage_path_preserves_names_prefixes_and_utf16() {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        for (input, expected) in [
+            ("J:/音楽/and I'm home.mp3", r"J:\音楽\and I'm home.mp3"),
+            (r"J:/音楽\Mixed Case.MP3", r"J:\音楽\Mixed Case.MP3"),
+            (r"J:\unchanged\title.mp3", r"J:\unchanged\title.mp3"),
+            ("//server/音楽/track.mp3", r"\\server\音楽\track.mp3"),
+            (r"\\?\J:\long/path.mp3", r"\\?\J:\long\path.mp3"),
+            (
+                r"\\?\UNC\server\share/name.mp3",
+                r"\\?\UNC\server\share\name.mp3",
+            ),
+        ] {
+            assert_eq!(
+                windows_storage_path(Path::new(input)).unwrap().to_string(),
+                expected
+            );
+        }
+        // Windows paths may contain non-Unicode UTF-16. Do not repair or lose it
+        // while changing a separator (to_string_lossy would corrupt the name).
+        let input = std::ffi::OsString::from_wide(&[b'J' as u16, 58, 47, 0xD800, 47, 0xDFFF]);
+        let expected = [b'J' as u16, 58, 92, 0xD800, 92, 0xDFFF];
+        let before: Vec<_> = input.encode_wide().collect();
+        assert_eq!(
+            windows_storage_path(Path::new(&input)).unwrap().as_wide(),
+            expected
+        );
+        assert_eq!(input.encode_wide().collect::<Vec<_>>(), before);
+    }
+
+    #[test]
+    fn windows_metadata_and_thumbnail_accept_mixed_separators() {
+        let directory = test_directory("winrt_separators");
+        let source = directory.join("字幕 and I'm home.wav");
+        write_minimal_wav(&source);
+        let before = fs::read(&source).unwrap();
+        let native = source.to_string_lossy().into_owned();
+        let expected = Audio::read_by_win_music_properties(&native, 13, 17).unwrap();
+        for path in [native.replace('\\', "/"), native.replacen('\\', "/", 2)] {
+            let actual = Audio::read_by_win_music_properties(&path, 13, 17)
+                .unwrap_or_else(|error| panic!("WinRT metadata failed for {path:?}: {error}"));
+            assert_eq!(actual.title, expected.title);
+            assert_eq!(actual.artist, expected.artist);
+            assert_eq!(actual.duration, expected.duration);
+            // Native normalization must not change the indexed path identity.
+            assert_eq!(actual.path, path);
+            assert_eq!((actual.modified, actual.created), (13, 17));
+            assert!(_get_picture_by_windows(&path, 96).unwrap().is_none());
+        }
+        assert_eq!(fs::read(&source).unwrap(), before);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "read-only comparison of isolated workspace music copies"]
+    fn windows_metadata_isolated_separator_probe() {
+        use sha2::{Digest, Sha256};
+        let allowed = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tool")
+            .canonicalize()
+            .unwrap();
+        let directory = PathBuf::from(
+            std::env::var_os("DAN_PLAYER_METADATA_READ_COPY_DIR")
+                .expect("Set a read-only music-copy directory inside workspace tool"),
+        )
+        .canonicalize()
+        .unwrap();
+        assert!(directory.starts_with(&allowed) && directory != allowed);
+        let _apartment = ComApartment::multithreaded();
+        let mut failures = Vec::new();
+        for entry in fs::read_dir(directory).unwrap().map(Result::unwrap) {
+            if !is_supported_audio_path(&entry.path()) {
+                continue;
+            }
+            let source = entry.path();
+            let native = source.to_string_lossy();
+            let native = native.strip_prefix(r"\\?\").unwrap_or(&native).to_string();
+            let before = Sha256::digest(fs::read(&source).unwrap());
+            let expected = Audio::read_by_win_music_properties(&native, 0, 0).unwrap();
+            let lofty = Audio::read_by_lofty(Path::new(&native), 0, 0).unwrap();
+            for (kind, path) in [
+                ("native", native.clone()),
+                ("forward", native.replace('\\', "/")),
+                ("mixed", native.replacen('\\', "/", 2)),
+            ] {
+                let raw = StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_str()))
+                    .and_then(|operation| operation.get());
+                let read = Audio::read_from_path(&path).unwrap();
+                println!(
+                    "WINRT_SEPARATOR {}",
+                    serde_json::json!({
+                        "file": source.file_name().unwrap().to_string_lossy(),
+                        "kind": kind,
+                        "raw_hr": raw.err().map(|error| format!("{:08X}", error.code().0)),
+                        "lofty_artist": lofty.artist,
+                        "fallback_requested": lofty.needs_windows_text_fallback,
+                        "windows_artist": expected.artist,
+                        "result_artist": read.artist,
+                        "result_by": read.by,
+                        "path_unchanged": read.path == path,
+                    })
+                );
+                assert_eq!(read.path, path);
+                if lofty.needs_windows_text_fallback && read.artist != expected.artist {
+                    failures.push(format!("{}: {kind}", source.display()));
+                }
+            }
+            assert_eq!(Sha256::digest(fs::read(&source).unwrap()), before);
+        }
+        assert!(failures.is_empty(), "fallback mismatch: {failures:?}");
     }
 
     #[test]

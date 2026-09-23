@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:dan_player/library/audio_trim.dart';
 import 'package:dan_player/library/audio_trim_commit.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -139,6 +140,7 @@ void main() {
           resolve: resolve);
     });
     tearDown(() async {
+      expect(TaskbarProgress.instance.value, isNull);
       // Only this test's verified, uniquely owned directory is removed.
       final root = p.absolute(
           '..', 'tool', 'validation', 'sep14-audio-trim', 'fixtures');
@@ -176,6 +178,8 @@ void main() {
               return jsonEncode({'path': request.destinationPath, 'audio': {}});
             },
             synchronize: (audio, request, json) async {
+              expect(TaskbarProgress.instance.value,
+                  TaskbarProgressValue.fraction(.94));
               events.add('sync');
               if (failSync) throw StateError('Disk index unavailable');
             });

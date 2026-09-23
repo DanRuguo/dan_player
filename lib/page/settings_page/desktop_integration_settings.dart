@@ -95,6 +95,16 @@ class _DesktopIntegrationSettingsState
             subtitle: Text(ui("小预览显示歌曲卡片；桌面 Peek 按窗口大小放大显示，保持比例。关闭后恢复系统窗口预览。")),
           ),
           const SizedBox(height: 12),
+          SettingsSwitchTile(
+            controlKey: const ValueKey('taskbar-playback-progress-setting'),
+            icon: Icons.linear_scale,
+            value: preferences.taskbarPlaybackProgress,
+            onChanged: (value) => unawaited(
+                _change(preferences.copyWith(taskbarPlaybackProgress: value))),
+            title: Text(ui('任务栏播放进度')),
+            subtitle: Text(ui('在任务栏图标上显示播放与暂停进度。关闭后仍显示下载、处理任务的进度及加载状态。')),
+          ),
+          const SizedBox(height: 12),
           SettingsSurface(
             child: Builder(builder: (context) {
               final theme = Theme.of(context);

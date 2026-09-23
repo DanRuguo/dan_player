@@ -12,7 +12,8 @@ void main() {
       final curve =
           LyricMotion.scrollCurveFor(spring: true, distance: distance);
       final peak = curve.transform(.66);
-      expect((peak - 1) * distance, inInclusiveRange(2.3, 8.001));
+      expect(
+          (peak - 1) * distance, closeTo((distance * .08).clamp(0, 12), .001));
       var previous = peak;
       for (var frame = 67; frame <= 100; frame++) {
         final value = curve.transform(frame / 100);

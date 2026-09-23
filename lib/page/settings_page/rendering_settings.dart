@@ -100,7 +100,7 @@ class RenderingSettings extends StatelessWidget {
                 controlKey: const ValueKey('lyric-spectrum'),
                 icon: Icons.graphic_eq,
                 title: Text(ui('歌词页实时频谱')),
-                subtitle: Text(ui('在歌词详情页播放条上显示频谱音柱；关闭后保留进度条。')),
+                subtitle: Text(ui('音柱可显示在播放条上方或封面四周；关闭后保留进度条。')),
                 value: value.lyricSpectrum,
                 onChanged: (v) => onChanged(value.copyWith(lyricSpectrum: v))),
             Padding(
@@ -108,6 +108,28 @@ class RenderingSettings extends StatelessWidget {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      AppSegmentedControl<LyricSpectrumPlacement>(
+                        key: const ValueKey('lyric-spectrum-placement'),
+                        semanticLabel: ui('频谱显示位置'),
+                        value: value.lyricSpectrumPlacement,
+                        onChanged: value.lyricSpectrum
+                            ? (placement) => onChanged(value.copyWith(
+                                lyricSpectrumPlacement: placement))
+                            : null,
+                        options: [
+                          AppSegmentOption(
+                            value: LyricSpectrumPlacement.progress,
+                            label: ui('播放条上方'),
+                            icon: Icons.align_vertical_bottom,
+                          ),
+                          AppSegmentOption(
+                            value: LyricSpectrumPlacement.cover,
+                            label: ui('封面四周'),
+                            icon: Icons.surround_sound_outlined,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
                       AppSegmentedControl<SpectrumDensity>(
                         key: const ValueKey('spectrum-density'),
                         semanticLabel: ui('频谱音柱数量'),
@@ -137,7 +159,7 @@ class RenderingSettings extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Text(ui('低／中／高档最多显示 36／72／112 根音柱，实际数量随窗口宽度调整。档位越高通常越耗 CPU；降低档位时音柱变宽，整体宽度不变。'),
+                      Text(ui('低／中／高档最多显示 36／72／112 根音柱，实际数量随可用空间调整。档位越高通常越耗 CPU；降低档位时音柱变宽。'),
                           style: Theme.of(context)
                               .textTheme
                               .bodyMedium
@@ -145,6 +167,20 @@ class RenderingSettings extends StatelessWidget {
                                   color: Theme.of(context)
                                       .colorScheme
                                       .onSurfaceVariant)),
+                      if (value.lyricSpectrumPlacement ==
+                          LyricSpectrumPlacement.cover) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          ui('四周音柱会根据封面留白调整高度；窄窗口未显示封面时，改在播放条上方显示。'),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant),
+                        ),
+                      ],
                     ])),
             const Divider(height: 1),
             SettingsSwitchTile(

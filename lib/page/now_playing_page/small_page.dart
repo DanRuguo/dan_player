@@ -29,6 +29,9 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
     NowPlayingViewMode.withLyric => viewWithLyric,
     NowPlayingViewMode.withPlaylist => viewWithPlaylist,
   };
+  late final _coverVisible =
+      ValueNotifier(views[1] == NowPlayingViewMode.onlyMain);
+  final _activeCoverGeneration = ValueNotifier(0);
 
   IconData viewSwitchIcon(NowPlayingViewMode viewMode) {
     return switch (viewMode) {
@@ -51,6 +54,12 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
         desView = viewWithPlaylist;
         break;
     }
+    // A rapid return can retain two artwork generations in AnimatedSwitcher.
+    // Retire the outgoing generation permanently before enabling its successor.
+    if (viewMode != views[1]) {
+      _activeCoverGeneration.value++;
+    }
+    _coverVisible.value = viewMode == NowPlayingViewMode.onlyMain;
     setState(() {
       views = desView;
     });
@@ -79,7 +88,12 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
                       duration: AppMotion.duration(
                           context, MotionKind.layout, AppMotion.standard),
                       child: switch (views[1]) {
-                        NowPlayingViewMode.onlyMain => const _NowPlayingInfo(),
+                        NowPlayingViewMode.onlyMain => _NowPlayingInfo(
+                            key: ValueKey(_activeCoverGeneration.value),
+                            coverVisible: _coverVisible,
+                            activeCoverGeneration: _activeCoverGeneration,
+                            coverGeneration: _activeCoverGeneration.value,
+                          ),
                         NowPlayingViewMode.withLyric =>
                           const VerticalLyricView(),
                         NowPlayingViewMode.withPlaylist =>
@@ -96,14 +110,15 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
             ),
           ),
           const SizedBox(height: 8.0),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: AppEntrance(
               identity: 'now-playing-slider',
               order: 1,
               child: SpectrumProgressSection(
-                spectrum: LyricPageSpectrum(height: 24),
-                progress: _NowPlayingSlider(),
+                spectrum:
+                    LyricPageSpectrum(height: 24, coverVisible: _coverVisible),
+                progress: const _NowPlayingSlider(),
               ),
             ),
           ),
@@ -131,6 +146,13 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _coverVisible.dispose();
+    _activeCoverGeneration.dispose();
+    super.dispose();
   }
 }
 

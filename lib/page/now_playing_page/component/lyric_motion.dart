@@ -5,6 +5,7 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'lyric_fractional_filter.dart';
+import 'lyric_follow_words.dart';
 
 /// Motion local to lyric surfaces. Playback time remains the sole clock for
 /// word highlighting; these durations only describe presentation transitions.
@@ -20,7 +21,7 @@ abstract final class LyricMotion {
   // Keep this separate from the shared line/title fade curve: a scroll must
   // decelerate, remain monotonic and never spring past its target.
   static const scrollCurve = Cubic(0.22, 0.0, 0.24, 1.0);
-  static const focusedFontScale = 1.34;
+  static const focusedFontScale = 1.50;
   static const focusedFontWeight = FontWeight.w800;
   static const maximumFollowRows = 24;
 
@@ -40,7 +41,7 @@ abstract final class LyricMotion {
   }) =>
       spring
           ? _LyricSpringCurve(
-              overshoot: math.min(8, distance.abs() * .06) /
+              overshoot: math.min(12, distance.abs() * .08) /
                   math.max(1, distance.abs()))
           : scrollCurve;
 
@@ -216,7 +217,11 @@ class LyricFollowEffects extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
+  Widget build(BuildContext context) => LyricWordFollowScope(
+      follow: transition == null
+          ? null
+          : LyricWordFollow(clock, transition!.curve, transition!.distance),
+      child: AnimatedBuilder(
         animation: Listenable.merge([
           if (transition != null) clock,
           if (blurAnimation != null) blurAnimation!,
@@ -238,17 +243,23 @@ class LyricFollowEffects extends StatelessWidget {
             // inside the filter. ImageFiltered rounds the incoming scroll/lag
             // transform in the Windows raster cache: the slow spring return
             // otherwise stalls, then jumps by a physical pixel.
-            child: LyricFractionalFilter(
+            child: LyricFractionalFilterScope(
+              repaintToken: (
+                clock.value,
+                blurAnimation?.value,
+                reading?.value,
+                offset
+              ),
               enabled: blurEnabled,
               dpr: View.of(context).devicePixelRatio,
               // Preserve the same clear-filter path during hover and after
               // follow cleanup; zero blur changes glyph sampling on Windows.
               sigma: math.max(.1, sigma),
-              child: child,
+              child: child!,
             ),
           );
         },
-      );
+      ));
 }
 
 /// One viewport mask with short edge ramps, disabled for manual reading and

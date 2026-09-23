@@ -1,10 +1,13 @@
 import 'dart:ui' as drawing;
+import 'dart:math' as math;
 
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_follow_words.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filter.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/foundation.dart';
@@ -116,7 +119,7 @@ class LyricViewTile extends StatelessWidget {
                     scheme.primary,
                     activation,
                   )!;
-                  return Padding(
+                  final contents = Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 12,
@@ -166,6 +169,7 @@ class LyricViewTile extends StatelessWidget {
                                   // transition does not invent word timing.
                                   BalancedLyricText(
                                     parts.first,
+                                    wordFollow: isMainLine && !reducedMotion,
                                     textAlign: textAlign,
                                     style: primaryStyle.copyWith(
                                       color: primaryColor,
@@ -174,25 +178,35 @@ class LyricViewTile extends StatelessWidget {
                                 for (final translation in translations)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 4),
-                                    child: Text(
+                                    child: BalancedLyricText(
                                       translation,
+                                      // Translation and phonetics have no word
+                                      // timestamps. Share the lead/return of
+                                      // the main row without inventing them.
+                                      wordFollow: isMainLine && !reducedMotion,
                                       textAlign: textAlign,
-                                      style: TextStyle(
-                                        color: foreground.withValues(
-                                          alpha: highContrast
-                                              ? 1
-                                              : .78 + .12 * activation,
-                                        ),
-                                        fontSize:
-                                            controller.translationFontSize,
-                                        height: 1.35,
-                                      ),
+                                      style: DefaultTextStyle.of(context)
+                                          .style
+                                          .copyWith(
+                                            color: foreground.withValues(
+                                              alpha: highContrast
+                                                  ? 1
+                                                  : .78 + .12 * activation,
+                                            ),
+                                            fontSize:
+                                                controller.translationFontSize,
+                                            height: 1.35,
+                                          ),
                                     ),
                                   ),
                               ],
                             ),
                     ),
                   );
+                  // Keep the filter and all paragraph draws in one display
+                  // list, below the row's retained boundary. The filter keeps
+                  // a blur-only path for a composited interlude's opacity.
+                  return ScopedLyricFractionalFilter(child: contents);
                 },
               ),
             ),
@@ -250,6 +264,9 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final follow = widget.active && !widget.reducedMotion
+        ? LyricWordFollowScope.of(context)
+        : null;
     return LayoutBuilder(
       builder: (context, constraints) {
         final direction = Directionality.of(context);
@@ -258,6 +275,9 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
         final width = constraints.hasBoundedWidth
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
+        final horizontalGuard =
+            lyricHorizontalInkGuard(widget.style, scaler, width);
+        final textMaxWidth = math.max(1.0, width - horizontalGuard * 2);
         final identity = (
           widget.line,
           widget.line.content,
@@ -277,14 +297,14 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
             direction: direction,
             scaler: scaler,
             pixelRatio: pixelRatio,
-            maxWidth: width,
+            maxWidth: textMaxWidth,
           );
           _layoutIdentity = identity;
         }
         final layout = _layout!;
         return SizedBox(
-          width: layout.base.width,
-          height: layout.base.height,
+          width: layout.base.width + horizontalGuard * 2,
+          height: layout.base.height + lyricVerticalInkGuard * 2,
           child: CustomPaint(
             painter: LyricWordHighlightPainter._(
               layout: layout,
@@ -296,6 +316,8 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
               baseColor: widget.baseColor,
               playedColor: widget.playedColor,
               glowAllowed: widget.glowAllowed,
+              follow: follow,
+              inkOffset: Offset(horizontalGuard, lyricVerticalInkGuard),
             ),
             isComplex: true,
             willChange: widget.active && !widget.reducedMotion,
@@ -326,15 +348,15 @@ class _TimedLyricLayout {
           textAlign: textAlign,
           textScaler: scaler,
         ),
-        fontSize = scaler.scale(style.fontSize ?? 14) {
-    // White shapes are recorded once; theme/focus colors are paint operations.
+        fontSize = scaler.scale(style.fontSize ?? 14),
+        _textAlign = textAlign,
+        _direction = direction,
+        _scaler = scaler {
+    // White shapes are laid out once; theme/focus colors are paint operations.
     // Sampling playback never rebuilds paragraphs or changes line breaks.
     base.text = TextSpan(
         text: line.content, style: style.copyWith(color: Colors.white));
     layoutBalancedLyric(base, maxWidth);
-    final recorder = drawing.PictureRecorder();
-    base.paint(Canvas(recorder), Offset.zero);
-    glyphs = recorder.endRecording();
 
     // Timing providers sometimes split a surrogate/ZWJ cluster into separate
     // words. Keep that grapheme in one mask with its actual combined interval.
@@ -345,6 +367,7 @@ class _TimedLyricLayout {
       boundaries.add(boundary);
     }
     var offset = 0;
+    var completeInkCoverage = true;
     words = [];
     for (var index = 0; index < line.words.length; index++) {
       final startOffset = offset;
@@ -357,10 +380,19 @@ class _TimedLyricLayout {
         if (next.start + next.length > end) end = next.start + next.length;
         offset += next.content.length;
       }
+      if (offset > line.content.length) {
+        completeInkCoverage = false;
+        break;
+      }
       final boxes = base.getBoxesForSelection(
           TextSelection(baseOffset: startOffset, extentOffset: offset),
           boxHeightStyle: drawing.BoxHeightStyle.includeLineSpacingMiddle);
-      if (boxes.isEmpty) continue;
+      if (boxes.isEmpty) {
+        if (line.content.substring(startOffset, offset).trim().isNotEmpty) {
+          completeInkCoverage = false;
+        }
+        continue;
+      }
       final text = line.content.substring(startOffset, offset);
       final characters = text.characters.toList(growable: false);
       // CJK graphemes have independent glyphs. Keep Latin ligatures, joining
@@ -393,6 +425,8 @@ class _TimedLyricLayout {
                     pieces.single.direction == TextDirection.ltr));
             revealOffset += pieces.fold<double>(
                 0, (sum, box) => sum + box.right - box.left);
+          } else if (characters[c].trim().isNotEmpty) {
+            completeInkCoverage = false;
           }
           characterOffset = nextOffset;
         }
@@ -418,6 +452,7 @@ class _TimedLyricLayout {
             !_joiningScript.hasMatch(text),
       ));
     }
+    completeWordInk = completeInkCoverage && offset == line.content.length;
     final lastGroup =
         line.words.lastIndexWhere((word) => word.content.trim().isNotEmpty);
     for (final word in words) {
@@ -455,9 +490,119 @@ class _TimedLyricLayout {
   final double pixelRatio;
   final TextPainter base;
   final double fontSize;
-  late final drawing.Picture glyphs;
+  final TextAlign _textAlign;
+  final TextDirection _direction;
+  final TextScaler _scaler;
+  TextPainter? _baseInk;
+  TextPainter? _playedInk;
+  TextPainter? _gradientInk;
+  Color? _baseInkColor;
+  Color? _playedInkColor;
+
+  TextPainter _newInkPainter(TextStyle inkStyle) => TextPainter(
+        text: TextSpan(text: line.content, style: inkStyle),
+        textDirection: _direction,
+        textAlign: _textAlign,
+        textScaler: _scaler,
+      )..layout(maxWidth: base.width);
+
+  /// Color is part of the paragraph's glyph draw, not an offscreen alpha mask.
+  /// This keeps the shaped text in the same display list as the outer fractional
+  /// filter, including when a timed line has independently moving characters.
+  TextPainter ink(Color color, {required bool played}) {
+    if (played) {
+      if (_playedInk == null || _playedInkColor != color) {
+        _playedInk?.dispose();
+        _playedInk = _newInkPainter(style.copyWith(color: color));
+        _playedInkColor = color;
+      }
+      return _playedInk!;
+    }
+    if (_baseInk == null || _baseInkColor != color) {
+      _baseInk?.dispose();
+      _baseInk = _newInkPainter(style.copyWith(color: color));
+      _baseInkColor = color;
+    }
+    return _baseInk!;
+  }
+
+  TextPainter gradientInk(drawing.Shader shader) {
+    final styleWithShader =
+        style.copyWith(foreground: Paint()..shader = shader);
+    if (_gradientInk == null) {
+      _gradientInk = _newInkPainter(styleWithShader);
+    } else {
+      _gradientInk!
+        ..text = TextSpan(text: line.content, style: styleWithShader)
+        ..layout(maxWidth: base.width);
+    }
+    return _gradientInk!;
+  }
+
   late final List<_TimedWordShape> words;
+  late final bool completeWordInk;
   late final Set<int> movingIndices;
+  late final List<List<Rect>> wordInkClips = () {
+    final partitions = lyricFollowClipPartitions([
+      for (final word in words)
+        for (final box in word.boxes) box.toRect()
+    ], base.size, followLineMetrics);
+    var index = 0;
+    return [
+      for (final word in words)
+        [for (final _ in word.boxes) partitions[index++]],
+    ];
+  }();
+  late final List<LyricFollowWordSlot> followSlots =
+      lyricFollowWordSlots(base, line.content);
+  late final followLineMetrics = base.computeLineMetrics();
+  late final List<({int word, int wordBox, int slot, Rect bounds})>
+      followPieces = [
+    for (var word = 0; word < words.length; word++)
+      for (var slot = 0; slot < followSlots.length; slot++)
+        for (var wordBox = 0; wordBox < words[word].boxes.length; wordBox++)
+          for (final slotBox in followSlots[slot].boxes)
+            // includeLineSpacingMiddle boxes of adjacent wrapped lines can
+            // overlap by a fractional pixel. They are different glyph rows,
+            // not fragments of the same visual word.
+            if (words[word]
+                    .boxes[wordBox]
+                    .toRect()
+                    .overlaps(slotBox.toRect()) &&
+                lyricFollowLineIndex(words[word].boxes[wordBox].toRect(),
+                        followLineMetrics) ==
+                    lyricFollowLineIndex(slotBox.toRect(), followLineMetrics))
+              (
+                word: word,
+                wordBox: wordBox,
+                slot: slot,
+                bounds: words[word]
+                    .boxes[wordBox]
+                    .toRect()
+                    .intersect(slotBox.toRect())
+              ),
+  ];
+  late final followInkClips = lyricFollowClipPartitions(
+      [for (final piece in followPieces) piece.bounds],
+      base.size,
+      followLineMetrics);
+  late final List<Rect> followGlowClips = () {
+    final clips = List.filled(followPieces.length, Rect.zero);
+    final groups = <int, List<int>>{};
+    for (var index = 0; index < followPieces.length; index++) {
+      (groups[followPieces[index].word] ??= []).add(index);
+    }
+    for (final indices in groups.values) {
+      final partitions = lyricFollowClipPartitions(
+          [for (final index in indices) followPieces[index].bounds],
+          base.size,
+          followLineMetrics);
+      for (var i = 0; i < indices.length; i++) {
+        clips[indices[i]] = partitions[i];
+      }
+    }
+    return clips;
+  }();
   static final _joiningLetter = RegExp(r'^[A-Za-z\u00c0-\u024f]{2}$');
   static final _joiningScript = RegExp(r'[\u0590-\u109f]');
   static final _independentCharacters =
@@ -489,7 +634,7 @@ class _TimedLyricLayout {
         Paint()
           ..imageFilter = drawing.ImageFilter.blur(sigmaX: 1.1, sigmaY: 1.1));
     canvas.clipRect(word.bounds, doAntiAlias: false);
-    canvas.drawPicture(glyphs);
+    base.paint(canvas, Offset.zero);
     canvas.restore();
     final picture = recorder.endRecording();
     final image = picture.toImageSync(width, height);
@@ -520,8 +665,10 @@ class _TimedLyricLayout {
 
   void dispose() {
     releaseGlowMasks();
+    _baseInk?.dispose();
+    _playedInk?.dispose();
+    _gradientInk?.dispose();
     base.dispose();
-    glyphs.dispose();
   }
 }
 
@@ -580,9 +727,15 @@ class LyricWordHighlightPainter extends CustomPainter {
     required this.baseColor,
     required this.playedColor,
     required this.glowAllowed,
+    required this.inkOffset,
+    this.follow,
   })  : _layout = layout,
         _position = position,
-        super(repaint: active && !reducedMotion ? position : null);
+        super(
+            repaint: Listenable.merge([
+          if (active && !reducedMotion) position,
+          if (follow != null) follow.clock,
+        ]));
 
   final _TimedLyricLayout _layout;
   final ValueListenable<Duration> _position;
@@ -593,6 +746,8 @@ class LyricWordHighlightPainter extends CustomPainter {
   final Color baseColor;
   final Color playedColor;
   final bool glowAllowed;
+  final LyricWordFollow? follow;
+  final Offset inkOffset;
 
   Duration get position => _position.value;
 
@@ -609,6 +764,19 @@ class LyricWordHighlightPainter extends CustomPainter {
 
   @visibleForTesting
   int get movingWordCount => _movingWords().length;
+
+  @visibleForTesting
+  List<double> get followWordOffsets => [
+        for (final slot in _layout.followSlots)
+          follow?.offset(slot.phase, _layout.fontSize) ?? 0,
+      ];
+
+  @visibleForTesting
+  List<Rect> get followStationaryWordBounds => [
+        for (final slot in _layout.followSlots)
+          if (slot.phase == 1)
+            for (final box in slot.boxes) box.toRect().shift(inkOffset),
+      ];
 
   @visibleForTesting
   List<double> get movingWordLifts =>
@@ -658,38 +826,72 @@ class LyricWordHighlightPainter extends CustomPainter {
     return result;
   }
 
-  void _paintWordColor(Canvas canvas, _TimedWordShape word) {
+  void _paintWordInk(Canvas canvas, int index, int boxIndex) {
+    final word = _layout.words[index];
+    if (activation <= 0 || reducedMotion) {
+      _layout
+          .ink(reducedMotion && activation > 0 ? playedColor : baseColor,
+              played: reducedMotion && activation > 0)
+          .paint(canvas, Offset.zero);
+      return;
+    }
     final progress = LyricMotion.progress(position, word.start, word.length);
-    // Build a color plane, then mask it once with the complete paragraph.
-    // srcATop over a dim base would cap the sung highlight at the unsung alpha.
-    final paint = Paint()..blendMode = BlendMode.src;
+    if (progress <= 0 || progress >= 1) {
+      _layout
+          .ink(progress >= 1 ? playedColor : baseColor, played: progress >= 1)
+          .paint(canvas, Offset.zero);
+      return;
+    }
     var offset = word.revealOffset;
     final softness = LyricWordEffects.softEdgeWidth(
         fontSize: _layout.fontSize, extent: word.extent);
-    for (final box in word.boxes) {
-      final rect = box.toRect();
-      if (progress <= 0 || progress >= 1) {
-        paint.shader = null;
-        paint.color = progress >= 1 ? playedColor : baseColor;
-      } else {
-        paint.shader = LyricWordEffects.revealShader(
-            bounds: rect,
+    for (var i = 0; i < boxIndex; i++) {
+      offset += word.boxes[i].right - word.boxes[i].left;
+    }
+    final box = word.boxes[boxIndex];
+    _layout
+        .gradientInk(LyricWordEffects.revealShader(
+            bounds: box.toRect(),
             progress: progress,
             extent: word.extent,
             offset: offset,
             softness: softness,
             reverse: box.direction == TextDirection.rtl,
             leading: playedColor,
-            trailing: baseColor);
-      }
-      canvas.drawRect(rect, paint);
-      offset += rect.width;
-    }
+            trailing: baseColor))
+        .paint(canvas, Offset.zero);
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    final bounds = Offset.zero & size;
+    canvas.save();
+    canvas.translate(inkOffset.dx, inkOffset.dy);
+    _paintInk(canvas, size);
+    canvas.restore();
+  }
+
+  void _paintInk(Canvas canvas, Size size) {
+    if (!_layout.completeWordInk) {
+      // A malformed imported timing can leave a visible grapheme without a
+      // selection box. Preserve the entire paragraph instead of dropping it.
+      _layout.ink(baseColor, played: false).paint(canvas, Offset.zero);
+      return;
+    }
+    if (activation <= 0 || reducedMotion) {
+      _layout
+          .ink(reducedMotion && activation > 0 ? playedColor : baseColor,
+              played: reducedMotion && activation > 0)
+          .paint(canvas, Offset.zero);
+      return;
+    }
+    final wave = follow;
+    if (wave != null &&
+        wave.clock.value > 0 &&
+        wave.clock.value < 1 &&
+        _layout.followPieces.isNotEmpty) {
+      _paintFollowWords(canvas, size, wave);
+      return;
+    }
     final moving = _movingWords();
     for (final pose in moving) {
       final word = _layout.words[pose.index];
@@ -721,57 +923,86 @@ class LyricWordHighlightPainter extends CustomPainter {
       }
       canvas.restore();
     }
-    // One color plane and one shared paragraph mask, never a layer per word.
-    // Masking after the colors preserves anti-aliased glyph edges and lets the
-    // sung alpha reach one independently from the dim unsung alpha.
-    final paintBounds = bounds.inflate(20);
-    canvas.saveLayer(paintBounds, Paint());
-    final timed = activation > 0 && !reducedMotion;
-    if (timed) {
-      canvas.drawRect(paintBounds, Paint()..color = baseColor);
-      final poses = {for (final pose in moving) pose.index: pose};
-      for (var index = 0; index < _layout.words.length; index++) {
-        final word = _layout.words[index];
-        final pose = poses[index];
+    if (_layout.words.isEmpty) {
+      _layout.ink(baseColor, played: false).paint(canvas, Offset.zero);
+      return;
+    }
+    final poses = {for (final pose in moving) pose.index: pose};
+    for (var index = 0; index < _layout.words.length; index++) {
+      final word = _layout.words[index];
+      for (var box = 0; box < word.boxes.length; box++) {
         canvas.save();
+        final pose = poses[index];
         if (pose != null) {
           canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
           canvas.scale(pose.scale, pose.scaleY);
           canvas.translate(-pose.anchorX, -word.bounds.center.dy);
         }
-        _paintWordColor(canvas, word);
+        canvas.clipRect(_layout.wordInkClips[index][box], doAntiAlias: false);
+        _paintWordInk(canvas, index, box);
         canvas.restore();
       }
-      canvas.saveLayer(paintBounds, Paint()..blendMode = BlendMode.dstIn);
     }
-    canvas.save();
-    for (final pose in moving) {
-      canvas.clipRect(_layout.words[pose.index].bounds,
-          clipOp: drawing.ClipOp.difference, doAntiAlias: false);
+  }
+
+  void _paintFollowWords(Canvas canvas, Size size, LyricWordFollow wave) {
+    final poses = {for (final pose in _movingWords()) pose.index: pose};
+    void transform(int wordIndex, int slotIndex) {
+      final slot = _layout.followSlots[slotIndex];
+      canvas.translate(0, wave.offset(slot.phase, _layout.fontSize));
+      final pose = poses[wordIndex];
+      if (pose != null) {
+        final word = _layout.words[wordIndex];
+        canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
+        canvas.scale(pose.scale, pose.scaleY);
+        canvas.translate(-pose.anchorX, -word.bounds.center.dy);
+      }
     }
-    canvas.drawPicture(_layout.glyphs);
-    canvas.restore();
-    for (final pose in moving) {
-      final word = _layout.words[pose.index];
+
+    // Keep long-note glow attached to the same independently moving ink.
+    if (glowAllowed) {
+      for (var index = 0; index < _layout.followPieces.length; index++) {
+        final piece = _layout.followPieces[index];
+        final word = _layout.words[piece.word];
+        final pose = poses[piece.word];
+        if (pose == null ||
+            pose.scaleY <= 1.00001 ||
+            word.length.inMilliseconds <= 650) {
+          continue;
+        }
+        final mask = _layout.glowMask(piece.word);
+        if (mask == null) continue;
+        final intensity =
+            ((pose.scaleY - 1) / LyricWordEffects.maximumScaleExpansion)
+                .clamp(0.0, 1.0);
+        canvas.save();
+        transform(piece.word, piece.slot);
+        canvas.clipRect(_layout.followGlowClips[index], doAntiAlias: false);
+        canvas.drawImageRect(
+            mask.$1,
+            Rect.fromLTWH(
+                0, 0, mask.$1.width.toDouble(), mask.$1.height.toDouble()),
+            mask.$2,
+            Paint()
+              ..filterQuality = FilterQuality.low
+              ..colorFilter = ColorFilter.mode(
+                  playedColor.withValues(
+                      alpha: (word.phraseEnd ? .27 : .18) * intensity),
+                  BlendMode.srcIn));
+        canvas.restore();
+      }
+    }
+    // The original glyphs carry their own ink color. Keep all draws in the
+    // outer filter's display list; a nested alpha-mask layer can be culled by
+    // Windows Impeller before the 1.5x source is projected back to the row.
+    for (var index = 0; index < _layout.followPieces.length; index++) {
+      final piece = _layout.followPieces[index];
       canvas.save();
-      canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
-      canvas.scale(pose.scale, pose.scaleY);
-      canvas.translate(-pose.anchorX, -word.bounds.center.dy);
-      canvas.clipRect(word.bounds, doAntiAlias: false);
-      canvas.drawPicture(_layout.glyphs);
+      transform(piece.word, piece.slot);
+      canvas.clipRect(_layout.followInkClips[index], doAntiAlias: false);
+      _paintWordInk(canvas, piece.word, piece.wordBox);
       canvas.restore();
     }
-    if (timed) {
-      canvas.restore();
-    } else {
-      canvas.drawRect(
-          paintBounds,
-          Paint()
-            ..blendMode = BlendMode.srcIn
-            ..color =
-                reducedMotion && activation > 0 ? playedColor : baseColor);
-    }
-    canvas.restore();
   }
 
   @override
@@ -783,7 +1014,11 @@ class LyricWordHighlightPainter extends CustomPainter {
       reducedMotion != oldDelegate.reducedMotion ||
       baseColor != oldDelegate.baseColor ||
       playedColor != oldDelegate.playedColor ||
-      glowAllowed != oldDelegate.glowAllowed;
+      glowAllowed != oldDelegate.glowAllowed ||
+      follow?.clock != oldDelegate.follow?.clock ||
+      follow?.curve != oldDelegate.follow?.curve ||
+      follow?.distance != oldDelegate.follow?.distance ||
+      inkOffset != oldDelegate.inkOffset;
 }
 
 /// The interlude occupies the same space before, during and after activation.

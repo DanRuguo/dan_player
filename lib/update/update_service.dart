@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/data/stream_file_transfer.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:github/github.dart';
 import 'package:path/path.dart' as path;
@@ -432,6 +433,7 @@ class UpdateService {
     File? partial;
     File? target;
     var completed = false;
+    final taskbar = TaskbarProgress.instance.begin();
     try {
       final appDataDirectory = await _appDataDirectory();
       _throwIfCancelled(cancellation);
@@ -453,11 +455,15 @@ class UpdateService {
         uri,
         partial,
         expectedSize: asset.size,
-        onProgress: onProgress,
+        onProgress: (progress) {
+          taskbar.update(progress.fraction);
+          onProgress?.call(progress);
+        },
         cancellation: cancellation,
       );
       _throwIfCancelled(cancellation);
 
+      taskbar.update(null);
       final digest = await _sha256ForFile(partial, cancellation);
       _throwIfCancelled(cancellation);
       var checksumVerified = false;
@@ -513,8 +519,12 @@ class UpdateService {
       }
       throw UpdateException('更新包下载失败，请稍后重试。', error);
     } finally {
-      if (!completed) {
-        await _removeOwnedDownload(partial, target, operationDirectory);
+      try {
+        if (!completed) {
+          await _removeOwnedDownload(partial, target, operationDirectory);
+        }
+      } finally {
+        taskbar.dispose();
       }
     }
   }

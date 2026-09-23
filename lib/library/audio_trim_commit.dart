@@ -16,6 +16,7 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/src/rust/api/audio_trim.dart' as native;
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:path/path.dart' as p;
 
 /// Native hooks separate irreversible file publication from index refresh.
@@ -87,7 +88,9 @@ Future<AudioTrimResult> performAudioTrim(
   AudioTrimOperations? operations,
 }) async {
   final cancel = cancellation ?? AudioTrimCancellation();
+  TaskbarProgressTask? taskbar;
   void report(double value) {
+    taskbar?.update(value);
     // A detached UI listener must not turn a successful disk commit into an
     // apparent failure or leave a running child process without an owner.
     try {
@@ -96,10 +99,15 @@ Future<AudioTrimResult> performAudioTrim(
   }
 
   try {
-    return await LibraryMutationGate.shared.run(() => _performAudioTrim(
-        audio, request, cancel, operations ?? _nativeTrimOperations, report));
+    return await LibraryMutationGate.shared.run(() {
+      taskbar = TaskbarProgress.instance.begin();
+      return _performAudioTrim(
+          audio, request, cancel, operations ?? _nativeTrimOperations, report);
+    });
   } on LibraryMutationBusy {
     throw const AudioTrimException('busy', '曲库操作正在进行，请稍后再裁剪');
+  } finally {
+    taskbar?.dispose();
   }
 }
 

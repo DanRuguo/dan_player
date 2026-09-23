@@ -1,6 +1,22 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'lyric_follow_words.dart';
+
+/// TextPainter's advance width can be smaller than antialiased glyph ink.
+/// Keep that ink inside the same paragraph canvas used by the row filter.
+const double lyricVerticalInkGuard = 4;
+
+double lyricHorizontalInkGuard(
+    TextStyle style, TextScaler scaler, double availableWidth) {
+  // Keep the source origin on an integral logical pixel. Fractional inset
+  // changes antialias thresholds when a context row deblurs on hover.
+  final desired = math.max(4.0, scaler.scale(style.fontSize ?? 14) * .2)
+      .ceilToDouble();
+  return availableWidth.isFinite
+      ? math.min(desired, math.max(0.0, (availableWidth - 1) / 2))
+      : desired;
+}
 
 /// Balance short lyric paragraphs without changing their text or timing offsets.
 /// Use Flutter's own shaping/break rules; at most seven additional layouts, only
@@ -72,10 +88,14 @@ final _phrases = RegExp(r'\S+');
 /// The measurement key omits paint colour so focus/hover never rewrap a line.
 class BalancedLyricText extends StatefulWidget {
   const BalancedLyricText(this.text,
-      {super.key, required this.style, required this.textAlign});
+      {super.key,
+      required this.style,
+      required this.textAlign,
+      this.wordFollow = false});
   final String text;
   final TextStyle style;
   final TextAlign textAlign;
+  final bool wordFollow;
 
   @override
   State<BalancedLyricText> createState() => _BalancedLyricTextState();
@@ -84,50 +104,155 @@ class BalancedLyricText extends StatefulWidget {
 class _BalancedLyricTextState extends State<BalancedLyricText> {
   Object? _identity;
   double? _width;
+  TextPainter? _painter;
+  List<LyricFollowWordSlot> _slots = const [];
+  Color? _color;
   @override
-  Widget build(BuildContext context) =>
-      LayoutBuilder(builder: (context, constraints) {
-        final direction = Directionality.of(context);
-        final scaler = MediaQuery.textScalerOf(context);
-        final locale = Localizations.maybeLocaleOf(context);
-        final style = widget.style.copyWith(color: Colors.white);
-        final identity = (
-          widget.text,
-          style,
-          widget.textAlign,
-          direction,
-          scaler,
-          locale,
-          constraints.maxWidth
-        );
-        if (_identity != identity) {
-          final painter = TextPainter(
-              text: TextSpan(text: widget.text, style: style),
-              textAlign: widget.textAlign,
-              textDirection: direction,
-              textScaler: scaler,
-              locale: locale);
-          try {
-            _width = layoutBalancedLyric(painter, constraints.maxWidth);
-          } finally {
-            painter.dispose();
-          }
-          _identity = identity;
-        }
-        final alignment = switch (widget.textAlign) {
-          TextAlign.center => Alignment.center,
-          TextAlign.right => Alignment.centerRight,
-          TextAlign.end when direction == TextDirection.ltr =>
-            Alignment.centerRight,
-          TextAlign.start when direction == TextDirection.rtl =>
-            Alignment.centerRight,
-          _ => Alignment.centerLeft,
-        };
+  Widget build(BuildContext context) {
+    final follow = widget.wordFollow ? LyricWordFollowScope.of(context) : null;
+    return LayoutBuilder(builder: (context, constraints) {
+      final direction = Directionality.of(context);
+      final scaler = MediaQuery.textScalerOf(context);
+      final locale = Localizations.maybeLocaleOf(context);
+      final style = widget.style.copyWith(color: Colors.white);
+      final horizontalGuard =
+          lyricHorizontalInkGuard(widget.style, scaler, constraints.maxWidth);
+      final textMaxWidth = constraints.maxWidth.isFinite
+          ? math.max(1.0, constraints.maxWidth - horizontalGuard * 2)
+          : constraints.maxWidth;
+      final identity = (
+        widget.text,
+        style,
+        widget.textAlign,
+        direction,
+        scaler,
+        locale,
+        textMaxWidth
+      );
+      if (_identity != identity || (widget.wordFollow && _painter == null)) {
+        _painter?.dispose();
+        final painter = _painter = TextPainter(
+            text: TextSpan(text: widget.text, style: widget.style),
+            textAlign: widget.textAlign,
+            textDirection: direction,
+            textScaler: scaler,
+            locale: locale);
+        _width = layoutBalancedLyric(painter, textMaxWidth);
+        _slots = widget.wordFollow
+            ? lyricFollowWordSlots(painter, widget.text)
+            : const [];
+        _color = widget.style.color;
+        _identity = identity;
+      }
+      if (_painter != null && _color != widget.style.color) {
+        _painter!
+          ..text = TextSpan(text: widget.text, style: widget.style)
+          ..layout(maxWidth: _width!);
+        _color = widget.style.color;
+      }
+      final alignment = switch (widget.textAlign) {
+        TextAlign.center => Alignment.center,
+        TextAlign.right => Alignment.centerRight,
+        TextAlign.end when direction == TextDirection.ltr =>
+          Alignment.centerRight,
+        TextAlign.start when direction == TextDirection.rtl =>
+          Alignment.centerRight,
+        _ => Alignment.centerLeft,
+      };
+      if (!widget.wordFollow) {
+        _painter?.dispose();
+        _painter = null;
+        _slots = const [];
         return Align(
             alignment: alignment,
             child: SizedBox(
-                width: _width!.isFinite ? _width : null,
-                child: Text(widget.text,
-                    textAlign: widget.textAlign, style: widget.style)));
-      });
+                width: _width!.isFinite ? _width! + horizontalGuard * 2 : null,
+                child: Padding(
+                    padding: EdgeInsets.symmetric(
+                        horizontal: horizontalGuard,
+                        vertical: lyricVerticalInkGuard),
+                    child: Text(widget.text,
+                        textAlign: widget.textAlign, style: widget.style))));
+      }
+      return Align(
+          alignment: alignment,
+          child: SizedBox(
+              width: _width!.isFinite ? _width! + horizontalGuard * 2 : null,
+              child: CustomPaint(
+                painter: PlainLyricWordFollowPainter(
+                    _painter!, _slots, follow, _color,
+                    inkOffset: Offset(horizontalGuard, lyricVerticalInkGuard)),
+                isComplex: true,
+                willChange: follow != null,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                      horizontal: horizontalGuard,
+                      vertical: lyricVerticalInkGuard),
+                  child: Opacity(
+                      opacity: 0,
+                      alwaysIncludeSemantics: true,
+                      child: Text(widget.text,
+                          textAlign: widget.textAlign, style: widget.style)),
+                ),
+              )));
+    });
+  }
+
+  @override
+  void dispose() {
+    _painter?.dispose();
+    super.dispose();
+  }
+}
+
+class PlainLyricWordFollowPainter extends CustomPainter {
+  PlainLyricWordFollowPainter(this.text, this.slots, this.follow, this.color,
+      {this.inkOffset = Offset.zero})
+      : super(repaint: follow?.clock);
+  final TextPainter text;
+  final List<LyricFollowWordSlot> slots;
+  final LyricWordFollow? follow;
+  final Color? color;
+  final Offset inkOffset;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.translate(inkOffset.dx, inkOffset.dy);
+    _paintInk(canvas);
+    canvas.restore();
+  }
+
+  void _paintInk(Canvas canvas) {
+    final motion = follow;
+    if (motion == null ||
+        slots.isEmpty ||
+        motion.clock.value <= 0 ||
+        motion.clock.value >= 1) {
+      text.paint(canvas, Offset.zero);
+      return;
+    }
+    final fontSize = text.textScaler.scale(text.text?.style?.fontSize ?? 14);
+    for (final slot in slots) {
+      canvas.save();
+      canvas.translate(0, motion.offset(slot.phase, fontSize));
+      if (slot.paintBoxes.length == 1) {
+        canvas.clipRect(slot.paintBoxes.single, doAntiAlias: false);
+      } else {
+        canvas.clipPath(slot.paintPath, doAntiAlias: false);
+      }
+      text.paint(canvas, Offset.zero);
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(PlainLyricWordFollowPainter oldDelegate) =>
+      !identical(text, oldDelegate.text) ||
+      !identical(slots, oldDelegate.slots) ||
+      follow?.clock != oldDelegate.follow?.clock ||
+      follow?.curve != oldDelegate.follow?.curve ||
+      follow?.distance != oldDelegate.follow?.distance ||
+      inkOffset != oldDelegate.inkOffset ||
+      color != oldDelegate.color;
 }

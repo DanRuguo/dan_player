@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dan_player/update/update_service.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:github/github.dart';
 import 'package:path/path.dart' as path;
@@ -116,6 +117,7 @@ void main() {
     });
 
     tearDown(() async {
+      expect(TaskbarProgress.instance.value, isNull);
       if (await scratch.exists()) await scratch.delete(recursive: true);
     });
 
@@ -159,6 +161,8 @@ void main() {
           _update(payload),
           cancellation: cancellation,
           onProgress: (progress) {
+            expect(TaskbarProgress.instance.value,
+                TaskbarProgressValue.fraction(progress.fraction!));
             if (progress.receivedBytes == payload.length) cancellation.cancel();
           },
         ),
@@ -209,8 +213,13 @@ void main() {
       );
       final oldOutcome = expectLater(oldDownload, _throwsCancellation);
       await checksumStarted.future.timeout(const Duration(seconds: 5));
+      expect(
+          TaskbarProgress.instance.value, TaskbarProgressValue.indeterminate);
 
       final newer = await service.download(_update(payload, checksum: true));
+      // Completing a later download restores the earlier checksum operation.
+      expect(
+          TaskbarProgress.instance.value, TaskbarProgressValue.indeterminate);
       cancellation.cancel();
       await oldOutcome;
 

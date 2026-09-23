@@ -162,6 +162,17 @@ set_target_properties(taskbar_thumbnail_policy_test PROPERTIES
 add_executable(taskbar_peek_bitmap_test EXCLUDE_FROM_ALL
   "tests/taskbar_peek_bitmap_test.cpp"
 )
+
+add_executable(taskbar_progress_policy_test EXCLUDE_FROM_ALL
+  "tests/taskbar_progress_policy_test.cpp"
+)
+if(MSVC)
+  target_compile_options(taskbar_progress_policy_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_progress_policy_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests"
+)
 target_compile_definitions(taskbar_peek_bitmap_test PRIVATE "NOMINMAX")
 target_link_libraries(taskbar_peek_bitmap_test PRIVATE "gdi32.lib" "user32.lib")
 set_target_properties(taskbar_peek_bitmap_test PROPERTIES

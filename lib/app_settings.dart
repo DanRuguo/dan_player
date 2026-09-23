@@ -187,6 +187,7 @@ class AppSettings {
       experience.value = experience.value.copyWith(
           springLyrics: snapshot.springLyrics,
           taskbarSongPreview: snapshot.taskbarSongPreview,
+          taskbarPlaybackProgress: snapshot.taskbarPlaybackProgress,
           trayMenuBlurRadius: snapshot.trayBlur);
     },
     persist: () => saveSettings(

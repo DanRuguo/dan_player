@@ -6,6 +6,7 @@ import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -102,7 +103,17 @@ void main() {
     final root = await Directory.systemTemp.createTemp('dan-custom-source-');
     addTearDown(() => root.delete(recursive: true));
     final destination = File('${root.path}${Platform.pathSeparator}track.mp3');
-    await service.download(track, destination);
+    var progressCalls = 0;
+    await service.download(track, destination, onProgress: (received, total) {
+      progressCalls++;
+      expect(
+          TaskbarProgress.instance.value,
+          total != null && total > 0
+              ? TaskbarProgressValue.fraction(received / total)
+              : TaskbarProgressValue.indeterminate);
+    });
+    expect(progressCalls, greaterThan(0));
+    expect(TaskbarProgress.instance.value, isNull);
     expect(await destination.readAsBytes(), const [1, 2, 3, 4]);
     expect(
         requests
@@ -558,6 +569,7 @@ void main() {
 
     final pending = service.download(audio, destination);
     await mediaStarted.future.timeout(const Duration(seconds: 1));
+    expect(TaskbarProgress.instance.value, isNotNull);
     profiles = [profile.copyWith(enabled: false)];
 
     await expectLater(
@@ -568,6 +580,7 @@ void main() {
         OnlineMusicFailureKind.unavailable,
       )),
     );
+    expect(TaskbarProgress.instance.value, isNull);
     expect(await destination.exists(), isFalse);
     expect(
       await root.list().where((entry) => entry.path.endsWith('.part')).toList(),

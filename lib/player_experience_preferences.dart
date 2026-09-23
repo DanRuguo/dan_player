@@ -9,6 +9,7 @@ class PlayerExperiencePreferences {
     this.closeToTray = false,
     this.taskbarControls = true,
     this.taskbarSongPreview = true,
+    this.taskbarPlaybackProgress = true,
     this.trayMenuBlurRadius = 0,
     this.springLyrics = true,
     this.desktopLyricVertical = false,
@@ -26,6 +27,7 @@ class PlayerExperiencePreferences {
   final bool closeToTray;
   final bool taskbarControls;
   final bool taskbarSongPreview;
+  final bool taskbarPlaybackProgress;
 
   /// Gaussian kernel radius in logical pixels. Zero keeps the menu solid.
   final double trayMenuBlurRadius;
@@ -85,6 +87,7 @@ class PlayerExperiencePreferences {
     bool? closeToTray,
     bool? taskbarControls,
     bool? taskbarSongPreview,
+    bool? taskbarPlaybackProgress,
     double? trayMenuBlurRadius,
     bool? springLyrics,
     bool? desktopLyricVertical,
@@ -115,6 +118,8 @@ class PlayerExperiencePreferences {
       closeToTray: closeToTray ?? this.closeToTray,
       taskbarControls: taskbarControls ?? this.taskbarControls,
       taskbarSongPreview: taskbarSongPreview ?? this.taskbarSongPreview,
+      taskbarPlaybackProgress:
+          taskbarPlaybackProgress ?? this.taskbarPlaybackProgress,
       trayMenuBlurRadius: safeTrayMenuBlurRadius(trayMenuBlurRadius,
           fallback: this.trayMenuBlurRadius),
       springLyrics: springLyrics ?? this.springLyrics,
@@ -139,6 +144,7 @@ class PlayerExperiencePreferences {
         'closeToTray': closeToTray,
         'taskbarControls': taskbarControls,
         'taskbarSongPreview': taskbarSongPreview,
+        'taskbarPlaybackProgress': taskbarPlaybackProgress,
         'trayMenuBlurRadius': safeTrayMenuBlurRadius(trayMenuBlurRadius),
         'springLyrics': springLyrics,
         'desktopLyricVertical': desktopLyricVertical,
@@ -169,6 +175,8 @@ class PlayerExperiencePreferences {
       taskbarControls: flag('taskbarControls', defaults.taskbarControls),
       taskbarSongPreview:
           flag('taskbarSongPreview', defaults.taskbarSongPreview),
+      taskbarPlaybackProgress:
+          flag('taskbarPlaybackProgress', defaults.taskbarPlaybackProgress),
       trayMenuBlurRadius: safeTrayMenuBlurRadius(value['trayMenuBlurRadius']),
       springLyrics: flag('springLyrics', defaults.springLyrics),
       desktopLyricVertical:
@@ -192,6 +200,7 @@ class PlayerExperiencePreferences {
       closeToTray == other.closeToTray &&
       taskbarControls == other.taskbarControls &&
       taskbarSongPreview == other.taskbarSongPreview &&
+      taskbarPlaybackProgress == other.taskbarPlaybackProgress &&
       trayMenuBlurRadius == other.trayMenuBlurRadius &&
       springLyrics == other.springLyrics &&
       desktopLyricVertical == other.desktopLyricVertical &&
@@ -210,6 +219,7 @@ class PlayerExperiencePreferences {
       closeToTray,
       taskbarControls,
       taskbarSongPreview,
+      taskbarPlaybackProgress,
       trayMenuBlurRadius,
       springLyrics,
       desktopLyricVertical,

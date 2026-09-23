@@ -2,6 +2,8 @@
 // select a directory path,
 // open a link in browser, ...
 
+use std::path::Path;
+
 use windows::{
     core::{h, Interface, HSTRING},
     Foundation::Uri,
@@ -11,6 +13,27 @@ use windows::{
 };
 
 use super::logger::log_to_dart;
+
+/// StorageFile requires native separators, unlike Rust's file APIs. Normalize
+/// only at this boundary: the caller's indexed path must keep its identity.
+pub(crate) fn windows_storage_path(path: &Path) -> windows::core::Result<HSTRING> {
+    let original = HSTRING::from(path);
+    if !original.as_wide().contains(&(b'/' as u16)) {
+        return Ok(original);
+    }
+    let native: Vec<u16> = original
+        .as_wide()
+        .iter()
+        .map(|&unit| {
+            if unit == b'/' as u16 {
+                b'\\' as u16
+            } else {
+                unit
+            }
+        })
+        .collect();
+    HSTRING::from_wide(&native)
+}
 
 /// path: 文件或文件夹的绝对路径。
 /// 会打开父级目录并选择路径指向的项。
@@ -25,7 +48,8 @@ pub fn show_in_explorer(path: String) -> bool {
 }
 
 fn _show_in_explorer(path: String) -> Result<bool, windows::core::Error> {
-    let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.get()?;
+    let file =
+        StorageFile::GetFileFromPathAsync(&windows_storage_path(Path::new(&path))?)?.get()?;
 
     let options: FolderLauncherOptions = FolderLauncherOptions::new()?;
     let select_items = options.ItemsToSelect()?;

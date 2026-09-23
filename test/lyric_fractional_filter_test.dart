@@ -160,96 +160,92 @@ void main() {
     }
   });
 
-  testWidgets('layer and child origins stay zero under nonzero layout offset',
+  testWidgets('scope repaints cached rows without rebuilding or relayout',
       (tester) async {
-    final filterKey = GlobalKey();
-    final childKey = GlobalKey();
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Padding(
-          padding: const EdgeInsets.only(left: 21.25, top: 30.4),
-          child: LyricFractionalFilter(
-            key: filterKey,
-            sigma: 1.2,
-            dpr: 1.25,
-            child: RepaintBoundary(
-              key: childKey,
-              child: const SizedBox(width: 120, height: 40),
-            ),
-          ),
-        ),
-      ),
-    ));
-    final row = filterKey.currentContext!.findRenderObject()! as RenderBox;
-    final source = childKey.currentContext!.findRenderObject()! as RenderBox;
-    final outer = row.debugLayer! as TransformLayer;
-    final filter = outer.firstChild! as ImageFilterLayer;
-    final child = filter.firstChild! as OffsetLayer;
-    expect(row.isRepaintBoundary, isFalse);
-    expect(outer.offset, Offset.zero);
-    expect(filter.offset, Offset.zero);
-    expect(child.offset, Offset.zero);
-    expect(source.localToGlobal(Offset.zero), const Offset(21.25, 30.4));
-    final fraction = lyricFilterRemainder(row.getTransformTo(null), 1.25);
-    expect(outer.transform![12] + fraction.dx, closeTo(21.25, 1e-9));
-    expect(outer.transform![13] + fraction.dy, closeTo(30.4, 1e-9));
+    final sourceKey = GlobalKey();
+    final counter = _PaintCounter();
+    var layouts = 0;
+    final source = LayoutBuilder(builder: (_, constraints) {
+      layouts++;
+      return SizedBox(
+          key: sourceKey,
+          width: 120,
+          height: 40,
+          child: CustomPaint(painter: counter));
+    });
+    final leaf =
+        RepaintBoundary(child: ScopedLyricFractionalFilter(child: source));
+    Widget surface(double offset, double sigma, int tick) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+            alignment: Alignment.topLeft,
+            child: Transform.translate(
+                offset: Offset(20.25, offset),
+                child: LyricFractionalFilterScope(
+                    sigma: sigma,
+                    dpr: 1.25,
+                    enabled: true,
+                    repaintToken: tick,
+                    child: leaf))));
+    await tester.pumpWidget(surface(30.4, .1, 0));
+    final render = sourceKey.currentContext!.findRenderObject();
+    final layoutCount = layouts;
+    var previousPaints = counter.paints;
+    for (final step in [(30.7, 1.2, 1), (31.1, .5, 2), (31.4, .1, 3)]) {
+      await tester.pumpWidget(surface(step.$1, step.$2, step.$3));
+      expect(counter.paints, previousPaints + 1);
+      previousPaints = counter.paints;
+      expect(layouts, layoutCount);
+      expect(sourceKey.currentContext!.findRenderObject(), same(render));
+      expect(tester.getTopLeft(find.byKey(sourceKey)), Offset(20.25, step.$1));
+    }
+    await tester.pump();
+    expect(counter.paints, previousPaints);
+    expect(tester.binding.transientCallbackCount, 0);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('scroll, blur, DPI and zero-crossing updates retain source cache',
+  testWidgets(
+      'manual scroll refreshes fractional source without a follow clock',
       (tester) async {
-    final filterKey = GlobalKey();
-    final sourceKey = GlobalKey();
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
     final counter = _PaintCounter();
-    final source = RepaintBoundary(
-      key: sourceKey,
-      child: SizedBox(
-          width: 120, height: 40, child: CustomPaint(painter: counter)),
-    );
-    Widget surface(double offset, double sigma, double dpr) => Directionality(
-          textDirection: TextDirection.ltr,
-          child: Align(
+    await tester.pumpWidget(Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
             alignment: Alignment.topLeft,
-            child: Transform.translate(
-              offset: Offset(0, offset),
-              child: LyricFractionalFilter(
-                key: filterKey,
-                sigma: sigma,
-                dpr: dpr,
-                child: source,
-              ),
-            ),
-          ),
-        );
-    await tester.pumpWidget(surface(20, 0, 1));
-    final row = filterKey.currentContext!.findRenderObject()!;
-    final outer = row.debugLayer! as TransformLayer;
-    final initialFilter = outer.firstChild! as ImageFilterLayer;
-    final initialSource = sourceKey.currentContext!.findRenderObject()!;
+            child: SizedBox(
+                width: 400,
+                height: 160,
+                child: SingleChildScrollView(
+                    controller: controller,
+                    child: SizedBox(
+                        height: 1000,
+                        child: Align(
+                            alignment: Alignment.topLeft,
+                            child: LyricFractionalFilterScope(
+                                sigma: .1,
+                                dpr: 1.25,
+                                enabled: true,
+                                repaintToken: 0,
+                                child: RepaintBoundary(
+                                    child: ScopedLyricFractionalFilter(
+                                        child: SizedBox(
+                                            width: 120,
+                                            height: 80,
+                                            child: CustomPaint(
+                                                painter: counter))))))))))));
     final paints = counter.paints;
-    for (final args in [(20.4, 1.2, 1.25), (21.0, .0, 1.0), (21.6, 2.4, 2.0)]) {
-      await tester.pumpWidget(surface(args.$1, args.$2, args.$3));
-      expect(row.debugLayer, same(outer));
-      expect(outer.firstChild, same(initialFilter));
-      expect(sourceKey.currentContext!.findRenderObject(), same(initialSource));
-      expect(counter.paints, paints,
-          reason: 'Moving/filtering a row must not repaint its cached source');
-      expect(initialFilter.offset, Offset.zero);
-    }
-    await tester.pumpWidget(surface(20, 0, 1));
-    expect(
-        initialFilter.imageFilter,
-        ui.ImageFilter.compose(
-            outer: ui.ImageFilter.blur(sigmaX: .1, sigmaY: .1),
-            inner: ui.ImageFilter.matrix(Matrix4.identity().storage,
-                filterQuality: ui.FilterQuality.low)),
-        reason: 'An exact integer endpoint retains the clear filter path');
-    expect(tester.binding.transientCallbackCount, 0);
-    expect(tester.binding.hasScheduledFrame, isFalse);
+    controller.jumpTo(7.5);
+    await tester.pump();
+    expect(counter.paints, greaterThan(paints));
+    final scrollPaints = counter.paints;
+    await tester.pump();
+    expect(counter.paints, scrollPaints);
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
+    expect(tester.binding.transientCallbackCount, 0);
   });
 
   testWidgets('disabled filter keeps hit testing and descendant identity',
@@ -283,8 +279,7 @@ void main() {
     final origin = tester.getTopLeft(find.byKey(sourceKey));
     for (final enabled in [false, true, false]) {
       await tester.pumpWidget(surface(enabled));
-      final row = filterKey.currentContext!.findRenderObject()!;
-      expect(row.debugLayer, enabled ? isA<TransformLayer>() : isNull);
+
       expect(sourceKey.currentContext!.findRenderObject(), same(source));
       expect(tester.getTopLeft(find.byKey(sourceKey)), origin);
       await tester.tap(find.byKey(sourceKey));
@@ -295,41 +290,33 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('axis scale compensates in local units and rotation falls back',
+  testWidgets('axis scale and rotation keep child layout and paint valid',
       (tester) async {
     final key = GlobalKey();
+    final counter = _PaintCounter();
     Widget surface(Matrix4 matrix) => Directionality(
-          textDirection: TextDirection.ltr,
-          child: Align(
+        textDirection: TextDirection.ltr,
+        child: Align(
             alignment: Alignment.topLeft,
             child: Transform(
-              transform: matrix,
-              child: LyricFractionalFilter(
-                key: key,
-                sigma: 0,
-                dpr: 1.5,
-                child: const SizedBox(width: 80, height: 30),
-              ),
-            ),
-          ),
-        );
-    final matrix = Matrix4.translationValues(30.23, 21.36, 0)
-      ..scaleByDouble(.75, 1.25, 1, 1);
-    await tester.pumpWidget(surface(matrix));
-    final row = key.currentContext!.findRenderObject()!;
-    final outer = row.debugLayer! as TransformLayer;
-    final fraction = lyricFilterRemainder(row.getTransformTo(null), 1.5);
-    expect(outer.transform![12], closeTo(-fraction.dx, 1e-9));
-    expect(outer.transform![13], closeTo(-fraction.dy, 1e-9));
-    await tester.pumpWidget(surface(Matrix4.rotationZ(math.pi / 12)));
-    final filter = outer.firstChild! as ImageFilterLayer;
-    expect(outer.transform, Matrix4.identity());
-    expect(
-        filter.imageFilter,
-        ui.ImageFilter.compose(
-            outer: ui.ImageFilter.blur(sigmaX: .1, sigmaY: .1),
-            inner: ui.ImageFilter.matrix(Matrix4.identity().storage,
-                filterQuality: ui.FilterQuality.low)));
-    expect(tester.takeException(), isNull);
+                transform: matrix,
+                child: LyricFractionalFilter(
+                    sigma: .1,
+                    dpr: 1.5,
+                    child: SizedBox(
+                        key: key,
+                        width: 80,
+                        height: 30,
+                        child: CustomPaint(painter: counter))))));
+    for (final matrix in [
+      Matrix4.translationValues(30.23, 21.36, 0)
+        ..scaleByDouble(.75, 1.25, 1, 1),
+      Matrix4.rotationZ(math.pi / 12)
+    ]) {
+      await tester.pumpWidget(surface(matrix));
+      expect(tester.getSize(find.byKey(key)), const Size(80, 30));
+      expect(tester.takeException(), isNull);
+    }
+    expect(counter.paints, greaterThan(0));
   });
 }

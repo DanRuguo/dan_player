@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' show Tristate;
 import 'dart:ui' as drawing;
 
@@ -161,7 +164,74 @@ Future<void> _wheel(WidgetTester tester, double delta) async {
   await tester.pump();
 }
 
+// Register the 2D ink, retaining its vertical structure. A blur/AA change can
+// alter either the mass centroid or a collapsed projection without shifting
+// the glyph. Compare the actual pixel pattern with normalized correlation.
+double _registeredHorizontalShift(List<double> a, List<double> b,
+    {required int width}) {
+  assert(a.length == b.length);
+  final scores = <double>[];
+  for (var shift = -3; shift <= 3; shift++) {
+    double dot = 0, aa = 0, bb = 0, sumA = 0, sumB = 0;
+    var count = 0;
+    for (var row = 0; row < a.length; row += width) {
+      for (var x = 3; x < width - 3; x++) {
+        final av = a[row + x], bv = b[row + x + shift];
+        dot += av * bv;
+        aa += av * av;
+        bb += bv * bv;
+        sumA += av;
+        sumB += bv;
+        count++;
+      }
+    }
+    scores.add((dot - sumA * sumB / count) /
+        math.sqrt((aa - sumA * sumA / count) * (bb - sumB * sumB / count)));
+  }
+  var peak = 0;
+  for (var i = 1; i < scores.length; i++) {
+    if (scores[i] > scores[peak]) peak = i;
+  }
+  if (peak == 0 || peak == scores.length - 1) return (peak - 3).toDouble();
+  final left = scores[peak - 1], right = scores[peak + 1];
+  final curvature = left - 2 * scores[peak] + right;
+  final fractional =
+      curvature.abs() < 1e-12 ? 0.0 : .5 * (left - right) / curvature;
+  return peak - 3 + fractional;
+}
+
 void main() {
+  test('ink registration detects real one-pixel shifts despite blur changes',
+      () {
+    final sharp = List.generate(160, (x) {
+      double stroke(double center, double width, double strength) =>
+          strength * math.exp(-math.pow((x - center) / width, 2));
+      return stroke(32, 2, 1) +
+          stroke(39, 4, .65) +
+          stroke(58, 1.5, .8) +
+          stroke(74, 3, .9) +
+          stroke(93, 2, .6);
+    });
+    final blurred = List.generate(sharp.length, (x) {
+      double result = 0, mass = 0;
+      for (var delta = -8; delta <= 8; delta++) {
+        if (x + delta < 0 || x + delta >= sharp.length) continue;
+        final weight = math.exp(-delta * delta / 8);
+        result += weight * sharp[x + delta];
+        mass += weight;
+      }
+      return result / mass;
+    });
+    for (final shift in [-1, 0, 1]) {
+      final moved = List.generate(
+          sharp.length,
+          (x) => x - shift >= 0 && x - shift < sharp.length
+              ? blurred[x - shift]
+              : 0.0);
+      expect(_registeredHorizontalShift(sharp, moved, width: sharp.length),
+          closeTo(shift, .03));
+    }
+  });
   setUpAll(() async {
     await (FontLoader(danEmbeddedFontFamily)
           ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
@@ -240,7 +310,9 @@ void main() {
           child: _app(harness,
               width: 419.5, height: 480, fontFamily: danEmbeddedFontFamily)));
       await tester.pumpAndSettle();
-      Future<List<double>> centers() async => (await tester.runAsync(() async {
+      var captureIndex = 0;
+      Future<List<({List<double> pixels, int width})>> inkRows() async =>
+          (await tester.runAsync(() async {
             final image = await (boundary.currentContext!.findRenderObject()
                     as RenderRepaintBoundary)
                 .toImage(pixelRatio: dpi);
@@ -248,10 +320,13 @@ void main() {
                     format: drawing.ImageByteFormat.rawRgba))!
                 .buffer
                 .asUint8List();
-            final result = <double>[];
+            final result = <({List<double> pixels, int width})>[];
             for (final row in [1, 2, 3]) {
               final rect = tester.getRect(_row(row));
-              double mass = 0, moment = 0;
+              final left = (rect.left * dpi).floor();
+              final right = (rect.right * dpi).floor();
+              final pixels = <double>[];
+              double mass = 0;
               for (var y = ((rect.top + 3) * dpi).ceil();
                   y < ((rect.bottom - 3) * dpi).floor() && y < image.height;
                   y++) {
@@ -265,26 +340,69 @@ void main() {
                       (bytes[at + 1] - bytes[bg + 1]).abs() +
                       (bytes[at + 2] - bytes[bg + 2]).abs();
                   mass += weight;
-                  moment += weight * x;
+                  pixels.add(weight.toDouble());
                 }
               }
               expect(mass, greaterThan(100));
-              result.add(moment / mass);
+              result.add((pixels: pixels, width: right - left));
+            }
+            const output =
+                String.fromEnvironment('DAN_LYRIC_REGISTRATION_RENDER');
+            if (output.isNotEmpty) {
+              await Directory(output).create(recursive: true);
+              final name = '$output/dpi-$dpi-${captureIndex++}';
+              await File('$name.png').writeAsBytes(
+                  (await image.toByteData(format: drawing.ImageByteFormat.png))!
+                      .buffer
+                      .asUint8List());
+              await File('$name.json').writeAsString(jsonEncode({
+                'dpi': dpi,
+                'inkRows': [
+                  for (final row in result)
+                    {'width': row.width, 'pixels': row.pixels}
+                ],
+                'rects': [
+                  for (final row in [1, 2, 3])
+                    [
+                      tester.getRect(_row(row)).left * dpi,
+                      tester.getRect(_row(row)).top * dpi,
+                      tester.getRect(_row(row)).right * dpi,
+                      tester.getRect(_row(row)).bottom * dpi
+                    ]
+                ],
+              }));
             }
             image.dispose();
             return result;
           }))!;
-      final before = await centers();
+      final before = await inkRows();
       final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await pointer.addPointer(location: const Offset(1, 1));
       await pointer.moveTo(tester.getCenter(find.text('Line 1')));
       await tester.pump();
       for (final ms in [80, 80, 120]) {
         await tester.pump(Duration(milliseconds: ms));
-        final after = await centers();
+        final after = await inkRows();
         for (var i = 0; i < before.length; i++) {
-          expect(after[i], closeTo(before[i], .25),
-              reason: 'row ${i + 1}, DPI $dpi');
+          final shift = _registeredHorizontalShift(
+              before[i].pixels, after[i].pixels,
+              width: before[i].width);
+          expect(shift, closeTo(0, .25), reason: 'row ${i + 1}, DPI $dpi');
+          if (dpi == 2 && i == 2) {
+            for (final delta in [-1, 1]) {
+              final width = after[i].width;
+              final moved = List.generate(after[i].pixels.length, (index) {
+                final x = index % width;
+                return after[i].pixels[index - x + (x - delta) % width];
+              });
+              expect(
+                  _registeredHorizontalShift(before[i].pixels, moved,
+                      width: width),
+                  closeTo(shift + delta, .03),
+                  reason:
+                      'The real rendered ink must reveal an introduced pixel shift');
+            }
+          }
         }
       }
       await pointer.removePointer();
@@ -303,7 +421,9 @@ void main() {
         focused.fontSize, closeTo(22 * LyricMotion.focusedFontScale, .000001));
     final focusedSize = focused.fontSize! * _scale(tester, 0);
     final contextSize = contextStyle.fontSize! * _scale(tester, 1);
-    expect(focusedSize / contextSize, greaterThanOrEqualTo(1.24));
+    expect(focusedSize / contextSize, greaterThanOrEqualTo(1.50));
+    expect(contextSize, closeTo(22 * .992, .000001),
+        reason: 'Stronger focus must not shrink the adjacent line');
     expect(_opacity(tester, 0) / _opacity(tester, 1), greaterThan(1.4));
     expect(_opacity(tester, 1), greaterThan(_opacity(tester, 3)));
     expect(_opacity(tester, 3), greaterThan(_opacity(tester, 5)));

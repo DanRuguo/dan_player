@@ -16,10 +16,12 @@ class PerformanceSnapshot {
       required this.dynamicTheme,
       required this.springLyrics,
       required this.taskbarSongPreview,
+      this.taskbarPlaybackProgress = true,
       required this.trayBlur});
   final RenderingPreferences rendering;
   final BackgroundPreferences backgrounds;
   final bool dynamicTheme, springLyrics, taskbarSongPreview;
+  final bool taskbarPlaybackProgress;
   final double trayBlur;
 
   factory PerformanceSnapshot.capture(
@@ -33,6 +35,7 @@ class PerformanceSnapshot {
           dynamicTheme: dynamicTheme,
           springLyrics: experience.springLyrics,
           taskbarSongPreview: experience.taskbarSongPreview,
+          taskbarPlaybackProgress: experience.taskbarPlaybackProgress,
           trayBlur: experience.trayMenuBlurRadius);
 
   Map<String, Object> toMap() => {
@@ -41,6 +44,7 @@ class PerformanceSnapshot {
         'dynamicTheme': dynamicTheme,
         'springLyrics': springLyrics,
         'taskbarSongPreview': taskbarSongPreview,
+        'taskbarPlaybackProgress': taskbarPlaybackProgress,
         'trayBlur': trayBlur
       };
 
@@ -58,6 +62,9 @@ class PerformanceSnapshot {
         dynamicTheme: raw['dynamicTheme'],
         springLyrics: raw['springLyrics'],
         taskbarSongPreview: raw['taskbarSongPreview'],
+        taskbarPlaybackProgress: raw['taskbarPlaybackProgress'] is bool
+            ? raw['taskbarPlaybackProgress'] as bool
+            : true,
         trayBlur: PlayerExperiencePreferences.safeTrayMenuBlurRadius(
             raw['trayBlur']));
   }
@@ -98,6 +105,7 @@ class PerformanceSnapshot {
         dynamicTheme: high,
         springLyrics: high,
         taskbarSongPreview: high,
+        taskbarPlaybackProgress: high,
         trayBlur: high ? 20 : 0);
   }
 }

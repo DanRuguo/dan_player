@@ -25,6 +25,7 @@
 #include "desktop_integration_tray_style.h"
 #include "resource.h"
 #include "taskbar_peek_geometry.h"
+#include "taskbar_progress_policy.h"
 #include "taskbar_thumbnail_policy.h"
 
 namespace {
@@ -32,10 +33,12 @@ using flutter::EncodableMap;
 using flutter::EncodableValue;
 namespace policy = desktop_integration;
 namespace thumbnail = taskbar_thumbnail;
+namespace progress = taskbar_progress;
 
 constexpr UINT kTrayId = 1;
 constexpr UINT kTrayCallback = WM_APP + 0x541;
 constexpr UINT kTrayEffectsChanged = WM_APP + 0x542;
+constexpr UINT kApplyTaskbarProgress = WM_APP + 0x543;
 
 // Use the runner's generated version, never a second manually updated release
 // string. Standalone native checks do not define FLUTTER_VERSION.
@@ -255,6 +258,10 @@ struct DesktopIntegrationController::Impl
   UINT taskbar_button_created = 0;
   UINT state_message = 0;
   policy::ShellState shell;
+  progress::Reconciler progress_state;
+  bool progress_applying = false;
+  bool progress_pending = false;
+  bool progress_available = false;
   policy::Playback playback;
   std::wstring tooltip = L"Dan Player";
   std::array<std::wstring, 8> labels{
@@ -430,8 +437,33 @@ struct DesktopIntegrationController::Impl
       EnsureTray();
       EnsureTaskbar();
       UpdateButtons();
+      ApplyProgress();
       if (theme_changed || font_changed || icons_changed || labels_changed || blur_changed) RefreshMenuAppearance();
       result->Success(Status());
+    } else if (method == "setProgress") {
+      const auto item = args ? args->find(EncodableValue("state"))
+                             : EncodableMap::const_iterator{};
+      const auto* name = args && item != args->end()
+                             ? std::get_if<std::string>(&item->second) : nullptr;
+      const auto state = name ? progress::ParseState(*name) : std::nullopt;
+      progress::Snapshot next;
+      bool valid = state.has_value();
+      if (valid) {
+        next.state = *state;
+        if (progress::Determinate(*state)) {
+          valid = ReadThumbnailDimension(*args, "completed", &next.completed) &&
+                  ReadThumbnailDimension(*args, "total", &next.total);
+        }
+      }
+      if (!valid || !progress::Valid(next)) {
+        result->Error("INVALID_ARGUMENT", "Progress requires a valid state and, when determinate, integer 0 <= completed <= total <= 9007199254740991 with total > 0");
+        return;
+      }
+      progress_state.SetDesired(next);
+      ApplyProgress();
+      // Own the latest state even before configure/TaskbarButtonCreated. Shell
+      // availability is separate; no Dart retry is needed while it initializes.
+      result->Success();
     } else if (method == "setThumbnail") {
       std::int64_t width = 0;
       std::int64_t height = 0;
@@ -545,6 +577,7 @@ struct DesktopIntegrationController::Impl
         {EncodableValue("revision"), EncodableValue(++revision)},
         {EncodableValue("trayAvailable"), EncodableValue(tray_available)},
         {EncodableValue("taskbarAvailable"), EncodableValue(taskbar_available)},
+        {EncodableValue("progressAvailable"), EncodableValue(progress_available)},
         {EncodableValue("thumbnailAvailable"), EncodableValue(thumbnail_available)},
         {EncodableValue("roundedWindowCornersAvailable"), EncodableValue(false)},
         {EncodableValue("windowVisible"),
@@ -857,6 +890,57 @@ struct DesktopIntegrationController::Impl
       taskbar_available = false;
     }
     QueueState();
+  }
+
+  static TBPFLAG ProgressFlag(progress::State state) {
+    switch (state) {
+      case progress::State::kIndeterminate: return TBPF_INDETERMINATE;
+      case progress::State::kNormal: return TBPF_NORMAL;
+      case progress::State::kPaused: return TBPF_PAUSED;
+      case progress::State::kError: return TBPF_ERROR;
+      default: return TBPF_NOPROGRESS;
+    }
+  }
+
+  void ApplyProgress() {
+    if (disposed || !active || !shell.taskbar_ready || !taskbar ||
+        progress_applying) return;
+    const auto attempt = progress_state.Begin();
+    if (!attempt) return;
+    progress_applying = true;
+    auto* current = taskbar;
+    current->AddRef();
+    HRESULT result = S_OK;
+    for (unsigned index = 0; index < attempt->plan.size; ++index) {
+      if (attempt->plan.operations[index] == progress::Operation::kValue) {
+        result = current->SetProgressValue(window,
+            static_cast<ULONGLONG>(attempt->desired.completed),
+            static_cast<ULONGLONG>(attempt->desired.total));
+      } else {
+        result = current->SetProgressState(window,
+            ProgressFlag(attempt->desired.state));
+      }
+      if (FAILED(result) || disposed || current != taskbar) break;
+    }
+    if (disposed) {
+      // A nested disposal may happen before this COM call finishes applying.
+      // Clear again while retaining the interface, never resurrect the bar.
+      current->SetProgressState(window, TBPF_NOPROGRESS);
+    }
+    current->Release();
+    progress_applying = false;
+    if (disposed) return;
+    progress_state.Complete(*attempt, SUCCEEDED(result) && current == taskbar);
+    const bool next_available = progress_state.sent().has_value();
+    if (next_available != progress_available) {
+      progress_available = next_available;
+      QueueState();
+    }
+    if (progress_state.pending() && !progress_pending) {
+      // Only reconcile a newer request/lifecycle that arrived inside COM. This
+      // is one posted message, not a timer or a failure-driven polling loop.
+      progress_pending = PostMessageW(window, kApplyTaskbarProgress, 0, 0) != FALSE;
+    }
   }
 
   void Emit(policy::Action action) {
@@ -1364,6 +1448,11 @@ struct DesktopIntegrationController::Impl
       RefreshMenuAppearance();
       return 0;
     }
+    if (message == kApplyTaskbarProgress) {
+      progress_pending = false;
+      ApplyProgress();
+      return 0;
+    }
     if (message == state_message && state_message != 0) {
       state_pending = false;
       if (active && channel) {
@@ -1374,6 +1463,8 @@ struct DesktopIntegrationController::Impl
     }
     if (message == taskbar_created && taskbar_created != 0) {
       shell.ExplorerRestarted();
+      progress_state.InvalidateShell();
+      progress_available = false;
       tray_available = false;
       if (taskbar) { taskbar->Release(); taskbar = nullptr; }
       EnsureTray();
@@ -1385,8 +1476,10 @@ struct DesktopIntegrationController::Impl
     }
     if (message == taskbar_button_created && taskbar_button_created != 0) {
       shell.TaskbarButtonCreated();
+      progress_state.InvalidateShell();
       EnsureTaskbar();
       UpdateButtons();
+      ApplyProgress();
       RebuildThumbnail();
       QueueState();
       return std::nullopt;
@@ -1458,12 +1551,17 @@ struct DesktopIntegrationController::Impl
     const bool had_buttons = shell.buttons_added;
     shell.ExplorerRestarted();
     taskbar_available = false;
+    progress_available = false;
+    progress_pending = false;
+    progress_state.SetDesired({});
+    progress_state.InvalidateShell();
     taskbar_controls = false;
     if (menu_window) DestroyWindow(menu_window);
     if (menu_open) EndMenu();
     popup_paint.Clear();
     ClearPopupBlur();
     popup_fonts.Clear();
+    if (old_taskbar) old_taskbar->SetProgressState(window, TBPF_NOPROGRESS);
     if (old_taskbar && had_buttons) {
       THUMBBUTTON buttons[3]{};
       const std::array<unsigned, 3> ids{policy::kPrevious, policy::kToggle,

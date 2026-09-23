@@ -11,16 +11,56 @@ class _BackupWorkerControl {
   }
 }
 
-Future<T> _runBackupOperation<T>(BackupOperation? operation,
-    Future<T> Function(_BackupWorkerControl) worker) async {
+// Build each worker closure in a scope containing only transferable inputs.
+// Creating it in the public service method would also retain BackupOperation
+// and its progress callback/cancellation closure through the shared context.
+Future<List<int>> Function(_BackupWorkerControl) _exportBackupWorker(
+        String source,
+        String destination,
+        Map<String, Object?> options,
+        String? password) =>
+    (control) => CacheBackupService._exportBackupOnWorker(
+        source, destination, options, password, control);
+
+Future<Map<String, Object?>> Function(_BackupWorkerControl)
+    _restoreBackupWorker(String backup, String destination, String current,
+            Map<String, Object?>? options, String? password) =>
+        (control) => CacheBackupService._restoreBackupOnWorker(
+            backup, destination, current, options, password, control);
+
+Future<Map<String, dynamic>> Function(_BackupWorkerControl)
+    _inspectBackupWorker(String backupPath, String? password) =>
+        (control) async {
+          final temporary =
+              await Directory.systemTemp.createTemp('dan-player-inspect-');
+          try {
+            final input = File(backupPath);
+            final encrypted = await BackupEncryption.isEncrypted(input);
+            final plain =
+                await _openBackupEnvelope(input, temporary, password, control);
+            final manifest = await _readStreamingZip(plain, temporary, control,
+                manifestOnly: true);
+            return {...manifest, 'encrypted': encrypted};
+          } finally {
+            await temporary.delete(recursive: true);
+          }
+        };
+
+Future<T> _runBackupOperation<T>(
+    BackupOperation? operation, Future<T> Function(_BackupWorkerControl) worker,
+    {TaskbarProgressTask? taskbar}) async {
   final temporary =
       await Directory.systemTemp.createTemp('dan-player-backup-job-');
   final cancelled = File(path.join(temporary.path, 'cancel'));
   final receive = ReceivePort();
+  final task = taskbar ?? TaskbarProgress.instance.begin();
   final subscription = receive.listen((event) {
     if (event is List && event.length == 3) {
-      operation?.onProgress?.call(
-          BackupProgress(event[0] as String, event[1] as int, event[2] as int));
+      final progress =
+          BackupProgress(event[0] as String, event[1] as int, event[2] as int);
+      task.update(
+          progress.total > 0 ? progress.completed / progress.total : null);
+      operation?.onProgress?.call(progress);
     }
   });
   operation?.cancelWorker = () async {
@@ -29,14 +69,24 @@ Future<T> _runBackupOperation<T>(BackupOperation? operation,
   try {
     if (operation?.isCancelled ?? false) throw const CacheBackupCancelled();
     final control = _BackupWorkerControl(cancelled.path, receive.sendPort);
-    return await Isolate.run(() => worker(control));
+    return await _dispatchBackupWorker(worker, control);
   } finally {
-    if (operation != null) operation.cancelWorker = null;
-    await subscription.cancel();
-    receive.close();
-    await temporary.delete(recursive: true);
+    try {
+      if (operation != null) operation.cancelWorker = null;
+      await subscription.cancel();
+      receive.close();
+      await temporary.delete(recursive: true);
+    } finally {
+      if (taskbar == null) task.dispose();
+    }
   }
 }
+
+// Keep UI/taskbar listeners out of the context captured by Isolate.run.
+Future<T> _dispatchBackupWorker<T>(
+        Future<T> Function(_BackupWorkerControl) worker,
+        _BackupWorkerControl control) =>
+    Isolate.run(() => worker(control));
 
 Future<File> _openBackupEnvelope(File backup, Directory temporary,
     String? password, _BackupWorkerControl control) async {

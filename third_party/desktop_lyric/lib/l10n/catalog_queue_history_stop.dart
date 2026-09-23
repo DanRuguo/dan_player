@@ -42,11 +42,6 @@ const Map<String, List<String>> catalogQueueHistoryStop = {
     "歌詞ページのリアルタイムスペクトラム",
     "가사 페이지 실시간 스펙트럼"
   ],
-  "在歌词详情页播放条上显示频谱音柱；关闭后保留进度条。": [
-    "Show spectrum bars above the lyrics page playback bar. The progress bar remains when disabled.",
-    "歌詞ページの再生バー上にスペクトラムを表示します。オフにしてもシークバーは表示されます。",
-    "가사 페이지 재생 바 위에 스펙트럼을 표시합니다. 꺼도 진행 바는 유지됩니다."
-  ],
   "没有匹配的书签": ["No matching bookmarks", "一致するブックマークはありません", "일치하는 북마크가 없습니다"],
   '撤销队列整理 · Ctrl+Z': [
     'Undo queue edit · Ctrl+Z',

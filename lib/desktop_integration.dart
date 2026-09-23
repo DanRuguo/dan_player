@@ -15,6 +15,7 @@ import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:dan_player/taskbar_song_preview.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/window_mode_controller.dart';
 import 'package:flutter/foundation.dart';
@@ -25,7 +26,7 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'package:path/path.dart' as path;
 
 /// Transport metadata updates remain independent of the optional bounded song
-/// preview. No positions, lyrics or per-frame updates are sent to the taskbar.
+/// preview and native progress. Positions never rebuild metadata/previews.
 @immutable
 class DesktopPlaybackSnapshot {
   const DesktopPlaybackSnapshot({
@@ -99,6 +100,11 @@ abstract interface class DesktopPlaybackAdapter
   Future<void> stopObserving();
 }
 
+abstract interface class DesktopPlaybackProgressAdapter {
+  ValueListenable<TaskbarProgressValue> get taskbarProgress;
+  void setTaskbarProgressEnabled(bool enabled);
+}
+
 class _NativeDesktopAdapter implements DesktopNativeAdapter {
   static const channel = MethodChannel('dan_player/desktop_integration');
 
@@ -129,13 +135,65 @@ class _DesktopWindowAdapter implements DesktopWindowAdapter {
 /// A passive observer. Merely constructing a tray/setting/background does not
 /// touch PlayService.instance. Startup remains the owner of BASS construction.
 class _DesktopPlaybackAdapter extends ValueNotifier<DesktopPlaybackSnapshot>
-    implements DesktopPlaybackAdapter {
+    implements DesktopPlaybackAdapter, DesktopPlaybackProgressAdapter {
   _DesktopPlaybackAdapter() : super(const DesktopPlaybackSnapshot());
 
   PlaybackService? _playback;
   DesktopLyricService? _lyrics;
   StreamSubscription<PlayerState>? _playerEvents;
+  StreamSubscription<double>? _progressEvents;
+  final _taskbarProgress = ValueNotifier(TaskbarProgressValue.none);
+  bool _progressEnabled = false;
+  PlayerState _progressState = PlayerState.unknown;
+  double _progressLength = 0;
   bool _observing = false;
+
+  @override
+  ValueListenable<TaskbarProgressValue> get taskbarProgress => _taskbarProgress;
+
+  @override
+  void setTaskbarProgressEnabled(bool enabled) {
+    if (_progressEnabled == enabled) return;
+    _progressEnabled = enabled;
+    _updateProgressSource();
+    _publishProgress();
+  }
+
+  void _updateProgressSource() {
+    final playback = _playback;
+    if (!_observing || playback == null || !_progressEnabled) {
+      unawaited(_progressEvents?.cancel());
+      _progressEvents = null;
+      return;
+    }
+    _progressState = playback.playerState;
+    _progressLength = playback.length;
+    // Reuse the source's existing 33ms stream; it stops on pause and emits
+    // successful seeks explicitly. No second native position timer/query.
+    _progressEvents ??= playback.positionStream.listen(_publishProgress);
+  }
+
+  void _publishProgress([double? position]) {
+    final playback = _playback;
+    if (!_observing || playback == null || playback.nowPlaying == null) {
+      _taskbarProgress.value = TaskbarProgressValue.none;
+    } else if (playback.isBuffering.value ||
+        _progressState == PlayerState.stalled) {
+      _taskbarProgress.value = TaskbarProgressValue.indeterminate;
+    } else if (!_progressEnabled ||
+        !(_progressLength > 0) ||
+        !const {
+          PlayerState.playing,
+          PlayerState.paused,
+          PlayerState.pausedDevice,
+        }.contains(_progressState)) {
+      _taskbarProgress.value = TaskbarProgressValue.none;
+    } else {
+      _taskbarProgress.value = TaskbarProgressValue.fraction(
+          (position ?? playback.position) / _progressLength,
+          paused: _progressState != PlayerState.playing);
+    }
+  }
 
   @override
   void startObserving() {
@@ -165,11 +223,14 @@ class _DesktopPlaybackAdapter extends ValueNotifier<DesktopPlaybackSnapshot>
     final playback = _playback;
     if (!_observing || playback == null) return;
     final audio = playback.nowPlaying;
+    _progressState = playback.playerState;
+    _updateProgressSource();
+    _publishProgress();
     value = DesktopPlaybackSnapshot(
       ready: true,
       hasTrack: audio != null,
       hasQueue: playback.playlist.value.isNotEmpty,
-      playing: playback.playerState == PlayerState.playing,
+      playing: _progressState == PlayerState.playing,
       buffering: playback.isBuffering.value,
       desktopLyrics: _lyrics!.isRunning || _lyrics!.isStarting,
       title: audio == null ? '' : '${audio.displayTitle} — ${audio.artist}',
@@ -219,7 +280,10 @@ class _DesktopPlaybackAdapter extends ValueNotifier<DesktopPlaybackSnapshot>
     _playback?.isBuffering.removeListener(_publish);
     _lyrics?.removeListener(_publish);
     await _playerEvents?.cancel();
+    await _progressEvents?.cancel();
     _playerEvents = null;
+    _progressEvents = null;
+    _taskbarProgress.value = TaskbarProgressValue.none;
     _playback = null;
     _lyrics = null;
   }
@@ -235,6 +299,7 @@ class DesktopIntegration implements Listenable {
         _preferences = AppSettings.instance.experience,
         _supported = Platform.isWindows,
         _previewRenderer = renderTaskbarSongPreview,
+        _progressOperations = TaskbarProgress.instance,
         _themeOverride = null,
         _syncAppearance = true,
         _onError = HotkeysHelper.showError;
@@ -250,12 +315,14 @@ class DesktopIntegration implements Listenable {
     void Function(String)? onError,
     TaskbarPreviewRenderer previewRenderer = renderTaskbarSongPreview,
     ThemeProvider? themeProvider,
+    ValueListenable<TaskbarProgressValue?>? progressOperations,
   })  : _native = native,
         _window = window,
         _playback = playback,
         _preferences = preferences,
         _supported = supported,
         _previewRenderer = previewRenderer,
+        _progressOperations = progressOperations ?? TaskbarProgress(),
         _themeOverride = themeProvider,
         _syncAppearance = syncAppearance,
         _onError = onError;
@@ -270,6 +337,8 @@ class DesktopIntegration implements Listenable {
   final bool _supported;
   final bool _syncAppearance;
   final TaskbarPreviewRenderer _previewRenderer;
+  final ValueListenable<TaskbarProgressValue?> _progressOperations;
+  TaskbarProgressPublisher? _progressPublisher;
   final ThemeProvider? _themeOverride;
   ThemeProvider get _theme => _themeOverride ?? ThemeProvider.instance;
   TaskbarPreviewPublisher? _preview;
@@ -365,6 +434,13 @@ class DesktopIntegration implements Listenable {
       _sentAppearance = appearance;
       _sentLanguage = language;
       _started = true;
+      _progressPublisher = TaskbarProgressPublisher(
+          operations: _progressOperations,
+          invoke: (method, args) => _invoke(method, args),
+          onError: (error) => LOGGER.w('Taskbar progress: $error'));
+      if (_playback case final DesktopPlaybackProgressAdapter source) {
+        source.taskbarProgress.addListener(_updateTaskbarProgress);
+      }
       _preview = TaskbarPreviewPublisher(
           invoke: _invoke,
           renderer: _previewRenderer,
@@ -417,11 +493,15 @@ class DesktopIntegration implements Listenable {
       _nativeRevision = revision;
     }
     final wasAvailable = _available;
+    final wasTaskbarAvailable = _taskbarAvailable;
     if (raw['trayAvailable'] is bool) {
       _available = raw['trayAvailable'] as bool;
     }
     if (raw['taskbarAvailable'] is bool) {
       _taskbarAvailable = raw['taskbarAvailable'] as bool;
+    }
+    if (!wasTaskbarAvailable && _taskbarAvailable) {
+      _progressPublisher?.retry();
     }
     final visible = raw['windowVisible'];
     final minimized = raw['minimized'];
@@ -452,6 +532,7 @@ class DesktopIntegration implements Listenable {
 
   void _scheduleSync() {
     if (!_started || _closed || _syncScheduled) return;
+    _updateTaskbarProgress();
     _syncScheduled = true;
     scheduleMicrotask(() {
       _syncScheduled = false;
@@ -528,6 +609,23 @@ class DesktopIntegration implements Listenable {
         _notify();
       });
     });
+  }
+
+  void _updateTaskbarProgress() {
+    if (_closed || !_started) return;
+    final enabled = _preferences.value.taskbarPlaybackProgress;
+    if (_playback case final DesktopPlaybackProgressAdapter source) {
+      source.setTaskbarProgressEnabled(enabled);
+      final value = source.taskbarProgress.value;
+      _progressPublisher?.setPlayback(
+          enabled || value.state == TaskbarProgressState.indeterminate
+              ? value
+              : TaskbarProgressValue.none);
+    } else {
+      _progressPublisher?.setPlayback(_playback.value.buffering
+          ? TaskbarProgressValue.indeterminate
+          : TaskbarProgressValue.none);
+    }
   }
 
   Future<void> _onNativeEvent(MethodCall call) async {
@@ -644,6 +742,10 @@ class DesktopIntegration implements Listenable {
     _hidden.value = true;
     _changes.value++;
     _native.setEventHandler(null);
+    if (_playback case final DesktopPlaybackProgressAdapter source) {
+      source.taskbarProgress.removeListener(_updateTaskbarProgress);
+      source.setTaskbarProgressEnabled(false);
+    }
     if (_started) {
       _preferences.removeListener(_scheduleSync);
       uiLanguage.removeListener(_scheduleSync);
@@ -656,6 +758,7 @@ class DesktopIntegration implements Listenable {
       }
     }
     try {
+      await _progressPublisher?.dispose();
       await _preview?.dispose();
       if (_supported) await _invoke('dispose');
     } catch (error, trace) {

@@ -44,16 +44,16 @@ const catalogAnimations = <String, List<String>>{
     '페이지, 콘텐츠 영역 및 시작 안내 단계 사이의 전환입니다.'
   ],
   '布局与文字动画': ['Layout & text motion', '配置と文字の動き', '배치 및 텍스트 애니메이션'],
-  '封面尺寸、排序、自动填充及标题显隐的过渡。': [
-    'Transitions for cover size, sorting, auto-fill and title visibility.',
-    'ジャケットサイズ、並べ替え、自動配置、タイトル表示の切り替え。',
-    '표지 크기, 정렬, 자동 채우기 및 제목 표시 전환입니다.'
+  '封面尺寸、排序、自动填充、标题显隐及长文本滚动。': [
+    'Cover size, sorting, auto-fill, title visibility and scrolling long text.',
+    'ジャケットサイズ、並べ替え、自動配置、タイトル表示、長い文字列のスクロール。',
+    '표지 크기, 정렬, 자동 채우기, 제목 표시 및 긴 텍스트 스크롤입니다.'
   ],
   '歌词动画': ['Lyric motion', '歌詞アニメーション', '가사 애니메이션'],
-  '逐词渐亮、长音浮动与行跟随；关闭后仍更新当前歌词。': [
-    'Word highlighting, sustained-note lift and line following. Current lyrics still update when disabled.',
-    '単語のハイライト、ロングトーンの浮き上がり、行の追従。オフでも現在の歌詞は更新されます。',
-    '단어별 강조, 긴 음의 떠오름과 행 따라가기입니다. 꺼도 현재 가사는 갱신됩니다.'
+  '逐词渐亮、长音浮动、左右错速与行跟随；关闭后仍更新当前歌词。': [
+    'Word highlighting, sustained-note lift, staggered line motion and line following. Current lyrics still update when disabled.',
+    '単語のハイライト、ロングトーンの浮き上がり、左右の時間差と行の追従。オフでも現在の歌詞は更新されます。',
+    '단어별 강조, 긴 음의 떠오름, 좌우 시간차와 행 따라가기입니다. 꺼도 현재 가사는 갱신됩니다.'
   ],
   '交互反馈动画': ['Interaction feedback', '操作フィードバック', '상호작용 피드백'],
   '悬停光效、水波纹、按钮和控件的状态过渡。': [

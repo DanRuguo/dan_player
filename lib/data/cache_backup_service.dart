@@ -11,6 +11,7 @@ import 'package:dan_player/data/app_data_location.dart';
 import 'package:dan_player/data/backup_encryption.dart';
 import 'package:dan_player/data/backup_selection.dart';
 import 'package:dan_player/data/backup_restore_preservation.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:path/path.dart' as path;
 
 export 'backup_selection.dart';
@@ -71,6 +72,16 @@ class CacheRestoreResult {
 typedef CacheLocationActivator = Future<void> Function(
     Directory directory, Directory stagedDirectory);
 
+Future<T> _trackBackupProgress<T>(
+    Future<T> Function(TaskbarProgressTask) operation) async {
+  final taskbar = TaskbarProgress.instance.begin();
+  try {
+    return await operation(taskbar);
+  } finally {
+    taskbar.dispose();
+  }
+}
+
 /// Portable backup of the complete app-data tree.
 ///
 /// The container is a ZIP with a `.bak` extension. JSON documents are rewritten
@@ -94,8 +105,8 @@ class CacheBackupService {
           final options = selection.toMap();
           final result = await _runBackupOperation(
               operation,
-              (control) => _exportBackupOnWorker(
-                  sourcePath, destinationPath, options, password, control));
+              _exportBackupWorker(
+                  sourcePath, destinationPath, options, password));
           return CacheBackupResult(
               fileCount: result[0],
               songCount: result[1],
@@ -292,52 +303,55 @@ class CacheBackupService {
     BackupSelection? selection,
     String? password,
     BackupOperation? operation,
-  }) async {
-    Map<String, Object?> transaction;
-    try {
-      final backupPath = backup.absolute.path;
-      final destinationPath = destination.absolute.path;
-      final currentPath = currentData.absolute.path;
-      final options = selection?.toMap();
-      transaction = await _runBackupOperation(
-          operation,
-          (control) => _restoreBackupOnWorker(backupPath, destinationPath,
-              currentPath, options, password, control));
-    } on CacheBackupException {
-      rethrow;
-    } catch (error) {
-      throw CacheBackupException('Could not restore backup: $error');
-    }
-    try {
-      final staged = Directory(transaction['staged'] as String);
-      if (activateLocation != null) {
-        await activateLocation(destination, staged);
-      }
-    } catch (error) {
-      try {
-        await Isolate.run(() => _discardPreparedRestore(transaction));
-      } catch (rollbackError) {
-        throw CacheBackupException(
-            'Cache location was not changed and staged cleanup failed: '
-            '$rollbackError (original error: $error)');
-      }
-      if (error is CacheBackupException) rethrow;
-      throw CacheBackupException('Cache location was not changed: $error');
-    }
-    if (activateLocation == null) {
-      await Isolate.run(() => _discardPreparedRestore(transaction));
-      throw const CacheBackupException(
-          'A cache location activator is required for safe restore');
-    }
-    return CacheRestoreResult(
-      destination: destination,
-      fileCount: transaction['fileCount'] as int,
-      restoredSongs: transaction['restoredSongs'] as int,
-      missingSongs: transaction['missingSongs'] as int,
-      restartRequired: true,
-      musicCount: transaction['musicCount'] as int? ?? 0,
-    );
-  }
+  }) =>
+      _trackBackupProgress((taskbar) async {
+        Map<String, Object?> transaction;
+        try {
+          final backupPath = backup.absolute.path;
+          final destinationPath = destination.absolute.path;
+          final currentPath = currentData.absolute.path;
+          final options = selection?.toMap();
+          transaction = await _runBackupOperation(
+              operation,
+              _restoreBackupWorker(
+                  backupPath, destinationPath, currentPath, options, password),
+              taskbar: taskbar);
+        } on CacheBackupException {
+          rethrow;
+        } catch (error) {
+          throw CacheBackupException('Could not restore backup: $error');
+        }
+        taskbar.update(null);
+        try {
+          final staged = Directory(transaction['staged'] as String);
+          if (activateLocation != null) {
+            await activateLocation(destination, staged);
+          }
+        } catch (error) {
+          try {
+            await _discardRestoreInWorker(transaction);
+          } catch (rollbackError) {
+            throw CacheBackupException(
+                'Cache location was not changed and staged cleanup failed: '
+                '$rollbackError (original error: $error)');
+          }
+          if (error is CacheBackupException) rethrow;
+          throw CacheBackupException('Cache location was not changed: $error');
+        }
+        if (activateLocation == null) {
+          await _discardRestoreInWorker(transaction);
+          throw const CacheBackupException(
+              'A cache location activator is required for safe restore');
+        }
+        return CacheRestoreResult(
+          destination: destination,
+          fileCount: transaction['fileCount'] as int,
+          restoredSongs: transaction['restoredSongs'] as int,
+          missingSongs: transaction['missingSongs'] as int,
+          restartRequired: true,
+          musicCount: transaction['musicCount'] as int? ?? 0,
+        );
+      });
 
   static Future<Map<String, Object?>> _restoreBackupOnWorker(
       String backupFile,
@@ -531,26 +545,17 @@ class CacheBackupService {
     }
   }
 
+  static Future<void> _discardRestoreInWorker(
+          Map<String, Object?> transaction) =>
+      Isolate.run(() => _discardPreparedRestore(transaction));
+
   Future<BackupContents> inspectBackup(
       {required File backup,
       String? password,
       BackupOperation? operation}) async {
     final backupPath = backup.absolute.path;
-    final result = await _runBackupOperation(operation, (control) async {
-      final temporary =
-          await Directory.systemTemp.createTemp('dan-player-inspect-');
-      try {
-        final input = File(backupPath);
-        final encrypted = await BackupEncryption.isEncrypted(input);
-        final plain =
-            await _openBackupEnvelope(input, temporary, password, control);
-        final manifest = await _readStreamingZip(plain, temporary, control,
-            manifestOnly: true);
-        return {...manifest, 'encrypted': encrypted};
-      } finally {
-        await temporary.delete(recursive: true);
-      }
-    });
+    final result = await _runBackupOperation(
+        operation, _inspectBackupWorker(backupPath, password));
     return _contentsFromManifest(result);
   }
 

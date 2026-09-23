@@ -39,10 +39,23 @@ const Map<String, List<String>> catalogRendering = {
     "선택한 프레임률을 목표로 하며 화면 이동 시 해당 화면 상한에 맞춥니다. 실제 프레임률은 시스템 부하에도 영향을 받습니다."
   ],
   "频谱音柱数量": ["Spectrum bar count", "スペクトラムのバー数", "스펙트럼 막대 수"],
-  "低／中／高档最多显示 36／72／112 根音柱，实际数量随窗口宽度调整。档位越高通常越耗 CPU；降低档位时音柱变宽，整体宽度不变。": [
-    "Low / Medium / High show up to 36 / 72 / 112 bars, depending on window width. Higher levels typically use more CPU power. Lower levels use wider bars across the same total width.",
-    "少なめ／標準／多めは最大 36／72／112 本で、実際の本数はウィンドウの幅によって変わります。段階が高いほど通常は CPU の消費電力が増えます。下げると全体の幅を保ったままバーが太くなります。",
-    "낮음 / 중간 / 높음은 최대 36 / 72 / 112개이며 실제 개수는 창 너비에 따라 달라집니다. 단계가 높을수록 일반적으로 CPU 소비 전력이 증가합니다. 낮추면 전체 너비는 유지되고 막대가 굵어집니다."
+  '频谱显示位置': ['Spectrum placement', 'スペクトラムの位置', '스펙트럼 위치'],
+  '播放条上方': ['Above progress bar', 'シークバーの上', '진행 막대 위'],
+  '封面四周': ['Around cover', 'ジャケットの周囲', '표지 둘레'],
+  '音柱可显示在播放条上方或封面四周；关闭后保留进度条。': [
+    'Show spectrum bars above the progress bar or around the cover. Turning this off keeps the progress bar.',
+    'スペクトラムをシークバーの上またはジャケットの周囲に表示します。オフにしてもシークバーは残ります。',
+    '스펙트럼을 진행 막대 위나 표지 둘레에 표시합니다. 꺼도 진행 막대는 유지됩니다.'
+  ],
+  '四周音柱会根据封面留白调整高度；窄窗口未显示封面时，改在播放条上方显示。': [
+    'Bars adapt to the space around the cover. When a narrow window hides the cover, they appear above the progress bar.',
+    '周囲の余白に合わせてバーの高さを調整します。狭いウィンドウでジャケットが非表示の場合は、シークバーの上に表示します。',
+    '표지 주변 여백에 맞춰 막대 높이를 조절합니다. 좁은 창에서 표지가 보이지 않으면 진행 막대 위에 표시합니다.'
+  ],
+  "低／中／高档最多显示 36／72／112 根音柱，实际数量随可用空间调整。档位越高通常越耗 CPU；降低档位时音柱变宽。": [
+    "Low / Medium / High show up to 36 / 72 / 112 bars, depending on available space. Higher levels typically use more CPU power. Lower levels use wider bars.",
+    "少なめ／標準／多めは最大 36／72／112 本で、実際の本数は表示領域によって変わります。段階が高いほど通常は CPU の負荷が増えます。下げるとバーが太くなります。",
+    "낮음 / 중간 / 높음은 최대 36 / 72 / 112개이며 실제 개수는 사용 가능한 공간에 따라 달라집니다. 단계가 높을수록 일반적으로 CPU 부하가 증가합니다. 낮추면 막대가 굵어집니다."
   ],
   '低': ['Low', '少なめ', '낮음'],
   '中': ['Medium', '標準', '중간'],

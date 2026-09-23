@@ -14,12 +14,12 @@ const animationLabels = <MotionKind, (String, String, IconData)>{
   MotionKind.transitions: ('页面切换', '页面、内容区与引导步骤之间的过渡。', Icons.swap_horiz),
   MotionKind.layout: (
     '布局与文字动画',
-    '封面尺寸、排序、自动填充及标题显隐的过渡。',
+    '封面尺寸、排序、自动填充、标题显隐及长文本滚动。',
     Icons.dashboard_customize_outlined
   ),
   MotionKind.lyrics: (
     '歌词动画',
-    '逐词渐亮、长音浮动与行跟随；关闭后仍更新当前歌词。',
+    '逐词渐亮、长音浮动、左右错速与行跟随；关闭后仍更新当前歌词。',
     Icons.lyrics_outlined
   ),
   MotionKind.feedback: (

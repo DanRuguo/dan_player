@@ -12,6 +12,8 @@ enum SpectrumDensity {
   final int maximumBars;
 }
 
+enum LyricSpectrumPlacement { progress, cover }
+
 /// Visual preferences; audio clocks and accessibility remain independent.
 @immutable
 class RenderingPreferences {
@@ -22,6 +24,7 @@ class RenderingPreferences {
       this.surfaceBlur = true,
       this.animations = const MotionPreferences(),
       this.spectrumDensity = SpectrumDensity.high,
+      this.lyricSpectrumPlacement = LyricSpectrumPlacement.progress,
       this.frameRate = const FrameRatePreference()});
 
   final bool pauseWhenHidden;
@@ -29,6 +32,7 @@ class RenderingPreferences {
   final bool compactSpectrum;
   final bool surfaceBlur;
   final SpectrumDensity spectrumDensity;
+  final LyricSpectrumPlacement lyricSpectrumPlacement;
   final FrameRatePreference frameRate;
   final MotionPreferences animations;
 
@@ -38,6 +42,7 @@ class RenderingPreferences {
           bool? compactSpectrum,
           bool? surfaceBlur,
           SpectrumDensity? spectrumDensity,
+          LyricSpectrumPlacement? lyricSpectrumPlacement,
           FrameRatePreference? frameRate,
           MotionPreferences? animations}) =>
       RenderingPreferences(
@@ -46,6 +51,8 @@ class RenderingPreferences {
         compactSpectrum: compactSpectrum ?? this.compactSpectrum,
         surfaceBlur: surfaceBlur ?? this.surfaceBlur,
         spectrumDensity: spectrumDensity ?? this.spectrumDensity,
+        lyricSpectrumPlacement:
+            lyricSpectrumPlacement ?? this.lyricSpectrumPlacement,
         frameRate: frameRate ?? this.frameRate,
         animations: animations ?? this.animations,
       );
@@ -56,6 +63,7 @@ class RenderingPreferences {
         'compactSpectrum': compactSpectrum,
         'surfaceBlur': surfaceBlur,
         'spectrumDensity': spectrumDensity.name,
+        'lyricSpectrumPlacement': lyricSpectrumPlacement.name,
         'frameRate': frameRate.toMap(),
         'animations': animations.toMap()
       };
@@ -72,6 +80,9 @@ class RenderingPreferences {
         spectrumDensity: SpectrumDensity.values.firstWhere(
             (v) => value is Map && value['spectrumDensity'] == v.name,
             orElse: () => SpectrumDensity.high),
+        lyricSpectrumPlacement: LyricSpectrumPlacement.values.firstWhere(
+            (v) => value is Map && value['lyricSpectrumPlacement'] == v.name,
+            orElse: () => LyricSpectrumPlacement.progress),
         frameRate: FrameRatePreference.fromMap(
             value is Map ? value['frameRate'] : null),
         lyricSpectrum: value is Map && value['lyricSpectrum'] is bool
@@ -112,11 +123,19 @@ class RenderingPreferences {
       surfaceBlur == other.surfaceBlur &&
       animations == other.animations &&
       spectrumDensity == other.spectrumDensity &&
+      lyricSpectrumPlacement == other.lyricSpectrumPlacement &&
       frameRate == other.frameRate;
 
   @override
-  int get hashCode => Object.hash(pauseWhenHidden, lyricSpectrum,
-      compactSpectrum, surfaceBlur, spectrumDensity, frameRate, animations);
+  int get hashCode => Object.hash(
+      pauseWhenHidden,
+      lyricSpectrum,
+      compactSpectrum,
+      surfaceBlur,
+      spectrumDensity,
+      lyricSpectrumPlacement,
+      frameRate,
+      animations);
 }
 
 /// A listenable lets stream/timer owners apply a change synchronously even

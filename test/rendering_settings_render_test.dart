@@ -91,10 +91,19 @@ void main() {
         control.onChanged!(SpectrumDensity.low);
         await tester.pumpAndSettle();
         expect(prefs.spectrumDensity, SpectrumDensity.low);
+        final placement =
+            tester.widget<AppSegmentedControl<LyricSpectrumPlacement>>(
+                find.byKey(const ValueKey('lyric-spectrum-placement')));
+        expect(placement.value, LyricSpectrumPlacement.progress);
+        placement.onChanged!(LyricSpectrumPlacement.cover);
+        await tester.pumpAndSettle();
+        expect(prefs.lyricSpectrumPlacement, LyricSpectrumPlacement.cover);
+        expect(tester.takeException(), isNull);
         const output = String.fromEnvironment('DAN_RENDERING_SETTINGS_RENDER');
         if (output.isNotEmpty) {
-          final frameControl = tester.widget<AppSegmentedControl<FrameRateMode>>(
-              find.byKey(const ValueKey('frame-rate-mode')));
+          final frameControl =
+              tester.widget<AppSegmentedControl<FrameRateMode>>(
+                  find.byKey(const ValueKey('frame-rate-mode')));
           frameControl.onChanged!(FrameRateMode.adaptive);
           await tester.pumpAndSettle();
           await tester.runAsync(() async {

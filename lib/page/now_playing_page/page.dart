@@ -14,6 +14,8 @@ import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/title_bar.dart';
 import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
+import 'package:dan_player/component/lyric_cover_spectrum.dart';
+import 'package:dan_player/component/overflow_marquee_text.dart';
 import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -36,6 +38,7 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -434,7 +437,15 @@ class _NowPlayingSlider extends StatelessWidget {
 
 /// title, artist, album, cover
 class _NowPlayingInfo extends StatefulWidget {
-  const _NowPlayingInfo();
+  const _NowPlayingInfo({
+    super.key,
+    this.coverVisible,
+    this.activeCoverGeneration,
+    this.coverGeneration = 0,
+  });
+  final ValueListenable<bool>? coverVisible;
+  final ValueListenable<int>? activeCoverGeneration;
+  final int coverGeneration;
 
   @override
   State<_NowPlayingInfo> createState() => __NowPlayingInfoState();
@@ -475,65 +486,65 @@ class __NowPlayingInfoState extends State<_NowPlayingInfo> {
       ),
     );
 
-    return Center(
-      child: SizedBox(
-        width: 400.0,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              nowPlaying == null ? "Dan Player" : nowPlaying.displayTitle,
-              maxLines: 1,
-              style: TextStyle(
-                color: scheme.onSecondaryContainer,
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-              ),
-            ),
-            Text(
-              nowPlaying == null
-                  ? "Enjoy Music"
-                  : "${nowPlaying.artist} - ${nowPlaying.album}",
-              maxLines: 1,
-              style: TextStyle(color: scheme.onSecondaryContainer),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: Center(
-                child: TouchTrackSwipe(
-                  onPrevious: playbackService.lastAudio,
-                  onNext: playbackService.nextAudio,
-                  child: RepaintBoundary(
-                    child: nowPlaying == null
-                        ? placeholder
-                        : LayoutBuilder(
-                            builder: (context, constraints) {
-                              final available =
-                                  constraints.biggest.shortestSide;
-                              final size = available.isFinite && available > 0
-                                  ? available.clamp(1.0, 400.0)
-                                  : 400.0;
-                              return Center(
-                                  child: ClipRRect(
-                                borderRadius: AppShape.surfaceRadius,
-                                child: AudioArtwork(
-                                  audio: nowPlaying,
-                                  retainWhileLoading: true,
-                                  size: size,
-                                  placeholder: placeholder,
-                                  loading: loadingWidget,
-                                ),
-                              ));
-                            },
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Center(
+            child: SizedBox(
+                width: 400,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    OverflowMarqueeText(
+                      nowPlaying == null
+                          ? "Dan Player"
+                          : nowPlaying.displayTitle,
+                      hidden: DesktopIntegration.instance.isHidden,
+                      style: TextStyle(
+                        color: scheme.onSecondaryContainer,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                    OverflowMarqueeText(
+                      nowPlaying == null
+                          ? "Enjoy Music"
+                          : "${nowPlaying.artist} - ${nowPlaying.album}",
+                      hidden: DesktopIntegration.instance.isHidden,
+                      style: TextStyle(color: scheme.onSecondaryContainer),
+                    ),
+                  ],
+                ))),
+        const SizedBox(height: 16),
+        Expanded(
+          child: Center(
+            child: TouchTrackSwipe(
+              onPrevious: playbackService.lastAudio,
+              onNext: playbackService.nextAudio,
+              child: RepaintBoundary(
+                child: LyricCoverSpectrum(
+                  coverVisible: widget.coverVisible,
+                  activeCoverGeneration: widget.activeCoverGeneration,
+                  coverGeneration: widget.coverGeneration,
+                  coverBuilder: (size) => nowPlaying == null
+                      ? placeholder
+                      : ClipRRect(
+                          borderRadius: AppShape.surfaceRadius,
+                          child: AudioArtwork(
+                            audio: nowPlaying,
+                            retainWhileLoading: true,
+                            size: size,
+                            placeholder: placeholder,
+                            loading: loadingWidget,
                           ),
-                  ),
+                        ),
                 ),
               ),
-            )
-          ],
-        ),
-      ),
+            ),
+          ),
+        )
+      ],
     );
   }
 

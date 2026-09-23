@@ -3,18 +3,60 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
-/// Blur a lyric row without quantizing its slow movement to physical pixels.
+/// Per-row paint parameters. Only the leaf filter depends on this scope, so a
+/// follow tick does not rebuild or relayout the cached paragraph subtree.
+class LyricFractionalFilterScope extends InheritedWidget {
+  const LyricFractionalFilterScope(
+      {super.key,
+      required this.sigma,
+      required this.dpr,
+      required this.enabled,
+      required this.repaintToken,
+      required super.child});
+  final double sigma;
+  final double dpr;
+  final bool enabled;
+  final Object repaintToken;
+  @override
+  bool updateShouldNotify(LyricFractionalFilterScope oldWidget) =>
+      sigma != oldWidget.sigma ||
+      dpr != oldWidget.dpr ||
+      enabled != oldWidget.enabled ||
+      repaintToken != oldWidget.repaintToken;
+}
+
+class ScopedLyricFractionalFilter extends StatelessWidget {
+  const ScopedLyricFractionalFilter({super.key, required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) {
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<LyricFractionalFilterScope>();
+    if (scope == null) return child;
+    return LyricFractionalFilter(
+        sigma: scope.sigma,
+        dpr: scope.dpr,
+        enabled: scope.enabled,
+        repaint: Scrollable.maybeOf(context)?.position,
+        repaintToken: scope.repaintToken,
+        child: child);
+  }
+}
+
+/// Paint a row's source and inverse sampling matrix in one display list.
 ///
-/// A filter layer on the Windows raster-cache path rounds its incoming
-/// translation. Place its source on a physical pixel, then restore the
-/// fractional remainder with a bilinear matrix filter. The net geometry is
-/// unchanged, including on renderers that do not round incoming translations.
+/// Windows Impeller culls nested display lists before an enclosing layer's
+/// inverse filter projection. A supersampled TransformLayer can therefore lose
+/// glyphs near the right window edge. Recording saveLayer, scale, and the actual
+/// paragraph paints together lets the display list map their output bounds.
 class LyricFractionalFilter extends SingleChildRenderObjectWidget {
   const LyricFractionalFilter({
     super.key,
     required this.sigma,
     required this.dpr,
     this.enabled = true,
+    this.repaintToken,
+    this.repaint,
     super.child,
   })  : assert(sigma >= 0 && sigma < double.infinity),
         assert(dpr > 0 && dpr < double.infinity);
@@ -22,17 +64,21 @@ class LyricFractionalFilter extends SingleChildRenderObjectWidget {
   final double sigma;
   final double dpr;
   final bool enabled;
+  final Object? repaintToken;
+  final Listenable? repaint;
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderLyricFractionalFilter(sigma, dpr, enabled);
+      _RenderLyricFractionalFilter(sigma, dpr, enabled, repaint);
 
   @override
   void updateRenderObject(BuildContext context, RenderObject renderObject) {
     (renderObject as _RenderLyricFractionalFilter)
       ..sigma = sigma
       ..dpr = dpr
-      ..enabled = enabled;
+      ..enabled = enabled
+      ..repaintToken = repaintToken
+      ..repaint = repaint;
   }
 }
 
@@ -68,13 +114,38 @@ Offset lyricFilterRemainder(Matrix4 logicalToGlobal, double dpr) {
 }
 
 class _RenderLyricFractionalFilter extends RenderProxyBox {
-  _RenderLyricFractionalFilter(this._sigma, this._dpr, this._enabled);
-
+  _RenderLyricFractionalFilter(
+      this._sigma, this._dpr, this._enabled, this._repaint);
   double _sigma;
   double _dpr;
   bool _enabled;
-  final _filterHandle = LayerHandle<ImageFilterLayer>();
+  Object? _repaintToken;
+  Listenable? _repaint;
 
+  void _onAncestorMotion() {
+    if (_enabled) markNeedsPaint();
+  }
+
+  set repaint(Listenable? value) {
+    if (identical(_repaint, value)) return;
+    if (attached) _repaint?.removeListener(_onAncestorMotion);
+    _repaint = value;
+    if (attached) _repaint?.addListener(_onAncestorMotion);
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _repaint?.addListener(_onAncestorMotion);
+  }
+
+  @override
+  void detach() {
+    _repaint?.removeListener(_onAncestorMotion);
+    super.detach();
+  }
+
+  final _fallbackFilter = LayerHandle<ImageFilterLayer>();
   set sigma(double value) {
     if (_sigma == value) return;
     _sigma = value;
@@ -90,66 +161,61 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   set enabled(bool value) {
     if (_enabled == value) return;
     _enabled = value;
-    markNeedsCompositingBitsUpdate();
+    markNeedsPaint();
+  }
+
+  set repaintToken(Object? value) {
+    if (_repaintToken == value) return;
+    _repaintToken = value;
+    // The enclosing paragraph boundary otherwise retains a remainder sampled
+    // before its ancestor's follow/scroll transform changed.
     markNeedsPaint();
   }
 
   @override
-  bool get alwaysNeedsCompositing => child != null && _enabled;
-
-  // Deliberately not a repaint boundary: an ancestor scroll/paint offset must
-  // recompute the remainder. Descendant boundaries retain their cached text.
-
-  @override
   void paint(PaintingContext context, Offset offset) {
     if (child == null || !_enabled) {
-      _filterHandle.layer = null;
-      layer = null;
+      _fallbackFilter.layer = null;
       super.paint(context, offset);
       return;
     }
-
+    final sigma = _sigma < .1 ? .1 : _sigma;
+    if (child!.needsCompositing) {
+      // Interlude opacity can require its own layer. Its few geometric dots
+      // need no high-resolution glyph sampling; never span canvas state across
+      // independently recorded child layers.
+      final fallback = _fallbackFilter.layer ??= ImageFilterLayer();
+      fallback.imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
+      context.pushLayer(fallback, super.paint, offset);
+      return;
+    }
+    _fallbackFilter.layer = null;
     final remainder = lyricFilterRemainder(getTransformTo(null), _dpr);
     final anchor = offset - remainder;
-    final transform =
-        layer is TransformLayer ? layer! as TransformLayer : TransformLayer();
-    transform
-      ..offset = Offset.zero
-      ..transform = Matrix4.translationValues(anchor.dx, anchor.dy, 0);
-    layer = transform;
-
-    // Preserve the existing clear/hover sampling path even at zero blur.
-    // Disabling the effect explicitly still removes all our filter layers.
-    final sigma = _sigma < .1 ? .1 : _sigma;
-    final blur = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
-    // Sample the fractional source before blurring it. Applying the matrix
-    // after a blur changes its input raster origin when sigma changes.
-    // Keep one layer so independently warming nested filter caches cannot
-    // change glyph sampling partway through the slow return.
-    final filter = _filterHandle.layer ??= ImageFilterLayer();
-    filter
-      ..offset = Offset.zero
-      ..imageFilter = ui.ImageFilter.compose(
-        outer: blur,
+    const samplingScale = 1.5;
+    final filter = ui.ImageFilter.compose(
+        outer: ui.ImageFilter.blur(
+            sigmaX: sigma * samplingScale, sigmaY: sigma * samplingScale),
         inner: ui.ImageFilter.matrix(
-          Matrix4.translationValues(remainder.dx, remainder.dy, 0).storage,
-          filterQuality: ui.FilterQuality.low,
-        ),
-      );
-
-    // Apply the layout offset only once, in the outer layer. The filter's
-    // offset and child paint origin must both stay zero; otherwise part of the
-    // translation is embedded in the display list instead of the aligned CTM.
-    final bounds = paintBounds.inflate(sigma * 3 + 2);
-    context.pushLayer(transform, (childContext, _) {
-      childContext.pushLayer(filter, super.paint, Offset.zero,
-          childPaintBounds: bounds);
-    }, Offset.zero, childPaintBounds: bounds);
+            (Matrix4.translationValues(remainder.dx, remainder.dy, 0)
+                  ..scaleByDouble(1 / samplingScale, 1 / samplingScale, 1, 1))
+                .storage,
+            filterQuality: ui.FilterQuality.medium));
+    final canvas = context.canvas;
+    canvas.save();
+    canvas.translate(anchor.dx, anchor.dy);
+    // Null bounds are intentional: explicit saveLayer bounds clip source input
+    // before its inverse matrix, while the child keeps its existing clip paths.
+    canvas.saveLayer(null, ui.Paint()..imageFilter = filter);
+    canvas.scale(samplingScale);
+    super.paint(context, Offset.zero);
+    canvas.restore();
+    canvas.restore();
   }
 
   @override
   void dispose() {
-    _filterHandle.layer = null;
+    _fallbackFilter.layer = null;
     super.dispose();
   }
 }

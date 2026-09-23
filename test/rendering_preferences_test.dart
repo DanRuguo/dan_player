@@ -2,6 +2,9 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/page/settings_page/rendering_settings.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/background_preferences.dart';
+import 'package:dan_player/performance_preset.dart';
+import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:desktop_lyric/l10n/catalog_rendering.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -9,6 +12,36 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('spectrum placement is backwards compatible and survives presets', () {
+    for (final raw in [
+      null,
+      {},
+      {'lyricSpectrumPlacement': 'unknown'},
+      {'lyricSpectrumPlacement': false}
+    ]) {
+      expect(RenderingPreferences.fromMap(raw).lyricSpectrumPlacement,
+          LyricSpectrumPlacement.progress);
+    }
+    for (final placement in LyricSpectrumPlacement.values) {
+      final prefs = RenderingPreferences(lyricSpectrumPlacement: placement);
+      expect(RenderingPreferences.fromMap(prefs.toMap()), prefs);
+      expect(prefs.copyWith(lyricSpectrum: false).lyricSpectrumPlacement,
+          placement);
+      final snapshot = PerformanceSnapshot.capture(
+          prefs,
+          const BackgroundPreferences(),
+          const PlayerExperiencePreferences(),
+          true);
+      for (final mode in PerformanceMode.values) {
+        final restored =
+            PerformanceSnapshot.fromMap(snapshot.forMode(mode).toMap())!;
+        expect(restored.rendering.lyricSpectrumPlacement, placement);
+        expect(
+            restored.rendering.lyricSpectrum, mode != PerformanceMode.economy);
+      }
+    }
+  });
+
   test('old and malformed preferences default on; only a bool opts out', () {
     for (final raw in [
       null,

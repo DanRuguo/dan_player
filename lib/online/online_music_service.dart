@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/data/stream_file_transfer.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
@@ -977,6 +978,22 @@ class OnlineMusicService {
   }
 
   Future<void> download(
+    Audio audio,
+    File destination, {
+    void Function(int received, int? total)? onProgress,
+  }) async {
+    final taskbar = TaskbarProgress.instance.begin();
+    try {
+      await _download(audio, destination, onProgress: (received, total) {
+        taskbar.update(total != null && total > 0 ? received / total : null);
+        onProgress?.call(received, total);
+      });
+    } finally {
+      taskbar.dispose();
+    }
+  }
+
+  Future<void> _download(
     Audio audio,
     File destination, {
     void Function(int received, int? total)? onProgress,

@@ -6,6 +6,7 @@ import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:dan_player/library/ffmpeg_runtime.dart';
+import 'package:dan_player/taskbar_progress.dart';
 
 const ffmpegModuleUrl =
     'https://github.com/DanRuguo/dan_player/releases/download/v26.0.5/DanPlayer-FFmpeg-7.1.1-windows-x64.zip';
@@ -65,6 +66,25 @@ class FfmpegModuleInstaller {
   }
 
   Future<void> install(
+      {required void Function(double?) progress,
+      void Function(String)? onStage,
+      FfmpegRuntime? runtime}) async {
+    _check();
+    final taskbar = TaskbarProgress.instance.begin();
+    try {
+      await _install(
+          progress: (value) {
+            taskbar.update(value);
+            progress(value);
+          },
+          onStage: onStage,
+          runtime: runtime);
+    } finally {
+      taskbar.dispose();
+    }
+  }
+
+  Future<void> _install(
       {required void Function(double?) progress,
       void Function(String)? onStage,
       FfmpegRuntime? runtime}) async {

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/library_mutation_gate.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
+import 'package:dan_player/taskbar_progress.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart';
 
@@ -79,6 +80,7 @@ class LibraryRefreshTask extends ChangeNotifier {
   bool _started = false;
   bool _cancelRequested = false;
   bool _completionNoticeTaken = false;
+  TaskbarProgressTask? _taskbar;
   LibraryRefreshPhase phase = LibraryRefreshPhase.scanning;
   IndexActionState? lastAction;
   Object? error;
@@ -106,6 +108,10 @@ class LibraryRefreshTask extends ChangeNotifier {
   void _setPhase(LibraryRefreshPhase value) {
     if (phase == value) return;
     phase = value;
+    if (value == LibraryRefreshPhase.cancelling ||
+        value == LibraryRefreshPhase.committing) {
+      _taskbar?.update(null);
+    }
     notifyListeners();
   }
 
@@ -142,12 +148,17 @@ class LibraryRefreshTask extends ChangeNotifier {
       await _gate.run(() async {
         active.value = this;
         if (_cancelRequested) throw const LibraryScanCancelled();
+        _taskbar = TaskbarProgress.instance.begin();
         await for (final action in scan()) {
           lastAction = action;
           if (action.message == 'INDEX_PHASE_COMMITTING') {
             _cancelRequested = false;
             _setPhase(LibraryRefreshPhase.committing);
           }
+          _taskbar!.update(
+              phase == LibraryRefreshPhase.scanning && action.progress < 1
+                  ? action.progress
+                  : null);
           _progress.add(action);
           notifyListeners();
         }
@@ -178,6 +189,8 @@ class LibraryRefreshTask extends ChangeNotifier {
         LOGGER.w('[library scan cleanup] $failure');
       }
       if (identical(active.value, this)) active.value = null;
+      _taskbar?.dispose();
+      _taskbar = null;
       unawaited(_progress.close());
       _completed.complete();
     }

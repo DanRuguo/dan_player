@@ -11,6 +11,7 @@ void main() {
       expect(value, const PlayerExperiencePreferences());
       expect(value.closeToTray, isFalse);
       expect(value.taskbarControls, isTrue);
+      expect(value.taskbarPlaybackProgress, isTrue);
       expect(value.desktopLyricVertical, isFalse);
       expect(value.exclusiveOutput, isFalse);
       expect(value.playbackRate, 1);
@@ -28,6 +29,7 @@ void main() {
     const value = PlayerExperiencePreferences(
       closeToTray: true,
       taskbarControls: false,
+      taskbarPlaybackProgress: false,
       springLyrics: false,
       desktopLyricVertical: true,
       playbackRate: 1.75,
@@ -68,6 +70,8 @@ void main() {
         {...value.toMap(), 'playbackRate': .75});
     expect(value.copyWith(closeToTray: false).toMap(),
         {...value.toMap(), 'closeToTray': false});
+    expect(value.copyWith(taskbarPlaybackProgress: false).toMap(),
+        {...value.toMap(), 'taskbarPlaybackProgress': false});
     expect(value.copyWith(springLyrics: true).toMap(),
         {...value.toMap(), 'springLyrics': true});
     expect(value.copyWith(desktopLyricVertical: false).toMap(),
@@ -129,6 +133,7 @@ void main() {
     final value = PlayerExperiencePreferences.fromMap(const {
       'closeToTray': 'true',
       'taskbarControls': 0,
+      'taskbarPlaybackProgress': 'false',
       'springLyrics': [],
       'desktopLyricVertical': 1,
       'exclusiveOutput': 'yes',

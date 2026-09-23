@@ -11,9 +11,12 @@ import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 class FullWidthSpectrum extends StatelessWidget {
-  const FullWidthSpectrum({super.key, this.height = 72.0});
+  const FullWidthSpectrum(
+      {super.key, this.height = 72.0, this.activity, this.shouldListen});
 
   final double height;
+  final Listenable? activity;
+  final bool Function(RenderingPreferences)? shouldListen;
 
   @override
   Widget build(BuildContext context) {
@@ -26,19 +29,44 @@ class FullWidthSpectrum extends StatelessWidget {
       samples: playback.frequencySpectrumStream,
       readLevels: () => playback.frequencySpectrumLevels,
       hidden: DesktopIntegration.instance.isHidden,
+      activity: activity,
+      shouldListen: shouldListen,
     );
   }
 }
 
 class LyricPageSpectrum extends StatelessWidget {
-  const LyricPageSpectrum({super.key, required this.height});
+  const LyricPageSpectrum({super.key, required this.height, this.coverVisible});
   final double height;
+  final ValueListenable<bool>? coverVisible;
+
+  bool _visible(RenderingPreferences preferences) =>
+      lyricSpectrumVisibleAt(preferences, LyricSpectrumPlacement.progress,
+          coverVisible: coverVisible?.value ?? true);
+
   @override
-  Widget build(BuildContext context) =>
-      RenderingPreferencesScope.of(context).lyricSpectrum
-          ? FullWidthSpectrum(height: height)
-          : const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    Widget buildSpectrum(BuildContext context) =>
+        _visible(RenderingPreferencesScope.of(context))
+            ? FullWidthSpectrum(
+                height: height, activity: coverVisible, shouldListen: _visible)
+            : const SizedBox.shrink();
+    return coverVisible == null
+        ? buildSpectrum(context)
+        : ValueListenableBuilder<bool>(
+            valueListenable: coverVisible!,
+            builder: (context, _, __) => buildSpectrum(context));
+  }
 }
+
+bool lyricSpectrumVisibleAt(
+        RenderingPreferences preferences, LyricSpectrumPlacement location,
+        {bool coverVisible = true}) =>
+    preferences.lyricSpectrum &&
+    (preferences.lyricSpectrumPlacement == LyricSpectrumPlacement.cover &&
+            coverVisible
+        ? location == LyricSpectrumPlacement.cover
+        : location == LyricSpectrumPlacement.progress);
 
 /// The real spectrum view, separated from the player singleton so rendering
 /// and subscription lifetimes can also be tested without opening native audio.
@@ -52,6 +80,9 @@ class FullWidthSpectrumView extends StatefulWidget {
     this.height = 72,
     this.maximumBars = 112,
     this.hidden,
+    this.coverRect,
+    this.activity,
+    this.shouldListen,
   }) : assert(height >= 0);
 
   final int maximumBars;
@@ -59,6 +90,9 @@ class FullWidthSpectrumView extends StatefulWidget {
   final List<double> Function() readLevels;
   final double height;
   final ValueListenable<bool>? hidden;
+  final Rect? coverRect;
+  final Listenable? activity;
+  final bool Function(RenderingPreferences)? shouldListen;
 
   @override
   State<FullWidthSpectrumView> createState() => _FullWidthSpectrumViewState();
@@ -74,7 +108,9 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
   bool _treeVisible = false;
   bool _mediaAllowsMotion = false;
   bool _enabled = false;
+  bool _attached = true;
   int _sourceGeneration = 0;
+  int _activationGeneration = 0;
 
   @override
   void initState() {
@@ -82,6 +118,7 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     widget.hidden?.addListener(_syncActivity);
+    widget.activity?.addListener(_syncActivity);
   }
 
   @override
@@ -108,6 +145,10 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
       oldWidget.hidden?.removeListener(_syncActivity);
       widget.hidden?.addListener(_syncActivity);
     }
+    if (!identical(oldWidget.activity, widget.activity)) {
+      oldWidget.activity?.removeListener(_syncActivity);
+      widget.activity?.addListener(_syncActivity);
+    }
     _syncActivity();
   }
 
@@ -115,23 +156,60 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
     if (!mounted) return;
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    final enabled = _mediaAllowsMotion &&
+    final preferences = _preferences?.value ?? const RenderingPreferences();
+    final enabled = _attached &&
+        (widget.shouldListen?.call(preferences) ?? true) &&
+        _mediaAllowsMotion &&
         !features.disableAnimations &&
         !features.reduceMotion &&
-        (_preferences?.value ?? const RenderingPreferences())
-            .allowsVisualUpdates(
+        preferences.allowsVisualUpdates(
           lifecycle: _lifecycle,
           treeVisible: _treeVisible,
           nativeHidden: widget.hidden?.value ?? false,
         );
     // Native hide and preference changes may arrive without another frame.
-    // Release/resume native FFT demand synchronously under the current policy.
-    _syncSubscription(enabled);
+    // Release native FFT demand synchronously under the current policy.
+    final activation = ++_activationGeneration;
+    if (enabled &&
+        widget.activity != null &&
+        !identical(_listeningTo, widget.samples)) {
+      // A responsive switch can retain both fading surfaces. Release all old
+      // owners first, then attach the new owner once, independent of listener
+      // registration order. This schedules no timer or animation frame.
+      _detach();
+      try {
+        _setLevels(widget.readLevels());
+      } catch (_) {
+        _setLevels(const []);
+      }
+      scheduleMicrotask(() {
+        if (mounted && activation == _activationGeneration) {
+          _syncSubscription(true);
+        }
+      });
+    } else {
+      _syncSubscription(enabled);
+    }
     if (_enabled != enabled) setState(() => _enabled = enabled);
   }
 
   @override
   void didChangeAccessibilityFeatures() => _syncActivity();
+
+  @override
+  void deactivate() {
+    _attached = false;
+    _activationGeneration++;
+    _syncSubscription(false);
+    super.deactivate();
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    _attached = true;
+    _syncActivity();
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -204,13 +282,22 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
           width: double.infinity,
           child: RepaintBoundary(
             child: CustomPaint(
-              painter: FrequencySpectrumPainter(
-                levels: _levels,
-                maximumBars: widget.maximumBars,
-                pixelRatio: MediaQuery.devicePixelRatioOf(context),
-                startColor: scheme.primary,
-                endColor: scheme.tertiary,
-              ),
+              painter: widget.coverRect == null
+                  ? FrequencySpectrumPainter(
+                      levels: _levels,
+                      maximumBars: widget.maximumBars,
+                      pixelRatio: MediaQuery.devicePixelRatioOf(context),
+                      startColor: scheme.primary,
+                      endColor: scheme.tertiary,
+                    )
+                  : CoverSpectrumPainter(
+                      levels: _levels,
+                      coverRect: widget.coverRect!,
+                      maximumBars: widget.maximumBars,
+                      pixelRatio: MediaQuery.devicePixelRatioOf(context),
+                      startColor: scheme.primary,
+                      endColor: scheme.tertiary,
+                    ),
             ),
           ),
         ),
@@ -222,6 +309,7 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.hidden?.removeListener(_syncActivity);
+    widget.activity?.removeListener(_syncActivity);
     _preferences?.removeListener(_syncActivity);
     _detach();
     _levels.dispose();
@@ -270,6 +358,9 @@ class FrequencySpectrumPainter extends CustomPainter {
     required this.endColor,
     this.pixelRatio = 1,
     this.maximumBars = 112,
+    this.fixedBarCount,
+    this.sampleStart = 0,
+    this.sampleEnd = 1,
   }) : super(repaint: levels);
 
   final ValueListenable<List<double>> levels;
@@ -277,6 +368,9 @@ class FrequencySpectrumPainter extends CustomPainter {
   final Color endColor;
   final double pixelRatio;
   final int maximumBars;
+  final int? fixedBarCount;
+  final double sampleStart;
+  final double sampleEnd;
   final _paint = Paint();
   Size? _geometrySize;
   List<_SpectrumBar> _bars = const [];
@@ -286,7 +380,9 @@ class FrequencySpectrumPainter extends CustomPainter {
     final frame = levels.value;
     if (frame.isEmpty) return 0;
     final safePosition = position.isFinite ? position.clamp(0.0, 1.0) : 0.0;
-    final scaled = safePosition * (frame.length - 1);
+    final scaled = (sampleStart + (sampleEnd - sampleStart) * safePosition)
+            .clamp(0.0, 1.0) *
+        (frame.length - 1);
     final left = scaled.floor();
     final right = math.min(left + 1, frame.length - 1);
     final fraction = scaled - left;
@@ -297,7 +393,8 @@ class FrequencySpectrumPainter extends CustomPainter {
   void _layoutBars(Size size) {
     if (size == _geometrySize) return;
     final count =
-        (size.width / 5 * maximumBars / 112).floor().clamp(1, maximumBars);
+        (fixedBarCount ?? (size.width / 5 * maximumBars / 112).floor())
+            .clamp(1, maximumBars);
     final gap = math.min(2.0, size.width / count * .4);
     final barWidth = (size.width - gap * (count - 1)) / count;
     _bars = List.generate(count, (index) {
@@ -353,8 +450,108 @@ class FrequencySpectrumPainter extends CustomPainter {
       !identical(oldDelegate.levels, levels) ||
       oldDelegate.startColor != startColor ||
       oldDelegate.maximumBars != maximumBars ||
+      oldDelegate.fixedBarCount != fixedBarCount ||
+      oldDelegate.sampleStart != sampleStart ||
+      oldDelegate.sampleEnd != sampleEnd ||
       oldDelegate.pixelRatio != pixelRatio ||
       oldDelegate.endColor != endColor;
+}
+
+/// Four bounded strips share one spectrum subscription and repaint listener.
+/// Each strip reuses the existing batched rounded-bar mesh; density is a total
+/// budget around the cover, never a separate budget per edge.
+class CoverSpectrumPainter extends CustomPainter {
+  CoverSpectrumPainter({
+    required this.levels,
+    required this.coverRect,
+    required this.startColor,
+    required this.endColor,
+    this.pixelRatio = 1,
+    this.maximumBars = 112,
+  }) : super(repaint: levels);
+
+  final ValueListenable<List<double>> levels;
+  final Rect coverRect;
+  final Color startColor;
+  final Color endColor;
+  final double pixelRatio;
+  final int maximumBars;
+  Size? _layoutSize;
+  List<FrequencySpectrumPainter> _edges = const [];
+
+  @visibleForTesting
+  int get barCount => _edges.fold(0, (sum, edge) => sum + edge.fixedBarCount!);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty ||
+        !size.width.isFinite ||
+        !size.height.isFinite ||
+        !coverRect.isFinite ||
+        coverRect.isEmpty) {
+      return;
+    }
+    final inset = math.min(16.0, coverRect.shortestSide * .05);
+    final width = coverRect.width - inset * 2;
+    final height = coverRect.height - inset * 2;
+    final gap = math.min(4.0, size.shortestSide * .012);
+    final room = [
+      coverRect.top - gap,
+      size.width - coverRect.right - gap,
+      size.height - coverRect.bottom - gap,
+      coverRect.left - gap,
+    ];
+    if (width <= 0 || height <= 0 || room.any((space) => space <= 0)) return;
+    if (_layoutSize != size) {
+      final budget = maximumBars.clamp(4, 112);
+      final count =
+          ((width + height) * 2 / 5 * budget / 112).floor().clamp(4, budget);
+      _edges = List.generate(4, (edge) {
+        final edgeCount = count ~/ 4 + (edge < count % 4 ? 1 : 0);
+        return FrequencySpectrumPainter(
+            levels: levels,
+            startColor: startColor,
+            endColor: endColor,
+            pixelRatio: pixelRatio,
+            maximumBars: edgeCount,
+            fixedBarCount: edgeCount,
+            sampleStart: edge / 4,
+            sampleEnd: (edge + 1) / 4);
+      }, growable: false);
+      _layoutSize = size;
+    }
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    for (var edge = 0; edge < 4; edge++) {
+      canvas.save();
+      final amplitude = room[edge];
+      switch (edge) {
+        case 0:
+          canvas.translate(coverRect.left + inset, 0);
+        case 1:
+          canvas.translate(size.width, coverRect.top + inset);
+          canvas.rotate(math.pi / 2);
+        case 2:
+          canvas.translate(coverRect.right - inset, size.height);
+          canvas.rotate(math.pi);
+        case 3:
+          canvas.translate(0, coverRect.bottom - inset);
+          canvas.rotate(-math.pi / 2);
+      }
+      _edges[edge].paint(canvas, Size(edge.isEven ? width : height, amplitude));
+      canvas.restore();
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(CoverSpectrumPainter oldDelegate) =>
+      oldDelegate.levels != levels ||
+      oldDelegate.coverRect != coverRect ||
+      oldDelegate.startColor != startColor ||
+      oldDelegate.endColor != endColor ||
+      oldDelegate.pixelRatio != pixelRatio ||
+      oldDelegate.maximumBars != maximumBars;
 }
 
 class _SpectrumBar {

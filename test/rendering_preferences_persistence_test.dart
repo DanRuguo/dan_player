@@ -47,7 +47,11 @@ void main() {
   test('real settings file round trips both choices without window IO',
       () async {
     for (final pause in [false, true]) {
-      final value = RenderingPreferences(pauseWhenHidden: pause);
+      final value = RenderingPreferences(
+          pauseWhenHidden: pause,
+          lyricSpectrumPlacement: pause
+              ? LyricSpectrumPlacement.cover
+              : LyricSpectrumPlacement.progress);
       AppSettings.instance.rendering.value = value;
       await AppSettings.instance
           .saveSettings(throwOnError: true, captureWindowSize: false);
@@ -121,6 +125,7 @@ void main() {
       'compactSpectrum': true,
       'surfaceBlur': true,
       'spectrumDensity': 'high',
+      'lyricSpectrumPlacement': 'progress',
       'frameRate': {'mode': 'display', 'fps': 60},
       'animations': {
         'startup': true,
