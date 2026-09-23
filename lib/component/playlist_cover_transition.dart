@@ -428,7 +428,15 @@ class _PlaylistCoverTransitionHostState
         !_starting &&
         (notification is ScrollStartNotification ||
             notification is ScrollUpdateNotification)) {
-      _cancel();
+      if (_capture case final capture?) {
+        // Scrolling invalidates the source geometry, not the user's selected
+        // view. Empty the capture so its completion applies that selection
+        // without a flight. A newer selection/explicit cancel still invalidates
+        // its generation and cannot be overwritten by this pending request.
+        capture.dispose();
+      } else {
+        _cancel();
+      }
     }
     return false;
   }

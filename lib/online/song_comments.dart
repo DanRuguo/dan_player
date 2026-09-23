@@ -474,6 +474,19 @@ class SongCommentsService {
     ));
   }
 
+  /// Opening/rebuilding a dialog never grants network access. A missing or
+  /// unreadable snapshot stays missing until a deliberate refresh/tab action.
+  Future<SongCommentsPage?> readCachedPage({
+    required SongCommentsTarget target,
+    required SongCommentSort sort,
+    SongCommentsCancellation? cancellation,
+  }) async {
+    cancellation?.check();
+    final result = await _cache?.read(target, sort, 0);
+    cancellation?.check();
+    return result;
+  }
+
   Future<SongCommentsPage> loadPage({
     required SongCommentsTarget target,
     required SongCommentSort sort,

@@ -2,9 +2,9 @@
 
 <p>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/images/RCE_logo_white.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/images/RCE_logo_transparent.png">
-    <img src="assets/images/RCE_logo_transparent.png" alt="RCE brand logo" width="128">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/player-icon-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/player-icon-light.png">
+    <img src="docs/images/player-icon-light.png" alt="Dan Player application icon" width="128">
   </picture>
 </p>
 
@@ -109,6 +109,9 @@ Online music and custom sources complement local listening. Custom services prov
 
 ### New in 26.0.5
 
+- **Search history:** the search box sits higher, with deduplicated, centered history chips that wrap and hide older entries in small windows. Click to search again; right-click or long-press, then click × to delete.
+- **Lyrics and comments:** automatic lyric loading and opening comments read local content and caches. Online requests require a manual lyric search, comment refresh, loading more comments, or a comment category/source change. The refresh icon spins during updates, with a shared result bubble on success or failure.
+- **Playback interaction:** improved progress-bar multitouch, cancelled drags and recovery after a failed seek. An old drag cannot seek a new playback session. Lyric dragging rebuilds less content, and playlist view changes survive scrolling during transition capture.
 - **Category tiles:** rectangular artwork supports 1×1, 2×1, 1×2 and 2×2 sizes, custom drag ordering and optional gap filling. Captions sit directly on the artwork and choose light or dark text from its colors.
 - **Backup and restore:** choose local music by folder, library index, playlists, statistics, settings and cached resources for a single `.bak` file, with optional password encryption. Choose folders and data again when restoring, or select everything at once. Keep your password safe. Each encrypted backup must be smaller than about 64 GiB; split larger collections by folder.
 - **Performance and onboarding:** switch to power saving or high performance, then restore the previous related settings when turning the mode off. Refresh-rate and spectrum-density settings, a first-use guide and a shorter splash sequence are also available.
@@ -127,15 +130,15 @@ Playlist view controls, the volume panel, menus, native blur switching and windo
 
 ### Find a track and focus on its lyrics
 
-| Track search | Mini player & lyrics |
+| Search & history | Mini player & lyrics |
 | --- | --- |
-| ![Track search in the Chinese interface with fictional tracks](docs/images/feature-search-dark.png) | ![Mini player and lyrics with fictional demonstration content](docs/images/feature-mini-lyrics-dark.png) |
+| ![Search page content rendered from Flutter widgets, with centered history chips in English](docs/images/search-history-en.png) | ![Mini player and lyrics with fictional demonstration content](docs/images/feature-mini-lyrics-dark.png) |
 
 ### Rediscover your library through listening history
 
 ![Music statistics and rankings in the Chinese interface with fictional data](docs/images/statistics-rankings-light.png)
 
-<sub>These existing repository images render production Flutter widgets with fictional tracks and isolated data. They illustrate the interface, not live audio or native desktop-effects testing. The screenshots use the Chinese interface; the app also offers English, Japanese and Korean. See the <a href="docs/images/README.md">full gallery</a> for more light/dark themes, window sizes and feature previews.</sub>
+<sub>These images render actual Flutter widgets with isolated demonstration data. The search image shows the English page content area and example history, not a complete native window; other examples mostly use the Chinese interface. They illustrate layout and features, not live audio or native desktop effects. See the <a href="docs/images/README.md">full gallery</a> for more themes, window sizes and all four interface languages.</sub>
 
 ### Category tiles and getting started
 

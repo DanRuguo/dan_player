@@ -13,6 +13,7 @@ import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/library_mutation_gate.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/library/track_resume_store.dart';
+import 'package:dan_player/search/search_history.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/page/settings_page/backup_selection_dialog.dart';
@@ -127,6 +128,7 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
         AppPreference.instance.save(),
         PlaybackStatistics.instance.flush(),
         TrackResumeStore.flushIfInitialized(),
+        SearchHistoryStore.instance.flush(),
       ]);
 
   Future<void> _export() async {

@@ -94,8 +94,12 @@ BackupComponent backupComponentForPath(String relative) {
   final normalized = relative.replaceAll('\\', '/').toLowerCase();
   final name = normalized.split('/').last.replaceFirst(RegExp(r'\.bak$'), '');
   if (name.startsWith('playback_statistics')) return BackupComponent.statistics;
-  if (const {'settings.json', 'app_preference.json', 'eq_presets.json'}
-      .contains(name)) return BackupComponent.settings;
+  if (const {
+    'settings.json',
+    'app_preference.json',
+    'eq_presets.json',
+    'search_history.json',
+  }.contains(name)) return BackupComponent.settings;
   if (const {
     'playlists.json',
     'collections.json',

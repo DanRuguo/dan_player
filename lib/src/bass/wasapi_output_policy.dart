@@ -24,6 +24,16 @@ class WasapiOutputMode {
   void confirmActive() => preferred = active;
 }
 
+/// Transport commands received during an asynchronous output replacement also
+/// apply to its fallback source. With no command, retain the observed state.
+class OutputPlaybackIntent {
+  bool? _requestedPlaying;
+
+  void request(bool playing) => _requestedPlaying = playing;
+
+  bool resolve(bool observedPlaying) => _requestedPlaying ?? observedPlaying;
+}
+
 /// Flush old device samples only for an explicit seek. Ordinary pause keeps
 /// its buffered tail. A rejected seek still restores the previous play state;
 /// seeking a paused stream must never resume it.

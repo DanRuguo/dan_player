@@ -14,6 +14,8 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/page/search_page/search_page.dart';
 import 'package:dan_player/search/audio_search_index.dart';
+import 'package:dan_player/search/search_history.dart';
+import 'package:dan_player/page/search_page/search_history_capsules.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:go_router/go_router.dart';
@@ -24,10 +26,12 @@ class SearchResultPage extends StatefulWidget {
   const SearchResultPage(
       {super.key,
       required this.searchResult,
+      this.history,
       this.search = UnionSearchResult.search});
 
   final UnionSearchResult searchResult;
   final LibrarySearch search;
+  final SearchHistoryStore? history;
 
   @override
   State<SearchResultPage> createState() => _SearchResultPageState();
@@ -96,6 +100,8 @@ class _SearchResultPageState extends State<SearchResultPage> {
       _pendingQuery = value;
       _error = null;
     });
+    unawaited(rememberSearch(
+        context, widget.history ?? SearchHistoryStore.instance, value));
     try {
       final result =
           await widget.search(value, onlineCancellation: cancellation);

@@ -2,9 +2,9 @@
 
 <p>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/images/RCE_logo_white.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/images/RCE_logo_transparent.png">
-    <img src="assets/images/RCE_logo_transparent.png" alt="RCE 品牌标志" width="128">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/player-icon-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/player-icon-light.png">
+    <img src="docs/images/player-icon-light.png" alt="Dan Player 播放器图标" width="128">
   </picture>
 </p>
 
@@ -112,6 +112,9 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 ### 26.0.5 新增体验
 
+- **搜索与历史：** 搜索框上移，历史胶囊自动去重、居中换行，窄窗自动隐藏较早记录。点击重搜；右键或长按后，再点击 × 删除。
+- **歌词与评论：** 自动加载歌词和打开评论仅读取本地内容与缓存；手动搜词、更新评论、加载更多或切换评论分类／来源时才联网。评论更新期间图标旋转，完成或失败显示统一气泡。
+- **播放交互：** 改进进度条多点触控、拖动取消与失败恢复；切换播放会话后旧拖动不会误跳转。减少歌词拖动时的重建，保留歌单追踪捕获期间的视图切换。
 - **分类磁贴：** 矩形封面支持 1×1、2×1、1×2、2×2，自定义拖动排序和可选自动填隙；文字直接显示在封面内，按图像明暗自动选择文字颜色。
 - **备份与恢复：** 将本地音乐按文件夹、曲库索引、歌单、统计、设置与缓存资源按需保存到一个 `.bak` 文件，可选密码加密；恢复时可重新选择文件夹和资料项目，也可一键全选。请妥善保存密码；单个加密备份须小于约 64 GiB，更大的收藏可分文件夹备份。
 - **性能与引导：** 一键省电或高性能，关闭后恢复之前的相关设置；支持刷新率与频谱档位设置，首次使用提供功能引导，开屏等待更短。
@@ -130,15 +133,15 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 ### 找到想听的歌曲，专注眼前的歌词
 
-| 歌曲搜索 | 迷你播放器与歌词 |
+| 搜索页与历史 | 迷你播放器与歌词 |
 | --- | --- |
-| ![歌曲搜索界面，使用虚构曲目](docs/images/feature-search-dark.png) | ![迷你播放器与歌词，使用虚构演示内容](docs/images/feature-mini-lyrics-dark.png) |
+| ![搜索页内容区域组件渲染：居中历史胶囊与强调色删除状态](docs/images/search-history-zh.png) | ![迷你播放器与歌词，使用虚构演示内容](docs/images/feature-mini-lyrics-dark.png) |
 
 ### 从收听记录重新认识自己的曲库
 
 ![音乐统计与歌曲排行，使用虚构演示数据](docs/images/statistics-rankings-light.png)
 
-<sub>图片均复用仓库内的生产控件渲染资源，使用虚构曲目与隔离资料；用于展示界面，不代表实时音频或原生桌面效果测试。更多明暗主题、宽窄窗口和功能示例见 <a href="docs/images/README.md">界面图库</a>。</sub>
+<sub>图片使用实际 Flutter 控件与隔离演示数据；搜索图展示页面内容区域和示例历史，不是完整原生窗口截图。图片用于展示布局与功能，不代表实时音频或原生桌面效果测试。更多明暗主题、宽窄窗口和四语言示例见 <a href="docs/images/README.md">界面图库</a>。</sub>
 
 ### 分类磁贴与首次迁移
 

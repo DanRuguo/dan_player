@@ -232,6 +232,8 @@ void main() {
     await tester.pumpWidget(_host(SongCommentsDialog(
         audio: audio, service: SongCommentsService(transport: transport))));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('song-comments-refresh')));
+    await tester.pumpAndSettle();
     final state = tester.state(find.byType(SongCommentsDialog));
     for (final language in [UiLanguage.en, UiLanguage.ja, UiLanguage.ko]) {
       await _language(tester, language);
@@ -263,6 +265,8 @@ void main() {
     await tester.pumpWidget(_host(SongCommentsDialog(
         audio: commentAudio(),
         service: SongCommentsService(transport: transport))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('song-comments-refresh')));
     await tester.pumpAndSettle();
     for (final language in [UiLanguage.en, UiLanguage.ja, UiLanguage.ko]) {
       await _language(tester, language);

@@ -15,14 +15,13 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/foundation.dart';
 
 /// A cached online result can win over local lyrics when the user selected
-/// online-first, but neither choice starts a network search while a usable
-/// local or cached result already exists.
+/// online-first. Playback and document changes only read saved sources; even a
+/// complete cache miss must wait for an explicit user search before networking.
 @visibleForTesting
 Future<Lyric?> resolveAutomaticLyricSources({
   required bool localFirst,
   required Future<Lyric?> Function() local,
   required Future<Lyric?> Function() cachedOnline,
-  required Future<Lyric?> Function() searchOnline,
   bool Function()? stillCurrent,
 }) async {
   final savedSources =
@@ -32,8 +31,7 @@ Future<Lyric?> resolveAutomaticLyricSources({
     final result = await readSaved();
     if (result != null) return result;
   }
-  if (stillCurrent?.call() == false) return null;
-  return searchOnline();
+  return null;
 }
 
 /// Editable tags and provider preferences must not turn an existing saved
@@ -280,21 +278,10 @@ class LyricService extends ChangeNotifier {
         legacyIdentity: () => _legacyOnlineCacheIdentity(audio, source: source),
       );
 
-  Future<Lyric?> _cachedOnline(Audio audio, Future<Lyric?> Function() fetch,
-          {LyricSource? source, bool refresh = false}) =>
-      OnlineLyricCache.instance.resolve(
-        onlineLyricCacheIdentity(audio, source: source),
-        fetch,
-        refresh: refresh,
-      );
-
-  Future<Lyric?> _resolveOnline(Audio audio, {bool refresh = false}) async {
-    if (!refresh) {
-      final cached = await _readCachedOnline(audio);
-      if (cached != null) return cached;
-    }
+  Future<Lyric?> _searchOnline(Audio audio) async {
     if (!_isPlaying(audio)) return null;
-    return _cachedOnline(audio, () async {
+    return OnlineLyricCache.instance.resolve(onlineLyricCacheIdentity(audio),
+        () async {
       if (!_isPlaying(audio)) return null;
       final direct = switch (audio.onlineProvider) {
         "qq" => await getOnlineLyric(
@@ -304,7 +291,7 @@ class LyricService extends ChangeNotifier {
       };
       if (!_isPlaying(audio)) return direct;
       return direct ?? await getMostMatchedLyric(audio);
-    }, refresh: refresh);
+    }, refresh: true);
   }
 
   Future<Lyric?> _getLyricDefault(bool localFirst) async {
@@ -314,15 +301,13 @@ class LyricService extends ChangeNotifier {
     final nowPlaying = _getNowPlaying();
     if (nowPlaying == null) return Future.value(null);
 
-    if (nowPlaying.isOnline) return _resolveOnline(nowPlaying);
+    if (nowPlaying.isOnline) return _readCachedOnline(nowPlaying);
 
     return resolveAutomaticLyricSources(
       localFirst: localFirst,
       local: () => Lrc.fromAudioPath(nowPlaying),
       cachedOnline: () => _readCachedOnline(nowPlaying),
       stillCurrent: () => _isPlaying(nowPlaying),
-      searchOnline: () =>
-          _disposed ? Future<Lyric?>.value(null) : _resolveOnline(nowPlaying),
     );
   }
 
@@ -378,19 +363,6 @@ class LyricService extends ChangeNotifier {
           cachedOnline: () =>
               _readCachedOnline(nowPlaying, source: lyricSource),
           local: () => Lrc.fromAudioPath(nowPlaying),
-          searchOnline: () => _disposed
-              ? Future<Lyric?>.value(null)
-              : _cachedOnline(
-                  nowPlaying,
-                  () => getOnlineLyric(
-                    qqSongId: lyricSource.qqSongId,
-                    qqSongMid: lyricSource.qqSongMid,
-                    kugouSongHash: lyricSource.kugouSongHash,
-                    neteaseSongId: lyricSource.neteaseSongId,
-                    lrclibId: lyricSource.lrclibId,
-                  ),
-                  source: lyricSource,
-                ),
         );
       }
     }
@@ -426,7 +398,7 @@ class LyricService extends ChangeNotifier {
     if (nowPlaying == null) return;
 
     // This is an explicit re-search, unlike the automatic playback lookup.
-    final raw = _resolveOnline(nowPlaying, refresh: true);
+    final raw = _searchOnline(nowPlaying);
     _useExplicitFuture(nowPlaying, raw);
   }
 

@@ -63,8 +63,13 @@ class MiniNowPlaying extends StatelessWidget {
                   final playback = PlayService.instance.playbackService;
                   final lyrics = PlayService.instance.lyricService;
                   return ListenableBuilder(
-                    listenable: Listenable.merge(
-                        [playback, playback.isBuffering, lyrics]),
+                    listenable: Listenable.merge([
+                      playback,
+                      playback.isBuffering,
+                      playback.resolvingAudioPath,
+                      playback.isChangingOutput,
+                      lyrics,
+                    ]),
                     child: const _NowPlayingForeground(),
                     builder: (context, child) => RectangleProgressIndicator(
                       size: Size(constraints.maxWidth, constraints.maxHeight),
@@ -73,12 +78,12 @@ class MiniNowPlaying extends StatelessWidget {
                       hidden: DesktopIntegration.instance.isHidden,
                       trackIdentity: (
                         playback.nowPlaying?.path,
-                        lyrics.currLyricFuture
+                        playback.playbackSessionToken
                       ),
-                      onSeek: playback.nowPlaying == null ||
-                              playback.isBuffering.value
-                          ? null
-                          : playback.seek,
+                      onSeek:
+                          playback.nowPlaying == null || !playback.canEditQueue
+                              ? null
+                              : playback.seek,
                       child: child!,
                     ),
                   );

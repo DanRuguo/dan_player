@@ -9,6 +9,7 @@ import 'package:dan_player/page/search_page/search_result_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'support/search_history_fixture.dart';
 
 UnionSearchResult emptyResult(String query) => UnionSearchResult(query)
   ..online = Future.value(const OnlineSearchResponse(tracks: [], failures: {}));
@@ -32,7 +33,9 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(result.online, same(provider));
     await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: SearchResultPage(searchResult: result))));
+        home: Scaffold(
+            body: SearchResultPage(
+                history: MemorySearchHistory(), searchResult: result))));
     await tester.pumpAndSettle();
     expect(find.textContaining(onlineSourcesDisabledMessage), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
@@ -48,11 +51,14 @@ void main() {
       GoRoute(
         path: '/',
         builder: (_, __) => Scaffold(
-          body: SearchPage(search: (query, {onlineCancellation}) {
-            expect(requests.containsKey(query), isFalse);
-            cancellations[query] = onlineCancellation!;
-            return (requests[query] = Completer<UnionSearchResult>()).future;
-          }),
+          body: SearchPage(
+              history: MemorySearchHistory(),
+              search: (query, {onlineCancellation}) {
+                expect(requests.containsKey(query), isFalse);
+                cancellations[query] = onlineCancellation!;
+                return (requests[query] = Completer<UnionSearchResult>())
+                    .future;
+              }),
         ),
       ),
       GoRoute(
@@ -101,9 +107,12 @@ void main() {
         data: const MediaQueryData(textScaler: TextScaler.linear(2)),
         child: child!,
       ),
-      home: Scaffold(body: SearchPage(search: (_, {onlineCancellation}) async {
-        throw StateError('index unavailable');
-      })),
+      home: Scaffold(
+          body: SearchPage(
+              history: MemorySearchHistory(),
+              search: (_, {onlineCancellation}) async {
+                throw StateError('index unavailable');
+              })),
     ));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'demo');
@@ -127,6 +136,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
       body: SearchResultPage(
+          history: MemorySearchHistory(),
           searchResult: old,
           search: (_, {onlineCancellation}) => pending.future),
     )));

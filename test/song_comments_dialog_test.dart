@@ -110,6 +110,13 @@ Future<void> _launch(
   await tester.tap(find.byKey(_open));
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
+  // These existing request/layout scenarios begin with an explicit refresh;
+  // merely opening the dialog now only reads the local snapshot.
+  if (find.text('暂无本地评论，请点击右上角更新。').evaluate().isNotEmpty) {
+    await tester.tap(find.byKey(_refresh));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+  }
 }
 
 Finder _list() => find.byType(ListView);
@@ -195,7 +202,7 @@ void main() {
   });
 
   testWidgets(
-      'opening is user initiated and initially requests only hot comments',
+      'opening waits for explicit refresh before requesting hot comments',
       (tester) async {
     final transport = FakeCommentsTransport(
         (request) => neteaseComments([neteaseComment(1)], sort: request.sort));
@@ -204,6 +211,10 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(transport.requests, isEmpty);
     await tester.tap(find.byKey(_open));
+    await tester.pumpAndSettle();
+    expect(transport.requests, isEmpty);
+    expect(find.text('暂无本地评论，请点击右上角更新。'), findsOneWidget);
+    await tester.tap(find.byKey(_refresh));
     await tester.pumpAndSettle();
     expect(transport.requests, hasLength(1));
     expect(transport.requests.single.sort, SongCommentSort.hot);
@@ -354,8 +365,12 @@ void main() {
     await tester.pumpWidget(
         _app(service, direct: true, audio: commentAudio(id: '123')));
     await tester.pump();
+    await tester.tap(find.byKey(_refresh));
+    await tester.pump();
     await tester.pumpWidget(
         _app(service, direct: true, audio: commentAudio(id: '456')));
+    await tester.pump();
+    await tester.tap(find.byKey(_refresh));
     await tester.pumpAndSettle();
     expect(transport.requests.first.cancellation.isCancelled, isTrue);
     old.complete(neteaseComments([neteaseComment(123)]));

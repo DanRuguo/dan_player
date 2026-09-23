@@ -40,7 +40,6 @@ void main() {
           calls++;
           return saved.future;
         },
-        searchOnline: () async => throw StateError('stale network search'),
         stillCurrent: () => current,
       );
       current = false;

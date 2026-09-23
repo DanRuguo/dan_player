@@ -56,6 +56,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   bool _disposed = false;
   bool _dragging = false;
   bool _dragCandidate = false;
+  int? _seekPointer;
   bool _hoveringBoundary = false;
   bool _suppressHoverUntilExit = false;
   bool _pointerFocus = false;
@@ -171,6 +172,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
     }
     _syncActivity();
     if (oldWidget.trackIdentity != widget.trackIdentity) {
+      _seekPointer = null;
       _dragCandidate = false;
       _dragging = false;
       _dragIdentity = null;
@@ -203,6 +205,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   }
 
   void _cancelSeek() {
+    _seekPointer = null;
     _dragCandidate = false;
     _dragging = false;
     _dragIdentity = null;
@@ -218,20 +221,37 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
     _dragging = false;
     _dragCandidate = false;
     _dragIdentity = null;
-    final previousFraction = _latestFraction;
     try {
       if (valid) {
-        _latestFraction = progress.value;
-        widget.onSeek!(progress.value * _length);
+        _applySeek(progress.value);
       } else {
         progress.value = _latestFraction;
       }
-    } catch (_) {
-      _latestFraction = previousFraction;
-      progress.value = previousFraction;
-      rethrow;
     } finally {
       _finishPointerHint();
+    }
+  }
+
+  void _applySeek(double fraction) {
+    final previousFraction = _latestFraction;
+    _latestFraction = fraction.clamp(0.0, 1.0);
+    progress.value = _latestFraction;
+    try {
+      widget.onSeek!(_latestFraction * _length);
+      // PlaybackService reports native failures itself. A normal return is
+      // therefore not proof of success, especially while paused (no next tick).
+      // Read back sample rounding as well before the next keyboard adjustment.
+      final actual = widget.readPosition?.call();
+      if (!_disposed && actual != null) {
+        _latestFraction = _fraction(actual);
+        progress.value = _latestFraction;
+      }
+    } catch (_) {
+      if (!_disposed) {
+        _latestFraction = previousFraction;
+        progress.value = previousFraction;
+      }
+      rethrow;
     }
   }
 
@@ -298,10 +318,8 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   void _seekByKeyboard(double fraction) {
     if (widget.onSeek == null || _length == 0) return;
     _cancelSeek();
-    _latestFraction = fraction.clamp(0.0, 1.0);
-    progress.value = _latestFraction;
     try {
-      widget.onSeek!(_latestFraction * _length);
+      _applySeek(fraction);
     } finally {
       _pointerFocus = false;
       _keyboardFocus = _seekFocus.hasPrimaryFocus;
@@ -356,10 +374,12 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
             // The existing colour boundary is the handle. Keeping recognition on
             // the parent (not an overlay) lets every transport button still win a
             // tap, even when the moving boundary happens to cross that button.
-            onPointerDown: (event) => _dragCandidate =
-                event.buttons == kPrimaryButton &&
-                    _atBoundary(event.localPosition.dx),
-            onPointerCancel: (_) => _cancelSeek(),
+            onPointerUp: (event) {
+              if (_seekPointer == event.pointer) _seekPointer = null;
+            },
+            onPointerCancel: (event) {
+              if (_seekPointer == event.pointer) _cancelSeek();
+            },
             child: RawGestureDetector(
               excludeFromSemantics: true,
               gestures: {
@@ -368,8 +388,19 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
                       _BoundaryDragRecognizer>(
                     () => _BoundaryDragRecognizer(debugOwner: this),
                     (recognizer) {
-                      recognizer.acceptsDown =
-                          (event) => _atBoundary(event.localPosition.dx);
+                      recognizer.acceptsDown = (event) {
+                        // The finger that acquires the boundary owns it until
+                        // release. A second contact must neither move its
+                        // preview nor cancel it when that contact is lost.
+                        if (!_active ||
+                            _seekPointer != null ||
+                            !_atBoundary(event.localPosition.dx)) {
+                          return false;
+                        }
+                        _seekPointer = event.pointer;
+                        _dragCandidate = true;
+                        return true;
+                      };
                       recognizer.onStart = (details) {
                         _beginSeek();
                         _seekAt(details.localPosition.dx);
@@ -455,11 +486,17 @@ class _BoundaryDragRecognizer extends HorizontalDragGestureRecognizer {
   @override
   bool isPointerAllowed(PointerEvent event) =>
       event is PointerDownEvent &&
-      acceptsDown?.call(event) == true &&
-      super.isPointerAllowed(event);
+      super.isPointerAllowed(event) &&
+      acceptsDown?.call(event) == true;
 
   @override
   bool isPointerPanZoomAllowed(PointerPanZoomStartEvent event) => false;
+
+  @override
+  void handleNonAllowedPointer(PointerDownEvent event) {
+    // OneSequenceGestureRecognizer rejects every pending pointer by default.
+    // Ignoring a second contact must not reject the first finger's arena.
+  }
 
   @override
   bool hasSufficientGlobalDistanceToAccept(

@@ -17,9 +17,9 @@ class DanPlayerScrollBehavior extends AppScrollBehavior {
       };
 }
 
-/// Observes a left-edge touch swipe without entering Flutter's gesture arena,
-/// so vertical lists and sliders keep their normal gestures.
-class TouchEdgeSwipe extends StatefulWidget {
+/// Left-edge navigation competes with the child's gesture recognizers, so a
+/// slider, selection, or accepted long press cannot also navigate on release.
+class TouchEdgeSwipe extends StatelessWidget {
   const TouchEdgeSwipe({
     super.key,
     required this.child,
@@ -30,79 +30,12 @@ class TouchEdgeSwipe extends StatefulWidget {
   final VoidCallback onSwipeRight;
 
   @override
-  State<TouchEdgeSwipe> createState() => _TouchEdgeSwipeState();
-}
-
-class _TouchEdgeSwipeState extends State<TouchEdgeSwipe> {
-  int? _pointer;
-  Offset? _start;
-  Offset? _last;
-  bool? _horizontal;
-
-  bool _isDirectTouch(PointerDeviceKind kind) =>
-      kind == PointerDeviceKind.touch ||
-      kind == PointerDeviceKind.stylus ||
-      kind == PointerDeviceKind.invertedStylus;
-
-  void _down(PointerDownEvent event) {
-    if (_pointer != null || !_isDirectTouch(event.kind)) return;
-    if (event.localPosition.dx > 32.0) return;
-    _pointer = event.pointer;
-    _start = event.localPosition;
-    _last = event.localPosition;
-    _horizontal = null;
-  }
-
-  void _move(PointerMoveEvent event) {
-    if (event.pointer != _pointer) return;
-    final start = _start;
-    if (start == null) return;
-    final delta = event.localPosition - start;
-    if (_horizontal == null && delta.distance >= 14.0) {
-      _horizontal = delta.dx > 0 && delta.dx.abs() > delta.dy.abs() * 1.25;
-    }
-    if (_horizontal == true) _last = event.localPosition;
-  }
-
-  void _reset() {
-    _pointer = null;
-    _start = null;
-    _last = null;
-    _horizontal = null;
-  }
-
-  void _finish(PointerUpEvent event) {
-    if (event.pointer != _pointer) return;
-    final start = _start;
-    final last = _last;
-    final horizontal = _horizontal;
-    _reset();
-    if (start == null || last == null) return;
-    final delta = last - start;
-    if (horizontal == true &&
-        delta.dx >= 88.0 &&
-        delta.dx.abs() > delta.dy.abs() * 1.35) {
-      widget.onSwipeRight();
-    }
-  }
-
-  void _cancel(PointerCancelEvent event) {
-    if (event.pointer == _pointer) _reset();
-  }
-
-  @override
-  Widget build(BuildContext context) => Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: _down,
-        onPointerMove: _move,
-        onPointerUp: _finish,
-        onPointerCancel: _cancel,
-        child: widget.child,
-      );
+  Widget build(BuildContext context) => _TouchSwipeSurface(
+      edgeOnly: true, onSwipe: (_) => onSwipeRight(), child: child);
 }
 
 /// Horizontal direct-touch swipe for previous/next on the immersive player.
-class TouchTrackSwipe extends StatefulWidget {
+class TouchTrackSwipe extends StatelessWidget {
   const TouchTrackSwipe({
     super.key,
     required this.child,
@@ -115,73 +48,137 @@ class TouchTrackSwipe extends StatefulWidget {
   final VoidCallback onNext;
 
   @override
-  State<TouchTrackSwipe> createState() => _TouchTrackSwipeState();
+  Widget build(BuildContext context) => _TouchSwipeSurface(
+      edgeOnly: false,
+      onSwipe: (distance) => distance < 0 ? onNext() : onPrevious(),
+      child: child);
 }
 
-class _TouchTrackSwipeState extends State<TouchTrackSwipe> {
-  int? _pointer;
+class _TouchSwipeSurface extends StatelessWidget {
+  const _TouchSwipeSurface(
+      {required this.edgeOnly, required this.onSwipe, required this.child});
+
+  final bool edgeOnly;
+  final ValueChanged<double> onSwipe;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => RawGestureDetector(
+        behavior: HitTestBehavior.translucent,
+        gestures: {
+          _DirectTouchSwipeRecognizer:
+              GestureRecognizerFactoryWithHandlers<_DirectTouchSwipeRecognizer>(
+                  _DirectTouchSwipeRecognizer.new,
+                  (recognizer) => recognizer
+                    ..edgeOnly = edgeOnly
+                    ..onSwipe = onSwipe),
+        },
+        child: child,
+      );
+}
+
+class _DirectTouchSwipeRecognizer extends OneSequenceGestureRecognizer {
+  _DirectTouchSwipeRecognizer()
+      : super(
+          supportedDevices: const {
+            PointerDeviceKind.touch,
+            PointerDeviceKind.stylus,
+            PointerDeviceKind.invertedStylus,
+          },
+          allowedButtonsFilter: (buttons) => buttons == kPrimaryButton,
+        );
+
+  bool edgeOnly = false;
+  ValueChanged<double>? onSwipe;
+  final _pointers = <int>{};
+  int? _primary;
   Offset? _start;
   Offset? _last;
   bool? _horizontal;
+  bool _blocked = false;
+  bool _won = false;
 
-  bool _isDirectTouch(PointerDeviceKind kind) =>
-      kind == PointerDeviceKind.touch ||
-      kind == PointerDeviceKind.stylus ||
-      kind == PointerDeviceKind.invertedStylus;
+  bool _reachedAction(double distance) =>
+      edgeOnly ? distance >= 88 : distance.abs() >= 84;
 
-  void _down(PointerDownEvent event) {
-    if (_pointer != null || !_isDirectTouch(event.kind)) return;
-    _pointer = event.pointer;
-    _start = event.localPosition;
-    _last = event.localPosition;
-    _horizontal = null;
-  }
-
-  void _move(PointerMoveEvent event) {
-    if (event.pointer != _pointer) return;
-    final start = _start;
-    if (start == null) return;
-    final delta = event.localPosition - start;
-    if (_horizontal == null && delta.distance >= 14.0) {
-      _horizontal = delta.dx.abs() > delta.dy.abs() * 1.25;
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    _pointers.add(event.pointer);
+    if (_pointers.length > 1 || (edgeOnly && event.localPosition.dx > 32)) {
+      // Once a second finger joins, keep the entire sequence inert until all
+      // fingers lift. A pinch must not turn its first finger into a track swipe.
+      _blocked = true;
+      resolve(GestureDisposition.rejected);
+      return;
     }
-    if (_horizontal == true) _last = event.localPosition;
+    _primary = event.pointer;
+    _start = _last = event.localPosition;
   }
 
-  void _reset() {
-    _pointer = null;
-    _start = null;
-    _last = null;
-    _horizontal = null;
-  }
+  // An unrelated mouse/stylus secondary button must not reject an ongoing
+  // allowed touch. The base implementation rejects the whole active arena.
+  @override
+  void handleNonAllowedPointer(PointerDownEvent event) {}
 
-  void _finish(PointerUpEvent event) {
-    if (event.pointer != _pointer) return;
-    final start = _start;
-    final last = _last;
-    final horizontal = _horizontal;
-    _reset();
-    if (horizontal != true || start == null || last == null) return;
-    final delta = last - start;
-    if (delta.dx.abs() <= delta.dy.abs() * 1.35) return;
-    if (delta.dx <= -84.0) {
-      widget.onNext();
-    } else if (delta.dx >= 84.0) {
-      widget.onPrevious();
+  @override
+  void handleEvent(PointerEvent event) {
+    double? completed;
+    if (event.pointer == _primary && !_blocked) {
+      if (event is PointerMoveEvent && _start != null) {
+        final delta = event.localPosition - _start!;
+        if (_horizontal == null && delta.distance >= 14) {
+          _horizontal = (!edgeOnly || delta.dx > 0) &&
+              delta.dx.abs() > delta.dy.abs() * 1.25;
+          if (!_horizontal!) {
+            _blocked = true;
+            resolve(GestureDisposition.rejected);
+          }
+        }
+        if (_horizontal == true) {
+          _last = event.localPosition;
+          // Child controls get their normal drag slop first. Do not claim the
+          // arena before this gesture has reached its actual action threshold.
+          if (_reachedAction(delta.dx)) {
+            resolve(GestureDisposition.accepted);
+          }
+        }
+      } else if (event is PointerUpEvent && _won && _horizontal == true) {
+        final delta = _last! - _start!;
+        if (_reachedAction(delta.dx) &&
+            delta.dx.abs() > delta.dy.abs() * 1.35) {
+          completed = delta.dx;
+        }
+      }
     }
-  }
-
-  void _cancel(PointerCancelEvent event) {
-    if (event.pointer == _pointer) _reset();
+    if (event is PointerUpEvent || event is PointerCancelEvent) {
+      _pointers.remove(event.pointer);
+      stopTrackingPointer(event.pointer);
+    }
+    if (completed != null) {
+      invokeCallback<void>('onSwipe', () => onSwipe?.call(completed!));
+    }
   }
 
   @override
-  Widget build(BuildContext context) => Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: _down,
-        onPointerMove: _move,
-        onPointerUp: _finish,
-        onPointerCancel: _cancel,
-        child: widget.child,
-      );
+  void acceptGesture(int pointer) {
+    if (pointer == _primary && !_blocked) _won = true;
+  }
+
+  @override
+  void rejectGesture(int pointer) {
+    if (pointer == _primary) _blocked = true;
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {
+    resolve(GestureDisposition.rejected);
+    _primary = null;
+    _start = _last = null;
+    _horizontal = null;
+    _blocked = _won = false;
+  }
+
+  @override
+  String get debugDescription => 'direct touch swipe';
 }

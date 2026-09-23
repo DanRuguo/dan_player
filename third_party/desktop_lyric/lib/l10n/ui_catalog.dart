@@ -53,6 +53,8 @@ import 'catalog_font_picker.dart';
 import 'catalog_audio_trim.dart';
 import 'catalog_animations.dart';
 import 'catalog_cover_import.dart';
+import 'catalog_search_history.dart';
+import 'catalog_comments_feedback_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogStartupProgress,
@@ -109,4 +111,6 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogAudioTrim,
   ...catalogAnimations,
   ...catalogCoverImport,
+  ...catalogSearchHistory,
+  ...uiCatalogCommentsFeedback2605,
 });

@@ -420,14 +420,19 @@ class _NowPlayingSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final playback = context.watch<PlaybackService>();
-    return ValueListenableBuilder<bool>(
-      valueListenable: playback.isBuffering,
-      builder: (context, buffering, _) => DetailProgressSlider(
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        playback.isBuffering,
+        playback.resolvingAudioPath,
+        playback.isChangingOutput,
+      ]),
+      builder: (context, _) => DetailProgressSlider(
         positions: playback.positionStream,
         readPosition: () => playback.position,
         duration: playback.length,
-        trackIdentity: playback.nowPlaying?.path,
-        enabled: playback.nowPlaying != null && !buffering,
+        trackIdentity:
+            (playback.nowPlaying?.path, playback.playbackSessionToken),
+        enabled: playback.nowPlaying != null && playback.canEditQueue,
         onSeek: playback.seek,
         hidden: DesktopIntegration.instance.isHidden,
       ),

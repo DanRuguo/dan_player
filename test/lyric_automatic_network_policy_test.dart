@@ -56,10 +56,6 @@ void main() {
           calls.add('cached');
           return lyric('cached');
         },
-        searchOnline: () async {
-          calls.add('network');
-          throw StateError('unexpected automatic request');
-        },
       );
       expect(calls, localFirst ? ['local'] : ['cached']);
       expect((result!.lines.single as UnsyncLyricLine).content,
@@ -80,16 +76,12 @@ void main() {
         calls.add('local');
         return lyric('local');
       },
-      searchOnline: () async {
-        calls.add('network');
-        return lyric('network');
-      },
     );
     expect(calls, ['cached', 'local']);
     expect((result!.lines.single as UnsyncLyricLine).content, 'local');
   });
 
-  test('only a track without either saved source starts an automatic search',
+  test('a track without either saved source waits for a manual lyric search',
       () async {
     final calls = <String>[];
     final result = await resolveAutomaticLyricSources(
@@ -102,12 +94,8 @@ void main() {
         calls.add('cached');
         return null;
       },
-      searchOnline: () async {
-        calls.add('network');
-        return lyric('network');
-      },
     );
-    expect(calls, ['local', 'cached', 'network']);
-    expect((result!.lines.single as UnsyncLyricLine).content, 'network');
+    expect(calls, ['local', 'cached']);
+    expect(result, isNull);
   });
 }

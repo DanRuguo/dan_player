@@ -2,9 +2,9 @@
 
 <p>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/images/RCE_logo_white.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/images/RCE_logo_transparent.png">
-    <img src="assets/images/RCE_logo_transparent.png" alt="RCE ブランドロゴ" width="128">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/player-icon-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/player-icon-light.png">
+    <img src="docs/images/player-icon-light.png" alt="Dan Player のアプリアイコン" width="128">
   </picture>
 </p>
 
@@ -109,6 +109,9 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 ### 26.0.5 の新機能
 
+- **検索履歴：** 検索欄を少し上へ移動し、重複を除いた履歴を中央揃えのチップで表示します。自動で折り返し、狭い画面では古い履歴を隠します。クリックで再検索、右クリックまたは長押しの後に × を押すと削除できます。
+- **歌詞とコメント：** 歌詞の自動読み込みとコメント画面の表示では、ローカルの内容とキャッシュだけを読みます。通信は歌詞の手動検索、コメントの更新・追加読み込み、分類・提供元の切り替えで行います。更新中はアイコンが回転し、成功・失敗を共通の通知バブルで知らせます。
+- **再生操作：** シークバーのマルチタッチ、ドラッグの取り消し、シーク失敗後の復帰を改善しました。再生セッションが変わると古いドラッグ操作は無効になります。歌詞ドラッグ中の再構築を減らし、プレイリストの切り替え準備中にスクロールしても表示変更を維持します。
 - **分類タイル：** 長方形のジャケットを 1×1、2×1、1×2、2×2 に変更でき、ドラッグによる並べ替えと隙間の自動補充に対応します。文字は画像内に直接表示し、画像の明るさに応じて文字色を選びます。
 - **バックアップと復元：** フォルダー別のローカル音楽、ライブラリ索引、プレイリスト、統計、設定、キャッシュを選んで、1 つの `.bak` に保存できます。パスワード暗号化に対応し、復元時もフォルダーやデータを選択、または一括選択できます。パスワードは大切に保管してください。暗号化バックアップ 1 個の上限は約 64 GiB 未満です。大きなコレクションはフォルダーごとに分けてください。
 - **性能設定と初回ガイド：** 省電力・高性能モードを選択でき、解除すると関連設定が切り替え前の状態に戻ります。描画フレームレートやスペクトラムの本数を設定でき、初回ガイドと短い起動画面も追加しました。
@@ -127,15 +130,15 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 ### 聴きたい曲を見つけ、歌詞に集中
 
-| 楽曲検索 | ミニプレーヤーと歌詞 |
+| 検索と履歴 | ミニプレーヤーと歌詞 |
 | --- | --- |
-| ![架空の楽曲を使った中国語 UI の検索画面](docs/images/feature-search-dark.png) | ![架空のデータを使ったミニプレーヤーと歌詞表示](docs/images/feature-mini-lyrics-dark.png) |
+| ![日本語の検索ページ内容領域を Flutter ウィジェットで描画。履歴チップを中央揃えで表示](docs/images/search-history-ja.png) | ![架空のデータを使ったミニプレーヤーと歌詞表示](docs/images/feature-mini-lyrics-dark.png) |
 
 ### 再生記録から、自分のライブラリを再発見
 
 ![架空のデータを使った中国語 UI の音楽統計とランキング](docs/images/statistics-rankings-light.png)
 
-<sub>画像はリポジトリ内の既存リソースを使用しています。実際の Flutter ウィジェットを架空の楽曲と隔離データでレンダリングしたもので、リアルタイム音声や Windows ネイティブ効果の動作検証を示すものではありません。掲載画像は中国語 UI ですが、アプリは英語・日本語・韓国語にも対応しています。明暗テーマ、ウィンドウ幅、その他の機能は<a href="docs/images/README.md">画像ギャラリー</a>で確認できます。</sub>
+<sub>実際の Flutter ウィジェットを隔離したデモデータで描画しています。検索画像は日本語ページの内容領域と履歴の例で、ネイティブウィンドウ全体のスクリーンショットではありません。その他の例は主に中国語 UI です。画像は配置と機能の紹介であり、リアルタイム音声や Windows ネイティブ効果の検証ではありません。テーマ・ウィンドウ幅・4 言語の例は<a href="docs/images/README.md">画像ギャラリー</a>をご覧ください。</sub>
 
 ### 分類タイルと初回ガイド
 

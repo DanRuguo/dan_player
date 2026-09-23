@@ -2,9 +2,9 @@
 
 <p>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/images/RCE_logo_white.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/images/RCE_logo_transparent.png">
-    <img src="assets/images/RCE_logo_transparent.png" alt="RCE 브랜드 로고" width="128">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/player-icon-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/player-icon-light.png">
+    <img src="docs/images/player-icon-light.png" alt="Dan Player 앱 아이콘" width="128">
   </picture>
 </p>
 
@@ -109,6 +109,9 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 ### 26.0.5의 새 기능
 
+- **검색 기록:** 검색창을 위로 올리고 중복을 제외한 기록 칩을 가운데 정렬했습니다. 자동으로 줄을 바꾸며 좁은 창에서는 오래된 기록을 숨깁니다. 클릭하면 다시 검색하고, 오른쪽 클릭이나 길게 누른 뒤 ×를 누르면 삭제합니다.
+- **가사와 댓글:** 가사 자동 로딩과 댓글 화면 열기는 로컬 콘텐츠와 캐시만 읽습니다. 직접 가사를 검색하거나 댓글을 새로고침하고 더 불러오거나 분류·제공처를 바꿀 때만 접속합니다. 업데이트 중에는 아이콘이 회전하고 성공·실패를 공통 알림 말풍선으로 표시합니다.
+- **재생 조작:** 진행 막대의 멀티터치, 드래그 취소, 탐색 실패 후 복구를 개선했습니다. 재생 세션이 바뀌면 이전 드래그로 위치가 바뀌지 않습니다. 가사 드래그 중 재구성을 줄이고, 재생목록 전환 준비 중 스크롤해도 보기 변경을 유지합니다.
 - **분류 타일:** 직사각형 커버를 1×1, 2×1, 1×2, 2×2로 설정하고 드래그로 순서를 바꾸거나 빈칸 자동 채우기를 사용할 수 있습니다. 제목은 커버 안에 직접 표시하며 이미지 밝기에 따라 글자색을 선택합니다.
 - **백업 및 복원:** 폴더별 로컬 음악, 라이브러리 인덱스, 재생목록, 통계, 설정, 캐시를 선택해 하나의 `.bak` 파일로 저장하고 암호로 암호화할 수 있습니다. 복원 시에도 폴더와 데이터를 다시 선택하거나 한 번에 모두 선택할 수 있습니다. 암호를 안전하게 보관하세요. 암호화된 백업 하나는 약 64 GiB 미만이어야 하며, 큰 컬렉션은 폴더별로 나누어 백업할 수 있습니다.
 - **성능 설정과 시작 안내:** 절전 또는 고성능 모드를 켰다가 끄면 관련 설정을 이전 상태로 복원합니다. 화면 갱신율과 스펙트럼 막대 수를 설정할 수 있으며, 첫 사용 안내를 추가하고 시작 화면 시간을 줄였습니다.
@@ -127,15 +130,15 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 ### 듣고 싶은 곡을 찾고 가사에 집중
 
-| 곡 검색 | 미니 플레이어 및 가사 |
+| 검색 및 기록 | 미니 플레이어 및 가사 |
 | --- | --- |
-| ![가상 곡을 사용한 중국어 인터페이스의 검색 화면](docs/images/feature-search-dark.png) | ![가상 데이터를 사용한 미니 플레이어와 가사 화면](docs/images/feature-mini-lyrics-dark.png) |
+| ![실제 Flutter 위젯으로 렌더링한 한국어 검색 페이지 콘텐츠 영역과 가운데 정렬된 기록 칩](docs/images/search-history-ko.png) | ![가상 데이터를 사용한 미니 플레이어와 가사 화면](docs/images/feature-mini-lyrics-dark.png) |
 
 ### 청취 기록으로 라이브러리 다시 발견하기
 
 ![가상 데이터를 사용한 중국어 인터페이스의 음악 통계 및 순위](docs/images/statistics-rankings-light.png)
 
-<sub>이미지는 저장소의 기존 리소스를 재사용합니다. 실제 Flutter 위젯을 가상 곡과 격리된 데이터로 렌더링한 것으로, 실시간 오디오나 Windows 네이티브 효과의 검증 결과가 아닙니다. 이미지는 중국어 인터페이스를 사용하지만 앱은 영어, 일본어, 한국어도 지원합니다. 밝은 테마와 어두운 테마, 여러 창 너비, 추가 기능은 <a href="docs/images/README.md">화면 갤러리</a>에서 확인할 수 있습니다.</sub>
+<sub>실제 Flutter 위젯을 격리된 데모 데이터로 렌더링했습니다. 검색 이미지는 한국어 페이지의 콘텐츠 영역과 예시 기록이며, 네이티브 창 전체를 캡처한 화면이 아닙니다. 다른 예시는 주로 중국어 인터페이스를 사용합니다. 배치와 기능을 소개하는 이미지로, 실시간 오디오나 Windows 네이티브 효과의 검증 결과는 아닙니다. 테마, 창 너비, 4개 언어 예시는 <a href="docs/images/README.md">화면 갤러리</a>에서 확인하세요.</sub>
 
 ### 분류 타일과 시작 안내
 

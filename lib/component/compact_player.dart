@@ -118,6 +118,8 @@ class _CompactPlayerState extends State<CompactPlayer> {
             listenable: Listenable.merge([
               playback,
               playback.isBuffering,
+              playback.resolvingAudioPath,
+              playback.isChangingOutput,
               playback.playlist,
               lyricService,
             ]),
@@ -131,13 +133,11 @@ class _CompactPlayerState extends State<CompactPlayer> {
                   return _view(
                     title: audio?.displayTitle ?? 'Dan Player',
                     artist: audio?.artist ?? ui("尚未选择歌曲"),
-                    // Every load gets a new lyric future, even when the next
-                    // queue occurrence has the same audio path. Cancelling a
-                    // pending seek also on a source change is conservative:
-                    // an old drag must never seek the newly loaded session.
+                    // A source request changes the session before it opens;
+                    // replacing lyrics alone does not invalidate a seek.
                     trackIdentity: audio == null
                         ? null
-                        : (audio.path, lyricService.currLyricFuture),
+                        : (audio.path, playback.playbackSessionToken),
                     audio: audio,
                     lyricFuture: lyricService.currLyricFuture,
                     position: playback.position,
@@ -145,7 +145,8 @@ class _CompactPlayerState extends State<CompactPlayer> {
                     readPosition: () => playback.position,
                     duration: playback.length,
                     isPlaying: playing,
-                    isBuffering: playback.isBuffering.value,
+                    isBuffering:
+                        playback.isBuffering.value || !playback.canEditQueue,
                     onPrevious: playback.playlist.value.isEmpty
                         ? null
                         : playback.lastAudio,
@@ -250,6 +251,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
   double? _dragPosition;
   Object? _dragTrackIdentity;
   bool _dragging = false;
+  int? _seekPointer;
 
   @override
   void initState() {
@@ -342,6 +344,44 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
 
   bool get _canSeek =>
       widget.onSeek != null && _duration > 0 && !widget.isBuffering;
+
+  void _cancelSeekPointer(int pointer) {
+    if (_seekPointer != pointer) return;
+    _seekPointer = null;
+    if (!_dragging) return;
+    setState(() {
+      _dragging = false;
+      _dragTrackIdentity = null;
+      _dragPosition = null;
+    });
+    _livePosition.value = widget.readPosition?.call() ?? _livePosition.value;
+  }
+
+  void _finishSeek(double value) {
+    final shouldSeek =
+        _dragging && _canSeek && _dragTrackIdentity == widget.trackIdentity;
+    setState(() {
+      _dragging = false;
+      _dragTrackIdentity = null;
+      _dragPosition = null;
+    });
+    try {
+      if (shouldSeek) widget.onSeek!(value);
+    } catch (error, stack) {
+      // Let Material Slider complete its internal gesture cleanup on failure.
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: error,
+        stack: stack,
+        library: 'Dan Player',
+        context: ErrorDescription('while seeking from the compact timeline'),
+      ));
+    } finally {
+      if (mounted) {
+        _livePosition.value =
+            widget.readPosition?.call() ?? _livePosition.value;
+      }
+    }
+  }
 
   @override
   void didUpdateWidget(CompactPlayerView oldWidget) {
@@ -696,46 +736,42 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
           Expanded(
             child: Semantics(
               label: ui("播放进度"),
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
-                  thumbShape:
-                      const RoundSliderThumbShape(enabledThumbRadius: 5),
-                  overlayShape:
-                      const RoundSliderOverlayShape(overlayRadius: 18),
-                ),
-                child: Slider(
-                  key: const ValueKey('compact-progress-slider'),
-                  value: _position,
-                  max: _duration > 0 ? _duration : 1,
-                  semanticFormatterCallback: (value) =>
-                      '${_timeText(value)} / ${_timeText(_duration)}',
-                  onChanged: _canSeek
-                      ? (value) {
-                          if (_dragging) {
-                            setState(() => _dragPosition = value);
+              child: Listener(
+                onPointerDown: (event) => _seekPointer ??= event.pointer,
+                onPointerUp: (event) {
+                  if (_seekPointer == event.pointer) _seekPointer = null;
+                },
+                onPointerCancel: (event) => _cancelSeekPointer(event.pointer),
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 5),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 18),
+                  ),
+                  child: Slider(
+                    key: const ValueKey('compact-progress-slider'),
+                    value: _position,
+                    max: _duration > 0 ? _duration : 1,
+                    semanticFormatterCallback: (value) =>
+                        '${_timeText(value)} / ${_timeText(_duration)}',
+                    onChanged: _canSeek
+                        ? (value) {
+                            if (_dragging) {
+                              setState(() => _dragPosition = value);
+                            }
                           }
-                        }
-                      : null,
-                  onChangeStart: _canSeek
-                      ? (value) => setState(() {
-                            _dragging = true;
-                            _dragTrackIdentity = widget.trackIdentity;
-                            _dragPosition = value;
-                          })
-                      : null,
-                  onChangeEnd: _canSeek
-                      ? (value) {
-                          final shouldSeek = _dragging &&
-                              _dragTrackIdentity == widget.trackIdentity;
-                          setState(() {
-                            _dragging = false;
-                            _dragTrackIdentity = null;
-                            _dragPosition = null;
-                          });
-                          if (shouldSeek) widget.onSeek!(value);
-                        }
-                      : null,
+                        : null,
+                    onChangeStart: _canSeek
+                        ? (value) => setState(() {
+                              _dragging = true;
+                              _dragTrackIdentity = widget.trackIdentity;
+                              _dragPosition = value;
+                            })
+                        : null,
+                    onChangeEnd: _canSeek ? _finishSeek : null,
+                  ),
                 ),
               ),
             ),

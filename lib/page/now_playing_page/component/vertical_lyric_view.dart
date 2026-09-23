@@ -840,14 +840,17 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   void _markManualInteraction({bool dragging = false}) {
     if (!_active) return;
     _followGeneration++;
+    final enteringManual = !_manualScrollActive;
     _manualScrollActive = true;
-    _cancelFollowEffects();
+    if (enteringManual) _cancelFollowEffects();
     if (_scrollController.hasClients &&
         _scrollController.position.isScrollingNotifier.value &&
         !dragging) {
       _scrollController.jumpTo(_scrollController.offset);
     }
-    setState(() {});
+    // Subsequent touch updates only move the viewport. Rebuilding every lyric
+    // row here turns a long-song drag into a whole-column build on every frame.
+    if (enteringManual) setState(() {});
     _manualScrollTimer?.cancel();
     if (dragging) _dragging = true;
     if (!_dragging) _resumeAfterGrace();

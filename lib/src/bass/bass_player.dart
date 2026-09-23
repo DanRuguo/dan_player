@@ -483,6 +483,7 @@ class BassPlayer {
   }
 
   final _outputMode = WasapiOutputMode();
+  OutputPlaybackIntent? _outputPlaybackIntent;
 
   /// Current decoder/output mode. Configure this before loading a source;
   /// live changes go through the transactional [useExclusiveMode] method.
@@ -1159,6 +1160,8 @@ class BassPlayer {
       }
     }
 
+    final transport = OutputPlaybackIntent();
+    _outputPlaybackIntent = transport;
     try {
       // Keep the old stream and mode intact until the replacement is open.
       final applied = await _setSource(
@@ -1183,8 +1186,8 @@ class BassPlayer {
           showAppNotice(ui('输出模式已切换，但暂时无法恢复原播放位置'), kind: AppNoticeKind.error);
         }
       }
-      if (wasPlaying) {
-        start();
+      if (transport.resolve(wasPlaying)) {
+        _resumeCurrentOutput();
       } else {
         _publishState(playerState);
       }
@@ -1206,7 +1209,9 @@ class BassPlayer {
               generation: generation);
           if (!restored || !_isCurrentSource(generation)) return false;
           if (lastPos > 0) seek(lastPos);
-          if (wasPlaying) start();
+          // Reopening the original URL can take time. A pause/play received
+          // during that await must win over the pre-failure playback snapshot.
+          if (transport.resolve(wasPlaying)) _resumeCurrentOutput();
           _publishState(playerState);
           showAppNotice(ui('输出模式切换失败，已恢复原模式：{0}', [err]),
               kind: AppNoticeKind.error);
@@ -1228,6 +1233,10 @@ class BassPlayer {
               : const PlaybackProblem(
                   PlaybackProblemKind.deviceInitialization, '音频输出切换失败。'));
       return false;
+    } finally {
+      if (identical(_outputPlaybackIntent, transport)) {
+        _outputPlaybackIntent = null;
+      }
     }
   }
 
@@ -1683,6 +1692,12 @@ class BassPlayer {
   ///
   /// do nothing if [setSource] hasn't been called
   void start() {
+    _outputPlaybackIntent?.request(true);
+    _resumeCurrentOutput();
+  }
+
+  // Internal buffer/output recovery is not a new user transport command.
+  void _resumeCurrentOutput() {
     if (_fstream == null) return;
 
     try {
@@ -1752,6 +1767,7 @@ class BassPlayer {
   ///
   /// do nothing if [setSource] hasn't been called
   void pause() {
+    _outputPlaybackIntent?.request(false);
     if (_fstream == null) return;
 
     if (wasapiExclusive) {
@@ -1805,7 +1821,7 @@ class BassPlayer {
           _positionUpdater = null;
         },
         move: () => _seekNative(position),
-        resume: start,
+        resume: _resumeCurrentOutput,
       );
     } else {
       _seekNative(position);

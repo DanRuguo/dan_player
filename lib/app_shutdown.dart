@@ -7,6 +7,7 @@ import 'package:dan_player/library/library_auto_refresh.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/search/search_history.dart';
 import 'package:dan_player/utils.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -130,6 +131,7 @@ Future<void> _shutdownAndCloseWindow() async {
         saveLyricSources(),
         AppSettings.instance.saveSettings(),
         AppPreference.instance.save(),
+        SearchHistoryStore.instance.flush(),
       ]),
       HotkeysHelper.unregisterAll(),
     ];

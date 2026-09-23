@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -7,16 +8,18 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/component/song_comment_match_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/online/song_comment_association.dart';
 import 'package:dan_player/online/song_comments.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
+import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
-/// Calling this entry point is the only application action that starts loading
-/// comments. The captured platform ID is independent of later playback changes.
+/// Opening reads only local comments; refresh/category/source actions can fetch.
+/// The captured platform ID is independent of later playback changes.
 Future<void> showSongCommentsDialog(
   BuildContext context,
   Audio audio, {
@@ -56,6 +59,7 @@ class _CommentTab {
   int? total;
   bool loaded = false;
   bool loading = false;
+  bool refreshing = false;
   bool hasMore = true;
   bool reachedLimit = false;
   bool repeatedPage = false;
@@ -116,7 +120,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     _availableSorts = SongCommentsService.sortsFor(_target);
     _sort = _availableSorts.first;
     _tabs = {for (final sort in SongCommentSort.values) sort: _CommentTab()};
-    if (_target != null) unawaited(_load());
+    if (_target != null) unawaited(_load(cacheOnly: true));
   }
 
   void _disposeTabs() {
@@ -217,12 +221,13 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     _cancel();
     setState(() {
       _tab.loading = false;
+      _tab.refreshing = false;
       _sort = sort;
     });
     if (!_tab.loaded) unawaited(_load());
   }
 
-  Future<void> _load({bool refresh = false}) async {
+  Future<void> _load({bool refresh = false, bool cacheOnly = false}) async {
     final target = _target;
     final tab = _tab;
     if (_closed ||
@@ -238,6 +243,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     _request = cancellation;
     setState(() {
       tab.loading = true;
+      tab.refreshing = refresh;
       tab.error = null;
     });
     bool current() =>
@@ -247,14 +253,21 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
         target == _target &&
         sort == _sort;
     try {
-      final result = await _service.loadPage(
-        target: target,
-        sort: sort,
-        page: refresh ? 0 : tab.nextPage,
-        refresh: refresh,
-        cancellation: cancellation,
-      );
+      final result = cacheOnly
+          ? await _service.readCachedPage(
+              target: target,
+              sort: sort,
+              cancellation: cancellation,
+            )
+          : await _service.loadPage(
+              target: target,
+              sort: sort,
+              page: refresh ? 0 : tab.nextPage,
+              refresh: refresh,
+              cancellation: cancellation,
+            );
       if (!current()) return;
+      if (result == null) return;
       final seen = refresh
           ? <String>{}
           : tab.comments.map((comment) => comment.id).toSet();
@@ -279,6 +292,10 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
         tab.hasMore = result.hasMore && !tab.repeatedPage;
         tab.reachedLimit = result.reachedLimit;
       });
+      if (refresh && mounted) {
+        showAppNotice(ui('评论已更新'),
+            context: context, kind: AppNoticeKind.success);
+      }
     } on SongCommentsCancelled {
       // Route/tab/source changes intentionally ignore the cancelled response.
     } catch (error) {
@@ -291,10 +308,17 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
               ? ui(error.message)
               : ui("评论加载失败，请检查网络后重试。");
         });
+        if (refresh && mounted) {
+          showAppNotice(ui('评论更新失败'),
+              context: context, kind: AppNoticeKind.error);
+        }
       }
     } finally {
       if (current()) {
-        setState(() => tab.loading = false);
+        setState(() {
+          tab.loading = false;
+          tab.refreshing = false;
+        });
         _request = null;
       }
     }
@@ -345,13 +369,13 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
                         if (_target != null)
                           IconButton(
                             key: const ValueKey('song-comments-refresh'),
-                            tooltip: ui('更新评论'),
+                            tooltip: ui(tab.refreshing ? '正在更新评论…' : '更新评论'),
                             constraints: const BoxConstraints(
                                 minWidth: 44, minHeight: 44),
                             onPressed: tab.loading
                                 ? null
                                 : () => unawaited(_load(refresh: true)),
-                            icon: const Icon(Symbols.refresh),
+                            icon: _CommentRefreshIcon(active: tab.refreshing),
                           ),
                         IconButton(
                           key: const ValueKey('song-comments-close'),
@@ -570,6 +594,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
             ),
           ]);
     }
+    if (!tab.loaded) return Text(ui('暂无本地评论，请点击右上角更新。'));
     if (tab.comments.isEmpty) return Text(ui("平台暂未返回这首歌曲的评论。"));
     if (tab.repeatedPage) return Text(ui("平台返回了重复页面，已停止继续请求。"));
     if (tab.reachedLimit) return Text(ui("已达到本次每个分类最多 10 页（200 条）的读取上限。"));
@@ -587,6 +612,102 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
         label: Text(ui("加载更多")),
       ),
     );
+  }
+}
+
+/// Only the refresh glyph repaints while the request runs. Stop its ticker when
+/// the window/route is hidden or feedback motion is disabled.
+class _CommentRefreshIcon extends StatefulWidget {
+  const _CommentRefreshIcon({required this.active});
+  final bool active;
+
+  @override
+  State<_CommentRefreshIcon> createState() => _CommentRefreshIconState();
+}
+
+class _CommentRefreshIconState extends State<_CommentRefreshIcon>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  late final _turns = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900));
+  final _hidden = DesktopIntegration.instance.isHidden;
+  AppLifecycleState? _lifecycle;
+  bool _motionAllowed = false;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = WidgetsBinding.instance.lifecycleState;
+    WidgetsBinding.instance.addObserver(this);
+    _hidden.addListener(_sync);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _motionAllowed = AppMotion.enabled(context, MotionKind.feedback);
+    _visible = TickerMode.valuesOf(context).enabled;
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(_CommentRefreshIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
+    _sync();
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() => _sync();
+
+  void _sync() {
+    final accessibility =
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    final animate = widget.active &&
+        _motionAllowed &&
+        _visible &&
+        !_hidden.value &&
+        !accessibility.disableAnimations &&
+        !accessibility.reduceMotion &&
+        _lifecycle != AppLifecycleState.hidden &&
+        _lifecycle != AppLifecycleState.paused &&
+        _lifecycle != AppLifecycleState.detached;
+    if (animate && !_turns.isAnimating) {
+      _turns.repeat();
+    } else if (!animate) {
+      _turns.stop();
+      if (!widget.active) _turns.value = 0;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        liveRegion: widget.active,
+        label: widget.active ? ui('正在更新评论…') : null,
+        child: RepaintBoundary(
+          child: RotationTransition(
+            key: const ValueKey('song-comments-refresh-motion'),
+            turns: _turns,
+            child: RepaintBoundary(
+                child: Icon(Symbols.refresh,
+                    color: widget.active
+                        ? Theme.of(context).colorScheme.primary
+                        : null)),
+          ),
+        ),
+      );
+
+  @override
+  void dispose() {
+    _hidden.removeListener(_sync);
+    WidgetsBinding.instance.removeObserver(this);
+    _turns.dispose();
+    super.dispose();
   }
 }
 
