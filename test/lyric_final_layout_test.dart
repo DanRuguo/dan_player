@@ -1,3 +1,5 @@
+import 'dart:ui' as drawing;
+
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -164,12 +166,18 @@ void main() {
         }
 
         final beforeSize = tester.getSize(primary);
+        final phoneticSize = timed ? tester.getSize(find.text(romaji)) : null;
         for (final phase in [.25, .55, .82, 1.0]) {
           clock.value = phase;
           await tester.pump();
           expect(tester.getSize(primary), beforeSize,
               reason: 'Follow motion cannot change the paragraph wrap width');
           expect(lastGlyph.right, lessThanOrEqualTo(paintSize.width - 3));
+          if (timed) {
+            expect(tester.getSize(find.text(romaji)), phoneticSize,
+                reason:
+                    'Phonetic text must not reflow as the follow clock moves');
+          }
           for (final painter in secondaryPainters) {
             final first = painter.slots.first;
             final offset = painter.follow!
@@ -190,6 +198,206 @@ void main() {
       });
     }
   }
+
+  testWidgets('phonetics retain word follow at focus handoff', (tester) async {
+    final settings = LyricViewController();
+    final position = ValueNotifier(const Duration(seconds: 2));
+    final clock = AnimationController(
+        vsync: tester, duration: LyricMotion.springScrollDuration);
+    final timedLine = _TimedLine(japanese, chinese)..romanization = romaji;
+    final plainLine = LrcLine(Duration.zero, japanese,
+        length: const Duration(seconds: 5), isBlank: false)
+      ..romanization = romaji;
+
+    Future<void> mount(LyricLine line, int distance) async {
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: SizedBox(
+                  width: 500,
+                  child: ChangeNotifierProvider.value(
+                      value: settings,
+                      child: LyricWordFollowScope(
+                          follow: LyricWordFollow(
+                              clock, LyricMotion.scrollCurve, 160),
+                          child: LyricViewTile(
+                              line: line,
+                              position: position,
+                              opacity: 1,
+                              reducedMotion: false,
+                              distance: distance)))))));
+      await tester.pump();
+    }
+
+    BalancedLyricText phonetic() =>
+        tester.widget<BalancedLyricText>(find.byWidgetPredicate(
+            (widget) => widget is BalancedLyricText && widget.text == romaji));
+
+    await mount(timedLine, 1);
+    expect(phonetic().wordFollow, isFalse);
+    await mount(timedLine, 0);
+    expect(phonetic().wordFollow, isTrue);
+    await mount(plainLine, 1);
+    expect(phonetic().wordFollow, isFalse);
+    await mount(plainLine, 0);
+    expect(phonetic().wordFollow, isTrue,
+        reason: 'Line-timed phonetics retain the existing staggered follow');
+
+    await tester.pumpWidget(const SizedBox());
+    clock.dispose();
+    position.dispose();
+    settings.dispose();
+  });
+
+  testWidgets('settled phonetics detach from the Windows repaint path',
+      (tester) async {
+    final settings = LyricViewController();
+    final position = ValueNotifier(const Duration(milliseconds: 500));
+    final clock = AnimationController(
+        vsync: tester, duration: const Duration(milliseconds: 600));
+    final line = _TimedLine(japanese, chinese)..romanization = romaji;
+    const transition = LyricFollowTransition(
+        distance: 160,
+        delay: 0,
+        curve: LyricMotion.scrollCurve,
+        initialOffset: 0,
+        initialBlur: 0,
+        finalBlur: 0);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SizedBox(
+                width: 592,
+                child: ChangeNotifierProvider.value(
+                    value: settings,
+                    child: LyricFollowEffects(
+                        clock: clock,
+                        transition: transition,
+                        blur: 0,
+                        blurEnabled: false,
+                        child: LyricViewTile(
+                            line: line,
+                            position: position,
+                            opacity: 1,
+                            reducedMotion: false,
+                            distance: 0)))))));
+
+    CustomPaint phoneticPaint() =>
+        tester.widget<CustomPaint>(find.byWidgetPredicate((widget) =>
+            widget is CustomPaint &&
+            widget.painter is PlainLyricWordFollowPainter &&
+            (widget.painter as PlainLyricWordFollowPainter)
+                    .text
+                    .text
+                    ?.toPlainText() ==
+                romaji));
+
+    clock.forward(from: 0);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(phoneticPaint().willChange, isTrue);
+    expect((phoneticPaint().painter as PlainLyricWordFollowPainter).follow,
+        isNotNull);
+
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(clock.isAnimating, isFalse);
+    expect(phoneticPaint().willChange, isFalse);
+    expect((phoneticPaint().painter as PlainLyricWordFollowPainter).follow,
+        isNull);
+    position.value = const Duration(seconds: 3);
+    await tester.pump();
+    expect(phoneticPaint().willChange, isFalse,
+        reason: 'Timed sung-word updates must not revive the phonetic ticker');
+
+    await tester.pumpWidget(const SizedBox());
+    clock.dispose();
+    position.dispose();
+    settings.dispose();
+  });
+
+  testWidgets('timed phonetics move only during the finite follow',
+      (tester) async {
+    final settings = LyricViewController()..translationFontSize = 18;
+    final clock = AnimationController(
+        vsync: tester, duration: LyricMotion.springScrollDuration);
+    final position = ValueNotifier(const Duration(milliseconds: 500));
+    final line = _TimedLine(japanese, chinese)..romanization = romaji;
+    final key = GlobalKey();
+    await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(fontFamily: danEmbeddedFontFamily),
+        home: Scaffold(
+            body: Center(
+                child: SizedBox(
+                    width: 592,
+                    child: RepaintBoundary(
+                        key: key,
+                        child: ChangeNotifierProvider.value(
+                            value: settings,
+                            child: LyricWordFollowScope(
+                                follow: LyricWordFollow(
+                                    clock, LyricMotion.scrollCurve, 160),
+                                child: LyricViewTile(
+                                    line: line,
+                                    position: position,
+                                    opacity: 1,
+                                    reducedMotion: false,
+                                    distance: 0)))))))));
+
+    Future<Uint8List> phoneticPixels() async {
+      final phoneticPaint = find.byWidgetPredicate((widget) =>
+          widget is CustomPaint &&
+          widget.painter is PlainLyricWordFollowPainter &&
+          (widget.painter as PlainLyricWordFollowPainter)
+                  .text
+                  .text
+                  ?.toPlainText() ==
+              romaji);
+      final bounds = tester.getRect(phoneticPaint);
+      final origin = tester.getTopLeft(find.byKey(key));
+      final result = await tester.runAsync(() async {
+        final image = await (key.currentContext!.findRenderObject()
+                as RenderRepaintBoundary)
+            .toImage();
+        final bytes =
+            (await image.toByteData(format: drawing.ImageByteFormat.rawRgba))!
+                .buffer
+                .asUint8List();
+        final pixels = <int>[];
+        final left = (bounds.left - origin.dx).floor().clamp(0, image.width);
+        final right = (bounds.right - origin.dx).ceil().clamp(0, image.width);
+        final top = (bounds.top - origin.dy).floor().clamp(0, image.height);
+        final bottom =
+            (bounds.bottom - origin.dy).ceil().clamp(0, image.height);
+        for (var y = top; y < bottom; y++) {
+          pixels.addAll(bytes.sublist(
+              (y * image.width + left) * 4, (y * image.width + right) * 4));
+        }
+        image.dispose();
+        return Uint8List.fromList(pixels);
+      });
+      return result!;
+    }
+
+    clock.value = .35;
+    await tester.pump();
+    final moving = await phoneticPixels();
+    clock.value = .75;
+    await tester.pump();
+    expect(await phoneticPixels(), isNot(orderedEquals(moving)),
+        reason: 'The existing staggered animation remains visible');
+
+    clock.value = 1;
+    await tester.pump();
+    final settled = await phoneticPixels();
+    for (final milliseconds in [1500, 3000, 4500]) {
+      position.value = Duration(milliseconds: milliseconds);
+      await tester.pump();
+      expect(await phoneticPixels(), orderedEquals(settled),
+          reason: 'Sung-word repaint must not move settled phonetics');
+    }
+    await tester.pumpWidget(const SizedBox());
+    clock.dispose();
+    position.dispose();
+    settings.dispose();
+  });
 
   testWidgets('Latin words wrap at the focused size rather than after scale',
       (tester) async {

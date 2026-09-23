@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
+import 'package:dan_player/component/category_pointer_glow.dart';
 import 'package:flutter/material.dart';
 
 /// FLIP-style paint interpolation keeps the sliver's final geometry correct
@@ -62,21 +63,23 @@ class _CategoryTileMotionState extends State<CategoryTileMotion>
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-      animation: _controller,
-      child: widget.child,
-      builder: (context, child) {
-        final rect = _current;
-        return Transform(
-            transform: Matrix4.identity()
-              ..translateByDouble(rect.left - widget.rect.left,
-                  rect.top - widget.rect.top, 0, 1)
-              ..scaleByDouble(
-                  widget.scaleSize ? rect.width / widget.rect.width : 1,
-                  widget.scaleSize ? rect.height / widget.rect.height : 1,
-                  1,
-                  1),
-            alignment: Alignment.topLeft,
-            child: child);
-      });
+  Widget build(BuildContext context) => CoverPointerMotion(
+      motion: _controller,
+      child: AnimatedBuilder(
+          animation: _controller,
+          child: widget.child,
+          builder: (context, child) {
+            final rect = _current;
+            return Transform(
+                transform: Matrix4.identity()
+                  ..translateByDouble(rect.left - widget.rect.left,
+                      rect.top - widget.rect.top, 0, 1)
+                  ..scaleByDouble(
+                      widget.scaleSize ? rect.width / widget.rect.width : 1,
+                      widget.scaleSize ? rect.height / widget.rect.height : 1,
+                      1,
+                      1),
+                alignment: Alignment.topLeft,
+                child: child);
+          }));
 }

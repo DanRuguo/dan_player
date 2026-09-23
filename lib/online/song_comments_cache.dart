@@ -118,20 +118,21 @@ class SongCommentsCache {
 
   Future<void> write(
       SongCommentsTarget target, SongCommentSort sort, SongCommentsPage result,
-      {bool replaceSort = false}) {
+      {bool replaceSort = false, bool Function()? stillCurrent}) {
     // A second dialog/request can finish the same page concurrently. Keep the
     // atomic rename and size accounting in one order on Windows.
-    final pending = _pendingWrite
-        .then((_) => _write(target, sort, result, replaceSort: replaceSort));
+    final pending = _pendingWrite.then((_) => _write(target, sort, result,
+        replaceSort: replaceSort, stillCurrent: stillCurrent));
     _pendingWrite = pending;
     return pending;
   }
 
   Future<void> _write(
       SongCommentsTarget target, SongCommentSort sort, SongCommentsPage result,
-      {required bool replaceSort}) async {
+      {required bool replaceSort, bool Function()? stillCurrent}) async {
     File? temporary;
     try {
+      if (stillCurrent?.call() == false) return;
       final file = await _file(target, sort, result.page);
       final bytes = utf8.encode(jsonEncode({
         'version': 1,
@@ -172,6 +173,9 @@ class SongCommentsCache {
       temporary = File(
           '${file.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp');
       await temporary.writeAsBytes(bytes, flush: true);
+      // Cancellation or a newer refresh may arrive while this write is queued
+      // or awaiting filesystem IO. Preserve the last complete saved snapshot.
+      if (stillCurrent?.call() == false) return;
       await temporary.rename(file.path);
       _knownTotalBytes = _knownTotalBytes! + bytes.length - previousBytes;
       if (replaceSort && result.page == 0) {

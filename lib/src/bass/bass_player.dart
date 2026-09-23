@@ -624,15 +624,20 @@ class BassPlayer {
 
   /// Normal playback updates every 33ms. Successful seeks additionally publish
   /// the actual native position immediately, including while paused.
-  Stream<double> get positionStream => _eventBoundary
+  // Keep these broadcast views stable across widget rebuilds. Recreating a
+  // where/map stream makes progress and lyric consumers detach/re-attach even
+  // when the player is unchanged. The predicate still reads the live boundary
+  // when each queued event is delivered.
+  late final Stream<double> positionStream = _eventBoundary
       .currentEvents(_positionStreamController.stream, (event) => event.stamp)
       .map((event) => event.position);
 
-  Stream<PlayerState> get playerStateStream =>
+  late final Stream<PlayerState> playerStateStream =
       playbackEvents.map((event) => event.state);
 
-  Stream<BassPlaybackEvent> get playbackEvents => _eventBoundary.currentEvents(
-      _playerStateStreamController.stream, (event) => event.stamp);
+  late final Stream<BassPlaybackEvent> playbackEvents =
+      _eventBoundary.currentEvents(
+          _playerStateStreamController.stream, (event) => event.stamp);
 
   void _publishPosition() => _positionStreamController
       .add((stamp: _eventBoundary.stamp, position: position));

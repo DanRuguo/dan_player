@@ -11,8 +11,8 @@ double lyricHorizontalInkGuard(
     TextStyle style, TextScaler scaler, double availableWidth) {
   // Keep the source origin on an integral logical pixel. Fractional inset
   // changes antialias thresholds when a context row deblurs on hover.
-  final desired = math.max(4.0, scaler.scale(style.fontSize ?? 14) * .2)
-      .ceilToDouble();
+  final desired =
+      math.max(4.0, scaler.scale(style.fontSize ?? 14) * .2).ceilToDouble();
   return availableWidth.isFinite
       ? math.min(desired, math.max(0.0, (availableWidth - 1) / 2))
       : desired;
@@ -183,6 +183,10 @@ class _BalancedLyricTextState extends State<BalancedLyricText> {
                     _painter!, _slots, follow, _color,
                     inkOffset: Offset(horizontalGuard, lyricVerticalInkGuard)),
                 isComplex: true,
+                // LyricFollowEffects detaches the clock at the end of its
+                // finite animation. Only moving words bypass the raster cache;
+                // settled phonetics can reuse stable glyph sampling while the
+                // timed primary paragraph continues to repaint.
                 willChange: follow != null,
                 child: Padding(
                   padding: EdgeInsets.symmetric(

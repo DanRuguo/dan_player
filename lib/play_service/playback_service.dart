@@ -208,6 +208,7 @@ class PlaybackService extends ChangeNotifier {
   late final _wasapiExclusive = ValueNotifier(_player.wasapiExclusive);
   ValueNotifier<bool> get wasapiExclusive => _wasapiExclusive;
   final isChangingOutput = ValueNotifier(false);
+  int? _outputSourceToken;
   late final _playbackRate = ValueNotifier(_player.playbackRate);
   ValueNotifier<double> get playbackRate => _playbackRate;
   bool get supportsPlaybackRate => _player.supportsPlaybackRate;
@@ -251,6 +252,7 @@ class PlaybackService extends ChangeNotifier {
     final occurrence = _currentOccurrence;
     if (occurrence != null) queueStopBoundary.loading(occurrence.id, token);
     isChangingOutput.value = true;
+    _outputSourceToken = token;
     eqEditRevision++;
     _player.cancelPendingSource();
     final current = nowPlaying;
@@ -285,6 +287,7 @@ class PlaybackService extends ChangeNotifier {
         showAppNotice(ui('切换音频输出失败：{0}', [err]), kind: AppNoticeKind.error);
       }
     } finally {
+      if (_outputSourceToken == token) _outputSourceToken = null;
       if (!_closed) isChangingOutput.value = false;
       if (_isCurrentSourceRequest(token)) {
         isBuffering.value = false;
@@ -376,6 +379,9 @@ class PlaybackService extends ChangeNotifier {
   final ValueNotifier<String?> resolvingAudioPath = ValueNotifier(null);
   int _sourceRequestToken = 0;
   int _manualSeekRevision = 0;
+  // An explicit pause while a source opens must survive the async hand-off.
+  // A later play or new song selection may request playback again.
+  bool _playWhenReady = false;
   bool _resumeStorageErrorReported = false;
   DateTime? _resumeRetryAfter;
   bool _closed = false;
@@ -1124,6 +1130,7 @@ class PlaybackService extends ChangeNotifier {
       return false;
     }
     final token = ++_sourceRequestToken;
+    _playWhenReady = true;
     OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
     _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
@@ -1220,8 +1227,10 @@ class PlaybackService extends ChangeNotifier {
           _player.seek(initialPosition);
         },
         start: _player.start,
+        shouldStart: () => _playWhenReady,
       );
-      if (!started) {
+      if (!started &&
+          (!_isCurrentSourceRequest(token) || stillCurrent?.call() == false)) {
         // setSource already committed this paused source. Keep its identity
         // truthful even when a lyric revision invalidates the requested seek.
         if (_isCurrentSourceRequest(token)) {
@@ -1232,13 +1241,15 @@ class PlaybackService extends ChangeNotifier {
         return false;
       }
       playService.lyricService.updateLyric();
-      PlaybackStatistics.instance
-          .start(nowPlaying!, playbackRate: _player.playbackRate);
+      if (started) {
+        PlaybackStatistics.instance
+            .start(nowPlaying!, playbackRate: _player.playbackRate);
+      }
       notifyListeners();
       ThemeProvider.instance.applyThemeFromAudio(nowPlaying!);
 
       _lastSmtcProgressMs = -1000;
-      _smtc.updateState(state: SMTCState.playing);
+      _smtc.updateState(state: started ? SMTCState.playing : SMTCState.paused);
       _smtc.updateDisplay(
         title: nowPlaying!.displayTitle,
         artist: nowPlaying!.artist,
@@ -1258,7 +1269,7 @@ class PlaybackService extends ChangeNotifier {
       _lastSessionProgressMs = (position * 1000).floor();
       _smtc.updateTimeProperties(progress: _lastSessionProgressMs);
       _schedulePlaybackStateSave(positionOverride: position);
-      return true;
+      return started;
     } catch (err, trace) {
       LOGGER.e("[load and play] $err");
       LOGGER.d("[load and play] trace", stackTrace: trace);
@@ -1535,6 +1546,7 @@ class PlaybackService extends ChangeNotifier {
     _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
     segmentLoop.clear();
     final token = ++_sourceRequestToken;
+    _playWhenReady = resumeAfterLoad;
     final occurrence = queueOccurrenceId(audioIndex);
     if (occurrence != null) queueStopBoundary.loading(occurrence, token);
     OnlineMusicService.instance.cancelPendingStreamResolution();
@@ -1544,7 +1556,6 @@ class PlaybackService extends ChangeNotifier {
       audioIndex,
       playlist,
       savedPosition,
-      resumeAfterLoad: resumeAfterLoad,
     );
   }
 
@@ -1552,9 +1563,8 @@ class PlaybackService extends ChangeNotifier {
     int token,
     int audioIndex,
     List<Audio> playlist,
-    double savedPosition, {
-    required bool resumeAfterLoad,
-  }) async {
+    double savedPosition,
+  ) async {
     try {
       if (audioIndex < 0 || audioIndex >= playlist.length) {
         throw RangeError.index(audioIndex, playlist, 'audioIndex');
@@ -1594,6 +1604,7 @@ class PlaybackService extends ChangeNotifier {
           showAppNotice(ui('已恢复歌曲，但原播放位置暂不可用'), kind: AppNoticeKind.warning);
         }
       }
+      final resumeAfterLoad = _playWhenReady;
       if (resumeAfterLoad) {
         _player.start();
         PlaybackStatistics.instance
@@ -1618,7 +1629,8 @@ class PlaybackService extends ChangeNotifier {
 
       playService.desktopLyricService.canSendMessage.then((canSend) {
         if (!canSend || !_isCurrentSourceRequest(token)) return;
-        playService.desktopLyricService.sendPlayerStateMessage(resumeAfterLoad);
+        playService.desktopLyricService
+            .sendPlayerStateMessage(playerState == PlayerState.playing);
         playService.desktopLyricService.sendNowPlayingMessage(nowPlaying!);
       });
     } catch (err, trace) {
@@ -1670,6 +1682,7 @@ class PlaybackService extends ChangeNotifier {
     if (canEditQueue && nowPlaying?.stableTrackId == audio.stableTrackId) {
       final token = _sourceRequestToken;
       if (position >= length) return false;
+      _playWhenReady = true;
       try {
         if (!_isCurrentSourceRequest(token) || stillCurrent?.call() == false) {
           return false;
@@ -1690,6 +1703,7 @@ class PlaybackService extends ChangeNotifier {
             _schedulePlaybackStateSave(positionOverride: position);
           },
           start: start,
+          shouldStart: () => _playWhenReady,
         );
         return started && playerState == PlayerState.playing;
       } catch (_) {
@@ -1938,6 +1952,7 @@ class PlaybackService extends ChangeNotifier {
   /// 暂停
   void pause() {
     if (_closed) return;
+    _playWhenReady = false;
     if (_practiceTimer != null) {
       _practiceRemaining = _practiceDeadline!.difference(DateTime.now());
       if (_practiceRemaining!.isNegative) _practiceRemaining = Duration.zero;
@@ -1961,13 +1976,21 @@ class PlaybackService extends ChangeNotifier {
 
   /// 恢复播放
   void start() {
+    if (_closed) return;
+    _playWhenReady = true;
+    // Only the current output rebuild may forward transport intent to BASS.
+    // A previous output request can still be saving settings while a newer
+    // song opens; its busy flag must not restart the retained old track.
+    if (resolvingAudioPath.value != null &&
+        _outputSourceToken != _sourceRequestToken) {
+      return;
+    }
     if (_practiceRemaining != null && segmentLoop.enabled) {
       _schedulePracticeInterval();
       return;
     }
     if (segmentLoop.finished) segmentLoop.setEnabled(false);
     queueStopBoundary.resumeAdvance();
-    if (_closed) return;
     try {
       if (nowPlaying == null) return;
       _player.start();

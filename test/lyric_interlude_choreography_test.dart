@@ -32,8 +32,8 @@ Widget _fixture(GlobalKey key, ValueNotifier<Duration> position,
           child: RepaintBoundary(
             key: key,
             child: SizedBox(
-              width: 72,
-              height: 24,
+              width: 96,
+              height: 40,
               child: LyricTransitionTile(
                 line:
                     LrcLine(Duration.zero, '', isBlank: true, length: _length),
@@ -65,10 +65,10 @@ void main() {
     expect(early.dotOpacities.$3, 0);
     expect(peak.scale, closeTo(1.25, .000001));
     expect(rest.scale, closeTo(1, .000001));
-    // Includes the dot radius, not just the centre: no extra layout/clip area.
-    expect(36 - (24 + 4.2) * peak.scale, greaterThanOrEqualTo(0));
-    expect(36 + (24 + 4.2) * peak.scale, lessThanOrEqualTo(72));
-    expect(12 + 4.2 * peak.scale, lessThanOrEqualTo(24));
+    // Keep the full expanded ink clear of the layer's clipping boundary.
+    expect(48 - (24 + 4.2) * peak.scale, greaterThan(10));
+    expect(96 - (48 + (24 + 4.2) * peak.scale), greaterThan(10));
+    expect(20 - 4.2 * peak.scale, greaterThan(10));
   });
 
   test('the final dot completes before the group visibly contracts and fades',
@@ -219,11 +219,22 @@ void main() {
     ]) {
       position.value = Duration(milliseconds: ms);
       await tester.pump();
-      expect(tester.getSize(find.byKey(key)), const Size(72, 24));
+      expect(tester.getSize(find.byKey(key)), const Size(96, 40));
       final pixels = await _pixels(tester, key);
       final hasInk = [for (var i = 3; i < pixels.length; i += 4) pixels[i]]
           .any((alpha) => alpha > 0);
       expect(hasInk, ms > 0 && ms < 12000);
+      if (ms == 11750) {
+        int alphaAt(int x, int y) => pixels[(y * 96 + x) * 4 + 3];
+        for (final x in [18, 48, 78]) {
+          expect(alphaAt(x, 20), greaterThan(32),
+              reason: 'All three waiting dots remain visible when expanded');
+        }
+        for (final (x, y) in [(0, 20), (95, 20), (48, 0), (48, 39)]) {
+          expect(alphaAt(x, y), 0,
+              reason: 'The expanded dots leave a clear compositor margin');
+        }
+      }
       if (renderDirectory != null) {
         await tester.runAsync(() async {
           final boundary =

@@ -910,7 +910,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byType(VerticalLyricScrollView), findsNothing);
     expect(find.text('正在加载歌词'), findsOneWidget);
-    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.binding.transientCallbackCount, greaterThan(0));
+    final loadingTop = tester.getTopLeft(find.text('正在加载歌词')).dy;
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(tester.getTopLeft(find.text('正在加载歌词')).dy, lessThan(loadingTop - 1),
+        reason: 'Visible loading text should bob without changing its layout');
     next.complete(_plainLyric(3));
     await tester.pumpAndSettle();
     expect(find.byType(LyricViewTile), findsNWidgets(3));

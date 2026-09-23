@@ -90,6 +90,7 @@ class _PlaylistCoverTransitionHostState
   bool _starting = false;
   int _generation = 0;
   _CaptureJob? _capture;
+  BoxConstraints? _viewportConstraints;
 
   @override
   void initState() {
@@ -173,6 +174,7 @@ class _PlaylistCoverTransitionHostState
       return;
     }
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final viewportConstraints = _viewportConstraints;
     final generation = ++_generation;
     final capture = _CaptureJob();
     _capture = capture;
@@ -218,6 +220,15 @@ class _PlaylistCoverTransitionHostState
       return;
     }
     _capture = null;
+    if (viewportConstraints != _viewportConstraints) {
+      // Resizing while GPU capture is pending must still apply the requested
+      // view change; only its obsolete snapshots are discarded.
+      capture.dispose();
+      _busy = false;
+      widget.controller._notify();
+      update();
+      return;
+    }
     _flights.addAll(capture.flights);
     capture.flights.clear();
     if (_flights.isEmpty) {
@@ -434,24 +445,42 @@ class _PlaylistCoverTransitionHostState
   }
 
   @override
-  Widget build(BuildContext context) => _CoverTransitionScope(
-        owner: this,
-        hidden: _hidden,
-        child: NotificationListener<ScrollNotification>(
-          onNotification: _scroll,
-          child: Stack(key: _boxKey, fit: StackFit.expand, children: [
-            widget.child,
-            if (_flights.isNotEmpty)
-              Positioned.fill(
-                  child: IgnorePointer(
-                      child: RepaintBoundary(
-                child: CustomPaint(
-                    painter: _CoverFlightsPainter(
-                        List.unmodifiable(_flights), _animation, _reveal)),
-              ))),
-          ]),
-        ),
-      );
+  Widget build(BuildContext context) =>
+      LayoutBuilder(builder: (context, constraints) {
+        if (_viewportConstraints != constraints) {
+          _viewportConstraints = constraints;
+          // Snapshots and landing rectangles belong to the captured viewport.
+          // A window/header resize must expose the freshly laid-out covers instead
+          // of flying to old coordinates (or holding them while artwork loads).
+          if (_flights.isNotEmpty) {
+            _cancel(notify: false);
+            final generation = _generation;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && generation == _generation) {
+                widget.controller._notify();
+              }
+            });
+          }
+        }
+        return _CoverTransitionScope(
+          owner: this,
+          hidden: _hidden,
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _scroll,
+            child: Stack(key: _boxKey, fit: StackFit.expand, children: [
+              widget.child,
+              if (_flights.isNotEmpty)
+                Positioned.fill(
+                    child: IgnorePointer(
+                        child: RepaintBoundary(
+                  child: CustomPaint(
+                      painter: _CoverFlightsPainter(
+                          List.unmodifiable(_flights), _animation, _reveal)),
+                ))),
+            ]),
+          ),
+        );
+      });
 }
 
 class _CoverTransitionScope extends InheritedWidget {

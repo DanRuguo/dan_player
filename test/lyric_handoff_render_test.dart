@@ -33,7 +33,7 @@ void main() {
   tearDown(() => uiLanguage.value = UiLanguage.zh);
   for (final language in UiLanguage.values) {
     testWidgets(
-        'handoff ${language.name} fades, releases timeline and stays idle while loading',
+        'handoff ${language.name} fades, releases timeline and animates only the loading status',
         (tester) async {
       tester.view.physicalSize = const Size(900, 540);
       tester.view.devicePixelRatio = 1;
@@ -132,8 +132,12 @@ void main() {
       await capture('fading');
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.byType(VerticalLyricScrollView), findsNothing);
-      expect(find.text(translateUi('正在加载歌词', language)), findsOneWidget);
-      expect(tester.binding.transientCallbackCount, 0);
+      final loading = find.text(translateUi('正在加载歌词', language));
+      expect(loading, findsOneWidget);
+      expect(tester.binding.transientCallbackCount, greaterThan(0));
+      final loadingTop = tester.getTopLeft(loading).dy;
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(tester.getTopLeft(loading).dy, lessThan(loadingTop - 1));
       await capture('loading');
       pending.complete(Lrc.fromLrcText(
           '[00:00.00]下一首 · Next song\n[00:05.00]新的旋律，继续播放', LrcSource.web));

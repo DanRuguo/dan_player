@@ -23,24 +23,27 @@ class OnlineLyricCache {
   static const maxTotalBytes = 64 * 1024 * 1024;
   DateTime? _lastPrune;
 
-  /// Read an existing result without starting a provider request. Automatic
-  /// playback uses this before it considers searching the network.
-  Future<Lyric?> read(String identity) async {
+  /// Read a saved result without starting or waiting for a provider request.
+  /// Automatic playback must still reach local lyrics during a slow refresh.
+  Future<Lyric?> read(String identity,
+      {String Function()? legacyIdentity}) async {
     final key = sha256.convert(utf8.encode(identity)).toString();
     try {
-      final pending = _pending[key];
-      if (pending != null) return (await pending)?.toLyric();
       final file = File(path.join((await _directory()).path, '$key.json'));
-      if (!await file.exists() || await file.length() > maxEntryBytes) {
-        return null;
+      if (await file.exists() && await file.length() <= maxEntryBytes) {
+        final snapshot =
+            LyricSnapshot.fromJson(jsonDecode(await file.readAsString()));
+        final lyric = snapshot?.toLyric();
+        if (lyric != null && lyric.lines.isNotEmpty) return lyric;
       }
-      final snapshot =
-          LyricSnapshot.fromJson(jsonDecode(await file.readAsString()));
-      final lyric = snapshot?.toLyric();
-      return lyric != null && lyric.lines.isNotEmpty ? lyric : null;
-    } catch (_) {
-      return null;
-    }
+    } catch (_) {}
+    if (legacyIdentity == null) return null;
+    final legacy = await read(legacyIdentity());
+    if (legacy == null) return null;
+    // Promotion is maintenance, not part of playback. It can join an active
+    // manual refresh, whose newer snapshot must win without delaying old lyrics.
+    resolve(identity, () async => legacy).ignore();
+    return legacy;
   }
 
   Future<Lyric?> resolve(String identity, Future<Lyric?> Function() fetch,

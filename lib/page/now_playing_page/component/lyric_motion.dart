@@ -217,11 +217,7 @@ class LyricFollowEffects extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => LyricWordFollowScope(
-      follow: transition == null
-          ? null
-          : LyricWordFollow(clock, transition!.curve, transition!.distance),
-      child: AnimatedBuilder(
+  Widget build(BuildContext context) => AnimatedBuilder(
         animation: Listenable.merge([
           if (transition != null) clock,
           if (blurAnimation != null) blurAnimation!,
@@ -237,29 +233,41 @@ class LyricFollowEffects extends StatelessWidget {
           final offset = sample?.offset ?? 0;
           // Keep the subtree shape stable while crossing zero blur; otherwise
           // a focus handoff would discard the timed paragraph's glyph cache.
-          return Transform.translate(
-            offset: Offset(0, offset),
-            // Keep the cached paragraph, but sample its fractional position
-            // inside the filter. ImageFiltered rounds the incoming scroll/lag
-            // transform in the Windows raster cache: the slow spring return
-            // otherwise stalls, then jumps by a physical pixel.
-            child: LyricFractionalFilterScope(
-              repaintToken: (
-                clock.value,
-                blurAnimation?.value,
-                reading?.value,
-                offset
+          return LyricWordFollowScope(
+            // The row's transition record survives after its finite clock has
+            // completed. Disconnect the per-word painter at that point: an
+            // idle phonetic paragraph must no longer advertise continuous
+            // repainting to the Windows raster cache while the sung primary
+            // line keeps changing. The settled paint is identical to the
+            // final follow frame, so this does not alter the visual handoff.
+            follow: transition != null && clock.isAnimating && clock.value < 1
+                ? LyricWordFollow(
+                    clock, transition!.curve, transition!.distance)
+                : null,
+            child: Transform.translate(
+              offset: Offset(0, offset),
+              // Keep the cached paragraph, but sample its fractional position
+              // inside the filter. ImageFiltered rounds the incoming scroll/lag
+              // transform in the Windows raster cache: the slow spring return
+              // otherwise stalls, then jumps by a physical pixel.
+              child: LyricFractionalFilterScope(
+                repaintToken: (
+                  clock.value,
+                  blurAnimation?.value,
+                  reading?.value,
+                  offset
+                ),
+                enabled: blurEnabled,
+                dpr: View.of(context).devicePixelRatio,
+                // Preserve the same clear-filter path during hover and after
+                // follow cleanup; zero blur changes glyph sampling on Windows.
+                sigma: math.max(.1, sigma),
+                child: child!,
               ),
-              enabled: blurEnabled,
-              dpr: View.of(context).devicePixelRatio,
-              // Preserve the same clear-filter path during hover and after
-              // follow cleanup; zero blur changes glyph sampling on Windows.
-              sigma: math.max(.1, sigma),
-              child: child!,
             ),
           );
         },
-      ));
+      );
 }
 
 /// One viewport mask with short edge ramps, disabled for manual reading and

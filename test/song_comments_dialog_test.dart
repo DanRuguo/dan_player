@@ -36,7 +36,8 @@ class _MemoryCommentsCache extends SongCommentsCache {
   @override
   Future<void> write(
       SongCommentsTarget target, SongCommentSort sort, SongCommentsPage result,
-      {bool replaceSort = false}) async {
+      {bool replaceSort = false, bool Function()? stillCurrent}) async {
+    if (stillCurrent?.call() == false) return;
     pages[_key(target, sort, result.page)] = result;
   }
 }

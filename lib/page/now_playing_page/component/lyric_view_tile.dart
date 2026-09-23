@@ -128,17 +128,17 @@ class LyricViewTile extends StatelessWidget {
                       alignment: alignment,
                       child: blank
                           ? SizedBox(
-                              height: 24,
+                              // Leave room for the interlude's 25% expansion
+                              // and the neighbouring row's blur kernel.
+                              height: 40,
                               child: duration > const Duration(seconds: 5)
-                                  ? Opacity(
-                                      opacity: activation,
-                                      child: LyricTransitionTile(
-                                        line: line,
-                                        length: duration,
-                                        position: position,
-                                        active: isMainLine,
-                                        reducedMotion: reducedMotion,
-                                      ),
+                                  ? LyricTransitionTile(
+                                      line: line,
+                                      length: duration,
+                                      position: position,
+                                      active: isMainLine,
+                                      reducedMotion: reducedMotion,
+                                      emphasisOpacity: activation,
                                     )
                                   : null,
                             )
@@ -147,7 +147,8 @@ class LyricViewTile extends StatelessWidget {
                               crossAxisAlignment: crossAxisAlignment,
                               children: [
                                 if (syncLine != null)
-                                  _TimedLyricText(
+                                  _LyricParagraphSurface(
+                                      child: _TimedLyricText(
                                     line: syncLine,
                                     position: position,
                                     active: isMainLine,
@@ -163,22 +164,24 @@ class LyricViewTile extends StatelessWidget {
                                     ),
                                     playedColor: primaryColor,
                                     glowAllowed: glowAllowed,
-                                  )
+                                  ))
                                 else
                                   // LRC has line times only. A uniform focus
                                   // transition does not invent word timing.
-                                  BalancedLyricText(
+                                  _LyricParagraphSurface(
+                                      child: BalancedLyricText(
                                     parts.first,
                                     wordFollow: isMainLine && !reducedMotion,
                                     textAlign: textAlign,
                                     style: primaryStyle.copyWith(
                                       color: primaryColor,
                                     ),
-                                  ),
+                                  )),
                                 for (final translation in translations)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 4),
-                                    child: BalancedLyricText(
+                                    child: _LyricParagraphSurface(
+                                        child: BalancedLyricText(
                                       translation,
                                       // Translation and phonetics have no word
                                       // timestamps. Share the lead/return of
@@ -197,16 +200,15 @@ class LyricViewTile extends StatelessWidget {
                                                 controller.translationFontSize,
                                             height: 1.35,
                                           ),
-                                    ),
+                                    )),
                                   ),
                               ],
                             ),
                     ),
                   );
-                  // Keep the filter and all paragraph draws in one display
-                  // list, below the row's retained boundary. The filter keeps
-                  // a blur-only path for a composited interlude's opacity.
-                  return ScopedLyricFractionalFilter(child: contents);
+                  return blank
+                      ? _LyricParagraphSurface(child: contents)
+                      : contents;
                 },
               ),
             ),
@@ -215,6 +217,20 @@ class LyricViewTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Each paragraph owns its sampling layer and retained display list. The sung
+/// words repaint every frame, but settled translations/phonetics must keep
+/// their own raster-cache origin instead of joining that changing display list.
+/// Keep the boundary OUTSIDE the filter: a composited child would bypass the
+/// filter's fractional-origin correction on Windows.
+class _LyricParagraphSurface extends StatelessWidget {
+  const _LyricParagraphSurface({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      RepaintBoundary(child: ScopedLyricFractionalFilter(child: child));
 }
 
 /// Both inactive and active timed lines use this exact paragraph layout.
@@ -1032,6 +1048,7 @@ class LyricTransitionTile extends StatelessWidget {
     required this.position,
     required this.active,
     required this.reducedMotion,
+    this.emphasisOpacity = 1,
   });
 
   final LyricLine line;
@@ -1039,18 +1056,20 @@ class LyricTransitionTile extends StatelessWidget {
   final ValueListenable<Duration> position;
   final bool active;
   final bool reducedMotion;
+  final double emphasisOpacity;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return CustomPaint(
-      size: const Size(72, 24),
+      size: const Size(96, 40),
       painter: _LyricInterludePainter(
         start: line.start,
         length: length,
         position: position,
         active: active,
         reducedMotion: reducedMotion,
+        emphasisOpacity: emphasisOpacity,
         color: Theme.of(context).colorScheme.onSecondaryContainer,
       ),
     );
@@ -1064,6 +1083,7 @@ class _LyricInterludePainter extends CustomPainter {
     required this.position,
     required this.active,
     required this.reducedMotion,
+    required this.emphasisOpacity,
     required this.color,
   }) : super(repaint: active && !reducedMotion ? position : null);
 
@@ -1072,6 +1092,7 @@ class _LyricInterludePainter extends CustomPainter {
   final ValueListenable<Duration> position;
   final bool active;
   final bool reducedMotion;
+  final double emphasisOpacity;
   final Color color;
 
   @override
@@ -1079,18 +1100,21 @@ class _LyricInterludePainter extends CustomPainter {
     final pose = LyricMotion.interludePose(position.value - start, length,
         reduced: reducedMotion);
     final paint = Paint();
+    final center = Offset(size.width / 2, size.height / 2);
     canvas.save();
-    canvas.translate(36, 12);
+    canvas.translate(center.dx, center.dy);
     canvas.scale(pose.scale);
-    canvas.translate(-36, -12);
+    canvas.translate(-center.dx, -center.dy);
     for (var index = 0; index < 3; index++) {
       final dotOpacity = switch (index) {
         0 => pose.dotOpacities.$1,
         1 => pose.dotOpacities.$2,
         _ => pose.dotOpacities.$3,
       };
-      paint.color = color.withValues(alpha: pose.opacity * dotOpacity);
-      canvas.drawCircle(Offset(12 + 24.0 * index, 12), 4.2, paint);
+      paint.color = color.withValues(
+          alpha: color.a * pose.opacity * dotOpacity * emphasisOpacity);
+      canvas.drawCircle(
+          Offset(center.dx + 24.0 * (index - 1), center.dy), 4.2, paint);
     }
     canvas.restore();
   }
@@ -1102,5 +1126,6 @@ class _LyricInterludePainter extends CustomPainter {
       !identical(position, oldDelegate.position) ||
       active != oldDelegate.active ||
       reducedMotion != oldDelegate.reducedMotion ||
+      emphasisOpacity != oldDelegate.emphasisOpacity ||
       color != oldDelegate.color;
 }

@@ -85,6 +85,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   bool _focused = false;
   bool _dragging = false;
   Object? _dragIdentity;
+  int? _pointer;
   double _from = 0;
   double _target = 0;
   int _generation = 0;
@@ -146,14 +147,17 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
       oldWidget.hidden?.removeListener(_syncActivity);
       widget.hidden?.addListener(_syncActivity);
     }
-    if (oldWidget.trackIdentity != widget.trackIdentity || !_enabled) {
+    final sourceChanged = !identical(oldWidget.positions, widget.positions);
+    if (oldWidget.trackIdentity != widget.trackIdentity ||
+        sourceChanged ||
+        !_enabled) {
       _dragging = false;
       _dragIdentity = null;
       _receive(widget.readPosition(), immediate: true);
     } else if (oldWidget.duration != widget.duration && !_dragging) {
       _receive(widget.readPosition(), immediate: true);
     }
-    if (!identical(oldWidget.positions, widget.positions)) {
+    if (sourceChanged) {
       _detach();
       _active = false;
     }
@@ -246,7 +250,32 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
         _dragging && _enabled && _dragIdentity == widget.trackIdentity;
     setState(() => _dragging = false);
     _dragIdentity = null;
-    if (canSeek) widget.onSeek(_safe(value));
+    try {
+      if (canSeek) widget.onSeek(_safe(value));
+    } catch (error, stack) {
+      // Let Slider finish its own gesture cleanup even if a caller fails.
+      // Rethrowing here leaves its internal interaction active on the next
+      // drag; report through Flutter's usual error channel instead.
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: error,
+        stack: stack,
+        library: 'Dan Player',
+        context: ErrorDescription('while seeking from the detail timeline'),
+      ));
+    } finally {
+      if (mounted) _receive(widget.readPosition(), immediate: true);
+    }
+  }
+
+  void _cancelPointer(int pointer) {
+    if (_pointer != pointer) return;
+    _pointer = null;
+    if (!_dragging) return;
+    // Material Slider also calls onChangeEnd for pointer cancellation. Clear
+    // the preview before its recognizer runs so lost native capture cannot
+    // commit a seek as if the user had released the handle normally.
+    setState(() => _dragging = false);
+    _dragIdentity = null;
     _receive(widget.readPosition(), immediate: true);
   }
 
@@ -282,48 +311,55 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
               _enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
           onEnter: (_) => setState(() => _hovered = true),
           onExit: (_) => setState(() => _hovered = false),
-          child: Focus(
-            onFocusChange: (focused) => setState(() => _focused = focused),
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(end: emphasis),
-              duration: motion ? AppMotion.quick : Duration.zero,
-              curve: Curves.easeOutCubic,
-              builder: (context, emphasis, child) => SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 4 + emphasis,
-                  trackShape: const RoundedRectSliderTrackShape(),
-                  thumbShape: DetailProgressHandleShape(emphasis: emphasis),
-                  overlayShape: SliderComponentShape.noOverlay,
-                  activeTrackColor: scheme.primary,
-                  inactiveTrackColor: highContrast
-                      ? scheme.outline
-                      : scheme.primary.withValues(alpha: .18),
-                  thumbColor: scheme.primary,
-                  valueIndicatorColor: scheme.primaryContainer,
-                  valueIndicatorTextStyle:
-                      TextStyle(color: scheme.onPrimaryContainer),
-                  showValueIndicator: ShowValueIndicator.onDrag,
+          child: Listener(
+            onPointerDown: (event) => _pointer ??= event.pointer,
+            onPointerUp: (event) {
+              if (_pointer == event.pointer) _pointer = null;
+            },
+            onPointerCancel: (event) => _cancelPointer(event.pointer),
+            child: Focus(
+              onFocusChange: (focused) => setState(() => _focused = focused),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(end: emphasis),
+                duration: motion ? AppMotion.quick : Duration.zero,
+                curve: Curves.easeOutCubic,
+                builder: (context, emphasis, child) => SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 4 + emphasis,
+                    trackShape: const RoundedRectSliderTrackShape(),
+                    thumbShape: DetailProgressHandleShape(emphasis: emphasis),
+                    overlayShape: SliderComponentShape.noOverlay,
+                    activeTrackColor: scheme.primary,
+                    inactiveTrackColor: highContrast
+                        ? scheme.outline
+                        : scheme.primary.withValues(alpha: .18),
+                    thumbColor: scheme.primary,
+                    valueIndicatorColor: scheme.primaryContainer,
+                    valueIndicatorTextStyle:
+                        TextStyle(color: scheme.onPrimaryContainer),
+                    showValueIndicator: ShowValueIndicator.onDrag,
+                  ),
+                  child: child!,
                 ),
-                child: child!,
-              ),
-              child: ValueListenableBuilder<double>(
-                valueListenable: _display,
-                builder: (context, position, _) => Semantics(
-                  label: ui('播放进度'),
-                  child: Slider(
-                    key: const ValueKey('detail-progress-slider'),
-                    min: 0,
-                    max: _length > 0 ? _length : 1,
-                    value: _safe(position),
-                    label: _time(position),
-                    semanticFormatterCallback: _time,
-                    onChangeStart: _enabled ? _begin : null,
-                    onChanged: _enabled
-                        ? (value) {
-                            if (_dragging) _display.value = _safe(value);
-                          }
-                        : null,
-                    onChangeEnd: _enabled ? _finish : null,
+                child: ValueListenableBuilder<double>(
+                  valueListenable: _display,
+                  builder: (context, position, _) => Semantics(
+                    label: ui('播放进度'),
+                    child: Slider(
+                      key: const ValueKey('detail-progress-slider'),
+                      min: 0,
+                      max: _length > 0 ? _length : 1,
+                      value: _safe(position),
+                      label: _time(position),
+                      semanticFormatterCallback: _time,
+                      onChangeStart: _enabled ? _begin : null,
+                      onChanged: _enabled
+                          ? (value) {
+                              if (_dragging) _display.value = _safe(value);
+                            }
+                          : null,
+                      onChangeEnd: _enabled ? _finish : null,
+                    ),
                   ),
                 ),
               ),

@@ -23,18 +23,16 @@ Future<Lyric?> resolveAutomaticLyricSources({
   required Future<Lyric?> Function() local,
   required Future<Lyric?> Function() cachedOnline,
   required Future<Lyric?> Function() searchOnline,
+  bool Function()? stillCurrent,
 }) async {
-  if (localFirst) {
-    final result = await local();
-    if (result != null) return result;
-    final cached = await cachedOnline();
-    if (cached != null) return cached;
-  } else {
-    final cached = await cachedOnline();
-    if (cached != null) return cached;
-    final result = await local();
+  final savedSources =
+      localFirst ? [local, cachedOnline] : [cachedOnline, local];
+  for (final readSaved in savedSources) {
+    if (stillCurrent?.call() == false) return null;
+    final result = await readSaved();
     if (result != null) return result;
   }
+  if (stillCurrent?.call() == false) return null;
   return searchOnline();
 }
 
@@ -83,6 +81,8 @@ class LyricService extends ChangeNotifier {
 
   Audio? _getNowPlaying() =>
       _disposed ? null : playService.playbackService.nowPlaying;
+
+  bool _isPlaying(Audio audio) => _getNowPlaying()?.path == audio.path;
 
   /// 供 widget 使用
   Future<Lyric?> currLyricFuture = Future.value(null);
@@ -275,20 +275,10 @@ class LyricService extends ChangeNotifier {
   }
 
   Future<Lyric?> _readCachedOnline(Audio audio, {LyricSource? source}) =>
-      _readAndPromoteCachedOnline(audio, source: source);
-
-  Future<Lyric?> _readAndPromoteCachedOnline(Audio audio,
-      {LyricSource? source}) async {
-    final cache = OnlineLyricCache.instance;
-    final identity = onlineLyricCacheIdentity(audio, source: source);
-    final current = await cache.read(identity);
-    if (current != null) return current;
-    final legacy = await cache.read(
-      _legacyOnlineCacheIdentity(audio, source: source),
-    );
-    if (legacy == null) return null;
-    return cache.resolve(identity, () async => legacy);
-  }
+      OnlineLyricCache.instance.read(
+        onlineLyricCacheIdentity(audio, source: source),
+        legacyIdentity: () => _legacyOnlineCacheIdentity(audio, source: source),
+      );
 
   Future<Lyric?> _cachedOnline(Audio audio, Future<Lyric?> Function() fetch,
           {LyricSource? source, bool refresh = false}) =>
@@ -303,14 +293,16 @@ class LyricService extends ChangeNotifier {
       final cached = await _readCachedOnline(audio);
       if (cached != null) return cached;
     }
+    if (!_isPlaying(audio)) return null;
     return _cachedOnline(audio, () async {
+      if (!_isPlaying(audio)) return null;
       final direct = switch (audio.onlineProvider) {
         "qq" => await getOnlineLyric(
             qqSongId: audio.onlineNumericId, qqSongMid: audio.onlineId),
         "netease" => await getOnlineLyric(neteaseSongId: audio.onlineId),
         _ => null,
       };
-      if (_disposed) return null;
+      if (!_isPlaying(audio)) return direct;
       return direct ?? await getMostMatchedLyric(audio);
     }, refresh: refresh);
   }
@@ -328,6 +320,7 @@ class LyricService extends ChangeNotifier {
       localFirst: localFirst,
       local: () => Lrc.fromAudioPath(nowPlaying),
       cachedOnline: () => _readCachedOnline(nowPlaying),
+      stillCurrent: () => _isPlaying(nowPlaying),
       searchOnline: () =>
           _disposed ? Future<Lyric?>.value(null) : _resolveOnline(nowPlaying),
     );
@@ -381,6 +374,7 @@ class LyricService extends ChangeNotifier {
       } else {
         raw = resolveAutomaticLyricSources(
           localFirst: false,
+          stillCurrent: () => _isPlaying(nowPlaying),
           cachedOnline: () =>
               _readCachedOnline(nowPlaying, source: lyricSource),
           local: () => Lrc.fromAudioPath(nowPlaying),

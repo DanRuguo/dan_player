@@ -390,6 +390,11 @@ class DefaultSongCommentsTransport implements SongCommentsTransport {
   }
 }
 
+class _CommentLoadState {
+  int active = 0;
+  int revision = 0;
+}
+
 class SongCommentsService {
   SongCommentsService({
     SongCommentsTransport? transport,
@@ -407,6 +412,9 @@ class SongCommentsService {
   final SongCommentsTransport _transport;
   final SongCommentsCache? _cache;
   final Duration _timeout;
+  // Retain only active source/sort groups. A refresh invalidates older writes,
+  // including pagination that was already in flight in another dialog.
+  final _activeLoads = <String, _CommentLoadState>{};
 
   static bool canRead(Audio audio) => unavailableReason(audio) == null;
 
@@ -479,6 +487,11 @@ class SongCommentsService {
     }
     final token = cancellation ?? SongCommentsCancellation();
     token.check();
+    final group = '${target.identity}:${sort.name}';
+    final state = _activeLoads.putIfAbsent(group, _CommentLoadState.new);
+    state.active++;
+    if (refresh) state.revision++;
+    final revision = state.revision;
     try {
       if (!refresh && _cache != null) {
         final cached = await _cache!.read(target, sort, page);
@@ -493,7 +506,8 @@ class SongCommentsService {
       final result = _parse(response, target, sort, page);
       token.check();
       await _cache?.write(target, sort, result,
-          replaceSort: refresh && page == 0);
+          replaceSort: refresh && page == 0,
+          stillCurrent: () => !token.isCancelled && state.revision == revision);
       token.check();
       return result;
     } on TimeoutException {
@@ -513,6 +527,9 @@ class SongCommentsService {
       token.check();
       throw const SongCommentsException(
           SongCommentsFailure.network, '评论加载失败，请检查网络连接后重试。');
+    } finally {
+      state.active--;
+      if (state.active == 0) _activeLoads.remove(group);
     }
   }
 

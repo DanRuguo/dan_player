@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/rendering_preferences.dart';
 
@@ -218,12 +219,19 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
                     : ui("无歌词");
             content = Center(
               key: ValueKey(label),
-              child: Text(label,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 22,
-                      color:
-                          Theme.of(context).colorScheme.onSecondaryContainer)),
+              child: waiting
+                  ? _LyricLoadingStatus(
+                      label: label,
+                      color: Theme.of(context).colorScheme.onSecondaryContainer,
+                      animate: active && !reduced,
+                    )
+                  : Text(label,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 22,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSecondaryContainer)),
             );
           }
           final firstPresentation = !_hasPresented;
@@ -266,6 +274,98 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
   void dispose() {
     widget.hidden?.removeListener(_visibilityChanged);
     WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+}
+
+/// The pending lyric has a fixed layout box; only its ink bobs while visible.
+/// The lyric motion switch, reduced-motion preference and hidden-page policy
+/// all stop this one ticker without affecting loading or playback.
+class _LyricLoadingStatus extends StatefulWidget {
+  const _LyricLoadingStatus({
+    required this.label,
+    required this.color,
+    required this.animate,
+  });
+
+  final String label;
+  final Color color;
+  final bool animate;
+
+  @override
+  State<_LyricLoadingStatus> createState() => _LyricLoadingStatusState();
+}
+
+class _LyricLoadingStatusState extends State<_LyricLoadingStatus>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _motion = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) _motion.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LyricLoadingStatus oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.animate == oldWidget.animate) return;
+    if (widget.animate) {
+      _motion.repeat();
+    } else {
+      _motion.stop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        label: widget.label,
+        liveRegion: true,
+        child: ExcludeSemantics(
+          child: SizedBox(
+            height: 56,
+            child: Center(
+              child: AnimatedBuilder(
+                animation: _motion,
+                child: RepaintBoundary(
+                  child: Text(widget.label,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 22, color: widget.color)),
+                ),
+                builder: (context, child) {
+                  if (!widget.animate) return child!;
+                  // sin² meets both ends at zero velocity: the loop never
+                  // snaps back, and the 6px travel reads clearly at high DPI.
+                  final wave =
+                      math.pow(math.sin(math.pi * _motion.value), 2).toDouble();
+                  final scale = 1 + .04 * wave;
+                  return Opacity(
+                    opacity: .80 + .20 * wave,
+                    child: Transform(
+                      // Sample one fixed paragraph. Rerasterizing text at
+                      // every tiny scale step changes glyph hinting instead
+                      // of moving its ink continuously. Include translation
+                      // in this matrix so it too uses fractional sampling.
+                      alignment: Alignment.center,
+                      transform: Matrix4.translationValues(0, -6 * wave, 0)
+                        ..scaleByDouble(scale, scale, 1, 1),
+                      filterQuality: FilterQuality.medium,
+                      child: child,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+
+  @override
+  void dispose() {
+    _motion.dispose();
     super.dispose();
   }
 }
