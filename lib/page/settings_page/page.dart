@@ -59,6 +59,7 @@ class SettingsPage extends StatelessWidget {
           title: ui("联网与歌词"),
           icon: Icons.lyrics_outlined,
           children: [
+            const AutomaticOnlineLyricsSwitch(),
             const DefaultLyricSourceControl(),
             const LyricExperienceSettings(),
             const MusicSourceSettings(),

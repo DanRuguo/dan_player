@@ -28,6 +28,29 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
+class AutomaticOnlineLyricsSwitch extends StatelessWidget {
+  const AutomaticOnlineLyricsSwitch({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final settings = AppSettings.instance;
+    return ValueListenableBuilder<bool>(
+      valueListenable: settings.automaticOnlineLyrics,
+      builder: (context, enabled, _) => SettingsSwitchTile(
+        title: Text(ui('自动联网')),
+        subtitle: Text(ui('本地歌词和缓存均缺失时自动联网搜词；评论仍需手动更新。')),
+        icon: Symbols.cloud_sync,
+        value: enabled,
+        onChanged: (value) async {
+          settings.automaticOnlineLyrics.value = value;
+          await settings.saveSettings();
+        },
+      ),
+    );
+  }
+}
+
 class RestoreSessionSwitch extends StatefulWidget {
   const RestoreSessionSwitch({super.key});
 

@@ -37,9 +37,15 @@ class _Desktop extends Fake implements DesktopLyricService {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  for (final scenario in ['qq', 'netease', 'configured', 'corrupt']) {
-    test('automatic $scenario lyric miss cannot create a network client',
-        () async {
+  for (final scenario in [
+    'qq',
+    'netease',
+    'configured',
+    'corrupt',
+    'enabled'
+  ]) {
+    test('automatic $scenario lyric miss follows network permission', () async {
+      AppSettings.instance.automaticOnlineLyrics.value = scenario == 'enabled';
       // Real LyricService resolution and cache reads, with only playback and
       // desktop output replaced. Every HTTP client creation is denied and counted.
       final audio = Audio.online(
@@ -48,7 +54,8 @@ void main() {
               'qq',
               'netease',
               'configured',
-              'corrupt'
+              'corrupt',
+              'enabled'
             ].indexOf(scenario)}',
         numericId: 9100000,
         title: 'Isolated policy probe',
@@ -81,6 +88,7 @@ void main() {
       addTearDown(() async {
         LYRIC_SOURCES.remove(audio.path);
         await facade.close();
+        AppSettings.instance.automaticOnlineLyrics.value = false;
         await playback.positions.close();
         readiness.dispose();
         final fixture = corrupt;
@@ -99,7 +107,7 @@ void main() {
         clients++;
         throw StateError('Unexpected automatic lyric network access');
       });
-      expect(clients, 0);
+      expect(clients, scenario == 'enabled' ? greaterThan(0) : 0);
     });
   }
 }

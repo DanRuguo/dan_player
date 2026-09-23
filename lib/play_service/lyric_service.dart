@@ -15,8 +15,8 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/foundation.dart';
 
 /// A cached online result can win over local lyrics when the user selected
-/// online-first. Playback and document changes only read saved sources; even a
-/// complete cache miss must wait for an explicit user search before networking.
+/// online-first. This stage only reads saved sources; network fallback is gated
+/// separately by the opt-in preference after both saved sources miss.
 @visibleForTesting
 Future<Lyric?> resolveAutomaticLyricSources({
   required bool localFirst,
@@ -32,6 +32,18 @@ Future<Lyric?> resolveAutomaticLyricSources({
     if (result != null) return result;
   }
   return null;
+}
+
+/// Recheck permission after asynchronous disk reads and before starting I/O.
+@visibleForTesting
+Future<Lyric?> resolveMissingLyricOnline({
+  required Future<Lyric?> saved,
+  required bool Function() allowed,
+  required Future<Lyric?> Function() search,
+}) async {
+  final lyric = await saved;
+  if (lyric != null || !allowed()) return lyric;
+  return search();
 }
 
 /// Editable tags and provider preferences must not turn an existing saved
@@ -61,6 +73,8 @@ class LyricService extends ChangeNotifier {
   LyricService._(
       this.playService, this._resolveDefaultForTesting, this.documents) {
     documents?.addListener(_handleDocumentChange);
+    AppSettings.instance.automaticOnlineLyrics
+        .addListener(_handleAutomaticOnlineChange);
     _positionStreamSubscription =
         playService.playbackService.positionStream.listen((pos) {
       if (_disposed) return;
@@ -96,6 +110,13 @@ class LyricService extends ChangeNotifier {
   int get resolutionGeneration => _lyricToken;
   int _currentLyricLine = -1;
   bool _isCurrent(int token) => !_disposed && token == _lyricToken;
+
+  void _handleAutomaticOnlineChange() {
+    if (AppSettings.instance.automaticOnlineLyrics.value &&
+        _rawResolvedLyric == null) {
+      updateLyric();
+    }
+  }
 
   void _handleDocumentChange() {
     final audio = _getNowPlaying();
@@ -278,20 +299,35 @@ class LyricService extends ChangeNotifier {
         legacyIdentity: () => _legacyOnlineCacheIdentity(audio, source: source),
       );
 
-  Future<Lyric?> _searchOnline(Audio audio) async {
-    if (!_isPlaying(audio)) return null;
-    return OnlineLyricCache.instance.resolve(onlineLyricCacheIdentity(audio),
-        () async {
-      if (!_isPlaying(audio)) return null;
+  Future<Lyric?> _searchOnline(
+    Audio audio, {
+    LyricSource? source,
+    bool refresh = true,
+    bool Function()? stillCurrent,
+  }) async {
+    bool current() => _isPlaying(audio) && (stillCurrent?.call() ?? true);
+    if (!current()) return null;
+    return OnlineLyricCache.instance
+        .resolve(onlineLyricCacheIdentity(audio, source: source), () async {
+      if (!current()) return null;
+      if (source != null) {
+        return getOnlineLyric(
+          qqSongId: source.qqSongId,
+          qqSongMid: source.qqSongMid,
+          kugouSongHash: source.kugouSongHash,
+          neteaseSongId: source.neteaseSongId,
+          lrclibId: source.lrclibId,
+        );
+      }
       final direct = switch (audio.onlineProvider) {
         "qq" => await getOnlineLyric(
             qqSongId: audio.onlineNumericId, qqSongMid: audio.onlineId),
         "netease" => await getOnlineLyric(neteaseSongId: audio.onlineId),
         _ => null,
       };
-      if (!_isPlaying(audio)) return direct;
+      if (!current()) return direct;
       return direct ?? await getMostMatchedLyric(audio);
-    }, refresh: true);
+    }, refresh: refresh);
   }
 
   Future<Lyric?> _getLyricDefault(bool localFirst) async {
@@ -366,6 +402,30 @@ class LyricService extends ChangeNotifier {
         );
       }
     }
+    final token = _lyricToken + 1;
+    bool allowed() =>
+        _isCurrent(token) &&
+        _isPlaying(nowPlaying) &&
+        AppSettings.instance.automaticOnlineLyrics.value;
+    raw = resolveMissingLyricOnline(
+      saved: raw,
+      allowed: allowed,
+      search: () async {
+        // A pinned source can miss while a previous default search is cached.
+        if (lyricSource != null) {
+          final cached = await _readCachedOnline(nowPlaying);
+          if (cached != null) return cached;
+        }
+        if (!allowed()) return null;
+        return _searchOnline(
+          nowPlaying,
+          source:
+              lyricSource?.source == LyricSourceType.local ? null : lyricSource,
+          refresh: false,
+          stillCurrent: allowed,
+        );
+      },
+    );
     _useRawFuture(raw, offsetMs: store?.forAudio(nowPlaying)?.offsetMs ?? 0);
   }
 
@@ -447,6 +507,8 @@ class LyricService extends ChangeNotifier {
     if (_disposed) return;
     _disposed = true;
     documents?.removeListener(_handleDocumentChange);
+    AppSettings.instance.automaticOnlineLyrics
+        .removeListener(_handleAutomaticOnlineChange);
     _lyricToken++;
     _resolvedLyric = null;
     _currentLyricLine = -1;

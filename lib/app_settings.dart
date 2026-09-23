@@ -161,6 +161,9 @@ class AppSettings {
   /// Controls new search requests only; saved online tracks remain usable.
   final onlineSources = ValueNotifier(const OnlineSourcePreferences());
 
+  /// Opt-in fallback only when no saved lyrics are available.
+  final automaticOnlineLyrics = ValueNotifier(false);
+
   /// LRCLIB is a read-only public lyric API, independent of track search.
   final lrclibEnabled = ValueNotifier(true);
 
@@ -353,6 +356,8 @@ class AppSettings {
         BackgroundPreferences.fromMap(settingsMap['Backgrounds']);
     _instance.onlineSources.value =
         OnlineSourcePreferences.fromJson(settingsMap['OnlineSources']);
+    _instance.automaticOnlineLyrics.value =
+        settingsMap['AutomaticOnlineLyrics'] == true;
     _instance.lrclibEnabled.value = settingsMap['LrclibEnabled'] is bool
         ? settingsMap['LrclibEnabled'] as bool
         : true;
@@ -526,6 +531,7 @@ class AppSettings {
         "PerformancePreset": performancePresets.value.toMap(),
         "PlayerShortcuts": shortcuts.value.toMap(),
         "OnlineSources": onlineSources.value.toJson(),
+        "AutomaticOnlineLyrics": automaticOnlineLyrics.value,
         "LrclibEnabled": lrclibEnabled.value,
         "CustomMusicSources": CustomMusicSourceProfileCodec.encodeSettings(
           customMusicSources.value,
