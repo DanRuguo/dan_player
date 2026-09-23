@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -47,7 +48,58 @@ class CustomMusicSourceSettings extends StatefulWidget {
       _CustomMusicSourceSettingsState();
 }
 
-class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
+class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _reorder = AnimationController(vsync: this);
+  final Map<String, GlobalKey> _cardKeys = {};
+  final Map<String, double> _reorderOffsets = {};
+  bool _reordering = false;
+
+  @override
+  void dispose() {
+    _reorder.dispose();
+    super.dispose();
+  }
+
+  Future<void> _move(String id, int direction) async {
+    if (_reordering) return;
+    final profiles = _profiles.value;
+    final index = profiles.indexWhere((p) => p.id == id);
+    final target = index + direction;
+    if (index < 0 || target < 0 || target >= profiles.length) return;
+    final other = profiles[target].id;
+    final height = _cardKeys[id]?.currentContext?.size?.height;
+    final otherHeight = _cardKeys[other]?.currentContext?.size?.height;
+    setState(() {
+      _reordering = true;
+      _reorderOffsets[id] = direction * ((otherHeight ?? 0) + 10);
+      _reorderOffsets[other] = -direction * ((height ?? 0) + 10);
+    });
+    _reorder.duration = AppMotion.duration(
+        context, MotionKind.feedback, const Duration(milliseconds: 280));
+    try {
+      await _reorder.forward(from: 0).orCancel;
+      if (!mounted) return;
+      // Resolve identities again so an edit/import during the animation cannot
+      // be overwritten with an old list snapshot.
+      final next = List<CustomMusicSourceProfile>.of(_profiles.value);
+      final from = next.indexWhere((p) => p.id == id);
+      final to = next.indexWhere((p) => p.id == other);
+      setState(() {
+        _reorderOffsets.clear();
+        _reordering = false;
+      });
+      _reorder.reset();
+      if (from >= 0 && to >= 0) {
+        final moved = next.removeAt(from);
+        next.insert(to, moved);
+        await _commit(next);
+      }
+    } on TickerCanceled {
+      // Disposal owns the interrupted animation; no settings mutation follows.
+    }
+  }
+
   int _saveRevision = 0;
   String? _saveError;
   bool _transferring = false;
@@ -512,15 +564,36 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings> {
               _EmptyCustomSources(onAdd: () => _openEditor())
             else
               for (var index = 0; index < profiles.length; index++) ...[
-                _CustomSourceCard(
-                  profile: profiles[index],
-                  onEnabled: (enabled) =>
-                      unawaited(_setEnabled(profiles[index], enabled)),
-                  testing: _testingId == profiles[index].id,
-                  testBusy: _testingId != null,
-                  onTest: () => _test(profiles[index]),
-                  onEdit: () => _openEditor(profiles[index]),
-                  onDelete: () => _delete(profiles[index]),
+                AnimatedBuilder(
+                  key: ValueKey(profiles[index].id),
+                  animation: _reorder,
+                  builder: (context, child) => Transform.translate(
+                    offset: Offset(
+                        0,
+                        (_reorderOffsets[profiles[index].id] ?? 0) *
+                            Curves.easeInOutCubic.transform(_reorder.value)),
+                    child: child,
+                  ),
+                  child: SizedBox(
+                    key: _cardKeys.putIfAbsent(
+                        profiles[index].id, GlobalKey.new),
+                    child: _CustomSourceCard(
+                      profile: profiles[index],
+                      onEnabled: (enabled) =>
+                          unawaited(_setEnabled(profiles[index], enabled)),
+                      testing: _testingId == profiles[index].id,
+                      testBusy: _testingId != null,
+                      onTest: () => _test(profiles[index]),
+                      onEdit: () => _openEditor(profiles[index]),
+                      onDelete: () => _delete(profiles[index]),
+                      onUp: index == 0 || _reordering
+                          ? null
+                          : () => _move(profiles[index].id, -1),
+                      onDown: index == profiles.length - 1 || _reordering
+                          ? null
+                          : () => _move(profiles[index].id, 1),
+                    ),
+                  ),
                 ),
                 if (index + 1 < profiles.length) const SizedBox(height: 10),
               ],
@@ -582,6 +655,8 @@ class _CustomSourceCard extends StatelessWidget {
     required this.onTest,
     required this.onEdit,
     required this.onDelete,
+    this.onUp,
+    this.onDown,
   });
 
   final CustomMusicSourceProfile profile;
@@ -591,6 +666,8 @@ class _CustomSourceCard extends StatelessWidget {
   final VoidCallback onTest;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback? onUp;
+  final VoidCallback? onDown;
 
   @override
   Widget build(BuildContext context) {
@@ -662,6 +739,20 @@ class _CustomSourceCard extends StatelessWidget {
             spacing: 6,
             runSpacing: 6,
             children: [
+              IconButton(
+                key: ValueKey('custom-source-up-${profile.id}'),
+                tooltip: ui('提高来源优先级'),
+                color: scheme.primary,
+                onPressed: onUp,
+                icon: const Icon(Symbols.arrow_upward),
+              ),
+              IconButton(
+                key: ValueKey('custom-source-down-${profile.id}'),
+                tooltip: ui('降低来源优先级'),
+                color: scheme.primary,
+                onPressed: onDown,
+                icon: const Icon(Symbols.arrow_downward),
+              ),
               TextButton.icon(
                 key: ValueKey('custom-source-test-${profile.id}'),
                 onPressed: testBusy ? null : onTest,

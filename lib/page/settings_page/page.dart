@@ -1,3 +1,4 @@
+import 'package:dan_player/page/settings_page/lyric_cache_batch_settings.dart';
 import 'package:dan_player/page/page_scaffold.dart';
 import 'package:dan_player/page/settings_page/about_brand.dart';
 import 'package:dan_player/page/settings_page/artist_separator_editor.dart';
@@ -61,6 +62,7 @@ class SettingsPage extends StatelessWidget {
           children: [
             const AutomaticOnlineLyricsSwitch(),
             const DefaultLyricSourceControl(),
+            const LyricCacheBatchSettings(),
             const LyricExperienceSettings(),
             const MusicSourceSettings(),
             const CustomMusicSourceSettings(),

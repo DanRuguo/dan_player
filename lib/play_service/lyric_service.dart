@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:dan_player/lyric/online_lyric_cache.dart';
@@ -48,9 +49,33 @@ Future<Lyric?> resolveMissingLyricOnline({
 
 /// Editable tags and provider preferences must not turn an existing saved
 /// result into another automatic network search for the same library track.
-@visibleForTesting
 String onlineLyricCacheIdentity(Audio audio, {LyricSource? source}) =>
     jsonEncode([2, audio.stableTrackId, source?.toMap()]);
+
+String _legacyOnlineCacheIdentity(Audio audio, {LyricSource? source}) {
+  final settings = AppSettings.instance;
+  // Metadata/provider changes naturally select a new cache entry. Do not
+  // include the display offset: cached timestamps must remain canonical.
+  return jsonEncode([
+    1,
+    audio.stableTrackId,
+    audio.title,
+    audio.artist,
+    audio.album,
+    audio.duration,
+    source?.toMap(),
+    settings.onlineSources.value.toJson(),
+    settings.customMusicSources.value
+        .map((profile) => profile.toJson())
+        .toList(),
+  ]);
+}
+
+Future<Lyric?> readCachedOnlineLyric(Audio audio, {LyricSource? source}) =>
+    OnlineLyricCache.instance.read(
+      onlineLyricCacheIdentity(audio, source: source),
+      legacyIdentity: () => _legacyOnlineCacheIdentity(audio, source: source),
+    );
 
 /// 只通知 lyric 变更
 class LyricService extends ChangeNotifier {
@@ -274,31 +299,6 @@ class LyricService extends ChangeNotifier {
     );
   }
 
-  String _legacyOnlineCacheIdentity(Audio audio, {LyricSource? source}) {
-    final settings = AppSettings.instance;
-    // Metadata/provider changes naturally select a new cache entry. Do not
-    // include the display offset: cached timestamps must remain canonical.
-    return jsonEncode([
-      1,
-      audio.stableTrackId,
-      audio.title,
-      audio.artist,
-      audio.album,
-      audio.duration,
-      source?.toMap(),
-      settings.onlineSources.value.toJson(),
-      settings.customMusicSources.value
-          .map((profile) => profile.toJson())
-          .toList(),
-    ]);
-  }
-
-  Future<Lyric?> _readCachedOnline(Audio audio, {LyricSource? source}) =>
-      OnlineLyricCache.instance.read(
-        onlineLyricCacheIdentity(audio, source: source),
-        legacyIdentity: () => _legacyOnlineCacheIdentity(audio, source: source),
-      );
-
   Future<Lyric?> _searchOnline(
     Audio audio, {
     LyricSource? source,
@@ -319,14 +319,7 @@ class LyricService extends ChangeNotifier {
           lrclibId: source.lrclibId,
         );
       }
-      final direct = switch (audio.onlineProvider) {
-        "qq" => await getOnlineLyric(
-            qqSongId: audio.onlineNumericId, qqSongMid: audio.onlineId),
-        "netease" => await getOnlineLyric(neteaseSongId: audio.onlineId),
-        _ => null,
-      };
-      if (!current()) return direct;
-      return direct ?? await getMostMatchedLyric(audio);
+      return getMostMatchedLyric(audio, stillCurrent: current);
     }, refresh: refresh);
   }
 
@@ -337,12 +330,12 @@ class LyricService extends ChangeNotifier {
     final nowPlaying = _getNowPlaying();
     if (nowPlaying == null) return Future.value(null);
 
-    if (nowPlaying.isOnline) return _readCachedOnline(nowPlaying);
+    if (nowPlaying.isOnline) return readCachedOnlineLyric(nowPlaying);
 
     return resolveAutomaticLyricSources(
       localFirst: localFirst,
       local: () => Lrc.fromAudioPath(nowPlaying),
-      cachedOnline: () => _readCachedOnline(nowPlaying),
+      cachedOnline: () => readCachedOnlineLyric(nowPlaying),
       stillCurrent: () => _isPlaying(nowPlaying),
     );
   }
@@ -397,7 +390,7 @@ class LyricService extends ChangeNotifier {
           localFirst: false,
           stillCurrent: () => _isPlaying(nowPlaying),
           cachedOnline: () =>
-              _readCachedOnline(nowPlaying, source: lyricSource),
+              readCachedOnlineLyric(nowPlaying, source: lyricSource),
           local: () => Lrc.fromAudioPath(nowPlaying),
         );
       }
@@ -413,17 +406,19 @@ class LyricService extends ChangeNotifier {
       search: () async {
         // A pinned source can miss while a previous default search is cached.
         if (lyricSource != null) {
-          final cached = await _readCachedOnline(nowPlaying);
+          final cached = await readCachedOnlineLyric(nowPlaying);
           if (cached != null) return cached;
         }
         if (!allowed()) return null;
-        return _searchOnline(
+        final result = await _searchOnline(
           nowPlaying,
           source:
               lyricSource?.source == LyricSourceType.local ? null : lyricSource,
           refresh: false,
           stillCurrent: allowed,
         );
+        if (result == null && allowed()) throw const NoMatchingOnlineLyric();
+        return result;
       },
     );
     _useRawFuture(raw, offsetMs: store?.forAudio(nowPlaying)?.offsetMs ?? 0);

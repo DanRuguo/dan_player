@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -225,6 +226,11 @@ class SongSearchResult {
   final String album;
   final double score;
 
+  /// Match groups use the same precision shown in the candidate list.
+  int get matchPercent => (score * 100).round();
+  final bool scoreVerified;
+  final Lyric? previewLyric;
+
   /// Duration supplied by the search response; null means version unverified.
   final double? durationSeconds;
 
@@ -247,7 +253,9 @@ class SongSearchResult {
 
   SongSearchResult(
       this.source, this.title, this.artists, this.album, this.score,
-      {this.durationSeconds,
+      {this.scoreVerified = true,
+      this.previewLyric,
+      this.durationSeconds,
       this.qqSongId,
       this.qqSongMid,
       this.neteaseSongId,
@@ -258,12 +266,16 @@ class SongSearchResult {
 
   String get sourceLabel => customProfile?.name ?? source.sourceLabel;
 
-  String get identity => switch (source) {
-        ResultSource.qq => 'qq:${qqSongId ?? qqSongMid ?? ''}',
-        ResultSource.kugou => 'kugou:${kugouSongHash ?? ''}',
-        ResultSource.netease => 'netease:${neteaseSongId ?? ''}',
-        ResultSource.lrclib => 'lrclib:${lrclibId ?? ''}',
-      };
+  String get identity => !scoreVerified && customProfile != null
+      ? 'manual-custom:${customProfile!.id}'
+      : customProfile != null && customProfile!.id != 'kugou'
+          ? 'custom:${customProfile!.id}:${customAudio?.onlineId ?? title}'
+          : switch (source) {
+              ResultSource.qq => 'qq:${qqSongId ?? qqSongMid ?? ''}',
+              ResultSource.kugou => 'kugou:${kugouSongHash ?? ''}',
+              ResultSource.netease => 'netease:${neteaseSongId ?? ''}',
+              ResultSource.lrclib => 'lrclib:${lrclibId ?? ''}',
+            };
 
   @override
   String toString() {
@@ -424,7 +436,18 @@ Future<LyricSearchResponse> searchLyricCandidates(
   Duration retryDelay = const Duration(milliseconds: 160),
 }) async {
   final enabled = sources ?? _configuredLyricSearchSources();
-  if (enabled.isEmpty) {
+  final extraProfiles = sources == null
+      ? AppSettings.instance.customMusicSources.value
+          .where((profile) =>
+              profile.id != 'kugou' &&
+              profile.enabled &&
+              profile.authentication == null &&
+              profile.capabilities
+                  .contains(CustomMusicSourceCapability.search) &&
+              profile.capabilities.contains(CustomMusicSourceCapability.lyrics))
+          .toList()
+      : <CustomMusicSourceProfile>[];
+  if (enabled.isEmpty && extraProfiles.isEmpty) {
     return LyricSearchResponse(
       candidates: const [],
       failures: const {},
@@ -484,6 +507,33 @@ Future<LyricSearchResponse> searchLyricCandidates(
           return [for (final record in records) record.toJson()];
         },
   };
+  final extraSearch = Future.wait(extraProfiles.map((profile) async {
+    final found = <SongSearchResult>[];
+    try {
+      for (final query in queries) {
+        final response = await CustomMusicSourceTransport(profile)
+            .search(query, limit: limit)
+            .timeout(_providerTimeout);
+        if (!_isCurrentCustomLyricProfile(profile)) return <SongSearchResult>[];
+        for (final track in response.tracks) {
+          found.add(SongSearchResult(
+              ResultSource.kugou,
+              track.title,
+              track.artist,
+              track.album,
+              computeSongMatchScore(
+                  audio, track.title, track.artist, track.album),
+              customProfile: profile,
+              customAudio: track,
+              durationSeconds: _positiveSeconds(track.duration)));
+        }
+        if (found.isNotEmpty) break;
+      }
+    } catch (error, trace) {
+      LOGGER.w('[lyric/custom-search:${profile.id}] 候选搜索失败', stackTrace: trace);
+    }
+    return found;
+  }));
   final outcomes = await Future.wait([
     for (final source in ResultSource.values)
       if (enabled.contains(source))
@@ -509,18 +559,88 @@ Future<LyricSearchResponse> searchLyricCandidates(
       }
     }
   }
-  final candidates = unique.values.toList()
-    ..sort((left, right) {
-      final score = right.score.compareTo(left.score);
-      if (score != 0) return score;
-      final source = left.source.index.compareTo(right.source.index);
-      if (source != 0) return source;
-      final title = normalizeSongMatchText(left.title)
-          .compareTo(normalizeSongMatchText(right.title));
-      if (title != 0) return title;
-      return left.identity.compareTo(right.identity);
-    });
+  for (final group in await extraSearch) {
+    for (final candidate in group) {
+      final previous = unique[candidate.identity];
+      if (previous == null || candidate.score > previous.score) {
+        unique[candidate.identity] = candidate;
+      }
+    }
+  }
+  final candidates = unique.values.toList()..sort(compareLyricCandidates);
   return LyricSearchResponse(candidates: candidates, failures: failures);
+}
+
+List<SongSearchResult> visibleManualLyricCandidates(
+        Iterable<SongSearchResult> candidates) =>
+    (candidates
+        .where((candidate) =>
+            !candidate.scoreVerified ||
+            (candidate.score.isFinite && candidate.score >= .6))
+        .toList()
+      ..sort(compareLyricCandidates));
+
+/// Only explicit manual lookup queries metadata-only providers. Their returned
+/// lyrics are selectable, clearly unscored, and never eligible for automation.
+Future<LyricSearchResponse> searchManualLyricCandidates(Audio audio,
+    {Future<LyricSearchResponse> Function(Audio)? rankedSearch}) async {
+  final unscored = Future.wait(customLyricSourceChoicesFor(audio)
+      .where((choice) => !choice.profile.capabilities
+          .contains(CustomMusicSourceCapability.search))
+      .map((choice) async {
+    try {
+      final lyric = await getLyricForCustomSourceChoice(audio, choice);
+      if (lyric == null || lyric.lines.isEmpty) return null;
+      return SongSearchResult(
+          ResultSource.kugou, audio.title, audio.artist, audio.album, 0,
+          scoreVerified: false,
+          previewLyric: lyric,
+          customProfile: choice.profile,
+          customAudio: audio);
+    } catch (_) {
+      return null;
+    }
+  }));
+  final ranked = await (rankedSearch ?? searchLyricCandidates)(audio);
+  final candidates = visibleManualLyricCandidates([
+    ...ranked.candidates,
+    ...(await unscored).whereType<SongSearchResult>(),
+  ]);
+  return LyricSearchResponse(
+      candidates: candidates,
+      failures: ranked.failures,
+      sourcesDisabled: ranked.sourcesDisabled && candidates.isEmpty);
+}
+
+/// Shared by the manual candidate list and automatic fallback. Word timing is
+/// assessed only after loading a score group, never ahead of a higher match.
+int compareLyricCandidates(SongSearchResult left, SongSearchResult right) {
+  if (left.scoreVerified != right.scoreVerified) {
+    return left.scoreVerified ? -1 : 1;
+  }
+  final score =
+      left.scoreVerified ? right.matchPercent.compareTo(left.matchPercent) : 0;
+  if (score != 0) return score;
+  int priority(SongSearchResult candidate) {
+    final custom = candidate.customProfile;
+    if (custom != null) {
+      final index = AppSettings.instance.customMusicSources.value
+          .indexWhere((p) => p.id == custom.id);
+      return 3 + (index < 0 ? 1000 : index);
+    }
+    return switch (candidate.source) {
+      ResultSource.qq => 0,
+      ResultSource.netease => 1,
+      ResultSource.lrclib => 2,
+      ResultSource.kugou => 1003,
+    };
+  }
+
+  final source = priority(left).compareTo(priority(right));
+  if (source != 0) return source;
+  final title = normalizeSongMatchText(left.title)
+      .compareTo(normalizeSongMatchText(right.title));
+  return title != 0 ? title : left.identity.compareTo(right.identity);
 }
 
 Future<_ProviderSearchResult> _searchLyricSource({
@@ -887,7 +1007,14 @@ Future<Lyric?> getNeteaseLyric(
     final payload = await (payloadLoader ?? _loadNeteaseLyricPayload)
         .call(neteaseSongId)
         .timeout(_providerTimeout);
+    if (payload is Map &&
+        (payload['code'] == null || payload['code'] == 200) &&
+        payload['nolyric'] == true) {
+      throw const InstrumentalLyric();
+    }
     return parseNeteaseLyricPayload(payload);
+  } on InstrumentalLyric {
+    rethrow;
   } catch (err, trace) {
     LOGGER.w('[lyric/netease] 无法读取歌词', stackTrace: trace);
   }
@@ -1017,15 +1144,21 @@ Future<Lrc?> getQqPublicLyric({
     if (code != null && code != 0) {
       throw HttpException('QQ lyric service code $code');
     }
+    if (payload['instrumental'] == true || payload['nolyric'] == true) {
+      throw const InstrumentalLyric();
+    }
     final text = payload['lyric'];
     if (text == null || text is String && text.trim().isEmpty) {
       throw const LyricUnavailableException();
     }
+    if (text is! String) throw const FormatException('Invalid QQ lyric text');
     final parsed = parseQqPublicLyricPayload(payload);
     if (parsed == null) {
-      throw const FormatException('Invalid QQ lyric text');
+      throw const LyricUnavailableException();
     }
     return parsed;
+  } on InstrumentalLyric {
+    rethrow;
   } catch (error, trace) {
     if (throwOnFailure) rethrow;
     LOGGER.w('[lyric/qq-public] 无法读取普通歌词', stackTrace: trace);
@@ -1068,7 +1201,12 @@ Future<Lyric?> getLrclibLyric(
     final payload = await (payloadLoader ?? _loadLrclibRecordPayload)
         .call(recordId)
         .timeout(_providerTimeout);
+    if (payload is Map && payload['instrumental'] == true) {
+      throw const InstrumentalLyric();
+    }
     return parseLrclibLyricPayload(payload);
+  } on InstrumentalLyric {
+    rethrow;
   } catch (error, trace) {
     LOGGER.w('[lyric/lrclib] 无法读取歌词', stackTrace: trace);
   }
@@ -1163,12 +1301,21 @@ Future<Lyric?> getOnlineLyric({
             songMid: qqSongMid,
             throwOnFailure: true,
             payloadLoader: qqPayloadLoader);
+      } on InstrumentalLyric {
+        rethrow;
       } catch (error, trace) {
         publicFailure = error;
         publicFailureTrace = trace;
       }
       if (lyric == null && qqSongMid != null && qqSongMid.trim().isNotEmpty) {
-        lyric = await _getQQUnsyncLyric(qqSongMid.trim());
+        try {
+          lyric = await _getQQUnsyncLyric(qqSongMid.trim());
+        } catch (_) {
+          if (publicFailure != null) {
+            Error.throwWithStackTrace(publicFailure, publicFailureTrace!);
+          }
+          rethrow;
+        }
       }
       if (lyric == null && publicFailure != null) {
         Error.throwWithStackTrace(publicFailure, publicFailureTrace!);
@@ -1181,6 +1328,8 @@ Future<Lyric?> getOnlineLyric({
       lyric = await getLrclibLyric(lrclibId);
     }
     return lyric;
+  } on InstrumentalLyric {
+    rethrow;
   } catch (_) {
     if (throwOnFailure) rethrow;
     return null;
@@ -1190,7 +1339,12 @@ Future<Lyric?> getOnlineLyric({
 Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) {
   if (candidate.customProfile case final profile?) {
     final audio = candidate.customAudio;
-    if (audio == null) return Future.value(null);
+    if (audio == null || !_isCurrentCustomLyricProfile(profile)) {
+      return Future.value(null);
+    }
+    if (candidate.previewLyric != null) {
+      return Future.value(candidate.previewLyric);
+    }
     return getLyricForCustomSourceChoice(
         audio, CustomLyricSourceChoice(profile));
   }
@@ -1235,62 +1389,6 @@ Future<Lyric?> getLyricForCustomSourceChoice(
   } finally {
     deadlineTimer.cancel();
   }
-}
-
-Future<Lyric?> _getCustomLyric(Audio audio) async {
-  Lyric? fallback;
-  final profiles = AppSettings.instance.customMusicSources.value;
-  final deadline = DateTime.now().add(_customLyricSweepTimeout);
-  for (final profile in profiles) {
-    if (!profile.enabled ||
-        profile.authentication != null ||
-        !profile.capabilities.contains(CustomMusicSourceCapability.lyrics)) {
-      continue;
-    }
-    // go-music-api resolves lyrics from the opaque identity returned by its
-    // own search; unlike Dan v1 and legacy lyric endpoints it cannot match an
-    // unrelated local file from metadata alone.
-    if (profile.protocol == CustomMusicSourceProtocol.goMusicApi &&
-        audio.onlineProvider != profile.providerId) {
-      continue;
-    }
-    // Text-only metadata lookups cannot prove which short/full recording they
-    // returned. Explicit user choices and existing saved associations still
-    // use their normal loader; only unsolicited automatic matching skips them.
-    if (_songVersionKind(audio.title) != null &&
-        audio.onlineProvider != profile.providerId &&
-        profile.protocol != CustomMusicSourceProtocol.kugou) {
-      continue;
-    }
-    final remaining = deadline.difference(DateTime.now());
-    if (remaining <= Duration.zero) break;
-    final cancellation = CustomMusicSourceCancellation();
-    final deadlineTimer = Timer(remaining, cancellation.cancel);
-    try {
-      final response = await CustomMusicSourceTransport(profile)
-          .lyrics(audio, cancellation: cancellation)
-          .timeout(remaining);
-      if (!_isCurrentCustomLyricProfile(profile)) {
-        return null;
-      }
-      final lyric = _parseCustomLyricResponse(response.rawBody);
-      if (hasWordTiming(lyric)) return lyric;
-      fallback ??= lyric;
-    } on TimeoutException {
-      cancellation.cancel();
-      break;
-    } on CustomMusicSourceCancelled {
-      break;
-    } catch (error, trace) {
-      LOGGER.w(
-        '[lyric/custom:${profile.id}] ${profile.name} 未返回可用歌词',
-        stackTrace: trace,
-      );
-    } finally {
-      deadlineTimer.cancel();
-    }
-  }
-  return fallback;
 }
 
 bool _isCurrentCustomLyricProfile(CustomMusicSourceProfile expected) {
@@ -1388,78 +1486,60 @@ T? _validLyric<T extends Lyric>(T? lyric) {
 
 Future<Lyric?> getMostMatchedLyric(
   Audio audio, {
-  Future<Lyric?> Function(Audio audio)? customLyricLoader,
   Future<LyricSearchResponse> Function(Audio audio)? candidateSearch,
   Future<Lyric?> Function(SongSearchResult candidate)? candidateLyricLoader,
+  bool Function()? stillCurrent,
 }) async {
-  Lyric? customLyric;
-  try {
-    customLyric = await (customLyricLoader ?? _getCustomLyric).call(audio);
-  } catch (err, trace) {
-    LOGGER.w('[lyric/custom] 自定义歌词来源失败', stackTrace: trace);
-  }
-  if (hasWordTiming(customLyric)) return customLyric;
-
+  bool current() => stillCurrent?.call() ?? true;
+  if (!current()) return null;
   LyricSearchResponse response;
   try {
     response = await (candidateSearch ?? searchLyricCandidates).call(audio);
   } catch (err, trace) {
     LOGGER.w('[lyric/search] 候选搜索失败', stackTrace: trace);
-    return customLyric;
+    response = LyricSearchResponse(candidates: const [], failures: const {});
   }
   final load = candidateLyricLoader ?? getLyricForCandidate;
   final candidates = response.candidates
       .where((candidate) =>
-          isAutomaticLyricCandidateCompatible(audio, candidate) &&
-          (customLyric == null || candidate.score >= 1 - 1e-9))
+          candidate.scoreVerified &&
+          candidate.score.isFinite &&
+          candidate.score >= .6)
       .toList()
-    ..sort((a, b) => b.score.compareTo(a.score));
-  final deadline = DateTime.now().add(_customLyricSweepTimeout);
-  var attempted = 0;
-  for (var start = 0; start < candidates.length && attempted < 20;) {
+    ..sort(compareLyricCandidates);
+  for (var start = 0; start < candidates.length;) {
     var end = start + 1;
     while (end < candidates.length &&
-        (candidates[end].score - candidates[start].score).abs() < 1e-9) {
+        candidates[end].matchPercent == candidates[start].matchPercent) {
       end++;
     }
-    // Round-robin equal matches across sources so many duplicates from one
-    // provider cannot consume the entire budget before another is considered.
-    final sources = <String, List<SongSearchResult>>{};
+    Lyric? fallback;
+    var instrumental = false;
+    // Preserve manual-list order, retry failures, and prefer timed words only
+    // within this displayed percentage. Never let a lower match displace valid lyrics.
     for (final candidate in candidates.sublist(start, end)) {
-      (sources[candidate.customProfile?.id ?? candidate.source.name] ??= [])
-          .add(candidate);
-    }
-    final group = <SongSearchResult>[];
-    for (var row = 0; group.length < end - start; row++) {
-      for (final source in sources.values) {
-        if (row < source.length) group.add(source[row]);
-      }
-    }
-    Lyric? fallback = customLyric;
-    for (var index = 0; index < group.length && attempted < 20; index += 3) {
-      final remaining = deadline.difference(DateTime.now());
-      if (remaining <= Duration.zero) return fallback;
-      final batch = group.skip(index).take(min(3, 20 - attempted)).toList();
-      attempted += batch.length;
-      final values = await Future.wait(batch.map((candidate) async {
-        try {
-          return await load(candidate).timeout(remaining);
-        } catch (err, trace) {
-          LOGGER.w('[lyric/${candidate.source.name}] 候选歌词读取失败',
-              stackTrace: trace);
-          return null;
-        }
-      }));
-      for (final lyric in values) {
+      if (!current()) return null;
+      try {
+        final lyric = await load(candidate).timeout(_providerTimeout);
+        if (!current()) return null;
         if (lyric == null || lyric.lines.isEmpty) continue;
         if (hasWordTiming(lyric)) return lyric;
         fallback ??= lyric;
+      } on InstrumentalLyric {
+        instrumental = true;
+      } catch (err, trace) {
+        LOGGER.w('[lyric/${candidate.source.name}] 候选歌词读取失败',
+            stackTrace: trace);
       }
     }
     if (fallback != null) return fallback;
+    if (instrumental && current()) throw const InstrumentalLyric();
     start = end;
   }
-  return customLyric;
+  if (!current()) return null;
+  // Metadata-only endpoints cannot prove a >=60% match. They remain manual
+  // choices, but never become an automatic or bulk-cache fallback.
+  return null;
 }
 
 String? _songVersionKind(String title) {

@@ -75,6 +75,26 @@ void main() {
   tearDown(LYRIC_SOURCES.clear);
 
   testWidgets(
+      'manual list hides weak matches and labels unscored custom results',
+      (tester) async {
+    final audio = _audio('fixture.mp3');
+    await tester.pumpWidget(_host(LyricSourceDialog(
+        audio: audio,
+        currentTrackPath: () => audio.path,
+        search: (_) async => LyricSearchResponse(candidates: [
+              _candidate(1, title: 'Weak result', score: .59),
+              _candidate(2, title: 'Acceptable result', score: .60),
+              SongSearchResult(ResultSource.kugou, 'Unscored result', '', '', 0,
+                  scoreVerified: false, kugouSongHash: 'unscored'),
+            ], failures: {}))));
+    await tester.pumpAndSettle();
+    expect(find.text('Weak result'), findsNothing);
+    expect(find.text('Acceptable result'), findsOneWidget);
+    expect(find.text('Unscored result'), findsOneWidget);
+    expect(find.textContaining('匹配度未知'), findsOneWidget);
+  });
+
+  testWidgets(
       'short version warns about an unmarked candidate without rejecting manual selection',
       (tester) async {
     final audio = _audio(r'C:\Music\OP.wav')..title = '結想は花となる short ver.';

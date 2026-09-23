@@ -38,7 +38,7 @@ void main() {
 
   for (final language in UiLanguage.values) {
     testWidgets(
-        'render ${language.name} real font centers history labels and delete mark',
+        'render ${language.name} single-character capsule centers its real-font delete mark',
         (tester) async {
       tester.view.physicalSize = const Size(900, 700);
       tester.view.devicePixelRatio = 1;
@@ -49,7 +49,7 @@ void main() {
       final history = MemorySearchHistory();
       addTearDown(history.dispose);
       const queries = [
-        '春日影',
+        '光',
         '夜に駆ける',
         '다시 만날 그날까지',
         'Hotel California',
@@ -101,7 +101,7 @@ void main() {
       }
 
       (await capture('normal')).dispose();
-      final target = find.byKey(const ValueKey(('search-history', '春日影')));
+      final target = find.byKey(const ValueKey(('search-history', '光')));
       final before = tester.getRect(target);
       await tester.tap(target,
           buttons: kSecondaryMouseButton, kind: PointerDeviceKind.mouse);

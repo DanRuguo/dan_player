@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:dan_player/component/app_motion.dart';
@@ -215,7 +216,7 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
             final label = waiting
                 ? ui("正在加载歌词")
                 : snapshot.hasError
-                    ? ui("歌词加载失败，请切换来源或重试")
+                    ? ui(lyricLookupStatus(snapshot.error) ?? "歌词加载失败，请切换来源或重试")
                     : ui("无歌词");
             content = Center(
               key: ValueKey(label),

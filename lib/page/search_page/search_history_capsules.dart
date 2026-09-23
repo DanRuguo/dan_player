@@ -169,8 +169,10 @@ class _SearchHistoryCapsulesState extends State<SearchHistoryCapsules> {
                                 onLongPress: arm,
                                 style: TextButton.styleFrom(
                                   shape: const StadiumBorder(),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16),
+                                  padding: armed
+                                      ? EdgeInsets.zero
+                                      : const EdgeInsets.symmetric(
+                                          horizontal: 16),
                                   minimumSize: Size.zero,
                                   tapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,

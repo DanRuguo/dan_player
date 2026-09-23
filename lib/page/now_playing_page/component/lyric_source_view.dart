@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:async';
@@ -286,10 +287,13 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
     }
     try {
       final result =
-          await (widget.search ?? searchLyricCandidates)(widget.audio);
+          await (widget.search ?? searchManualLyricCandidates)(widget.audio);
       if (!_isSearchCurrent(generation)) return;
       setState(() {
-        _response = result;
+        _response = LyricSearchResponse(
+            candidates: visibleManualLyricCandidates(result.candidates),
+            failures: result.failures,
+            sourcesDisabled: result.sourcesDisabled);
         _searching = false;
       });
     } catch (_) {
@@ -401,7 +405,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       }
       final source = _sourceFor(candidate);
       stage = 1;
-      if (widget.persistSource != null) {
+      if (widget.persistSource != null && source != null) {
         await widget.persistSource!(widget.audio.path, source);
       } else {
         await LyricDocumentStore.instance.select(widget.audio, lyric,
@@ -426,23 +430,25 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       Navigator.of(context).pop();
     } catch (error) {
       if (_isSelectionCurrent(generation)) {
-        final message = error is StaleLyricRevision
-            ? error.toString()
-            : stage == 1
-                ? '歌词已获取，但保存来源失败；旧设置已保留，请检查数据目录权限后重试。'
-                : stage == 2
-                    ? '歌词来源已保存，但未能应用；请重新打开当前歌曲后重试。'
-                    : error is LyricUnavailableException
-                        ? '此来源暂未提供这条录音的可用歌词，请选择其他候选。'
-                        : error is TimeoutException
-                            ? '获取歌词超时，请重试或选择其他候选。'
-                            : error is SocketException ||
-                                    error is HandshakeException ||
-                                    error is HttpException
-                                ? '连接歌词来源失败，请检查网络或代理后重试。'
-                                : error is FormatException
-                                    ? '歌词来源返回的内容无法解析，请重试或选择其他候选。'
-                                    : '获取歌词失败，可选择其他候选或重试。';
+        final message = error is InstrumentalLyric
+            ? InstrumentalLyric.message
+            : error is StaleLyricRevision
+                ? error.toString()
+                : stage == 1
+                    ? '歌词已获取，但保存来源失败；旧设置已保留，请检查数据目录权限后重试。'
+                    : stage == 2
+                        ? '歌词来源已保存，但未能应用；请重新打开当前歌曲后重试。'
+                        : error is LyricUnavailableException
+                            ? '此来源暂未提供这条录音的可用歌词，请选择其他候选。'
+                            : error is TimeoutException
+                                ? '获取歌词超时，请重试或选择其他候选。'
+                                : error is SocketException ||
+                                        error is HandshakeException ||
+                                        error is HttpException
+                                    ? '连接歌词来源失败，请检查网络或代理后重试。'
+                                    : error is FormatException
+                                        ? '歌词来源返回的内容无法解析，请重试或选择其他候选。'
+                                        : '获取歌词失败，可选择其他候选或重试。';
         setState(
             () => _candidateErrors[candidate.identity] = () => ui(message));
       }
@@ -463,26 +469,30 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
     });
   }
 
-  LyricSource _sourceFor(SongSearchResult candidate) =>
-      switch (candidate.source) {
-        ResultSource.qq => LyricSource(
-            LyricSourceType.qq,
-            qqSongId: candidate.qqSongId,
-            qqSongMid: candidate.qqSongMid,
-          ),
-        ResultSource.kugou => LyricSource(
-            LyricSourceType.kugou,
-            kugouSongHash: candidate.kugouSongHash,
-          ),
-        ResultSource.netease => LyricSource(
-            LyricSourceType.netease,
-            neteaseSongId: candidate.neteaseSongId,
-          ),
-        ResultSource.lrclib => LyricSource(
-            LyricSourceType.lrclib,
-            lrclibId: candidate.lrclibId,
-          ),
-      };
+  LyricSource? _sourceFor(SongSearchResult candidate) =>
+      candidate.customProfile != null &&
+              (candidate.customProfile!.id != 'kugou' ||
+                  candidate.kugouSongHash == null)
+          ? null
+          : switch (candidate.source) {
+              ResultSource.qq => LyricSource(
+                  LyricSourceType.qq,
+                  qqSongId: candidate.qqSongId,
+                  qqSongMid: candidate.qqSongMid,
+                ),
+              ResultSource.kugou => LyricSource(
+                  LyricSourceType.kugou,
+                  kugouSongHash: candidate.kugouSongHash,
+                ),
+              ResultSource.netease => LyricSource(
+                  LyricSourceType.netease,
+                  neteaseSongId: candidate.neteaseSongId,
+                ),
+              ResultSource.lrclib => LyricSource(
+                  LyricSourceType.lrclib,
+                  lrclibId: candidate.lrclibId,
+                ),
+            };
 
   bool _isCurrentCandidate(SongSearchResult candidate) {
     final configured =
@@ -593,8 +603,8 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                           padding: const EdgeInsets.only(bottom: 8),
                           child: _MessagePanel(
                             key: const ValueKey('lyric-source-custom-api-note'),
-                            message: ui(
-                                "自动匹配会按保存顺序尝试已启用的自定义歌词源；自定义结果不会列入下面的内置平台候选。"),
+                            message:
+                                ui("优先使用匹配度高的歌词；同分优先逐字歌词和内置来源，第三方源按设置顺序尝试。"),
                             color: scheme.secondaryContainer,
                           ),
                         ),
@@ -720,12 +730,15 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
         enabled: !_trackChanged,
         shape: AppShape.control,
         leading: CircleAvatar(
-          child: Text(switch (candidate.source) {
-            ResultSource.qq => 'QQ',
-            ResultSource.netease => ui("网"),
-            ResultSource.kugou => ui("酷"),
-            ResultSource.lrclib => 'LR',
-          }),
+          child: candidate.customProfile != null &&
+                  candidate.customProfile!.id != 'kugou'
+              ? const Icon(Symbols.api)
+              : Text(switch (candidate.source) {
+                  ResultSource.qq => 'QQ',
+                  ResultSource.netease => ui("网"),
+                  ResultSource.kugou => ui("酷"),
+                  ResultSource.lrclib => 'LR',
+                }),
         ),
         title:
             Text(candidate.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -736,8 +749,10 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
             if (details.isNotEmpty)
               Text(details, maxLines: 1, overflow: TextOverflow.ellipsis),
             Text(
-              ui("来源：{0} · 匹配 {1}%",
-                  [ui(candidate.sourceLabel), (candidate.score * 100).round()]),
+              candidate.scoreVerified
+                  ? ui("来源：{0} · 匹配 {1}%",
+                      [ui(candidate.sourceLabel), candidate.matchPercent])
+                  : ui('来源：{0} · 匹配度未知，仅供手动选择', [candidate.sourceLabel]),
             ),
             if (lyricCandidateMayUseDifferentVersion(widget.audio, candidate))
               Text(ui('版本可能不同：当前歌曲为短版，候选未注明短版。'),

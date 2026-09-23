@@ -44,11 +44,19 @@ void main() {
                   candidates: const [], failures: const {})),
           isNull);
       expect(requests, 0);
+      final manual = await searchManualLyricCandidates(audio,
+          rankedSearch: (_) async =>
+              LyricSearchResponse(candidates: [], failures: {}));
+      expect(manual.candidates, hasLength(1));
+      expect(manual.candidates.single.scoreVerified, isFalse);
+      expect(await getLyricForCandidate(manual.candidates.single), isA<Lrc>());
+      expect(requests, 1,
+          reason: 'Selecting the displayed result reuses its fetched lyric');
       expect(
           await getLyricForCustomSourceChoice(
               audio, CustomLyricSourceChoice(profile)),
           isA<Lrc>());
-      expect(requests, 1);
+      expect(requests, 2);
     } finally {
       AppSettings.instance.customMusicSources.value = previous;
       await subscription.cancel();
@@ -171,7 +179,8 @@ void main() {
     }
   });
 
-  test('multiple custom lyric sources fall through in saved order', () async {
+  test('metadata-only sources are never used for unverified automatic matching',
+      () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final requests = <String>[];
     final subscription = server.listen((request) async {
@@ -224,8 +233,8 @@ void main() {
         candidateSearch: (_) async =>
             LyricSearchResponse(candidates: [], failures: {}));
 
-    expect(((lyric as Lrc).lines.single as LrcLine).content, 'Second source');
-    expect(requests, ['/first', '/second']);
+    expect(lyric, isNull);
+    expect(requests, isEmpty);
   });
 
   test('an edited profile cannot publish a stale in-flight lyric', () async {
@@ -271,11 +280,8 @@ void main() {
       null,
     );
 
-    final pending = getMostMatchedLyric(
-      audio,
-      candidateSearch: (_) async =>
-          LyricSearchResponse(candidates: const [], failures: const {}),
-    );
+    final pending =
+        getLyricForCustomSourceChoice(audio, CustomLyricSourceChoice(profile));
     await requested.future;
     AppSettings.instance.customMusicSources.value = [
       profile.copyWith(enabled: false),

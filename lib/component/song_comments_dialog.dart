@@ -1,3 +1,4 @@
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_motion.dart';
@@ -120,7 +121,25 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     _availableSorts = SongCommentsService.sortsFor(_target);
     _sort = _availableSorts.first;
     _tabs = {for (final sort in SongCommentSort.values) sort: _CommentTab()};
-    if (_target != null) unawaited(_load(cacheOnly: true));
+    if (_target != null) {
+      final target = _target;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted || _closed || _target != target) return;
+        final cached = _load(cacheOnly: true);
+        final generation = _generation;
+        await cached;
+        if (!mounted ||
+            _closed ||
+            _target != target ||
+            generation != _generation ||
+            !TickerMode.valuesOf(context).enabled ||
+            ModalRoute.of(context)?.isCurrent == false ||
+            !AppSettings.instance.automaticOnlineLyrics.value) {
+          return;
+        }
+        await _load(refresh: true);
+      });
+    }
   }
 
   void _disposeTabs() {

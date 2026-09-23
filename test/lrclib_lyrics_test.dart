@@ -40,7 +40,9 @@ void main() {
     expect(client.closed, isTrue);
   });
 
-  test('instrumental and malformed records are not offered as candidates', () {
+  test(
+      'explicit instrumental records are retained while malformed records are rejected',
+      () {
     final records = parseLrclibSearchPayload([
       {
         'id': 1,
@@ -65,7 +67,8 @@ void main() {
       },
     ]);
 
-    expect(records.map((record) => record.id), [2]);
+    expect(records.map((record) => record.id), [1, 2]);
+    expect(records.first.instrumental, isTrue);
   });
 
   test('429 is surfaced as a bounded-retry transport error', () async {

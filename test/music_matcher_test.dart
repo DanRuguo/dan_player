@@ -565,7 +565,6 @@ void main() {
     final loaded = <ResultSource>[];
     final lyric = await getMostMatchedLyric(
       _audio(title: '結想は花となる', artist: '堀江晶太', duration: 195),
-      customLyricLoader: (_) async => null,
       candidateSearch: (_) async => LyricSearchResponse(
         candidates: candidates,
         failures: const {},
@@ -699,7 +698,6 @@ void main() {
     final loaded = <int?>[];
     final result = await getMostMatchedLyric(
       _audio(),
-      customLyricLoader: (_) async => throw StateError('custom unavailable'),
       candidateSearch: (_) async => LyricSearchResponse(
         candidates: candidates,
         failures: const {},
@@ -717,7 +715,8 @@ void main() {
     expect(loaded, [1, 2, 3]);
   });
 
-  test('automatic short matching rejects full and unknown versions before I/O',
+  test(
+      'automatic matching uses the same score and source order as the manual list',
       () async {
     final audio =
         _audio(title: '結想は花となる short ver.', artist: '堀江晶太', duration: 96);
@@ -734,18 +733,17 @@ void main() {
     ];
     final loaded = <int?>[];
     final lyric = await getMostMatchedLyric(audio,
-        customLyricLoader: (_) async => null,
         candidateSearch: (_) async =>
             LyricSearchResponse(candidates: candidates, failures: const {}),
         candidateLyricLoader: (candidate) async {
           loaded.add(candidate.qqSongId);
           return _lyric('selected short recording');
         });
-    expect(loaded, [5]);
+    final manual = [...candidates]..sort(compareLyricCandidates);
+    expect(loaded, manual.map((candidate) => candidate.qqSongId));
     expect(lyric, isNotNull);
     expect(candidates.length, 5,
-        reason:
-            'manual candidates remain available, even when automatic rejects them');
+        reason: 'automatic matching does not mutate the manual candidate list');
     expect(
         isAutomaticLyricCandidateCompatible(audio, candidate(6, '結想は花となる', 96)),
         isTrue);

@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/lyric/compact_lyric_frame.dart';
@@ -70,7 +71,17 @@ class _CompactLyricViewState extends State<CompactLyricView>
     if (snapshot.connectionState != ConnectionState.done) {
       return CompactLyricFrame.loading;
     }
-    if (snapshot.hasError) return CompactLyricFrame.failed;
+    if (snapshot.hasError) {
+      final label = lyricLookupStatus(snapshot.error);
+      return label == null
+          ? CompactLyricFrame.failed
+          : CompactLyricFrame(
+              status: snapshot.error is InstrumentalLyric
+                  ? CompactLyricStatus.instrumental
+                  : CompactLyricStatus.unavailable,
+              primary: label,
+            );
+    }
     final value = snapshot.data;
     if (value == null) return CompactLyricFrame.unavailable;
     if (!identical(_lyric, value)) {

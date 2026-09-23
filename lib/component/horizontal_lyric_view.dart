@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'dart:async';
 
@@ -84,7 +85,9 @@ class _HorizontalLyricContentState extends State<HorizontalLyricContent>
                 snapshot.hasError) {
               return Center(
                 child: Text(
-                  snapshot.hasError ? ui("歌词暂不可用") : 'Enjoy Music',
+                  snapshot.hasError
+                      ? ui(lyricLookupStatus(snapshot.error) ?? "歌词暂不可用")
+                      : 'Enjoy Music',
                   maxLines: 1,
                   softWrap: false,
                   textAlign: TextAlign.center,

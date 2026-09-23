@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -98,11 +99,21 @@ void main() {
       await HttpOverrides.runZoned(() async {
         final lyrics = facade.lyricService;
         lyrics.updateLyric();
-        expect(await lyrics.currLyricFuture, isNull);
+        if (scenario == 'enabled') {
+          await expectLater(
+              lyrics.currLyricFuture, throwsA(isA<NoMatchingOnlineLyric>()));
+        } else {
+          expect(await lyrics.currLyricFuture, isNull);
+        }
         // Window/document refresh paths may resolve repeatedly; misses must
         // remain passive each time, rather than performing a retry search.
         lyrics.updateLyric();
-        expect(await lyrics.currLyricFuture, isNull);
+        if (scenario == 'enabled') {
+          await expectLater(
+              lyrics.currLyricFuture, throwsA(isA<NoMatchingOnlineLyric>()));
+        } else {
+          expect(await lyrics.currLyricFuture, isNull);
+        }
       }, createHttpClient: (_) {
         clients++;
         throw StateError('Unexpected automatic lyric network access');

@@ -39,7 +39,7 @@ class AutomaticOnlineLyricsSwitch extends StatelessWidget {
       valueListenable: settings.automaticOnlineLyrics,
       builder: (context, enabled, _) => SettingsSwitchTile(
         title: Text(ui('自动联网')),
-        subtitle: Text(ui('本地歌词和缓存均缺失时自动联网搜词；评论仍需手动更新。')),
+        subtitle: Text(ui('缺少本地和缓存歌词时自动搜词；打开已关联的歌曲评论时自动更新一次。')),
         icon: Symbols.cloud_sync,
         value: enabled,
         onChanged: (value) async {

@@ -48,10 +48,10 @@ void main() {
     expect(result, isA<Lrc>());
   });
 
-  test('metadata custom LRC can be upgraded by an exact-match word candidate',
+  test(
+      'exact-match word candidates are available without metadata-only fallbacks',
       () async {
     final result = await getMostMatchedLyric(audio(),
-        customLyricLoader: (_) async => ordinary(),
         candidateSearch: (_) async => LyricSearchResponse(candidates: [
               SongSearchResult(ResultSource.kugou, 'Song', 'Artist', 'Album', 1,
                   kugouSongHash: 'same')
@@ -155,7 +155,6 @@ void main() {
           kugouSongHash: 'hash')
     ];
     final lyric = await getMostMatchedLyric(audio(),
-        customLyricLoader: (_) async => null,
         candidateSearch: (_) async =>
             LyricSearchResponse(candidates: candidates, failures: {}),
         candidateLyricLoader: (c) async =>
@@ -172,7 +171,6 @@ void main() {
           kugouSongHash: 'hash')
     ];
     final lyric = await getMostMatchedLyric(audio(),
-        customLyricLoader: (_) async => null,
         candidateSearch: (_) async =>
             LyricSearchResponse(candidates: candidates, failures: {}),
         candidateLyricLoader: (c) async {

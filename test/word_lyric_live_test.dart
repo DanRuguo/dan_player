@@ -98,9 +98,7 @@ void main() {
         }
       }
       final selected = await getMostMatchedLyric(audio,
-          customLyricLoader: (_) async => null,
-          candidateSearch: (_) async => response,
-          candidateLyricLoader: load);
+          candidateSearch: (_) async => response, candidateLyricLoader: load);
       final report = {
         'sample': sample.$1,
         'localArtist': sample.$2,

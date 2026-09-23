@@ -1,3 +1,4 @@
+import 'package:dan_player/app_settings.dart';
 import 'dart:async';
 
 import 'package:dan_player/component/app_motion.dart';
@@ -63,6 +64,43 @@ Animation<double> _turns(WidgetTester tester) =>
     tester.widget<RotationTransition>(find.byKey(_motion)).turns;
 
 void main() {
+  testWidgets(
+      'opt-in refreshes visible linked comments once with normal feedback',
+      (tester) async {
+    AppSettings.instance.automaticOnlineLyrics.value = true;
+    addTearDown(() => AppSettings.instance.automaticOnlineLyrics.value = false);
+    final response = Completer<Map<String, dynamic>>();
+    final transport = FakeCommentsTransport((_) => response.future);
+    final service = SongCommentsService(
+        transport: transport, cache: _Cache(page: _saved()));
+    await tester.pumpWidget(_app(service));
+    await tester.pump();
+    expect(transport.requests, hasLength(1));
+    final before = _turns(tester).value;
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(_turns(tester).value, isNot(before));
+    expect(find.text('Saved comment'), findsOneWidget);
+    response.complete(neteaseComments([neteaseComment(91)]));
+    await tester.pumpAndSettle();
+    expect(find.text('评论已更新'), findsOneWidget);
+    await tester.pumpWidget(_app(service));
+    await tester.pumpAndSettle();
+    expect(transport.requests, hasLength(1));
+  });
+
+  testWidgets('opt-in does not refresh an offstage comment view',
+      (tester) async {
+    AppSettings.instance.automaticOnlineLyrics.value = true;
+    addTearDown(() => AppSettings.instance.automaticOnlineLyrics.value = false);
+    final transport =
+        FakeCommentsTransport((_) => throw StateError('Unexpected network'));
+    await tester.pumpWidget(_app(
+        SongCommentsService(transport: transport, cache: _Cache()),
+        visible: false));
+    await tester.pumpAndSettle();
+    expect(transport.requests, isEmpty);
+  });
+
   testWidgets(
       'opening, rebuilding, and changing track read only local comments',
       (tester) async {

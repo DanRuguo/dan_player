@@ -153,7 +153,9 @@ List<LrclibRecord> parseLrclibSearchPayload(
   for (final value in payload) {
     if (records.length >= limit.clamp(1, 20)) break;
     final record = parseLrclibRecordPayload(value);
-    if (record != null && record.hasLyrics) records.add(record);
+    if (record != null && (record.hasLyrics || record.instrumental)) {
+      records.add(record);
+    }
   }
   return records;
 }
