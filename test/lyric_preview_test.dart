@@ -154,6 +154,71 @@ void main() {
     await preview.close();
     preview.dispose();
   });
+  test(
+      'repeated successful previews settle at the exact endpoint, not last stats',
+      () async {
+    final processes = <ProcessFake>[];
+    final clocks = <void Function(double)>[];
+    final preview = LyricAudioPreview(audio(),
+        mainPlayback: () => null,
+        launch: (_, __, ___, clock) async {
+          clocks.add(clock);
+          final process = ProcessFake();
+          processes.add(process);
+          return process;
+        });
+    final positions = <double>[];
+    final subscription = preview.positionStream.listen(positions.add);
+    for (final lastStat in [1.38, 1.39, 1.40]) {
+      await preview.play(.85, 1.418);
+      clocks.last(lastStat);
+      processes.last.done.complete(0);
+      await Future<void>.delayed(Duration.zero);
+      expect(preview.playing, isFalse);
+      expect(preview.position, 1.418);
+      expect(positions.last, 1.418);
+      for (final clock in clocks) {
+        clock(1.37); // Even stderr delivered after exit must not rewind it.
+      }
+      expect(preview.position, 1.418);
+    }
+    await subscription.cancel();
+    await preview.close();
+    preview.dispose();
+  });
+  test('pause, failed exit and replaced process never complete the new range',
+      () async {
+    final processes = <ProcessFake>[];
+    final clocks = <void Function(double)>[];
+    final preview = LyricAudioPreview(audio(),
+        mainPlayback: () => null,
+        launch: (_, __, ___, clock) async {
+          clocks.add(clock);
+          final process = ProcessFake();
+          processes.add(process);
+          return process;
+        });
+    await preview.play(1, 3);
+    clocks.last(1.5);
+    await preview.pause();
+    expect(preview.position, 1.5);
+    await preview.play(1, 3);
+    clocks.last(1.7);
+    processes.last.done.complete(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(preview.position, 1.7);
+    expect(preview.error, isNotNull);
+    await preview.play(1, 3);
+    clocks.last(1.8);
+    await preview.play(4, 6);
+    expect(preview.position, 4);
+    clocks[2](2.9);
+    expect(preview.position, 4);
+    clocks.last(4.2);
+    await preview.close();
+    expect(preview.position, 4.2);
+    preview.dispose();
+  });
   test('CUE preview maps line time to file time and back', () async {
     const cue = CueTrackReference(
         cuePath: r'J:\library\album.cue',
@@ -258,5 +323,25 @@ void main() {
     expect(times.length, greaterThan(5));
     expect(times.first, closeTo(1, .15));
     expect(times.last, lessThanOrEqualTo(2.1));
+    // Reproduce the reported sub-second sentence with the real decoder.
+    final replay =
+        LyricAudioPreview(audio(path: file.path), mainPlayback: () => null);
+    for (var i = 0; i < 3; i++) {
+      final finished = Completer<void>();
+      void changed() {
+        if (!replay.playing && !replay.loading && replay.position == 1.418) {
+          if (!finished.isCompleted) finished.complete();
+        }
+      }
+
+      replay.addListener(changed);
+      await replay.play(.85, 1.418);
+      await finished.future.timeout(const Duration(seconds: 10));
+      replay.removeListener(changed);
+      expect(replay.error, isNull);
+      expect(replay.position, 1.418);
+    }
+    await replay.close();
+    replay.dispose();
   }, skip: Platform.environment['DAN_PLAYER_FFMPEG_DIR'] == null);
 }

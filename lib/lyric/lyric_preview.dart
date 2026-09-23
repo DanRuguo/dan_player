@@ -91,6 +91,14 @@ class LyricAudioPreview extends ChangeNotifier {
         _mainFactory = mainPlayback ?? existingPreviewMainPlayback {
     _decoder = ProcessAudioTrimPreview(audio,
         mainPlayback: () => null,
+        onCompleted: () {
+          if (_disposed || _closing != null) return;
+          // Stats are periodic and need not include the final audio sample.
+          // Seal this generation so buffered stderr cannot rewind the endpoint.
+          ++_generation;
+          _position = _rangeEnd;
+          _positions.add(_position);
+        },
         launch: (file, start, duration) {
           final token = _generation;
           return _launch(file, start, duration, (time) {

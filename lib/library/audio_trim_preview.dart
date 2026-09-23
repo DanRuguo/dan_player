@@ -122,7 +122,9 @@ TrimMainPlayback? _existingMainPlayback() => PlayService.playbackReady.value
 /// frees a second BASS engine, whose native resources are process-global.
 class ProcessAudioTrimPreview extends AudioTrimPreview {
   ProcessAudioTrimPreview(Audio audio,
-      {TrimPreviewLauncher? launch, TrimMainPlayback? Function()? mainPlayback})
+      {TrimPreviewLauncher? launch,
+      TrimMainPlayback? Function()? mainPlayback,
+      this.onCompleted})
       : _file = audio.localFilePath,
         _launch = launch ?? _launchPreview,
         _mainPlayback = mainPlayback ?? _existingMainPlayback;
@@ -130,6 +132,9 @@ class ProcessAudioTrimPreview extends AudioTrimPreview {
   final String _file;
   final TrimPreviewLauncher _launch;
   final TrimMainPlayback? Function() _mainPlayback;
+
+  /// Only a successful, current process exit; never a stop or replacement.
+  final VoidCallback? onCompleted;
   TrimPreviewProcess? _process;
   Future<TrimPreviewProcess>? _pendingLaunch;
   Future<void>? _stopping;
@@ -246,6 +251,7 @@ class ProcessAudioTrimPreview extends AudioTrimPreview {
       }
     }
     _releaseMain();
+    if (code == 0) onCompleted?.call();
     _notify();
   }
 
