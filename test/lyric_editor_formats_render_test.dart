@@ -154,6 +154,20 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('lyric-format-lrc')));
       await tester.pumpAndSettle();
       expect(find.text(translateUi('转换歌词格式？', language)), findsOneWidget);
+      await capture('conversion-back');
+      await tester.tap(find.byKey(const ValueKey('lyric-conversion-back')));
+      await tester.pumpAndSettle();
+      expect(find.text(translateUi('选择歌词编辑格式', language)), findsOneWidget);
+      await tester.tap(find.text(translateUi('取消', language)).last);
+      await tester.pumpAndSettle();
+      await tapTab(0);
+      expect(tester.widget<TextField>(field).controller!.text,
+          contains('夜🌙(1500,1000)'));
+      await tester.ensureVisible(formatButton);
+      await tester.tap(formatButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('lyric-format-lrc')));
+      await tester.pumpAndSettle();
       await tester.tap(find.text(translateUi('保留完整内容', language)));
       await tester.pumpAndSettle();
       await tester.ensureVisible(formatButton);

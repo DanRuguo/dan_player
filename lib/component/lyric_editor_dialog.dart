@@ -281,7 +281,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         final selected = await _confirmConversion(lyric, format);
         if (!mounted) return;
         _setDraft(LyricEditDraft.fromLyric(
-            lyric, selected ? format : preferredLyricEditingFormat(lyric)));
+            lyric, selected ?? preferredLyricEditingFormat(lyric)));
       }
       _initialSignature = _signature;
     } catch (error, trace) {
@@ -297,24 +297,41 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       ? ui(error.message) + (error.source is int ? ' (${error.source})' : '')
       : ui('$error');
 
-  Future<bool> _confirmConversion(Lyric lyric, LyricEditFormat next) async {
-    final loses = !lyricConversionPreservesData(lyric, next);
-    if (!loses) return true;
-    return await showAppDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-                  title: AppDialogTitle(ui('转换歌词格式？')),
-                  content: Text(ui('转换可能丢失逐字时间或辅助内容；纯文本转时间轴需要手动校时。原始版本仍保留。')),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: Text(ui('保留完整内容'))),
-                    FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: Text(ui('转换')))
-                  ],
-                )) ==
-        true;
+  Future<LyricEditFormat?> _confirmConversion(Lyric lyric, LyricEditFormat next,
+      {LyricEditFormat? keepFormat}) async {
+    while (mounted) {
+      if (lyricConversionPreservesData(lyric, next)) return next;
+      final choice = await showAppDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: AppDialogTitle(ui('转换歌词格式？')),
+                content: Text(ui('转换可能丢失逐字时间或辅助内容；纯文本转时间轴需要手动校时。原始版本仍保留。')),
+                actions: [
+                  TextButton.icon(
+                      key: const ValueKey('lyric-conversion-back'),
+                      onPressed: () => Navigator.pop(context, 'back'),
+                      icon: const Icon(Symbols.arrow_back),
+                      label: Text(ui('返回选择格式'))),
+                  TextButton(
+                      onPressed: () => Navigator.pop(context, 'keep'),
+                      child: Text(ui('保留完整内容'))),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(context, 'convert'),
+                      child: Text(ui('转换')))
+                ],
+              ));
+      if (!mounted) return null;
+      if (choice == 'convert') return next;
+      if (choice != 'back') {
+        return choice == 'keep'
+            ? keepFormat ?? preferredLyricEditingFormat(lyric)
+            : null;
+      }
+      final picked = await chooseLyricEditFormat(context, current: next);
+      if (!mounted || picked == null) return null;
+      next = picked;
+    }
+    return null;
   }
 
   Future<void> _changeFormat() async {
@@ -328,8 +345,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         return;
       }
       final lyric = _draft.parse();
-      if (!await _confirmConversion(lyric, next) || !mounted) return;
-      setState(() => _setDraft(LyricEditDraft.fromLyric(lyric, next)));
+      final selected =
+          await _confirmConversion(lyric, next, keepFormat: format);
+      if (!mounted || selected == null || selected == format) return;
+      setState(() => _setDraft(LyricEditDraft.fromLyric(lyric, selected)));
     } catch (error) {
       setState(() => onlineError = _errorText(error));
     }
@@ -423,10 +442,9 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
     if (dirty && !await _confirmReplace()) return;
     if (!mounted) return;
     final convert = await _confirmConversion(lyric, format);
-    if (!mounted) return;
+    if (!mounted || convert == null) return;
     setState(() {
-      _setDraft(LyricEditDraft.fromLyric(
-          lyric, convert ? format : preferredLyricEditingFormat(lyric)));
+      _setDraft(LyricEditDraft.fromLyric(lyric, convert));
       loadError = null;
       onlineError = null;
     });

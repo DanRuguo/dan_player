@@ -38,6 +38,7 @@ const catalogLyricEditorFormats = <String, List<String>>{
     "변환 시 단어 타이밍이나 보조 텍스트가 손실될 수 있습니다. 일반 텍스트의 타이밍은 직접 맞춰야 합니다. 원본은 보존됩니다."
   ],
   "保留完整内容": ["Keep all data", "すべての内容を保持", "모든 내용 유지"],
+  "返回选择格式": ["Back to format selection", "形式の選択に戻る", "형식 선택으로 돌아가기"],
   "转换": ["Convert", "変換", "변환"],
   "导入歌词": ["Import lyrics", "歌詞をインポート", "가사 가져오기"],
   "歌词文件": ["Lyric files", "歌詞ファイル", "가사 파일"],
