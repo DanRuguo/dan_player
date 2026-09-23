@@ -38,6 +38,9 @@ void main() {
     expect(words.last.length.inMilliseconds, 1300);
     expect(identical(first, second), isFalse);
     expect(identical(first.lines, second.lines), isFalse);
+    final noSearch = await cache.read('track/provider');
+    expect(noSearch, isA<Qrc>());
+    expect(await cache.read('unknown/provider'), isNull);
   });
 
   test('concurrent playback shares fetch; forced search replaces saved result',

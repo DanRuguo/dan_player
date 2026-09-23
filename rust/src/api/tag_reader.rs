@@ -1281,6 +1281,21 @@ fn text_looks_misdecoded(value: &str) -> bool {
     latin1_supplement >= 3 && latin1_supplement * 3 >= non_whitespace
 }
 
+fn reliable_explicit_id3_title(raw: &str) -> Option<&str> {
+    let title = raw.trim();
+    (!title.is_empty() && !text_looks_misdecoded(title)).then_some(title)
+}
+
+fn reliable_explicit_id3_performer(raw: &str) -> Option<String> {
+    let values: Vec<_> = raw
+        .split('\0')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect();
+    (!values.is_empty() && !values.iter().any(|value| text_looks_misdecoded(value)))
+        .then(|| values.join("/"))
+}
+
 #[derive(Debug)]
 pub(crate) struct Audio {
     title: String,
@@ -1315,6 +1330,53 @@ pub(crate) struct Audio {
 }
 
 impl Audio {
+    /// WinRT can substitute TPE2 for the song artist, or return the file name
+    /// when a valid TIT2 exists, after Lofty hits an unrelated malformed ID3
+    /// frame. Only restore explicit, strictly framed text in those cases.
+    /// This read-only fallback runs only on MP3 metadata reads that already
+    /// needed another parser; unchanged index entries remain untouched.
+    fn restore_explicit_id3_text(path: &Path, audio: &mut Self) {
+        if !path
+            .extension()
+            .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("mp3"))
+        {
+            return;
+        }
+        let Some([title, performer, _]) = id3_compat::trim_text_fields(path) else {
+            return;
+        };
+        let mut restored = false;
+        if path
+            .file_name()
+            .is_some_and(|name| audio.title == name.to_string_lossy().as_ref())
+        {
+            if let Some(title) = title.as_deref().and_then(reliable_explicit_id3_title) {
+                if audio.title != title {
+                    audio.title = title.to_string();
+                    restored = true;
+                }
+            }
+        }
+        if let Some(performer) = performer {
+            // ID3v2.4 permits NUL-delimited values in one TPE1 frame. Keep the
+            // same slash-joined performer representation as the Lofty path.
+            if let Some(performer) = reliable_explicit_id3_performer(&performer) {
+                if audio.artist != performer {
+                    audio.artist = performer;
+                    restored = true;
+                }
+            }
+        }
+        if restored {
+            audio.by = Some(
+                audio
+                    .by
+                    .as_ref()
+                    .map_or_else(|| "ID3v2".to_string(), |source| format!("{source}+ID3v2")),
+            );
+        }
+    }
+
     fn new_with_path(path: impl AsRef<Path>, by: Option<String>) -> Option<Self> {
         let path = path.as_ref();
         Some(Audio {
@@ -1447,11 +1509,25 @@ impl Audio {
                         }
                     }
                 }
+                if value.needs_windows_text_fallback
+                    || path
+                        .file_name()
+                        .is_some_and(|name| value.title == name.to_string_lossy().as_ref())
+                    || value
+                        .album_artist
+                        .as_deref()
+                        .is_some_and(|owner| owner == value.artist)
+                {
+                    Self::restore_explicit_id3_text(path, &mut value);
+                }
                 return Some(with_file_size(value));
             }
 
             match Self::read_by_win_music_properties(path, modified, created) {
-                Ok(value) => Some(with_file_size(value)),
+                Ok(mut value) => {
+                    Self::restore_explicit_id3_text(path, &mut value);
+                    Some(with_file_size(value))
+                }
                 Err(err) => {
                     log_to_dart(format!("{:?}: {}", path, err));
                     Self::new_with_path(path, None).map(with_file_size)
@@ -2026,10 +2102,14 @@ pub fn update_index(
         &previous
     };
     let roots = incremental_index::roots(previous)?;
+    // Keep the 26.0.5 schema readable by earlier builds. Individual
+    // Windows-fallback MP3 records carry a checked-artist proof; older schemas
+    // still receive their existing complete migration scan.
+    let old_version = previous["version"].as_u64();
     let index = incremental_index::refresh_cancellable(
         Some(previous),
         &roots,
-        previous["version"].as_u64() != Some(INDEX_VERSION),
+        old_version != Some(INDEX_VERSION),
         &|path| Audio::read_from_path(path).map(|audio| audio.to_json_value()),
         &task.control,
         |progress| {
@@ -2450,6 +2530,105 @@ mod tests {
         id3v1[127] = 0xff;
         bytes.extend_from_slice(&id3v1);
         fs::write(path, bytes).unwrap();
+    }
+
+    fn write_id3_performer_fixture(path: &Path, performer: Option<&str>, title: Option<&str>) {
+        let mut body = Vec::new();
+        for (id, value) in [
+            (b"TPE2", Some("FAVORITE")),
+            (b"TPE1", performer),
+            (b"TIT2", title),
+        ] {
+            let Some(value) = value else { continue };
+            let mut payload = vec![3];
+            payload.extend_from_slice(value.as_bytes());
+            let size = payload.len();
+            body.extend_from_slice(id);
+            body.extend_from_slice(&[
+                ((size >> 21) & 127) as u8,
+                ((size >> 14) & 127) as u8,
+                ((size >> 7) & 127) as u8,
+                (size & 127) as u8,
+                0,
+                0,
+            ]);
+            body.extend(payload);
+        }
+        let size = body.len();
+        let mut bytes = vec![
+            b'I',
+            b'D',
+            b'3',
+            4,
+            0,
+            0,
+            ((size >> 21) & 127) as u8,
+            ((size >> 14) & 127) as u8,
+            ((size >> 7) & 127) as u8,
+            (size & 127) as u8,
+        ];
+        bytes.extend(body);
+        for _ in 0..3 {
+            let mut frame = vec![0u8; 417];
+            frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+            bytes.extend(frame);
+        }
+        fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn explicit_id3_performer_beats_windows_album_artist_without_changing_album_owner() {
+        let directory = test_directory("explicit_id3_performer");
+        let source = directory.join("song.mp3");
+        write_id3_performer_fixture(&source, Some("福圓美里"), Some("真实标题"));
+        let before = fs::read(&source).unwrap();
+        let mut audio = Audio::new_with_path(&source, Some("Windows".into())).unwrap();
+        audio.artist = "FAVORITE".into();
+        audio.album_artist = Some("FAVORITE".into());
+        Audio::restore_explicit_id3_text(&source, &mut audio);
+        assert_eq!(audio.title, "真实标题");
+        assert_eq!(audio.artist, "福圓美里");
+        assert_eq!(audio.album_artist.as_deref(), Some("FAVORITE"));
+        assert_eq!(audio.by.as_deref(), Some("Windows+ID3v2"));
+
+        write_id3_performer_fixture(&source, Some("Singer A\0Singer B"), Some("真实标题"));
+        let mut multiple = Audio::new_with_path(&source, Some("Windows".into())).unwrap();
+        multiple.artist = "FAVORITE".into();
+        Audio::restore_explicit_id3_text(&source, &mut multiple);
+        assert_eq!(multiple.artist, "Singer A/Singer B");
+
+        write_id3_performer_fixture(&source, None, Some("独立的 TIT2"));
+        let mut title_only = Audio::new_with_path(&source, Some("Windows".into())).unwrap();
+        title_only.artist = "FAVORITE".into();
+        title_only.album = "Original album".into();
+        title_only.album_artist = Some("FAVORITE".into());
+        Audio::restore_explicit_id3_text(&source, &mut title_only);
+        assert_eq!(title_only.title, "独立的 TIT2");
+        assert_eq!(title_only.artist, "FAVORITE");
+        assert_eq!(title_only.album, "Original album");
+        assert_eq!(title_only.album_artist.as_deref(), Some("FAVORITE"));
+
+        write_id3_performer_fixture(&source, None, None);
+        let mut album_only = Audio::new_with_path(&source, Some("Windows".into())).unwrap();
+        album_only.artist = "FAVORITE".into();
+        album_only.album_artist = Some("FAVORITE".into());
+        Audio::restore_explicit_id3_text(&source, &mut album_only);
+        assert_eq!(album_only.artist, "FAVORITE");
+        assert_eq!(album_only.title, "song.mp3");
+        assert_eq!(album_only.by.as_deref(), Some("Windows"));
+        assert_eq!(Audio::read_from_path(&source).unwrap().artist, "FAVORITE");
+
+        let tagless = directory.join("no-tags.mp3");
+        let mut bare_audio = Vec::new();
+        for _ in 0..3 {
+            let mut frame = vec![0u8; 417];
+            frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+            bare_audio.extend(frame);
+        }
+        fs::write(&tagless, bare_audio).unwrap();
+        assert_eq!(Audio::read_from_path(&tagless).unwrap().artist, "UNKNOWN");
+        assert_ne!(fs::read(&source).unwrap(), before);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     pub(super) fn test_picture(picture_type: PictureType, red: u8) -> Picture {
@@ -3348,7 +3527,8 @@ mod tests {
             let native = native.strip_prefix(r"\\?\").unwrap_or(&native).to_string();
             let before = Sha256::digest(fs::read(&source).unwrap());
             let expected = Audio::read_by_win_music_properties(&native, 0, 0).unwrap();
-            let lofty = Audio::read_by_lofty(Path::new(&native), 0, 0).unwrap();
+            let lofty = Audio::read_by_lofty(Path::new(&native), 0, 0);
+            let raw_text = id3_compat::trim_text_fields(&source);
             for (kind, path) in [
                 ("native", native.clone()),
                 ("forward", native.replace('\\', "/")),
@@ -3363,22 +3543,145 @@ mod tests {
                         "file": source.file_name().unwrap().to_string_lossy(),
                         "kind": kind,
                         "raw_hr": raw.err().map(|error| format!("{:08X}", error.code().0)),
-                        "lofty_artist": lofty.artist,
-                        "fallback_requested": lofty.needs_windows_text_fallback,
+                        "lofty_artist": lofty.as_ref().map(|value| value.artist.as_str()),
+                        "raw_id3_text": raw_text,
+                        "fallback_requested": lofty.as_ref().map(|value| value.needs_windows_text_fallback),
                         "windows_artist": expected.artist,
+                        "windows_album_artist": expected.album_artist,
                         "result_artist": read.artist,
                         "result_by": read.by,
                         "path_unchanged": read.path == path,
                     })
                 );
                 assert_eq!(read.path, path);
-                if lofty.needs_windows_text_fallback && read.artist != expected.artist {
+                let expected_artist = raw_text
+                    .as_ref()
+                    .and_then(|fields| fields[1].as_deref())
+                    .filter(|value| !value.trim().is_empty() && !text_looks_misdecoded(value))
+                    .unwrap_or(&expected.artist);
+                if lofty
+                    .as_ref()
+                    .is_none_or(|value| value.needs_windows_text_fallback)
+                    && read.artist != expected_artist
+                {
                     failures.push(format!("{}: {kind}", source.display()));
                 }
             }
             assert_eq!(Sha256::digest(fs::read(&source).unwrap()), before);
         }
         assert!(failures.is_empty(), "fallback mismatch: {failures:?}");
+    }
+
+    #[test]
+    #[ignore = "edits only workspace music copies named by DAN_PLAYER_METADATA_READ_COPY_DIR"]
+    fn real_mp3_full_metadata_edit_refresh_and_reopen_keeps_four_fields() {
+        use sha2::{Digest, Sha256};
+        let allowed = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tool")
+            .canonicalize()
+            .unwrap();
+        let originals = PathBuf::from(
+            std::env::var_os("DAN_PLAYER_METADATA_READ_COPY_DIR")
+                .expect("Set an isolated music-copy directory inside workspace tool"),
+        )
+        .canonicalize()
+        .unwrap();
+        assert!(originals.starts_with(&allowed) && originals != allowed);
+        let working = test_directory("artist_edit_reopen");
+        let mut originals_and_hashes = Vec::new();
+        for entry in fs::read_dir(&originals).unwrap().map(Result::unwrap) {
+            let source = entry.path();
+            if !is_supported_audio_path(&source) {
+                continue;
+            }
+            let bytes = fs::read(&source).unwrap();
+            originals_and_hashes.push((source.clone(), Sha256::digest(&bytes)));
+            fs::write(working.join(source.file_name().unwrap()), bytes).unwrap();
+        }
+        assert_eq!(originals_and_hashes.len(), 2);
+        let roots = vec![working.to_string_lossy().into_owned()];
+        let read = |path: &Path| Audio::read_from_path(path).map(|audio| audio.to_json_value());
+        let before = incremental_index::refresh(None, &roots, true, &read, |_| {}).unwrap();
+        for (index, (source, _)) in originals_and_hashes.iter().enumerate() {
+            let copy = working.join(source.file_name().unwrap());
+            let [_, old_artist, _] = id3_compat::trim_text_fields(&copy).unwrap();
+            let expected_artist = format!("测试歌手{index}");
+            let expected_title = format!("测试标题{index}");
+            let expected_album = format!("测试专辑{index}");
+            let expected_filename = format!("edited-{index}.mp3");
+            assert!(old_artist.is_some());
+            assert_eq!(
+                Audio::read_from_path(&copy).unwrap().artist,
+                old_artist.unwrap()
+            );
+            let saved = update_audio_metadata(
+                copy.to_string_lossy().into_owned(),
+                expected_filename.clone(),
+                expected_title.clone(),
+                expected_artist.clone(),
+                expected_album.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                Path::new(&saved).file_name().unwrap(),
+                expected_filename.as_str()
+            );
+            assert!(!copy.exists());
+            let fields = id3_compat::trim_text_fields(Path::new(&saved)).unwrap();
+            assert_eq!(
+                fields,
+                [
+                    Some(expected_title),
+                    Some(expected_artist),
+                    Some(expected_album)
+                ]
+            );
+        }
+        let refreshed =
+            incremental_index::refresh(Some(&before), &roots, false, &read, |_| {}).unwrap();
+        // Simulate an installed version 113 index after its Windows reader
+        // collapsed both artists to TPE2, even though the file stamp matches.
+        let mut legacy = refreshed.clone();
+        legacy["version"] = 113.into();
+        for song in legacy["folders"][0]["audios"].as_array_mut().unwrap() {
+            song["artist"] = "FAVORITE".into();
+            song["album_artist"] = "FAVORITE".into();
+            song["by"] = "Windows".into();
+        }
+        let repaired =
+            incremental_index::refresh(Some(&legacy), &roots, false, &read, |_| {}).unwrap();
+        assert_eq!(repaired["version"], INDEX_VERSION);
+        let persisted = working.join("index.json");
+        fs::write(&persisted, serde_json::to_vec(&repaired).unwrap()).unwrap();
+        let reopened: serde_json::Value =
+            serde_json::from_slice(&fs::read(&persisted).unwrap()).unwrap();
+        let songs = reopened["folders"][0]["audios"].as_array().unwrap();
+        assert_eq!(songs.len(), 2);
+        for (index, (source, before_hash)) in originals_and_hashes.iter().enumerate() {
+            let copy = working.join(format!("edited-{index}.mp3"));
+            let direct = Audio::read_from_path(&copy).unwrap();
+            let indexed = songs
+                .iter()
+                .find(|item| item["path"].as_str() == copy.to_str())
+                .unwrap();
+            let expected_artist = format!("测试歌手{index}");
+            let expected_title = format!("测试标题{index}");
+            let expected_album = format!("测试专辑{index}");
+            assert_eq!(direct.path, copy.to_string_lossy());
+            assert_eq!(direct.title, expected_title);
+            assert_eq!(direct.artist, expected_artist);
+            assert_eq!(direct.album, expected_album);
+            assert_eq!(direct.album_artist.as_deref(), Some("FAVORITE"));
+            assert_eq!(indexed["path"], copy.to_string_lossy().as_ref());
+            assert_eq!(indexed["title"], expected_title);
+            assert_eq!(indexed["artist"], expected_artist);
+            assert_eq!(indexed["album"], expected_album);
+            assert_eq!(indexed["album_artist"], "FAVORITE");
+            assert_eq!(Sha256::digest(fs::read(source).unwrap()), *before_hash);
+        }
+        fs::remove_dir_all(working).unwrap();
     }
 
     #[test]
@@ -3520,5 +3823,191 @@ mod tests {
         assert_eq!(recovered, first);
 
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "read-only audit of the user library; requires DAN_PLAYER_FULL_LIBRARY_READ_DIR and workspace tool output"]
+    fn audit_full_user_library_metadata_read_only() {
+        fn files_under(root: &Path, files: &mut Vec<PathBuf>) {
+            for entry in fs::read_dir(root).unwrap() {
+                let entry = entry.unwrap();
+                let kind = entry.file_type().unwrap();
+                if kind.is_dir() {
+                    files_under(&entry.path(), files);
+                } else if kind.is_file()
+                    && entry.path().extension().is_some_and(|ext| {
+                        matches!(
+                            ext.to_string_lossy().to_ascii_lowercase().as_str(),
+                            "mp3" | "flac"
+                        )
+                    })
+                {
+                    files.push(entry.path());
+                }
+            }
+        }
+        let source = PathBuf::from(
+            std::env::var("DAN_PLAYER_FULL_LIBRARY_READ_DIR")
+                .expect("Set the user library directory; this audit only reads it"),
+        );
+        let output = PathBuf::from(
+            std::env::var("DAN_PLAYER_FULL_LIBRARY_AUDIT_OUTPUT")
+                .expect("Set a JSON output path inside the workspace tool folder"),
+        );
+        let workspace_tool = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("tool")
+            .canonicalize()
+            .unwrap();
+        assert!(source.is_absolute() && source.is_dir());
+        assert!(output.is_absolute());
+        assert!(
+            output
+                .parent()
+                .unwrap()
+                .canonicalize()
+                .unwrap()
+                .starts_with(workspace_tool),
+            "audit output must stay inside workspace tool"
+        );
+        assert!(!output.starts_with(&source));
+
+        let mut files = Vec::new();
+        files_under(&source, &mut files);
+        files.sort();
+        let mp3_count = files
+            .iter()
+            .filter(|file| {
+                file.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("mp3"))
+            })
+            .count();
+        assert_eq!((mp3_count, files.len() - mp3_count), (647, 19));
+        let rows = files
+            .iter()
+            .map(|path| {
+                let audio = Audio::read_from_path(path);
+                let raw_id3 = if path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("mp3"))
+                {
+                    id3_compat::trim_text_fields(path)
+                } else {
+                    None
+                };
+                serde_json::json!({
+                    "path": path.to_string_lossy(),
+                    "file_name": path.file_name().unwrap().to_string_lossy(),
+                    "app": audio.map(|item| item.to_json_value()),
+                    "id3_title": raw_id3.as_ref().and_then(|fields| fields[0].as_ref()),
+                    "id3_tpe1": raw_id3.as_ref().and_then(|fields| fields[1].as_ref()),
+                    "id3_album": raw_id3.as_ref().and_then(|fields| fields[2].as_ref()),
+                })
+            })
+            .collect::<Vec<_>>();
+        fs::write(&output, serde_json::to_vec_pretty(&rows).unwrap()).unwrap();
+        assert!(
+            rows.iter().all(|row| !row["app"].is_null()),
+            "some files failed metadata reading; inspect the tool report"
+        );
+    }
+
+    #[test]
+    #[ignore = "read-only simulation against the user's installed index; writes only a workspace tool report"]
+    fn simulate_full_library_legacy_index_repair_read_only() {
+        use sha2::{Digest, Sha256};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let source = PathBuf::from(
+            std::env::var("DAN_PLAYER_FULL_LIBRARY_READ_DIR").expect("Set music directory"),
+        );
+        let input = PathBuf::from(
+            std::env::var("DAN_PLAYER_FULL_LIBRARY_INDEX_INPUT").expect("Set read-only index path"),
+        );
+        let output = PathBuf::from(
+            std::env::var("DAN_PLAYER_FULL_LIBRARY_INDEX_OUTPUT")
+                .expect("Set workspace tool output path"),
+        );
+        let workspace_tool = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("tool")
+            .canonicalize()
+            .unwrap();
+        assert!(source.is_absolute() && source.is_dir());
+        assert!(input.is_absolute() && input.is_file());
+        assert!(output
+            .parent()
+            .unwrap()
+            .canonicalize()
+            .unwrap()
+            .starts_with(workspace_tool));
+        assert!(!output.starts_with(&source));
+        let input_bytes = fs::read(&input).unwrap();
+        let previous: serde_json::Value = serde_json::from_slice(&input_bytes).unwrap();
+        assert_eq!(previous["version"], 113);
+        let reads = AtomicUsize::new(0);
+        let rebuilt = incremental_index::refresh(
+            Some(&previous),
+            &[source.to_string_lossy().into_owned()],
+            false,
+            &|path| {
+                reads.fetch_add(1, Ordering::Relaxed);
+                Audio::read_from_path(path).map(|audio| audio.to_json_value())
+            },
+            |_| {},
+        )
+        .unwrap();
+        let songs = rebuilt["folders"][0]["audios"].as_array().unwrap();
+        assert_eq!(songs.len(), 666);
+        assert_eq!(rebuilt["version"], 113);
+        for (file_name, field, expected) in [
+            ("圣域(五彩斑斓的世界 ED2).mp3", "artist", "福圓美里"),
+            (
+                "君に逢えたから(五彩斑斓的世界 ED1).mp3",
+                "artist",
+                "eufonius",
+            ),
+            ("永远同在.mp3", "title", "永远同在"),
+        ] {
+            let song = songs
+                .iter()
+                .find(|song| {
+                    song["path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with(file_name))
+                })
+                .unwrap();
+            assert_eq!(song[field], expected);
+        }
+        let full_reads = reads.load(Ordering::Relaxed);
+        assert!(
+            full_reads < 100,
+            "a targeted repair reread {full_reads} of 666 songs"
+        );
+        let second_reads = AtomicUsize::new(0);
+        let second = incremental_index::refresh(
+            Some(&rebuilt),
+            &[source.to_string_lossy().into_owned()],
+            false,
+            &|path| {
+                second_reads.fetch_add(1, Ordering::Relaxed);
+                Audio::read_from_path(path).map(|audio| audio.to_json_value())
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(second_reads.load(Ordering::Relaxed), 0);
+        assert_eq!(second, rebuilt);
+        assert_eq!(
+            Sha256::digest(fs::read(&input).unwrap()),
+            Sha256::digest(&input_bytes)
+        );
+        fs::write(&output, serde_json::to_vec_pretty(&rebuilt).unwrap()).unwrap();
+        println!("targeted native metadata reads: {full_reads} / 666");
     }
 }

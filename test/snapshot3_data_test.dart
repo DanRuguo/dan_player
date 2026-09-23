@@ -246,6 +246,21 @@ void main() {
     Snapshot3Upgrade.validateDocument('custom_audio_order.json', []);
     Snapshot3Upgrade.validateDocument(
         'playback_statistics.json', {'version': 2});
+    Snapshot3Upgrade.validateDocument('index.json', {
+      'version': 113,
+      'folders': [
+        {
+          'audios': [
+            {
+              'id3_text_checked': [1, '123', 456, 'Title', 'Singer', 'Windows']
+            }
+          ]
+        }
+      ]
+    });
+    expect(
+        () => Snapshot3Upgrade.validateDocument('index.json', {'version': 114}),
+        throwsUnsupportedError);
     expect(
         () => Snapshot3Upgrade.validateDocument(
             'named_queues.json', {'version': 2}),

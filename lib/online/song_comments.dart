@@ -8,6 +8,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/online/song_comment_association.dart';
+import 'package:dan_player/online/song_comments_cache.dart';
 // Pinned music_api exposes no public serializer. Reuse its implementation rather
 // than copying cryptographic source; keep this adapter covered by request tests.
 // ignore: implementation_imports
@@ -271,15 +272,15 @@ class AnonymousSongCommentsTransport implements SongCommentsTransport {
             SongCommentsFailure.network, '评论服务暂时不可用，请稍后重试。');
       }
       if (response.contentLength > responseByteLimit) {
-        throw const SongCommentsException(SongCommentsFailure.invalid,
-            '评论响应超过大小限制，请稍后重试或切换评论来源。');
+        throw const SongCommentsException(
+            SongCommentsFailure.invalid, '评论响应超过大小限制，请稍后重试或切换评论来源。');
       }
       final bytes = BytesBuilder(copy: false);
       await for (final chunk in response) {
         cancellation.check();
         if (bytes.length + chunk.length > responseByteLimit) {
-          throw const SongCommentsException(SongCommentsFailure.invalid,
-              '评论响应超过大小限制，请稍后重试或切换评论来源。');
+          throw const SongCommentsException(
+              SongCommentsFailure.invalid, '评论响应超过大小限制，请稍后重试或切换评论来源。');
         }
         bytes.add(chunk);
       }
@@ -392,8 +393,11 @@ class DefaultSongCommentsTransport implements SongCommentsTransport {
 class SongCommentsService {
   SongCommentsService({
     SongCommentsTransport? transport,
+    SongCommentsCache? cache,
     Duration timeout = requestTimeout,
   })  : _transport = transport ?? DefaultSongCommentsTransport(),
+        _cache =
+            cache ?? (transport == null ? SongCommentsCache.instance : null),
         _timeout = timeout;
 
   static final instance = SongCommentsService();
@@ -401,6 +405,7 @@ class SongCommentsService {
   static const maxPages = 10;
   static const requestTimeout = Duration(seconds: 12);
   final SongCommentsTransport _transport;
+  final SongCommentsCache? _cache;
   final Duration _timeout;
 
   static bool canRead(Audio audio) => unavailableReason(audio) == null;
@@ -465,6 +470,7 @@ class SongCommentsService {
     required SongCommentsTarget target,
     required SongCommentSort sort,
     int page = 0,
+    bool refresh = false,
     SongCommentsCancellation? cancellation,
   }) async {
     if (page < 0 || page >= maxPages) {
@@ -474,12 +480,22 @@ class SongCommentsService {
     final token = cancellation ?? SongCommentsCancellation();
     token.check();
     try {
+      if (!refresh && _cache != null) {
+        final cached = await _cache!.read(target, sort, page);
+        token.check();
+        if (cached != null) return cached;
+      }
       final response = await token
           .race(_transport.fetch(target,
               sort: sort, page: page, cancellation: token))
           .timeout(_timeout);
       token.check();
-      return _parse(response, target, sort, page);
+      final result = _parse(response, target, sort, page);
+      token.check();
+      await _cache?.write(target, sort, result,
+          replaceSort: refresh && page == 0);
+      token.check();
+      return result;
     } on TimeoutException {
       token.cancel();
       throw const SongCommentsException(

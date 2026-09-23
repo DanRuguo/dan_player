@@ -5,6 +5,7 @@ import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/component/song_comments_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/song_comments.dart';
+import 'package:dan_player/online/song_comments_cache.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +18,28 @@ const _latest = ValueKey('song-comments-latest');
 const _close = ValueKey('song-comments-close');
 const _more = ValueKey('song-comments-load-more');
 const _retry = ValueKey('song-comments-retry');
+const _refresh = ValueKey('song-comments-refresh');
+
+class _MemoryCommentsCache extends SongCommentsCache {
+  _MemoryCommentsCache()
+      : super(
+            directory: () async => throw StateError('No disk in widget test'));
+  final pages = <String, SongCommentsPage>{};
+  String _key(SongCommentsTarget target, SongCommentSort sort, int page) =>
+      '${target.identity}:${sort.name}:$page';
+
+  @override
+  Future<SongCommentsPage?> read(
+          SongCommentsTarget target, SongCommentSort sort, int page) async =>
+      pages[_key(target, sort, page)];
+
+  @override
+  Future<void> write(
+      SongCommentsTarget target, SongCommentSort sort, SongCommentsPage result,
+      {bool replaceSort = false}) async {
+    pages[_key(target, sort, result.page)] = result;
+  }
+}
 
 Widget _app(
   SongCommentsService service, {
@@ -187,6 +210,73 @@ void main() {
     expect(find.text('测试评论 1'), findsOneWidget);
     expect(find.byType(Image), findsNothing);
     expect(find.byType(SelectableText), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('icon-only refresh replaces a loaded category on explicit click',
+      (tester) async {
+    var revision = 1;
+    final transport = FakeCommentsTransport((request) =>
+        neteaseComments([neteaseComment(revision)], sort: request.sort));
+    await _launch(tester, SongCommentsService(transport: transport));
+    expect(find.text('测试评论 1'), findsOneWidget);
+    expect(transport.requests, hasLength(1));
+    final button = find.byKey(_refresh);
+    expect(button, findsOneWidget);
+    expect(tester.getSize(button).width, greaterThanOrEqualTo(44));
+    expect(tester.getSize(button).height, greaterThanOrEqualTo(44));
+    revision = 2;
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(transport.requests, hasLength(2));
+    expect(find.text('测试评论 1'), findsNothing);
+    expect(find.text('测试评论 2'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('failed refresh retains old comments and retry refreshes page 0',
+      (tester) async {
+    var revision = 1;
+    var fail = false;
+    final transport = FakeCommentsTransport((request) {
+      if (fail) throw StateError('offline');
+      return neteaseComments([neteaseComment(revision)], sort: request.sort);
+    });
+    await _launch(tester, SongCommentsService(transport: transport));
+    fail = true;
+    await tester.tap(find.byKey(_refresh));
+    await tester.pumpAndSettle();
+    expect(find.text('测试评论 1'), findsOneWidget);
+    expect(find.byKey(_retry), findsOneWidget);
+    fail = false;
+    revision = 2;
+    await tester.tap(find.byKey(_retry));
+    await tester.pumpAndSettle();
+    expect(transport.requests.last.page, 0);
+    expect(find.text('测试评论 2'), findsOneWidget);
+    expect(find.text('测试评论 1'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('closing and reopening a cached dialog does not reconnect',
+      (tester) async {
+    final transport =
+        FakeCommentsTransport((_) => neteaseComments([neteaseComment(1)]));
+    final service = SongCommentsService(
+      transport: transport,
+      cache: _MemoryCommentsCache(),
+    );
+    await _launch(tester, service);
+    await tester.pumpAndSettle();
+    expect(find.text('测试评论 1'), findsOneWidget);
+    expect(transport.requests, hasLength(1));
+    await tester.tap(find.byKey(_close));
+    await tester.pumpAndSettle();
+    transport.handler = (_) => throw StateError('offline');
+    await tester.tap(find.byKey(_open));
+    await tester.pumpAndSettle();
+    expect(find.text('测试评论 1'), findsOneWidget);
+    expect(transport.requests, hasLength(1));
     expect(tester.takeException(), isNull);
   });
 

@@ -235,13 +235,25 @@ pub(super) fn refresh_cancellable(
     let results: Vec<anyhow::Result<serde_json::Value>> = files.par_iter().map(|file| {
         control.check()?;
         let previous = old.get(&path_key(&file.path)).copied();
-        if !force && previous.is_some_and(|value| file.fingerprint.matches(value)
-            && value["metadata_pending"] != true
-            && !needs_classification_backfill(value)
-            && !needs_duration_backfill(value)) {
-            let mut value = previous.unwrap().clone();
-            value["path"] = file.path.to_string_lossy().into_owned().into();
-            return Ok(value);
+        if !force {
+            if let Some(previous) = previous.filter(|value| {
+                file.fingerprint.matches(value)
+                    && value["metadata_pending"] != true
+                    && !needs_classification_backfill(value)
+                    && !needs_duration_backfill(value)
+            }) {
+                let check = legacy_id3_text_check(&file.path, previous);
+                if check != LegacyId3TextCheck::ReRead {
+                    let mut value = previous.clone();
+                    value["path"] = file.path.to_string_lossy().into_owned().into();
+                    if check == LegacyId3TextCheck::MarkChecked {
+                        anyhow::ensure!(Fingerprint::read(&file.path)? == file.fingerprint,
+                            "INDEX_SCAN_INCOMPLETE|校验标签期间歌曲发生变化，请重试；旧索引未覆盖");
+                        value["id3_text_checked"] = id3_text_proof(&value).unwrap();
+                    }
+                    return Ok(value);
+                }
+            }
         }
         // Readability failures are not missing/bad metadata. Fail the entire
         // refresh; a metadata parser miss itself preserves the prior record.
@@ -269,6 +281,9 @@ pub(super) fn refresh_cancellable(
             anyhow::anyhow!("INDEX_SCHEMA_INVALID|歌曲元数据记录无效"))?.clone());
         file.fingerprint.apply(&mut value);
         value["metadata_pending"] = (!reliable).into();
+        if reliable && needs_id3_text_proof(&file.path, &value) {
+            value["id3_text_checked"] = id3_text_proof(&value).unwrap();
+        }
         Ok(value)
     }).collect();
     let mut grouped = BTreeMap::<String, Vec<serde_json::Value>>::new();
@@ -321,6 +336,82 @@ pub(super) fn refresh_cancellable(
     progress(1.0);
     control.check()?;
     Ok(output)
+}
+
+fn is_windows_id3_fallback(path: &Path, value: &serde_json::Value) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("mp3"))
+        && matches!(value["by"].as_str(), Some("Windows" | "Lofty+Windows"))
+}
+
+fn is_filename_title_fallback(path: &Path, value: &serde_json::Value) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("mp3"))
+        && path
+            .file_name()
+            .is_some_and(|name| value["title"].as_str() == name.to_str())
+        && matches!(
+            value["by"].as_str(),
+            Some("Lofty" | "Windows" | "Lofty+Windows")
+        )
+}
+
+fn needs_id3_text_proof(path: &Path, value: &serde_json::Value) -> bool {
+    is_windows_id3_fallback(path, value) || is_filename_title_fallback(path, value)
+}
+
+// A per-song proof survives saves from this build. Older 26.0.5 builds ignore
+// the field, and even if an older native scan keeps it while changing a song,
+// its stamped metadata no longer matches. The next new scan repairs only that
+// suspected artist/title fallback MP3 instead of rereading the entire library.
+fn id3_text_proof(value: &serde_json::Value) -> Option<serde_json::Value> {
+    Some(serde_json::json!([
+        1,
+        value["modified_ns"].as_str()?,
+        value["file_size"].as_u64()?,
+        value["title"].as_str()?,
+        value["artist"].as_str()?,
+        value["by"].as_str()?,
+    ]))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LegacyId3TextCheck {
+    Reuse,
+    MarkChecked,
+    ReRead,
+}
+
+fn legacy_id3_text_check(path: &Path, value: &serde_json::Value) -> LegacyId3TextCheck {
+    if !needs_id3_text_proof(path, value) {
+        return LegacyId3TextCheck::Reuse;
+    }
+    let Some(proof) = id3_text_proof(value) else {
+        return LegacyId3TextCheck::ReRead;
+    };
+    if value["id3_text_checked"] == proof {
+        return LegacyId3TextCheck::Reuse;
+    }
+    let Some([title, performer, _]) = id3_compat::trim_text_fields(path) else {
+        return LegacyId3TextCheck::ReRead;
+    };
+    if is_windows_id3_fallback(path, value)
+        && performer
+            .as_deref()
+            .and_then(reliable_explicit_id3_performer)
+            .is_some_and(|text| value["artist"].as_str() != Some(text.as_str()))
+    {
+        return LegacyId3TextCheck::ReRead;
+    }
+    if is_filename_title_fallback(path, value)
+        && title
+            .as_deref()
+            .and_then(reliable_explicit_id3_title)
+            .is_some_and(|text| value["title"].as_str() != Some(text))
+    {
+        return LegacyId3TextCheck::ReRead;
+    }
+    LegacyId3TextCheck::MarkChecked
 }
 
 #[cfg(test)]
@@ -487,6 +578,246 @@ mod tests {
         let second = f.scan(Some(&first), false, &calls);
         assert_eq!(second, first);
         assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+    #[test]
+    fn old_windows_album_artist_is_rechecked_once_without_rescanning_the_library() {
+        let f = Fixture::new();
+        let affected = f.file("affected.mp3");
+        f.file("unrelated.flac");
+        let calls = AtomicUsize::new(0);
+        let mut old = f.scan(None, true, &calls);
+        old["version"] = 113.into();
+        for song in old["folders"][0]["audios"].as_array_mut().unwrap() {
+            if song["path"].as_str() == Some(affected.to_str().unwrap()) {
+                song["by"] = "Windows".into();
+                song["artist"] = "FAVORITE".into();
+                song["album_artist"] = "FAVORITE".into();
+            }
+        }
+        calls.store(0, Ordering::Relaxed);
+        let repaired = refresh(
+            Some(&old),
+            &f.roots(),
+            false,
+            &|path| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                let mut item = tags(path);
+                item["artist"] = "Actual performer".into();
+                item["album_artist"] = "FAVORITE".into();
+                item["by"] = "Windows+ID3v2".into();
+                Some(item)
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(repaired["version"], INDEX_VERSION);
+        let selected = songs(&repaired)
+            .into_iter()
+            .find(|song| song["path"].as_str() == Some(affected.to_str().unwrap()))
+            .unwrap();
+        assert_eq!(selected["artist"], "Actual performer");
+        assert_eq!(selected["album_artist"], "FAVORITE");
+        let stable = f.scan(Some(&repaired), false, &calls);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(stable, repaired);
+    }
+
+    #[test]
+    fn old_filename_title_fallback_is_rechecked_once_without_touching_other_songs() {
+        let f = Fixture::new();
+        let affected = f.file("title.mp3");
+        f.file("unrelated.flac");
+        let calls = AtomicUsize::new(0);
+        let mut old = f.scan(None, true, &calls);
+        let affected_row = old["folders"][0]["audios"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["path"].as_str() == Some(affected.to_str().unwrap()))
+            .unwrap();
+        affected_row["title"] = "title.mp3".into();
+        affected_row["by"] = "Lofty+Windows".into();
+        calls.store(0, Ordering::Relaxed);
+        let repaired = refresh(
+            Some(&old),
+            &f.roots(),
+            false,
+            &|path| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                let mut result = tags(path);
+                result["title"] = "Verified TIT2".into();
+                result["by"] = "Lofty+Windows+ID3v2".into();
+                Some(result)
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(repaired["version"], 113);
+        let selected = songs(&repaired)
+            .into_iter()
+            .find(|row| row["path"].as_str() == Some(affected.to_str().unwrap()))
+            .unwrap();
+        assert_eq!(selected["title"], "Verified TIT2");
+        let stable = f.scan(Some(&repaired), false, &calls);
+        assert_eq!(stable, repaired);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn old_artist_recheck_requires_the_specific_windows_mp3_fallback() {
+        let mut value = serde_json::json!({
+            "by": "Windows", "artist": "FAVORITE", "album_artist": "FAVORITE"
+        });
+        let mp3 = Path::new("song.mp3");
+        assert_eq!(
+            legacy_id3_text_check(mp3, &value),
+            LegacyId3TextCheck::ReRead
+        );
+        value["modified_ns"] = "123".into();
+        value["file_size"] = 42.into();
+        assert_eq!(
+            legacy_id3_text_check(mp3, &value),
+            LegacyId3TextCheck::ReRead
+        );
+        assert_eq!(
+            legacy_id3_text_check(Path::new("song.flac"), &value),
+            LegacyId3TextCheck::Reuse
+        );
+        value["by"] = "Lofty".into();
+        assert_eq!(
+            legacy_id3_text_check(mp3, &value),
+            LegacyId3TextCheck::Reuse
+        );
+        value["by"] = "Windows".into();
+        value["artist"] = "Singer".into();
+        assert_eq!(
+            legacy_id3_text_check(mp3, &value),
+            LegacyId3TextCheck::ReRead
+        );
+        value["title"] = "Tagged title".into();
+        value["id3_text_checked"] = id3_text_proof(&value).unwrap();
+        assert_eq!(
+            legacy_id3_text_check(mp3, &value),
+            LegacyId3TextCheck::Reuse
+        );
+    }
+
+    #[test]
+    fn matching_raw_id3_is_marked_checked_without_full_metadata_read() {
+        let f = Fixture::new();
+        let source = f.file("matching.mp3");
+        let payload = b"\x03Singer";
+        let frame_size = payload.len() as u8;
+        let tag_size = frame_size + 10;
+        let mut bytes = vec![b'I', b'D', b'3', 4, 0, 0, 0, 0, 0, tag_size];
+        bytes.extend_from_slice(b"TPE1");
+        bytes.extend_from_slice(&[0, 0, 0, frame_size, 0, 0]);
+        bytes.extend_from_slice(payload);
+        fs::write(&source, bytes).unwrap();
+        let calls = AtomicUsize::new(0);
+        let mut old = f.scan(None, true, &calls);
+        let row = &mut old["folders"][0]["audios"][0];
+        row["by"] = "Windows".into();
+        row["artist"] = "Singer".into();
+        calls.store(0, Ordering::Relaxed);
+        let checked = refresh(
+            Some(&old),
+            &f.roots(),
+            false,
+            &|_| panic!("a matching raw performer must not trigger full tag reading"),
+            |_| {},
+        )
+        .unwrap();
+        let song = songs(&checked)[0];
+        assert_eq!(song["id3_text_checked"], id3_text_proof(song).unwrap());
+        let stable = refresh(
+            Some(&checked),
+            &f.roots(),
+            false,
+            &|_| panic!("checked unchanged tags must be reused"),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(stable, checked);
+    }
+
+    #[test]
+    fn album_artist_only_is_checked_once_and_old_build_rewrites_are_repaired_selectively() {
+        let f = Fixture::new();
+        let album_only = f.file("album-only.mp3");
+        f.file("unrelated.flac");
+        let calls = AtomicUsize::new(0);
+        let mut old = f.scan(None, true, &calls);
+        let record = old["folders"][0]["audios"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|song| song["path"].as_str() == Some(album_only.to_str().unwrap()))
+            .unwrap();
+        record["by"] = "Windows".into();
+        record["artist"] = "Album owner".into();
+        record["album_artist"] = "Album owner".into();
+        let read = |path: &Path| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            let mut result = tags(path);
+            result["by"] = "Windows".into();
+            result["artist"] = "Album owner".into();
+            result["album_artist"] = "Album owner".into();
+            Some(result)
+        };
+        calls.store(0, Ordering::Relaxed);
+        let checked = refresh(Some(&old), &f.roots(), false, &read, |_| {}).unwrap();
+        assert_eq!(checked["version"], 113);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        let record = songs(&checked)
+            .into_iter()
+            .find(|song| song["path"].as_str() == Some(album_only.to_str().unwrap()))
+            .unwrap();
+        assert_eq!(record["id3_text_checked"], id3_text_proof(record).unwrap());
+        let stable = refresh(Some(&checked), &f.roots(), false, &read, |_| {}).unwrap();
+        assert_eq!(stable, checked);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+
+        // An older binary can either drop the unknown field on a Dart save
+        // or retain it while its native scan overwrites a changed record.
+        let mut old_dart_save = checked.clone();
+        let record = old_dart_save["folders"][0]["audios"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|song| song["path"].as_str() == Some(album_only.to_str().unwrap()))
+            .unwrap();
+        record.as_object_mut().unwrap().remove("id3_text_checked");
+        let rechecked = refresh(Some(&old_dart_save), &f.roots(), false, &read, |_| {}).unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        let record = songs(&rechecked)
+            .into_iter()
+            .find(|song| song["path"].as_str() == Some(album_only.to_str().unwrap()))
+            .unwrap();
+        assert_eq!(record["id3_text_checked"], id3_text_proof(record).unwrap());
+
+        let mut old_native_scan = rechecked.clone();
+        let record = old_native_scan["folders"][0]["audios"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|song| song["path"].as_str() == Some(album_only.to_str().unwrap()))
+            .unwrap();
+        record["artist"] = "Old reader value".into();
+        record["album_artist"] = "Old reader value".into();
+        assert_eq!(
+            legacy_id3_text_check(&album_only, record),
+            LegacyId3TextCheck::ReRead
+        );
+        record["artist"] = "Album owner".into();
+        record["album_artist"] = "Album owner".into();
+        record["modified_ns"] = "different stamp".into();
+        assert_eq!(
+            legacy_id3_text_check(&album_only, record),
+            LegacyId3TextCheck::ReRead
+        );
     }
     #[test]
     fn old_duration_reader_marker_is_backfilled_once_then_reused() {

@@ -48,6 +48,7 @@ class PlaylistRectangleTile extends StatefulWidget {
 class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
   Object? _request;
   Future<ImageProvider?>? _image;
+  int? _coverGeneration;
 
   Widget _wrapArtwork(Widget child) =>
       widget.artworkWrapper?.call(child) ?? child;
@@ -59,7 +60,14 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
   }
 
   void _coverChanged() {
-    if (mounted) setState(() => _request = null);
+    final audio = widget.audio;
+    if (!mounted || audio == null) return;
+    final generation = CoverCache.instance.generationFor(audio.localFilePath);
+    if (generation == _coverGeneration) return;
+    setState(() {
+      _coverGeneration = generation;
+      _request = null;
+    });
   }
 
   @override
@@ -88,6 +96,9 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
             logicalHeight: box.maxHeight,
             devicePixelRatio: MediaQuery.devicePixelRatioOf(context));
         final audio = widget.audio;
+        _coverGeneration = audio == null
+            ? null
+            : CoverCache.instance.generationFor(audio.localFilePath);
         final request = (
           widget.imagePath,
           widget.revision,
@@ -96,9 +107,7 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
           audio?.modified,
           audio?.coverFingerprint,
           audio?.artworkUrl,
-          audio == null
-              ? 0
-              : CoverCache.instance.generationFor(audio.localFilePath),
+          _coverGeneration ?? 0,
           target,
         );
         if (_request != request) {

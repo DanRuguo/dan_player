@@ -54,13 +54,13 @@ void main() {
 
   File fixture(String name) => File(path.join(dataRoot.path, name));
 
-  test(
-      'legacy version 113 index save keeps pending classification marker and order',
+  test('version 113 index saves checked-ID3 proof without changing the schema',
       () async {
     final a = CategoryTestAudio('First').toMap()
       ..remove('composer')
       ..remove('album_artist')
-      ..remove('classification_version');
+      ..remove('classification_version')
+      ..['id3_text_checked'] = [1, '123', 456, 'Title', 'Singer', 'Windows'];
     final b = CategoryTestAudio('Second').toMap()
       ..remove('classification_version');
     await fixture('index.json').writeAsString(jsonEncode({
@@ -83,13 +83,39 @@ void main() {
         isTrue);
     await AudioLibrary.instance.saveIndex();
     final saved = jsonDecode(await fixture('index.json').readAsString()) as Map;
-    expect(saved['version'], 113);
+    expect(saved['version'], 113,
+        reason: 'a Dart-only save must not claim the native migration ran');
     final folder = (saved['folders'] as List).single as Map;
     expect(folder['modified'], 99);
     expect(folder['latest'], 98);
     final audios = folder['audios'] as List;
     expect(audios.map((audio) => audio['path']), [a['path'], b['path']]);
     expect(audios.map((audio) => audio['classification_version']), [0, 0]);
+    expect((audios.first as Map)['id3_text_checked'],
+        [1, '123', 456, 'Title', 'Singer', 'Windows']);
+    await AudioLibrary.initFromIndex();
+    await AudioLibrary.instance.saveIndex();
+    expect(
+        (jsonDecode(await fixture('index.json').readAsString())
+            as Map)['version'],
+        113);
+  });
+
+  test('Dart-only save does not advance a pending native index migration',
+      () async {
+    await fixture('index.json').writeAsString(jsonEncode({
+      'version': 112,
+      'folders': [
+        {
+          'path': 'D:/category-test-fixtures',
+          'audios': [CategoryTestAudio('Legacy').toMap()]
+        }
+      ]
+    }));
+    await AudioLibrary.initFromIndex();
+    await AudioLibrary.instance.saveIndex();
+    final saved = jsonDecode(await fixture('index.json').readAsString()) as Map;
+    expect(saved['version'], 112);
   });
 
   test(

@@ -1,4 +1,5 @@
 const Map<String, List<String>> uiCatalogSongCommentCapabilities = {
+  '更新评论': ['Refresh comments', 'コメントを更新', '댓글 새로고침'],
   '评论响应超过大小限制，请稍后重试或切换评论来源。': [
     'The comment response exceeds the size limit. Try again later or choose another source.',
     'コメントの応答がサイズ制限を超えました。後で再試行するか、別の提供元を選んでください。',

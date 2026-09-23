@@ -302,6 +302,7 @@ class _CategoryTileState extends State<_CategoryTile> {
   Offset? _menuPosition;
   Object? _request;
   Future<ImageProvider?>? _artwork;
+  int? _coverGeneration;
   @override
   void initState() {
     super.initState();
@@ -309,7 +310,14 @@ class _CategoryTileState extends State<_CategoryTile> {
   }
 
   void _coverChanged() {
-    if (mounted) setState(() => _request = null);
+    final audio = widget.group.coverAudio;
+    if (!mounted || audio == null) return;
+    final generation = CoverCache.instance.generationFor(audio.localFilePath);
+    if (generation == _coverGeneration) return;
+    setState(() {
+      _coverGeneration = generation;
+      _request = null;
+    });
   }
 
   @override
@@ -348,6 +356,9 @@ class _CategoryTileState extends State<_CategoryTile> {
           logicalHeight: circle ? width : height,
           devicePixelRatio: MediaQuery.devicePixelRatioOf(context));
       final audio = group.coverAudio;
+      _coverGeneration = audio == null
+          ? null
+          : CoverCache.instance.generationFor(audio.localFilePath);
       final source = (
         group.persistenceKey,
         widget.covers.coverIdFor(group),
@@ -356,9 +367,7 @@ class _CategoryTileState extends State<_CategoryTile> {
         audio?.modified,
         audio?.coverFingerprint,
         audio?.artworkUrl,
-        audio == null
-            ? 0
-            : CoverCache.instance.generationFor(audio.localFilePath)
+        _coverGeneration ?? 0
       );
       final aspect = circle ? 1.0 : width / height;
       final request = (source as Object, target, aspect);

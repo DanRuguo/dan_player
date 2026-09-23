@@ -23,6 +23,26 @@ class OnlineLyricCache {
   static const maxTotalBytes = 64 * 1024 * 1024;
   DateTime? _lastPrune;
 
+  /// Read an existing result without starting a provider request. Automatic
+  /// playback uses this before it considers searching the network.
+  Future<Lyric?> read(String identity) async {
+    final key = sha256.convert(utf8.encode(identity)).toString();
+    try {
+      final pending = _pending[key];
+      if (pending != null) return (await pending)?.toLyric();
+      final file = File(path.join((await _directory()).path, '$key.json'));
+      if (!await file.exists() || await file.length() > maxEntryBytes) {
+        return null;
+      }
+      final snapshot =
+          LyricSnapshot.fromJson(jsonDecode(await file.readAsString()));
+      final lyric = snapshot?.toLyric();
+      return lyric != null && lyric.lines.isNotEmpty ? lyric : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Lyric?> resolve(String identity, Future<Lyric?> Function() fetch,
       {bool refresh = false}) async {
     final key = sha256.convert(utf8.encode(identity)).toString();

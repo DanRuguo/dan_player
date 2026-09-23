@@ -90,6 +90,11 @@ class SavedPlaybackState {
 class PlaybackStateStore {
   PlaybackStateStore._();
 
+  // A successful fallback means the primary was unreadable. Keep that known-
+  // good backup through the next save instead of rotating the damaged primary
+  // over it. The path guards independent isolated profiles in one process.
+  static String? _recoveredBackupPath;
+
   static Future<File> _file([String suffix = ""]) async {
     final supportPath = (await getAppDataDir()).path;
     return File("$supportPath\\playback_state.json$suffix");
@@ -105,15 +110,21 @@ class PlaybackStateStore {
         json.encode(state.toMap()),
         flush: true,
       );
-      if (await backup.exists()) await backup.delete();
-      if (await target.exists()) await target.rename(backup.path);
+      if (_recoveredBackupPath == backup.path && await backup.exists()) {
+        if (await target.exists()) await target.delete();
+      } else {
+        if (await backup.exists()) await backup.delete();
+        if (await target.exists()) await target.rename(backup.path);
+      }
       await temporary.rename(target.path);
-      if (await backup.exists()) await backup.delete();
+      _recoveredBackupPath = null;
+      // Retain the previous completed session. load() already knows how to
+      // recover it when the newest file is later damaged or only half-written.
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
       try {
         if (!await target.exists() && await backup.exists()) {
-          await backup.rename(target.path);
+          await backup.copy(target.path);
         }
       } catch (_) {}
     } finally {
@@ -132,7 +143,11 @@ class PlaybackStateStore {
         final decoded = json.decode(await file.readAsString());
         if (decoded is Map) {
           final state = SavedPlaybackState.fromMap(decoded);
-          if (state != null) return state;
+          if (state != null) {
+            _recoveredBackupPath =
+                file.path == backup.path ? backup.path : null;
+            return state;
+          }
         }
       } catch (err, trace) {
         LOGGER.e(err, stackTrace: trace);

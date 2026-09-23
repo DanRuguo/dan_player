@@ -24,6 +24,9 @@ class AudioLibrary {
   AudioLibrary._(this.folders);
 
   List<String>? _scanRoots;
+  // A Dart-only save must not claim an older native index schema was fully
+  // migrated. The checked-artist proof is independent of this schema number.
+  int _indexVersion = 113;
 
   /// Selected roots, including empty roots. Legacy indexes retain their
   /// recorded folders until a full scan records the explicitly selected roots.
@@ -197,6 +200,8 @@ class AudioLibrary {
       // I/O. Snapshot it in the same synchronous turn as replacing the library.
       final onlineAudios = List<Audio>.from(instance.onlineAudioCollection);
       _instance = AudioLibrary._(folders)
+        .._indexVersion =
+            indexJson['version'] is int ? indexJson['version'] as int : 0
         .._scanRoots = roots == null ? null : List<String>.from(roots)
         ..onlineAudioCollection = onlineAudios;
 
@@ -317,7 +322,7 @@ class AudioLibrary {
       // boundary. JSON encoding a large library can then run without blocking
       // Flutter's UI isolate or observing a half-mutated collection.
       final snapshot = <String, Object?>{
-        "version": 113,
+        "version": _indexVersion,
         "roots": List<String>.of(scanRoots),
         "folders": [for (final folder in folders) folder.toMap()],
       };
@@ -341,7 +346,8 @@ class AudioLibrary {
   void registerSavedAudio(Audio audio) {
     final directory = path_util.dirname(audio.path);
     final roots = List<String>.of(scanRoots);
-    if (!roots.any((root) => path_util.equals(root, directory) ||
+    if (!roots.any((root) =>
+        path_util.equals(root, directory) ||
         path_util.isWithin(root, directory))) {
       _scanRoots = [...roots, directory];
     }
@@ -355,12 +361,13 @@ class AudioLibrary {
       }
     }
     if (!replaced) {
-      final matching = folders.where((folder) =>
-          path_util.equals(folder.path, directory));
+      final matching =
+          folders.where((folder) => path_util.equals(folder.path, directory));
       if (matching.isNotEmpty) {
         matching.first.audios.add(audio);
       } else {
-        folders.add(AudioFolder([audio], directory, audio.modified, audio.modified));
+        folders.add(
+            AudioFolder([audio], directory, audio.modified, audio.modified));
       }
     }
     rebuildDerivedCollections();
@@ -476,6 +483,10 @@ class Audio {
   String? modifiedNanos;
   bool metadataReadPending;
 
+  /// Proof that the stamped file's ID3 title and performer were checked.
+  /// Earlier 26.0.5 builds ignore this optional field.
+  final Object? id3TextChecked;
+
   String? get coverFingerprint =>
       modifiedNanos == null ? null : '${modifiedNanos}_s${fileSizeBytes ?? 0}';
 
@@ -532,6 +543,7 @@ class Audio {
     this.fileSizeBytes,
     this.modifiedNanos,
     this.metadataReadPending = false,
+    this.id3TextChecked,
     this.cueTrack,
     this.durationVersion = 1,
     this.onlineProvider,
@@ -761,6 +773,7 @@ class Audio {
           map["file_size"] is num ? (map["file_size"] as num).toInt() : null,
       modifiedNanos: map['modified_ns'] is String ? map['modified_ns'] : null,
       metadataReadPending: map['metadata_pending'] == true,
+      id3TextChecked: map['id3_text_checked'],
       cueTrack: cue,
       durationVersion: (map['duration_version'] as num?)?.toInt() ?? 0,
       stableTrackId: map['track_id'] is String ? map['track_id'] : null,
@@ -784,6 +797,7 @@ class Audio {
         "file_size": fileSizeBytes,
         "modified_ns": modifiedNanos,
         "metadata_pending": metadataReadPending,
+        if (id3TextChecked != null) "id3_text_checked": id3TextChecked,
         "path": path,
         if (cueTrack != null) 'cue_track': cueTrack!.toMap(),
         "modified": modified,

@@ -59,6 +59,7 @@ class _CommentTab {
   bool hasMore = true;
   bool reachedLimit = false;
   bool repeatedPage = false;
+  bool retryRefresh = false;
   String Function()? error;
 }
 
@@ -221,10 +222,15 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     if (!_tab.loaded) unawaited(_load());
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool refresh = false}) async {
     final target = _target;
     final tab = _tab;
-    if (_closed || target == null || tab.loading || !tab.hasMore) return;
+    if (_closed ||
+        target == null ||
+        tab.loading ||
+        (!refresh && !tab.hasMore)) {
+      return;
+    }
     final sort = _sort;
     _cancel();
     final generation = _generation;
@@ -244,19 +250,28 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
       final result = await _service.loadPage(
         target: target,
         sort: sort,
-        page: tab.nextPage,
+        page: refresh ? 0 : tab.nextPage,
+        refresh: refresh,
         cancellation: cancellation,
       );
       if (!current()) return;
-      final seen = tab.comments.map((comment) => comment.id).toSet();
+      final seen = refresh
+          ? <String>{}
+          : tab.comments.map((comment) => comment.id).toSet();
       final incoming =
           result.comments.where((comment) => seen.add(comment.id)).toList();
       setState(() {
+        if (refresh) {
+          tab.comments.clear();
+          tab.nextPage = 0;
+          if (tab.scroll.hasClients) tab.scroll.jumpTo(0);
+        }
         if (result.availableSorts.isNotEmpty) {
           _availableSorts =
               {..._availableSorts, ...result.availableSorts}.toList();
         }
         tab.comments.addAll(incoming);
+        tab.retryRefresh = false;
         tab.loaded = true;
         tab.total = result.reportedTotal;
         tab.nextPage = result.page + 1;
@@ -270,9 +285,12 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
       if (current()) {
         // Keep an unformatted UI message, so a cached failure follows a later
         // language change without issuing another network request.
-        setState(() => tab.error = () => error is SongCommentsException
-            ? ui(error.message)
-            : ui("评论加载失败，请检查网络后重试。"));
+        setState(() {
+          tab.retryRefresh = refresh;
+          tab.error = () => error is SongCommentsException
+              ? ui(error.message)
+              : ui("评论加载失败，请检查网络后重试。");
+        });
       }
     } finally {
       if (current()) {
@@ -317,16 +335,33 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
                   padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
                   child: AppDialogTitle(
                     ui("歌曲评论"),
+                    sideExtent: _target == null ? 48 : 96,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleLarge,
-                    trailing: IconButton(
-                      key: const ValueKey('song-comments-close'),
-                      tooltip: ui("关闭评论"),
-                      constraints:
-                          const BoxConstraints(minWidth: 44, minHeight: 44),
-                      onPressed: _dismiss,
-                      icon: const Icon(Symbols.close),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_target != null)
+                          IconButton(
+                            key: const ValueKey('song-comments-refresh'),
+                            tooltip: ui('更新评论'),
+                            constraints: const BoxConstraints(
+                                minWidth: 44, minHeight: 44),
+                            onPressed: tab.loading
+                                ? null
+                                : () => unawaited(_load(refresh: true)),
+                            icon: const Icon(Symbols.refresh),
+                          ),
+                        IconButton(
+                          key: const ValueKey('song-comments-close'),
+                          tooltip: ui("关闭评论"),
+                          constraints:
+                              const BoxConstraints(minWidth: 44, minHeight: 44),
+                          onPressed: _dismiss,
+                          icon: const Icon(Symbols.close),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -529,7 +564,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
                   minimumSize: const Size(44, 44),
                   visualDensity: VisualDensity.standard,
                   shape: AppShape.control),
-              onPressed: _load,
+              onPressed: () => unawaited(_load(refresh: tab.retryRefresh)),
               icon: const Icon(Symbols.refresh),
               label: Text(ui("重试")),
             ),

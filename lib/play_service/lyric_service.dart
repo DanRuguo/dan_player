@@ -14,6 +14,36 @@ import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/foundation.dart';
 
+/// A cached online result can win over local lyrics when the user selected
+/// online-first, but neither choice starts a network search while a usable
+/// local or cached result already exists.
+@visibleForTesting
+Future<Lyric?> resolveAutomaticLyricSources({
+  required bool localFirst,
+  required Future<Lyric?> Function() local,
+  required Future<Lyric?> Function() cachedOnline,
+  required Future<Lyric?> Function() searchOnline,
+}) async {
+  if (localFirst) {
+    final result = await local();
+    if (result != null) return result;
+    final cached = await cachedOnline();
+    if (cached != null) return cached;
+  } else {
+    final cached = await cachedOnline();
+    if (cached != null) return cached;
+    final result = await local();
+    if (result != null) return result;
+  }
+  return searchOnline();
+}
+
+/// Editable tags and provider preferences must not turn an existing saved
+/// result into another automatic network search for the same library track.
+@visibleForTesting
+String onlineLyricCacheIdentity(Audio audio, {LyricSource? source}) =>
+    jsonEncode([2, audio.stableTrackId, source?.toMap()]);
+
 /// 只通知 lyric 变更
 class LyricService extends ChangeNotifier {
   final PlayService playService;
@@ -225,12 +255,11 @@ class LyricService extends ChangeNotifier {
     );
   }
 
-  Future<Lyric?> _cachedOnline(Audio audio, Future<Lyric?> Function() fetch,
-      {LyricSource? source, bool refresh = false}) {
+  String _legacyOnlineCacheIdentity(Audio audio, {LyricSource? source}) {
     final settings = AppSettings.instance;
     // Metadata/provider changes naturally select a new cache entry. Do not
     // include the display offset: cached timestamps must remain canonical.
-    final identity = jsonEncode([
+    return jsonEncode([
       1,
       audio.stableTrackId,
       audio.title,
@@ -243,20 +272,48 @@ class LyricService extends ChangeNotifier {
           .map((profile) => profile.toJson())
           .toList(),
     ]);
-    return OnlineLyricCache.instance.resolve(identity, fetch, refresh: refresh);
   }
 
-  Future<Lyric?> _resolveOnline(Audio audio, {bool refresh = false}) =>
-      _cachedOnline(audio, () async {
-        final direct = switch (audio.onlineProvider) {
-          "qq" => await getOnlineLyric(
-              qqSongId: audio.onlineNumericId, qqSongMid: audio.onlineId),
-          "netease" => await getOnlineLyric(neteaseSongId: audio.onlineId),
-          _ => null,
-        };
-        if (_disposed) return null;
-        return direct ?? await getMostMatchedLyric(audio);
-      }, refresh: refresh);
+  Future<Lyric?> _readCachedOnline(Audio audio, {LyricSource? source}) =>
+      _readAndPromoteCachedOnline(audio, source: source);
+
+  Future<Lyric?> _readAndPromoteCachedOnline(Audio audio,
+      {LyricSource? source}) async {
+    final cache = OnlineLyricCache.instance;
+    final identity = onlineLyricCacheIdentity(audio, source: source);
+    final current = await cache.read(identity);
+    if (current != null) return current;
+    final legacy = await cache.read(
+      _legacyOnlineCacheIdentity(audio, source: source),
+    );
+    if (legacy == null) return null;
+    return cache.resolve(identity, () async => legacy);
+  }
+
+  Future<Lyric?> _cachedOnline(Audio audio, Future<Lyric?> Function() fetch,
+          {LyricSource? source, bool refresh = false}) =>
+      OnlineLyricCache.instance.resolve(
+        onlineLyricCacheIdentity(audio, source: source),
+        fetch,
+        refresh: refresh,
+      );
+
+  Future<Lyric?> _resolveOnline(Audio audio, {bool refresh = false}) async {
+    if (!refresh) {
+      final cached = await _readCachedOnline(audio);
+      if (cached != null) return cached;
+    }
+    return _cachedOnline(audio, () async {
+      final direct = switch (audio.onlineProvider) {
+        "qq" => await getOnlineLyric(
+            qqSongId: audio.onlineNumericId, qqSongMid: audio.onlineId),
+        "netease" => await getOnlineLyric(neteaseSongId: audio.onlineId),
+        _ => null,
+      };
+      if (_disposed) return null;
+      return direct ?? await getMostMatchedLyric(audio);
+    }, refresh: refresh);
+  }
 
   Future<Lyric?> _getLyricDefault(bool localFirst) async {
     if (_disposed) return null;
@@ -267,14 +324,13 @@ class LyricService extends ChangeNotifier {
 
     if (nowPlaying.isOnline) return _resolveOnline(nowPlaying);
 
-    if (localFirst) {
-      final local = await Lrc.fromAudioPath(nowPlaying);
-      if (_disposed) return null;
-      return local ?? (await _resolveOnline(nowPlaying));
-    }
-    final matched = await _resolveOnline(nowPlaying);
-    if (_disposed) return null;
-    return matched ?? (await Lrc.fromAudioPath(nowPlaying));
+    return resolveAutomaticLyricSources(
+      localFirst: localFirst,
+      local: () => Lrc.fromAudioPath(nowPlaying),
+      cachedOnline: () => _readCachedOnline(nowPlaying),
+      searchOnline: () =>
+          _disposed ? Future<Lyric?>.value(null) : _resolveOnline(nowPlaying),
+    );
   }
 
   /// 根据默认歌词来源获取歌词：
@@ -323,16 +379,25 @@ class LyricService extends ChangeNotifier {
       if (lyricSource.source == LyricSourceType.local) {
         raw = Lrc.fromAudioPath(nowPlaying);
       } else {
-        raw = _cachedOnline(
-            nowPlaying,
-            () => getOnlineLyric(
-                  qqSongId: lyricSource.qqSongId,
-                  qqSongMid: lyricSource.qqSongMid,
-                  kugouSongHash: lyricSource.kugouSongHash,
-                  neteaseSongId: lyricSource.neteaseSongId,
-                  lrclibId: lyricSource.lrclibId,
+        raw = resolveAutomaticLyricSources(
+          localFirst: false,
+          cachedOnline: () =>
+              _readCachedOnline(nowPlaying, source: lyricSource),
+          local: () => Lrc.fromAudioPath(nowPlaying),
+          searchOnline: () => _disposed
+              ? Future<Lyric?>.value(null)
+              : _cachedOnline(
+                  nowPlaying,
+                  () => getOnlineLyric(
+                    qqSongId: lyricSource.qqSongId,
+                    qqSongMid: lyricSource.qqSongMid,
+                    kugouSongHash: lyricSource.kugouSongHash,
+                    neteaseSongId: lyricSource.neteaseSongId,
+                    lrclibId: lyricSource.lrclibId,
+                  ),
+                  source: lyricSource,
                 ),
-            source: lyricSource);
+        );
       }
     }
     _useRawFuture(raw, offsetMs: store?.forAudio(nowPlaying)?.offsetMs ?? 0);
