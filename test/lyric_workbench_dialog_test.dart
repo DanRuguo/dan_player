@@ -89,6 +89,21 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('saved draft is selectable explicitly from the workbench',
+      (tester) async {
+    await tester.runAsync(() => store.saveDraft(
+        audio, Lrc.fromLrcText('[00:01]Edited copy', LrcSource.local)!));
+    expect(store.forAudio(audio)!.effective, isNull);
+    await tester.pumpWidget(host());
+    await settleSave(tester);
+    await tapAndSave(tester, 'lyric-use-saved-draft');
+    expect(
+        (store.forAudio(audio)!.effective!.toLyric().lines.first as LrcLine)
+            .content,
+        'Edited copy');
+    expect(store.forAudio(audio)!.locked, isTrue);
+  });
+
   testWidgets('confirm, offset and no-lyric controls save one shared document',
       (tester) async {
     await tester.pumpWidget(host());

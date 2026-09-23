@@ -7,7 +7,9 @@ import 'package:dan_player/library/ffmpeg_module_install.dart';
 import 'package:path/path.dart' as p;
 
 class FfmpegSetupCard extends StatefulWidget {
-  const FfmpegSetupCard({super.key, required this.onReady});
+  const FfmpegSetupCard(
+      {super.key, required this.onReady, this.lyricPreview = false});
+  final bool lyricPreview;
   final VoidCallback onReady;
   @override
   State<FfmpegSetupCard> createState() => _FfmpegSetupCardState();
@@ -60,10 +62,12 @@ class _FfmpegSetupCardState extends State<FfmpegSetupCard> {
             border: Border.all(color: scheme.outlineVariant)),
         child:
             Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(ui('安装裁剪组件'), style: Theme.of(context).textTheme.titleMedium),
+          Text(ui(widget.lyricPreview ? '安装试听组件' : '安装裁剪组件'),
+              style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 10),
-          Text(ui(
-              '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用 Windows 系统代理。')),
+          Text(ui(widget.lyricPreview
+              ? '试听复用 FFmpeg 组件，不会改写歌曲。可以手动安装，或从 GitHub 下载约 70 MB 的组件。'
+              : '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用 Windows 系统代理。')),
           const SizedBox(height: 10),
           Text(ui(
               '也可以从官网下载 Windows 完整编译包，将 bin 目录中的程序及 DLL 放到以下目录，然后点击“我已安装好”。')),

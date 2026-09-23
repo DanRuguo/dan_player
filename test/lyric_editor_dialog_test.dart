@@ -182,7 +182,7 @@ void main() {
           .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
           .controller!
           .text,
-      '[00:00.00]Local line',
+      '[00:00.000]Local line',
     );
 
     await tester.tap(find.byKey(const ValueKey('lyric-editor-fill-online')));
@@ -206,7 +206,7 @@ void main() {
     expect(
       tester
           .widget<FilledButton>(
-            find.widgetWithText(FilledButton, '保存歌词'),
+            find.widgetWithText(FilledButton, '保存编辑副本'),
           )
           .onPressed,
       isNull,
@@ -223,13 +223,13 @@ void main() {
           .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
           .controller!
           .text,
-      '[00:01.00]Online line',
+      '[00:01.000]Online line',
     );
     expect(sidecar.readAsStringSync(), '[00:00.00]Local line');
     expect(
       tester
           .widget<FilledButton>(
-            find.widgetWithText(FilledButton, '保存歌词'),
+            find.widgetWithText(FilledButton, '保存编辑副本'),
           )
           .onPressed,
       isNotNull,
@@ -274,7 +274,7 @@ void main() {
           .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
           .controller!
           .text,
-      '[00:03.00]Chosen custom line',
+      '[00:03.000]Chosen custom line',
     );
     expect(sidecar.readAsStringSync(), '[00:00.00]Local line');
     expect(tester.takeException(), isNull);
@@ -314,7 +314,7 @@ void main() {
           .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
           .controller!
           .text,
-      '[00:00.00]Local line',
+      '[00:00.000]Local line',
     );
     expect(tester.takeException(), isNull);
   });
@@ -389,7 +389,7 @@ void main() {
           )
           .controller!
           .text,
-      '[00:00.00]Local line',
+      '[00:00.000]Local line',
     );
     expect(tester.takeException(), isNull);
   });
@@ -420,7 +420,7 @@ void main() {
           .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
           .controller!
           .text,
-      '[00:00.00]Local line',
+      '[00:00.000]Local line',
     );
     expect(tester.takeException(), isNull);
   });
@@ -453,7 +453,7 @@ void main() {
           .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
           .controller!
           .text,
-      '[00:00.00]Local line',
+      '[00:00.000]Local line',
     );
     expect(tester.takeException(), isNull);
   });

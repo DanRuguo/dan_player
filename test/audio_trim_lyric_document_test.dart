@@ -315,4 +315,19 @@ void main() {
     expect(await File('${directory.path}/lyric_documents.json').readAsString(),
         before);
   });
+  test(
+      'trimming a draft-only document never activates it or doubles its offset',
+      () async {
+    await store.saveDraft(
+        source, Lrc.fromLrcText('[00:02]Draft\n[00:04]Next', LrcSource.local)!);
+    await store.setOffset(source, 500);
+    await trim(1, 5);
+    final doc = store.forAudio(saved)!;
+    expect(doc.effective, isNull);
+    expect(doc.draft, isNotNull);
+    expect(doc.offsetMs, 500);
+    await store.useDraft(saved);
+    expect(store.forAudio(saved)!.render()!.lines.first.start,
+        const Duration(milliseconds: 1500));
+  });
 }

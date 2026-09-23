@@ -1,3 +1,10 @@
+import 'package:dan_player/component/lyric_playback_preview.dart';
+import 'package:dan_player/component/lyric_timing_dialog.dart';
+import 'package:dan_player/component/lyric_format_picker.dart';
+import 'package:dan_player/lyric/lyric_edit_codec.dart';
+import 'package:dan_player/lyric/cached_lyric.dart';
+import 'package:dan_player/lyric/plain_lyric.dart';
+import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:async';
@@ -10,7 +17,6 @@ import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
-import 'package:dan_player/lyric/lyric_text_codec.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/utils.dart';
@@ -129,11 +135,14 @@ Future<bool> showLyricEditorDialog(
     showAppNotice(ui("联网音乐的歌词为只读，不能修改"), kind: AppNoticeKind.warning);
     return false;
   }
+  final format = await chooseLyricEditFormat(context);
+  if (format == null || !context.mounted) return false;
   return await showAppDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (context) => LyricEditorDialog(
           audio: audio,
+          initialFormat: format,
           onlineLyricSearch: onlineLyricSearch,
           onlineLyricCandidateLoader: onlineLyricCandidateLoader,
           customLyricChoices: customLyricChoices,
@@ -152,8 +161,10 @@ class LyricEditorDialog extends StatefulWidget {
     this.customLyricChoices,
     this.customLyricCandidateLoader,
     this.localLyricLoader,
+    this.initialFormat = LyricEditFormat.lrc,
   });
 
+  final LyricEditFormat initialFormat;
   final Audio audio;
   final OnlineLyricEditorSearch? onlineLyricSearch;
   final OnlineLyricEditorCandidateLoader? onlineLyricCandidateLoader;
@@ -167,8 +178,12 @@ class LyricEditorDialog extends StatefulWidget {
 
 class _LyricEditorDialogState extends State<LyricEditorDialog> {
   final controller = TextEditingController();
+  final translationController = TextEditingController();
+  final romanizationController = TextEditingController();
   final focusNode = FocusNode();
-  String original = "";
+  late LyricEditFormat format;
+  String _initialSignature = '';
+  int _tab = 0;
   bool loading = true;
   bool saving = false;
   bool loadingOnline = false;
@@ -176,85 +191,203 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   String? onlineError;
   int _onlineLoadGeneration = 0;
   int _documentRevision = 0;
-  Lyric? _originalLyric;
+  bool get _busy => loading || saving || loadingOnline;
+  bool get _supportsPreview {
+    if (format == LyricEditFormat.plain) return false;
+    if (format != LyricEditFormat.lossless) return true;
+    try {
+      return _draft.parse() is! PlainLyric;
+    } catch (_) {
+      return false;
+    }
+  }
 
-  String get sidecarPath => path_util.setExtension(widget.audio.path, ".lrc");
-  bool get dirty => controller.text != original;
+  bool get _hasAux =>
+      format != LyricEditFormat.plain && format != LyricEditFormat.lossless;
+  LyricEditDraft get _draft => LyricEditDraft(format, controller.text,
+      translation: translationController.text,
+      romanization: romanizationController.text);
+  String get _signature => jsonEncode([
+        format.name,
+        controller.text,
+        translationController.text,
+        romanizationController.text
+      ]);
+  bool get dirty => !loading && _signature != _initialSignature;
+  TextEditingController get _activeController => _tab == 1
+      ? translationController
+      : _tab == 2
+          ? romanizationController
+          : controller;
 
   @override
   void initState() {
     super.initState();
+    format = widget.initialFormat;
     _load();
+  }
+
+  void _setDraft(LyricEditDraft draft) {
+    format = draft.format;
+    controller.text = draft.original;
+    translationController.text = draft.translation;
+    romanizationController.text = draft.romanization;
+    if ((!_hasAux && (_tab == 1 || _tab == 2)) ||
+        (!_supportsPreview && _tab == 3)) {
+      _tab = 0;
+    }
   }
 
   Future<void> _load() async {
     try {
-      String text;
-      final injectedLoader = widget.localLyricLoader;
-      if (injectedLoader != null) {
-        text = await injectedLoader(widget.audio);
+      Lyric? lyric;
+      if (widget.localLyricLoader != null) {
+        final text = await widget.localLyricLoader!(widget.audio);
+        lyric = Lrc.fromLrcText(text, LrcSource.local, separator: '┃');
       } else {
         final store = LyricDocumentStore.instance;
         await store.load();
         final document = store.forAudio(widget.audio);
         _documentRevision = document?.revision ?? 0;
-        _originalLyric = document?.original?.toLyric();
-        if (document?.effective != null) {
-          text = document!.editedText ??
-              document.originalText ??
-              _serializeLyric(document.effective!.toLyric());
-        } else if (widget.audio.isCueTrack) {
-          text = '';
-        } else {
-          final sidecar = File(sidecarPath);
-          if (await sidecar.exists()) {
-            final bytes = await sidecar.readAsBytes();
-            text = decodeLyricText(bytes);
-          } else {
-            final lyric = await Lrc.fromAudioPath(widget.audio, separator: "┃");
-            text = lyric == null ? "" : _serializeLyric(lyric);
+        lyric = document?.draft?.toLyric() ?? document?.effective?.toLyric();
+        if (lyric == null && document?.noLyrics != true) {
+          if (!widget.audio.isCueTrack) {
+            for (final extension in [
+              'lrc',
+              'elrc',
+              'qrc',
+              'krc',
+              'yrc',
+              'danlyrics.json',
+              'txt'
+            ]) {
+              final file = File(
+                  path_util.setExtension(widget.audio.path, '.$extension'));
+              if (await file.exists()) {
+                lyric = (await readLyricEditFile(file)).parse();
+                break;
+              }
+            }
+          }
+          lyric ??= await readAvailableCachedLyric(widget.audio,
+              source: LYRIC_SOURCES[widget.audio.path]);
+          if (lyric == null && !widget.audio.isCueTrack) {
+            lyric = await Lrc.fromAudioPath(widget.audio, separator: '┃');
           }
         }
       }
       if (!mounted) return;
-      original = text;
-      _originalLyric ??= Lrc.fromLrcText(text, LrcSource.local, separator: '┃');
-      controller.text = text;
+      if (lyric != null) {
+        final selected = await _confirmConversion(lyric, format);
+        if (!mounted) return;
+        _setDraft(LyricEditDraft.fromLyric(
+            lyric, selected ? format : preferredLyricEditingFormat(lyric)));
+      }
+      _initialSignature = _signature;
     } catch (error, trace) {
-      LOGGER.e("[lyric editor] load failed: $error", stackTrace: trace);
-      loadError = ui("读取歌词失败：{0}", [error]);
+      LOGGER.e('[lyric editor] load failed: $error', stackTrace: trace);
+      loadError = ui('读取歌词失败：{0}', [_errorText(error)]);
+      _initialSignature = _signature;
     } finally {
       if (mounted) setState(() => loading = false);
     }
   }
 
-  String _serializeLyric(Lyric lyric) {
-    final output = StringBuffer();
-    for (final line in lyric.lines) {
-      final totalHundredths = line.start.inMilliseconds ~/ 10;
-      final minutes = totalHundredths ~/ 6000;
-      final seconds = (totalHundredths % 6000) ~/ 100;
-      final hundredths = totalHundredths % 100;
-      final content = switch (line) {
-        UnsyncLyricLine() => line.content,
-        SyncLyricLine() => [
-            line.content,
-            if (line.translation?.trim().isNotEmpty == true) line.translation!,
-          ].join("┃"),
-        _ => "",
-      };
-      final timestamp = "[${minutes.toString().padLeft(2, "0")}:"
-          "${seconds.toString().padLeft(2, "0")}."
-          "${hundredths.toString().padLeft(2, "0")}]";
-      // Plain/custom providers can return one multiline lyric item. Give every
-      // displayed line a valid editable LRC prefix without inventing playback
-      // timing; the user can adjust timestamps before explicitly saving.
-      for (final contentLine in content.replaceAll('\r\n', '\n').split('\n')) {
-        output.writeln('$timestamp$contentLine');
-      }
-    }
-    return output.toString().trimRight();
+  String _errorText(Object error) => error is FormatException
+      ? ui(error.message) + (error.source is int ? ' (${error.source})' : '')
+      : ui('$error');
+
+  Future<bool> _confirmConversion(Lyric lyric, LyricEditFormat next) async {
+    final loses = !lyricConversionPreservesData(lyric, next);
+    if (!loses) return true;
+    return await showAppDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+                  title: AppDialogTitle(ui('转换歌词格式？')),
+                  content: Text(ui('转换可能丢失逐字时间或辅助内容；纯文本转时间轴需要手动校时。原始版本仍保留。')),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: Text(ui('保留完整内容'))),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: Text(ui('转换')))
+                  ],
+                )) ==
+        true;
   }
+
+  Future<void> _changeFormat() async {
+    final next = await chooseLyricEditFormat(context, current: format);
+    if (next == null || next == format || !mounted) return;
+    try {
+      if (controller.text.trim().isEmpty &&
+          translationController.text.isEmpty &&
+          romanizationController.text.isEmpty) {
+        setState(() => _setDraft(LyricEditDraft(next, '')));
+        return;
+      }
+      final lyric = _draft.parse();
+      if (!await _confirmConversion(lyric, next) || !mounted) return;
+      setState(() => _setDraft(LyricEditDraft.fromLyric(lyric, next)));
+    } catch (error) {
+      setState(() => onlineError = _errorText(error));
+    }
+  }
+
+  Future<void> _loadExample() async {
+    if (dirty && !await _confirmReplace()) return;
+    if (!mounted) return;
+    setState(() {
+      _setDraft(lyricEditingExample(format));
+      _tab = 0;
+      loadError = null;
+      onlineError = null;
+    });
+  }
+
+  Future<void> _importFile() async {
+    final picker = OpenFilePicker()
+      ..title = ui('导入歌词')
+      ..filterSpecification = {
+        ui('歌词文件'): '*.lrc;*.elrc;*.qrc;*.krc;*.yrc;*.txt;*.json'
+      };
+    final file = picker.getFile();
+    if (file == null) return;
+    setState(() => saving = true);
+    try {
+      final imported = await readLyricEditFile(file);
+      final parsed = imported.parse();
+      if (!mounted) return;
+      if (dirty && !await _confirmReplace()) return;
+      if (!mounted) return;
+      setState(() {
+        _setDraft(LyricEditDraft.fromLyric(parsed, imported.format));
+        loadError = null;
+        onlineError = null;
+      });
+    } catch (error) {
+      if (mounted) setState(() => onlineError = _errorText(error));
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  Future<bool> _confirmReplace() async =>
+      await showAppDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+                  title: AppDialogTitle(ui('替换编辑中的内容？')),
+                  content: Text(ui('尚未保存的内容将丢失。')),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: Text(ui('取消'))),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: Text(ui('替换')))
+                  ])) ==
+      true;
 
   Future<void> _fillOnlineLyric() async {
     if (loading || saving || loadingOnline) return;
@@ -268,11 +401,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       context: context,
       builder: (_) => _OnlineLyricCandidateDialog(
         audio: widget.audio,
-        search: widget.onlineLyricSearch ?? searchLyricCandidates,
+        search: widget.onlineLyricSearch ?? searchManualLyricCandidates,
         loadCandidate:
             widget.onlineLyricCandidateLoader ?? getLyricForCandidate,
-        customChoices: widget.customLyricChoices ??
-            customLyricSourceChoicesFor(widget.audio),
+        customChoices: widget.customLyricChoices ?? const [],
         loadCustomCandidate:
             widget.customLyricCandidateLoader ?? getLyricForCustomSourceChoice,
       ),
@@ -283,83 +415,161 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       setState(() => loadingOnline = false);
       return;
     }
-    final text = _serializeLyric(lyric).trim();
-    final failure = text.isEmpty ? ui("该候选没有返回可用歌词，可选择其他候选或重试。") : null;
+    setState(() => loadingOnline = false);
+    if (!hasLyricContent(lyric)) {
+      setState(() => onlineError = ui('该候选没有返回可用歌词，可选择其他候选或重试。'));
+      return;
+    }
+    if (dirty && !await _confirmReplace()) return;
+    if (!mounted) return;
+    final convert = await _confirmConversion(lyric, format);
+    if (!mounted) return;
     setState(() {
-      loadingOnline = false;
-      onlineError = failure;
-      if (failure == null) {
-        loadError = null;
-        controller.value = TextEditingValue(
-          text: text,
-          selection: TextSelection.collapsed(offset: text.length),
-        );
-      }
+      _setDraft(LyricEditDraft.fromLyric(
+          lyric, convert ? format : preferredLyricEditingFormat(lyric)));
+      loadError = null;
+      onlineError = null;
     });
-    if (failure == null) focusNode.requestFocus();
   }
 
-  void _insertCurrentTimestamp() {
+  int _currentMilliseconds() {
     final playback = PlayService.instance.playbackService;
-    final position = playback.nowPlaying?.path == widget.audio.path
-        ? playback.position
-        : 0.0;
-    final totalHundredths = (position * 100).floor();
-    final minutes = totalHundredths ~/ 6000;
-    final seconds = (totalHundredths % 6000) ~/ 100;
-    final hundredths = totalHundredths % 100;
-    final stamp =
-        "[${minutes.toString().padLeft(2, "0")}:${seconds.toString().padLeft(2, "0")}.${hundredths.toString().padLeft(2, "0")}]";
+    return ((playback.nowPlaying?.path == widget.audio.path
+                ? playback.position
+                : 0.0) *
+            1000)
+        .floor();
+  }
+
+  Future<void> _insertCurrentTimestamp() async {
+    final target = _activeController;
+    final offset =
+        target.selection.isValid ? target.selection.start : target.text.length;
+    final rowStart =
+        offset == 0 ? 0 : target.text.lastIndexOf('\n', offset - 1) + 1;
+    final next = target.text.indexOf('\n', offset);
+    final rowEnd = next < 0 ? target.text.length : next;
+    final row = target.text.substring(rowStart, rowEnd);
+    final mode = _tab == 0 ? format : LyricEditFormat.lrc;
+    final ms = _currentMilliseconds();
+    var end = ms + 1000;
+    final oldStart = mode == LyricEditFormat.lrc ||
+            mode == LyricEditFormat.enhanced
+        ? LrcLine.fromLine(row)?.start.inMilliseconds
+        : int.tryParse(RegExp(r'^\[(\d+),').firstMatch(row)?.group(1) ?? '');
+    void applyRow(int start, int endTime) {
+      final replacement = retimeLyricEditorRow(row, mode, start, endTime);
+      if (_tab == 0 && oldStart != null) {
+        final translated = retimeLyricAuxiliaryRows(
+            translationController.text, oldStart, start);
+        final romanized = retimeLyricAuxiliaryRows(
+            romanizationController.text, oldStart, start);
+        translationController.text = translated;
+        romanizationController.text = romanized;
+      }
+      _replaceRange(target, rowStart, rowEnd, replacement);
+    }
+
+    try {
+      if (mode.timedWords) {
+        try {
+          final parsed = LyricEditDraft(mode, row).parse();
+          final line = parsed.lines
+              .whereType<SyncLyricLine>()
+              .firstWhere((l) => l.words.isNotEmpty);
+          end = ms + line.length.inMilliseconds;
+        } catch (_) {/* An untimed draft line receives its first time range. */}
+        final times =
+            await showLyricTimingDialog(context, startMs: ms, endMs: end);
+        if (times == null || !mounted) return;
+        applyRow(times.$1, times.$2);
+      } else {
+        applyRow(ms, ms);
+      }
+    } catch (error) {
+      if (mounted) setState(() => onlineError = _errorText(error));
+    }
+  }
+
+  Future<void> _timeSelectedWord() async {
     final selection = controller.selection;
-    final offset = selection.isValid ? selection.start : controller.text.length;
-    controller.text = controller.text.replaceRange(offset, offset, stamp);
-    controller.selection =
-        TextSelection.collapsed(offset: offset + stamp.length);
+    if (!selection.isValid || selection.isCollapsed) {
+      setState(() => onlineError = ui('请选择不含时间标记的文字'));
+      return;
+    }
+    final rowStart = selection.start == 0
+        ? 0
+        : controller.text.lastIndexOf('\n', selection.start - 1) + 1;
+    final next = controller.text.indexOf('\n', rowStart);
+    final row = controller.text
+        .substring(rowStart, next < 0 ? controller.text.length : next);
+    final header = format == LyricEditFormat.enhanced
+        ? RegExp(r'^\[(\d+):(\d+)(?:\.(\d+))?\]')
+        : RegExp(r'^\[(\d+),(\d+)\]');
+    final match = header.firstMatch(row);
+    if (match == null ||
+        selection.start < rowStart + match.end ||
+        (next >= 0 && selection.end > next)) {
+      setState(() => onlineError = ui('请先设置当前行时间，再选择该行的文字'));
+      return;
+    }
+    final lineStart = format == LyricEditFormat.enhanced
+        ? LrcLine.fromLine(row)!.start.inMilliseconds
+        : int.parse(match[1]!);
+    final lineEnd = format == LyricEditFormat.enhanced
+        ? 86400000
+        : lineStart + int.parse(match[2]!);
+    final current = _currentMilliseconds().clamp(lineStart, lineEnd);
+    final times = await showLyricTimingDialog(context,
+        startMs: current, endMs: (current + 500).clamp(current, lineEnd));
+    if (times == null || !mounted) return;
+    try {
+      if (times.$2 > lineEnd) throw const FormatException('逐字时间超出所在行范围');
+      final replacement = replaceTimedLyricWord(
+          row,
+          format,
+          selection.start - rowStart,
+          selection.end - rowStart,
+          times.$1,
+          times.$2,
+          lineStartMs: lineStart);
+      _replaceRange(controller, rowStart, rowStart + row.length, replacement);
+    } catch (error) {
+      setState(() => onlineError = _errorText(error));
+    }
+  }
+
+  void _replaceRange(
+      TextEditingController target, int start, int end, String value) {
+    target.value = TextEditingValue(
+        text: target.text.replaceRange(start, end, value),
+        selection: TextSelection.collapsed(offset: start + value.length));
     focusNode.requestFocus();
-    setState(() {});
+    setState(() => onlineError = null);
   }
 
   Future<void> _save() async {
-    final text = controller.text.trim();
-    if (text.isEmpty) {
-      showAppNotice(ui("歌词不能为空"), kind: AppNoticeKind.warning);
-      return;
-    }
+    Lyric parsed;
     try {
-      if (Lrc.fromLrcText(text, LrcSource.local) == null) {
-        showAppNotice(ui("没有识别到有效的 LRC 时间戳"), kind: AppNoticeKind.info);
-        return;
-      }
-    } on FormatException {
-      showAppNotice(ui("没有识别到有效的 LRC 时间戳"), kind: AppNoticeKind.info);
+      parsed = _draft.parse();
+    } catch (error) {
+      setState(() => onlineError = _errorText(error));
       return;
     }
     setState(() => saving = true);
     try {
-      await LyricDocumentStore.instance.edit(widget.audio, text,
-          original: _originalLyric,
-          originalText: original,
-          expectedRevision: _documentRevision);
+      await LyricDocumentStore.instance
+          .saveDraft(widget.audio, parsed, expectedRevision: _documentRevision);
     } catch (error, trace) {
       LOGGER.e("[lyric editor] save failed: $error", stackTrace: trace);
-      showAppNotice(ui("保存歌词失败：{0}", [error]), kind: AppNoticeKind.error);
+      showAppNotice(ui("保存歌词失败：{0}", [_errorText(error)]),
+          kind: AppNoticeKind.error);
       if (mounted) setState(() => saving = false);
       return;
     }
 
-    original = text;
-    try {
-      final playback = PlayService.instance.playbackService;
-      if (playback.nowPlaying?.path == widget.audio.path) {
-        PlayService.instance.lyricService.updateLyric();
-      }
-    } catch (error, trace) {
-      // The file and source index are already durable. A playback refresh is
-      // best-effort and must not turn a committed save into a false failure.
-      LOGGER.w("[lyric editor] refresh after save failed: $error",
-          stackTrace: trace);
-    }
-    showAppNotice(ui("歌词修订已保存并锁定"), kind: AppNoticeKind.success);
+    _initialSignature = _signature;
+    showAppNotice(ui('编辑副本已保存，手动选用后才用于播放'), kind: AppNoticeKind.success);
     if (mounted) Navigator.pop(context, true);
   }
 
@@ -389,39 +599,42 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   }
 
   Future<void> _exportSidecar() async {
-    final text = controller.text.trim();
-    if (text.isEmpty || Lrc.fromLrcText(text, LrcSource.local) == null) {
-      showAppNotice(ui('没有识别到有效的 LRC 时间戳'), kind: AppNoticeKind.info);
-      return;
-    }
-    final confirmed = await showAppDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: AppDialogTitle(ui('导出同名 LRC？')),
-        content: Text(
-            ui('将写入下列文件；已有内容会被替换并保留 .bak 备份。应用内修订另行保存。\n{0}', [sidecarPath])),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(ui('取消'))),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(ui('确认导出'))),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    setState(() => saving = true);
     try {
-      await persistEditedLyric(
-          audioPath: widget.audio.path,
-          sidecarPath: sidecarPath,
-          text: text,
-          persistSource: (_, __) async {});
-      showAppNotice(ui('歌词已保存到 {0}', [sidecarPath]),
-          kind: AppNoticeKind.success);
+      _draft.parse();
+      final picker = SaveFilePicker()
+        ..title = ui('导出歌词')
+        ..fileName =
+            '${path_util.basenameWithoutExtension(widget.audio.path)}.edited.${format.extension}'
+        ..defaultExtension = format.extension
+        ..filterSpecification = {ui(format.label): '*.${format.extension}'};
+      final file = picker.getFile();
+      if (file == null || !mounted) return;
+      if (path_util.windows.equals(file.path, widget.audio.path) ||
+          !file.path.toLowerCase().endsWith('.${format.extension}')) {
+        throw const FormatException('请选择对应格式的歌词文件');
+      }
+      final files = _draft.exportFiles(file.path);
+      final confirmed = await showAppDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+                  title: AppDialogTitle(ui('导出歌词')),
+                  content: SingleChildScrollView(
+                      child: Text(ui('以下文件将写入，已有内容保留备份；翻译和注音使用独立 LRC 文件。\n{0}',
+                          [files.keys.join('\n')]))),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: Text(ui('取消'))),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: Text(ui('确认导出')))
+                  ]));
+      if (confirmed != true || !mounted) return;
+      setState(() => saving = true);
+      await writeLyricExport(files);
+      showAppNotice(ui('歌词已保存到 {0}', [file.path]), kind: AppNoticeKind.success);
     } catch (error) {
-      showAppNotice(ui('导出歌词失败：{0}', [error]), kind: AppNoticeKind.error);
+      if (mounted) setState(() => onlineError = _errorText(error));
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -431,281 +644,322 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   void dispose() {
     _onlineLoadGeneration++;
     controller.dispose();
+    translationController.dispose();
+    romanizationController.dispose();
     focusNode.dispose();
     super.dispose();
   }
 
-  Widget _editorSurface(ThemeData theme, ColorScheme scheme) => loading
-      ? const Center(heightFactor: 1, child: CircularProgressIndicator())
-      : loadError != null
-          ? Center(
-              heightFactor: 1,
-              child: Text(
-                loadError!,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.error),
-              ),
-            )
-          : Stack(
-              fit: StackFit.loose,
-              children: [
-                TextField(
-                  key: const ValueKey('lyric-editor-field'),
-                  controller: controller,
-                  focusNode: focusNode,
-                  maxLines: null,
-                  minLines: 4,
-                  readOnly: saving || loadingOnline,
-                  keyboardType: TextInputType.multiline,
-                  onChanged: (_) => setState(() {}),
-                  style: theme.textTheme.bodyLarge?.copyWith(height: 1.45),
-                  decoration: InputDecoration(
-                    alignLabelWithHint: true,
-                    filled: true,
-                    fillColor: scheme.surfaceContainerLowest,
-                    border: AppShape.inputBorder,
-                    contentPadding: const EdgeInsets.all(16),
-                    hintText: ui("[00:00.00]歌词内容"),
-                  ),
-                ),
-                if (loadingOnline)
-                  const Positioned(
-                    key: ValueKey('lyric-editor-online-progress'),
-                    top: 1,
-                    left: 12,
-                    right: 12,
-                    child: LinearProgressIndicator(),
-                  ),
-              ],
-            );
+  Widget _preview(ColorScheme scheme) {
+    try {
+      final lyric = _draft.parse();
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+                key: const ValueKey('lyric-editor-play-preview'),
+                onPressed: _busy
+                    ? null
+                    : () =>
+                        showLyricPlaybackPreview(context, widget.audio, lyric),
+                icon: const Icon(Symbols.play_arrow),
+                label: Text(ui('播放编辑预览')))),
+        const SizedBox(height: 12),
+        Text(ui('预览最多显示 100 行，每行展示前 80 个时间片段；保存包含全部内容。'),
+            style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 12),
+        for (final line in lyric.lines
+            .where((line) => lyricLineText(line).trim().isNotEmpty)
+            .take(100))
+          Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                  color: scheme.surfaceContainerLow,
+                  borderRadius: AppShape.controlRadius),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (lyric is! PlainLyric)
+                      Row(children: [
+                        Expanded(
+                            child: Text(lyricStamp(line.start),
+                                style: TextStyle(
+                                    color: scheme.primary, fontSize: 12))),
+                        IconButton.outlined(
+                            key: ValueKey(
+                                'lyric-line-preview-${lyric.lines.indexOf(line)}'),
+                            tooltip: ui('逐句试听'),
+                            onPressed: _busy
+                                ? null
+                                : () => showLyricPlaybackPreview(
+                                    context, widget.audio, lyric,
+                                    line: lyric.lines.indexOf(line)),
+                            icon: const Icon(Symbols.play_arrow)),
+                      ]),
+                    if (line.romanization?.isNotEmpty == true)
+                      Text(line.romanization!,
+                          style: TextStyle(color: scheme.onSurfaceVariant)),
+                    Text(lyricLineText(line).split('┃').first,
+                        style: Theme.of(context).textTheme.titleMedium),
+                    if (line is SyncLyricLine &&
+                        line.translation?.isNotEmpty == true)
+                      Text(line.translation!),
+                    if (line is UnsyncLyricLine && line.content.contains('┃'))
+                      Text(line.content.split('┃').skip(1).join('┃')),
+                    if (line is SyncLyricLine)
+                      Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Wrap(spacing: 6, runSpacing: 6, children: [
+                            for (final word in line.words.take(80))
+                              Chip(
+                                  label: Text(
+                                      '${word.content} · ${word.length.inMilliseconds} ms'),
+                                  visualDensity: VisualDensity.compact),
+                          ])),
+                  ])),
+      ]);
+    } catch (error) {
+      return Text(_errorText(error), style: TextStyle(color: scheme.error));
+    }
+  }
+
+  Widget _toolbar(ThemeData theme, ColorScheme scheme) {
+    final compact = MediaQuery.sizeOf(context).width < 600;
+    Widget action(String label, IconData icon, VoidCallback callback,
+            {String? key}) =>
+        compact && key != 'lyric-editor-format'
+            ? IconButton.outlined(
+                key: key == null ? null : ValueKey(key),
+                tooltip: ui(label),
+                style: IconButton.styleFrom(shape: AppShape.control),
+                onPressed: _busy ? null : callback,
+                icon: Icon(icon))
+            : OutlinedButton.icon(
+                key: key == null ? null : ValueKey(key),
+                style: OutlinedButton.styleFrom(shape: AppShape.control),
+                onPressed: _busy ? null : callback,
+                icon: Icon(icon),
+                label: Text(ui(label)));
+    return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+            color: scheme.surfaceContainerLow,
+            borderRadius: AppShape.controlRadius,
+            border:
+                Border.all(color: scheme.outlineVariant.withValues(alpha: .6))),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            action(format.label, Symbols.tune, _changeFormat,
+                key: 'lyric-editor-format'),
+            action('导出歌词', Symbols.save_alt, _exportSidecar,
+                key: 'lyric-editor-export'),
+          ]),
+          const SizedBox(height: 10),
+          Text(ui(_supportsPreview
+              ? '选择格式 → 编辑内容 → 试听检查 → 保存副本'
+              : '选择格式 → 编辑内容 → 保存副本')),
+          const SizedBox(height: 6),
+          Text(ui('保存为编辑副本；只有手动选用后才替换播放歌词。'),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            action('载入示例', Symbols.science, _loadExample,
+                key: 'lyric-editor-example'),
+            action('导入歌词', Symbols.file_open, _importFile),
+            action('填入联网歌词', Symbols.cloud_download, _fillOnlineLyric,
+                key: 'lyric-editor-fill-online'),
+            if (compact && _hasAux && _tab != 3) ...[
+              const SizedBox(width: 8),
+              action('设置当前行时间', Symbols.timer, _insertCurrentTimestamp,
+                  key: 'lyric-editor-insert-time'),
+              if (format.timedWords && _tab == 0)
+                action('设置所选文字时间', Symbols.av_timer, _timeSelectedWord,
+                    key: 'lyric-editor-word-time'),
+            ],
+          ]),
+          if (!compact && _hasAux && _tab != 3) ...[
+            const Divider(height: 24),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              action('设置当前行时间', Symbols.timer, _insertCurrentTimestamp,
+                  key: 'lyric-editor-insert-time'),
+              if (format.timedWords && _tab == 0)
+                action('设置所选文字时间', Symbols.av_timer, _timeSelectedWord,
+                    key: 'lyric-editor-word-time'),
+            ]),
+          ],
+        ]));
+  }
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final dialogHeight =
-        (MediaQuery.sizeOf(context).height - 48).clamp(300, 760).toDouble();
+    final theme = Theme.of(context), scheme = Theme.of(context).colorScheme;
+    final aux = _tab == 1 || _tab == 2;
     return PopScope<bool>(
       canPop: !dirty && !saving,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && !saving) _cancel();
       },
       child: Dialog(
-        child: AppDialogContent(
-          width: 900,
-          maxHeight: dialogHeight,
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final textScale =
-                    MediaQuery.textScalerOf(context).scale(14) / 14;
-                final compact = constraints.maxHeight < 480 || textScale > 1.7;
-                final editor = _editorSurface(theme, scheme);
-                final column = Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    AppDialogTitle(
-                      ui("编辑歌词 · {0}", [widget.audio.displayTitle]),
-                      style: theme.textTheme.titleLarge,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      subtitle: Text(
-                        '${widget.audio.artist} · ${widget.audio.album}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                      leading: Icon(Symbols.lyrics, color: scheme.primary),
-                      trailing: IconButton(
-                        key: const ValueKey('lyric-editor-close'),
-                        tooltip: ui("关闭"),
-                        onPressed: saving ? null : _cancel,
-                        icon: const Icon(Symbols.close),
-                      ),
-                    ),
-                    const SizedBox(height: 16.0),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: scheme.surfaceContainerLow,
-                        borderRadius: AppShape.controlRadius,
-                        border: Border.all(
-                          color: scheme.outlineVariant.withValues(alpha: .72),
-                        ),
-                      ),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final summary = Text(
-                            ui("保存应用内修订并锁定，保留原始歌词；+500 ms 表示晚显示 500 ms。"),
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          );
-                          final actions = Wrap(
-                            alignment: WrapAlignment.end,
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              if (!widget.audio.isCueTrack)
-                                OutlinedButton.icon(
-                                  key: const ValueKey('lyric-editor-export'),
-                                  onPressed: loading || saving || loadingOnline
-                                      ? null
-                                      : _exportSidecar,
-                                  icon: const Icon(Symbols.save_alt),
-                                  label: Text(ui('导出 LRC…')),
-                                ),
-                              OutlinedButton.icon(
-                                key: const ValueKey('lyric-editor-fill-online'),
-                                onPressed: loading || saving || loadingOnline
-                                    ? null
-                                    : _fillOnlineLyric,
-                                icon: loadingOnline
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: AppDialogContent(
+            width: 900,
+            maxHeight: (MediaQuery.sizeOf(context).height - 48)
+                .clamp(200, 800)
+                .toDouble(),
+            child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AppDialogTitle(
+                          ui('编辑歌词 · {0}', [widget.audio.displayTitle]),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleLarge,
+                          leading: Icon(Symbols.lyrics, color: scheme.primary),
+                          trailing: IconButton(
+                              key: const ValueKey('lyric-editor-close'),
+                              tooltip: ui('关闭'),
+                              onPressed: saving ? null : _cancel,
+                              icon: const Icon(Symbols.close))),
+                      const SizedBox(height: 12),
+                      Flexible(
+                          child: SingleChildScrollView(
+                              key:
+                                  const ValueKey('lyric-editor-compact-scroll'),
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                        '${widget.audio.artist} · ${widget.audio.album}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                                color:
+                                                    scheme.onSurfaceVariant)),
+                                    const SizedBox(height: 12),
+                                    _toolbar(theme, scheme),
+                                    const SizedBox(height: 14),
+                                    Wrap(spacing: 8, runSpacing: 8, children: [
+                                      for (final entry in {
+                                        0: '原文',
+                                        if (_hasAux) 1: '翻译',
+                                        if (_hasAux) 2: '注音',
+                                        if (_supportsPreview) 3: '预览'
+                                      }.entries)
+                                        ChoiceChip(
+                                            key: ValueKey(
+                                                'lyric-editor-tab-${entry.key}'),
+                                            label: Text(ui(entry.value)),
+                                            selected: _tab == entry.key,
+                                            onSelected: _busy
+                                                ? null
+                                                : (_) => setState(() {
+                                                      focusNode.unfocus();
+                                                      _tab = entry.key;
+                                                    })),
+                                    ]),
+                                    const SizedBox(height: 12),
+                                    if (loading || loadingOnline)
+                                      const LinearProgressIndicator(
+                                          key: ValueKey(
+                                              'lyric-editor-online-progress')),
+                                    if (loadError != null ||
+                                        onlineError != null)
+                                      Padding(
+                                          padding:
+                                              const EdgeInsets.only(bottom: 12),
+                                          child: Text(onlineError ?? loadError!,
+                                              key: const ValueKey(
+                                                  'lyric-editor-online-error'),
+                                              style: TextStyle(
+                                                  color: scheme.error))),
+                                    if (_tab == 3)
+                                      _preview(scheme)
+                                    else ...[
+                                      Text(
+                                          ui(aux
+                                              ? '翻译和注音使用 LRC 时间戳，与原文行的开始时间一致。'
+                                              : '格式示例（时间可手动修改）'),
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                  color:
+                                                      scheme.onSurfaceVariant)),
+                                      const SizedBox(height: 6),
+                                      if (!aux &&
+                                          format != LyricEditFormat.lossless &&
+                                          format != LyricEditFormat.plain)
+                                        Padding(
+                                            padding: const EdgeInsets.only(
+                                                bottom: 10),
+                                            child: SelectableText(
+                                                format.example,
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                        color:
+                                                            scheme.primary))),
+                                      TextField(
+                                          key: ValueKey(_tab == 0
+                                              ? 'lyric-editor-field'
+                                              : 'lyric-editor-aux-$_tab'),
+                                          controller: _activeController,
+                                          focusNode: focusNode,
+                                          minLines:
+                                              MediaQuery.sizeOf(context).width <
+                                                      600
+                                                  ? 4
+                                                  : 8,
+                                          maxLines: 16,
+                                          readOnly: _busy,
+                                          keyboardType: TextInputType.multiline,
+                                          onChanged: (_) => setState(
+                                              () => onlineError = null),
+                                          style: theme.textTheme.bodyLarge
+                                              ?.copyWith(height: 1.5),
+                                          decoration: InputDecoration(
+                                              filled: true,
+                                              fillColor:
+                                                  scheme.surfaceContainerLowest,
+                                              border: AppShape.inputBorder,
+                                              contentPadding:
+                                                  const EdgeInsets.all(16),
+                                              hintText: aux
+                                                  ? '[00:01.000]…'
+                                                  : format.example)),
+                                    ],
+                                  ]))),
+                      const SizedBox(height: 16),
+                      OverflowBar(
+                          alignment: MainAxisAlignment.end,
+                          spacing: 12,
+                          overflowSpacing: 8,
+                          children: [
+                            TextButton.icon(
+                                onPressed: saving ? null : _cancel,
+                                icon: const Icon(Symbols.close),
+                                label: Text(ui('取消'))),
+                            FilledButton.icon(
+                                key: const ValueKey('lyric-editor-save'),
+                                onPressed: _busy ? null : _save,
+                                icon: saving
                                     ? const SizedBox.square(
                                         dimension: 16,
                                         child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Symbols.cloud_download),
-                                label: Text(loadingOnline
-                                    ? ui("正在加载歌词")
-                                    : ui("填入联网歌词")),
-                              ),
-                              OutlinedButton.icon(
-                                key: const ValueKey('lyric-editor-insert-time'),
-                                onPressed: loading ||
-                                        saving ||
-                                        loadingOnline ||
-                                        loadError != null
-                                    ? null
-                                    : _insertCurrentTimestamp,
-                                icon: const Icon(Symbols.timer),
-                                label: Text(ui("插入当前播放时间")),
-                              ),
-                            ],
-                          );
-                          final textScale =
-                              MediaQuery.textScalerOf(context).scale(14) / 14;
-                          if (constraints.maxWidth < 620 * textScale) {
-                            return Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                summary,
-                                const SizedBox(height: 10),
-                                Align(
-                                  alignment: AlignmentDirectional.centerEnd,
-                                  child: actions,
-                                ),
-                              ],
-                            );
-                          }
-                          return Row(
-                            children: [
-                              Expanded(child: summary),
-                              const SizedBox(width: 16),
-                              actions,
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                    if (onlineError != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: Container(
-                          key: const ValueKey('lyric-editor-online-error'),
-                          padding: const EdgeInsetsDirectional.only(
-                            start: 12,
-                            top: 6,
-                            bottom: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: scheme.errorContainer,
-                            borderRadius: AppShape.controlRadius,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Symbols.cloud_off,
-                                  color: scheme.onErrorContainer),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  onlineError!,
-                                  style:
-                                      TextStyle(color: scheme.onErrorContainer),
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: ui("关闭"),
-                                onPressed: () =>
-                                    setState(() => onlineError = null),
-                                icon: const Icon(Symbols.close),
-                                color: scheme.onErrorContainer,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 12.0),
-                    if (compact)
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                            maxHeight:
-                                (constraints.maxHeight * .65).clamp(0, 360)),
-                        child: editor,
-                      )
-                    else
-                      Flexible(child: editor),
-                    const SizedBox(height: 16.0),
-                    OverflowBar(
-                      alignment: MainAxisAlignment.end,
-                      overflowAlignment: OverflowBarAlignment.end,
-                      spacing: 12,
-                      overflowSpacing: 8,
-                      children: [
-                        TextButton.icon(
-                          onPressed: saving ? null : _cancel,
-                          icon: const Icon(Symbols.close),
-                          label: Text(ui("取消")),
-                        ),
-                        FilledButton.icon(
-                          onPressed: loading ||
-                                  saving ||
-                                  loadingOnline ||
-                                  loadError != null
-                              ? null
-                              : _save,
-                          icon: saving
-                              ? const SizedBox.square(
-                                  dimension: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Symbols.save),
-                          label: Text(ui("保存歌词")),
-                        ),
-                      ],
-                    ),
-                  ],
-                );
-                if (!compact) return column;
-                return SingleChildScrollView(
-                  key: const ValueKey('lyric-editor-compact-scroll'),
-                  child: column,
-                );
-              },
-            ),
-          ),
-        ),
-      ),
+                                            strokeWidth: 2))
+                                    : const Icon(Symbols.save),
+                                label: Text(ui('保存编辑副本'))),
+                          ]),
+                    ])),
+          )),
     );
   }
 }
@@ -1196,10 +1450,12 @@ class _OnlineLyricCandidateDialogState
           children: [
             if (details.isNotEmpty)
               Text(details, maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text(ui("来源：{0} · 匹配 {1}%", [
-              ui(candidate.sourceLabel),
-              (candidate.score * 100).round(),
-            ])),
+            Text(candidate.scoreVerified
+                ? ui("来源：{0} · 匹配 {1}%", [
+                    ui(candidate.sourceLabel),
+                    (candidate.score * 100).round(),
+                  ])
+                : ui('来源：{0} · 匹配度未知，仅供手动选择', [candidate.sourceLabel])),
             if (error != null)
               Text(error, style: TextStyle(color: scheme.error)),
           ],

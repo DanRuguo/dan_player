@@ -1,3 +1,4 @@
+import 'catalog_lyric_editor_formats.dart';
 import 'catalog_automatic_online_lyrics.dart';
 import 'catalog_artist_separators.dart';
 import 'catalog_startup_progress.dart';
@@ -58,6 +59,7 @@ import 'catalog_search_history.dart';
 import 'catalog_comments_feedback_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
+  ...catalogLyricEditorFormats,
   ...catalogAutomaticOnlineLyrics,
   ...catalogStartupProgress,
   ...catalogArtistSeparators,

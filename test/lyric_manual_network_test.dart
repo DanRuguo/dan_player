@@ -1,3 +1,5 @@
+import 'package:dan_player/lyric/lyric_document.dart';
+import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -37,6 +39,38 @@ class _Desktop extends Fake implements DesktopLyricService {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('saving an editor draft never re-resolves playback lyrics', () async {
+    final directory = await Directory.systemTemp.createTemp('draft-passive-');
+    addTearDown(() => directory.delete(recursive: true));
+    final documents = LyricDocumentStore(storageDirectory: directory);
+    final audio = Audio('Song', 'Artist', 'Album', 0, 120, null, null,
+        '${directory.path}/song.mp3', 0, 0, null);
+    final playback = _Playback(audio), readiness = PlaybackReadiness();
+    var resolutions = 0;
+    final facade = PlayService.forTesting(
+        readiness: readiness,
+        createPlayback: (_) => playback,
+        createDesktopLyric: (_) => _Desktop(),
+        createLyric: (player) => LyricService.forTesting(player,
+                documents: documents, resolveDefaultLyric: (_) async {
+              resolutions++;
+              return null;
+            }));
+    final service = facade.lyricService;
+    service.updateLyric();
+    await service.currLyricFuture;
+    final generation = service.resolutionGeneration;
+    await documents.saveDraft(
+        audio, Lrc.fromLrcText('[00:01]Draft', LrcSource.local)!);
+    expect(resolutions, 1);
+    expect(service.resolutionGeneration, generation);
+    expect(await service.currLyricFuture, isNull);
+    await facade.close();
+    await playback.positions.close();
+    readiness.dispose();
+    documents.dispose();
+  });
 
   for (final scenario in [
     'qq',

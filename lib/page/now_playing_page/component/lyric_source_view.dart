@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -224,6 +225,14 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
   final Map<String, String Function()> _candidateErrors = {};
   Listenable? _playbackListenable;
 
+  bool get _usingSavedDraft {
+    final document = LyricDocumentStore.instance.forAudio(widget.audio);
+    return document?.edited != null &&
+        document?.draft != null &&
+        jsonEncode(document!.edited!.toJson()) ==
+            jsonEncode(document.draft!.toJson());
+  }
+
   String? _currentTrackPath() =>
       widget.currentTrackPath?.call() ??
       PlayService.instance.playbackService.nowPlaying?.path;
@@ -310,6 +319,35 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
 
   bool _isSelectionCurrent(int generation) =>
       mounted && !_closed && generation == _selectionGeneration;
+
+  Future<void> _selectDraft() async {
+    if (_trackChanged || _loadingCandidate != null) return;
+    final generation = ++_selectionGeneration;
+    final store = LyricDocumentStore.instance;
+    final revision = store.revisionFor(widget.audio);
+    setState(() {
+      _loadingCandidate = 'draft';
+      _operationError = null;
+    });
+    try {
+      await store.useDraft(widget.audio,
+          expectedRevision: revision,
+          stillCurrent: () =>
+              _isSelectionCurrent(generation) &&
+              !_trackChanged &&
+              _currentTrackPath() == widget.audio.path);
+      if (mounted && _isSelectionCurrent(generation)) Navigator.pop(context);
+    } catch (_) {
+      if (_isSelectionCurrent(generation)) {
+        setState(() =>
+            _operationError = () => ui('歌词已被另一操作修改，旧结果未覆盖当前版本，请重新打开后重试。'));
+      }
+    } finally {
+      if (mounted && generation == _selectionGeneration) {
+        setState(() => _loadingCandidate = null);
+      }
+    }
+  }
 
   Future<void> _selectLocal() async {
     if (_trackChanged) return;
@@ -608,6 +646,27 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                             color: scheme.secondaryContainer,
                           ),
                         ),
+                      if (widget.audio.isLocal &&
+                          LyricDocumentStore.instance
+                                  .forAudio(widget.audio)
+                                  ?.draft !=
+                              null)
+                        ListTile(
+                            key: const ValueKey('lyric-source-draft'),
+                            enabled:
+                                !_trackChanged && _loadingCandidate == null,
+                            leading: const Icon(Symbols.edit_note),
+                            title: Text(ui('使用编辑的本地歌词')),
+                            subtitle: Text(ui('使用已保存的完整编辑副本，保留逐字时间、翻译和注音。')),
+                            trailing: _loadingCandidate == 'draft'
+                                ? const SizedBox.square(
+                                    dimension: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : Icon(_usingSavedDraft
+                                    ? Symbols.check_circle
+                                    : Symbols.chevron_right),
+                            onTap: _selectDraft),
                       if (widget.audio.isLocal && !widget.audio.isCueTrack) ...[
                         ListTile(
                           key: const ValueKey('lyric-source-local'),
@@ -622,11 +681,13 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                                       CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : (LyricDocumentStore.instance
-                                                  .forAudio(widget.audio)
-                                                  ?.source ??
-                                              LYRIC_SOURCES[widget.audio.path])
-                                          ?.source ==
-                                      LyricSourceType.local
+                                                      .forAudio(widget.audio)
+                                                      ?.source ??
+                                                  LYRIC_SOURCES[
+                                                      widget.audio.path])
+                                              ?.source ==
+                                          LyricSourceType.local &&
+                                      !_usingSavedDraft
                                   ? const Icon(Symbols.check_circle)
                                   : null,
                           shape: AppShape.control,

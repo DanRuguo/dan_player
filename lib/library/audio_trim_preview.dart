@@ -48,7 +48,6 @@ class _NativePreviewProcess implements TrimPreviewProcess {
   void kill() => process.kill();
 }
 
-@visibleForTesting
 List<String> trimPreviewArguments(String file, double start, double duration,
         {required double volume}) =>
     [
@@ -297,3 +296,6 @@ class ProcessAudioTrimPreview extends AudioTrimPreview {
     super.dispose();
   }
 }
+
+/// Shares the existing pause/resume guard with isolated lyric preview sessions.
+TrimMainPlayback? existingPreviewMainPlayback() => _existingMainPlayback();

@@ -13,27 +13,9 @@ String decodeKrcContainer(String value) {
       data[3] != 49) {
     throw const FormatException('Invalid KRC container');
   }
-  const mask = [
-    64,
-    71,
-    97,
-    119,
-    94,
-    50,
-    116,
-    71,
-    81,
-    54,
-    49,
-    45,
-    206,
-    210,
-    110,
-    105
-  ];
   final compressed = Uint8List(data.length - 4);
   for (var i = 0; i < compressed.length; i++) {
-    compressed[i] = data[i + 4] ^ mask[i % mask.length];
+    compressed[i] = data[i + 4] ^ _krcMask[i % _krcMask.length];
   }
   return decodeLyricZlib(compressed);
 }
@@ -58,4 +40,37 @@ class _BoundedLyricsSink implements Sink<List<int>> {
 
   @override
   void close() {}
+}
+
+const _krcMask = [
+  64,
+  71,
+  97,
+  119,
+  94,
+  50,
+  116,
+  71,
+  81,
+  54,
+  49,
+  45,
+  206,
+  210,
+  110,
+  105
+];
+
+List<int> encodeKrcContainer(String text) {
+  final bytes = utf8.encode(text);
+  if (bytes.length > 1024 * 1024) throw const FormatException('歌词文件过大');
+  final compressed = zlib.encode(bytes);
+  return [
+    107,
+    114,
+    99,
+    49,
+    for (var i = 0; i < compressed.length; i++)
+      compressed[i] ^ _krcMask[i % _krcMask.length]
+  ];
 }

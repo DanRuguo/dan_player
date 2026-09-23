@@ -33,7 +33,7 @@ class Krc extends Lyric {
         if (decoded is Map && decoded['content'] is List) {
           for (final item in decoded['content']) {
             if (item is! Map ||
-                item['type'] != 1 ||
+                (item['type'] != 1 && item['type'] != 0) ||
                 item['lyricContent'] is! List) {
               continue;
             }
@@ -42,10 +42,14 @@ class Krc extends Lyric {
               if (trans[i] is List &&
                   (trans[i] as List).isNotEmpty &&
                   trans[i][0] is String) {
-                lines[i].translation = trans[i][0];
+                if (item['type'] == 1) {
+                  lines[i].translation = trans[i][0];
+                } else {
+                  lines[i].romanization =
+                      (trans[i] as List).whereType<String>().join(' ');
+                }
               }
             }
-            break;
           }
         }
       } catch (_) {}

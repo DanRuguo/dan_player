@@ -114,6 +114,7 @@ class LyricDocument {
     this.source,
     this.original,
     this.edited,
+    this.draft,
     this.originalText,
     this.editedText,
     this.locked = false,
@@ -128,6 +129,7 @@ class LyricDocument {
   final LyricSource? source;
   final LyricSnapshot? original;
   final LyricSnapshot? edited;
+  final LyricSnapshot? draft;
   final String? originalText;
   final String? editedText;
   final bool locked;
@@ -164,6 +166,7 @@ class LyricDocument {
         'source': source?.toMap(),
         'original': original?.toJson(),
         'edited': edited?.toJson(),
+        'draft': draft?.toJson(),
         'originalText': originalText,
         'editedText': editedText,
         'locked': locked,
@@ -186,6 +189,7 @@ class LyricDocument {
           : null,
       original: LyricSnapshot.fromJson(data['original']),
       edited: LyricSnapshot.fromJson(data['edited']),
+      draft: LyricSnapshot.fromJson(data['draft']),
       originalText: data['originalText'] as String?,
       editedText: data['editedText'] as String?,
       locked: data['locked'] == true,
@@ -347,6 +351,7 @@ class LyricDocumentStore extends ChangeNotifier {
           Map<String, dynamic> Function(LyricDocument previous) transform,
           {int? expectedRevision,
           bool archive = false,
+          bool draftOnly = false,
           bool Function()? stillCurrent}) =>
       _exclusive(() async {
         await _load();
@@ -367,14 +372,19 @@ class LyricDocumentStore extends ChangeNotifier {
         map['trackId'] = id;
         map['path'] = audio.path;
         map['revision'] = previous.revision + 1;
-        if (archive && previous.effective != null) {
+        if (archive && (previous.effective != null || previous.draft != null)) {
           map['history'] = [
             ...previous.history,
             previous.toJson(includeHistory: false)
           ];
         }
         final next = LyricDocument.fromJson(map);
-        await _write({..._documents, id: next}, stillCurrent: stillCurrent);
+        _savingDraftOnly = draftOnly;
+        try {
+          await _write({..._documents, id: next}, stillCurrent: stillCurrent);
+        } finally {
+          _savingDraftOnly = false;
+        }
         return next;
       });
 
@@ -409,15 +419,17 @@ class LyricDocumentStore extends ChangeNotifier {
             ..['noLyrics'] = false
             ..['offsetMs'] = keepOffset ? old.offsetMs : 0
             ..['revision'] = old.revision + 1;
-          if (old.effective != null)
+          if (old.effective != null) {
             map['history'] = [
               ...old.history,
               old.toJson(includeHistory: false)
             ];
+          }
           next[id] = LyricDocument.fromJson(map);
         }
-        if (next.entries.any((e) => !identical(_documents[e.key], e.value)))
+        if (next.entries.any((e) => !identical(_documents[e.key], e.value))) {
           await _write(next);
+        }
         return conflicts;
       });
 
@@ -440,11 +452,56 @@ class LyricDocumentStore extends ChangeNotifier {
           stillCurrent: stillCurrent,
           archive: true);
 
+  bool _savingDraftOnly = false;
+  bool get savingDraftOnly => _savingDraftOnly;
+
+  Future<LyricDocument> saveDraft(Audio audio, Lyric lyric,
+      {int? expectedRevision}) {
+    if (audio.isOnline) throw StateError('联网音乐的歌词为只读，不能修改');
+    if (!hasLyricContent(lyric)) throw const FormatException('歌词不能为空');
+    return _change(
+        audio,
+        (old) =>
+            old.toJson()..['draft'] = LyricSnapshot.capture(lyric).toJson(),
+        expectedRevision: expectedRevision,
+        draftOnly: true,
+        archive: true);
+  }
+
+  Future<LyricDocument> useDraft(Audio audio,
+          {int? expectedRevision, bool Function()? stillCurrent}) =>
+      _change(audio, (old) {
+        if (old.draft == null) throw const FormatException('没有已保存的编辑副本');
+        return old.toJson()
+          ..['edited'] = old.draft!.toJson()
+          ..['editedText'] = null
+          ..['source'] = LyricSource(LyricSourceType.local).toMap()
+          ..['locked'] = true
+          ..['noLyrics'] = false;
+      },
+          expectedRevision: expectedRevision,
+          stillCurrent: stillCurrent,
+          archive: true);
+
   Future<LyricDocument> edit(Audio audio, String text,
       {Lyric? original, String? originalText, int? expectedRevision}) {
     if (audio.isOnline) throw StateError('联网音乐的歌词为只读，不能修改');
     final parsed = Lrc.fromLrcText(text, LrcSource.local, separator: '┃');
     if (parsed == null) throw const FormatException('没有识别到有效的 LRC 时间戳');
+    return editLyric(audio, parsed,
+        original: original,
+        originalText: originalText,
+        editedText: text,
+        expectedRevision: expectedRevision);
+  }
+
+  Future<LyricDocument> editLyric(Audio audio, Lyric parsed,
+      {Lyric? original,
+      String? originalText,
+      String? editedText,
+      int? expectedRevision}) {
+    if (audio.isOnline) throw StateError('联网音乐的歌词为只读，不能修改');
+    if (!hasLyricContent(parsed)) throw const FormatException('歌词不能为空');
     return _change(
         audio,
         (old) => old.toJson()
@@ -454,7 +511,7 @@ class LyricDocumentStore extends ChangeNotifier {
                   : LyricSnapshot.capture(original).toJson())
           ..['originalText'] = old.originalText ?? originalText
           ..['edited'] = LyricSnapshot.capture(parsed).toJson()
-          ..['editedText'] = text
+          ..['editedText'] = editedText
           ..['locked'] = true
           ..['noLyrics'] = false,
         expectedRevision: expectedRevision,

@@ -115,6 +115,11 @@ class LyricService extends ChangeNotifier {
   }
 
   void _handleDocumentChange() {
+    if (documents?.savingDraftOnly == true) {
+      final audio = _getNowPlaying();
+      if (audio != null) _documentRevision = documents!.revisionFor(audio);
+      return;
+    }
     final audio = _getNowPlaying();
     if (audio != null && documents!.revisionFor(audio) != _documentRevision) {
       updateLyric();

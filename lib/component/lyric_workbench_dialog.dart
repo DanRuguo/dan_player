@@ -293,6 +293,22 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                             ]),
                             const SizedBox(height: 16),
                             _section(context, ui('歌词内容与版本'), [
+                              if (document?.draft != null)
+                                Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: OutlinedButton.icon(
+                                        key: const ValueKey(
+                                            'lyric-use-saved-draft'),
+                                        onPressed: busy
+                                            ? null
+                                            : () => _change((revision) async {
+                                                  await store.useDraft(
+                                                      widget.audio,
+                                                      expectedRevision:
+                                                          revision);
+                                                }),
+                                        icon: const Icon(Symbols.check_circle),
+                                        label: Text(ui('使用编辑的本地歌词')))),
                               _actionGrid(context, [
                                 if (!widget.audio.isOnline)
                                   OutlinedButton.icon(

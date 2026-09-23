@@ -32,12 +32,14 @@ Future<void> synchronizeTrimmedLyricDocument(
 Map<String, dynamic> _trimDocument(
     Map<String, dynamic> document, int start, int end) {
   final offset = (document['offsetMs'] as int? ?? 0) * 1000;
-  for (final kind in const ['original', 'edited']) {
+  final hasActiveSnapshot =
+      document['original'] != null || document['edited'] != null;
+  for (final kind in const ['original', 'edited', 'draft']) {
     final previous = document[kind];
     final snapshot = previous == null
         ? null
-        : _trimSnapshot(
-            Map<String, dynamic>.from(previous as Map), start, end, offset);
+        : _trimSnapshot(Map<String, dynamic>.from(previous as Map), start, end,
+            kind == 'draft' && !hasActiveSnapshot ? 0 : offset);
     document[kind] = snapshot;
     final textKey = '${kind}Text';
     if (document[textKey] != null) {
