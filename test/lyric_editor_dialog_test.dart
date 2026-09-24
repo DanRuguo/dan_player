@@ -7,6 +7,7 @@ import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/cue_track.dart';
+import 'package:dan_player/lyric/lyric_edit_codec.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
@@ -43,6 +44,8 @@ Widget _host(
   TargetPlatform? platform,
   LyricAudioPreview? preview,
   Future<bool> Function()? ensureTools,
+  LyricEditFormat initialFormat = LyricEditFormat.lrc,
+  LocalLyricEditorLoader? localLyricLoader,
   bool disableAnimations = true,
   MotionPreferences motionPreferences = const MotionPreferences(),
 }) =>
@@ -69,12 +72,14 @@ Widget _host(
                 barrierDismissible: false,
                 builder: (_) => LyricEditorDialog(
                   audio: audio,
+                  initialFormat: initialFormat,
                   onlineLyricSearch: search,
                   onlineLyricCandidateLoader: loadCandidate,
                   customLyricChoices: customChoices,
                   customLyricCandidateLoader:
                       loadCustomCandidate ?? (_, __) async => null,
-                  localLyricLoader: (_) async => '[00:00.00]Local line',
+                  localLyricLoader:
+                      localLyricLoader ?? (_) async => '[00:00.00]Local line',
                   preview: preview,
                   ensureTools: ensureTools,
                 ),
@@ -724,6 +729,132 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     expect(launches.last.$3.killed, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'audition clock follows the active lyric timestamp format without seeking',
+      (tester) async {
+    const cue = CueTrackReference(
+        cuePath: r'J:\library\album.cue',
+        sourcePath: r'J:\library\album.flac',
+        number: 2,
+        startFrame: 750,
+        endFrame: 1500);
+    final audio = Audio('CUE Song', 'Artist', 'Album', 0, 10, null, null,
+        cue.sourcePath, 0, 0, null,
+        cueTrack: cue);
+    final starts = <double>[];
+    late void Function(double) clock;
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => audio.duration.toDouble(),
+        mainPlayback: () => null,
+        launch: (_, start, __, onPosition) async {
+          starts.add(start);
+          clock = onPosition;
+          return ProcessFake();
+        });
+    await tester.pumpWidget(_host(audio,
+        search: (_) async =>
+            LyricSearchResponse(candidates: [], failures: const {}),
+        loadCandidate: (_) async => null,
+        localLyricLoader: (_) async => '',
+        initialFormat: LyricEditFormat.qrc,
+        preview: player,
+        ensureTools: () async => true));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    expect(starts.single, 10);
+    clock(10.42);
+    await tester.pump();
+    expect(find.text('当前时刻 420 毫秒 / 10000 毫秒'), findsOneWidget);
+    await tester
+        .tap(find.byKey(const ValueKey('lyric-editor-audition-forward')));
+    await tester.pump();
+    expect(starts.last, closeTo(10.52, .0001));
+    expect(find.text('当前时刻 520 毫秒 / 10000 毫秒'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(player.playing, isFalse);
+    final slider = tester.widget<Slider>(
+        find.byKey(const ValueKey('lyric-editor-audition-seek')));
+    slider.onChangeStart!(.52);
+    slider.onChanged!(.725);
+    await tester.pump();
+    expect(find.text('当前时刻 725 毫秒 / 10000 毫秒'), findsOneWidget);
+    expect(slider.semanticFormatterCallback!(.725), '725 毫秒');
+    slider.onChangeEnd!(.725);
+    await tester.pump();
+    expect(player.position, closeTo(.725, .0001));
+    expect(player.playing, isFalse);
+    final startsBeforeFormats = starts.length;
+
+    Future<void> choose(LyricEditFormat next, String expected) async {
+      final button = find.byKey(const ValueKey('lyric-editor-format'));
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      final target = find.byKey(ValueKey('lyric-format-${next.name}'));
+      await tester.scrollUntilVisible(target, 160,
+          scrollable: find
+              .descendant(
+                  of: find.byType(AlertDialog).last,
+                  matching: find.byType(Scrollable))
+              .last);
+      tester.widget<ListTile>(target).onTap!();
+      await tester.pumpAndSettle();
+      expect(find.text(next.label), findsOneWidget);
+      expect(find.text('当前时刻 $expected'), findsOneWidget);
+      expect(player.position, closeTo(.725, .0001));
+      expect(starts.length, startsBeforeFormats);
+    }
+
+    await choose(LyricEditFormat.krc, '725 毫秒 / 10000 毫秒');
+    await choose(LyricEditFormat.yrc, '725 毫秒 / 10000 毫秒');
+    await choose(LyricEditFormat.lrc, '00:00.725 / 00:10.000');
+    await choose(LyricEditFormat.enhanced, '00:00.725 / 00:10.000');
+    await choose(LyricEditFormat.plain, '00:00.725 / 00:10.000');
+    await choose(LyricEditFormat.lossless, '00:00.725 / 00:10.000');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('dense audition clock uses the same millisecond format',
+      (tester) async {
+    tester.view.physicalSize = const Size(640, 420);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final audio = _audio('fixture.mp3');
+    late void Function(double) clock;
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => audio.duration.toDouble(),
+        mainPlayback: () => null,
+        launch: (_, __, ___, onPosition) async {
+          clock = onPosition;
+          return ProcessFake();
+        });
+    await tester.pumpWidget(_host(audio,
+        search: (_) async =>
+            LyricSearchResponse(candidates: [], failures: const {}),
+        loadCandidate: (_) async => null,
+        localLyricLoader: (_) async => '',
+        initialFormat: LyricEditFormat.qrc,
+        preview: player,
+        ensureTools: () async => true,
+        textScale: 2));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    clock(1.2);
+    await tester.pump();
+    final clockText = find.byKey(const ValueKey('lyric-editor-audition-time'));
+    expect(tester.widget<Text>(clockText).data, '1200 毫秒');
+    final tooltip = tester.widget<Tooltip>(
+        find.ancestor(of: clockText, matching: find.byType(Tooltip)));
+    expect(tooltip.message, '当前时刻 1200 毫秒 / 180000 毫秒');
     expect(tester.takeException(), isNull);
   });
 

@@ -13,6 +13,9 @@ class TapRow {
   TapRow(this.text, [this.translation = '', this.romanization = '']);
   final String text, translation, romanization;
   double? start, end;
+  // Preserves the line's confirmed end if a final word is extended to EOF.
+  // A retry must use the original line boundary, even after a checkpoint load.
+  double? lineEndBeforeAutoWord;
   final List<double> wordEnds = [];
   // Text is immutable; timing and rendering read these tokens repeatedly.
   late final List<String> tokens = List.unmodifiable(tapTokens(text));
@@ -22,6 +25,7 @@ class TapRow {
         'romanization': romanization,
         'start': start,
         'end': end,
+        'lineEndBeforeAutoWord': lineEndBeforeAutoWord,
         'wordEnds': wordEnds,
       };
   factory TapRow.fromJson(Map<String, dynamic> json) {
@@ -29,6 +33,8 @@ class TapRow {
         json['romanization'] as String);
     row.start = (json['start'] as num?)?.toDouble();
     row.end = (json['end'] as num?)?.toDouble();
+    row.lineEndBeforeAutoWord =
+        (json['lineEndBeforeAutoWord'] as num?)?.toDouble();
     row.wordEnds
         .addAll((json['wordEnds'] as List).map((n) => (n as num).toDouble()));
     return row;
@@ -207,13 +213,72 @@ class TapLyricSession {
       }
     } else if (stage == TapStage.words && wordStarted) {
       final previous = row.wordEnds.isEmpty ? row.start! : row.wordEnds.last;
-      if (time <= previous || time > row.end! + .001) return false;
-      row.wordEnds.add(time.clamp(row.start!, row.end!));
+      final lastWord = row.wordEnds.length == row.tokens.length - 1;
+      final windowEnd =
+          wordRecordingEnd(mediaDuration > 0 ? mediaDuration : row.end! + .5);
+      // A slightly late final tap is meaningful, but the tolerance must not
+      // become lyric time or let any earlier word run past the line end.
+      if (time > row.end! + .001 && (!lastWord || time > windowEnd + .001)) {
+        return false;
+      }
+      final wordEnd = time.clamp(row.start!, row.end!);
+      if (wordEnd <= previous) return false;
+      row.wordEnds.add(wordEnd);
       if (row.wordEnds.length == row.tokens.length) stage = TapStage.wordReview;
     } else {
       return false;
     }
     position = time;
+    return true;
+  }
+
+  /// The extra half second gives the last word a chance to finish before a
+  /// recording is judged incomplete. It is not part of the confirmed line.
+  double wordRecordingEnd(double duration) =>
+      (row.end! + .5).clamp(0.0, duration);
+
+  /// A naturally completed final line may end exactly at the song's EOF.
+  /// Without a start mark there is no line to finish automatically.
+  bool finishLastLineAtSongEnd(double duration) {
+    if (stage != TapStage.lines ||
+        index != rows.length - 1 ||
+        row.start == null ||
+        row.end != null ||
+        !duration.isFinite ||
+        duration <= row.start!) {
+      return false;
+    }
+    row.end = duration;
+    position = duration;
+    stage = TapStage.lineReview;
+    return true;
+  }
+
+  /// Only the one remaining word can be inferred at a recording boundary.
+  /// The tolerance belongs to playback, so a normal line finishes at its
+  /// original end. If the final line's tolerance was cut short by song EOF,
+  /// its last word and containing line both end at that real EOF.
+  bool finishLastWordAtRecordingEnd(double playbackEnd, double duration) {
+    if (stage != TapStage.words ||
+        !wordStarted ||
+        row.wordEnds.length != row.tokens.length - 1 ||
+        !playbackEnd.isFinite ||
+        !duration.isFinite ||
+        duration <= 0 ||
+        (playbackEnd - wordRecordingEnd(duration)).abs() > .001) {
+      return false;
+    }
+    final songEnded = (playbackEnd - duration).abs() <= .001;
+    final finish = songEnded && index == rows.length - 1 ? duration : row.end!;
+    final previous = row.wordEnds.isEmpty ? row.start! : row.wordEnds.last;
+    if (finish <= previous) return false;
+    if (finish > row.end!) {
+      row.lineEndBeforeAutoWord = row.end;
+      row.end = finish;
+    }
+    row.wordEnds.add(finish);
+    position = playbackEnd;
+    stage = TapStage.wordReview;
     return true;
   }
 
@@ -226,6 +291,7 @@ class TapLyricSession {
   void accept() {
     final words = stage == TapStage.wordReview;
     if (!words && stage != TapStage.lineReview) return;
+    if (words) row.lineEndBeforeAutoWord = null;
     index++;
     if (index == rows.length) {
       index = rows.length - 1;
@@ -240,6 +306,10 @@ class TapLyricSession {
   void retry() {
     if (stage == TapStage.wordReview || stage == TapStage.words) {
       row.wordEnds.clear();
+      if (row.lineEndBeforeAutoWord != null) {
+        row.end = row.lineEndBeforeAutoWord;
+        row.lineEndBeforeAutoWord = null;
+      }
       wordStarted = false;
       stage = TapStage.words;
     } else {
@@ -318,7 +388,16 @@ class TapLyricSession {
       if (r.text.trim().isEmpty ||
           r.start != null && (!r.start!.isFinite || r.start! < previous) ||
           r.end != null &&
-              (r.start == null || !r.end!.isFinite || r.end! <= r.start!)) {
+              (r.start == null || !r.end!.isFinite || r.end! <= r.start!) ||
+          r.lineEndBeforeAutoWord != null &&
+              (r.start == null ||
+                  r.end == null ||
+                  !r.lineEndBeforeAutoWord!.isFinite ||
+                  r.lineEndBeforeAutoWord! <= r.start! ||
+                  r.lineEndBeforeAutoWord! >= r.end! ||
+                  !identical(r, s.rows.last) ||
+                  r.wordEnds.length != r.tokens.length ||
+                  r.wordEnds.last != r.end)) {
         throw const FormatException('无法读取点按进度');
       }
       var wordEnd = r.start ?? 0;

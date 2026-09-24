@@ -1042,6 +1042,18 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
     super.dispose();
   }
 
+  // Auxiliary tracks use LRC timestamps even when the original uses QRC/KRC/YRC.
+  String _auditionStamp(double seconds) {
+    final milliseconds = (seconds * 1000).round();
+    if (_tab == 0 &&
+        (format == LyricEditFormat.qrc ||
+            format == LyricEditFormat.krc ||
+            format == LyricEditFormat.yrc)) {
+      return '$milliseconds ${ui('毫秒')}';
+    }
+    return lyricStamp(Duration(milliseconds: milliseconds));
+  }
+
   Widget _auditionControls(ColorScheme scheme) {
     final size = MediaQuery.sizeOf(context);
     final compact = size.width < 600 || size.height < 500;
@@ -1142,13 +1154,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                     animation: _auditionTimeline,
                     builder: (context, _) => Tooltip(
                         message:
-                            '${ui('当前时刻')} ${lyricStamp(Duration(milliseconds: ((_auditionDrag.value ?? _auditionTick.value) * 1000).round()))} / ${lyricStamp(Duration(milliseconds: (_audition.duration * 1000).round()))}',
+                            '${ui('当前时刻')} ${_auditionStamp(_auditionDrag.value ?? _auditionTick.value)} / ${_auditionStamp(_audition.duration)}',
                         child: Text(
-                            lyricStamp(Duration(
-                                milliseconds: ((_auditionDrag.value ??
-                                            _auditionTick.value) *
-                                        1000)
-                                    .round())),
+                            _auditionStamp(
+                                _auditionDrag.value ?? _auditionTick.value),
                             key:
                                 const ValueKey('lyric-editor-audition-time')))),
             ]),
@@ -1158,8 +1167,6 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                 builder: (context, _) {
                   final end = _audition.duration;
                   final position = _auditionDrag.value ?? _auditionTick.value;
-                  String stamp(double seconds) => lyricStamp(
-                      Duration(milliseconds: (seconds * 1000).round()));
                   final timeCaption = short ? '' : '${ui('当前时刻')} ';
                   final enabled = !_busy && !_auditionChecking && end > 0;
                   return Column(
@@ -1209,8 +1216,9 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                                           max: end > 0 ? end : 1,
                                           value: position.clamp(
                                               0.0, end > 0 ? end : 1),
-                                          label: stamp(position),
-                                          semanticFormatterCallback: stamp,
+                                          label: _auditionStamp(position),
+                                          semanticFormatterCallback:
+                                              _auditionStamp,
                                           onChangeStart: enabled
                                               ? _startAuditionDrag
                                               : null,
@@ -1232,7 +1240,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                                 child: Tooltip(
                                     message: ui('当前时刻'),
                                     child: Text(
-                                        '$timeCaption${stamp(position)} / ${stamp(end)}',
+                                        '$timeCaption${_auditionStamp(position)} / ${_auditionStamp(end)}',
                                         key: const ValueKey(
                                             'lyric-editor-audition-time'),
                                         maxLines: 1,

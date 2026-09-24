@@ -105,6 +105,8 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
   bool busy = false, closing = false, ready = false, checked = false;
   String? error;
   Lyric? reviewLyric;
+  ({TapStage stage, TapRow row, double end})? _recording;
+  int _playbackIntent = 0;
   bool get review =>
       [TapStage.lineReview, TapStage.wordReview].contains(session.stage);
   bool get timing =>
@@ -117,12 +119,51 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
       if (!mounted) return;
       session.position = p;
       positionTick.value = p;
+      final recording = _recording;
+      if (recording == null ||
+          !identical(session.row, recording.row) ||
+          session.stage != recording.stage ||
+          player.playing ||
+          player.loading ||
+          player.error != null ||
+          (p - recording.end).abs() > .001) {
+        return;
+      }
+      _recording = null;
+      final completed = recording.stage == TapStage.lines
+          ? session.finishLastLineAtSongEnd(player.duration)
+          : session.finishLastWordAtRecordingEnd(p, player.duration);
+      if (!completed) return;
+      reviewLyric = null;
+      setState(() => error = null);
+      if (session.stage != TapStage.lineReview) return;
+      final completedSession = session;
+      final completedStage = session.stage;
+      final intent = ++_playbackIntent;
+      // Let the decoder finish its exit notification before starting the
+      // normal review playback. Later user actions invalidate this handoff.
+      scheduleMicrotask(() {
+        if (!mounted ||
+            closing ||
+            intent != _playbackIntent ||
+            !identical(session, completedSession) ||
+            session.stage != completedStage) {
+          return;
+        }
+        final range = session.reviewRange(player.duration);
+        unawaited(player.play(range.start, range.end));
+      });
     });
     if (timing) unawaited(_run(_prepare));
   }
 
   void _changed() {
     if (mounted) setState(() {});
+  }
+
+  void _invalidateRecording() {
+    _recording = null;
+    ++_playbackIntent;
   }
 
   Future<void> _run(Future<void> Function() work) async {
@@ -156,6 +197,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
   }
 
   Future<void> _saveProgress() async {
+    _invalidateRecording();
     await player.pause();
     _syncText();
     if (widget.progressStore == null) {
@@ -191,6 +233,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
       return;
     }
     if (!await _replace() || !mounted) return;
+    _invalidateRecording();
     session = restored;
     reviewLyric = null;
     text.text = session.text;
@@ -235,6 +278,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
 
   Future<void> _toggle() async {
     if (!timing || !ready) return;
+    _invalidateRecording();
     if (player.playing || player.loading) {
       await player.pause();
       return;
@@ -247,7 +291,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
       end = range.end;
       if (start < range.start || start >= end) start = range.start;
     } else if (session.stage == TapStage.words) {
-      end = session.row.end!;
+      end = session.wordRecordingEnd(player.duration);
       if (start >= end) {
         error = ui('音乐已到句尾，请重录本句；未完成的字不会自动确认。');
         return;
@@ -260,6 +304,9 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
         return;
       }
     }
+    if (!review) {
+      _recording = (stage: session.stage, row: session.row, end: end);
+    }
     await player.play(start, end);
   }
 
@@ -267,6 +314,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
     if (!player.playing || !player.clockReady || review || !timing) return;
     if (!session.mark(player.position)) return;
     if (review) {
+      _invalidateRecording();
       reviewLyric = null;
       await player.pause();
       final range = session.reviewRange(player.duration);
@@ -278,6 +326,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
   }
 
   Future<void> _retry() async {
+    _invalidateRecording();
     await player.pause();
     reviewLyric = null;
     session.retry();
@@ -285,6 +334,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
   }
 
   Future<void> _accept() async {
+    _invalidateRecording();
     await player.pause();
     reviewLyric = null;
     session.accept();
@@ -293,12 +343,14 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
 
   Future<void> _rate(double rate) async {
     final wasPlaying = player.playing;
+    _invalidateRecording();
     await player.pause();
     session.rate = rate;
     if (wasPlaying) await _toggle();
   }
 
   Future<void> _editText() async {
+    _invalidateRecording();
     await player.pause();
     if (!mounted) return;
     final confirmed = await showAppDialog<bool>(
@@ -323,6 +375,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
   }
 
   Future<void> _saveLyric() async {
+    _invalidateRecording();
     await player.pause();
     if (!mounted) return;
     _syncText();
@@ -360,6 +413,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
 
   Future<void> _exit() async {
     if (busy || closing) return;
+    _invalidateRecording();
     await player.pause();
     if (!mounted) return;
     final action = await showAppDialog<String>(
@@ -389,6 +443,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
 
   @override
   void dispose() {
+    _invalidateRecording();
     player.removeListener(_changed);
     unawaited(subscription?.cancel());
     player.dispose();
@@ -576,8 +631,8 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
         Text(ui(review
             ? '试听检查：满意后继续；不满意只重录当前行。'
             : session.stage == TapStage.words
-                ? '空格播放或暂停；Enter 或点按强调的字，记录该字结束。'
-                : '空格播放或暂停；Enter 标记本句开始，再按一次标记结束。')),
+                ? '空格播放或暂停；Enter 或点按强调的字记录结束；只剩最后一字时，试听自然结束会自动补齐。'
+                : '空格播放或暂停；Enter 标记本句开始，再按一次结束；最后一句已标记开始时，歌曲播完自动结束。')),
         const SizedBox(height: 12),
         if (checked && !ready)
           FfmpegSetupCard(lyricPreview: true, onReady: () => _run(_prepare))
@@ -586,7 +641,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
           if (!player.playing &&
               !review &&
               session.stage == TapStage.words &&
-              session.position >= session.row.end!)
+              session.position >= session.wordRecordingEnd(player.duration))
             Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Text(ui('音乐已到句尾，请重录本句；未完成的字不会自动确认。'))),

@@ -104,15 +104,15 @@ const Map<String, List<String>> catalogTapLyricEditor = {
     "試聴して確認します。よければ次へ、やり直す場合はこの行だけ再録します。",
     "타이밍을 확인하세요. 만족하면 계속하고, 아니면 현재 행만 다시 기록합니다."
   ],
-  "空格播放或暂停；Enter 或点按强调的字，记录该字结束。": [
-    "Space plays or pauses. Enter or tap the highlighted word to mark its end.",
-    "Spaceで再生・一時停止。Enterまたは強調された文字をタップして終わりを記録します。",
-    "Space로 재생·일시 정지합니다. Enter 또는 강조된 글자를 눌러 끝을 기록하세요."
+  "空格播放或暂停；Enter 或点按强调的字记录结束；只剩最后一字时，试听自然结束会自动补齐。": [
+    "Space plays or pauses. Enter or tap the highlighted word to mark its end. If only the final word remains, natural playback completion fills its end.",
+    "Spaceで再生・一時停止。Enterまたは強調された文字をタップして終了を記録します。最後の文字だけが残った場合は、再生終了時に自動補完します。",
+    "Space로 재생·일시 정지합니다. Enter 또는 강조된 글자를 눌러 끝을 기록하세요. 마지막 글자만 남으면 재생이 자연스럽게 끝날 때 자동으로 채웁니다."
   ],
-  "空格播放或暂停；Enter 标记本句开始，再按一次标记结束。": [
-    "Space plays or pauses. Enter marks the line start; press again to mark its end.",
-    "Spaceで再生・一時停止。Enterで行の開始、もう一度で終了を記録します。",
-    "Space로 재생·일시 정지합니다. Enter로 행 시작을 기록하고 다시 눌러 끝을 기록하세요."
+  "空格播放或暂停；Enter 标记本句开始，再按一次结束；最后一句已标记开始时，歌曲播完自动结束。": [
+    "Space plays or pauses. Enter marks the line start; press again for its end. A started final line ends automatically when the song finishes.",
+    "Spaceで再生・一時停止。Enterで行の開始、もう一度で終了を記録します。開始を記録した最後の行は、曲の終わりで自動終了します。",
+    "Space로 재생·일시 정지합니다. Enter로 행 시작을 기록하고 다시 눌러 끝을 기록하세요. 시작을 기록한 마지막 행은 곡이 끝날 때 자동으로 종료됩니다."
   ],
   "暂停 · 空格": ["Pause · Space", "一時停止 · Space", "일시 정지 · Space"],
   "播放 · 空格": ["Play · Space", "再生 · Space", "재생 · Space"],

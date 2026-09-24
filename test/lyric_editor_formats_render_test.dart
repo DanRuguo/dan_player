@@ -72,6 +72,14 @@ void main() {
               seedColor: Colors.orange, brightness: Brightness.dark)));
       final audio = Audio('光と夜 · Love song', '歌手 Artist', '专辑 Album', 0, 180,
           null, null, 'fixture.mp3', 0, 0, null);
+      late void Function(double) auditionClock;
+      final audition = LyricAudioPreview(audio,
+          probeDuration: (_) async => audio.duration.toDouble(),
+          mainPlayback: () => null,
+          launch: (_, __, ___, onPosition) async {
+            auditionClock = onPosition;
+            return ProcessFake();
+          });
       await tester.pumpWidget(RepaintBoundary(
           key: boundary,
           child: MaterialApp(
@@ -87,6 +95,8 @@ void main() {
                                       builder: (_) => LyricEditorDialog(
                                           audio: audio,
                                           initialFormat: LyricEditFormat.qrc,
+                                          preview: audition,
+                                          ensureTools: () async => true,
                                           localLyricLoader: (_) async =>
                                               '[00:01.001]光と夜\n[00:03.000]你好世界')),
                                   child: const Text('Open')))))))));
@@ -134,6 +144,18 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
+      await tester
+          .tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+      await tester.pump();
+      auditionClock(169.69);
+      await tester.pump();
+      await tester
+          .tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+      await tester.pump();
+      expect(
+          find.text(
+              '${translateUi('当前时刻', language)} 169690 ${translateUi('毫秒', language)} / 180000 ${translateUi('毫秒', language)}'),
+          findsOneWidget);
       await capture('wide');
       expectAuditionBelowEditor();
       await tapTab(1);
@@ -152,6 +174,9 @@ void main() {
       await tapTab(1);
       tester.view.physicalSize = const Size(480, 740);
       await tester.pumpAndSettle();
+      await tapTab(0);
+      await capture('audition-format-milliseconds-narrow');
+      await tapTab(1);
       await capture('narrow');
       tester
           .widget<SingleChildScrollView>(

@@ -52,6 +52,7 @@ const catalogNetworkProxy = <String, List<String>>{
     'GitHub 연결 테스트'
   ],
   '保存并应用': ['Save and apply', '保存して適用', '저장하고 적용'],
+  '重试保存': ['Retry save', '保存を再試行', '저장 다시 시도'],
   '代理设置已应用并保存。': [
     'Proxy settings applied and saved.',
     'プロキシ設定を適用して保存しました。',

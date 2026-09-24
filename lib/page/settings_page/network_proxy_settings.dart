@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/settings_tile.dart';
@@ -11,8 +12,8 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Network routing for requests made by the player. Draft changes are tested
-/// independently and take effect only after the user saves a valid selection.
+/// Network routing for requests made by the player. System and direct modes
+/// apply on selection; custom proxy values remain drafts until saved.
 class NetworkProxySettings extends StatefulWidget {
   const NetworkProxySettings(
       {super.key, this.preferences, this.persist, this.probe});
@@ -32,11 +33,16 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
   late NetworkProxyMode _mode;
   bool _dirty = false;
   bool _saving = false;
+  bool _persistInFlight = false;
+  bool _persistQueued = false;
+  bool _retryNeeded = false;
+  bool _applyingLocal = false;
   bool _testing = false;
   String? _error;
   String? _result;
   bool _testPassed = false;
   int _probeRevision = 0;
+  int _commitRevision = 0;
 
   ValueNotifier<NetworkProxyPreferences> get _preferences =>
       widget.preferences ?? AppSettings.instance.networkProxy;
@@ -65,6 +71,7 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
     _address.text = value.customProxyUrl ?? '';
     _port.clear();
     _dirty = false;
+    _retryNeeded = false;
     _error = null;
     _result = null;
     _testing = false;
@@ -72,7 +79,7 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
   }
 
   void _onPreferencesChanged() {
-    if (_dirty || !mounted) return;
+    if (_dirty || _applyingLocal || !mounted) return;
     setState(_readSaved);
   }
 
@@ -84,6 +91,26 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
       _testing = false;
       _probeRevision++;
     });
+  }
+
+  bool get _hasUnsavedCustomDraft =>
+      _address.text.trim() != (_preferences.value.customProxyUrl ?? '') ||
+      _port.text.trim().isNotEmpty;
+
+  void _selectMode(NetworkProxyMode mode) {
+    if (mode == _mode) return;
+    setState(() {
+      _mode = mode;
+      _dirty = true;
+      _error = null;
+      _result = null;
+      _testing = false;
+      _probeRevision++;
+    });
+    if (mode != NetworkProxyMode.custom) {
+      _applyAndPersist(NetworkProxyPreferences(
+          mode: mode, customProxyUrl: _preferences.value.customProxyUrl));
+    }
   }
 
   NetworkProxyPreferences? _candidate() {
@@ -121,36 +148,88 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || _mode != NetworkProxyMode.custom) return;
     final candidate = _validatedCandidate();
     if (candidate == null) return;
+    _applyAndPersist(candidate);
+  }
+
+  void _applyAndPersist(NetworkProxyPreferences candidate) {
     setState(() {
       _saving = true;
+      _retryNeeded = false;
       _error = null;
+      _result = null;
       _testing = false;
       _probeRevision++;
     });
-    _preferences.value = candidate;
+    _applyingLocal = true;
+    try {
+      _preferences.value = candidate;
+    } finally {
+      _applyingLocal = false;
+    }
     // A user may have just changed the Windows proxy while this page was open.
     WindowsSystemProxy.instance.refresh();
+    _commitRevision++;
+    _persistQueued = true;
+    unawaited(_drainPersistence());
+  }
+
+  void _retryPersist() {
+    if (_saving || !_retryNeeded) return;
+    setState(() {
+      _saving = true;
+      _retryNeeded = false;
+      _error = null;
+    });
+    _persistQueued = true;
+    unawaited(_drainPersistence());
+  }
+
+  Future<void> _drainPersistence() async {
+    if (_persistInFlight) return;
+    _persistInFlight = true;
     try {
-      await (widget.persist ??
-          () => AppSettings.instance
-              .saveSettings(
+      // One write at a time. If a selection changes during an older write,
+      // persist the latest live preference again after that write finishes.
+      while (_persistQueued && mounted) {
+        _persistQueued = false;
+        final revision = _commitRevision;
+        try {
+          await (widget.persist ??
+              () => AppSettings.instance.saveSettings(
                   captureWindowSize: false,
                   throwOnError: true,
                   requireCommit: true))();
-      if (!mounted) return;
-      setState(() {
-        _readSaved();
-        _result = ui('代理设置已应用并保存。');
-        _testPassed = true;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _error = ui('代理设置已在本次运行应用，但保存失败；请重试。'));
+        } catch (_) {
+          if (!mounted) return;
+          if (revision != _commitRevision) continue;
+          setState(() {
+            _saving = false;
+            _retryNeeded = true;
+            _error = ui('代理设置已在本次运行应用，但保存失败；请重试。');
+          });
+          return;
+        }
+        if (!mounted || revision != _commitRevision) continue;
+        setState(() {
+          if (_mode == NetworkProxyMode.custom &&
+              _preferences.value.mode == NetworkProxyMode.custom) {
+            _address.text = _preferences.value.customProxyUrl ?? '';
+            _port.clear();
+          }
+          _dirty = _mode != _preferences.value.mode || _hasUnsavedCustomDraft;
+          _saving = false;
+          _retryNeeded = false;
+          _error = null;
+          _result = ui('代理设置已应用并保存。');
+          _testPassed = true;
+        });
+      }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      _persistInFlight = false;
+      if (_persistQueued && mounted) unawaited(_drainPersistence());
     }
   }
 
@@ -225,12 +304,7 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
             key: const ValueKey('network-proxy-mode'),
             semanticLabel: ui('网络代理模式'),
             value: _mode,
-            onChanged: _saving
-                ? null
-                : (mode) {
-                    _mode = mode;
-                    _edit();
-                  },
+            onChanged: _selectMode,
             options: [
               AppSegmentOption(
                   value: NetworkProxyMode.system,
@@ -323,11 +397,34 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
                     : const Icon(Icons.network_check_outlined),
                 label: Text(ui('测试 GitHub 连接')),
               ),
-              FilledButton.icon(
-                key: const ValueKey('network-proxy-save'),
-                onPressed: _saving ? null : () => unawaited(_save()),
-                icon: const Icon(Icons.save_outlined),
-                label: Text(ui('保存并应用')),
+              AnimatedSwitcher(
+                key: const ValueKey('network-proxy-save-transition'),
+                duration: AppMotion.duration(
+                    context, MotionKind.layout, AppMotion.standard),
+                switchInCurve: AppMotion.standardCurve,
+                switchOutCurve: AppMotion.standardCurve,
+                transitionBuilder: (child, animation) => SizeTransition(
+                  axis: Axis.horizontal,
+                  alignment: Alignment.centerRight,
+                  sizeFactor: animation,
+                  child: FadeTransition(opacity: animation, child: child),
+                ),
+                child: _mode == NetworkProxyMode.custom
+                    ? FilledButton.icon(
+                        key: const ValueKey('network-proxy-save'),
+                        onPressed: _saving ? null : () => unawaited(_save()),
+                        icon: const Icon(Icons.save_outlined),
+                        label: Text(ui('保存并应用')),
+                      )
+                    : _retryNeeded
+                        ? FilledButton.icon(
+                            key: const ValueKey('network-proxy-retry'),
+                            onPressed: _saving ? null : _retryPersist,
+                            icon: const Icon(Icons.refresh_outlined),
+                            label: Text(ui('重试保存')),
+                          )
+                        : const SizedBox.shrink(
+                            key: ValueKey('network-proxy-save-hidden')),
               ),
             ],
           ),

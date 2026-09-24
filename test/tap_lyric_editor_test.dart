@@ -365,6 +365,169 @@ void main() {
     expect(s.row.wordEnds.length, 2);
     expect(find.text('音乐已到句尾，请重录本句；未完成的字不会自动确认。'), findsOneWidget);
   });
+  testWidgets('last word closes at exact line end after its tolerance window',
+      (tester) async {
+    final s = TapLyricSession()..text = '你 好';
+    s.beginLines();
+    s.mark(.3);
+    s.mark(2);
+    s.accept();
+    s.beginWords();
+    late ProcessFake process;
+    late void Function(double) clock;
+    final launches = <(double, double)>[];
+    final player = LyricAudioPreview(song,
+        mainPlayback: () => null,
+        launch: (_, start, duration, c) async {
+          launches.add((start, duration));
+          clock = c;
+          return process = ProcessFake();
+        });
+    await pumpEditor(tester, s, preview: player);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(launches.single, (.3, 2.2));
+    clock(.8);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    clock(2.25);
+    await tester.pump();
+    expect(s.stage, TapStage.words);
+    expect(find.text('音乐已到句尾，请重录本句；未完成的字不会自动确认。'), findsNothing);
+    process.done.complete(0);
+    await tester.pumpAndSettle();
+    expect(s.stage, TapStage.wordReview);
+    expect(s.row.wordEnds, [.8, 2]);
+    expect(s.row.end, 2);
+    expect(launches, [(.3, 2.2)],
+        reason: 'word review, like a manual word mark, waits for Space');
+    expect(s.position, 2.5, reason: 'the transport shows the real playhead');
+    expect(find.byKey(const ValueKey('tap-accept')), findsOneWidget);
+    expect(find.text('音乐已到句尾，请重录本句；未完成的字不会自动确认。'), findsNothing);
+  });
+  testWidgets('word tolerance clipped by song EOF records the actual EOF',
+      (tester) async {
+    final s = TapLyricSession()..text = '你 好';
+    s.beginLines();
+    s.mark(7);
+    s.mark(7.8);
+    s.accept();
+    s.beginWords();
+    late ProcessFake process;
+    late void Function(double) clock;
+    final player = LyricAudioPreview(song,
+        mainPlayback: () => null,
+        launch: (_, __, ___, c) async {
+          clock = c;
+          return process = ProcessFake();
+        });
+    await pumpEditor(tester, s, preview: player);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    clock(7.4);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    process.done.complete(0);
+    await tester.pumpAndSettle();
+    expect(s.stage, TapStage.wordReview);
+    expect(s.row.wordEnds, [7.4, 8]);
+    expect(s.row.end, 8);
+    await tester.tap(find.text('不满意，重录本句'));
+    await tester.pumpAndSettle();
+    expect(s.stage, TapStage.words);
+    expect(s.row.end, 7.8);
+    expect(s.row.wordEnds, isEmpty);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    clock(7.4);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    clock(7.95);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(s.stage, TapStage.wordReview);
+    expect(s.row.end, 7.8);
+    expect(s.row.wordEnds, [7.4, 7.8],
+        reason: 'a late manual last-word tap lands on the exact line end');
+  });
+  testWidgets('only the started final line closes at natural song EOF',
+      (tester) async {
+    final s = TapLyricSession()..text = 'one\ntwo';
+    s.beginLines();
+    s.mark(.2);
+    s.mark(1);
+    s.accept();
+    late ProcessFake process;
+    late void Function(double) clock;
+    final player = LyricAudioPreview(song,
+        mainPlayback: () => null,
+        launch: (_, __, ___, c) async {
+          clock = c;
+          return process = ProcessFake();
+        });
+    await pumpEditor(tester, s, preview: player);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    clock(2);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    process.done.complete(0);
+    await tester.pumpAndSettle();
+    expect(s.stage, TapStage.lineReview);
+    expect(s.row.end, 8);
+    expect(find.byKey(const ValueKey('tap-accept')), findsOneWidget);
+    expect(
+        find.text('歌曲已结束，但歌词尚未完成。请检查歌词文本与歌曲版本是否一致，或本句打点是否有误。'), findsNothing);
+  });
+  testWidgets('manual pause and stale clock cannot finish a word',
+      (tester) async {
+    final s = TapLyricSession()..text = '你 好';
+    s.beginLines();
+    s.mark(.3);
+    s.mark(2);
+    s.accept();
+    s.beginWords();
+    final clocks = <void Function(double)>[];
+    final processes = <ProcessFake>[];
+    final player = LyricAudioPreview(song,
+        mainPlayback: () => null,
+        launch: (_, __, ___, c) async {
+          clocks.add(c);
+          final process = ProcessFake();
+          processes.add(process);
+          return process;
+        });
+    await pumpEditor(tester, s, preview: player);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    clocks.single(.8);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(s.stage, TapStage.words);
+    expect(s.row.wordEnds, [.8]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(processes.length, 2);
+    clocks.first(2.5);
+    await tester.pump();
+    expect(s.position, .8);
+    expect(processes.first.done.isCompleted, isTrue);
+    await tester.pumpAndSettle();
+    expect(s.stage, TapStage.words);
+    processes.last.done.complete(1);
+    await tester.pumpAndSettle();
+    expect(s.stage, TapStage.words,
+        reason: 'failed playback must not count as a natural completion');
+    expect(s.row.wordEnds, [.8]);
+  });
   testWidgets(
       'saved paused word progress resumes without restarting text or auto-playing',
       (tester) async {

@@ -30,6 +30,10 @@ void main() {
         expect(location.queryParameters['section'], entry.section);
       }
       expect(uiLanguage.value, before);
+      final direct = translateUi('直连', language);
+      expect(searchSettings(direct).map((entry) => entry.id),
+          contains('network-proxy'),
+          reason: direct);
       expect(searchSettings('  '), isEmpty);
     });
   }

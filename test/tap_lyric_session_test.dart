@@ -131,8 +131,7 @@ void main() {
     s.accept();
     expect(s.stage, TapStage.lineDone);
   });
-  test(
-      'word timing advances only by valid taps, pause and song EOF do not accept',
+  test('word timing advances only by valid taps and round-trips final word',
       () {
     final s = TapLyricSession()..text = '你 好';
     s.beginLines();
@@ -145,7 +144,7 @@ void main() {
     s.wordStarted = true;
     expect(s.mark(.8), isTrue);
     expect(s.mark(.8), isFalse);
-    expect(s.mark(2.1), isFalse);
+    expect(s.mark(2.6), isFalse);
     s.position = 2;
     expect(s.stage, TapStage.words);
     s.mark(1.8);
@@ -164,6 +163,138 @@ void main() {
         LyricEditDraft.fromLyric(lyric, LyricEditFormat.lossless).parse();
     expect((snapshot.lines.single as QrcLine).words.last.length.inMilliseconds,
         1100);
+  });
+  test('late manual tap may end only the final word at the exact line end', () {
+    final s = TapLyricSession()..text = '你 好';
+    s.beginLines();
+    s.mark(.3);
+    s.mark(2);
+    s.accept();
+    s.beginWords();
+    s.mediaDuration = 2.3;
+    s.wordStarted = true;
+    s.mark(.8);
+    expect(s.mark(2.3), isTrue);
+    expect(s.row.wordEnds, [.8, 2]);
+    expect(s.position, 2.3, reason: 'the transport keeps actual media time');
+    expect(s.row.end, 2, reason: 'a manual tap preserves the confirmed line');
+    expect(s.stage, TapStage.wordReview);
+    s.retry();
+    s.wordStarted = true;
+    expect(s.mark(2), isTrue);
+    expect(s.mark(2.2), isFalse,
+        reason: 'the last word still requires positive duration');
+
+    final earlier = TapLyricSession()..text = '你 好 吗';
+    earlier.beginLines();
+    earlier.mark(.3);
+    earlier.mark(2);
+    earlier.accept();
+    earlier.beginWords();
+    earlier.mediaDuration = 8;
+    earlier.wordStarted = true;
+    earlier.mark(.8);
+    expect(earlier.mark(2.2), isFalse,
+        reason: 'the tolerance cannot mark a non-final word');
+    expect(earlier.row.wordEnds, [.8]);
+  });
+  test('natural word tolerance ends at the exact line boundary', () {
+    final s = TapLyricSession()..text = '你 好';
+    s.beginLines();
+    s.mark(.3);
+    s.mark(2);
+    s.accept();
+    s.beginWords();
+    s.wordStarted = true;
+    s.mark(.8);
+    expect(s.wordRecordingEnd(8), 2.5);
+    expect(s.finishLastWordAtRecordingEnd(2.4, 8), isFalse);
+    expect(s.finishLastWordAtRecordingEnd(2.5, 8), isTrue);
+    expect(s.row.end, 2);
+    expect(s.row.wordEnds, [.8, 2]);
+    expect(s.position, 2.5, reason: 'the transport shows the real playhead');
+    expect(s.stage, TapStage.wordReview);
+    expect(s.reviewRange(8), (start: 0.0, end: 2.5));
+    final restored =
+        TapLyricSession.fromJson(jsonDecode(jsonEncode(s.toJson())));
+    expect(restored.row.wordEnds, [.8, 2]);
+    expect(restored.row.end, 2);
+  });
+  test(
+      'EOF clipped last word extends the containing line and retry restores it',
+      () {
+    for (final duration in [2.3, 2.5]) {
+      final s = TapLyricSession()..text = '你 好';
+      s.beginLines();
+      s.mark(.3);
+      s.mark(2);
+      s.accept();
+      s.beginWords();
+      s.wordStarted = true;
+      s.mark(.8);
+      expect(s.wordRecordingEnd(duration), duration);
+      expect(s.finishLastWordAtRecordingEnd(duration, duration), isTrue);
+      expect(s.row.end, duration);
+      expect(s.row.wordEnds.last, duration);
+      expect(s.row.lineEndBeforeAutoWord, 2);
+      final copied =
+          TapLyricSession.fromJson(jsonDecode(jsonEncode(s.toJson())));
+      expect(copied.row.end, duration);
+      expect((copied.lyric(words: true).lines.single as QrcLine).length,
+          Duration(milliseconds: ((duration - .3) * 1000).round()));
+      copied.retry();
+      expect(copied.row.end, 2);
+      expect(copied.row.lineEndBeforeAutoWord, isNull);
+      expect(copied.wordRecordingEnd(duration), duration);
+      expect(copied.row.wordEnds, isEmpty);
+      expect(copied.stage, TapStage.words);
+      expect(
+          TapLyricSession.fromJson(jsonDecode(jsonEncode(copied.toJson())))
+              .row
+              .end,
+          2);
+    }
+  });
+  test('natural completion infers only the final word and final started line',
+      () {
+    final words = TapLyricSession()..text = '你 好 吗';
+    words.beginLines();
+    words.mark(.2);
+    words.mark(2);
+    words.accept();
+    words.beginWords();
+    expect(words.finishLastWordAtRecordingEnd(2.5, 8), isFalse);
+    words.wordStarted = true;
+    expect(words.finishLastWordAtRecordingEnd(2.5, 8), isFalse,
+        reason: 'two missing words must not be guessed');
+    words.mark(.6);
+    words.mark(1.1);
+    expect(words.finishLastWordAtRecordingEnd(2.5, 8), isTrue);
+
+    final lines = TapLyricSession()..text = 'one\ntwo';
+    lines.beginLines();
+    lines.mark(.2);
+    expect(lines.finishLastLineAtSongEnd(8), isFalse,
+        reason: 'non-final lines still require a stop tap');
+    lines.mark(1);
+    lines.accept();
+    expect(lines.finishLastLineAtSongEnd(8), isFalse,
+        reason: 'a line needs an explicit start');
+    lines.mark(2);
+    expect(lines.finishLastLineAtSongEnd(8), isTrue);
+    expect(lines.row.end, 8);
+    expect(lines.stage, TapStage.lineReview);
+    expect(lines.reviewRange(8), (start: 1.0, end: 8.0));
+    expect(
+        TapLyricSession.fromJson(jsonDecode(jsonEncode(lines.toJson())))
+            .row
+            .end,
+        8);
+    final single = TapLyricSession()..text = 'alone';
+    single.beginLines();
+    single.mark(.5);
+    expect(single.finishLastLineAtSongEnd(8), isTrue);
+    expect(single.row.end, 8);
   });
   test('every intermediate stage round-trips while remaining paused', () {
     final s = TapLyricSession()..text = '你好|Hello|ni hao';
