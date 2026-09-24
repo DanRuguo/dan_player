@@ -150,6 +150,10 @@ void main() {
     expect(preview.position, 3);
     clocks.last(3.7);
     expect(preview.position, 3.7);
+    clocks.last(3.68);
+    expect(preview.position, 3.7);
+    clocks.last(double.nan);
+    expect(preview.position, 3.7);
     expect(processes.first.killed, isTrue);
     await preview.close();
     preview.dispose();

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive_io.dart';
 import 'package:dan_player/data/cache_backup_service.dart';
 import 'package:dan_player/library/cue_track.dart';
+import 'package:dan_player/lyric/tap_lyric_session.dart';
 import 'package:dan_player/library/track_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
@@ -321,6 +322,9 @@ void main() {
       final songId = registry.idFor(song.path);
       final cueId = registry.idFor(cue.identity, cue: cue);
       await registry.flush();
+      await TapProgressStore(
+              Directory(path.join(source.path, 'lyric_tap_progress')), songId)
+          .save(TapLyricSession()..text = 'Hello|你好|ni hao');
       final identities = registry.toMap();
       ((identities['records'] as List).first as Map)['aliases'] = [
         path.join(sandbox.path, 'previous', 'song.mp3')
@@ -388,6 +392,11 @@ void main() {
           destination: Directory(path.join(sandbox.path, 'restored')),
           currentData: current,
           activateLocation: (_, ready) async => staged = ready);
+      final tapProgress = await TapProgressStore(
+              Directory(path.join(staged!.path, 'lyric_tap_progress')), songId)
+          .load();
+      expect(tapProgress!.text, 'Hello|你好|ni hao');
+      expect(tapProgress.stage, TapStage.text);
       final restoredRegistry = jsonDecode(
           await File(path.join(staged!.path, 'track_identities.json'))
               .readAsString()) as Map;

@@ -245,6 +245,9 @@ void main() {
                     child: const Text('Open'))))));
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
+    expect(find.text('你想如何编辑歌词😋？'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('lyric-method-text')));
+    await tester.pumpAndSettle();
     expect(find.text('选择歌词编辑格式'), findsOneWidget);
     expect(find.byType(LyricEditorDialog), findsNothing);
     await tester.tap(find.text('取消'));

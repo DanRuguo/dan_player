@@ -1380,6 +1380,10 @@ bool _shouldIncludeCacheEntry(String relative) {
 }
 
 bool _preservesMusicReferences(String relative) {
+  if (relative
+      .replaceAll('\\', '/')
+      .toLowerCase()
+      .startsWith('lyric_tap_progress/')) { return true; }
   var name = path.basename(relative).toLowerCase();
   if (name.endsWith('.bak')) name = name.substring(0, name.length - 4);
   return const {

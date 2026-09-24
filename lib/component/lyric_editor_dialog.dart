@@ -1,4 +1,5 @@
 import 'package:dan_player/component/lyric_playback_preview.dart';
+import 'package:dan_player/component/tap_lyric_editor.dart';
 import 'package:dan_player/component/lyric_timing_dialog.dart';
 import 'package:dan_player/component/lyric_format_picker.dart';
 import 'package:dan_player/lyric/lyric_edit_codec.dart';
@@ -135,6 +136,54 @@ Future<bool> showLyricEditorDialog(
     showAppNotice(ui("联网音乐的歌词为只读，不能修改"), kind: AppNoticeKind.warning);
     return false;
   }
+  final quick = await chooseLyricEditingMethod(context);
+  if (quick == null || !context.mounted) return false;
+  if (quick) {
+    return await showAppDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (tapContext) => TapLyricEditor(
+                audio: audio,
+                fetchOnline: () => showAppDialog<Lyric>(
+                    context: tapContext,
+                    builder: (_) => _OnlineLyricCandidateDialog(
+                        audio: audio,
+                        search:
+                            onlineLyricSearch ?? searchManualLyricCandidates,
+                        loadCandidate:
+                            onlineLyricCandidateLoader ?? getLyricForCandidate,
+                        customChoices: customLyricChoices ?? const [],
+                        loadCustomCandidate: customLyricCandidateLoader ??
+                            getLyricForCustomSourceChoice)),
+                saveLyric: (lyric) async {
+                  if (lyric is PlainLyric) {
+                    final store = LyricDocumentStore.instance;
+                    await store.load();
+                    await store.saveDraft(audio, lyric,
+                        expectedRevision: store.revisionFor(audio));
+                    showAppNotice(ui('编辑副本已保存，手动选用后才用于播放'),
+                        kind: AppNoticeKind.success);
+                    return true;
+                  }
+                  final selected = await chooseLyricEditFormat(tapContext);
+                  if (selected == null || !tapContext.mounted) return false;
+                  return await showAppDialog<bool>(
+                          context: tapContext,
+                          barrierDismissible: false,
+                          builder: (_) => LyricEditorDialog(
+                              audio: audio,
+                              initialFormat: selected,
+                              initialLyric: lyric,
+                              onlineLyricSearch: onlineLyricSearch,
+                              onlineLyricCandidateLoader:
+                                  onlineLyricCandidateLoader,
+                              customLyricChoices: customLyricChoices,
+                              customLyricCandidateLoader:
+                                  customLyricCandidateLoader)) ==
+                      true;
+                })) ==
+        true;
+  }
   final format = await chooseLyricEditFormat(context);
   if (format == null || !context.mounted) return false;
   return await showAppDialog<bool>(
@@ -162,9 +211,11 @@ class LyricEditorDialog extends StatefulWidget {
     this.customLyricCandidateLoader,
     this.localLyricLoader,
     this.initialFormat = LyricEditFormat.lrc,
+    this.initialLyric,
   });
 
   final LyricEditFormat initialFormat;
+  final Lyric? initialLyric;
   final Audio audio;
   final OnlineLyricEditorSearch? onlineLyricSearch;
   final OnlineLyricEditorCandidateLoader? onlineLyricCandidateLoader;
@@ -241,7 +292,12 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   Future<void> _load() async {
     try {
       Lyric? lyric;
-      if (widget.localLyricLoader != null) {
+      if (widget.initialLyric != null) {
+        await LyricDocumentStore.instance.load();
+        _documentRevision =
+            LyricDocumentStore.instance.revisionFor(widget.audio);
+        lyric = widget.initialLyric;
+      } else if (widget.localLyricLoader != null) {
         final text = await widget.localLyricLoader!(widget.audio);
         lyric = Lrc.fromLrcText(text, LrcSource.local, separator: '┃');
       } else {

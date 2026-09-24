@@ -69,16 +69,27 @@ class _LyricPreviewProcess implements TrimPreviewProcess {
 
 typedef LyricPreviewLauncher = Future<TrimPreviewProcess> Function(String file,
     double start, double duration, ValueChanged<double> onPosition);
-Future<TrimPreviewProcess> launchLyricPreview(String file, double start,
-    double duration, ValueChanged<double> onPosition) async {
+Future<TrimPreviewProcess> launchLyricPreview(
+    String file, double start, double duration, ValueChanged<double> onPosition,
+    {double rate = 1}) async {
+  if (![.25, .5, .75, 1.0].contains(rate)) {
+    throw ArgumentError.value(rate, 'rate');
+  }
   final executable = await audioToolPath('ffplay');
   final args = trimPreviewArguments(file, start, duration,
       volume: AppPreference.instance.playbackPref.volumeDsp);
   args[args.indexOf('-nostats')] = '-stats';
   args[args.indexOf('-loglevel') + 1] = 'info';
+  if (rate != 1) {
+    args.insertAll(args.indexOf('-i'), [
+      '-af',
+      '${rate == .25 ? 'atempo=0.5,atempo=0.5' : 'atempo=$rate'},asetpts=N/SR/TB'
+    ]);
+  }
   final process = await Process.start(executable, args, runInShell: false);
   await process.stdin.close();
-  return _LyricPreviewProcess(process, onPosition);
+  return _LyricPreviewProcess(process,
+      rate == 1 ? onPosition : (time) => onPosition(start + time * rate));
 }
 
 /// Preview owns a decoder process, not a playlist entry or a lyric source. The
@@ -103,7 +114,10 @@ class LyricAudioPreview extends ChangeNotifier {
           final token = _generation;
           return _launch(file, start, duration, (time) {
             if (_disposed || token != _generation) return;
-            _position = (time - _cueStart).clamp(_rangeStart, _rangeEnd);
+            if (!time.isFinite) return;
+            _clockReady = true;
+            // Device-clock corrections must not move recorded media time back.
+            _position = (time - _cueStart).clamp(_position, _rangeEnd);
             _positions.add(_position);
           });
         });
@@ -117,6 +131,8 @@ class LyricAudioPreview extends ChangeNotifier {
   Stream<double> get positionStream => _positions.stream;
   double _position = 0, _rangeStart = 0, _rangeEnd = 0;
   double get position => _position;
+  bool _clockReady = false;
+  bool get clockReady => _clockReady;
   double? _fileDuration;
   double get duration => audio.cueTrack?.endSeconds != null
       ? audio.cueTrack!.endSeconds! - _cueStart
@@ -200,6 +216,7 @@ class LyricAudioPreview extends ChangeNotifier {
     // A user play action during startup wins over this temporary decoder.
     if (_main?.playing == true) return;
     _position = _rangeStart;
+    _clockReady = false;
     _positions.add(_position);
     await _decoder.play(_rangeStart + _cueStart, _rangeEnd + _cueStart);
   }

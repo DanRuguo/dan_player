@@ -1,3 +1,4 @@
+import 'catalog_tap_lyric_editor.dart';
 import 'catalog_lyric_editor_formats.dart';
 import 'catalog_automatic_online_lyrics.dart';
 import 'catalog_artist_separators.dart';
@@ -60,6 +61,7 @@ import 'catalog_comments_feedback_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogLyricEditorFormats,
+  ...catalogTapLyricEditor,
   ...catalogAutomaticOnlineLyrics,
   ...catalogStartupProgress,
   ...catalogArtistSeparators,

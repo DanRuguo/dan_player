@@ -92,6 +92,9 @@ class BackupOperation {
 
 BackupComponent backupComponentForPath(String relative) {
   final normalized = relative.replaceAll('\\', '/').toLowerCase();
+  if (normalized.startsWith('lyric_tap_progress/')) {
+    return BackupComponent.library;
+  }
   final name = normalized.split('/').last.replaceFirst(RegExp(r'\.bak$'), '');
   if (name.startsWith('playback_statistics')) return BackupComponent.statistics;
   if (const {
