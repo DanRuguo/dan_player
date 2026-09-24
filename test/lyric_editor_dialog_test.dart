@@ -2,16 +2,22 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/component/lyric_editor_dialog.dart';
+import 'package:dan_player/component/lyric_playback_preview.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/cue_track.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
+import 'package:dan_player/lyric/lyric_preview.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:desktop_lyric/app_motion.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
+import 'lyric_preview_test.dart' show ProcessFake;
 
 Audio _audio(String path) => Audio(
       'Song',
@@ -35,16 +41,23 @@ Widget _host(
   OnlineLyricEditorCustomCandidateLoader? loadCustomCandidate,
   double textScale = 1,
   TargetPlatform? platform,
+  LyricAudioPreview? preview,
+  Future<bool> Function()? ensureTools,
+  bool disableAnimations = true,
+  MotionPreferences motionPreferences = const MotionPreferences(),
 }) =>
     MaterialApp(
       scrollBehavior: const DanPlayerScrollBehavior(),
       theme: ThemeData(useMaterial3: true, platform: platform),
-      builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context).copyWith(
-          disableAnimations: true,
-          textScaler: TextScaler.linear(textScale),
+      builder: (context, child) => MotionPreferencesScope(
+        preferences: motionPreferences,
+        child: MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            disableAnimations: disableAnimations,
+            textScaler: TextScaler.linear(textScale),
+          ),
+          child: child!,
         ),
-        child: child!,
       ),
       home: Builder(
         builder: (context) => Scaffold(
@@ -62,6 +75,8 @@ Widget _host(
                   customLyricCandidateLoader:
                       loadCustomCandidate ?? (_, __) async => null,
                   localLyricLoader: (_) async => '[00:00.00]Local line',
+                  preview: preview,
+                  ensureTools: ensureTools,
                 ),
               ),
               child: const Text('Open'),
@@ -126,6 +141,35 @@ Future<void> _pumpCandidateTransition(WidgetTester tester) async {
 void main() {
   setUp(LYRIC_SOURCES.clear);
   tearDown(LYRIC_SOURCES.clear);
+
+  test('editor borrows only the current track media clock', () {
+    const first = CueTrackReference(
+        cuePath: r'J:\library\album.cue',
+        sourcePath: r'J:\library\album.flac',
+        number: 1,
+        startFrame: 0,
+        endFrame: 750);
+    const second = CueTrackReference(
+        cuePath: r'J:\library\album.cue',
+        sourcePath: r'J:\library\album.flac',
+        number: 2,
+        startFrame: 750,
+        endFrame: 1500);
+    Audio track(CueTrackReference? cue) => Audio('CUE Song', 'Artist', 'Album',
+        0, 10, null, null, r'J:\library\album.flac', 0, 0, null,
+        cueTrack: cue);
+    final edited = track(second);
+    expect(matchingLyricEditorPlaybackPosition(edited, track(first), 4, 10),
+        isNull);
+    expect(matchingLyricEditorPlaybackPosition(edited, track(null), 4, 10),
+        isNull);
+    expect(matchingLyricEditorPlaybackPosition(edited, track(second), .42, 10),
+        .42);
+    expect(
+        matchingLyricEditorPlaybackPosition(
+            edited, track(second), double.nan, 10),
+        isNull);
+  });
 
   test('source persistence failure restores the old LRC and association',
       () async {
@@ -521,6 +565,457 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Large text candidate'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('short text editor shares its scroll controller with the thumb',
+      (tester) async {
+    tester.view.physicalSize = const Size(400, 400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final (directory, _, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    await tester.pumpWidget(_host(
+      audio,
+      platform: TargetPlatform.windows,
+      search: (_) async =>
+          LyricSearchResponse(candidates: [], failures: const {}),
+      loadCandidate: (_) async => null,
+    ));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    final scroll = tester.widget<SingleChildScrollView>(
+        find.byKey(const ValueKey('lyric-editor-compact-scroll')));
+    final thumb = tester.widget<AppScrollbar>(find
+        .ancestor(
+            of: find.byKey(const ValueKey('lyric-editor-compact-scroll')),
+            matching: find.byType(AppScrollbar))
+        .first);
+    expect(scroll.controller, same(thumb.controller));
+    expect(scroll.controller!.positions, hasLength(1));
+    expect(scroll.controller!.position.maxScrollExtent, greaterThan(0));
+    scroll.controller!.jumpTo(scroll.controller!.position.maxScrollExtent);
+    await tester.pump();
+    expect(scroll.controller!.offset, greaterThan(0));
+    expect(
+        tester.getRect(find.byKey(const ValueKey('lyric-editor-save'))).bottom,
+        lessThanOrEqualTo(400));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'editor audition keys, text focus and preview handoff share one decoder',
+      (tester) async {
+    final (directory, _, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final launches = <(double, double, ProcessFake)>[];
+    late void Function(double) clock;
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => audio.duration.toDouble(),
+        mainPlayback: () => null,
+        launch: (_, start, duration, onPosition) async {
+          clock = onPosition;
+          final process = ProcessFake();
+          launches.add((start, duration, process));
+          return process;
+        });
+    await tester.pumpWidget(_host(audio,
+        search: (_) async =>
+            LyricSearchResponse(candidates: [], failures: const {}),
+        loadCandidate: (_) async => null,
+        preview: player,
+        ensureTools: () async => true));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    expect(launches.single.$1, 0);
+    expect(player.playing, isTrue);
+    clock(1.2);
+    await tester.pump();
+    expect(find.text('当前时刻 00:01.200 / 03:00.000'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(launches.last.$1, closeTo(1.3, .0001));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(launches.last.$1, closeTo(1.2, .0001));
+    tester
+        .widget<Slider>(
+            find.byKey(const ValueKey('lyric-editor-audition-seek')))
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(launches.last.$1, closeTo(1.3, .0001));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(launches.last.$1, closeTo(1.2, .0001));
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(player.playing, isFalse);
+    final countWhilePaused = launches.length;
+    final field = find.byKey(const ValueKey('lyric-editor-field'));
+    await tester.ensureVisible(field);
+    await tester.tap(field);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(player.playing, isFalse);
+    expect(launches.length, countWhilePaused);
+
+    await tester.ensureVisible(
+        find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    expect(player.playing, isTrue);
+
+    final previewTab = find.byKey(const ValueKey('lyric-editor-tab-3'));
+    await tester.ensureVisible(previewTab);
+    await tester.tap(previewTab);
+    await tester.pump();
+    expect(player.playing, isFalse);
+    expect(
+        find.byKey(const ValueKey('lyric-editor-audition-play')), findsNothing);
+    final launchesBeforePreview = launches.length;
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(launches.length, launchesBeforePreview);
+    final openPreview = find.byKey(const ValueKey('lyric-editor-play-preview'));
+    await tester.ensureVisible(openPreview);
+    await tester.tap(openPreview);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.byType(LyricPlaybackPreview), findsOneWidget);
+    expect(player.playing, isTrue);
+    expect(launches.last.$1, 0);
+    clock(2);
+    await tester.pump();
+    final countInPreview = launches.length;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(launches.length, countInPreview);
+    await tester.tap(find.byKey(const ValueKey('lyric-preview-close')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.byType(LyricPlaybackPreview), findsNothing);
+    expect(player.playing, isFalse);
+    expect(
+        find.byKey(const ValueKey('lyric-editor-audition-play')), findsNothing);
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('lyric-editor-tab-0')));
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-tab-0')));
+    await tester.pump();
+    expect(find.text('当前时刻 00:02.000 / 03:00.000'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(launches.last.$1, 2);
+    expect(player.playing, isTrue);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-close')));
+    await tester.pump(const Duration(milliseconds: 350));
+    if (find.text('放弃修改').evaluate().isNotEmpty) {
+      await tester.tap(find.text('放弃修改'));
+      await tester.pump(const Duration(milliseconds: 350));
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(launches.last.$3.killed, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('missing preview tools show the existing installation card',
+      (tester) async {
+    tester.view.physicalSize = const Size(480, 420);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final (directory, _, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => audio.duration.toDouble(),
+        mainPlayback: () => null,
+        launch: (_, __, ___, ____) async => ProcessFake());
+    await tester.pumpWidget(_host(audio,
+        search: (_) async =>
+            LyricSearchResponse(candidates: [], failures: const {}),
+        loadCandidate: (_) async => null,
+        preview: player,
+        ensureTools: () async => false));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('lyric-editor-audition-install')),
+        findsOneWidget);
+    expect(player.playing, isFalse);
+    expect(
+        tester.getRect(find.byKey(const ValueKey('lyric-editor-save'))).bottom,
+        lessThanOrEqualTo(420));
+    expect(tester.takeException(), isNull);
+    await tester
+        .tap(find.byKey(const ValueKey('lyric-editor-audition-install')));
+    await tester.pumpAndSettle();
+    expect(find.text('我已安装好'), findsOneWidget);
+    expect(find.text('从 GitHub 下载'), findsOneWidget);
+    expect(find.byType(AppScrollbar), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('closing while tool check is pending cannot start late playback',
+      (tester) async {
+    final (directory, _, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final ready = Completer<bool>();
+    var launches = 0;
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => audio.duration.toDouble(),
+        mainPlayback: () => null,
+        launch: (_, __, ___, ____) async {
+          launches++;
+          return ProcessFake();
+        });
+    await tester.pumpWidget(_host(audio,
+        search: (_) async =>
+            LyricSearchResponse(candidates: [], failures: const {}),
+        loadCandidate: (_) async => null,
+        preview: player,
+        ensureTools: () => ready.future));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-close')));
+    await tester.pumpAndSettle();
+    ready.complete(true);
+    await tester.pump();
+    expect(launches, 0);
+    expect(player.playing, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('preview tab collapse follows layout and system motion choices',
+      (tester) async {
+    final (directory, _, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    for (final (systemReduced, preference, expected) in [
+      (false, const MotionPreferences(), AppMotion.standard),
+      (
+        false,
+        const MotionPreferences(disabled: {MotionKind.layout}),
+        Duration.zero
+      ),
+      (true, const MotionPreferences(), Duration.zero),
+    ]) {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(_host(audio,
+          search: (_) async =>
+              LyricSearchResponse(candidates: [], failures: const {}),
+          loadCandidate: (_) async => null,
+          disableAnimations: systemReduced,
+          motionPreferences: preference));
+      await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+      await _pumpDialogTransition(tester);
+      final switcher =
+          find.byKey(const ValueKey('lyric-editor-audition-collapse'));
+      expect(tester.widget<AnimatedSwitcher>(switcher).duration, expected);
+      await tester
+          .ensureVisible(find.byKey(const ValueKey('lyric-editor-tab-3')));
+      await tester.tap(find.byKey(const ValueKey('lyric-editor-tab-3')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('lyric-editor-audition-play')),
+          findsNothing);
+      await tester
+          .ensureVisible(find.byKey(const ValueKey('lyric-editor-tab-0')));
+      await tester.tap(find.byKey(const ValueKey('lyric-editor-tab-0')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('lyric-editor-audition-play')),
+          findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('CUE audition and timestamp insertion use segment media time',
+      (tester) async {
+    const cue = CueTrackReference(
+        cuePath: r'J:\library\album.cue',
+        sourcePath: r'J:\library\album.flac',
+        number: 2,
+        startFrame: 750,
+        endFrame: 1500);
+    final audio = Audio('CUE Song', 'Artist', 'Album', 0, 10, null, null,
+        cue.sourcePath, 0, 0, null,
+        cueTrack: cue);
+    final starts = <double>[];
+    late void Function(double) clock;
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => audio.duration.toDouble(),
+        mainPlayback: () => null,
+        launch: (file, start, duration, onPosition) async {
+          expect(file, cue.sourcePath);
+          starts.add(start);
+          clock = onPosition;
+          return ProcessFake();
+        });
+    await tester.pumpWidget(_host(audio,
+        search: (_) async =>
+            LyricSearchResponse(candidates: [], failures: const {}),
+        loadCandidate: (_) async => null,
+        preview: player,
+        ensureTools: () async => true));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    expect(starts.single, 10);
+    clock(10.42);
+    await tester.pump();
+    expect(find.text('当前时刻 00:00.420 / 00:10.000'), findsOneWidget);
+    await tester
+        .tap(find.byKey(const ValueKey('lyric-editor-audition-forward')));
+    await tester.pump();
+    expect(starts.last, closeTo(10.52, .0001));
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(player.playing, isFalse);
+    final slider = tester.widget<Slider>(
+        find.byKey(const ValueKey('lyric-editor-audition-seek')));
+    slider.onChangeStart!(.52);
+    slider.onChanged!(.725);
+    await tester.pump();
+    expect(find.text('当前时刻 00:00.725 / 00:10.000'), findsOneWidget);
+    slider.onChangeEnd!(.725);
+    await tester.pump();
+    expect(player.playing, isFalse);
+    expect(player.position, closeTo(.725, .0001));
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    expect(starts.last, closeTo(10.725, .0001));
+    final insert = find.byKey(const ValueKey('lyric-editor-insert-time'));
+    await tester.ensureVisible(insert);
+    await tester.tap(insert);
+    await tester.pump();
+    expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('lyric-editor-field')))
+            .controller!
+            .text,
+        '[00:00.725]Local line');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('editor slider ignores second pointer cancel and restores first',
+      (tester) async {
+    final (directory, _, audio) = _fixture();
+    addTearDown(() => directory.deleteSync(recursive: true));
+    late void Function(double) clock;
+    final starts = <double>[];
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => audio.duration.toDouble(),
+        mainPlayback: () => null,
+        launch: (_, start, __, onPosition) async {
+          starts.add(start);
+          clock = onPosition;
+          return ProcessFake();
+        });
+    await tester.pumpWidget(_host(audio,
+        search: (_) async =>
+            LyricSearchResponse(candidates: [], failures: const {}),
+        loadCandidate: (_) async => null,
+        preview: player,
+        ensureTools: () async => true));
+    await tester.tap(find.byKey(const ValueKey('open-lyric-editor')));
+    await _pumpDialogTransition(tester);
+    await tester.tap(find.byKey(const ValueKey('lyric-editor-audition-play')));
+    await tester.pump();
+    clock(1.2);
+    await tester.pump();
+    final seek = find.byKey(const ValueKey('lyric-editor-audition-seek'));
+    final first = await tester.startGesture(tester.getCenter(seek));
+    await first.moveBy(const Offset(65, 0));
+    await tester.pump();
+    expect(player.playing, isFalse);
+    final second =
+        await tester.startGesture(tester.getCenter(seek), pointer: 2);
+    await second.cancel();
+    await tester.pump();
+    expect(player.playing, isFalse);
+    await first.cancel();
+    await tester.pump();
+    expect(player.playing, isTrue);
+    expect(starts.last, closeTo(1.2, .0001));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('paused final preview drag stays paused and shows milliseconds',
+      (tester) async {
+    final audio = _audio('missing-preview.mp3');
+    late void Function(double) clock;
+    var launches = 0;
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => audio.duration.toDouble(),
+        mainPlayback: () => null,
+        launch: (_, __, ___, onPosition) async {
+          launches++;
+          clock = onPosition;
+          return ProcessFake();
+        });
+    addTearDown(player.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LyricPlaybackPreview(
+            audio: audio,
+            lyric: _lyric('Line', 1),
+            preview: player,
+            ensureTools: () async => true)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(player.playing, isTrue);
+    clock(1.2);
+    await tester.tap(find.byKey(const ValueKey('lyric-preview-play')));
+    await tester.pump();
+    expect(player.playing, isFalse);
+    final seek =
+        tester.widget<Slider>(find.byKey(const ValueKey('lyric-preview-seek')));
+    seek.onChangeStart!(1.2);
+    seek.onChanged!(2.345);
+    await tester.pump();
+    expect(find.text('00:02.345 / 03:00.000'), findsOneWidget);
+    seek.onChangeEnd!(2.345);
+    await tester.pump();
+    expect(player.playing, isFalse);
+    expect(player.position, closeTo(2.345, .0001));
+    expect(launches, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('borrowed final preview reports zero duration without launching',
+      (tester) async {
+    final audio = Audio('Song', 'Artist', 'Album', 0, 0, null, null,
+        'missing-preview.mp3', 0, 0, null);
+    var launches = 0;
+    final player = LyricAudioPreview(audio,
+        probeDuration: (_) async => null,
+        mainPlayback: () => null,
+        launch: (_, __, ___, ____) async {
+          launches++;
+          return ProcessFake();
+        });
+    addTearDown(player.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LyricPlaybackPreview(
+            audio: audio,
+            lyric: _lyric('Line', 1),
+            preview: player,
+            ensureTools: () async => true)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('无法读取歌曲时长，无法试听。'), findsOneWidget);
+    expect(find.text('安装试听组件'), findsNothing);
+    expect(player.playing, isFalse);
+    expect(launches, 0);
     expect(tester.takeException(), isNull);
   });
 }

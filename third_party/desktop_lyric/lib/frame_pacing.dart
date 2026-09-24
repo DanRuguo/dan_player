@@ -43,6 +43,12 @@ class FrameRatePreference {
 double validDisplayRate(double rate) =>
     rate.isFinite && rate >= 15 && rate <= 1000 ? rate : 60;
 
+const adaptiveInteractionWindow = Duration(milliseconds: 800);
+
+bool adaptiveInteractionIsActive(Duration? lastInteraction, Duration now) =>
+    lastInteraction != null &&
+    now - lastInteraction < adaptiveInteractionWindow;
+
 /// Per-engine preference: the main player persists it and forwards it to helpers.
 final frameRatePreference = ValueNotifier(const FrameRatePreference());
 final windowDisplayRate = ValueNotifier<double?>(null);
@@ -127,8 +133,7 @@ class FramePacedWidgetsBinding extends WidgetsFlutterBinding {
   double? get _target {
     final preference = frameRatePreference.value;
     final hz = displayRate;
-    final active = _interaction != null &&
-        _clock.elapsed - _interaction! < const Duration(milliseconds: 800);
+    final active = adaptiveInteractionIsActive(_interaction, _clock.elapsed);
     final target = preference.target(hz, interacting: active);
     final engineHz = validDisplayRate(
         platformDispatcher.implicitView?.display.refreshRate ?? 60);
@@ -148,8 +153,11 @@ class FramePacedWidgetsBinding extends WidgetsFlutterBinding {
   }
 
   void _interact() {
-    _interaction = _clock.elapsed;
-    if (frameRatePreference.value.mode == FrameRateMode.adaptive) {
+    final now = _clock.elapsed;
+    final becameActive = !adaptiveInteractionIsActive(_interaction, now);
+    _interaction = now;
+    if (becameActive &&
+        frameRatePreference.value.mode == FrameRateMode.adaptive) {
       _reconfigure();
     }
   }

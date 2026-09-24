@@ -68,6 +68,24 @@ const catalogLyricEditorFormats = <String, List<String>>{
   "翻译": ["Translation", "翻訳", "번역"],
   "注音": ["Pronunciation", "読み", "발음"],
   "预览": ["Preview", "プレビュー", "미리 보기"],
+  "当前时刻": ["Current time", "現在時刻", "현재 시각"],
+  "后退 100 毫秒": ["Back 100 ms", "100 ミリ秒戻る", "100밀리초 뒤로"],
+  "前进 100 毫秒": ["Forward 100 ms", "100 ミリ秒進む", "100밀리초 앞으로"],
+  "空格播放或暂停；左右方向键每次移动 100 毫秒。": [
+    "Space plays or pauses; Left and Right move 100 ms per press.",
+    "Space で再生・一時停止、左右キーで 1 回につき 100 ミリ秒移動します。",
+    "스페이스로 재생·일시 정지하고 왼쪽·오른쪽 키로 누를 때마다 100밀리초 이동합니다."
+  ],
+  "无法读取歌曲时长，无法试听。": [
+    "The song duration could not be read, so preview is unavailable.",
+    "曲の長さを読み取れないため、試聴できません。",
+    "곡 길이를 읽을 수 없어 미리 들을 수 없습니다."
+  ],
+  "试听失败，请重试。": [
+    "Preview failed. Please try again.",
+    "試聴に失敗しました。再試行してください。",
+    "미리 듣기에 실패했습니다. 다시 시도해 주세요."
+  ],
   "翻译和注音使用 LRC 时间戳，与原文行的开始时间一致。": [
     "Use LRC timestamps matching the start of each original line.",
     "原文の行の開始時刻に合わせた LRC タイムスタンプを使用します。",

@@ -521,10 +521,17 @@ class OnlineMusicService {
       );
     }
     final tracks = <Audio>[];
-    for (final value in songs.take(limit)) {
+    for (final value in songs) {
+      if (tracks.length >= limit) break;
       if (value is! Map) continue;
       final audio = _neteaseAudio(value);
       if (audio != null) tracks.add(audio);
+    }
+    if (songs.isNotEmpty && tracks.isEmpty) {
+      throw const OnlineMusicException(
+        OnlineMusicFailureKind.api,
+        '音乐服务返回的数据无效或过大',
+      );
     }
     return tracks;
   }
@@ -616,7 +623,9 @@ class OnlineMusicService {
 
   Audio? _neteaseAudio(Map song) {
     final id = _firstString([song["id"]]);
-    if (id == null) return null;
+    final name = song["name"];
+    final title = name is String ? _firstString([name]) : null;
+    if (id == null || title == null) return null;
     final artistValues = song["artists"] is List
         ? song["artists"] as List
         : song["ar"] is List
@@ -637,7 +646,7 @@ class OnlineMusicService {
     return Audio.online(
       provider: "netease",
       id: id,
-      title: _firstString([song["name"]]) ?? "UNKNOWN",
+      title: title,
       artist: artist,
       album: album["name"]?.toString() ?? "UNKNOWN",
       duration: durationMs ~/ 1000,

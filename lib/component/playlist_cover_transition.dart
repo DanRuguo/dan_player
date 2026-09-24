@@ -651,7 +651,7 @@ class _PlaylistCoverTransitionMarkerState
           key: _boundary,
           child: _CoverReadinessObserver(
               onChanged: () => _owner?._imageMayBeReady(),
-              hidePlaceholder: scope?.hidden.isNotEmpty ?? false,
+              hidePlaceholder: scope?.hidden.contains(widget.entryId) == true,
               child: widget.child)),
     );
   }

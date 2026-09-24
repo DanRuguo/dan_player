@@ -66,6 +66,44 @@ void main() {
     });
   });
 
+  test('continuous adaptive interaction keeps its frame budget', () {
+    fakeAsync((time) {
+      final emitted = <Duration>[];
+      final pacer = FrameRequestPacer(
+          now: () => time.elapsed, emit: () => emitted.add(time.elapsed));
+      Duration? lastInteraction;
+      void hover() {
+        // A monitor move can leave the engine at 240 Hz while the destination
+        // requests 120 Hz. Every hover may request repaint of the cover glow.
+        if (!adaptiveInteractionIsActive(lastInteraction, time.elapsed)) {
+          pacer.reset();
+        }
+        lastInteraction = time.elapsed;
+        pacer.request(120);
+      }
+
+      for (var index = 0; index < 20; index++) {
+        hover();
+        time.elapse(const Duration(milliseconds: 1));
+      }
+      expect(emitted, [
+        Duration.zero,
+        const Duration(microseconds: 8333),
+        const Duration(microseconds: 16666),
+      ]);
+      expect(pacer.pending, isTrue);
+
+      // The first input after a quiet period resumes at once. Continuous
+      // input before this boundary only updates the deadline.
+      time.elapse(adaptiveInteractionWindow);
+      final before = time.elapsed;
+      hover();
+      expect(emitted.last, before);
+      expect(pacer.pending, isFalse);
+      pacer.cancel();
+    });
+  });
+
   test('changing policy or hiding cancels pending frames; restore is immediate',
       () {
     fakeAsync((time) {

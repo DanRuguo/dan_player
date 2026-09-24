@@ -14,6 +14,7 @@ import 'package:dan_player/page/library_migration_recovery.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/online/song_comment_association.dart';
+import 'package:dan_player/online/app_network_proxy.dart';
 import 'package:dan_player/src/rust/api/logger.dart';
 import 'package:dan_player/src/rust/frb_generated.dart';
 import 'package:dan_player/theme_provider.dart';
@@ -197,6 +198,7 @@ Future<void> _startPlayer(Directory dataDirectory) async {
     await AppSettings.readFromJson();
     await loadPrefFont();
   }
+  AppNetworkProxy.install();
   if (File("$supportPath\\app_preference.json").existsSync()) {
     await AppPreference.read();
   }

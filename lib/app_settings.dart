@@ -8,6 +8,7 @@ import 'package:dan_player/performance_preset.dart';
 import 'package:dan_player/data/settings_file_writer.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/online_source_preferences.dart';
+import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/play_service/replay_gain.dart';
 import 'package:dan_player/play_service/track_resume_preferences.dart';
@@ -160,6 +161,9 @@ class AppSettings {
 
   /// Controls new search requests only; saved online tracks remain usable.
   final onlineSources = ValueNotifier(const OnlineSourcePreferences());
+
+  /// Shared by app HTTP clients, native online playback, and module downloads.
+  final networkProxy = ValueNotifier(const NetworkProxyPreferences());
 
   /// Opt-in fallback only when no saved lyrics are available.
   final automaticOnlineLyrics = ValueNotifier(false);
@@ -356,6 +360,8 @@ class AppSettings {
         BackgroundPreferences.fromMap(settingsMap['Backgrounds']);
     _instance.onlineSources.value =
         OnlineSourcePreferences.fromJson(settingsMap['OnlineSources']);
+    _instance.networkProxy.value =
+        NetworkProxyPreferences.fromMap(settingsMap['NetworkProxy']);
     _instance.automaticOnlineLyrics.value =
         settingsMap['AutomaticOnlineLyrics'] == true;
     _instance.lrclibEnabled.value = settingsMap['LrclibEnabled'] is bool
@@ -531,6 +537,7 @@ class AppSettings {
         "PerformancePreset": performancePresets.value.toMap(),
         "PlayerShortcuts": shortcuts.value.toMap(),
         "OnlineSources": onlineSources.value.toJson(),
+        "NetworkProxy": networkProxy.value.toMap(),
         "AutomaticOnlineLyrics": automaticOnlineLyrics.value,
         "LrclibEnabled": lrclibEnabled.value,
         "CustomMusicSources": CustomMusicSourceProfileCodec.encodeSettings(

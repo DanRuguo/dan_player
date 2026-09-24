@@ -7,6 +7,8 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:dan_player/library/ffmpeg_runtime.dart';
 import 'package:dan_player/taskbar_progress.dart';
+import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/online/network_proxy_preferences.dart';
 
 // Keep the independently published, hash-pinned module on the 26.0.5 release.
 // Player snapshots must not require another copy of the same 70 MB archive.
@@ -16,11 +18,11 @@ const ffmpegModuleHash =
     'd007d0d6ca34a0d69b9dfe3326c04914efe8fbf86e99d2c5b4a30ce580cceffa';
 const ffmpegModuleBytes = 73513838;
 
-/// Uses Windows' default web proxy (including its configured PAC), without
-/// changing the machine proxy or printing proxy credentials. Only user consent
-/// starts this downloader. The pinned hash is verified before extraction.
+/// Honors the app proxy selection. System mode delegates to Windows' web
+/// proxy (including PAC); no mode changes the machine proxy or prints secrets.
+/// The pinned hash is verified before extraction.
 const _downloadScript = r'''
-param([string]$Url,[string]$Destination)
+param([string]$Url,[string]$Destination,[string]$ProxyMode,[string]$ProxyUrl)
 $ErrorActionPreference='Stop'
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 $response=$null
@@ -28,7 +30,11 @@ for($redirect=0;$redirect -lt 6;$redirect++) {
   $uri=[Uri]$Url
   if($uri.Scheme -ne 'https') { throw 'HTTPS required' }
   $request=[Net.HttpWebRequest]::Create($uri)
-  $request.Proxy=[Net.WebRequest]::DefaultWebProxy
+  switch($ProxyMode) {
+    'direct' { $request.Proxy=$null }
+    'custom' { $request.Proxy=[Net.WebProxy]::new([Uri]$ProxyUrl) }
+    default { $request.Proxy=[Net.WebRequest]::DefaultWebProxy }
+  }
   $request.AllowAutoRedirect=$false
   $request.Timeout=30000
   $request.ReadWriteTimeout=30000
@@ -91,6 +97,14 @@ class FfmpegModuleInstaller {
       void Function(String)? onStage,
       FfmpegRuntime? runtime}) async {
     final tools = runtime ?? FfmpegRuntime.shared;
+    final proxy = AppSettings.instance.networkProxy.value;
+    final proxyUrl = proxy.mode == NetworkProxyMode.custom
+        ? NetworkProxyPreferences.normalizeCustomProxy(
+            proxy.customProxyUrl ?? '')
+        : null;
+    if (proxy.mode == NetworkProxyMode.custom && proxyUrl == null) {
+      throw const FormatException('Invalid custom HTTP proxy');
+    }
     final target = await tools.installDirectory;
     await target.parent.create(recursive: true);
     final work = await target.parent.createTemp('.ffmpeg-download-');
@@ -117,7 +131,11 @@ class FfmpegModuleInstaller {
             '-Url',
             ffmpegModuleUrl,
             '-Destination',
-            zip.path
+            zip.path,
+            '-ProxyMode',
+            proxy.mode.name,
+            '-ProxyUrl',
+            proxyUrl ?? ''
           ],
           runInShell: false);
       await _process!.stdin.close();

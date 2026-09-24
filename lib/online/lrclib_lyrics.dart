@@ -2,7 +2,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dan_player/online/online_http_request.dart';
+
 typedef LrclibHttpClientFactory = HttpClient Function();
+
+// The UI localizes this existing key when a provider changes its JSON shape.
+const _invalidPayloadMessage = '返回的数据无法解析，请重试。';
 
 class LrclibException implements Exception {
   const LrclibException(
@@ -59,13 +64,17 @@ class LrclibRecord {
 ///
 /// The transport never sends cookies, account identifiers, or audio data.
 class LrclibLyricsTransport {
-  LrclibLyricsTransport({LrclibHttpClientFactory? httpClientFactory})
-      : _httpClientFactory = httpClientFactory ?? HttpClient.new;
+  LrclibLyricsTransport({
+    LrclibHttpClientFactory? httpClientFactory,
+    Duration requestTimeout = const Duration(seconds: 12),
+  })  : assert(requestTimeout > Duration.zero),
+        _httpClientFactory = httpClientFactory ?? HttpClient.new,
+        _requestTimeout = requestTimeout;
 
-  static const _timeout = Duration(seconds: 12);
   static const _responseByteLimit = 2 * 1024 * 1024;
 
   final LrclibHttpClientFactory _httpClientFactory;
+  final Duration _requestTimeout;
 
   Future<List<LrclibRecord>> search({
     required String trackName,
@@ -89,56 +98,66 @@ class LrclibLyricsTransport {
     if (id <= 0) return null;
     final uri = Uri.https('lrclib.net', '/api/get/$id');
     final payload = await _getJson(uri);
-    return parseLrclibRecordPayload(payload);
+    if (payload == null) return null; // HTTP 404.
+    final record = parseLrclibRecordPayload(payload);
+    if (record == null) {
+      throw const LrclibException(_invalidPayloadMessage);
+    }
+    return record;
   }
 
   Future<Object?> _getJson(Uri uri) async {
-    final client = _httpClientFactory()..connectionTimeout = _timeout;
-    try {
-      final request = await client.getUrl(uri).timeout(_timeout);
-      request.followRedirects = false;
-      request.headers.set(
-        HttpHeaders.userAgentHeader,
-        'DanPlayer/26.0.4 (anonymous read-only lyrics)',
-      );
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final response = await request.close().timeout(_timeout);
-      final status = response.statusCode;
-      if (status == 408 || status == 429 || status >= 500) {
-        throw LrclibException(
-          'LRCLIB 服务暂时不可用（HTTP $status）',
-          retryable: true,
-          statusCode: status,
+    return runBoundedOnlineRequest(
+      createClient: _httpClientFactory,
+      timeout: _requestTimeout,
+      request: (client) async {
+        final request = await client.getUrl(uri);
+        request.followRedirects = false;
+        request.headers.set(
+          HttpHeaders.userAgentHeader,
+          'DanPlayer/26.0.4 (anonymous read-only lyrics)',
         );
-      }
-      if (status == HttpStatus.notFound) return null;
-      if (status != HttpStatus.ok) {
-        throw LrclibException(
-          'LRCLIB 请求失败（HTTP $status）',
-          statusCode: status,
-        );
-      }
-      if (response.contentLength > _responseByteLimit) {
-        throw const LrclibException('LRCLIB 响应过大，已停止解析');
-      }
-      final bytes = BytesBuilder(copy: false);
-      await for (final chunk in response.timeout(_timeout)) {
-        if (bytes.length + chunk.length > _responseByteLimit) {
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        final response = await request.close();
+        final status = response.statusCode;
+        if (status == 408 || status == 429 || status >= 500) {
+          throw LrclibException(
+            'LRCLIB 服务暂时不可用（HTTP $status）',
+            retryable: true,
+            statusCode: status,
+          );
+        }
+        if (status == HttpStatus.notFound) return null;
+        if (status != HttpStatus.ok) {
+          throw LrclibException(
+            'LRCLIB 请求失败（HTTP $status）',
+            statusCode: status,
+          );
+        }
+        if (response.contentLength > _responseByteLimit) {
           throw const LrclibException('LRCLIB 响应过大，已停止解析');
         }
-        bytes.add(chunk);
-      }
-      try {
-        return jsonDecode(utf8.decode(bytes.takeBytes()));
-      } on FormatException {
-        throw LrclibException(
-          'LRCLIB 返回了无法解析的响应',
-          statusCode: status,
-        );
-      }
-    } finally {
-      client.close(force: true);
-    }
+        final bytes = BytesBuilder(copy: false);
+        await for (final chunk in response) {
+          if (bytes.length + chunk.length > _responseByteLimit) {
+            throw const LrclibException('LRCLIB 响应过大，已停止解析');
+          }
+          bytes.add(chunk);
+        }
+        try {
+          final payload = jsonDecode(utf8.decode(bytes.takeBytes()));
+          if (payload == null) {
+            throw const LrclibException(_invalidPayloadMessage);
+          }
+          return payload;
+        } on FormatException {
+          throw LrclibException(
+            _invalidPayloadMessage,
+            statusCode: status,
+          );
+        }
+      },
+    );
   }
 }
 
@@ -147,15 +166,21 @@ List<LrclibRecord> parseLrclibSearchPayload(
   int limit = 20,
 }) {
   if (payload is! List) {
-    throw const LrclibException('LRCLIB 搜索响应缺少记录列表');
+    throw const LrclibException(_invalidPayloadMessage);
   }
   final records = <LrclibRecord>[];
+  var validRecords = 0;
   for (final value in payload) {
     if (records.length >= limit.clamp(1, 20)) break;
     final record = parseLrclibRecordPayload(value);
-    if (record != null && (record.hasLyrics || record.instrumental)) {
+    if (record == null) continue;
+    validRecords++;
+    if (record.hasLyrics || record.instrumental) {
       records.add(record);
     }
+  }
+  if (payload.isNotEmpty && validRecords == 0) {
+    throw const LrclibException(_invalidPayloadMessage);
   }
   return records;
 }

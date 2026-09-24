@@ -1,3 +1,4 @@
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
@@ -49,6 +50,7 @@ class _AudioArtworkState extends State<AudioArtwork> {
   void initState() {
     super.initState();
     CoverCache.instance.changes.addListener(_coverChanged);
+    AppSettings.instance.networkProxy.addListener(_networkProxyChanged);
   }
 
   void _coverChanged() {
@@ -57,9 +59,21 @@ class _AudioArtworkState extends State<AudioArtwork> {
     if (mounted && previous != _requestKey) setState(() {});
   }
 
+  void _networkProxyChanged() {
+    if (!mounted ||
+        !widget.audio.canFetchRemoteArtwork ||
+        widget.audio.artworkUrl?.isNotEmpty != true) {
+      return;
+    }
+    final previous = _requestKey;
+    _resolve();
+    if (previous != _requestKey) setState(() {});
+  }
+
   @override
   void dispose() {
     CoverCache.instance.changes.removeListener(_coverChanged);
+    AppSettings.instance.networkProxy.removeListener(_networkProxyChanged);
     super.dispose();
   }
 
@@ -87,6 +101,7 @@ class _AudioArtworkState extends State<AudioArtwork> {
       audio.modified,
       audio.coverFingerprint,
       audio.artworkUrl,
+      audio.isOnline ? AppSettings.instance.networkProxy.value : null,
       CoverCache.instance.generationFor(audio.localFilePath),
       AudioLibrary.revision,
       widget.revision,

@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/artwork_backdrop.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -96,6 +98,61 @@ void main() {
     ]) {
       await (FontLoader(font.$1)..addFont(rootBundle.load(font.$2))).load();
     }
+  });
+
+  testWidgets('proxy correction retries visible online art only',
+      (tester) async {
+    final settings = AppSettings.instance;
+    final original = settings.networkProxy.value;
+    settings.networkProxy.value =
+        const NetworkProxyPreferences(mode: NetworkProxyMode.direct);
+    addTearDown(() => settings.networkProxy.value = original);
+    final online = Audio.online(
+      provider: 'qq',
+      id: 'proxy-retry',
+      title: 'Online',
+      artist: 'Artist',
+      album: 'Album',
+      duration: 30,
+      artworkUrl: 'https://example.com/cover.png',
+    );
+    final local = Audio('Local', 'Artist', 'Album', 0, 30, null, null,
+        r'C:\test\local.mp3', 0, 0, null);
+    var onlineLoads = 0;
+    var localLoads = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Row(children: [
+        AudioArtwork(
+          audio: online,
+          size: 100,
+          loadArtwork: (_, __) async {
+            onlineLoads++;
+            return null;
+          },
+          placeholder: const Text('online missing'),
+        ),
+        AudioArtwork(
+          audio: local,
+          size: 100,
+          loadArtwork: (_, __) async {
+            localLoads++;
+            return null;
+          },
+          placeholder: const Text('local missing'),
+        ),
+      ]),
+    ));
+    await tester.pump();
+    expect(onlineLoads, 1);
+    expect(localLoads, 1);
+    expect(find.text('online missing'), findsOneWidget);
+
+    settings.networkProxy.value =
+        const NetworkProxyPreferences(mode: NetworkProxyMode.system);
+    await tester.pump();
+    expect(onlineLoads, 2);
+    expect(localLoads, 1);
+    expect(tester.takeException(), isNull);
   });
   testWidgets(
       'production foreground and backdrop preserve waiting frames then fade',

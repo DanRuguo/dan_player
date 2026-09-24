@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
+import 'package:dan_player/lyric/online_lyric_cache.dart';
 import 'package:dan_player/play_service/desktop_lyric_service.dart';
 import 'package:dan_player/play_service/lyric_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -89,7 +91,11 @@ class _Desktop extends Fake implements DesktopLyricService {
 }
 
 class _Harness {
-  _Harness({LyricDocumentStore? documents}) {
+  _Harness({
+    LyricDocumentStore? documents,
+    OnlineLyricCache? onlineCache,
+    Future<Lyric?> Function(Audio, bool Function())? onlineLookup,
+  }) {
     facade = PlayService.forTesting(
       readiness: ready,
       createPlayback: (_) {
@@ -101,7 +107,9 @@ class _Harness {
         return desktop;
       },
       createLyric: (owner) => LyricService.forTesting(owner,
-          documents: documents, resolveDefaultLyric: (localFirst) {
+          documents: documents,
+          onlineCache: onlineCache,
+          onlineLookup: onlineLookup, resolveDefaultLyric: (localFirst) {
         requests++;
         return resolve(localFirst);
       }),
@@ -187,6 +195,66 @@ void main() {
     expect(
         (rig.service.rawCurrentLyric!.lines.single as UnsyncLyricLine).content,
         'New session');
+  });
+
+  test('late manual search cannot cache over a newer same-track choice',
+      () async {
+    final directory =
+        await Directory.systemTemp.createTemp('dan-lyric-stale-cache-');
+    addTearDown(() => directory.delete(recursive: true));
+    final cache = OnlineLyricCache(directory: () async => directory);
+    final started = Completer<void>();
+    final pending = Completer<Lyric?>();
+    await rig.cleanUp();
+    rig = _Harness(
+      onlineCache: cache,
+      onlineLookup: (_, __) {
+        started.complete();
+        return pending.future;
+      },
+    );
+
+    rig.service.useOnlineLyric();
+    final stale = rig.service.currLyricFuture;
+    await started.future;
+    final selected = _sampleLyric();
+    rig.service.useSpecificLyric(selected);
+    pending.complete(Lrc.fromLrcText('[00:01.00]Stale', LrcSource.web));
+    expect(await stale, isNull);
+    await _flush();
+
+    expect(await rig.service.currLyricFuture, same(selected));
+    expect(
+        await cache.read(onlineLyricCacheIdentity(rig.playback.audio)), isNull);
+  });
+
+  test('turning automatic lookup off prevents a late cache commit', () async {
+    final directory =
+        await Directory.systemTemp.createTemp('dan-lyric-auto-cache-');
+    addTearDown(() => directory.delete(recursive: true));
+    final cache = OnlineLyricCache(directory: () async => directory);
+    final started = Completer<void>();
+    final pending = Completer<Lyric?>();
+    await rig.cleanUp();
+    AppSettings.instance.automaticOnlineLyrics.value = true;
+    addTearDown(() => AppSettings.instance.automaticOnlineLyrics.value = false);
+    rig = _Harness(
+      onlineCache: cache,
+      onlineLookup: (_, __) {
+        started.complete();
+        return pending.future;
+      },
+    );
+
+    rig.service.updateLyric();
+    final lookup = rig.service.currLyricFuture;
+    await started.future;
+    AppSettings.instance.automaticOnlineLyrics.value = false;
+    pending.complete(Lrc.fromLrcText('[00:01.00]Late', LrcSource.web));
+
+    expect(await lookup, isNull);
+    expect(
+        await cache.read(onlineLyricCacheIdentity(rig.playback.audio)), isNull);
   });
 
   test('locked and no-lyric documents avoid repeated online resolution',

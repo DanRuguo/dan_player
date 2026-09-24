@@ -71,6 +71,27 @@ void main() {
     expect(records.first.instrumental, isTrue);
   });
 
+  test('malformed search rows differ from valid records with no lyrics', () {
+    expect(parseLrclibSearchPayload(const []), isEmpty);
+    expect(
+      parseLrclibSearchPayload(const [
+        {
+          'id': 3,
+          'trackName': 'No lyrics yet',
+          'instrumental': false,
+        },
+      ]),
+      isEmpty,
+    );
+    expect(
+      () => parseLrclibSearchPayload(const [
+        {'id': 3},
+        {'trackName': 'Missing id'},
+      ]),
+      throwsA(isA<LrclibException>()),
+    );
+  });
+
   test('429 is surfaced as a bounded-retry transport error', () async {
     final client = _Client(_Response(const [], status: 429));
     await expectLater(
@@ -79,6 +100,39 @@ void main() {
       throwsA(isA<LrclibException>()
           .having((error) => error.retryable, 'retryable', isTrue)
           .having((error) => error.statusCode, 'statusCode', 429)),
+    );
+  });
+
+  test('slow trickle has one deadline for the whole response', () async {
+    late _Client client;
+    client = _Client(_Response.stream(
+      Stream.periodic(const Duration(milliseconds: 5), (_) => [0x20])
+          .takeWhile((_) => !client.closed),
+    ));
+    final transport = LrclibLyricsTransport(
+      httpClientFactory: () => client,
+      requestTimeout: const Duration(milliseconds: 45),
+    );
+
+    await expectLater(
+      transport.search(trackName: 'slow response'),
+      throwsA(isA<TimeoutException>()),
+    );
+    expect(client.closed, isTrue);
+  });
+
+  test('404 differs from a malformed successful record', () async {
+    final missing = LrclibLyricsTransport(
+      httpClientFactory: () => _Client(_Response(const [], status: 404)),
+    );
+    expect(await missing.getById(1), isNull);
+
+    final malformed = LrclibLyricsTransport(
+      httpClientFactory: () => _Client(_Response.json({'id': 1})),
+    );
+    await expectLater(
+      malformed.getById(1),
+      throwsA(isA<LrclibException>()),
     );
   });
 }
@@ -140,6 +194,11 @@ class _Response extends Stream<List<int>> implements HttpClientResponse {
       : contentLength = bytes.length,
         statusCode = status,
         _stream = Stream.value(bytes);
+
+  _Response.stream(Stream<List<int>> stream)
+      : contentLength = -1,
+        statusCode = 200,
+        _stream = stream;
 
   factory _Response.json(Object data) =>
       _Response(utf8.encode(jsonEncode(data)));

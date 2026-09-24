@@ -855,9 +855,17 @@ class Audio {
               expectedProfile: customProfile,
             ),
             size,
+            revision: AppSettings.instance.networkProxy.value,
           );
         }
-        return ArtworkImageProvider(NetworkImage(sizedUri.toString()), size);
+        return ArtworkImageProvider(
+          BoundedOnlineArtworkImageProvider(
+            sizedUri.toString(),
+            provider: onlineProvider,
+          ),
+          size,
+          revision: AppSettings.instance.networkProxy.value,
+        );
       }
     }
     if (isOnline) return null;

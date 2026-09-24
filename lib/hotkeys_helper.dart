@@ -179,7 +179,11 @@ class HotkeysHelper {
             playback.nextAudio();
           case PlayerCommand.seekBack:
           case PlayerCommand.seekForward:
-            if (playback.isBuffering.value || playback.length <= 0) return;
+            if (playback.isBuffering.value ||
+                !playback.canEditQueue ||
+                playback.length <= 0) {
+              return;
+            }
             final change = command == PlayerCommand.seekBack ? -5.0 : 5.0;
             final position = playback.position;
             if (!position.isFinite) return;

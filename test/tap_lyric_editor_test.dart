@@ -5,10 +5,12 @@ import 'package:dan_player/component/app_control_theme.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric_preview.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
+import 'package:dan_player/lyric/qrc.dart';
 import 'package:dan_player/lyric/tap_lyric_session.dart';
 import 'package:dan_player/lyric/lyric_edit_codec.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -93,6 +95,7 @@ void main() {
   Future<void> pumpEditor(WidgetTester tester, TapLyricSession session,
       {LyricAudioPreview? preview,
       Future<bool> Function(Lyric)? saveLyric,
+      Future<Lyric?> Function()? fetchOnline,
       GlobalKey? boundary,
       ValueNotifier<RenderingPreferences>? rendering}) async {
     await tester.pumpWidget(RepaintBoundary(
@@ -118,7 +121,7 @@ void main() {
                                     launch: (_, __, ___, ____) async =>
                                         ProcessFake()),
                             ensureTools: () async => true,
-                            fetchOnline: () async => null,
+                            fetchOnline: fetchOnline ?? () async => null,
                             saveLyric: saveLyric ?? (_) async => false)))))));
     await tester.pumpAndSettle();
   }
@@ -142,6 +145,48 @@ void main() {
     await tester.tap(find.text('仅保存正文'));
     await tester.pumpAndSettle();
     expect(saved?.text, '你好\n世界');
+  });
+
+  testWidgets('empty online result keeps the text being edited',
+      (tester) async {
+    final session = TapLyricSession()..text = '正在编辑的正文';
+    await pumpEditor(tester, session,
+        fetchOnline: () async => Qrc(
+            [QrcLine(Duration.zero, const Duration(seconds: 1), [], '只有翻译')]));
+    await tester.ensureVisible(find.text('联网填入纯文本'));
+    await tester.tap(find.text('联网填入纯文本'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('tap-text')))
+            .controller!
+            .text,
+        '正在编辑的正文');
+    expect(find.text('联网歌词没有可用正文，请重新选择。'), findsOneWidget);
+    expect(find.text('替换编辑中的内容？'), findsNothing);
+  });
+
+  testWidgets('clock updates redraw transport without rebuilding the editor',
+      (tester) async {
+    final session = fixture(TapStage.words);
+    late void Function(double) clock;
+    final preview = LyricAudioPreview(song,
+        mainPlayback: () => null,
+        launch: (_, __, ___, onPosition) async {
+          clock = onPosition;
+          return ProcessFake();
+        });
+    await pumpEditor(tester, session, preview: preview);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    final content =
+        tester.widget<AppContentTransition>(find.byType(AppContentTransition));
+    clock(1.5);
+    await tester.pump();
+    expect(
+        tester.widget<AppContentTransition>(find.byType(AppContentTransition)),
+        same(content));
+    expect(find.text('00:01.500 / 00:08.000'), findsOneWidget);
   });
 
   for (final lang in UiLanguage.values) {

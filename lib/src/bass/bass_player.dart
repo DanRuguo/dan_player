@@ -3,6 +3,7 @@ import 'spectrum_analysis.dart';
 // ignore_for_file: constant_identifier_names
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
@@ -10,6 +11,8 @@ import 'package:dan_player/play_service/playback_rate.dart';
 import 'package:dan_player/play_service/playback_diagnostics.dart';
 import 'package:dan_player/src/bass/bass_diagnostics.dart';
 import 'package:dan_player/play_service/replay_gain.dart';
+import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/src/bass/bass_replay_gain.dart';
 import 'package:dan_player/src/bass/bass_mix.dart';
 import 'package:dan_player/src/bass/bass_tempo.dart';
@@ -46,6 +49,39 @@ enum PlayerState {
 
   unknown,
 }
+
+enum BassNetworkConfigurationFailure { proxy, timeout }
+
+/// A native setup failure that can be localized after the URL worker returns.
+class BassNetworkConfigurationException implements Exception {
+  const BassNetworkConfigurationException(this.failure, this.errorCode);
+
+  final BassNetworkConfigurationFailure failure;
+  final int errorCode;
+
+  @override
+  String toString() =>
+      'BassNetworkConfigurationException(${failure.name}, BASS error $errorCode)';
+}
+
+String bassNetworkConfigurationNotice(
+        BassNetworkConfigurationException error) =>
+    switch (error.failure) {
+      BassNetworkConfigurationFailure.proxy =>
+        ui('无法设置联网音频代理（BASS 错误码 {0}）。', [error.errorCode]),
+      BassNetworkConfigurationFailure.timeout =>
+        ui('无法设置联网音频超时（BASS 错误码 {0}）。', [error.errorCode]),
+    };
+
+String bassOutputModeFailureNotice(Object error, {required bool restored}) =>
+    ui(
+      restored ? '输出模式切换失败，已恢复原模式：{0}' : '切换音频输出失败，原模式保持不变：{0}',
+      [
+        error is BassNetworkConfigurationException
+            ? bassNetworkConfigurationNotice(error)
+            : error
+      ],
+    );
 
 class BassPlaybackEvent {
   const BassPlaybackEvent(this.stamp, this.state, {this.reason, this.problem});
@@ -179,9 +215,10 @@ Future<_BassOpenResult> _openBassUrlInBackground(
   int flags,
   int device,
   int requestId,
+  String? proxy,
 ) {
   return Isolate.run(
-    () => _openBassUrl(libraryPath, url, flags, device, requestId),
+    () => _openBassUrl(libraryPath, url, flags, device, requestId, proxy),
     debugName: 'bass-url-open',
   );
 }
@@ -192,9 +229,11 @@ _BassOpenResult _openBassUrl(
   int flags,
   int device,
   int requestId,
+  String? proxy,
 ) {
   final library = ffi.DynamicLibrary.open(libraryPath);
   ffi.Pointer<ffi.Void>? urlPointer;
+  ffi.Pointer<ffi.Void>? proxyPointer;
   int Function(int, int)? setConfig;
   const configThread = 0x40000000;
   const netTimeout = 11;
@@ -208,6 +247,12 @@ _BassOpenResult _openBassUrl(
     setConfig = library.lookupFunction<
         ffi.Int32 Function(ffi.Uint32, ffi.Uint32),
         int Function(int, int)>('BASS_SetConfig');
+    final setConfigPtr = library.lookupFunction<
+        ffi.Int32 Function(ffi.Uint32, ffi.Pointer<ffi.Void>),
+        int Function(int, ffi.Pointer<ffi.Void>)>('BASS_SetConfigPtr');
+    final getConfigPtr = library.lookupFunction<
+        ffi.Pointer<ffi.Void> Function(ffi.Uint32),
+        ffi.Pointer<ffi.Void> Function(int)>('BASS_GetConfigPtr');
     final createUrl = library.lookupFunction<
         ffi.Uint32 Function(
           ffi.Pointer<ffi.Void>,
@@ -224,9 +269,22 @@ _BassOpenResult _openBassUrl(
           ffi.Pointer<ffi.Void>,
         )>('BASS_StreamCreateURL');
     urlPointer = url.toNativeUtf16().cast<ffi.Void>();
+    proxyPointer = proxy?.toNativeUtf16().cast<ffi.Void>();
+    // BASS_CONFIG_NET_PROXY: null = direct, empty = Windows default proxy,
+    // server:port = custom. BASS copies the string for later stream use.
+    final proxySet =
+        setConfigPtr(17 | BASS.BASS_UNICODE, proxyPointer ?? ffi.nullptr);
+    // BASS 2.4.18 clears the proxy when given null but can return FALSE/20.
+    // Confirm the resulting value before treating direct mode as a failure.
+    if (proxySet == BASS.FALSE &&
+        !(proxy == null && getConfigPtr(17) == ffi.nullptr)) {
+      throw BassNetworkConfigurationException(
+          BassNetworkConfigurationFailure.proxy, getError());
+    }
     if (setConfig(netTimeout | configThread, 8000) == BASS.FALSE ||
         setConfig(netReadTimeout | configThread, 12000) == BASS.FALSE) {
-      throw StateError('无法设置联网音频超时（BASS 错误码 ${getError()}）');
+      throw BassNetworkConfigurationException(
+          BassNetworkConfigurationFailure.timeout, getError());
     }
 
     // BASS's selected device and error code are thread-local. These calls stay
@@ -253,6 +311,7 @@ _BassOpenResult _openBassUrl(
     );
   } finally {
     if (urlPointer != null) ffi.malloc.free(urlPointer);
+    if (proxyPointer != null) ffi.malloc.free(proxyPointer);
     // A VM worker thread may later run another isolate; do not leave per-thread
     // BASS settings behind. The active stream retains its read timeout.
     setConfig?.call(netTimeout | configThread, 0);
@@ -357,6 +416,56 @@ class BassFileOpenGate {
   }
 }
 
+/// Serializes the process-wide BASS proxy setting with URL stream creation.
+/// FIFO preserves progress when more than one BassPlayer is active; stale
+/// generations are removed without starting another native worker.
+class BassUrlOpenGate {
+  bool _active = false;
+  final Queue<({bool Function() mayStart, Completer<bool> ready})> _waiting =
+      Queue();
+
+  Future<bool> acquire(bool Function() mayStart) {
+    if (!mayStart()) return Future.value(false);
+    if (!_active && _waiting.isEmpty) {
+      _active = true;
+      return Future.value(true);
+    }
+    final ready = Completer<bool>();
+    _waiting.add((mayStart: mayStart, ready: ready));
+    return ready.future;
+  }
+
+  void release() {
+    assert(_active);
+    if (!_active) return;
+    _active = false;
+    while (_waiting.isNotEmpty) {
+      final next = _waiting.removeFirst();
+      if (!next.mayStart()) {
+        next.ready.complete(false);
+        continue;
+      }
+      _active = true;
+      next.ready.complete(true);
+      return;
+    }
+  }
+
+  void cancelStaleWaiters() {
+    final retained =
+        Queue<({bool Function() mayStart, Completer<bool> ready})>();
+    while (_waiting.isNotEmpty) {
+      final next = _waiting.removeFirst();
+      if (next.mayStart()) {
+        retained.add(next);
+      } else {
+        next.ready.complete(false);
+      }
+    }
+    _waiting.addAll(retained);
+  }
+}
+
 class BassPlayer {
   static const int _bassAttribFreq = 1;
   static const int _bassDataFft4096 = 0x80000004;
@@ -391,6 +500,7 @@ class BassPlayer {
   AudioSegment? _segment;
   double? _segmentLength;
   int? _fstream;
+  bool get hasSource => !_freed && _fstream != null;
   double _userVolumeDsp = 1;
   double _volumeDspBase = 1;
   ReplayGainPreferences _replayGain = const ReplayGainPreferences();
@@ -530,6 +640,9 @@ class BassPlayer {
   final Set<_PendingBassUrlOpen> _pendingUrlOpens = {};
   final Set<_PendingBassFileOpen> _pendingFileOpens = {};
   final BassFileOpenGate _fileOpenGate = BassFileOpenGate();
+  // BASS_CONFIG_NET_PROXY is process-wide. Keep proxy selection and native URL
+  // creation together, including across separate BassPlayer instances.
+  static final BassUrlOpenGate _urlOpenGate = BassUrlOpenGate();
 
   /// audio's length in seconds
   double get length => _fstream == null
@@ -1213,7 +1326,7 @@ class BassPlayer {
           // during that await must win over the pre-failure playback snapshot.
           if (transport.resolve(wasPlaying)) _resumeCurrentOutput();
           _publishState(playerState);
-          showAppNotice(ui('输出模式切换失败，已恢复原模式：{0}', [err]),
+          showAppNotice(bassOutputModeFailureNotice(err, restored: true),
               kind: AppNoticeKind.error);
         } catch (restoreError, restoreTrace) {
           if (!_isCurrentSource(generation)) return false;
@@ -1224,7 +1337,7 @@ class BassPlayer {
           _publishState(playerState);
         }
       } else {
-        showAppNotice(ui('切换音频输出失败，原模式保持不变：{0}', [err]),
+        showAppNotice(bassOutputModeFailureNotice(err, restored: false),
             kind: AppNoticeKind.error);
       }
       _publishState(playerState,
@@ -1245,6 +1358,7 @@ class BassPlayer {
   /// phase, rather than waiting until that newer URL has been resolved.
   void cancelPendingSource() {
     _sourceGeneration += 1;
+    _urlOpenGate.cancelStaleWaiters();
     // Discard events already queued by the previous explicit source request.
     // The retained stream may keep playing while another file opens, using a
     // fresh observation stamp; opening cancellation remains independently
@@ -1319,12 +1433,16 @@ class BassPlayer {
     _PendingBassUrlOpen? pending;
     _PendingBassFileOpen? pendingFile;
     var fileSlotAcquired = false;
+    var urlSlotAcquired = false;
     try {
       if (isUrl) {
         if (_bassStreamCancel == null) {
           throw const FormatException(
               'BASS 运行库过旧，无法安全取消联网请求，请更新到 2.4.18 或更高版本');
         }
+        urlSlotAcquired =
+            await _urlOpenGate.acquire(() => _isCurrentSource(generation));
+        if (!urlSlotAcquired || !_isCurrentSource(generation)) return false;
         var device = _bassGetDevice();
         if (device == _bassErrorValue) {
           _bassInit();
@@ -1339,13 +1457,24 @@ class BassPlayer {
         // accidental identity reuse while a former stream is still alive.
         pending = _PendingBassUrlOpen(_nextNetworkRequestId++);
         _pendingUrlOpens.add(pending);
-        final result = await _openBassUrlInBackground(
-          _bassLibraryPath,
-          source,
-          flags,
-          device,
-          pending.requestId,
-        );
+        late final _BassOpenResult result;
+        try {
+          // Read the live choice after leaving the queue, not when the old
+          // stream first began opening.
+          final proxy = bassProxyForUrl(
+              Uri.parse(source), AppSettings.instance.networkProxy.value);
+          result = await _openBassUrlInBackground(
+            _bassLibraryPath,
+            source,
+            flags,
+            device,
+            pending.requestId,
+            proxy,
+          );
+        } finally {
+          _urlOpenGate.release();
+          urlSlotAcquired = false;
+        }
         uncommittedHandle = result.handle;
         if (!_isCurrentSource(generation)) return false;
         if (uncommittedHandle == 0) {
@@ -1479,6 +1608,7 @@ class BassPlayer {
           pendingFile.complete();
         }
         if (fileSlotAcquired) _fileOpenGate.release();
+        if (urlSlotAcquired) _urlOpenGate.release();
       }
     }
   }

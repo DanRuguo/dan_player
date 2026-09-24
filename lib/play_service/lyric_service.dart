@@ -52,22 +52,37 @@ Future<Lyric?> resolveMissingLyricOnline({
 class LyricService extends ChangeNotifier {
   final PlayService playService;
   final Future<Lyric?> Function(bool localFirst)? _resolveDefaultForTesting;
+  final OnlineLyricCache? _onlineCacheForTesting;
+  final Future<Lyric?> Function(Audio, bool Function())?
+      _onlineLookupForTesting;
   final LyricDocumentStore? documents;
   bool _disposed = false;
 
   LyricService(PlayService playService)
-      : this._(playService, null, LyricDocumentStore.instance);
+      : this._(playService, null, LyricDocumentStore.instance, null, null);
 
   @visibleForTesting
   LyricService.forTesting(
     PlayService playService, {
     required Future<Lyric?> Function(bool localFirst) resolveDefaultLyric,
     LyricDocumentStore? documents,
-  }) : this._(playService, resolveDefaultLyric, documents);
+    OnlineLyricCache? onlineCache,
+    Future<Lyric?> Function(Audio, bool Function())? onlineLookup,
+  }) : this._(
+          playService,
+          resolveDefaultLyric,
+          documents,
+          onlineCache,
+          onlineLookup,
+        );
 
   late final StreamSubscription<double> _positionStreamSubscription;
   LyricService._(
-      this.playService, this._resolveDefaultForTesting, this.documents) {
+      this.playService,
+      this._resolveDefaultForTesting,
+      this.documents,
+      this._onlineCacheForTesting,
+      this._onlineLookupForTesting) {
     documents?.addListener(_handleDocumentChange);
     AppSettings.instance.automaticOnlineLyrics
         .addListener(_handleAutomaticOnlineChange);
@@ -139,7 +154,9 @@ class LyricService extends ChangeNotifier {
             value is Lrc &&
             value.source == LrcSource.local) {
           LyricSearchIndex.instance.rememberLoadedLocal(audio, value);
-          cacheLocalLyric(audio, value).ignore();
+          cacheLocalLyric(audio, value,
+                  shouldStore: () => _isCurrent(token) && _isPlaying(audio))
+              .ignore();
         }
       }
       return value == null || offsetMs == 0
@@ -284,9 +301,11 @@ class LyricService extends ChangeNotifier {
   }) async {
     bool current() => _isPlaying(audio) && (stillCurrent?.call() ?? true);
     if (!current()) return null;
-    return OnlineLyricCache.instance
+    return (_onlineCacheForTesting ?? OnlineLyricCache.instance)
         .resolve(onlineLyricCacheIdentity(audio, source: source), () async {
       if (!current()) return null;
+      final testingLookup = _onlineLookupForTesting;
+      if (testingLookup != null) return testingLookup(audio, current);
       if (source != null) {
         return getOnlineLyric(
           qqSongId: source.qqSongId,
@@ -297,7 +316,7 @@ class LyricService extends ChangeNotifier {
         );
       }
       return getMostMatchedLyric(audio, stillCurrent: current);
-    }, refresh: refresh);
+    }, refresh: refresh, shouldStore: current);
   }
 
   Future<Lyric?> _getLyricDefault(bool localFirst) async {
@@ -430,8 +449,13 @@ class LyricService extends ChangeNotifier {
     final nowPlaying = _getNowPlaying();
     if (nowPlaying == null) return;
 
-    // This is an explicit re-search, unlike the automatic playback lookup.
-    final raw = _searchOnline(nowPlaying);
+    // Begin the search after _useExplicitFuture has installed its generation.
+    // A later choice on the same track must not commit this result to cache.
+    final token = _lyricToken + 1;
+    final raw = Future<Lyric?>.value().then((_) => _searchOnline(
+          nowPlaying,
+          stillCurrent: () => _isCurrent(token),
+        ));
     _useExplicitFuture(nowPlaying, raw);
   }
 

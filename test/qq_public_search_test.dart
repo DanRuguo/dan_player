@@ -102,6 +102,24 @@ void main() {
     expect(songs.single.title, 'Song');
     expect(songs.single.artists, 'Singer');
   });
+
+  test('nonempty rows without a usable song are a schema error', () {
+    Map<String, Object?> payload(List<Object?> rows) => {
+          'code': 0,
+          'data': {
+            'song': {'list': rows},
+          },
+        };
+
+    expect(parseQqPublicSearchPayload(payload(const [])), isEmpty);
+    expect(
+      () => parseQqPublicSearchPayload(payload(const [
+        {'songname': 'Missing mid'},
+        {'songmid': 'MID', 'songname': null},
+      ])),
+      throwsA(isA<QqPublicSearchException>()),
+    );
+  });
 }
 
 class _Client implements HttpClient {

@@ -48,6 +48,44 @@ void main() {
     expect(row.translation, '译|文');
     expect(row.romanization, '注 | 音');
   });
+  test('online flattening rejects lyrics the tap text form cannot represent',
+      () {
+    Qrc single(String value) => Qrc([
+          QrcLine(Duration.zero, const Duration(seconds: 1),
+              [QrcWord(Duration.zero, const Duration(seconds: 1), value)])
+        ]);
+    final lastSupported = tapTextFromLyric(single(
+        List.generate(32, (spaces) => 'A${' ' * spaces}|${' ' * spaces}B')
+            .join(' / ')));
+    expect(lastSupported.spaces, 32);
+    expect(parseTapText(lastSupported.text, lastSupported.spaces).single.text,
+        lastSupported.text);
+    final heavilyPadded = tapTextFromLyric(single('A${' ' * 32}|${' ' * 32}B'));
+    expect(heavilyPadded.spaces, 1);
+    expect(parseTapText(heavilyPadded.text, heavilyPadded.spaces).single.text,
+        heavilyPadded.text);
+    expect(
+        () => tapTextFromLyric(single(
+            List.generate(33, (spaces) => 'A${' ' * spaces}|${' ' * spaces}B')
+                .join(' / '))),
+        throwsA(isA<FormatException>()
+            .having((error) => error.message, 'message', contains('分隔符冲突'))));
+    expect(
+        () => tapTextFromLyric(single('A\nB')),
+        throwsA(isA<FormatException>()
+            .having((error) => error.message, 'message', contains('换行内容'))));
+  });
+  test('asymmetric pipe padding remains literal at the chosen exact level', () {
+    for (final content in ['a |  b', 'a  | b']) {
+      final lyric = Qrc([
+        QrcLine(Duration.zero, const Duration(seconds: 1),
+            [QrcWord(Duration.zero, const Duration(seconds: 1), content)])
+      ]);
+      final result = tapTextFromLyric(lyric);
+      expect(result.spaces, 1);
+      expect(parseTapText(result.text, result.spaces).single.text, content);
+    }
+  });
   test(
       'CJK graphemes and western words preserve all characters and punctuation',
       () {
@@ -63,6 +101,10 @@ void main() {
     expect(tapTokens('你好 world!'), ['你', '好 ', 'world!']);
     expect(tapTokens("don't go"), ["don't ", 'go']);
     expect(tapTokens('e\u0301lan'), ['e\u0301lan']);
+    final row = TapRow('你好 world!');
+    expect(identical(row.tokens, row.tokens), isTrue,
+        reason: 'clock updates reuse immutable tokens for the current line');
+    expect(() => row.tokens.add('changed'), throwsUnsupportedError);
   });
   test(
       'line review bounds and next pre-roll are based on confirmed previous end',

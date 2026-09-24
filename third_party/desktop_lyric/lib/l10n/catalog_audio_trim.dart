@@ -6,11 +6,11 @@ const catalogAudioTrim = <String, List<String>>{
     '먼저 자르기 구성 요소를 설치하거나 복구하세요.'
   ],
   '安装裁剪组件': ['Set up trimming', 'トリミングの準備', '자르기 설정'],
-  '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用 Windows 系统代理。':
+  '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用播放器的网络代理设置。':
       [
-    'Trimming requires FFmpeg, FFprobe and FFplay. A complete working toolset was not found. Download the approximately 70 MB component from GitHub using the Windows system proxy.',
-    'FFmpeg、FFprobe、FFplay が必要です。利用可能なツール一式が見つかりません。Windows のシステムプロキシを使用して GitHub から約 70 MB をダウンロードできます。',
-    'FFmpeg, FFprobe, FFplay가 필요합니다. 사용 가능한 도구 모음을 찾지 못했습니다. Windows 시스템 프록시를 사용하여 GitHub에서 약 70 MB를 다운로드할 수 있습니다.'
+    'Trimming requires FFmpeg, FFprobe and FFplay. A complete working toolset was not found. Download the approximately 70 MB component from GitHub using the player’s network proxy setting.',
+    'FFmpeg、FFprobe、FFplay が必要です。利用可能なツール一式が見つかりません。プレーヤーのネットワークプロキシ設定を使用して GitHub から約 70 MB をダウンロードできます。',
+    'FFmpeg, FFprobe, FFplay가 필요합니다. 사용 가능한 도구 모음을 찾지 못했습니다. 플레이어의 네트워크 프록시 설정으로 GitHub에서 약 70 MB를 다운로드할 수 있습니다.'
   ],
   '也可以从官网下载 Windows 完整编译包，将 bin 目录中的程序及 DLL 放到以下目录，然后点击“我已安装好”。': [
     'Alternatively, get a complete Windows build from the official download page. Copy the programs and DLLs from its bin folder to the folder below, then select “I have installed it”.',

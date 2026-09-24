@@ -71,6 +71,8 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("backup", "performance", "性能快捷设置", []),
   SettingsSearchEntry(
       "about", "updates", "检查更新", ["自动检查更新（每天最多一次）", "接收预览版更新"]),
+  SettingsSearchEntry("about", "network-proxy", "网络代理",
+      ["系统代理", "自定义 HTTP 代理", "测试 GitHub 连接"]),
   SettingsSearchEntry("about", "uninstall", "应用管理", ["卸载 Dan Player"]),
   SettingsSearchEntry("about", "issues", "报告问题", []),
   SettingsSearchEntry("about", "about", "关于", []),

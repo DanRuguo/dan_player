@@ -94,11 +94,31 @@ Future<TrimPreviewProcess> launchLyricPreview(
 
 /// Preview owns a decoder process, not a playlist entry or a lyric source. The
 /// normal player is resumed only if the user has not changed it meanwhile.
+typedef LyricPreviewDurationProbe = Future<double?> Function(Audio audio);
+
+Future<double?> _probeLyricPreviewDuration(Audio audio) async {
+  final executable = await audioToolPath('ffprobe');
+  final output = await probeFfmpeg(executable, [
+    '-v',
+    'error',
+    '-protocol_whitelist',
+    'file,pipe',
+    '-show_entries',
+    'format=duration',
+    '-of',
+    'default=noprint_wrappers=1:nokey=1',
+    audio.localFilePath
+  ]);
+  return double.tryParse(output.trim());
+}
+
 class LyricAudioPreview extends ChangeNotifier {
   LyricAudioPreview(this.audio,
       {LyricPreviewLauncher? launch,
+      LyricPreviewDurationProbe? probeDuration,
       TrimMainPlayback? Function()? mainPlayback})
       : _launch = launch ?? launchLyricPreview,
+        _durationProbe = probeDuration ?? _probeLyricPreviewDuration,
         _mainFactory = mainPlayback ?? existingPreviewMainPlayback {
     _decoder = ProcessAudioTrimPreview(audio,
         mainPlayback: () => null,
@@ -125,6 +145,7 @@ class LyricAudioPreview extends ChangeNotifier {
   }
   final Audio audio;
   final LyricPreviewLauncher _launch;
+  final LyricPreviewDurationProbe _durationProbe;
   final TrimMainPlayback? Function() _mainFactory;
   late final ProcessAudioTrimPreview _decoder;
   final _positions = StreamController<double>.broadcast(sync: true);
@@ -134,6 +155,7 @@ class LyricAudioPreview extends ChangeNotifier {
   bool _clockReady = false;
   bool get clockReady => _clockReady;
   double? _fileDuration;
+  Future<void>? _prepareTask;
   double get duration => audio.cueTrack?.endSeconds != null
       ? audio.cueTrack!.endSeconds! - _cueStart
       : _fileDuration == null
@@ -177,21 +199,13 @@ class LyricAudioPreview extends ChangeNotifier {
     main.addListener(_mainChanged);
   }
 
-  Future<void> prepare() async {
+  Future<void> prepare() => _prepareTask ??= _probe().whenComplete(() {
+        if (_fileDuration == null) _prepareTask = null;
+      });
+
+  Future<void> _probe() async {
     try {
-      final executable = await audioToolPath('ffprobe');
-      final output = await probeFfmpeg(executable, [
-        '-v',
-        'error',
-        '-protocol_whitelist',
-        'file,pipe',
-        '-show_entries',
-        'format=duration',
-        '-of',
-        'default=noprint_wrappers=1:nokey=1',
-        audio.localFilePath
-      ]);
-      final value = double.tryParse(output.trim());
+      final value = await _durationProbe(audio);
       if (!_disposed && value != null && value.isFinite && value > 0) {
         _fileDuration = value;
       }
@@ -224,6 +238,16 @@ class LyricAudioPreview extends ChangeNotifier {
   Future<void> pause() async {
     ++_generation;
     await _decoder.stop();
+  }
+
+  Future<void> seekPaused(double value) async {
+    if (_disposed || !value.isFinite) return;
+    await pause();
+    if (_disposed) return;
+    _position = value.clamp(0.0, duration);
+    _rangeStart = _position;
+    _rangeEnd = duration;
+    _positions.add(_position);
   }
 
   Future<void> close() => _closing ??= _close();

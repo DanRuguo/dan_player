@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/artwork_backdrop.dart';
 import 'package:dan_player/component/audio_artwork.dart';
 import 'package:dan_player/component/playlist_cover.dart';
@@ -9,6 +10,7 @@ import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -101,6 +103,85 @@ void main() {
       expect((small! as ArtworkImageProvider).size, const ArtworkSize(48, 48));
       expect(
           (large! as ArtworkImageProvider).size, const ArtworkSize(1024, 1024));
+    });
+
+    test('built-in artwork uses bounded source with stable sized cache keys',
+        () async {
+      const qqUrl = 'http://y.qq.com/music/photo_new/'
+          'T002R300x300M000000MkMni19ClKG.jpg';
+      final qq = Audio.online(
+        provider: 'qq',
+        id: 'qq-cover',
+        title: 'Test',
+        artist: 'Artist',
+        album: 'Album',
+        duration: 30,
+        artworkUrl: qqUrl,
+      );
+      final small = (await qq.artworkForSize(const ArtworkSize(96, 96)))!
+          as ArtworkImageProvider;
+      final large = (await qq.artworkForSize(const ArtworkSize(512, 512)))!
+          as ArtworkImageProvider;
+      final repeat = (await qq.artworkForSize(const ArtworkSize(96, 96)))!
+          as ArtworkImageProvider;
+      final smallSource = small.source as BoundedOnlineArtworkImageProvider;
+      final largeSource = large.source as BoundedOnlineArtworkImageProvider;
+      expect(smallSource.address, qqUrl);
+      expect(smallSource.provider, 'qq');
+      expect(largeSource.address, qqUrl.replaceFirst('R300x300', 'R800x800'));
+      expect(await small.obtainKey(ImageConfiguration.empty),
+          await repeat.obtainKey(ImageConfiguration.empty));
+      expect(await small.obtainKey(ImageConfiguration.empty),
+          isNot(await large.obtainKey(ImageConfiguration.empty)));
+
+      const signed = 'https://p.example.invalid/cover.jpg?token=one%2Ftwo';
+      final netease = Audio.online(
+        provider: 'netease',
+        id: 'netease-cover',
+        title: 'Test',
+        artist: 'Artist',
+        album: 'Album',
+        duration: 30,
+        artworkUrl: signed,
+      );
+      final source =
+          ((await netease.artworkForSize(const ArtworkSize(2048, 2048)))!
+                  as ArtworkImageProvider)
+              .source as BoundedOnlineArtworkImageProvider;
+      expect(source.address, signed);
+      expect(source.provider, 'netease');
+    });
+
+    test('online image cache key changes when the proxy route changes',
+        () async {
+      final settings = AppSettings.instance;
+      final original = settings.networkProxy.value;
+      try {
+        final song = Audio.online(
+          provider: 'qq',
+          id: 'proxy-cover',
+          title: 'Test',
+          artist: 'Artist',
+          album: 'Album',
+          duration: 30,
+          artworkUrl: 'https://example.com/cover.png',
+        );
+        settings.networkProxy.value =
+            const NetworkProxyPreferences(mode: NetworkProxyMode.direct);
+        final first = (await song.artworkForSize(const ArtworkSize(96, 96)))!
+            as ArtworkImageProvider;
+        settings.networkProxy.value =
+            const NetworkProxyPreferences(mode: NetworkProxyMode.system);
+        final next = (await song.artworkForSize(const ArtworkSize(96, 96)))!
+            as ArtworkImageProvider;
+        expect(first.source, next.source,
+            reason: 'the URL stays the same while only its route changes');
+        expect(await first.obtainKey(ImageConfiguration.empty),
+            isNot(await next.obtainKey(ImageConfiguration.empty)),
+            reason: 'an in-flight stale route must not be reused');
+      } finally {
+        settings.networkProxy.value = original;
+      }
     });
 
     test('large QQ views choose the verified 800px public album rendition', () {

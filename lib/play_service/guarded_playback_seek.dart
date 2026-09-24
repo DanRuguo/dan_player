@@ -16,3 +16,29 @@ Future<bool> guardedPlaybackSeek({
   start();
   return true;
 }
+
+/// A manual seek must have a live decoder, and only a successful native seek
+/// may change practice, resume, lyric or playback-state intent. Keep the
+/// duration read lazy while a newer source is still opening.
+bool guardedManualPlaybackSeek({
+  required bool queueEditable,
+  required bool buffering,
+  required bool hasSource,
+  required bool hasTrack,
+  required double Function() duration,
+  required double target,
+  required double Function(double) seekAndRead,
+  required void Function(double) commit,
+}) {
+  if (!queueEditable || buffering || !hasSource || !hasTrack) return false;
+  final length = duration();
+  if (!length.isFinite ||
+      length <= 0 ||
+      !target.isFinite ||
+      target < 0 ||
+      target > length) {
+    return false;
+  }
+  commit(seekAndRead(target));
+  return true;
+}

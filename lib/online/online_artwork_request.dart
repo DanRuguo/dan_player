@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/cover_image_import.dart';
@@ -38,11 +39,33 @@ class OnlineArtworkRequest {
     String address, {
     String? provider,
     CustomMusicSourceProfile? expectedProfile,
+  }) =>
+      _loadWithDeadline(
+        address,
+        provider: provider,
+        expectedProfile: expectedProfile,
+      );
+
+  /// Keep display artwork at its source resolution. The same bounded download
+  /// and image dimension check apply, while Flutter decodes only the requested
+  /// physical size. Imported/custom artwork still uses [loadCover].
+  Future<Uint8List> loadCoverBytes(
+    String address, {
+    String? provider,
+  }) =>
+      _loadWithDeadline(address, provider: provider, preserveOriginal: true);
+
+  Future<Uint8List> _loadWithDeadline(
+    String address, {
+    String? provider,
+    CustomMusicSourceProfile? expectedProfile,
+    bool preserveOriginal = false,
   }) {
     return _loadCover(
       address,
       provider: provider,
       expectedProfile: expectedProfile,
+      preserveOriginal: preserveOriginal,
     ).timeout(
       totalTimeout,
       onTimeout: () {
@@ -57,6 +80,7 @@ class OnlineArtworkRequest {
     String address, {
     String? provider,
     CustomMusicSourceProfile? expectedProfile,
+    required bool preserveOriginal,
   }) async {
     _checkCancelled();
     if (expectedProfile != null &&
@@ -162,11 +186,39 @@ class OnlineArtworkRequest {
     _requireCurrentCustomProfile(customProfile);
     if (bytes.isEmpty) throw const FormatException('封面服务器返回了空图片');
 
-    final prepared =
-        await CoverImageImporter.shared.fromBytes(bytes.takeBytes());
+    final downloaded = bytes.takeBytes();
+    final result = preserveOriginal
+        ? await _validateDisplayDimensions(downloaded)
+        : (await CoverImageImporter.shared.fromBytes(downloaded)).bytes;
     _checkCancelled();
     _requireCurrentCustomProfile(customProfile);
-    return prepared.bytes;
+    return result;
+  }
+
+  static Future<Uint8List> _validateDisplayDimensions(Uint8List bytes) async {
+    ui.ImmutableBuffer? buffer;
+    ui.ImageDescriptor? descriptor;
+    try {
+      buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+      descriptor = await ui.ImageDescriptor.encoded(buffer);
+      final width = descriptor.width;
+      final height = descriptor.height;
+      if (width <= 0 ||
+          height <= 0 ||
+          width > 32768 ||
+          height > 32768 ||
+          width * height > maxCoverInputPixels) {
+        throw const CoverImageException('封面图片最多支持 4000 万像素，请先缩小原图后重试。');
+      }
+      return bytes;
+    } on CoverImageException {
+      rethrow;
+    } catch (_) {
+      throw const CoverImageException('封面图片已损坏或无法解码。');
+    } finally {
+      descriptor?.dispose();
+      buffer?.dispose();
+    }
   }
 
   static CustomMusicSourceProfile? _currentCustomArtworkProfile(

@@ -8,6 +8,7 @@ import 'package:dan_player/page/settings_page/performance_preset_settings.dart';
 import 'package:dan_player/page/settings_page/create_issue.dart';
 import 'package:dan_player/page/settings_page/other_settings.dart';
 import 'package:dan_player/page/settings_page/music_source_settings.dart';
+import 'package:dan_player/page/settings_page/network_proxy_settings.dart';
 import 'package:dan_player/page/settings_page/custom_music_source_settings.dart';
 import 'package:dan_player/page/settings_page/desktop_integration_settings.dart';
 import 'package:dan_player/page/settings_page/desktop_lyric_settings.dart';
@@ -178,6 +179,9 @@ class SettingsPage extends StatelessWidget {
               children: [
                 const CheckForUpdate(
                   key: ValueKey('setting-updates'),
+                ),
+                const NetworkProxySettings(
+                  key: ValueKey('setting-network-proxy'),
                 ),
                 const UninstallSettings(
                   key: ValueKey('setting-uninstall'),

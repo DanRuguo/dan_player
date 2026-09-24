@@ -17,12 +17,19 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 Future<void> showLyricPlaybackPreview(
-        BuildContext context, Audio audio, Lyric lyric, {int? line}) =>
+        BuildContext context, Audio audio, Lyric lyric,
+        {int? line,
+        LyricAudioPreview? preview,
+        Future<bool> Function()? ensureTools}) =>
     showAppDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (_) =>
-            LyricPlaybackPreview(audio: audio, lyric: lyric, line: line));
+        builder: (_) => LyricPlaybackPreview(
+            audio: audio,
+            lyric: lyric,
+            line: line,
+            preview: preview,
+            ensureTools: ensureTools));
 
 class LyricPlaybackPreview extends StatefulWidget {
   const LyricPlaybackPreview(
@@ -43,8 +50,14 @@ class LyricPlaybackPreview extends StatefulWidget {
 
 class _LyricPlaybackPreviewState extends State<LyricPlaybackPreview> {
   late final player = widget.preview ?? LyricAudioPreview(widget.audio);
-  double? dragging;
+  final _dragging = ValueNotifier<double?>(null);
+  int? _dragPointer;
+  int _dragGeneration = 0;
+  double _dragOrigin = 0;
+  bool _dragWasPlaying = false;
+  Future<void>? _dragPause;
   bool checking = true, ready = false, closing = false;
+  String? setupError;
   ({double start, double end}) get range => widget.line == null
       ? (start: 0.0, end: player.duration)
       : lyricPreviewRange(widget.lyric, widget.line!, player.duration);
@@ -60,28 +73,92 @@ class _LyricPlaybackPreviewState extends State<LyricPlaybackPreview> {
   }
 
   Future<void> _start() async {
-    final ok =
-        await (widget.ensureTools ?? () => FfmpegRuntime.shared.ensure())();
-    if (ok && widget.preview == null) await player.prepare();
-    if (!mounted || closing) return;
-    setState(() {
-      checking = false;
-      ready = ok;
-    });
-    if (ok) await player.play(range.start, range.end);
+    try {
+      final ok =
+          await (widget.ensureTools ?? () => FfmpegRuntime.shared.ensure())();
+      if (ok) await player.prepare();
+      if (!mounted || closing) return;
+      final playable = ok && player.duration > 0;
+      setState(() {
+        checking = false;
+        ready = playable;
+        setupError = ok && !playable ? ui('无法读取歌曲时长，无法试听。') : null;
+      });
+      if (playable) await player.play(range.start, range.end);
+    } catch (_) {
+      if (mounted && !closing) {
+        setState(() {
+          checking = false;
+          ready = false;
+          setupError = ui('试听失败，请重试。');
+        });
+      }
+    }
   }
 
   Future<void> _close() async {
     if (closing) return;
+    ++_dragGeneration;
+    _dragging.value = null;
     setState(() => closing = true);
-    await player.close();
+    if (widget.preview == null) {
+      await player.close();
+    } else {
+      await player.pause();
+    }
     if (mounted) Navigator.pop(context);
+  }
+
+  void _beginSeek(double value) {
+    ++_dragGeneration;
+    _dragOrigin = player.position;
+    _dragWasPlaying = player.playing || player.loading;
+    _dragPause = player.pause();
+    _dragging.value = value;
+  }
+
+  void _changeSeek(double value) {
+    if (_dragging.value != null) _dragging.value = value;
+  }
+
+  Future<void> _endSeek(double value) async {
+    if (_dragging.value == null) return;
+    final generation = _dragGeneration;
+    final resume = _dragWasPlaying;
+    _dragPointer = null;
+    _dragging.value = null;
+    await _dragPause;
+    if (!mounted || closing || generation != _dragGeneration) return;
+    if (resume) {
+      final target = value >= range.end ? range.start : value;
+      await player.play(target, range.end);
+    } else {
+      await player.seekPaused(value);
+    }
+  }
+
+  Future<void> _cancelSeek(int pointer) async {
+    if (_dragPointer != pointer) return;
+    _dragPointer = null;
+    if (_dragging.value == null) return;
+    final generation = _dragGeneration;
+    final resume = _dragWasPlaying;
+    final origin = _dragOrigin;
+    _dragging.value = null;
+    await _dragPause;
+    if (!mounted || closing || generation != _dragGeneration) return;
+    if (resume) {
+      await player.play(origin, range.end);
+    } else {
+      await player.seekPaused(origin);
+    }
   }
 
   @override
   void dispose() {
     player.removeListener(_changed);
-    player.dispose();
+    if (widget.preview == null) player.dispose();
+    _dragging.dispose();
     super.dispose();
   }
 
@@ -123,17 +200,16 @@ class _LyricPlaybackPreviewState extends State<LyricPlaybackPreview> {
                           ],
                           if (checking || player.loading)
                             const LinearProgressIndicator(),
-                          if (!checking && !ready)
+                          if (!checking && !ready && setupError == null)
                             Flexible(
                                 child: SingleChildScrollView(
                                     child: FfmpegSetupCard(
                                         lyricPreview: true,
                                         onReady: () {
-                                          setState(() => ready = true);
-                                          unawaited(player.play(
-                                              range.start, range.end));
+                                          setState(() => checking = true);
+                                          unawaited(_start());
                                         })))
-                          else if (!checking)
+                          else if (!checking && ready)
                             Flexible(
                                 child: SizedBox(
                                     height: 460,
@@ -155,46 +231,54 @@ class _LyricPlaybackPreviewState extends State<LyricPlaybackPreview> {
                                                 .experience
                                                 .value
                                                 .springLyrics)))),
-                          if (player.error != null)
+                          if (setupError != null || player.error != null)
                             Padding(
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 8),
-                                child: Text(ui(player.error!),
+                                child: Text(setupError ?? ui(player.error!),
                                     style: TextStyle(color: scheme.error))),
                           StreamBuilder<double>(
                               stream: player.positionStream,
                               initialData: player.position,
-                              builder: (context, snapshot) => Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Slider(
-                                            key: const ValueKey(
-                                                'lyric-preview-seek'),
-                                            min: range.start,
-                                            max: range.end > range.start
-                                                ? range.end
-                                                : range.start + 1,
-                                            value: (dragging ?? player.position)
-                                                .clamp(
-                                                    range.start,
-                                                    range.end > range.start
-                                                        ? range.end
-                                                        : range.start + 1),
-                                            onChanged: !ready || closing
-                                                ? null
-                                                : (value) => setState(
-                                                    () => dragging = value),
-                                            onChangeEnd: !ready || closing
-                                                ? null
-                                                : (value) {
-                                                    setState(
-                                                        () => dragging = null);
-                                                    unawaited(player.play(
-                                                        value, range.end));
-                                                  }),
-                                        Text(
-                                            '${lyricStamp(Duration(milliseconds: (player.position * 1000).round()))} / ${lyricStamp(Duration(milliseconds: (range.end * 1000).round()))}'),
-                                      ])),
+                              builder: (context, snapshot) =>
+                                  ValueListenableBuilder<double?>(
+                                      valueListenable: _dragging,
+                                      builder: (context, dragged, _) => Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Listener(
+                                                    onPointerDown: (event) =>
+                                                        _dragPointer ??=
+                                                            event.pointer,
+                                                    onPointerUp: (event) {
+                                                      if (_dragPointer ==
+                                                          event.pointer) {
+                                                        _dragPointer = null;
+                                                      }
+                                                    },
+                                                    onPointerCancel: (event) =>
+                                                        unawaited(_cancelSeek(
+                                                            event.pointer)),
+                                                    child: Slider(
+                                                        key: const ValueKey(
+                                                            'lyric-preview-seek'),
+                                                        min: range.start,
+                                                        max: range.end >
+                                                                range.start
+                                                            ? range.end
+                                                            : range.start + 1,
+                                                        value: (dragged ?? player.position).clamp(
+                                                            range.start,
+                                                            range.end > range.start
+                                                                ? range.end
+                                                                : range.start + 1),
+                                                        label: lyricStamp(Duration(milliseconds: ((dragged ?? player.position) * 1000).round())),
+                                                        onChangeStart: !ready || closing || player.loading ? null : _beginSeek,
+                                                        onChanged: !ready || closing || player.loading ? null : _changeSeek,
+                                                        onChangeEnd: !ready || closing ? null : (value) => unawaited(_endSeek(value)))),
+                                                Text(
+                                                    '${lyricStamp(Duration(milliseconds: ((dragged ?? player.position) * 1000).round()))} / ${lyricStamp(Duration(milliseconds: (range.end * 1000).round()))}'),
+                                              ]))),
                           const SizedBox(height: 12),
                           Align(
                               alignment: Alignment.center,

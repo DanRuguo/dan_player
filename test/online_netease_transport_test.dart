@@ -186,6 +186,46 @@ void main() {
       );
     }
   });
+
+  test('nonempty invalid song rows fail instead of appearing as no matches',
+      () async {
+    final service = OnlineMusicService.forNeteaseTransportTesting(
+      httpClientFactory: () => _Client(_Response.json({
+        'code': 200,
+        'result': {
+          'songs': [
+            {'id': 11},
+            {'name': 'Missing id'},
+          ],
+        },
+      })),
+    );
+    await expectLater(
+      service.search('song'),
+      throwsA(isA<OnlineMusicException>().having(
+        (error) => error.kind,
+        'kind',
+        OnlineMusicFailureKind.api,
+      )),
+    );
+  });
+
+  test('malformed leading rows do not consume the result limit', () async {
+    final service = OnlineMusicService.forNeteaseTransportTesting(
+      httpClientFactory: () => _Client(_Response.json({
+        'code': 200,
+        'result': {
+          'songs': [
+            {'id': 11},
+            {'id': 12, 'name': 'Usable song'},
+          ],
+        },
+      })),
+    );
+    final response = await service.search('song', limit: 1);
+    expect(response.tracks.single.onlineId, '12');
+    expect(response.tracks.single.title, 'Usable song');
+  });
 }
 
 class _Client implements HttpClient {

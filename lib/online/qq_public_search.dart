@@ -205,6 +205,11 @@ List<QqPublicSong> parseQqPublicSearchPayload(
       durationSeconds: _positiveInt(row['interval']) ?? 0,
     ));
   }
+  if (rows.isNotEmpty && result.isEmpty) {
+    // A nonempty provider response with no usable song identity is a schema
+    // change, not evidence that this query has no matches.
+    throw const QqPublicSearchException('音乐服务返回的数据无效或过大');
+  }
   return result;
 }
 

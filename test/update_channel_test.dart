@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/update/update_channel_preference.dart';
 import 'package:dan_player/update/update_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -142,6 +143,49 @@ void main() {
     expect((await stable)!.version.toString(), '26.0.4');
     expect((await preview)!.version.toString(), '26.0.5-snapshot.10');
     expect(calls, 1);
+  });
+
+  test('proxy switch starts a new check without losing same-route sharing',
+      () async {
+    final settings = AppSettings.instance;
+    final previous = settings.networkProxy.value;
+    addTearDown(() => settings.networkProxy.value = previous);
+    settings.networkProxy.value =
+        const NetworkProxyPreferences(mode: NetworkProxyMode.direct);
+    final oldRequest = Completer<List<Release>>();
+    final newRequest = Completer<List<Release>>();
+    var calls = 0;
+    final shared = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      currentVersion: '26.0.3',
+      releaseLoader: () => ++calls == 1 ? oldRequest.future : newRequest.future,
+    );
+
+    final oldCheck = shared.checkLatest(includeIgnored: true);
+    settings.networkProxy.value = const NetworkProxyPreferences(
+        mode: NetworkProxyMode.custom, customProxyUrl: 'http://127.0.0.1:7890');
+    final newCheck = shared.checkLatest(includeIgnored: true);
+    final sharedCheck = shared.checkLatest(includeIgnored: true);
+    expect(calls, 2);
+
+    settings.networkProxy.value =
+        const NetworkProxyPreferences(mode: NetworkProxyMode.direct);
+    final sameOldRoute = shared.checkLatest(includeIgnored: true);
+    expect(calls, 2);
+    settings.networkProxy.value = const NetworkProxyPreferences(
+        mode: NetworkProxyMode.custom, customProxyUrl: 'http://127.0.0.1:7890');
+
+    oldRequest.completeError(const SocketException('old proxy failed'));
+    await expectLater(oldCheck, throwsA(isA<UpdateException>()));
+    await expectLater(sameOldRoute, throwsA(isA<UpdateException>()));
+    final afterOldFailure = shared.checkLatest(includeIgnored: true);
+    expect(calls, 2);
+
+    newRequest.complete([Release(tagName: '26.0.4')]);
+    for (final check in [newCheck, sharedCheck, afterOldFailure]) {
+      expect((await check)!.version.toString(), '26.0.4');
+    }
   });
 
   test('failed checks release their original in-flight lock for retry',

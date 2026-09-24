@@ -88,6 +88,53 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('newly visible uncaptured placeholder stays painted in flight',
+      (tester) async {
+    final controller = PlaylistCoverTransitionController();
+    addTearDown(controller.dispose);
+    final boundary = GlobalKey();
+    late StateSetter change;
+    var switched = false;
+    await tester.pumpWidget(MaterialApp(
+        home: Center(
+            child: SizedBox.square(
+                dimension: 300,
+                child: StatefulBuilder(builder: (context, setState) {
+                  change = setState;
+                  return RepaintBoundary(
+                      key: boundary,
+                      child: ColoredBox(
+                          color: Colors.black,
+                          child: PlaylistCoverTransitionHost(
+                              controller: controller,
+                              child: Stack(children: [
+                                Positioned(
+                                    left: switched ? 60 : 10,
+                                    top: 10,
+                                    child: _cover('moving')),
+                                Positioned(
+                                    left: switched ? 180 : 400,
+                                    top: 180,
+                                    child: const SizedBox.square(
+                                        dimension: 60,
+                                        child: PlaylistCoverTransitionMarker(
+                                            entryId: 'incoming',
+                                            child: ColoredBox(
+                                                color: Colors.blue))))
+                              ]))));
+                })))));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+        () => controller.transition(() => change(() => switched = true)));
+    await tester.pump();
+    await tester.pump();
+    expect(controller.active, isTrue);
+    expect((await _pixel(tester, boundary, 200, 200)).toARGB32(),
+        Colors.blue.toARGB32());
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('scrolled lazy layouts retain the visible anchor across switches',
       (tester) async {
     final controller = PlaylistCoverTransitionController();

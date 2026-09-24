@@ -23,6 +23,7 @@ import 'package:dan_player/play_service/queue_track_identity.dart';
 import 'package:dan_player/play_service/queue_stop_boundary.dart';
 import 'package:dan_player/play_service/guarded_playback_seek.dart';
 import 'package:dan_player/play_service/segment_loop.dart';
+import 'package:dan_player/play_service/track_resume_capture_cadence.dart';
 import 'package:dan_player/play_service/track_resume_restore.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/src/rust/api/smtc_flutter.dart';
@@ -87,6 +88,8 @@ class PlaybackService extends ChangeNotifier {
 
   int _lastSmtcProgressMs = -1000;
   int _lastSessionProgressMs = -30000;
+  final TrackResumeCaptureCadence _resumeCaptureCadence =
+      TrackResumeCaptureCadence();
 
   PlaybackService(this.playService) {
     queueStopBoundary.addListener(_onQueueStopChanged);
@@ -172,7 +175,10 @@ class PlaybackService extends ChangeNotifier {
       }
       PlaybackStatistics.instance
           .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
-      if (playerState == PlayerState.playing) {
+      if (playerState == PlayerState.playing &&
+          !segmentLoop.enabled &&
+          _resumeCaptureCadence.due(
+              session: _sourceRequestToken, position: progress)) {
         unawaited(_captureTrackResume(positionOverride: progress));
       }
       final progressMs = (progress * 1000).floor();
@@ -1278,7 +1284,9 @@ class PlaybackService extends ChangeNotifier {
         if (occurrence != null) queueStopBoundary.failed(occurrence, token);
         _recordProblem(err);
         showAppNotice(
-            ui(err is OnlineMusicException ? err.message : "播放失败：$err"),
+            err is BassNetworkConfigurationException
+                ? bassNetworkConfigurationNotice(err)
+                : ui(err is OnlineMusicException ? err.message : "播放失败：$err"),
             kind: AppNoticeKind.error);
         if (playerState != PlayerState.playing) {
           _smtc.updateState(state: SMTCState.paused);
@@ -1434,21 +1442,26 @@ class PlaybackService extends ChangeNotifier {
 
   void seekPrecisely(double target, int expectedSession) {
     if (!canEditQueue ||
+        isBuffering.value ||
+        !_player.hasSource ||
         expectedSession != _sourceRequestToken ||
         nowPlaying == null ||
         !length.isFinite ||
         !target.isFinite ||
         target < 0 ||
         target >= length) throw StateError('歌曲已改变或当前无法定位');
+    _player.seek(target);
     _practiceTimer?.cancel();
     _practiceTimer = null;
     _practiceRemaining = null;
     _manualSeekRevision++;
-    segmentLoop.manualSeek(target);
-    _player.seek(target);
+    final actualPosition = position;
+    segmentLoop.manualSeek(actualPosition);
+    unawaited(
+        _captureTrackResume(force: true, positionOverride: actualPosition));
     _lastSmtcProgressMs = -1000;
     playService.lyricService.findCurrLyricLine();
-    _schedulePlaybackStateSave(positionOverride: target);
+    _schedulePlaybackStateSave(positionOverride: actualPosition);
   }
 
   Future<void> restoreLastSessionOnce() =>
@@ -1640,7 +1653,9 @@ class PlaybackService extends ChangeNotifier {
       // song. Native source replacement itself is transactional as well.
       LOGGER.e("[restore session] $err", stackTrace: trace);
       showAppNotice(
-          ui(err is OnlineMusicException ? err.message : '恢复播放失败：$err'),
+          err is BassNetworkConfigurationException
+              ? bassNetworkConfigurationNotice(err)
+              : ui(err is OnlineMusicException ? err.message : '恢复播放失败：$err'),
           kind: AppNoticeKind.error);
     } finally {
       if (_isCurrentSourceRequest(token)) {
@@ -1679,7 +1694,10 @@ class PlaybackService extends ChangeNotifier {
         stillCurrent?.call() == false) {
       return false;
     }
-    if (canEditQueue && nowPlaying?.stableTrackId == audio.stableTrackId) {
+    if (canEditQueue &&
+        !isBuffering.value &&
+        _player.hasSource &&
+        nowPlaying?.stableTrackId == audio.stableTrackId) {
       final token = _sourceRequestToken;
       if (position >= length) return false;
       _playWhenReady = true;
@@ -1692,15 +1710,18 @@ class PlaybackService extends ChangeNotifier {
               _isCurrentSourceRequest(token) && stillCurrent?.call() != false,
           open: () async => true,
           seek: () {
+            _player.seek(position);
             _manualSeekRevision++;
             _practiceTimer?.cancel();
             _practiceTimer = null;
             _practiceRemaining = null;
-            segmentLoop.manualSeek(position);
-            _player.seek(position);
+            final actualPosition = this.position;
+            segmentLoop.manualSeek(actualPosition);
+            unawaited(_captureTrackResume(
+                force: true, positionOverride: actualPosition));
             playService.lyricService.findCurrLyricLine();
             _lastSmtcProgressMs = -1000;
-            _schedulePlaybackStateSave(positionOverride: position);
+            _schedulePlaybackStateSave(positionOverride: actualPosition);
           },
           start: start,
           shouldStart: () => _playWhenReady,
@@ -2031,18 +2052,31 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void seek(double position) {
-    if (_closed) return;
-    _manualSeekRevision++;
-    _practiceTimer?.cancel();
-    _practiceTimer = null;
-    _practiceRemaining = null;
-    segmentLoop.manualSeek(position);
     try {
-      _player.seek(position);
-      unawaited(_captureTrackResume(force: true, positionOverride: position));
-      _lastSmtcProgressMs = -1000;
-      playService.lyricService.findCurrLyricLine();
-      _schedulePlaybackStateSave(positionOverride: position);
+      guardedManualPlaybackSeek(
+        queueEditable: canEditQueue,
+        buffering: isBuffering.value,
+        hasSource: _player.hasSource,
+        hasTrack: nowPlaying != null,
+        duration: () => length,
+        target: position,
+        seekAndRead: (target) {
+          _player.seek(target);
+          return this.position;
+        },
+        commit: (actualPosition) {
+          _manualSeekRevision++;
+          _practiceTimer?.cancel();
+          _practiceTimer = null;
+          _practiceRemaining = null;
+          segmentLoop.manualSeek(actualPosition);
+          unawaited(_captureTrackResume(
+              force: true, positionOverride: actualPosition));
+          _lastSmtcProgressMs = -1000;
+          playService.lyricService.findCurrLyricLine();
+          _schedulePlaybackStateSave(positionOverride: actualPosition);
+        },
+      );
     } catch (error, trace) {
       LOGGER.w('[seek] $error', stackTrace: trace);
       showAppNotice(

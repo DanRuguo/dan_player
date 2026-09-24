@@ -31,6 +31,21 @@ const Map<String, List<String>> catalogTapLyricEditor = {
     "この曲の保存済み作業はありません。",
     "이 곡에 저장된 진행 상황이 없습니다."
   ],
+  "联网歌词没有可用正文，请重新选择。": [
+    "The online lyrics contain no usable text. Choose another result.",
+    "オンライン歌詞に使用できる本文がありません。別の候補を選んでください。",
+    "온라인 가사에 사용할 수 있는 본문이 없습니다. 다른 결과를 선택해 주세요."
+  ],
+  "正文中的分隔符冲突过多，请先手动编辑文本。": [
+    "The lyrics contain too many separator conflicts. Edit the text manually first.",
+    "歌詞本文に区切り文字との衝突が多すぎます。先にテキストを手動で編集してください。",
+    "가사 본문에 구분자 충돌이 너무 많습니다. 먼저 텍스트를 직접 편집해 주세요."
+  ],
+  "歌词包含换行内容，请先手动编辑文本。": [
+    "A lyric line contains a line break. Edit the text manually first.",
+    "歌詞の行に改行が含まれています。先にテキストを手動で編集してください。",
+    "가사 행에 줄바꿈이 있습니다. 먼저 텍스트를 직접 편집해 주세요."
+  ],
   "歌曲时长与进度不符，请重新编辑。": [
     "The song duration no longer matches this progress. Please start again.",
     "曲の長さが保存した作業と一致しません。最初から編集してください。",

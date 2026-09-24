@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/page/settings_page/check_update.dart';
 import 'package:dan_player/update/installer_launcher.dart';
 import 'package:dan_player/update/update_channel_preference.dart';
@@ -347,6 +348,59 @@ void main() {
     await checking;
     await tester.pumpAndSettle();
     expect(find.byType(NewestUpdateView), findsNothing);
+  });
+
+  testWidgets('proxy change unlocks manual retry and ignores old route result',
+      (tester) async {
+    final settings = AppSettings.instance;
+    final previousProxy = settings.networkProxy.value;
+    addTearDown(() => settings.networkProxy.value = previousProxy);
+    settings.networkProxy.value =
+        const NetworkProxyPreferences(mode: NetworkProxyMode.direct);
+    final oldRoute = Completer<List<Release>>();
+    final newRoute = Completer<List<Release>>();
+    var calls = 0;
+    final service = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      currentVersion: '26.0.3',
+      releaseLoader: () => ++calls == 1 ? oldRoute.future : newRoute.future,
+    );
+    await mount(tester, content: CheckForUpdate(service: service));
+    Finder checkButton() => find.widgetWithText(FilledButton, '立即检查');
+    tester.widget<FilledButton>(checkButton()).onPressed!();
+    await tester.pump();
+    expect(tester.widget<FilledButton>(checkButton()).onPressed, isNull);
+
+    settings.networkProxy.value = const NetworkProxyPreferences(
+        mode: NetworkProxyMode.custom, customProxyUrl: 'http://127.0.0.1:7890');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(checkButton()).onPressed, isNotNull);
+    tester.widget<FilledButton>(checkButton()).onPressed!();
+    await tester.pump();
+    expect(calls, 2);
+
+    newRoute.complete([Release(tagName: '26.0.5')]);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.byType(NewestUpdateView), findsOneWidget);
+    expect(
+        tester.widget<NewestUpdateView>(find.byType(NewestUpdateView))
+            .update
+            .version
+            .toString(),
+        '26.0.5');
+    oldRoute.complete([Release(tagName: '26.0.4')]);
+    await tester.pump();
+    expect(find.byType(NewestUpdateView), findsOneWidget);
+    expect(
+        tester.widget<NewestUpdateView>(find.byType(NewestUpdateView))
+            .update
+            .version
+            .toString(),
+        '26.0.5');
+    await tester.tap(find.text('稍后'));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('preview preference failure restores toggle and permits retry',

@@ -305,14 +305,38 @@ class _GridEdgeAutoScrollRegionState extends State<GridEdgeAutoScrollRegion> {
   final _regionKey = GlobalKey();
   Timer? _timer;
   double _step = 0;
+  bool _treeVisible = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _treeVisible = TickerMode.valuesOf(context).enabled;
+    if (!_treeVisible) _stop();
+  }
+
+  @override
+  void didUpdateWidget(GridEdgeAutoScrollRegion oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) _stop();
+  }
 
   void _update(Offset globalPosition) {
+    if (!_treeVisible) {
+      _stop();
+      return;
+    }
     final box = _regionKey.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.hasSize || box.size.height <= 0) {
       _stop();
       return;
     }
-    final y = box.globalToLocal(globalPosition).dy;
+    final local = box.globalToLocal(globalPosition);
+    // Drag targets beside the grid must not keep its old edge timer running.
+    if (local.dx < 0 || local.dx > box.size.width) {
+      _stop();
+      return;
+    }
+    final y = local.dy;
     final edge = math.min(72.0, math.max(32.0, box.size.height * .18));
     final double proximity;
     if (y < edge) {
@@ -331,7 +355,7 @@ class _GridEdgeAutoScrollRegionState extends State<GridEdgeAutoScrollRegion> {
   }
 
   void _tick() {
-    if (!mounted || !widget.controller.hasClients) {
+    if (!mounted || !_treeVisible || !widget.controller.hasClients) {
       _stop();
       return;
     }

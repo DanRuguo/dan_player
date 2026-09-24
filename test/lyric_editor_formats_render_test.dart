@@ -113,6 +113,17 @@ void main() {
         });
       }
 
+      void expectAuditionBelowEditor() {
+        final editor = tester
+            .getRect(find.byKey(const ValueKey('lyric-editor-compact-scroll')));
+        final audition = tester.getRect(
+            find.byKey(const ValueKey('lyric-editor-audition-visible')));
+        final save =
+            tester.getRect(find.byKey(const ValueKey('lyric-editor-save')));
+        expect(editor.bottom, lessThanOrEqualTo(audition.top + 1));
+        expect(audition.bottom, lessThanOrEqualTo(save.top));
+      }
+
       Future<void> tapTab(int tab) async {
         final target = find.byKey(ValueKey('lyric-editor-tab-$tab'));
         await tester.ensureVisible(target);
@@ -124,6 +135,7 @@ void main() {
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
       await capture('wide');
+      expectAuditionBelowEditor();
       await tapTab(1);
       await tester.enterText(find.byKey(const ValueKey('lyric-editor-aux-1')),
           '[00:01.001]光与夜\n[00:03.000]你好，世界');
@@ -141,6 +153,19 @@ void main() {
       tester.view.physicalSize = const Size(480, 740);
       await tester.pumpAndSettle();
       await capture('narrow');
+      tester
+          .widget<SingleChildScrollView>(
+              find.byKey(const ValueKey('lyric-editor-compact-scroll')))
+          .controller!
+          .jumpTo(0);
+      await tester.pumpAndSettle();
+      await capture('audition-narrow');
+      expectAuditionBelowEditor();
+      final narrowEditor = tester
+          .getRect(find.byKey(const ValueKey('lyric-editor-compact-scroll')));
+      final narrowField =
+          tester.getRect(find.byKey(const ValueKey('lyric-editor-aux-1')));
+      expect(narrowField.top + 40, lessThan(narrowEditor.bottom));
       final saveRect =
           tester.getRect(find.byKey(const ValueKey('lyric-editor-save')));
       expect(saveRect.bottom, lessThanOrEqualTo(740));
@@ -192,6 +217,27 @@ void main() {
       tester.view.physicalSize = const Size(640, 420);
       await tester.pumpAndSettle();
       await capture('short');
+      tester
+          .widget<SingleChildScrollView>(
+              find.byKey(const ValueKey('lyric-editor-compact-scroll')))
+          .controller!
+          .jumpTo(0);
+      await tester.pumpAndSettle();
+      await capture('audition-short');
+      expectAuditionBelowEditor();
+      final editorScroll = tester.widget<SingleChildScrollView>(
+          find.byKey(const ValueKey('lyric-editor-compact-scroll')));
+      editorScroll.controller!
+          .jumpTo(editorScroll.controller!.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(
+          tester.getRect(field).bottom,
+          lessThanOrEqualTo(tester
+                  .getRect(
+                      find.byKey(const ValueKey('lyric-editor-compact-scroll')))
+                  .bottom +
+              1));
+      await capture('audition-short-bottom');
       final save =
           tester.getRect(find.byKey(const ValueKey('lyric-editor-save')));
       expect(save.bottom, lessThanOrEqualTo(420));
@@ -202,11 +248,13 @@ void main() {
       tester.view.physicalSize = const Size(700, 760);
       await tester.pumpAndSettle();
       final preview = LyricAudioPreview(audio,
+          probeDuration: (_) async => audio.duration.toDouble(),
           mainPlayback: () => null,
           launch: (_, __, ___, clock) async {
             clock(1.6);
             return ProcessFake();
           });
+      addTearDown(preview.dispose);
       final dialog = showDialog<void>(
           context: context,
           barrierDismissible: false,

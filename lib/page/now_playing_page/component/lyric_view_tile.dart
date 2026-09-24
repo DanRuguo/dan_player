@@ -909,35 +909,35 @@ class LyricWordHighlightPainter extends CustomPainter {
       return;
     }
     final moving = _movingWords();
-    for (final pose in moving) {
-      final word = _layout.words[pose.index];
-      canvas.save();
-      canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
-      canvas.scale(pose.scale, pose.scaleY);
-      canvas.translate(-pose.anchorX, -word.bounds.center.dy);
-      if (glowAllowed &&
-          pose.scaleY > 1.00001 &&
-          word.length.inMilliseconds > 650) {
+    if (glowAllowed) {
+      for (final pose in moving) {
+        final word = _layout.words[pose.index];
+        if (pose.scaleY <= 1.00001 || word.length.inMilliseconds <= 650) {
+          continue;
+        }
+        final mask = _layout.glowMask(pose.index);
+        if (mask == null) continue;
         // One small diffuse mask per active long word, never the whole line.
         final intensity =
             ((pose.scaleY - 1) / LyricWordEffects.maximumScaleExpansion)
                 .clamp(0.0, 1.0);
-        final mask = _layout.glowMask(pose.index);
-        if (mask != null) {
-          canvas.drawImageRect(
-              mask.$1,
-              Rect.fromLTWH(
-                  0, 0, mask.$1.width.toDouble(), mask.$1.height.toDouble()),
-              mask.$2,
-              Paint()
-                ..filterQuality = FilterQuality.low
-                ..colorFilter = ColorFilter.mode(
-                    playedColor.withValues(
-                        alpha: (word.phraseEnd ? .27 : .18) * intensity),
-                    BlendMode.srcIn));
-        }
+        canvas.save();
+        canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
+        canvas.scale(pose.scale, pose.scaleY);
+        canvas.translate(-pose.anchorX, -word.bounds.center.dy);
+        canvas.drawImageRect(
+            mask.$1,
+            Rect.fromLTWH(
+                0, 0, mask.$1.width.toDouble(), mask.$1.height.toDouble()),
+            mask.$2,
+            Paint()
+              ..filterQuality = FilterQuality.low
+              ..colorFilter = ColorFilter.mode(
+                  playedColor.withValues(
+                      alpha: (word.phraseEnd ? .27 : .18) * intensity),
+                  BlendMode.srcIn));
+        canvas.restore();
       }
-      canvas.restore();
     }
     if (_layout.words.isEmpty) {
       _layout.ink(baseColor, played: false).paint(canvas, Offset.zero);

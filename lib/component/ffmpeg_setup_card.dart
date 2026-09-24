@@ -67,7 +67,7 @@ class _FfmpegSetupCardState extends State<FfmpegSetupCard> {
           const SizedBox(height: 10),
           Text(ui(widget.lyricPreview
               ? '试听复用 FFmpeg 组件，不会改写歌曲。可以手动安装，或从 GitHub 下载约 70 MB 的组件。'
-              : '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用 Windows 系统代理。')),
+              : '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用播放器的网络代理设置。')),
           const SizedBox(height: 10),
           Text(ui(
               '也可以从官网下载 Windows 完整编译包，将 bin 目录中的程序及 DLL 放到以下目录，然后点击“我已安装好”。')),

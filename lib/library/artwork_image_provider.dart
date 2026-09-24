@@ -26,6 +26,63 @@ Uri artworkUriForSize(Uri source, ArtworkSize size, {String? provider}) {
   return source.replace(path: '${match[1]}R800x800${match[2]}');
 }
 
+/// Fetches built-in online artwork through the same bounded request used by
+/// custom providers. A stable URL/provider key lets Flutter reuse the decoded
+/// image across rebuilds; [ArtworkImageProvider] adds the physical-size key.
+@immutable
+class BoundedOnlineArtworkImageProvider
+    extends ImageProvider<BoundedOnlineArtworkImageProvider> {
+  const BoundedOnlineArtworkImageProvider(this.address, {this.provider});
+
+  final String address;
+  final String? provider;
+
+  @override
+  Future<BoundedOnlineArtworkImageProvider> obtainKey(
+    ImageConfiguration configuration,
+  ) =>
+      SynchronousFuture<BoundedOnlineArtworkImageProvider>(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    BoundedOnlineArtworkImageProvider key,
+    ImageDecoderCallback decode,
+  ) {
+    final completer = MultiFrameImageStreamCompleter(
+      codec: _loadAsync(key, decode),
+      scale: 1,
+      debugLabel: 'BoundedOnlineArtworkImageProvider(${key.provider})',
+    );
+    completer.addEphemeralErrorListener((_, __) {
+      scheduleMicrotask(() => PaintingBinding.instance.imageCache.evict(key));
+    });
+    return completer;
+  }
+
+  static Future<ui.Codec> _loadAsync(
+    BoundedOnlineArtworkImageProvider key,
+    ImageDecoderCallback decode,
+  ) async {
+    final bytes = await OnlineArtworkRequest().loadCoverBytes(
+      key.address,
+      provider: key.provider,
+    );
+    return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is BoundedOnlineArtworkImageProvider &&
+      address == other.address &&
+      provider == other.provider;
+
+  @override
+  int get hashCode => Object.hash(address, provider);
+
+  @override
+  String toString() => 'BoundedOnlineArtworkImageProvider(provider: $provider)';
+}
+
 /// A bounded, profile-scoped image source for user-managed music providers.
 ///
 /// Unlike [NetworkImage], this does not open the connection until

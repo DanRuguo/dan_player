@@ -79,6 +79,28 @@ void main() {
     parser.add('25 M-A: 0.0\r   1.28 M-A: 0.0\r');
     expect(values, [1.25, 1.28]);
   });
+  test('duration probe is shared and paused seek updates the preview clock',
+      () async {
+    var probes = 0;
+    final preview = LyricAudioPreview(audio(),
+        probeDuration: (_) async {
+          probes++;
+          return 8;
+        },
+        mainPlayback: () => null,
+        launch: (_, __, ___, ____) async => ProcessFake());
+    await Future.wait([preview.prepare(), preview.prepare()]);
+    await preview.prepare();
+    expect(probes, 1);
+    final positions = <double>[];
+    final subscription = preview.positionStream.listen(positions.add);
+    await preview.seekPaused(2.345);
+    expect(preview.playing, isFalse);
+    expect(preview.position, 2.345);
+    expect(positions.last, 2.345);
+    await subscription.cancel();
+    preview.dispose();
+  });
   test(
       'preview pause keeps main paused and close restores unchanged playback once',
       () async {

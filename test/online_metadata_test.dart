@@ -5,10 +5,13 @@ import 'dart:ui' as ui;
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/online_metadata_lookup_dialog.dart';
+import 'package:dan_player/library/artwork_image_provider.dart';
+import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/cover_image_import.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/online_artwork_request.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -402,13 +405,118 @@ void main() {
         reason: 'each phase is shorter than the deadline on its own');
     expect(client.closed, isTrue);
   });
+
+  test('artwork deadline stops a response that keeps dripping small chunks',
+      () async {
+    var delivered = 0;
+    final body = (() async* {
+      while (true) {
+        await Future<void>.delayed(const Duration(milliseconds: 15));
+        delivered++;
+        yield const <int>[1];
+      }
+    })();
+    final client = _Client((_) => _Response(
+          const [],
+          length: -1,
+          body: body,
+        ));
+    final request = OnlineArtworkRequest(
+      httpClientFactory: () => client,
+      totalTimeout: const Duration(milliseconds: 90),
+    );
+
+    await expectLater(
+      request.loadCoverBytes('https://example.com/dripping-cover',
+          provider: 'qq'),
+      throwsA(isA<TimeoutException>()),
+    );
+    expect(delivered, greaterThan(1),
+        reason: 'each individual chunk arrives before the 90 ms deadline');
+    expect(client.closed, isTrue);
+  });
+
+  test('artwork rejects unknown-length body after 20 MiB', () async {
+    final chunk = Uint8List(1024 * 1024);
+    final body = Stream<List<int>>.fromIterable(List.filled(21, chunk));
+    final client = _Client((_) => _Response(
+          const [],
+          length: -1,
+          body: body,
+        ));
+    final request = OnlineArtworkRequest(httpClientFactory: () => client);
+
+    await expectLater(
+      request.loadCoverBytes('https://example.com/unknown-length-cover',
+          provider: 'netease'),
+      throwsA(isA<CoverImageException>()),
+    );
+    expect(client.closed, isTrue);
+  });
+
+  test('display cover keeps original pixels above import size limit', () async {
+    final fixture = await _solidPng(1800, 900);
+    final client = _Client((_) => _Response(fixture));
+    final request = OnlineArtworkRequest(httpClientFactory: () => client);
+
+    final result = await request.loadCoverBytes(
+      'https://example.com/large-cover',
+      provider: 'netease',
+    );
+
+    expect(result, orderedEquals(fixture),
+        reason: 'the 1800px display source must not be normalized to 1600px');
+    expect(client.closed, isTrue);
+
+    const display = ArtworkImageProvider(
+      BoundedOnlineArtworkImageProvider(
+        'https://example.com/large-cover',
+        provider: 'netease',
+      ),
+      ArtworkSize(2048, 2048),
+    );
+    await HttpOverrides.runZoned(() async {
+      expect(await _resolveArtwork(display), const ArtworkSize(1800, 900));
+    }, createHttpClient: (_) => _Client((_) => _Response(fixture)));
+    PaintingBinding.instance.imageCache
+        .evict(await display.obtainKey(ImageConfiguration.empty));
+  });
+
+  test('failed bounded image source is evicted and a retry can load', () async {
+    final fixture = await _smallPng();
+    final clients = <_Client>[];
+    const source = BoundedOnlineArtworkImageProvider(
+      'https://example.com/retry-cover',
+      provider: 'qq',
+    );
+
+    await HttpOverrides.runZoned(() async {
+      expect(await _resolveArtwork(source), isA<CoverImageException>());
+      await Future<void>.delayed(Duration.zero);
+      expect(PaintingBinding.instance.imageCache.containsKey(source), isFalse);
+      expect(await _resolveArtwork(source), const ArtworkSize(2, 2));
+    }, createHttpClient: (_) {
+      final response = clients.isEmpty ? <int>[1, 2, 3] : fixture;
+      final client = _Client((_) => _Response(response));
+      clients.add(client);
+      return client;
+    });
+
+    expect(clients, hasLength(2));
+    expect(clients.every((client) => client.closed), isTrue);
+    PaintingBinding.instance.imageCache.evict(source);
+  });
 }
 
 Future<Uint8List> _smallPng() async {
+  return _solidPng(2, 2);
+}
+
+Future<Uint8List> _solidPng(int width, int height) async {
   final recorder = ui.PictureRecorder();
   ui.Canvas(recorder).drawColor(const ui.Color(0xff337799), ui.BlendMode.src);
   final picture = recorder.endRecording();
-  final image = await picture.toImage(2, 2);
+  final image = await picture.toImage(width, height);
   try {
     final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!;
     return bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes);
@@ -416,6 +524,26 @@ Future<Uint8List> _smallPng() async {
     image.dispose();
     picture.dispose();
   }
+}
+
+Future<Object?> _resolveArtwork(ImageProvider source) async {
+  final result = Completer<Object?>();
+  final stream = source.resolve(ImageConfiguration.empty);
+  late ImageStreamListener listener;
+  listener = ImageStreamListener(
+    (info, _) {
+      final size = ArtworkSize(info.image.width, info.image.height);
+      info.dispose();
+      stream.removeListener(listener);
+      result.complete(size);
+    },
+    onError: (error, _) {
+      stream.removeListener(listener);
+      result.complete(error);
+    },
+  );
+  stream.addListener(listener);
+  return result.future;
 }
 
 class _Client implements HttpClient {
@@ -481,13 +609,15 @@ class _Response extends Stream<List<int>> implements HttpClientResponse {
       int status = 200,
       String? location,
       this.delay = Duration.zero,
-      this.onListen})
+      this.onListen,
+      this.body})
       : contentLength = length ?? bytes.length,
         statusCode = status,
         headers = _Headers(location);
   final List<int> bytes;
   final Duration delay;
   final void Function()? onListen;
+  final Stream<List<int>>? body;
   @override
   final int contentLength;
   @override
@@ -498,11 +628,12 @@ class _Response extends Stream<List<int>> implements HttpClientResponse {
   StreamSubscription<List<int>> listen(void Function(List<int>)? onData,
       {Function? onError, void Function()? onDone, bool? cancelOnError}) {
     onListen?.call();
-    final stream = delay > Duration.zero
-        ? Stream<List<int>>.fromFuture(
-            Future<List<int>>.delayed(delay, () => bytes),
-          )
-        : Stream<List<int>>.value(bytes);
+    final stream = body ??
+        (delay > Duration.zero
+            ? Stream<List<int>>.fromFuture(
+                Future<List<int>>.delayed(delay, () => bytes),
+              )
+            : Stream<List<int>>.value(bytes));
     return stream.listen(onData,
         onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }

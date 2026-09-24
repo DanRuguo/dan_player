@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/data/stream_file_transfer.dart';
+import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/taskbar_progress.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:github/github.dart';
@@ -225,7 +226,8 @@ class UpdateService {
   final Future<List<Release>> Function() _releaseLoader;
   final String _currentVersion;
   final Future<void> Function() _savePreferences;
-  Future<List<Release>>? _checkInFlight;
+  final Map<(NetworkProxyMode, String?), Future<List<Release>>>
+      _checksInFlight = {};
 
   static Future<void> _saveSettings() => AppSettings.instance
       .saveSettings(captureWindowSize: false, throwOnError: true);
@@ -251,7 +253,14 @@ class UpdateService {
     final previews =
         includePreviews ?? AppSettings.instance.receivePreviewUpdates;
     // Share only the HTTP operation, never another caller's channel decision.
-    final task = _checkInFlight ??= _fetchReleases();
+    final proxy = AppSettings.instance.networkProxy.value;
+    final proxyKey = (
+      proxy.mode,
+      proxy.mode == NetworkProxyMode.custom ? proxy.customProxyUrl : null
+    );
+    // A manual check after changing the proxy must start on the new route,
+    // while callers on the same route still share one GitHub request.
+    final task = _checksInFlight[proxyKey] ??= _fetchReleases();
     try {
       final releases = await task;
       final current = AppVersion.tryParse(_currentVersion);
@@ -267,7 +276,9 @@ class UpdateService {
       }
       return update;
     } finally {
-      if (identical(_checkInFlight, task)) _checkInFlight = null;
+      if (identical(_checksInFlight[proxyKey], task)) {
+        _checksInFlight.remove(proxyKey);
+      }
     }
   }
 

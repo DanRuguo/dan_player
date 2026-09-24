@@ -92,6 +92,7 @@ class TapLyricEditor extends StatefulWidget {
 
 class _TapLyricEditorState extends State<TapLyricEditor> {
   late TapLyricSession session = widget.initialSession ?? TapLyricSession();
+  late final positionTick = ValueNotifier<double>(session.position);
   late final text = TextEditingController(text: session.text);
   final keyboard = FocusNode();
   final contentScroll = ScrollController();
@@ -113,8 +114,9 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
     super.initState();
     player.addListener(_changed);
     subscription = player.positionStream.listen((p) {
+      if (!mounted) return;
       session.position = p;
-      if (mounted) setState(() {});
+      positionTick.value = p;
     });
     if (timing) unawaited(_run(_prepare));
   }
@@ -214,8 +216,12 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
 
   Future<void> _online() async {
     final lyric = await widget.fetchOnline();
-    if (lyric == null || !mounted || !await _replace() || !mounted) return;
+    if (lyric == null || !mounted) return;
     final result = tapTextFromLyric(lyric);
+    if (result.text.trim().isEmpty) {
+      throw const FormatException('联网歌词没有可用正文，请重新选择。');
+    }
+    if (!await _replace() || !mounted) return;
     session.spaces = result.spaces;
     text.text = result.text;
     _syncText();
@@ -386,6 +392,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
     player.removeListener(_changed);
     unawaited(subscription?.cancel());
     player.dispose();
+    positionTick.dispose();
     text.dispose();
     contentScroll.dispose();
     keyboard.dispose();
@@ -754,7 +761,10 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
                                                         ? _timingStage()
                                                         : _finishedStage())))),
                             const SizedBox(height: 8),
-                            if (timing && ready) _transport(),
+                            if (timing && ready)
+                              ValueListenableBuilder<double>(
+                                  valueListenable: positionTick,
+                                  builder: (context, _, child) => _transport()),
                             if (session.stage == TapStage.text) _textActions(),
                             if (!timing && session.stage != TapStage.text)
                               _finishActions(),

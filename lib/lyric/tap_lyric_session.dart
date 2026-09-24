@@ -14,7 +14,8 @@ class TapRow {
   final String text, translation, romanization;
   double? start, end;
   final List<double> wordEnds = [];
-  List<String> get tokens => tapTokens(text);
+  // Text is immutable; timing and rendering read these tokens repeatedly.
+  late final List<String> tokens = List.unmodifiable(tapTokens(text));
   Map<String, dynamic> toJson() => {
         'text': text,
         'translation': translation,
@@ -39,9 +40,6 @@ class TapRow {
 List<String> tapTokens(String text) {
   final result = <String>[];
   var word = '', prefix = '';
-  final cjk = RegExp(
-      r'[\u3040-\u30ff\u3400-\u9fff\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7ff\uf900-\ufaff]|[\u{20000}-\u{323af}]',
-      unicode: true);
   void flush() {
     if (word.isNotEmpty) {
       result.add('$prefix$word');
@@ -51,11 +49,11 @@ List<String> tapTokens(String text) {
   }
 
   for (final g in text.characters) {
-    if (cjk.hasMatch(g)) {
+    if (_tapCjk.hasMatch(g)) {
       flush();
       result.add('$prefix$g');
       prefix = '';
-    } else if (RegExp(r'^[\p{L}\p{M}\p{N}]', unicode: true).hasMatch(g) ||
+    } else if (_tapWordCharacter.hasMatch(g) ||
         ((g == "'" || g == '’') && word.isNotEmpty)) {
       word += g;
     } else {
@@ -71,6 +69,11 @@ List<String> tapTokens(String text) {
   if (prefix.isNotEmpty) result.add(prefix);
   return result;
 }
+
+final _tapCjk = RegExp(
+    r'[\u3040-\u30ff\u3400-\u9fff\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7ff\uf900-\ufaff]|[\u{20000}-\u{323af}]',
+    unicode: true);
+final _tapWordCharacter = RegExp(r'^[\p{L}\p{M}\p{N}]', unicode: true);
 
 String tapDelimiter(int spaces) => '${' ' * spaces}|${' ' * spaces}';
 
@@ -121,23 +124,52 @@ List<TapRow> parseTapText(String text, int spaces) {
           })
           .where((r) => r.text.trim().isNotEmpty)
           .toList();
-  var spaces = 0;
-  while (rows.any((r) => [r.text, r.translation, r.romanization]
-      .any((s) => s.contains(tapDelimiter(spaces))))) {
-    spaces++;
+  if (rows.length > 4000) throw const FormatException('歌词文件过大');
+  if (rows.any((r) => [r.text, r.translation, r.romanization]
+      .any((s) => s.contains('\n') || s.contains('\r')))) {
+    throw const FormatException('歌词包含换行内容，请先手动编辑文本。');
+  }
+  // The parser matches a delimiter only when both padding runs have exactly
+  // that many spaces. Track occupied levels in one scan of the imported text.
+  final occupied = List<bool>.filled(33, false);
+  for (final row in rows) {
+    for (final value in [row.text, row.translation, row.romanization]) {
+      for (var pipe = value.indexOf('|');
+          pipe >= 0;
+          pipe = value.indexOf('|', pipe + 1)) {
+        occupied[0] = true;
+        var left = 0, right = 0;
+        while (left < 33 &&
+            pipe - left > 0 &&
+            value.codeUnitAt(pipe - left - 1) == 32) {
+          left++;
+        }
+        while (right < 33 &&
+            pipe + right + 1 < value.length &&
+            value.codeUnitAt(pipe + right + 1) == 32) {
+          right++;
+        }
+        if (left == right && left > 0 && left <= 32) occupied[left] = true;
+      }
+    }
+  }
+  final spaces = occupied.indexOf(false);
+  if (spaces < 0) {
+    throw const FormatException('正文中的分隔符冲突过多，请先手动编辑文本。');
   }
   final delimiter = tapDelimiter(spaces);
-  return (
-    spaces: spaces,
-    text: rows
-        .map((r) => [
-              r.text,
-              if (r.translation.isNotEmpty || r.romanization.isNotEmpty)
-                r.translation,
-              if (r.romanization.isNotEmpty) r.romanization
-            ].join(delimiter))
-        .join('\n')
-  );
+  final text = rows
+      .map((r) => [
+            r.text,
+            if (r.translation.isNotEmpty || r.romanization.isNotEmpty)
+              r.translation,
+            if (r.romanization.isNotEmpty) r.romanization
+          ].join(delimiter))
+      .join('\n');
+  if (utf8.encode(text).length > LyricEditDraft.maxBytes) {
+    throw const FormatException('歌词文件过大');
+  }
+  return (spaces: spaces, text: text);
 }
 
 /// Playback is external. Every timestamp is media time, never elapsed wall time.
