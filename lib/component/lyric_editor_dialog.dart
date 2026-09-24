@@ -233,7 +233,12 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   final romanizationController = TextEditingController();
   final focusNode = FocusNode();
   late LyricEditFormat format;
-  String _initialSignature = '';
+  late LyricEditFormat _initialFormat;
+  String _initialOriginal = '';
+  String _initialTranslation = '';
+  String _initialRomanization = '';
+  String? _previewSource;
+  bool? _previewAvailable;
   int _tab = 0;
   bool loading = true;
   bool saving = false;
@@ -246,10 +251,15 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   bool get _supportsPreview {
     if (format == LyricEditFormat.plain) return false;
     if (format != LyricEditFormat.lossless) return true;
+    final source = controller.text;
+    if (_previewSource == source && _previewAvailable != null) {
+      return _previewAvailable!;
+    }
+    _previewSource = source;
     try {
-      return _draft.parse() is! PlainLyric;
+      return _previewAvailable = _draft.parse() is! PlainLyric;
     } catch (_) {
-      return false;
+      return _previewAvailable = false;
     }
   }
 
@@ -258,13 +268,19 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   LyricEditDraft get _draft => LyricEditDraft(format, controller.text,
       translation: translationController.text,
       romanization: romanizationController.text);
-  String get _signature => jsonEncode([
-        format.name,
-        controller.text,
-        translationController.text,
-        romanizationController.text
-      ]);
-  bool get dirty => !loading && _signature != _initialSignature;
+  bool get dirty =>
+      !loading &&
+      (format != _initialFormat ||
+          controller.text != _initialOriginal ||
+          translationController.text != _initialTranslation ||
+          romanizationController.text != _initialRomanization);
+  void _rememberInitialDraft() {
+    _initialFormat = format;
+    _initialOriginal = controller.text;
+    _initialTranslation = translationController.text;
+    _initialRomanization = romanizationController.text;
+  }
+
   TextEditingController get _activeController => _tab == 1
       ? translationController
       : _tab == 2
@@ -275,6 +291,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
   void initState() {
     super.initState();
     format = widget.initialFormat;
+    _rememberInitialDraft();
     _load();
   }
 
@@ -339,11 +356,11 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         _setDraft(LyricEditDraft.fromLyric(
             lyric, selected ?? preferredLyricEditingFormat(lyric)));
       }
-      _initialSignature = _signature;
+      _rememberInitialDraft();
     } catch (error, trace) {
       LOGGER.e('[lyric editor] load failed: $error', stackTrace: trace);
       loadError = ui('读取歌词失败：{0}', [_errorText(error)]);
-      _initialSignature = _signature;
+      _rememberInitialDraft();
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -642,7 +659,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
       return;
     }
 
-    _initialSignature = _signature;
+    _rememberInitialDraft();
     showAppNotice(ui('编辑副本已保存，手动选用后才用于播放'), kind: AppNoticeKind.success);
     if (mounted) Navigator.pop(context, true);
   }
@@ -742,8 +759,8 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         Text(ui('预览最多显示 100 行，每行展示前 80 个时间片段；保存包含全部内容。'),
             style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 12),
-        for (final line in lyric.lines
-            .where((line) => lyricLineText(line).trim().isNotEmpty)
+        for (final (index, line) in lyric.lines.indexed
+            .where((entry) => lyricLineText(entry.$2).trim().isNotEmpty)
             .take(100))
           Container(
               margin: const EdgeInsets.only(bottom: 10),
@@ -761,14 +778,13 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                                 style: TextStyle(
                                     color: scheme.primary, fontSize: 12))),
                         IconButton.outlined(
-                            key: ValueKey(
-                                'lyric-line-preview-${lyric.lines.indexOf(line)}'),
+                            key: ValueKey('lyric-line-preview-$index'),
                             tooltip: ui('逐句试听'),
                             onPressed: _busy
                                 ? null
                                 : () => showLyricPlaybackPreview(
                                     context, widget.audio, lyric,
-                                    line: lyric.lines.indexOf(line)),
+                                    line: index),
                             icon: const Icon(Symbols.play_arrow)),
                       ]),
                     if (line.romanization?.isNotEmpty == true)

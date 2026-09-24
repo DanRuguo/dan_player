@@ -24,11 +24,14 @@
 | 音乐统计 | [统计总览](feature-statistics-light.png) · [三栏排行](statistics-rankings-light.png) |
 | 主题与桌面设置 | [主题选择](feature-theme-picker-light.png) · [桌面设置](feature-desktop-settings-light.png) |
 | 歌词 | [歌词外观](feature-lyric-appearance-dark.png) · [迷你歌词](feature-mini-lyrics-dark.png) |
+| 歌词编辑 | [快捷点按文本](lyric-tap-text-zh.png) · [窄窗逐字打点](lyric-tap-words-narrow-zh.png) · [传统代码编辑](lyric-code-editor-zh.png) · [逐字预览](lyric-editor-preview-zh.png) |
 | 播放条与频谱 | [播放条](feature-player-bar-dark.png) · [固定虚构频谱帧](feature-spectrum-dark.png) |
 
 ## 更新预览
 
 本轮搜索历史图片由 [search_history_render_test.dart](../../test/search_history_render_test.dart) 生成，使用 `--dart-define=DAN_SEARCH_RENDER=<输出目录>`。加载播放器字体与 Material Symbols 图标字体，展示搜索页内容区域、居中换行、超长文本省略和示例历史；中文图展示强调色删除状态，英文／日文使用浅色主题，中文／韩文使用深色主题。这些图片不包含原生窗口边框或底部播放条，不作为整窗或原生性能测试证据。
+
+歌词编辑的四张图由 [tap_lyric_editor_test.dart](../../test/tap_lyric_editor_test.dart) 与 [lyric_editor_formats_render_test.dart](../../test/lyric_editor_formats_render_test.dart) 的中文定向渲染生成，分别使用 `DAN_TAP_RENDER`、`DAN_EDITOR_RENDER` 编译期开关。使用虚构曲目和真实产品字体；宽窗、窄窗、正文、逐字与预览均是 Flutter 离屏控件图，不代表真实声卡试听。
 
 在仓库运行 [render_public_ui.ps1](../../scripts/render_public_ui.ps1) 生成主要页面和功能预览，对应测试为 [public_ui_showcase_test.dart](../../test/public_ui_showcase_test.dart)。三栏排行由 [statistics_visualization_test.dart](../../test/statistics_visualization_test.dart) 渲染检查，使用 `DAN_STATISTICS_RENDER` 指定输出目录后，将需要展示的截图更新到本目录。
 

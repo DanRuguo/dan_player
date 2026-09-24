@@ -318,12 +318,32 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
 
   Future<void> _saveLyric() async {
     await player.pause();
+    if (!mounted) return;
     _syncText();
-    final lyric = session.stage == TapStage.text
-        ? PlainLyric(parseTapText(session.text, session.spaces).isNotEmpty
-            ? session.text
-            : '')
-        : session.lyric(words: session.stage == TapStage.done);
+    Lyric lyric;
+    if (session.stage == TapStage.text) {
+      final rows = parseTapText(session.text, session.spaces);
+      if (rows.any(
+          (row) => row.translation.isNotEmpty || row.romanization.isNotEmpty)) {
+        final confirmed = await showAppDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+                    title: AppDialogTitle(ui('仅保存正文？')),
+                    content: Text(ui('纯文本歌词只保存正文；翻译和注音可在继续编写逐句歌词后保留。')),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(dialogContext, false),
+                          child: Text(ui('取消'))),
+                      FilledButton(
+                          onPressed: () => Navigator.pop(dialogContext, true),
+                          child: Text(ui('仅保存正文'))),
+                    ]));
+        if (confirmed != true || !mounted) return;
+      }
+      lyric = PlainLyric(rows.map((row) => row.text).join('\n'));
+    } else {
+      lyric = session.lyric(words: session.stage == TapStage.done);
+    }
     final saved = await widget.saveLyric(lyric);
     if (saved && mounted) {
       closing = true;

@@ -7,6 +7,8 @@ import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric_preview.dart';
+import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/tap_lyric_session.dart';
 import 'package:dan_player/lyric/lyric_edit_codec.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -90,6 +92,7 @@ void main() {
   });
   Future<void> pumpEditor(WidgetTester tester, TapLyricSession session,
       {LyricAudioPreview? preview,
+      Future<bool> Function(Lyric)? saveLyric,
       GlobalKey? boundary,
       ValueNotifier<RenderingPreferences>? rendering}) async {
     await tester.pumpWidget(RepaintBoundary(
@@ -116,9 +119,30 @@ void main() {
                                         ProcessFake()),
                             ensureTools: () async => true,
                             fetchOnline: () async => null,
-                            saveLyric: (_) async => false)))))));
+                            saveLyric: saveLyric ?? (_) async => false)))))));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('plain-text save strips auxiliary columns after confirmation',
+      (tester) async {
+    final session = TapLyricSession()..text = '你好|Hello|ni hao\n世界||shi jie';
+    PlainLyric? saved;
+    await pumpEditor(tester, session, saveLyric: (lyric) async {
+      saved = lyric as PlainLyric;
+      return false;
+    });
+    await tester.tap(find.text('保存纯文本歌词'));
+    await tester.pumpAndSettle();
+    expect(find.text('仅保存正文？'), findsOneWidget);
+    await tester.tap(find.text('取消').last);
+    await tester.pumpAndSettle();
+    expect(saved, isNull);
+    await tester.tap(find.text('保存纯文本歌词'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('仅保存正文'));
+    await tester.pumpAndSettle();
+    expect(saved?.text, '你好\n世界');
+  });
 
   for (final lang in UiLanguage.values) {
     testWidgets(

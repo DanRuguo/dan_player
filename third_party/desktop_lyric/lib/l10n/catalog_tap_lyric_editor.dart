@@ -73,6 +73,13 @@ const Map<String, List<String>> catalogTapLyricEditor = {
   ],
   "加载上次进度": ["Resume saved progress", "保存した作業を再開", "저장한 진행 상황 불러오기"],
   "保存纯文本歌词": ["Save plain-text lyrics", "テキスト歌詞を保存", "일반 텍스트 가사 저장"],
+  "仅保存正文？": ["Save only the lyric text?", "歌詞本文だけを保存しますか？", "가사 본문만 저장할까요?"],
+  "纯文本歌词只保存正文；翻译和注音可在继续编写逐句歌词后保留。": [
+    "Plain-text lyrics save only the main text. Continue to line timing to keep translations and pronunciation.",
+    "テキスト歌詞には本文のみ保存されます。翻訳と読みを残すには行の時刻付けへ進んでください。",
+    "일반 텍스트 가사는 본문만 저장합니다. 번역과 발음을 유지하려면 행 타이밍 지정으로 계속하세요."
+  ],
+  "仅保存正文": ["Save main text only", "本文のみ保存", "본문만 저장"],
   "继续编写逐句歌词": ["Continue to line timing", "行の時刻付けへ進む", "행 타이밍 지정으로 계속"],
   "第 {0} / {1} 行": ["Line {0} of {1}", "{0} / {1} 行", "{0} / {1}행"],
   "开始本句 · Enter": ["Start line · Enter", "行の開始 · Enter", "행 시작 · Enter"],

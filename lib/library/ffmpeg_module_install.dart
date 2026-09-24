@@ -8,6 +8,8 @@ import 'package:path/path.dart' as p;
 import 'package:dan_player/library/ffmpeg_runtime.dart';
 import 'package:dan_player/taskbar_progress.dart';
 
+// Keep the independently published, hash-pinned module on the 26.0.5 release.
+// Player snapshots must not require another copy of the same 70 MB archive.
 const ffmpegModuleUrl =
     'https://github.com/DanRuguo/dan_player/releases/download/v26.0.5/DanPlayer-FFmpeg-7.1.1-windows-x64.zip';
 const ffmpegModuleHash =
@@ -30,7 +32,7 @@ for($redirect=0;$redirect -lt 6;$redirect++) {
   $request.AllowAutoRedirect=$false
   $request.Timeout=30000
   $request.ReadWriteTimeout=30000
-  $request.UserAgent='DanPlayer/26.0.5'
+  $request.UserAgent='DanPlayer/26.0.6-snapshot.1'
   $response=$request.GetResponse()
   if([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
     $Url=([Uri]::new($uri,$response.Headers['Location'])).AbsoluteUri

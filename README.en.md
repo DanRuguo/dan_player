@@ -67,9 +67,12 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 | Release | Best for | Download |
 | --- | --- | --- |
+| **26.0.6 snapshot1 · Preview** | Try the lyric editing and playback refinements | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6-snapshot.1) |
 | **26.0.5 · Stable** | Everyday listening with an official stable release | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
 **Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. In the 26.0.5 release, desktop lyrics run in a separate process launched from the same executable.
+
+FFmpeg for lyric previews and trimming is optional. When you choose to download it, the player reuses the [separate 26.0.5 component package](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) and verifies its pinned size and SHA-256. The 26.0.6 snapshot1 installer and portable ZIP do not bundle another copy.
 
 > **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through the app's backup and restore settings before upgrading.
 
@@ -107,10 +110,16 @@ These features are included in the 26.0.5 stable release; see the corresponding 
 
 Online music and custom sources complement local listening. Custom services provide capabilities such as search and lyrics according to what they explicitly declare. See the [custom music source API](docs/custom-music-source-api.md) for integration details.
 
+### 26.0.6 snapshot1
+
+- Plain-text saving in tap-to-time lyrics now explains that translations and pronunciation cannot go into the plain-text copy, and saves only the main text. Line and word timing can still retain those tracks.
+- The text editor avoids repeated parsing and temporary JSON allocations while rebuilding long lossless lyrics. New wide and narrow renders show both editing methods.
+- Lyrics and comments use local content and caches first by default. Automatic online access can be enabled in settings; manual search, refresh and batch caching remain available.
+
 ### New in 26.0.5
 
 - **Search history:** the search box sits higher, with deduplicated, centered history chips that wrap and hide older entries in small windows. Click to search again; right-click or long-press, then click × to delete.
-- **Lyrics and comments:** automatic lyric loading and opening comments read local content and caches. Online requests require a manual lyric search, comment refresh, loading more comments, or a comment category/source change. The refresh icon spins during updates, with a shared result bubble on success or failure.
+- **Lyrics and comments:** local content and caches take priority by default, with optional automatic online access. Manual lyric search, comment refresh, loading more comments, and changing a comment category or source can still make requests. The refresh icon spins during updates, with a shared result bubble on success or failure.
 - **Playback interaction:** improved progress-bar multitouch, cancelled drags and recovery after a failed seek. An old drag cannot seek a new playback session. Lyric dragging rebuilds less content, and playlist view changes survive scrolling during transition capture.
 - **Category tiles:** rectangular artwork supports 1×1, 2×1, 1×2 and 2×2 sizes, custom drag ordering and optional gap filling. Captions sit directly on the artwork and choose light or dark text from its colors.
 - **Backup and restore:** choose local music by folder, library index, playlists, statistics, settings and cached resources for a single `.bak` file, with optional password encryption. Choose folders and data again when restoring, or select everything at once. Keep your password safe. Each encrypted backup must be smaller than about 64 GiB; split larger collections by folder.
@@ -121,6 +130,16 @@ Playlist view controls, the volume panel, menus, native blur switching and windo
 <a id="screenshots"></a>
 
 ## Interface gallery
+
+### Two ways to edit lyrics
+
+| Tap to time: prepare text | Tap to time: word timing in a narrow window |
+| --- | --- |
+| ![Chinese tap editor with lyrics, translation and pronunciation input](docs/images/lyric-tap-text-zh.png) | ![Chinese tap editor timing words in a narrow window](docs/images/lyric-tap-words-narrow-zh.png) |
+
+| Text editor: lyric markup | Text editor: word preview |
+| --- | --- |
+| ![Chinese text editor showing QRC lyric markup](docs/images/lyric-code-editor-zh.png) | ![Chinese text editor showing a word-timed preview](docs/images/lyric-editor-preview-zh.png) |
 
 ### Organize your collection, your way
 
