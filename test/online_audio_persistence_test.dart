@@ -4,7 +4,6 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
-import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -206,6 +205,8 @@ void main() {
     expect(audio.canFetchRemoteArtwork, isTrue);
     final artwork = await audio.artworkForSize(const ArtworkSize(64, 64))
         as ArtworkImageProvider;
-    expect(artwork.source, isA<NetworkImage>());
+    final source = artwork.source as BoundedOnlineArtworkImageProvider;
+    expect(source.address, audio.artworkUrl);
+    expect(source.provider, 'qq');
   });
 }

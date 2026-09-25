@@ -3,6 +3,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:path/path.dart' as path;
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric_cache_batch.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -187,8 +188,8 @@ class _LyricCacheBatchSettingsState extends State<LyricCacheBatchSettings> {
                 Text(ui(task.status)),
                 if (task.running) ...[
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                      value: task.scanning || task.total == 0
+                  SettingsBusyIndicator.linear(
+                      progress: task.scanning || task.total == 0
                           ? null
                           : task.completed / task.total),
                   if (task.currentTitle.isNotEmpty)

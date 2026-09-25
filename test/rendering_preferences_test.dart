@@ -190,4 +190,27 @@ void main() {
     expect(PlayService.isInitialized, isFalse);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('two visual switches in one frame retain both choices',
+      (tester) async {
+    final settings = AppSettings.instance;
+    final original = settings.rendering.value;
+    addTearDown(() => settings.rendering.value = original);
+    settings.rendering.value = const RenderingPreferences();
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: VisualEffectsSettings(persist: () async {})))));
+
+    tester
+        .widget<SwitchListTile>(find.byKey(const ValueKey('surface-blur')))
+        .onChanged!(false);
+    tester
+        .widget<SwitchListTile>(find.byKey(const ValueKey('compact-spectrum')))
+        .onChanged!(false);
+    await tester.pump();
+
+    expect(settings.rendering.value.surfaceBlur, isFalse);
+    expect(settings.rendering.value.compactSpectrum, isFalse);
+  });
 }

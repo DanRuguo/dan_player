@@ -66,6 +66,31 @@ void main() {
     expect(saves, 3);
     expect(tester.binding.hasScheduledFrame, isFalse);
   });
+  testWidgets('two animation switches in one frame retain both choices',
+      (tester) async {
+    final settings = AppSettings.instance;
+    final original = settings.rendering.value;
+    addTearDown(() => settings.rendering.value = original);
+    settings.rendering.value = const RenderingPreferences();
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: AnimationSettings(persist: () async {})))));
+
+    tester
+        .widget<SwitchListTile>(
+            find.byKey(const ValueKey('animation-tracking')))
+        .onChanged!(false);
+    tester
+        .widget<SwitchListTile>(find.byKey(const ValueKey('animation-layout')))
+        .onChanged!(false);
+    await tester.pump();
+
+    expect(settings.rendering.value.animations.allows(MotionKind.tracking),
+        isFalse);
+    expect(
+        settings.rendering.value.animations.allows(MotionKind.layout), isFalse);
+  });
   setUpAll(() async {
     for (final font in [
       (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),

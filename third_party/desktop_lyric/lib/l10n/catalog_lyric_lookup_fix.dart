@@ -1,4 +1,9 @@
 const Map<String, List<String>> catalogLyricLookupFix = {
+  '歌词已被另一操作修改，旧结果未覆盖当前版本，请重新打开后重试。': [
+    'Lyrics changed during another operation. The older result was not applied. Reopen the track and try again.',
+    '別の操作で歌詞が変更されました。古い結果は適用されていません。曲を開き直して再試行してください。',
+    '다른 작업에서 가사가 변경되었습니다. 이전 결과는 적용되지 않았습니다. 곡을 다시 열고 시도해 주세요.'
+  ],
   '版本可能不同：当前歌曲为短版，候选未注明短版。': [
     'The version may differ: the current track is a short version, but this candidate is not marked as short.',
     'バージョンが異なる可能性があります。現在の曲はショート版ですが、候補には表記がありません。',

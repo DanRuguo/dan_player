@@ -32,7 +32,8 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
     setState(() => _saveFailed = false);
     try {
       await (widget.persist ??
-          () => AppSettings.instance.saveSettings(throwOnError: true))();
+          () => AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false))();
     } catch (_) {
       if (!mounted ||
           revision != _saveRevision ||

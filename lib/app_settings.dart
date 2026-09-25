@@ -321,18 +321,26 @@ class AppSettings {
     _instance.isWindowMaximized = restored.isMaximized;
   }
 
+  static bool _readCompatibleBoolean(Object? value, bool fallback) {
+    if (value is bool) return value;
+    if (value is int && (value == 0 || value == 1)) return value == 1;
+    return fallback;
+  }
+
   static Future<void> _readFromJson_old(Map settingsMap) async {
     _instance.themeMode = ThemeModePreference.decode(settingsMap);
     _readThemeSeed(settingsMap);
 
-    _instance.dynamicTheme = settingsMap["DynamicTheme"] == 1 ? true : false;
+    _instance.dynamicTheme =
+        _readCompatibleBoolean(settingsMap["DynamicTheme"], false);
     _instance.artistSeparator = settingsMap["ArtistSeparator"];
     _instance.artistSplitPattern =
         artistSeparatorPattern(_instance.artistSeparator);
 
     final llf = settingsMap["LocalLyricFirst"];
     if (llf != null) {
-      _instance.localLyricFirst = llf == 1 ? true : false;
+      _instance.localLyricFirst =
+          _readCompatibleBoolean(llf, _instance.localLyricFirst);
     }
 
     _readCustomMusicSources(settingsMap);
@@ -436,7 +444,8 @@ class AppSettings {
 
       final dt = settingsMap["DynamicTheme"];
       if (dt != null) {
-        _instance.dynamicTheme = dt;
+        _instance.dynamicTheme =
+            _readCompatibleBoolean(dt, _instance.dynamicTheme);
       }
 
       final as = settingsMap["ArtistSeparator"];
@@ -448,7 +457,8 @@ class AppSettings {
 
       final llf = settingsMap["LocalLyricFirst"];
       if (llf != null) {
-        _instance.localLyricFirst = llf;
+        _instance.localLyricFirst =
+            _readCompatibleBoolean(llf, _instance.localLyricFirst);
       }
 
       _readCustomMusicSources(settingsMap);

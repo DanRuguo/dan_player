@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/artist_separators.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -328,9 +329,7 @@ class _ArtistSeparatorEditDialogState extends State<ArtistSeparatorEditDialog> {
                       key: const ValueKey('artist-separator-save'),
                       onPressed: _saving ? null : _save,
                       icon: _saving
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2))
+                          ? const SettingsBusyIndicator.circular(size: 18)
                           : const Icon(Symbols.check),
                       label: Text(ui(_saving ? '正在保存…' : '保存')),
                     ),

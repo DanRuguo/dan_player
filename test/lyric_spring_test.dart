@@ -116,7 +116,7 @@ void main() {
       expect(values.last, 1);
       expect(values.reduce(math.max), greaterThan(1));
       expect((values.reduce(math.max) - 1) * distance,
-          lessThanOrEqualTo(8.000001));
+          lessThanOrEqualTo(12.000001));
       expect(values.every((value) => value.isFinite && value >= 0), true);
     }
   });

@@ -138,6 +138,108 @@ void main() {
     controller.dispose();
   });
 
+  test('manual edit during checkpoint becomes the recoverable original',
+      () async {
+    final original = baseline();
+    var live = original;
+    final firstStarted = Completer<void>();
+    final firstCommit = Completer<void>();
+    var writes = 0;
+    final controller = PerformancePresetController(
+        capture: () => live,
+        apply: (value) => live = value,
+        persist: () {
+          writes++;
+          if (writes == 1) {
+            firstStarted.complete();
+            return firstCommit.future;
+          }
+          return Future.value();
+        });
+    final selection = controller.select(PerformanceMode.economy);
+    await firstStarted.future;
+    final edited = PerformanceSnapshot(
+        rendering: live.rendering.copyWith(surfaceBlur: false),
+        backgrounds: live.backgrounds,
+        dynamicTheme: live.dynamicTheme,
+        springLyrics: live.springLyrics,
+        taskbarSongPreview: live.taskbarSongPreview,
+        taskbarPlaybackProgress: live.taskbarPlaybackProgress,
+        trayBlur: live.trayBlur);
+    live = edited;
+    firstCommit.complete();
+    await selection;
+    expect(writes, 3);
+    expect(controller.value.before!.samePreferencesAs(edited), isTrue);
+    await controller.select(PerformanceMode.custom);
+    expect(live.samePreferencesAs(edited), isTrue);
+    controller.dispose();
+  });
+
+  test('continuous edits cancel selection without overwriting the latest edit',
+      () async {
+    var live = baseline();
+    var writes = 0;
+    late PerformancePresetController controller;
+    controller = PerformancePresetController(
+        capture: () => live,
+        apply: (value) => live = value,
+        persist: () async {
+          writes++;
+          if (writes <= 3) {
+            live = PerformanceSnapshot(
+                rendering: live.rendering
+                    .copyWith(surfaceBlur: !live.rendering.surfaceBlur),
+                backgrounds: live.backgrounds,
+                dynamicTheme: live.dynamicTheme,
+                springLyrics: live.springLyrics,
+                taskbarSongPreview: live.taskbarSongPreview,
+                taskbarPlaybackProgress: live.taskbarPlaybackProgress,
+                trayBlur: live.trayBlur);
+          }
+        });
+    await controller.select(PerformanceMode.economy);
+    expect(writes, 4);
+    expect(controller.value.mode, PerformanceMode.custom);
+    expect(live.rendering.surfaceBlur, isFalse);
+    controller.dispose();
+  });
+
+  test('failed final save does not roll back a concurrent manual edit',
+      () async {
+    var live = baseline();
+    final finalStarted = Completer<void>();
+    final finalCommit = Completer<void>();
+    var writes = 0;
+    final controller = PerformancePresetController(
+        capture: () => live,
+        apply: (value) => live = value,
+        persist: () {
+          writes++;
+          if (writes == 2) {
+            finalStarted.complete();
+            return finalCommit.future;
+          }
+          return Future.value();
+        });
+    final selection = controller.select(PerformanceMode.economy);
+    await finalStarted.future;
+    live = PerformanceSnapshot(
+        rendering: live.rendering.copyWith(surfaceBlur: true),
+        backgrounds: live.backgrounds,
+        dynamicTheme: live.dynamicTheme,
+        springLyrics: live.springLyrics,
+        taskbarSongPreview: live.taskbarSongPreview,
+        taskbarPlaybackProgress: live.taskbarPlaybackProgress,
+        trayBlur: live.trayBlur);
+    finalCommit.completeError(StateError('superseded'));
+    await selection;
+    expect(writes, 3);
+    expect(controller.value.mode, PerformanceMode.economy);
+    expect(live.rendering.surfaceBlur, isTrue);
+    controller.dispose();
+  });
+
   test('a failed capture does not permanently lock mode selection', () async {
     var fail = true;
     var live = baseline();

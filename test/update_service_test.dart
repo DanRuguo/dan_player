@@ -278,6 +278,45 @@ void main() {
       );
     });
 
+    test('same-version marker digest rejects stale installer before checksum',
+        () async {
+      final payload = utf8.encode('old installer bytes');
+      var checksumRequests = 0;
+      final service = UpdateService.forTesting(
+        appDataDirectory: () async => scratch,
+        httpClientFactory: () => _FakeHttpClient((uri, _) {
+          if (uri.path.endsWith('.sha256')) checksumRequests++;
+          return _response(payload);
+        }),
+      );
+      final original = _update(payload, checksum: true);
+      final update = AvailableUpdate(
+        release: original.release,
+        version: original.version,
+        asset: original.asset,
+        checksumAsset: original.checksumAsset,
+        releaseBuild: ReleaseBuildMarker(
+          version: '26.0.4',
+          sourceRevision: 'b' * 40,
+          assembledUtc: DateTime.utc(2026, 9, 25),
+          installerAssetId: 1,
+          installerSize: payload.length,
+          installerSha256: 'a' * 64,
+          checksumAssetId: 2,
+          checksumSize: 84,
+        ),
+      );
+      await expectLater(
+        service.download(update),
+        throwsA(isA<UpdateException>()
+            .having((error) => error.message, 'message', contains('构建标识不一致'))),
+      );
+      expect(checksumRequests, 0);
+      expect(
+          await scratch.list(recursive: true).where((e) => e is File).toList(),
+          isEmpty);
+    });
+
     test('an HTTPS redirect cannot issue a downgraded HTTP request', () async {
       final requested = <Uri>[];
       final service = UpdateService.forTesting(

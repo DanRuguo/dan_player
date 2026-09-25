@@ -39,7 +39,8 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
     preferences.value = next;
     try {
       await (widget.persist ??
-          () => AppSettings.instance.saveSettings(throwOnError: true))();
+          () => AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false))();
     } catch (_) {
       if (!mounted ||
           revision != _saveRevision ||
@@ -58,7 +59,8 @@ class _MusicSourceSettingsState extends State<MusicSourceSettings> {
     notifier.value = enabled;
     try {
       await (widget.persist ??
-          () => AppSettings.instance.saveSettings(throwOnError: true))();
+          () => AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false))();
     } catch (_) {
       if (!mounted ||
           revision != _saveRevision ||

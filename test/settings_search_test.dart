@@ -34,6 +34,12 @@ void main() {
       expect(searchSettings(direct).map((entry) => entry.id),
           contains('network-proxy'),
           reason: direct);
+      for (final preset in ['一键省电', '一键高性能', '恢复原设置']) {
+        final translated = translateUi(preset, language);
+        expect(searchSettings(translated).map((entry) => entry.id),
+            contains('performance'),
+            reason: translated);
+      }
       expect(searchSettings('  '), isEmpty);
     });
   }

@@ -5,12 +5,38 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/play_service/lyric_service.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as path;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test('old settings default off and opt-in survives disk reload', () async {
     final settings = AppSettings.instance;
+    final previous = settings.automaticOnlineLyrics.value;
+    const channel = MethodChannel('plugins.flutter.io/path_provider');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    expect(Platform.environment['DAN_PLAYER_DATA_DIR']?.trim() ?? '', isEmpty);
+    final parent = await Directory(
+      path.join(Directory.current.path, 'build', 'test-data'),
+    ).create(recursive: true);
+    final fixture = await parent.createTemp('automatic-online-lyrics-');
+    messenger.setMockMethodCallHandler(channel, (_) async => fixture.path);
+    addTearDown(() async {
+      settings.automaticOnlineLyrics.value = previous;
+      messenger.setMockMethodCallHandler(channel, null);
+      final resolvedParent = await parent.resolveSymbolicLinks();
+      final resolvedFixture = await fixture.resolveSymbolicLinks();
+      if (!path.isWithin(resolvedParent, resolvedFixture) ||
+          !path
+              .basename(resolvedFixture)
+              .startsWith('automatic-online-lyrics-')) {
+        throw StateError('Refusing to delete an unverified fixture');
+      }
+      await Directory(resolvedFixture).delete(recursive: true);
+    });
+    settings.automaticOnlineLyrics.value = false;
     expect(settings.automaticOnlineLyrics.value, isFalse);
     final file = File('${(await getAppDataDir()).path}/settings.json');
     await file.parent.create(recursive: true);
@@ -22,7 +48,6 @@ void main() {
     settings.automaticOnlineLyrics.value = false;
     await AppSettings.readFromJson();
     expect(settings.automaticOnlineLyrics.value, isTrue);
-    settings.automaticOnlineLyrics.value = false;
   });
   for (final enabled in [false, true]) {
     for (final savedSource in ['missing', 'local', 'cached']) {

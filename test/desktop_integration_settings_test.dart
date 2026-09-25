@@ -71,6 +71,28 @@ void main() {
     expect(rig.native.calls, isEmpty);
   });
 
+  testWidgets('two desktop switches in one frame retain both choices',
+      (tester) async {
+    final rig = DesktopTestRig();
+    addTearDown(rig.dispose);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await mount(tester, rig);
+
+    tester
+        .widget<SwitchListTile>(
+            find.byKey(const ValueKey('taskbar-controls-setting')))
+        .onChanged!(false);
+    tester
+        .widget<SwitchListTile>(
+            find.byKey(const ValueKey('taskbar-song-preview-setting')))
+        .onChanged!(false);
+    await tester.pump();
+
+    expect(rig.preferences.value.taskbarControls, isFalse);
+    expect(rig.preferences.value.taskbarSongPreview, isFalse);
+  });
+
   testWidgets('song preview toggle preserves native buttons and persists once',
       (tester) async {
     final rig = DesktopTestRig();

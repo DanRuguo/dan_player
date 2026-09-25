@@ -110,9 +110,10 @@ Future<void> _launch(
   await tester.tap(find.byKey(_open));
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
-  // These existing request/layout scenarios begin with an explicit refresh;
-  // merely opening the dialog now only reads the local snapshot.
-  if (find.text('暂无本地评论，请点击右上角更新。').evaluate().isNotEmpty) {
+  // These request/layout scenarios explicitly refresh after opening. In a
+  // short window the empty-state footer is virtualized, but the fixed refresh
+  // button remains available and must still start the first request.
+  if (find.byKey(_refresh).evaluate().isNotEmpty) {
     await tester.tap(find.byKey(_refresh));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

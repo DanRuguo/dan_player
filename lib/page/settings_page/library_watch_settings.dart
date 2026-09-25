@@ -26,7 +26,8 @@ class LibraryWatchSettings extends StatelessWidget {
           value.value = next;
           try {
             await (save?.call() ??
-                AppSettings.instance.saveSettings(throwOnError: true));
+                AppSettings.instance.saveSettings(
+                    throwOnError: true, captureWindowSize: false));
           } catch (_) {
             if (context.mounted) {
               showAppNotice(ui('自动更新设置尚未保存，请重试。'),

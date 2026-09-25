@@ -359,10 +359,10 @@ const Map<String, List<String>> catalogCustomMusicSources = {
   '编辑自定义歌源': ['Edit custom source', 'カスタム音源を編集', '사용자 지정 음원 편집'],
   '删除自定义歌源': ['Delete custom source', 'カスタム音源を削除', '사용자 지정 음원 삭제'],
   '导入的歌词 API': ['Imported lyric API', '読み込んだ歌詞 API', '가져온 가사 API'],
-  '仅决定本地歌词与在线候选的优先顺序': [
-    'Only sets the priority between local lyrics and online candidates',
-    'ローカル歌詞とオンライン候補の優先順位だけを設定します',
-    '로컬 가사와 온라인 후보의 우선순위만 정합니다'
+  '仅决定下次加载时本地与在线歌词的优先顺序；当前歌曲不会立即换词，可手动指定默认歌词。': [
+    'Sets local versus online lyric priority for the next lyric load. The current song does not switch immediately; you can choose its default lyrics manually.',
+    '次に歌詞を読み込む際のローカルとオンラインの優先順位を設定します。現在の曲はすぐに切り替わりません。既定の歌詞は手動で指定できます。',
+    '다음 가사 로드에서 로컬과 온라인 가사의 우선순위를 정합니다. 현재 곡의 가사는 즉시 바뀌지 않으며 기본 가사를 직접 지정할 수 있습니다.'
   ],
   '只删除“{0}”的配置，不会删除收藏、歌单或歌曲。': [
     'Only the “{0}” configuration will be deleted. Favorites, playlists and tracks are not affected.',

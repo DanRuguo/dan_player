@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 
 /// One settings surface and one set of row metrics, independent of persistence.
@@ -78,6 +79,39 @@ class SettingsHeader extends StatelessWidget {
             ],
           ])),
     ]);
+  }
+}
+
+/// An inline retry for settings that take effect now but failed to reach disk.
+class SettingsSaveFeedback extends StatelessWidget {
+  const SettingsSaveFeedback({super.key, required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Semantics(
+        liveRegion: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(ui('设置保存失败，本次会话仍保留当前选择'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh),
+                label: Text(ui('重试保存')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

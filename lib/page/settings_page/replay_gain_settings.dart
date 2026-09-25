@@ -23,7 +23,8 @@ class _ReplayGainSettingsState extends State<ReplayGainSettings> {
   Future<void> _save() async {
     final generation = ++_saveGeneration;
     try {
-      await AppSettings.instance.saveSettings(throwOnError: true);
+      await AppSettings.instance
+          .saveSettings(throwOnError: true, captureWindowSize: false);
       if (mounted && generation == _saveGeneration) {
         setState(() {
           _error = null;
@@ -40,7 +41,9 @@ class _ReplayGainSettingsState extends State<ReplayGainSettings> {
     }
   }
 
-  void _change(ReplayGainPreferences next) {
+  void _change(ReplayGainPreferences Function(ReplayGainPreferences) update) {
+    final next = update(AppSettings.instance.replayGain.value);
+    if (next == AppSettings.instance.replayGain.value) return;
     ++_saveGeneration;
     if (PlayService.playbackReady.value &&
         !PlayService.instance.playbackService.configureReplayGain(next)) {
@@ -78,7 +81,8 @@ class ReplayGainSettingsPanel extends StatelessWidget {
       this.error,
       this.onRetrySave});
   final ReplayGainPreferences preferences;
-  final ValueChanged<ReplayGainPreferences>? onChanged;
+  final void Function(ReplayGainPreferences Function(ReplayGainPreferences))?
+      onChanged;
   final String? error;
   final VoidCallback? onRetrySave;
 
@@ -98,7 +102,7 @@ class ReplayGainSettingsPanel extends StatelessWidget {
           value: preferences.mode,
           onChanged: onChanged == null
               ? null
-              : (mode) => onChanged!(preferences.copyWith(mode: mode)),
+              : (mode) => onChanged!((current) => current.copyWith(mode: mode)),
           options: [
             AppSegmentOption(
                 value: ReplayGainMode.off,
@@ -125,8 +129,8 @@ class ReplayGainSettingsPanel extends StatelessWidget {
           value: preferences.preventClipping,
           onChanged: onChanged == null || preferences.mode == ReplayGainMode.off
               ? null
-              : (value) =>
-                  onChanged!(preferences.copyWith(preventClipping: value))),
+              : (value) => onChanged!(
+                  (current) => current.copyWith(preventClipping: value))),
       if (error != null) ...[
         Text(error!,
             style: TextStyle(color: Theme.of(context).colorScheme.error)),

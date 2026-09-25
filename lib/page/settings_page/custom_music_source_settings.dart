@@ -8,6 +8,7 @@ import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/custom_music_source_probe_dialog.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/custom_music_source_transport.dart';
 import 'package:dan_player/utils.dart';
@@ -117,7 +118,8 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings>
     );
     try {
       await (widget.persist ??
-          () => AppSettings.instance.saveSettings(throwOnError: true))();
+          () => AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false))();
     } catch (error, trace) {
       LOGGER.e('[custom source settings] save failed',
           error: error, stackTrace: trace);
@@ -757,10 +759,7 @@ class _CustomSourceCard extends StatelessWidget {
                 key: ValueKey('custom-source-test-${profile.id}'),
                 onPressed: testBusy ? null : onTest,
                 icon: testing
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                    ? const SettingsBusyIndicator.circular(size: 18)
                     : const Icon(Symbols.network_check),
                 label: Text(ui('测试')),
               ),

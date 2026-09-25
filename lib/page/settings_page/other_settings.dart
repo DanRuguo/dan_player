@@ -18,6 +18,7 @@ import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/page/settings_page/settings_choice_persistence.dart';
 import 'package:dan_player/page/folders_page.dart' show folderDisplayName;
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/utils.dart';
@@ -28,105 +29,143 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
-class AutomaticOnlineLyricsSwitch extends StatelessWidget {
-  const AutomaticOnlineLyricsSwitch({super.key});
+class AutomaticOnlineLyricsSwitch extends StatefulWidget {
+  const AutomaticOnlineLyricsSwitch({super.key, this.persist});
+  final Future<void> Function()? persist;
 
+  @override
+  State<AutomaticOnlineLyricsSwitch> createState() =>
+      _AutomaticOnlineLyricsSwitchState();
+}
+
+class _AutomaticOnlineLyricsSwitchState
+    extends State<AutomaticOnlineLyricsSwitch>
+    with SettingsChoicePersistence<AutomaticOnlineLyricsSwitch> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final settings = AppSettings.instance;
     return ValueListenableBuilder<bool>(
       valueListenable: settings.automaticOnlineLyrics,
-      builder: (context, enabled, _) => SettingsSwitchTile(
-        title: Text(ui('自动联网')),
-        subtitle: Text(ui('缺少本地和缓存歌词时自动搜词；打开已关联的歌曲评论时自动更新一次。')),
-        icon: Symbols.cloud_sync,
-        value: enabled,
-        onChanged: (value) async {
-          settings.automaticOnlineLyrics.value = value;
-          await settings.saveSettings();
-        },
+      builder: (context, enabled, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SettingsSwitchTile(
+            title: Text(ui('自动联网')),
+            subtitle: Text(ui('缺少本地和缓存歌词时自动搜词；打开已关联的歌曲评论时自动更新一次。')),
+            icon: Symbols.cloud_sync,
+            value: enabled,
+            onChanged: (value) {
+              settings.automaticOnlineLyrics.value = value;
+              unawaited(saveChoice(widget.persist));
+            },
+          ),
+          if (saveFailed)
+            SettingsSaveFeedback(
+                key: const ValueKey('automatic-online-save-failure'),
+                onRetry: () => unawaited(saveChoice(widget.persist))),
+        ],
       ),
     );
   }
 }
 
 class RestoreSessionSwitch extends StatefulWidget {
-  const RestoreSessionSwitch({super.key});
+  const RestoreSessionSwitch({super.key, this.persist});
+  final Future<void> Function()? persist;
 
   @override
   State<RestoreSessionSwitch> createState() => _RestoreSessionSwitchState();
 }
 
-class _RestoreSessionSwitchState extends State<RestoreSessionSwitch> {
+class _RestoreSessionSwitchState extends State<RestoreSessionSwitch>
+    with SettingsChoicePersistence<RestoreSessionSwitch> {
   final settings = AppSettings.instance;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return SettingsSwitchTile(
-      title: Text(ui("恢复上次播放会话")),
-      subtitle: Text(ui(settings.restoreLastSession
-          ? '下次启动恢复队列与播放位置，保持暂停。'
-          : '下次启动不恢复上次播放队列。')),
-      icon: Symbols.history,
-      value: settings.restoreLastSession,
-      onChanged: (value) async {
-        setState(() => settings.restoreLastSession = value);
-        await settings.saveSettings();
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SettingsSwitchTile(
+          title: Text(ui("恢复上次播放会话")),
+          subtitle: Text(ui(settings.restoreLastSession
+              ? '下次启动恢复队列与播放位置，保持暂停。'
+              : '下次启动不恢复上次播放队列。')),
+          icon: Symbols.history,
+          value: settings.restoreLastSession,
+          onChanged: (value) {
+            setState(() => settings.restoreLastSession = value);
+            unawaited(saveChoice(widget.persist));
+          },
+        ),
+        if (saveFailed)
+          SettingsSaveFeedback(
+              key: const ValueKey('restore-session-save-failure'),
+              onRetry: () => unawaited(saveChoice(widget.persist))),
+      ],
     );
   }
 }
 
 class DefaultLyricSourceControl extends StatefulWidget {
-  const DefaultLyricSourceControl({super.key});
+  const DefaultLyricSourceControl({super.key, this.persist});
+  final Future<void> Function()? persist;
 
   @override
   State<DefaultLyricSourceControl> createState() =>
       _DefaultLyricSourceControlState();
 }
 
-class _DefaultLyricSourceControlState extends State<DefaultLyricSourceControl> {
+class _DefaultLyricSourceControlState extends State<DefaultLyricSourceControl>
+    with SettingsChoicePersistence<DefaultLyricSourceControl> {
   final settings = AppSettings.instance;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return SettingsTile(
-      description: ui("首选歌词来源"),
-      subtitle: ui('仅决定本地歌词与在线候选的优先顺序'),
-      icon: Symbols.lyrics,
-      action: AppSegmentedControl<bool>(
-        value: settings.localLyricFirst,
-        semanticLabel: ui('首选歌词来源'),
-        options: [
-          AppSegmentOption<bool>(
-            value: true,
-            icon: Symbols.cloud_off,
-            label: ui("本地"),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SettingsTile(
+          description: ui("首选歌词来源"),
+          subtitle: ui('仅决定下次加载时本地与在线歌词的优先顺序；当前歌曲不会立即换词，可手动指定默认歌词。'),
+          icon: Symbols.lyrics,
+          action: AppSegmentedControl<bool>(
+            value: settings.localLyricFirst,
+            semanticLabel: ui('首选歌词来源'),
+            options: [
+              AppSegmentOption<bool>(
+                value: true,
+                icon: Symbols.cloud_off,
+                label: ui("本地"),
+              ),
+              AppSegmentOption<bool>(
+                value: false,
+                icon: Symbols.cloud,
+                label: ui("在线"),
+              ),
+            ],
+            onChanged: (newSelection) {
+              if (newSelection == settings.localLyricFirst) return;
+              setState(() => settings.localLyricFirst = newSelection);
+              unawaited(saveChoice(widget.persist));
+            },
           ),
-          AppSegmentOption<bool>(
-            value: false,
-            icon: Symbols.cloud,
-            label: ui("在线"),
-          ),
-        ],
-        onChanged: (newSelection) async {
-          if (newSelection == settings.localLyricFirst) return;
-
-          setState(() {
-            settings.localLyricFirst = newSelection;
-          });
-          await settings.saveSettings();
-        },
-      ),
+        ),
+        if (saveFailed)
+          SettingsSaveFeedback(
+              key: const ValueKey('lyric-source-save-failure'),
+              onRetry: () => unawaited(saveChoice(widget.persist))),
+      ],
     );
   }
 }
 
 class LyricApiEditor extends StatefulWidget {
-  const LyricApiEditor({super.key});
+  const LyricApiEditor({super.key, this.persist});
+  final Future<void> Function()? persist;
 
   @override
   State<LyricApiEditor> createState() => _LyricApiEditorState();
@@ -134,6 +173,38 @@ class LyricApiEditor extends StatefulWidget {
 
 class _LyricApiEditorState extends State<LyricApiEditor> {
   final settings = AppSettings.instance;
+  bool _saving = false;
+  bool _saveFailed = false;
+  int _saveRevision = 0;
+
+  Future<void> _saveApi() async {
+    final revision = ++_saveRevision;
+    setState(() {
+      _saving = true;
+      _saveFailed = false;
+    });
+    try {
+      await (widget.persist ??
+          () => settings.saveSettings(
+              throwOnError: true,
+              captureWindowSize: false,
+              requireCommit: true))();
+    } catch (_) {
+      if (mounted && revision == _saveRevision) {
+        setState(() {
+          _saving = false;
+          _saveFailed = true;
+        });
+      }
+      return;
+    }
+    if (!mounted || revision != _saveRevision) return;
+    setState(() => _saving = false);
+    showAppNotice(
+        settings.lyricApiUrl == null ? ui("已恢复默认歌词API") : ui("歌词API已更新"),
+        context: context,
+        kind: AppNoticeKind.success);
+  }
 
   Future<void> _backupCurrentApis() async {
     final currentApi = settings.lyricApiUrl?.trim();
@@ -244,6 +315,7 @@ class _LyricApiEditorState extends State<LyricApiEditor> {
   }
 
   Future<void> _openEditor() async {
+    if (_saving) return;
     final currentApi = settings.lyricApiUrl?.trim();
     final connectivityFuture = currentApi != null && currentApi.isNotEmpty
         ? testLyricApiConnectivity(currentApi)
@@ -379,29 +451,35 @@ class _LyricApiEditorState extends State<LyricApiEditor> {
       },
     );
 
-    if (result == null) return;
+    if (result == null || !mounted) return;
 
     setState(() {
       final value = result.trim();
       settings.lyricApiUrl = value.isEmpty ? null : value;
     });
-    await settings.saveSettings();
-    showAppNotice(
-        settings.lyricApiUrl == null ? ui("已恢复默认歌词API") : ui("歌词API已更新"),
-        kind: AppNoticeKind.success);
+    await _saveApi();
   }
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return SettingsTile(
-      description: ui("歌词API"),
-      icon: Symbols.api,
-      action: FilledButton.icon(
-        icon: const Icon(Symbols.api),
-        label: Text(settings.lyricApiUrl == null ? ui("设置接口") : ui("已自定义")),
-        onPressed: _openEditor,
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SettingsTile(
+          description: ui("歌词API"),
+          icon: Symbols.api,
+          action: FilledButton.icon(
+            icon: const Icon(Symbols.api),
+            label: Text(settings.lyricApiUrl == null ? ui("设置接口") : ui("已自定义")),
+            onPressed: _saving ? null : _openEditor,
+          ),
+        ),
+        if (_saveFailed)
+          SettingsSaveFeedback(
+              key: const ValueKey('lyric-api-save-failure'),
+              onRetry: () => unawaited(_saveApi())),
+      ],
     );
   }
 }
@@ -974,13 +1052,16 @@ class PreventSleepSwitch extends StatelessWidget {
           value: pref.preventSleepDuringPlayback,
           onChanged: (v) async {
             AppSettings.instance.experience.value =
-                pref.copyWith(preventSleepDuringPlayback: v);
+                AppSettings.instance.experience.value
+                    .copyWith(preventSleepDuringPlayback: v);
             try {
-              await AppSettings.instance.saveSettings(throwOnError: true);
+              await AppSettings.instance.saveSettings(
+                  throwOnError: true, captureWindowSize: false);
             } catch (_) {
-              if (context.mounted)
+              if (context.mounted) {
                 showPresentationNotice(ui('设置保存失败，本次会话仍保留当前选择'),
                     context: context, kind: AppNoticeKind.error);
+              }
             }
           },
         ),

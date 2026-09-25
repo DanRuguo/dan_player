@@ -42,7 +42,8 @@ void main() {
         StatefulBuilder(
             builder: (context, setState) => ReplayGainSettingsPanel(
                 preferences: preferences,
-                onChanged: (next) => setState(() => preferences = next))));
+                onChanged: (update) =>
+                    setState(() => preferences = update(preferences)))));
     final peak = find.byKey(const ValueKey('replay-gain-prevent-clipping'));
     expect(tester.widget<SwitchListTile>(peak).onChanged, isNull);
     await tester.tap(find.text(ui('专辑均衡')));
@@ -57,6 +58,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(preferences.mode, ReplayGainMode.off);
     expect(tester.widget<SwitchListTile>(peak).onChanged, isNull);
+  });
+
+  testWidgets('rapid mode and peak changes merge before the next frame',
+      (tester) async {
+    var preferences = const ReplayGainPreferences(mode: ReplayGainMode.track);
+    await host(
+        tester,
+        StatefulBuilder(
+            builder: (context, setState) => ReplayGainSettingsPanel(
+                preferences: preferences,
+                onChanged: (update) =>
+                    setState(() => preferences = update(preferences)))));
+    final mode = tester.widget<AppSegmentedControl<ReplayGainMode>>(
+        find.byKey(const ValueKey('replay-gain-mode')));
+    final peak = tester.widget<SwitchListTile>(
+        find.byKey(const ValueKey('replay-gain-prevent-clipping')));
+    mode.onChanged!(ReplayGainMode.album);
+    peak.onChanged!(false);
+    expect(preferences.mode, ReplayGainMode.album);
+    expect(preferences.preventClipping, isFalse);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('narrow large-text translated settings expose all choices',

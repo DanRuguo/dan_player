@@ -69,8 +69,8 @@ class _DesktopIntegrationSettingsState
             controlKey: const ValueKey('close-to-tray-setting'),
             icon: Icons.system_update_alt,
             value: preferences.closeToTray,
-            onChanged: (value) =>
-                unawaited(_change(preferences.copyWith(closeToTray: value))),
+            onChanged: (value) => unawaited(
+                _change(_preferences.value.copyWith(closeToTray: value))),
             title: Text(ui("关闭窗口后在后台继续播放")),
             subtitle: Text(ui("隐藏到系统托盘；可从托盘恢复主窗、迷你播放器或真正退出。托盘不可用时正常退出。")),
           ),
@@ -80,7 +80,7 @@ class _DesktopIntegrationSettingsState
             icon: Icons.skip_next_outlined,
             value: preferences.taskbarControls,
             onChanged: (value) => unawaited(
-                _change(preferences.copyWith(taskbarControls: value))),
+                _change(_preferences.value.copyWith(taskbarControls: value))),
             title: Text(ui("任务栏缩略图播放控制")),
             subtitle: Text(ui("悬停任务栏图标时显示上一首、播放/暂停和下一首。不在任务栏显示歌词。")),
           ),
@@ -89,8 +89,8 @@ class _DesktopIntegrationSettingsState
             controlKey: const ValueKey('taskbar-song-preview-setting'),
             icon: Icons.preview_outlined,
             value: preferences.taskbarSongPreview,
-            onChanged: (value) => unawaited(
-                _change(preferences.copyWith(taskbarSongPreview: value))),
+            onChanged: (value) => unawaited(_change(
+                _preferences.value.copyWith(taskbarSongPreview: value))),
             title: Text(ui("任务栏歌曲预览")),
             subtitle: Text(ui("小预览显示歌曲卡片；桌面 Peek 按窗口大小放大显示，保持比例。关闭后恢复系统窗口预览。")),
           ),
@@ -99,8 +99,8 @@ class _DesktopIntegrationSettingsState
             controlKey: const ValueKey('taskbar-playback-progress-setting'),
             icon: Icons.linear_scale,
             value: preferences.taskbarPlaybackProgress,
-            onChanged: (value) => unawaited(
-                _change(preferences.copyWith(taskbarPlaybackProgress: value))),
+            onChanged: (value) => unawaited(_change(
+                _preferences.value.copyWith(taskbarPlaybackProgress: value))),
             title: Text(ui('任务栏播放进度')),
             subtitle: Text(ui('在任务栏图标上显示播放与暂停进度。关闭后仍显示下载、处理任务的进度及加载状态。')),
           ),

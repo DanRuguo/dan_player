@@ -5,9 +5,11 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/online/app_network_proxy.dart';
 import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/online/windows_system_proxy.dart';
+import 'package:dan_player/utils.dart' show AppNoticeKind, showAppNotice;
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -43,6 +45,7 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
   bool _testPassed = false;
   int _probeRevision = 0;
   int _commitRevision = 0;
+  late Future<void> Function() _persist;
 
   ValueNotifier<NetworkProxyPreferences> get _preferences =>
       widget.preferences ?? AppSettings.instance.networkProxy;
@@ -50,6 +53,7 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
   @override
   void initState() {
     super.initState();
+    _persist = widget.persist ?? _persistSettings;
     _readSaved();
     _preferences.addListener(_onPreferencesChanged);
   }
@@ -57,6 +61,7 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
   @override
   void didUpdateWidget(covariant NetworkProxySettings oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _persist = widget.persist ?? _persistSettings;
     final previous = oldWidget.preferences ?? AppSettings.instance.networkProxy;
     if (!identical(previous, _preferences)) {
       previous.removeListener(_onPreferencesChanged);
@@ -64,6 +69,9 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
       _readSaved();
     }
   }
+
+  Future<void> _persistSettings() => AppSettings.instance.saveSettings(
+      captureWindowSize: false, throwOnError: true, requireCommit: true);
 
   void _readSaved() {
     final value = _preferences.value;
@@ -193,18 +201,18 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
     try {
       // One write at a time. If a selection changes during an older write,
       // persist the latest live preference again after that write finishes.
-      while (_persistQueued && mounted) {
+      while (_persistQueued) {
         _persistQueued = false;
         final revision = _commitRevision;
         try {
-          await (widget.persist ??
-              () => AppSettings.instance.saveSettings(
-                  captureWindowSize: false,
-                  throwOnError: true,
-                  requireCommit: true))();
+          await _persist();
         } catch (_) {
-          if (!mounted) return;
           if (revision != _commitRevision) continue;
+          if (!mounted) {
+            showAppNotice(ui('代理设置已在本次运行应用，但保存失败；请重试。'),
+                kind: AppNoticeKind.error);
+            return;
+          }
           setState(() {
             _saving = false;
             _retryNeeded = true;
@@ -219,7 +227,10 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
             _address.text = _preferences.value.customProxyUrl ?? '';
             _port.clear();
           }
-          _dirty = _mode != _preferences.value.mode || _hasUnsavedCustomDraft;
+          // A hidden custom draft must not block updates to the active system
+          // or direct mode from another settings owner.
+          _dirty = _mode != _preferences.value.mode ||
+              (_mode == NetworkProxyMode.custom && _hasUnsavedCustomDraft);
           _saving = false;
           _retryNeeded = false;
           _error = null;
@@ -229,7 +240,7 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
       }
     } finally {
       _persistInFlight = false;
-      if (_persistQueued && mounted) unawaited(_drainPersistence());
+      if (_persistQueued) unawaited(_drainPersistence());
     }
   }
 
@@ -391,9 +402,7 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
                 onPressed:
                     _testing || _saving ? null : () => unawaited(_test()),
                 icon: _testing
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SettingsBusyIndicator.circular(size: 16)
                     : const Icon(Icons.network_check_outlined),
                 label: Text(ui('测试 GitHub 连接')),
               ),

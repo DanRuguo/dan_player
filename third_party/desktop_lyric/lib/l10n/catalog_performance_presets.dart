@@ -28,10 +28,15 @@ const catalogPerformancePresets = <String, List<String>>{
     "使用中も手動で調整できます。復元すると対象項目は有効にする前の値に戻ります。",
     "모드 사용 중에도 수동으로 조정할 수 있습니다. 복원하면 해당 항목이 활성화 전 값으로 돌아갑니다."
   ],
-  "设置保存失败，已撤回本次切换；请重试。": [
-    "Could not save settings. This change was rolled back; please retry.",
-    "設定を保存できませんでした。今回の変更を元に戻しました。再試行してください。",
-    "설정을 저장하지 못해 이번 변경을 되돌렸습니다. 다시 시도하세요."
+  "设置保存失败；请检查当前设置并重试。": [
+    "Could not save settings. Check the current options and retry.",
+    "設定を保存できませんでした。現在の設定を確認して再試行してください。",
+    "설정을 저장하지 못했습니다. 현재 설정을 확인한 뒤 다시 시도하세요."
+  ],
+  "设置仍在变化，请稍后重试。": [
+    "Settings are still changing. Please try again shortly.",
+    "設定がまだ変更されています。少し待ってから再試行してください。",
+    "설정이 계속 변경되고 있습니다. 잠시 후 다시 시도하세요."
   ],
   "播放条七音频谱": ["Playback bar spectrum", "再生バーのスペクトラム", "재생 막대 스펙트럼"],
   "关闭后停止播放条的频谱采样与绘制，保留播放控制。": [

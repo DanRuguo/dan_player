@@ -2,9 +2,6 @@ name: Windows CI
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master]
-  pull_request:
 
 permissions:
   contents: read
@@ -31,17 +28,13 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Select checks from changed inputs
+      - name: Select full integration checks
         id: impact
-        env:
-          CHANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
-          & .\scripts\select_windows_ci_checks.ps1 -BaseRevision $env:CHANGE_BASE -Integration:($env:EVENT_NAME -eq 'workflow_dispatch') -OutputPath (Join-Path $env:GITHUB_WORKSPACE 'tool/ci-impact.json')
+          & .\scripts\select_windows_ci_checks.ps1 -Integration -OutputPath (Join-Path $env:GITHUB_WORKSPACE 'tool/ci-impact.json')
 
-      # This step always reports a real result, including documentation-only
-      # changes. Unknown dependencies and workflow/script edits expand to the
-      # existing complete integration path; CI never publishes a Release.
+      # Manual dispatch selects the complete integration path. CI never
+      # publishes a Release.
       - name: Verify version and validation policy
         run: |
           . .\scripts\support\release_version.ps1

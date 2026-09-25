@@ -62,13 +62,15 @@ class _AnimationSettingsState extends State<AnimationSettings> {
     settings.backgrounds.value = backgrounds;
     settings.experience.value =
         settings.experience.value.copyWith(springLyrics: enabled);
-    await _change(settings.rendering.value.animations.all(enabled));
+    await _change((current) => current.all(enabled));
   }
 
-  Future<void> _change(MotionPreferences next) async {
+  Future<void> _change(
+      MotionPreferences Function(MotionPreferences) update) async {
     final revision = ++_revision;
     final preferences = AppSettings.instance.rendering;
-    preferences.value = preferences.value.copyWith(animations: next);
+    preferences.value = preferences.value
+        .copyWith(animations: update(preferences.value.animations));
     setState(() => _failed = false);
     try {
       await (widget.persist ??
@@ -93,7 +95,8 @@ class _AnimationSettingsState extends State<AnimationSettings> {
                 SettingsHeader(
                     icon: Icons.animation,
                     title: ui('动画管理'),
-                    subtitle: ui('独立控制每类动画。关闭动画不影响播放、点击、拖动和实时进度。')),
+                    subtitle: ui(
+                        '单项开关只控制对应动画；全部开关还会同步调整频谱、背景动效与低频律动、歌词回弹。播放、点击、拖动和实时进度不受影响。')),
                 const SizedBox(height: 12),
                 Wrap(spacing: 8, runSpacing: 8, children: [
                   FilledButton.tonalIcon(
@@ -128,8 +131,8 @@ class _AnimationSettingsState extends State<AnimationSettings> {
                               title: Text(ui(entry.value.$1)),
                               subtitle: Text(ui(entry.value.$2)),
                               value: value.allows(entry.key),
-                              onChanged: (enabled) =>
-                                  _change(value.withKind(entry.key, enabled)))),
+                              onChanged: (enabled) => _change((current) =>
+                                  current.withKind(entry.key, enabled)))),
                   ]);
                 }),
                 if (_failed)

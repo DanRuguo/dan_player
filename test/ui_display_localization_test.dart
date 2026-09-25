@@ -119,7 +119,7 @@ void main() {
     final state = tester.state(find.byType(SearchResultPage));
     for (final language in [UiLanguage.en, UiLanguage.ja, UiLanguage.ko]) {
       await _language(tester, language);
-      const categories = ['所有', '总乐库', '联网', '艺术家', '专辑', '歌词'];
+      const categories = ['所有', '总乐库', '联网', '艺术家', '专辑', '歌词', '设置'];
       final tabBar = find.byType(TabBar);
       final tabLabels =
           find.descendant(of: tabBar, matching: find.byType(Text));
@@ -301,15 +301,16 @@ void main() {
     await tester
         .tap(find.byKey(ValueKey('lyric-candidate-${candidate.identity}')));
     await tester.pumpAndSettle();
+    final initialReads = reads;
+    expect(initialReads, greaterThan(0));
     final state = tester.state(find.byType(LyricSourceDialog));
     for (final language in [UiLanguage.en, UiLanguage.ja, UiLanguage.ko]) {
       await _language(tester, language);
       expect(find.text(ui('{0}未返回可用歌词，可选择其他候选或重试。', [ui('QQ音乐')])),
           findsOneWidget);
-      expect(find.text('暂停'), findsOneWidget);
-      expect(find.text('保存 · 取消'), findsOneWidget);
+      expect(find.text('暂停 · 保存 · 取消'), findsOneWidget);
       expect(searches, 1);
-      expect(reads, 1);
+      expect(reads, initialReads);
       expect(tester.state(find.byType(LyricSourceDialog)), same(state));
       expect(tester.takeException(), isNull);
     }

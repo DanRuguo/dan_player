@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/src/rust/api/utils.dart';
 import 'package:dan_player/update/update_service.dart';
 import 'package:dan_player/update/installer_launcher.dart';
@@ -28,7 +29,9 @@ Future<void> checkForUpdateAndPresent(
   final previews = AppSettings.instance.receivePreviewUpdates;
   final proxy = AppSettings.instance.networkProxy.value;
   bool currentRoute() =>
+      (!silent || AppSettings.instance.autoCheckUpdates) &&
       AppSettings.instance.networkProxy.value == proxy &&
+      AppSettings.instance.receivePreviewUpdates == previews &&
       (stillCurrent?.call() ?? true);
   try {
     LOGGER.i(
@@ -40,7 +43,9 @@ Future<void> checkForUpdateAndPresent(
     if (!currentRoute()) return;
     var checkRecorded = true;
     try {
-      await updater.recordSuccessfulCheck();
+      if (!await updater.recordSuccessfulCheck(stillCurrent: currentRoute)) {
+        return;
+      }
     } catch (error, stackTrace) {
       checkRecorded = false;
       LOGGER.e(error, stackTrace: stackTrace);
@@ -68,9 +73,11 @@ Future<void> checkForUpdateAndPresent(
         '[update] available ${update.isPreview ? 'preview' : 'stable'} ${update.version}');
     if (silent) {
       showAppNotice(
-        update.isPreview
-            ? ui("发现预览版 {0}", [update.version])
-            : ui("发现稳定版 {0}", [update.version]),
+        update.isSameVersionReissue
+            ? ui("发现同版本新构建 {0}", [update.version])
+            : update.isPreview
+                ? ui("发现预览版 {0}", [update.version])
+                : ui("发现稳定版 {0}", [update.version]),
         context: context,
         duration: const Duration(seconds: 12),
         kind: AppNoticeKind.info,
@@ -154,7 +161,9 @@ class _AutomaticUpdateCheckState extends State<AutomaticUpdateCheck> {
         UpdateService.instance.shouldCheckAutomatically) {
       _scheduledForThisProcess = true;
       Future<void>.delayed(const Duration(seconds: 8), () async {
-        if (mounted) await checkForUpdateAndPresent(context, silent: true);
+        if (mounted && UpdateService.instance.shouldCheckAutomatically) {
+          await checkForUpdateAndPresent(context, silent: true);
+        }
       });
     }
   }
@@ -209,8 +218,14 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
           service: widget.service,
           stillCurrent: () => mounted && revision == _checkRevision);
     } finally {
-      if (mounted && revision == _checkRevision) {
-        setState(() => _isChecking = false);
+      if (mounted) {
+        if (revision == _checkRevision) {
+          setState(() => _isChecking = false);
+        } else {
+          // A stale receipt may have been removed while saving. Refresh the
+          // displayed last-check time without touching a newer check's busy state.
+          setState(() {});
+        }
       }
     }
   }
@@ -224,6 +239,13 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
     setState(() {
       _saving = true;
       if (preview) {
+        // The old request selected a different channel. Its HTTP response may
+        // still be shared with the next check, but it cannot publish a result
+        // or stamp this channel as checked.
+        if (settings.receivePreviewUpdates != value) {
+          ++_checkRevision;
+          _isChecking = false;
+        }
         settings.receivePreviewUpdates = value;
       } else {
         settings.autoCheckUpdates = value;
@@ -235,6 +257,9 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
     } catch (error, trace) {
       if (preview && revision == _previewChoiceRevision) {
         settings.updateChannel = previousChannel;
+        // A check started while the unsaved choice was active is stale too.
+        ++_checkRevision;
+        _isChecking = false;
       } else if (!preview && revision == _autoChoiceRevision) {
         settings.autoCheckUpdates = previousAuto;
       }
@@ -289,7 +314,7 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
             FilledButton.icon(
               icon: const Icon(Symbols.update),
               label: Text(ui("立即检查")),
-              onPressed: _isChecking ? null : _check,
+              onPressed: _isChecking || _saving ? null : _check,
             ),
             Text(ui("当前版本：{0}", [AppSettings.version])),
             if (lastCheck != null)
@@ -298,11 +323,7 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
                 style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
-            if (_isChecking)
-              const SizedBox.square(
-                dimension: 18.0,
-                child: CircularProgressIndicator(strokeWidth: 2.0),
-              ),
+            if (_isChecking) const SettingsBusyIndicator.circular(size: 18),
           ],
         ),
       ],
@@ -350,6 +371,7 @@ class NewestUpdateView extends StatefulWidget {
 
 class _NewestUpdateViewState extends State<NewestUpdateView> {
   final _detailsScroll = ScrollController();
+  final _actionsScroll = ScrollController();
   final _errorContentKey = GlobalKey();
   bool _downloading = false;
   bool _confirming = false;
@@ -476,7 +498,12 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
     } on UpdateException catch (error, stackTrace) {
       LOGGER.e(error.cause ?? error, stackTrace: stackTrace);
       if (mounted && !cancellation.isCancelled) {
-        setState(() => _error = ui(error.message, error.arguments));
+        setState(() {
+          _error = ui(error.message, error.arguments);
+          if (widget.update.isSameVersionReissue) {
+            _error = '$_error\n${ui("若同版本附件已替换，请关闭弹窗重新检查更新。")}';
+          }
+        });
       }
     } catch (error, stackTrace) {
       LOGGER.e(error, stackTrace: stackTrace);
@@ -513,7 +540,7 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
     if (_ignoring || _installing || _confirming || _downloading) return;
     setState(() => _ignoring = true);
     try {
-      await _service.ignoreVersion(widget.update.version);
+      await _service.ignoreUpdate(widget.update);
       if (mounted) Navigator.pop(context);
     } catch (error, trace) {
       LOGGER.e(error, stackTrace: trace);
@@ -611,6 +638,7 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
   void dispose() {
     _cancellation?.cancel();
     _detailsScroll.dispose();
+    _actionsScroll.dispose();
     super.dispose();
   }
 
@@ -623,6 +651,19 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
         (MediaQuery.sizeOf(context).height - 64.0).clamp(0.0, 720.0);
     final result = _result;
     final progress = _progress;
+    final visibleNotes = ReleaseBuildMarker.visibleNotes(release.body);
+    final releaseTime =
+        widget.update.releaseBuild?.assembledUtc ?? release.publishedAt;
+    // Keep the version and some release detail visible when completed actions
+    // need more rows in a short window with enlarged text.
+    final actionsMaxHeight =
+        (maxHeight - 24.0 - 12.0 - (result == null ? 56.0 : 112.0))
+            .clamp(0.0, double.infinity);
+    final prioritizePrimary = result != null && actionsMaxHeight < 250;
+    final ignoreAction = TextButton(
+      onPressed: _installing || _confirming || _ignoring ? null : _ignore,
+      child: Text(ui(widget.update.isSameVersionReissue ? "忽略此构建" : "忽略此版本")),
+    );
 
     return PopScope(
         canPop: !_installing,
@@ -654,14 +695,16 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                               style: Theme.of(context).textTheme.titleLarge,
                               subtitle: Text(
                                 ui(
-                                    widget.update.isPreview
-                                        ? "预览版 {0}{1}"
-                                        : "稳定版 {0}{1}",
+                                    widget.update.isSameVersionReissue
+                                        ? "同版本新构建 {0}{1}"
+                                        : widget.update.isPreview
+                                            ? "预览版 {0}{1}"
+                                            : "稳定版 {0}{1}",
                                     [
                                       widget.update.version,
-                                      release.publishedAt == null
+                                      releaseTime == null
                                           ? ''
-                                          : ' · ${release.publishedAt!.toLocal().toString().split('.').first}'
+                                          : ' · ${releaseTime.toLocal().toString().split('.').first}'
                                     ]),
                                 style:
                                     TextStyle(color: scheme.onSurfaceVariant),
@@ -670,6 +713,11 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                                   color: scheme.primary, size: 30.0),
                             ),
                             const SizedBox(height: 16.0),
+                            if (widget.update.isSameVersionReissue) ...[
+                              Text(ui("此版本已重新发布新构建，可选择下载更新。"),
+                                  style: TextStyle(color: scheme.primary)),
+                              const SizedBox(height: 12.0),
+                            ],
                             if (widget.update.isPreview) ...[
                               Text(ui("这是预览版，可能存在问题；请选择是否下载。"),
                                   style: TextStyle(color: scheme.primary)),
@@ -683,8 +731,8 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                               child: Padding(
                                 padding: const EdgeInsets.all(16),
                                 child: MarkdownBody(
-                                  data: release.body?.trim().isNotEmpty == true
-                                      ? release.body!
+                                  data: visibleNotes.isNotEmpty
+                                      ? visibleNotes
                                       : ui("此版本没有提供更新说明。"),
                                   selectable: true,
                                   onTapLink: (_, href, __) {
@@ -699,8 +747,8 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                             ),
                             if (_downloading || progress != null) ...[
                               const SizedBox(height: 14.0),
-                              LinearProgressIndicator(
-                                  value: progress?.fraction),
+                              SettingsBusyIndicator.linear(
+                                  progress: progress?.fraction),
                               const SizedBox(height: 6.0),
                               Text(
                                 progress == null
@@ -754,97 +802,106 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
                     ),
                   ),
                   const SizedBox(height: 12.0),
-                  Wrap(
-                    key: const ValueKey('update-actions-wrap'),
-                    alignment: WrapAlignment.end,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: [
-                      if (!_downloading)
-                        TextButton(
-                          onPressed: _installing || _confirming || _ignoring
-                              ? null
-                              : _ignore,
-                          child: Text(ui("忽略此版本")),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: actionsMaxHeight),
+                    child: AppScrollbar(
+                      controller: _actionsScroll,
+                      child: SingleChildScrollView(
+                        key: const ValueKey('update-actions-scroll'),
+                        controller: _actionsScroll,
+                        child: Wrap(
+                          key: const ValueKey('update-actions-wrap'),
+                          alignment: WrapAlignment.end,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            if (!_downloading && !prioritizePrimary)
+                              ignoreAction,
+                            if (result != null) ...[
+                              if (_packageRejected)
+                                FilledButton.icon(
+                                  key: const ValueKey('update-redownload'),
+                                  onPressed:
+                                      _confirming || _installing || _ignoring
+                                          ? null
+                                          : _download,
+                                  icon: const Icon(Symbols.download),
+                                  label: Text(ui("重新下载")),
+                                ),
+                              if (!_packageRejected &&
+                                  result.canInstall(widget.update))
+                                FilledButton.icon(
+                                  key: const ValueKey('update-restart'),
+                                  onPressed: _installing || _ignoring
+                                      ? null
+                                      : _restartAndUpdate,
+                                  icon: _installing
+                                      ? SettingsBusyIndicator.circular(
+                                          key: const ValueKey(
+                                              'update-install-progress'),
+                                          size: 18,
+                                          color: scheme.onSurface,
+                                        )
+                                      : const Icon(Symbols.restart_alt),
+                                  label: Text(_installing
+                                      ? (_installerLaunched
+                                          ? ui("正在退出…")
+                                          : ui("正在验证安装器…"))
+                                      : (_installerLaunched
+                                          ? ui("重试退出")
+                                          : ui("重启并更新"))),
+                                ),
+                              OutlinedButton.icon(
+                                onPressed:
+                                    _installing ? null : _showDownloadedFile,
+                                icon: const Icon(Symbols.folder_open),
+                                label: Text(ui("显示安装包")),
+                              ),
+                            ] else
+                              FilledButton.icon(
+                                key: const ValueKey('update-download'),
+                                onPressed:
+                                    _downloading || _confirming || _ignoring
+                                        ? null
+                                        : _download,
+                                icon: Icon(widget.update.asset == null
+                                    ? Symbols.open_in_new
+                                    : Symbols.download),
+                                label: Text(widget.update.asset == null
+                                    ? ui("打开发布页")
+                                    : ui("下载更新")),
+                              ),
+                            if (!_downloading && prioritizePrimary)
+                              ignoreAction,
+                            OutlinedButton.icon(
+                              key: const ValueKey('update-github'),
+                              onPressed: _installing
+                                  ? null
+                                  : () => _openLink(_releasePageUrl,
+                                      githubOnly: true),
+                              icon: const Icon(Symbols.open_in_new),
+                              label: Text(ui("在 GitHub 查看")),
+                            ),
+                            // Keep exit/recovery available even in a narrow window.
+                            if (_downloading)
+                              TextButton.icon(
+                                onPressed: _cancelDownload,
+                                icon: const Icon(Symbols.cancel),
+                                label: Text(ui("取消下载")),
+                              )
+                            else
+                              TextButton(
+                                onPressed: _installing
+                                    ? null
+                                    : () => Navigator.pop(context),
+                                child:
+                                    Text(result == null ? ui("稍后") : ui("完成")),
+                              ),
+                          ],
                         ),
-                      if (result != null) ...[
-                        if (_packageRejected)
-                          FilledButton.icon(
-                            key: const ValueKey('update-redownload'),
-                            onPressed: _confirming || _installing || _ignoring
-                                ? null
-                                : _download,
-                            icon: const Icon(Symbols.download),
-                            label: Text(ui("重新下载")),
-                          ),
-                        if (!_packageRejected &&
-                            result.canInstall(widget.update))
-                          FilledButton.icon(
-                            key: const ValueKey('update-restart'),
-                            onPressed: _installing || _ignoring
-                                ? null
-                                : _restartAndUpdate,
-                            icon: _installing
-                                ? SizedBox.square(
-                                    key: const ValueKey(
-                                        'update-install-progress'),
-                                    dimension: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: scheme.onSurface,
-                                    ),
-                                  )
-                                : const Icon(Symbols.restart_alt),
-                            label: Text(_installing
-                                ? (_installerLaunched
-                                    ? ui("正在退出…")
-                                    : ui("正在验证安装器…"))
-                                : (_installerLaunched
-                                    ? ui("重试退出")
-                                    : ui("重启并更新"))),
-                          ),
-                        OutlinedButton.icon(
-                          onPressed: _installing ? null : _showDownloadedFile,
-                          icon: const Icon(Symbols.folder_open),
-                          label: Text(ui("显示安装包")),
-                        ),
-                      ] else
-                        FilledButton.icon(
-                          key: const ValueKey('update-download'),
-                          onPressed: _downloading || _confirming || _ignoring
-                              ? null
-                              : _download,
-                          icon: Icon(widget.update.asset == null
-                              ? Symbols.open_in_new
-                              : Symbols.download),
-                          label: Text(widget.update.asset == null
-                              ? ui("打开发布页")
-                              : ui("下载更新")),
-                        ),
-                      OutlinedButton.icon(
-                        key: const ValueKey('update-github'),
-                        onPressed: _installing
-                            ? null
-                            : () =>
-                                _openLink(_releasePageUrl, githubOnly: true),
-                        icon: const Icon(Symbols.open_in_new),
-                        label: Text(ui("在 GitHub 查看")),
                       ),
-                      // Keep exit/recovery available even in a narrow window.
-                      if (_downloading)
-                        TextButton.icon(
-                          onPressed: _cancelDownload,
-                          icon: const Icon(Symbols.cancel),
-                          label: Text(ui("取消下载")),
-                        )
-                      else
-                        TextButton(
-                          onPressed:
-                              _installing ? null : () => Navigator.pop(context),
-                          child: Text(result == null ? ui("稍后") : ui("完成")),
-                        ),
-                    ],
+                    ),
                   ),
                 ],
               ),

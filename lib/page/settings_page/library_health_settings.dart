@@ -2,6 +2,7 @@ import 'package:dan_player/app_settings.dart' show getAppDataDir;
 import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart'
     show customAudioOrderStorageWarning;
@@ -122,7 +123,7 @@ class _HealthDialogState extends State<_HealthDialog> {
                                 color: Theme.of(context).colorScheme.error))),
                   if (_error != null) Text(_error!),
                   if (report == null && _error == null) ...[
-                    const LinearProgressIndicator(),
+                    const SettingsBusyIndicator.linear(),
                     const SizedBox(height: 12),
                     Text(ui('已检查 {0} 首；关闭窗口会停止后续检查。', [_checked])),
                   ],
@@ -252,7 +253,7 @@ class _RelocationDialogState extends State<_RelocationDialog> {
                                       }
                                     }))),
                   const SizedBox(height: 12),
-                  if (_busy) const LinearProgressIndicator(),
+                  if (_busy) const SettingsBusyIndicator.linear(),
                   if (_error != null)
                     Padding(
                         padding: const EdgeInsets.only(top: 8),

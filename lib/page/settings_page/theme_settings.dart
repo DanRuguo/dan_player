@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dan_player/component/font_preview_loader.dart';
 import 'package:dan_player/page/settings_page/font_selector_dialog.dart';
 export 'package:dan_player/page/settings_page/font_selector_dialog.dart';
@@ -9,6 +11,7 @@ import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/page/settings_page/theme_picker_dialog.dart';
 import 'package:dan_player/page/settings_page/background_settings.dart';
+import 'package:dan_player/page/settings_page/settings_choice_persistence.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -35,33 +38,69 @@ class ThemeAppearanceSettings extends StatelessWidget {
       );
 }
 
-class ThemeSelector extends StatelessWidget {
-  const ThemeSelector({super.key, this.surface = true});
+class ThemeSelector extends StatefulWidget {
+  const ThemeSelector({super.key, this.surface = true, this.persist});
   final bool surface;
+  final Future<void> Function()? persist;
+
+  @override
+  State<ThemeSelector> createState() => _ThemeSelectorState();
+}
+
+class _ThemeSelectorState extends State<ThemeSelector> {
+  bool _saving = false;
+  bool _saveFailed = false;
+
+  Future<void> _save() async {
+    setState(() {
+      _saving = true;
+      _saveFailed = false;
+    });
+    try {
+      await (widget.persist ??
+          () => AppSettings.instance
+              .saveSettings(captureWindowSize: false, throwOnError: true))();
+    } catch (_) {
+      if (mounted) setState(() => _saveFailed = true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _choose() async {
+    if (_saving) return;
+    final seedColor = await showAppDialog<Color>(
+      context: context,
+      builder: (context) => const ThemePickerDialog(),
+    );
+    if (seedColor == null || !mounted) return;
+    ThemeProvider.instance.applyTheme(seedColor: seedColor);
+    AppSettings.instance.defaultTheme = seedColor.toARGB32();
+    await _save();
+  }
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return SettingsTile(
-      surface: surface,
-      description: ui("修改主题"),
-      subtitle: ui("选择喜欢的主色，按钮与高亮会统一使用；关闭动态配色后持续使用此颜色。"),
-      icon: Symbols.palette,
-      action: FilledButton.icon(
-        onPressed: () async {
-          final seedColor = await showAppDialog<Color>(
-            context: context,
-            builder: (context) => const ThemePickerDialog(),
-          );
-          if (seedColor == null) return;
-
-          ThemeProvider.instance.applyTheme(seedColor: seedColor);
-          AppSettings.instance.defaultTheme = seedColor.toARGB32();
-          await AppSettings.instance.saveSettings();
-        },
-        label: Text(ui("主题选择器")),
-        icon: const Icon(Symbols.palette),
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SettingsTile(
+          surface: widget.surface,
+          description: ui("修改主题"),
+          subtitle: ui("选择喜欢的主色，按钮与高亮会统一使用；关闭动态配色后持续使用此颜色。"),
+          icon: Symbols.palette,
+          action: FilledButton.icon(
+            onPressed: _saving ? null : _choose,
+            label: Text(ui("主题选择器")),
+            icon: const Icon(Symbols.palette),
+          ),
+        ),
+        if (_saveFailed)
+          SettingsSaveFeedback(
+              key: const ValueKey('theme-color-save-failure'),
+              onRetry: () => unawaited(_save())),
+      ],
     );
   }
 }
@@ -128,34 +167,43 @@ class _ThemeModeControlState extends State<ThemeModeControl> {
 }
 
 class DynamicThemeSwitch extends StatefulWidget {
-  const DynamicThemeSwitch({super.key, this.surface = true});
+  const DynamicThemeSwitch({super.key, this.surface = true, this.persist});
   final bool surface;
+  final Future<void> Function()? persist;
 
   @override
   State<DynamicThemeSwitch> createState() => _DynamicThemeSwitchState();
 }
 
-class _DynamicThemeSwitchState extends State<DynamicThemeSwitch> {
+class _DynamicThemeSwitchState extends State<DynamicThemeSwitch>
+    with SettingsChoicePersistence<DynamicThemeSwitch> {
   final settings = AppSettings.instance;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return SettingsSwitchTile(
-      surface: widget.surface,
-      contentPadding:
-          widget.surface ? SettingsSurface.rowPadding : EdgeInsets.zero,
-      title: Text(ui("专辑封面动态配色")),
-      subtitle: Text(ui("随当前歌曲封面平滑调整界面颜色；背景图片仍由背景设置决定。")),
-      icon: Symbols.auto_awesome,
-      value: settings.dynamicTheme,
-      onChanged: (_) async {
-        setState(() {
-          settings.dynamicTheme = !settings.dynamicTheme;
-        });
-        ThemeProvider.instance.syncDynamicThemeSetting();
-        await settings.saveSettings();
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SettingsSwitchTile(
+          surface: widget.surface,
+          contentPadding:
+              widget.surface ? SettingsSurface.rowPadding : EdgeInsets.zero,
+          title: Text(ui("专辑封面动态配色")),
+          subtitle: Text(ui("随当前歌曲封面平滑调整界面颜色；背景图片仍由背景设置决定。")),
+          icon: Symbols.auto_awesome,
+          value: settings.dynamicTheme,
+          onChanged: (value) {
+            setState(() => settings.dynamicTheme = value);
+            ThemeProvider.instance.syncDynamicThemeSetting();
+            unawaited(saveChoice(widget.persist));
+          },
+        ),
+        if (saveFailed)
+          SettingsSaveFeedback(
+              key: const ValueKey('dynamic-theme-save-failure'),
+              onRetry: () => unawaited(saveChoice(widget.persist))),
+      ],
     );
   }
 }

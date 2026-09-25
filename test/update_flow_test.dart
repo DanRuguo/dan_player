@@ -334,11 +334,14 @@ void main() {
       (tester) async {
     final pending = Completer<List<Release>>();
     AppSettings.instance.receivePreviewUpdates = true;
+    AppSettings.instance.lastUpdateCheckAt = null;
+    var recorded = 0;
     final service = UpdateService.forTesting(
       appDataDirectory: () => throw StateError('No disk'),
       httpClientFactory: () => throw StateError('No network'),
       currentVersion: '26.0.4-snapshot.1',
       releaseLoader: () => pending.future,
+      savePreferences: () async => recorded++,
     );
     final context = await mount(tester);
     final checking = checkForUpdateAndPresent(context, service: service);
@@ -348,6 +351,234 @@ void main() {
     await checking;
     await tester.pumpAndSettle();
     expect(find.byType(NewestUpdateView), findsNothing);
+    expect(AppSettings.instance.lastUpdateCheckAt, isNull);
+    expect(recorded, 0);
+  });
+
+  testWidgets('turning off automatic checks discards an in-flight result',
+      (tester) async {
+    final settings = AppSettings.instance;
+    final previousAuto = settings.autoCheckUpdates;
+    addTearDown(() => settings.autoCheckUpdates = previousAuto);
+    settings.autoCheckUpdates = true;
+    settings.lastUpdateCheckAt = null;
+    final pending = Completer<List<Release>>();
+    var saves = 0;
+    final service = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      currentVersion: '26.0.4',
+      releaseLoader: () => pending.future,
+      savePreferences: () async => saves++,
+    );
+    final context = await mount(tester);
+    final checking =
+        checkForUpdateAndPresent(context, silent: true, service: service);
+    settings.autoCheckUpdates = false;
+    pending.complete([Release(tagName: '26.0.5')]);
+    await checking;
+    await tester.pumpAndSettle();
+    expect(find.byType(NewestUpdateView), findsNothing);
+    expect(settings.lastUpdateCheckAt, isNull);
+    expect(saves, 0);
+  });
+
+  testWidgets('channel change during check receipt save clears stale timestamp',
+      (tester) async {
+    final settings = AppSettings.instance;
+    settings.receivePreviewUpdates = false;
+    settings.lastUpdateCheckAt = null;
+    final saving = Completer<void>();
+    final savedValues = <DateTime?>[];
+    final service = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      releaseLoader: () async => const [],
+      savePreferences: () {
+        savedValues.add(settings.lastUpdateCheckAt);
+        return savedValues.length == 1 ? saving.future : Future<void>.value();
+      },
+    );
+    final context = await mount(tester);
+    final checking =
+        checkForUpdateAndPresent(context, silent: true, service: service);
+    await tester.pump();
+    expect(savedValues, hasLength(1));
+    expect(settings.lastUpdateCheckAt, isNotNull);
+
+    settings.receivePreviewUpdates = true;
+    saving.complete();
+    await checking;
+    expect(settings.lastUpdateCheckAt, isNull);
+    expect(savedValues, [isNotNull, isNull]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('stale check save preserves a newer check receipt',
+      (tester) async {
+    final settings = AppSettings.instance;
+    settings.receivePreviewUpdates = false;
+    settings.lastUpdateCheckAt = null;
+    final oldSaving = Completer<void>();
+    var saves = 0;
+    final service = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      releaseLoader: () async => const [],
+      savePreferences: () =>
+          ++saves == 1 ? oldSaving.future : Future<void>.value(),
+    );
+    final context = await mount(tester);
+    final oldCheck =
+        checkForUpdateAndPresent(context, silent: true, service: service);
+    await tester.pump();
+    final oldReceipt = settings.lastUpdateCheckAt;
+    expect(oldReceipt, isNotNull);
+
+    settings.receivePreviewUpdates = true;
+    await checkForUpdateAndPresent(context, silent: true, service: service);
+    final newReceipt = settings.lastUpdateCheckAt;
+    expect(identical(newReceipt, oldReceipt), isFalse);
+    oldSaving.complete();
+    await oldCheck;
+    expect(identical(settings.lastUpdateCheckAt, newReceipt), isTrue);
+    expect(saves, 2);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('discarded check removes the stale timestamp from settings UI',
+      (tester) async {
+    uiLanguage.value = UiLanguage.zh;
+    final settings = AppSettings.instance;
+    settings.receivePreviewUpdates = false;
+    settings.lastUpdateCheckAt = null;
+    final oldSaving = Completer<void>();
+    var saves = 0;
+    final service = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      releaseLoader: () async => const [],
+      savePreferences: () =>
+          ++saves == 1 ? oldSaving.future : Future<void>.value(),
+    );
+    await mount(tester,
+        content:
+            CheckForUpdate(service: service, savePreferences: () async {}));
+    tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, '立即检查'))
+        .onPressed!();
+    await tester.pump();
+    expect(settings.lastUpdateCheckAt, isNotNull);
+
+    tester
+        .widget<SettingsSwitchTile>(
+            find.byKey(const ValueKey('update-preview-channel')))
+        .onChanged!(true);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('上次检查：'), findsOneWidget);
+    oldSaving.complete();
+    await tester.pumpAndSettle();
+    expect(settings.lastUpdateCheckAt, isNull);
+    expect(find.textContaining('上次检查：'), findsNothing);
+    expect(saves, 2);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'switching to previews unlocks a fresh check and drops old result',
+      (tester) async {
+    final settings = AppSettings.instance;
+    settings.receivePreviewUpdates = false;
+    settings.lastUpdateCheckAt = null;
+    final pending = Completer<List<Release>>();
+    var calls = 0;
+    var recorded = 0;
+    final service = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      currentVersion: '26.0.3',
+      releaseLoader: () {
+        calls++;
+        return pending.future;
+      },
+      savePreferences: () async => recorded++,
+    );
+    await mount(tester,
+        content:
+            CheckForUpdate(service: service, savePreferences: () async {}));
+    Finder checkButton() => find.widgetWithText(FilledButton, '立即检查');
+    tester.widget<FilledButton>(checkButton()).onPressed!();
+    await tester.pump();
+    expect(tester.widget<FilledButton>(checkButton()).onPressed, isNull);
+
+    tester
+        .widget<SettingsSwitchTile>(
+            find.byKey(const ValueKey('update-preview-channel')))
+        .onChanged!(true);
+    await tester.pump();
+    expect(settings.receivePreviewUpdates, isTrue);
+    expect(tester.widget<FilledButton>(checkButton()).onPressed, isNotNull);
+    tester.widget<FilledButton>(checkButton()).onPressed!();
+    await tester.pump();
+    // Both channel decisions may share the same HTTP operation.
+    expect(calls, 1);
+
+    pending
+        .complete([Release(tagName: '26.0.4-snapshot.2', isPrerelease: true)]);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.byType(NewestUpdateView), findsOneWidget);
+    expect(
+        tester
+            .widget<NewestUpdateView>(find.byType(NewestUpdateView))
+            .update
+            .version
+            .toString(),
+        '26.0.4-snapshot.2');
+    expect(find.text('所选通道暂无新版本'), findsNothing);
+    expect(recorded, 1);
+    expect(settings.lastUpdateCheckAt, isNotNull);
+    await tester.tap(find.text('稍后'));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('failed channel save leaves old check stale and allows retry',
+      (tester) async {
+    final settings = AppSettings.instance;
+    settings.receivePreviewUpdates = false;
+    settings.lastUpdateCheckAt = null;
+    final pending = Completer<List<Release>>();
+    final saving = Completer<void>();
+    var recorded = 0;
+    final service = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      currentVersion: '26.0.3',
+      releaseLoader: () => pending.future,
+      savePreferences: () async => recorded++,
+    );
+    await mount(tester,
+        content: CheckForUpdate(
+            service: service, savePreferences: () => saving.future));
+    final checkButton = find.widgetWithText(FilledButton, '立即检查');
+    tester.widget<FilledButton>(checkButton).onPressed!();
+    await tester.pump();
+    tester
+        .widget<SettingsSwitchTile>(
+            find.byKey(const ValueKey('update-preview-channel')))
+        .onChanged!(true);
+    await tester.pump();
+    expect(tester.widget<FilledButton>(checkButton).onPressed, isNull);
+
+    saving.completeError(StateError('synthetic save failure'));
+    await tester.pump();
+    expect(settings.receivePreviewUpdates, isFalse);
+    expect(tester.widget<FilledButton>(checkButton).onPressed, isNotNull);
+    pending.complete([Release(tagName: '26.0.4')]);
+    await tester.pump();
+    expect(find.byType(NewestUpdateView), findsNothing);
+    expect(settings.lastUpdateCheckAt, isNull);
+    expect(recorded, 0);
   });
 
   testWidgets('proxy change unlocks manual retry and ignores old route result',
@@ -385,7 +616,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 350));
     expect(find.byType(NewestUpdateView), findsOneWidget);
     expect(
-        tester.widget<NewestUpdateView>(find.byType(NewestUpdateView))
+        tester
+            .widget<NewestUpdateView>(find.byType(NewestUpdateView))
             .update
             .version
             .toString(),
@@ -394,7 +626,8 @@ void main() {
     await tester.pump();
     expect(find.byType(NewestUpdateView), findsOneWidget);
     expect(
-        tester.widget<NewestUpdateView>(find.byType(NewestUpdateView))
+        tester
+            .widget<NewestUpdateView>(find.byType(NewestUpdateView))
             .update
             .version
             .toString(),
@@ -578,6 +811,15 @@ void main() {
         expect(confirmButton.hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
         await press(tester, confirmButton);
+        if (language == UiLanguage.en && scale == 2.0) {
+          final actions = tester.widget<SingleChildScrollView>(
+              find.byKey(const ValueKey('update-actions-scroll')));
+          expect(actions.controller!.position.maxScrollExtent, greaterThan(0));
+          final github = find.byKey(const ValueKey('update-github'));
+          await tester.ensureVisible(github);
+          await tester.pumpAndSettle();
+          expect(github.hitTestable(), findsOneWidget);
+        }
         await press(tester, restartButton);
         expect(confirmButton.hitTestable(), findsOneWidget);
         expect(tester.getRect(confirmButton).bottom, lessThanOrEqualTo(360));

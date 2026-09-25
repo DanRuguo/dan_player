@@ -6,6 +6,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('rapid threshold and mode changes merge before the next frame',
+      (tester) async {
+    final prefs = ValueNotifier(
+        const TrackResumePreferences(mode: TrackResumeMode.longAudio));
+    addTearDown(prefs.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+          body: TrackResumeSettings(preferences: prefs, save: () async {})),
+    ));
+    final threshold = tester.widget<DropdownButtonFormField<int>>(
+        find.byKey(const ValueKey('track-resume-minimum')));
+    final mode = tester.widget<AppSegmentedControl<TrackResumeMode>>(
+        find.byKey(const ValueKey('track-resume-mode')));
+    threshold.onChanged!(30);
+    mode.onChanged!(TrackResumeMode.allLocal);
+    expect(prefs.value.minimumMinutes, 30);
+    expect(prefs.value.mode, TrackResumeMode.allLocal);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
       'narrow English resume controls preserve selection on save failure and clear only automatic memory',
       (tester) async {

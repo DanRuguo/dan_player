@@ -34,7 +34,8 @@ class _SidebarLayoutSettingsState extends State<SidebarLayoutSettings> {
     setState(() => _error = null);
     try {
       await (widget.persist ??
-          () => AppSettings.instance.saveSettings(throwOnError: true))();
+          () => AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false))();
     } catch (_) {
       if (mounted && revision == _revision) {
         setState(() => _error = ui("保存侧栏布局失败；当前选择仍对本次会话生效。"));

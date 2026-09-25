@@ -30,7 +30,8 @@ class _TrackResumeSettingsState extends State<TrackResumeSettings> {
     final generation = ++_saveGeneration;
     try {
       await (widget.save?.call() ??
-          AppSettings.instance.saveSettings(throwOnError: true));
+          AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false));
       if (mounted && generation == _saveGeneration) {
         setState(() {
           _error = null;
@@ -47,7 +48,9 @@ class _TrackResumeSettingsState extends State<TrackResumeSettings> {
     }
   }
 
-  void _change(TrackResumePreferences next) {
+  void _change(TrackResumePreferences Function(TrackResumePreferences) update) {
+    final next = update(_preferences.value);
+    if (next == _preferences.value) return;
     _preferences.value = next;
     setState(() {
       _notice = null;
@@ -104,7 +107,8 @@ class TrackResumeSettingsPanel extends StatelessWidget {
       this.notice,
       this.onRetrySave});
   final TrackResumePreferences preferences;
-  final ValueChanged<TrackResumePreferences>? onChanged;
+  final void Function(TrackResumePreferences Function(TrackResumePreferences))?
+      onChanged;
   final VoidCallback? onClear, onRetrySave;
   final String? error, notice;
 
@@ -124,7 +128,7 @@ class TrackResumeSettingsPanel extends StatelessWidget {
         value: preferences.mode,
         onChanged: onChanged == null
             ? null
-            : (mode) => onChanged!(preferences.copyWith(mode: mode)),
+            : (mode) => onChanged!((current) => current.copyWith(mode: mode)),
         options: [
           AppSegmentOption(
               value: TrackResumeMode.off,
@@ -159,7 +163,8 @@ class TrackResumeSettingsPanel extends StatelessWidget {
               ? null
               : (value) {
                   if (value != null) {
-                    onChanged!(preferences.copyWith(minimumMinutes: value));
+                    onChanged!(
+                        (current) => current.copyWith(minimumMinutes: value));
                   }
                 },
         ),

@@ -5,6 +5,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('background sliders in one frame retain both values',
+      (tester) async {
+    final preferences = ValueNotifier(const BackgroundPreferences());
+    final status = ValueNotifier(const WindowBackdropStatus());
+    addTearDown(preferences.dispose);
+    addTearDown(status.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: BackgroundSettingsPanel(
+                    preferences: preferences,
+                    status: status,
+                    onSave: () async {})))));
+    await tester.tap(find.byKey(const ValueKey('background-source-artwork')));
+    await tester.pump();
+
+    tester
+        .widget<Slider>(find.byKey(const ValueKey('background-opacity')))
+        .onChanged!(0.5);
+    tester
+        .widget<Slider>(find.byKey(const ValueKey('background-blur')))
+        .onChanged!(72);
+    await tester.pump();
+
+    expect(preferences.value.main.opacity, 0.5);
+    expect(preferences.value.main.blur, 72);
+  });
+
   for (final width in [320.0, 520.0, 1100.0]) {
     for (final scale in [1.0, 2.0]) {
       testWidgets('background choices fit $width at text $scale',

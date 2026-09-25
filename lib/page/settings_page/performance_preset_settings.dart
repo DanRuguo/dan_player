@@ -1,6 +1,7 @@
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/performance_preset.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -15,16 +16,20 @@ class PerformancePresetSettings extends StatefulWidget {
 }
 
 class _PerformancePresetSettingsState extends State<PerformancePresetSettings> {
-  bool _busy = false, _failed = false;
+  bool _busy = false, _failed = false, _deferred = false;
   PerformancePresetController get controller =>
       widget.controller ?? AppSettings.instance.performancePresets;
   Future<void> _select(PerformanceMode mode) async {
     setState(() {
       _busy = true;
       _failed = false;
+      _deferred = false;
     });
     try {
       await controller.select(mode);
+      if (mounted && controller.value.mode != mode) {
+        setState(() => _deferred = true);
+      }
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     } finally {
@@ -87,13 +92,21 @@ class _PerformancePresetSettingsState extends State<PerformancePresetSettings> {
           if (_busy)
             const Padding(
                 padding: EdgeInsets.only(top: 12),
-                child: LinearProgressIndicator()),
+                child: SettingsBusyIndicator.linear()),
           if (_failed)
             Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(ui('设置保存失败，已撤回本次切换；请重试。'),
+                child: Text(ui('设置保存失败；请检查当前设置并重试。'),
                     style:
                         TextStyle(color: Theme.of(context).colorScheme.error))),
+          if (_deferred)
+            Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(ui('设置仍在变化，请稍后重试。'),
+                    key: const ValueKey('performance-preset-deferred'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color:
+                            Theme.of(context).colorScheme.onSurfaceVariant))),
         ],
       )),
     );

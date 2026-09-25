@@ -40,6 +40,7 @@ class _VisualEffectsSettingsState extends State<VisualEffectsSettings> {
         valueListenable: AppSettings.instance.rendering,
         builder: (context, value, _) => RenderingSettings(
           value: value,
+          latestValue: () => AppSettings.instance.rendering.value,
           onChanged: (next) {
             AppSettings.instance.rendering.value = next;
             unawaited(_save());
@@ -63,10 +64,17 @@ class RenderingSettings extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.latestValue,
   });
 
   final RenderingPreferences value;
   final ValueChanged<RenderingPreferences> onChanged;
+
+  /// Reads the live model before combining rapid changes in the same frame.
+  final RenderingPreferences Function()? latestValue;
+
+  void _update(RenderingPreferences Function(RenderingPreferences) transform) =>
+      onChanged(transform(latestValue?.call() ?? value));
 
   @override
   Widget build(BuildContext context) {
@@ -78,10 +86,11 @@ class RenderingSettings extends StatelessWidget {
         title: Text(ui('界面面板毛玻璃')),
         subtitle: Text(ui('控制播放条等面板的模糊效果；窗口背景单独设置。')),
         value: value.surfaceBlur,
-        onChanged: (v) => onChanged(value.copyWith(surfaceBlur: v)),
+        onChanged: (v) =>
+            _update((current) => current.copyWith(surfaceBlur: v)),
       ),
       const SizedBox(height: 16),
-      _FrameRateSettings(value: value, onChanged: onChanged),
+      _FrameRateSettings(value: value, update: _update),
       const SizedBox(height: 16),
       SettingsSurface(
           padding: EdgeInsets.zero,
@@ -102,7 +111,8 @@ class RenderingSettings extends StatelessWidget {
                 title: Text(ui('歌词页实时频谱')),
                 subtitle: Text(ui('音柱可显示在播放条上方或封面四周；关闭后保留进度条。')),
                 value: value.lyricSpectrum,
-                onChanged: (v) => onChanged(value.copyWith(lyricSpectrum: v))),
+                onChanged: (v) =>
+                    _update((current) => current.copyWith(lyricSpectrum: v))),
             Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: Column(
@@ -113,8 +123,8 @@ class RenderingSettings extends StatelessWidget {
                         semanticLabel: ui('频谱显示位置'),
                         value: value.lyricSpectrumPlacement,
                         onChanged: value.lyricSpectrum
-                            ? (placement) => onChanged(value.copyWith(
-                                lyricSpectrumPlacement: placement))
+                            ? (placement) => _update((current) => current
+                                .copyWith(lyricSpectrumPlacement: placement))
                             : null,
                         options: [
                           AppSegmentOption(
@@ -135,8 +145,8 @@ class RenderingSettings extends StatelessWidget {
                         semanticLabel: ui('频谱音柱数量'),
                         value: value.spectrumDensity,
                         onChanged: value.lyricSpectrum
-                            ? (density) => onChanged(
-                                value.copyWith(spectrumDensity: density))
+                            ? (density) => _update((current) =>
+                                current.copyWith(spectrumDensity: density))
                             : null,
                         options: [
                           for (final density in SpectrumDensity.values)
@@ -190,7 +200,8 @@ class RenderingSettings extends StatelessWidget {
               title: Text(ui('播放条七音频谱')),
               subtitle: Text(ui('关闭后停止播放条的频谱采样与绘制，保留播放控制。')),
               value: value.compactSpectrum,
-              onChanged: (v) => onChanged(value.copyWith(compactSpectrum: v)),
+              onChanged: (v) =>
+                  _update((current) => current.copyWith(compactSpectrum: v)),
             ),
           ])),
       const SizedBox(height: 16),
@@ -202,16 +213,17 @@ class RenderingSettings extends StatelessWidget {
             ui('暂停隐藏窗口和已打开但不可见页面的歌词视觉、频谱与背景动效；不影响播放。关闭后继续更新已挂载视图，可能增加后台开销。')),
         value: value.pauseWhenHidden,
         onChanged: (enabled) =>
-            onChanged(value.copyWith(pauseWhenHidden: enabled)),
+            _update((current) => current.copyWith(pauseWhenHidden: enabled)),
       ),
     ]);
   }
 }
 
 class _FrameRateSettings extends StatelessWidget {
-  const _FrameRateSettings({required this.value, required this.onChanged});
+  const _FrameRateSettings({required this.value, required this.update});
   final RenderingPreferences value;
-  final ValueChanged<RenderingPreferences> onChanged;
+  final void Function(RenderingPreferences Function(RenderingPreferences))
+      update;
 
   @override
   Widget build(BuildContext context) {
@@ -234,8 +246,13 @@ class _FrameRateSettings extends StatelessWidget {
           choices.add(selected);
           choices.sort();
         }
-        void change(FrameRateMode mode, int fps) => onChanged(value.copyWith(
-            frameRate: FrameRatePreference(mode: mode, fps: fps)));
+        void changeMode(FrameRateMode mode) => update((current) =>
+            current.copyWith(
+                frameRate: FrameRatePreference(
+                    mode: mode, fps: current.frameRate.fps)));
+        void changeFps(int fps) => update((current) => current.copyWith(
+            frameRate:
+                FrameRatePreference(mode: FrameRateMode.fixed, fps: fps)));
         return SettingsSurface(
             child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -249,7 +266,7 @@ class _FrameRateSettings extends StatelessWidget {
               key: const ValueKey('frame-rate-mode'),
               semanticLabel: ui('界面刷新率'),
               value: preference.mode,
-              onChanged: (mode) => change(mode, preference.fps),
+              onChanged: changeMode,
               options: [
                 for (final mode in FrameRateMode.values)
                   AppSegmentOption(
@@ -277,7 +294,7 @@ class _FrameRateSettings extends StatelessWidget {
                 AppSegmentedControl<int>(
                   key: const ValueKey('frame-rate-fps'),
                   value: selected,
-                  onChanged: (fps) => change(FrameRateMode.fixed, fps),
+                  onChanged: changeFps,
                   options: [
                     for (final fps in choices)
                       AppSegmentOption(

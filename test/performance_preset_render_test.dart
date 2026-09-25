@@ -98,4 +98,46 @@ void main() {
       });
     }
   }
+
+  testWidgets('continuous manual edits explain why preset was deferred',
+      (tester) async {
+    var live = PerformanceSnapshot.capture(
+        const RenderingPreferences(),
+        const BackgroundPreferences(),
+        const PlayerExperiencePreferences(),
+        false);
+    var writes = 0;
+    final controller = PerformancePresetController(
+      capture: () => live,
+      apply: (value) => live = value,
+      persist: () async {
+        if (++writes > 3) return;
+        live = PerformanceSnapshot(
+          rendering:
+              live.rendering.copyWith(surfaceBlur: !live.rendering.surfaceBlur),
+          backgrounds: live.backgrounds,
+          dynamicTheme: live.dynamicTheme,
+          springLyrics: live.springLyrics,
+          taskbarSongPreview: live.taskbarSongPreview,
+          taskbarPlaybackProgress: live.taskbarPlaybackProgress,
+          trayBlur: live.trayBlur,
+        );
+      },
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(UiLanguageScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: PerformancePresetSettings(controller: controller)))));
+    tester
+        .widget<AppSegmentedControl<PerformanceMode>>(
+            find.byKey(const ValueKey('performance-preset')))
+        .onChanged!(PerformanceMode.economy);
+    await tester.pumpAndSettle();
+    expect(controller.value.mode, PerformanceMode.custom);
+    expect(writes, 4);
+    expect(find.byKey(const ValueKey('performance-preset-deferred')),
+        findsOneWidget);
+    expect(find.text('设置保存失败；请检查当前设置并重试。'), findsNothing);
+  });
 }

@@ -40,7 +40,8 @@ class _ShortcutSettingsState extends State<ShortcutSettings> {
     try {
       final persist = widget.persist;
       if (persist == null) {
-        await AppSettings.instance.saveSettings(throwOnError: true);
+        await AppSettings.instance
+            .saveSettings(throwOnError: true, captureWindowSize: false);
       } else {
         await persist();
       }

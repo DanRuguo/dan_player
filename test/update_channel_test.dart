@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
@@ -121,6 +122,185 @@ void main() {
         service.selectWindowsAsset(assets,
             version: '26.0.4', architecture: 'unknown'),
         isNull);
+  });
+
+  test(
+      'same-version offer requires a newer installed build and complete assets',
+      () {
+    const version = '26.0.6-snapshot.1';
+    const revision = 'b8a017d9d164ed333fc5d62cd6a3b278823d0e00';
+    const digest =
+        'a9660206b167f134b3886a4267a8d9c1d53f32bf756b6b2d398bc1eea3bf46e2';
+    final installed = InstalledBuild.fromProvenance({
+      'Product': 'Dan Player',
+      'SourceProject': 'https://github.com/DanRuguo/dan_player',
+      'Version': version,
+      'SourceRevision': 'a' * 40,
+      'AssembledUtc': '2026-09-24T10:00:00Z',
+    })!;
+    const setupName = 'DanPlayer-$version-Setup-x64.exe';
+    final setup = ReleaseAsset(
+      id: 410,
+      name: setupName,
+      size: 1024,
+      state: 'uploaded',
+      browserDownloadUrl: 'https://github.com/example/$setupName',
+    );
+    final checksum = ReleaseAsset(
+      id: 411,
+      name: '$setupName.sha256',
+      size: 84,
+      state: 'uploaded',
+      browserDownloadUrl: 'https://github.com/example/$setupName.sha256',
+    );
+    String marker({
+      String assembledUtc = '2026-09-25T10:00:00Z',
+      int installerId = 410,
+      int checksumId = 411,
+    }) =>
+        '${ReleaseBuildMarker.prefix}${jsonEncode({
+              'version': version,
+              'sourceRevision': revision,
+              'assembledUtc': assembledUtc,
+              'installerAssetId': installerId,
+              'installerSize': 1024,
+              'installerSha256': digest,
+              'checksumAssetId': checksumId,
+              'checksumSize': 84,
+            })}${ReleaseBuildMarker.suffix}';
+    Release release(String body, {List<ReleaseAsset>? assets}) => Release(
+          tagName: 'v$version',
+          isPrerelease: true,
+          body: 'Short release notes.\n$body',
+          assets: assets ?? [setup, checksum],
+        );
+    AvailableUpdate? select(Release candidate, {InstalledBuild? local}) =>
+        service.selectLatestRelease([candidate],
+            current: AppVersion.tryParse(version)!,
+            includePreviews: true,
+            architecture: 'x64',
+            installedBuild: local ?? installed);
+
+    final update = select(release(marker()));
+    expect(update, isNotNull);
+    expect(update!.isSameVersionReissue, isTrue);
+    expect(update.asset?.id, 410);
+    expect(update.checksumAsset?.id, 411);
+    expect(update.ignoreKey, '$version@$digest');
+    expect(select(release('')), isNull);
+    expect(select(release(marker(installerId: 400))), isNull);
+    expect(select(release(marker(checksumId: 400))), isNull);
+    expect(select(release(marker(), assets: [setup])), isNull);
+    expect(
+        select(release(marker(assembledUtc: '2026-09-23T10:00:00Z'))), isNull);
+    expect(
+        select(release(marker()),
+            local: InstalledBuild(
+              version: version,
+              sourceRevision: revision,
+              assembledUtc: DateTime.utc(2026, 9, 25, 10),
+            )),
+        isNull);
+    expect(
+        service.selectLatestRelease([release(marker())],
+            current: AppVersion.tryParse(version)!,
+            includePreviews: false,
+            architecture: 'x64',
+            installedBuild: installed),
+        isNull);
+  });
+
+  test('same-version ignored build does not hide a later replacement',
+      () async {
+    final settings = AppSettings.instance;
+    final previous = settings.ignoredUpdateVersion;
+    addTearDown(() => settings.ignoredUpdateVersion = previous);
+    const version = AppVersion(26, 0, 6, preRelease: ['snapshot', '1']);
+    AvailableUpdate reissue(String digest) => AvailableUpdate(
+          release: Release(tagName: version.toString()),
+          version: version,
+          releaseBuild: ReleaseBuildMarker(
+            version: version.toString(),
+            sourceRevision: 'b' * 40,
+            assembledUtc: DateTime.utc(2026, 9, 25),
+            installerAssetId: 1,
+            installerSize: 1,
+            installerSha256: digest,
+            checksumAssetId: 2,
+            checksumSize: 1,
+          ),
+        );
+    final first = reissue('a' * 64);
+    await service.ignoreUpdate(first);
+    expect(settings.ignoredUpdateVersion, first.ignoreKey);
+    expect(reissue('b' * 64).ignoreKey, isNot(first.ignoreKey));
+  });
+
+  test('same-version check uses installed identity and ignores only one build',
+      () async {
+    const version = '26.0.6-snapshot.1';
+    const setupName = 'DanPlayer-$version-Setup-x64.exe';
+    final settings = AppSettings.instance;
+    final previous = settings.ignoredUpdateVersion;
+    addTearDown(() => settings.ignoredUpdateVersion = previous);
+    settings.ignoredUpdateVersion = null;
+    final installed = InstalledBuild(
+      version: version,
+      sourceRevision: 'a' * 40,
+      assembledUtc: DateTime.utc(2026, 9, 24),
+    );
+    Release release(int installerId, String digest) {
+      final marker = jsonEncode({
+        'version': version,
+        'sourceRevision': 'b' * 40,
+        'assembledUtc': '2026-09-25T00:00:00Z',
+        'installerAssetId': installerId,
+        'installerSize': 100,
+        'installerSha256': digest,
+        'checksumAssetId': installerId + 1,
+        'checksumSize': 84,
+      });
+      return Release(
+        tagName: 'v$version',
+        isPrerelease: true,
+        body: '${ReleaseBuildMarker.prefix}$marker${ReleaseBuildMarker.suffix}',
+        assets: [
+          ReleaseAsset(
+            id: installerId,
+            name: setupName,
+            size: 100,
+            state: 'uploaded',
+            browserDownloadUrl: 'https://github.com/example/$setupName',
+          ),
+          ReleaseAsset(
+            id: installerId + 1,
+            name: '$setupName.sha256',
+            size: 84,
+            state: 'uploaded',
+            browserDownloadUrl: 'https://github.com/example/$setupName.sha256',
+          ),
+        ],
+      );
+    }
+
+    var remote = release(101, 'a' * 64);
+    final checker = UpdateService.forTesting(
+      appDataDirectory: () => throw StateError('No disk'),
+      httpClientFactory: () => throw StateError('No network'),
+      currentVersion: version,
+      architecture: 'x64',
+      installedBuildLoader: () async => installed,
+      releaseLoader: () async => [remote],
+    );
+    final first = await checker.checkLatest(includePreviews: true);
+    expect(first?.isSameVersionReissue, isTrue);
+    await checker.ignoreUpdate(first!);
+    expect(await checker.checkLatest(includePreviews: true), isNull);
+    expect(
+        await checker.checkLatest(includePreviews: true, includeIgnored: true),
+        isNotNull);
+    remote = release(201, 'b' * 64);
+    expect((await checker.checkLatest(includePreviews: true))?.asset?.id, 201);
   });
 
   test('shared HTTP results preserve each concurrent caller channel', () async {

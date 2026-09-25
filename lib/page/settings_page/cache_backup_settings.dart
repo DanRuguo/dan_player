@@ -7,6 +7,7 @@ import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/data/cache_backup_service.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/collection.dart';
@@ -439,8 +440,8 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
                 const SizedBox(height: 14),
               ],
               if (_busy) ...[
-                LinearProgressIndicator(
-                    value: (_progress?.total ?? 0) > 0
+                SettingsBusyIndicator.linear(
+                    progress: (_progress?.total ?? 0) > 0
                         ? (_progress!.completed / _progress!.total).clamp(0, 1)
                         : null),
                 const SizedBox(height: 8),
@@ -482,10 +483,7 @@ class _CacheBackupSettingsState extends State<CacheBackupSettings> {
                     FilledButton.icon(
                       onPressed: _busy ? null : _export,
                       icon: _busy
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
+                          ? const SettingsBusyIndicator.circular(size: 18)
                           : const Icon(Symbols.backup),
                       label: Text(_busy ? ui('正在处理…') : ui('备份到文件')),
                     ),

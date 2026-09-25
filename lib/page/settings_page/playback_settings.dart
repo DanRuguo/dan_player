@@ -26,7 +26,8 @@ class _PlaybackSettingsState extends State<PlaybackSettings> {
     final generation = ++_saveGeneration;
     if (mounted) setState(() => _saveError = null);
     try {
-      await AppSettings.instance.saveSettings(throwOnError: true);
+      await AppSettings.instance
+          .saveSettings(throwOnError: true, captureWindowSize: false);
     } catch (error) {
       if (mounted && generation == _saveGeneration) {
         setState(() => _saveError = ui("当前会话已应用，但设置保存失败：{0}", [error]));
@@ -196,7 +197,8 @@ class PlaybackRateButton extends StatelessWidget {
         onSelected: (value) async {
           if (!playback.setPlaybackRate(value)) return;
           try {
-            await AppSettings.instance.saveSettings(throwOnError: true);
+            await AppSettings.instance
+                .saveSettings(throwOnError: true, captureWindowSize: false);
           } catch (error) {
             showAppNotice(ui("速度已应用，但设置保存失败：{0}", [error]),
                 kind: AppNoticeKind.error);

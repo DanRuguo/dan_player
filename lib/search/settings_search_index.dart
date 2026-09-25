@@ -68,7 +68,8 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("desktop", "shortcuts", "应用内快捷键", []),
   SettingsSearchEntry(
       "backup", "backup", "播放器备份与恢复", ["创建播放器备份", "从备份恢复", "密码加密"]),
-  SettingsSearchEntry("backup", "performance", "性能快捷设置", []),
+  SettingsSearchEntry(
+      "backup", "performance", "性能快捷设置", ["一键省电", "一键高性能", "恢复原设置"]),
   SettingsSearchEntry(
       "about", "updates", "检查更新", ["自动检查更新（每天最多一次）", "接收预览版更新"]),
   SettingsSearchEntry("about", "network-proxy", "网络代理",

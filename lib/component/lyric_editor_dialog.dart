@@ -649,7 +649,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
 
   String _errorText(Object error) => error is FormatException
       ? ui(error.message) + (error.source is int ? ' (${error.source})' : '')
-      : ui('$error');
+      : error.toString();
 
   Future<LyricEditFormat?> _confirmConversion(Lyric lyric, LyricEditFormat next,
       {LyricEditFormat? keepFormat}) async {

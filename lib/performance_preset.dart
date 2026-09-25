@@ -48,6 +48,15 @@ class PerformanceSnapshot {
         'trayBlur': trayBlur
       };
 
+  bool samePreferencesAs(PerformanceSnapshot other) =>
+      rendering == other.rendering &&
+      backgrounds == other.backgrounds &&
+      dynamicTheme == other.dynamicTheme &&
+      springLyrics == other.springLyrics &&
+      taskbarSongPreview == other.taskbarSongPreview &&
+      taskbarPlaybackProgress == other.taskbarPlaybackProgress &&
+      trayBlur == other.trayBlur;
+
   static PerformanceSnapshot? fromMap(Object? raw) {
     if (raw is! Map ||
         raw['rendering'] is! Map ||
@@ -144,20 +153,59 @@ class PerformancePresetController
     final originalState = value;
     final live = capture();
     // Starting a new override always captures the current user's preferences.
-    final before = value.mode == PerformanceMode.custom ? live : value.before!;
+    var before = value.mode == PerformanceMode.custom ? live : value.before!;
+    var rollback = live;
+    PerformanceSnapshot? appliedSnapshot;
     _busy = true;
     try {
       if (value.mode == PerformanceMode.custom) {
-        value = PerformancePresetState(before: before);
-        await persist(); // Save the recovery copy before changing any preference.
+        // A user may edit another setting while the recovery checkpoint writes.
+        // Capture again before applying; otherwise the preset would erase that
+        // edit and "restore original settings" would restore an older value.
+        for (var attempt = 0; attempt < 3; attempt++) {
+          value = PerformancePresetState(before: before);
+          await persist();
+          final latest = capture();
+          if (latest.samePreferencesAs(before)) break;
+          before = latest;
+          if (attempt == 2) {
+            // During a long drag there may be no stable checkpoint. Leave the
+            // new manual choice in place and let the user select again later.
+            value = originalState;
+            await persist();
+            return;
+          }
+        }
+        rollback = before;
       }
-      apply(before.forMode(mode));
+      final next = before.forMode(mode);
+      try {
+        apply(next);
+      } catch (_) {
+        // Applying is synchronous, so no user edit can interleave here.
+        // Restore a partially applied snapshot before handling the failure.
+        apply(rollback);
+        rethrow;
+      }
+      appliedSnapshot = next;
       value = mode == PerformanceMode.custom
           ? const PerformancePresetState()
           : PerformancePresetState(mode: mode, before: before);
       await persist();
     } catch (_) {
-      apply(live);
+      if (appliedSnapshot != null &&
+          !capture().samePreferencesAs(appliedSnapshot)) {
+        // Another control changed a value after the preset was applied.
+        // Retrying saves the latest model without erasing that manual choice.
+        // If storage still fails, keep the live choice and recovery snapshot.
+        try {
+          await persist();
+          return;
+        } catch (_) {
+          rethrow;
+        }
+      }
+      if (appliedSnapshot != null) apply(rollback);
       value = originalState;
       // Another settings writer may have committed the temporary override
       // before this request was superseded. Persist the rollback too, while

@@ -13,6 +13,7 @@ import 'package:dan_player/play_service/desktop_lyric_service.dart';
 import 'package:dan_player/play_service/lyric_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
 
@@ -80,6 +81,16 @@ void main() {
     'enabled'
   ]) {
     test('automatic $scenario lyric miss follows network permission', () async {
+      expect(
+          Platform.environment['DAN_PLAYER_DATA_DIR']?.trim() ?? '', isEmpty);
+      const channel = MethodChannel('plugins.flutter.io/path_provider');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final parent = await Directory(
+        path.join(Directory.current.path, 'build', 'test-data'),
+      ).create(recursive: true);
+      final fixture = await parent.createTemp('lyric-network-policy-');
+      messenger.setMockMethodCallHandler(channel, (_) async => fixture.path);
       AppSettings.instance.automaticOnlineLyrics.value = scenario == 'enabled';
       // Real LyricService resolution and cache reads, with only playback and
       // desktop output replaced. Every HTTP client creation is denied and counted.
@@ -126,8 +137,21 @@ void main() {
         AppSettings.instance.automaticOnlineLyrics.value = false;
         await playback.positions.close();
         readiness.dispose();
-        final fixture = corrupt;
-        if (fixture != null && await fixture.exists()) await fixture.delete();
+        final corruptFixture = corrupt;
+        if (corruptFixture != null && await corruptFixture.exists()) {
+          await corruptFixture.delete();
+        }
+        messenger.setMockMethodCallHandler(channel, null);
+        final resolvedParent = await parent.resolveSymbolicLinks();
+        final resolvedFixture =
+            await Directory(fixture.path).resolveSymbolicLinks();
+        if (!path.isWithin(resolvedParent, resolvedFixture) ||
+            !path
+                .basename(resolvedFixture)
+                .startsWith('lyric-network-policy-')) {
+          throw StateError('Refusing to delete an unverified fixture');
+        }
+        await Directory(resolvedFixture).delete(recursive: true);
       });
       var clients = 0;
       await HttpOverrides.runZoned(() async {

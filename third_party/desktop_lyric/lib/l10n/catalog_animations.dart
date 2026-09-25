@@ -6,10 +6,10 @@ const catalogAnimations = <String, List<String>>{
     '재생 중 왼쪽 위 아이콘이 천천히 회전하며 일시 정지하거나 창을 숨기면 멈춥니다.'
   ],
   '动画管理': ['Animation controls', 'アニメーション管理', '애니메이션 관리'],
-  '独立控制每类动画。关闭动画不影响播放、点击、拖动和实时进度。': [
-    'Control each animation separately. Playback, clicks, dragging and live progress remain available.',
-    '各アニメーションを個別に設定できます。オフでも再生、クリック、ドラッグ、再生位置の更新は利用できます。',
-    '애니메이션을 개별 설정합니다. 꺼도 재생, 클릭, 드래그와 실시간 진행 상태는 유지됩니다.'
+  '单项开关只控制对应动画；全部开关还会同步调整频谱、背景动效与低频律动、歌词回弹。播放、点击、拖动和实时进度不受影响。': [
+    'Individual switches control only their animations. Enable/Disable all also changes the spectra, background motion and bass response, and lyric bounce. Playback, clicks, dragging and live progress remain available.',
+    '個別のスイッチは対応するアニメーションだけを変更します。「すべて」はスペクトラム、背景の動きと低音連動、歌詞のバウンドも切り替えます。再生、クリック、ドラッグ、再生位置の更新には影響しません。',
+    '개별 스위치는 해당 애니메이션만 제어합니다. 전체 켜기/끄기는 스펙트럼, 배경 움직임과 저음 반응, 가사 탄성 효과도 함께 바꿉니다. 재생, 클릭, 드래그와 실시간 진행에는 영향을 주지 않습니다.'
   ],
   '全部开启': ['Enable all', 'すべてオン', '모두 켜기'],
   '全部关闭': ['Disable all', 'すべてオフ', '모두 끄기'],

@@ -5,6 +5,7 @@ import 'package:dan_player/background_image_store.dart';
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -70,7 +71,7 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
       return;
     }
     setState(_cancelImport);
-    _update(value.copyWith(source: source));
+    _update((current) => current.copyWith(source: source));
   }
 
   Future<void> _chooseImage() async {
@@ -154,8 +155,11 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
     }
   }
 
-  void _update(BackgroundAppearance value, {bool save = true}) {
-    _preferences.value = _preferences.value.withScene(_scene, value);
+  void _update(BackgroundAppearance Function(BackgroundAppearance) change,
+      {bool save = true}) {
+    final preferences = _preferences.value;
+    _preferences.value =
+        preferences.withScene(_scene, change(preferences.forScene(_scene)));
     if (save) unawaited(_save());
   }
 
@@ -165,7 +169,8 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
     if (mounted) setState(() => _saveError = null);
     try {
       await (widget.onSave?.call() ??
-          AppSettings.instance.saveSettings(throwOnError: true));
+          AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false));
     } catch (_) {
       if (!mounted ||
           revision != _saveRevision ||
@@ -257,8 +262,9 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                     semanticFormatterCallback: (v) =>
                         ui("背景透明度 {0}%", [(v * 100).round()]),
                     onChanged: enabled
-                        ? (v) =>
-                            _update(value.copyWith(opacity: 1 - v), save: false)
+                        ? (v) => _update(
+                            (current) => current.copyWith(opacity: 1 - v),
+                            save: false)
                         : null,
                     onChangeEnd: enabled ? (_) => unawaited(_save()) : null,
                   ),
@@ -282,8 +288,9 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                       label: value.blur.round().toString(),
                       semanticFormatterCallback: (v) =>
                           ui("封面模糊强度 {0}", [v.round()]),
-                      onChanged: (v) =>
-                          _update(value.copyWith(blur: v), save: false),
+                      onChanged: (v) => _update(
+                          (current) => current.copyWith(blur: v),
+                          save: false),
                       onChangeEnd: (_) => unawaited(_save()),
                     ),
                   ),
@@ -303,7 +310,8 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                           : ui("仅适用于专辑封面或自定义图片，不改变真实窗后背景。")),
                   value: value.motion,
                   onChanged: value.source.usesImage
-                      ? (motion) => _update(value.copyWith(motion: motion))
+                      ? (motion) =>
+                          _update((current) => current.copyWith(motion: motion))
                       : null,
                 ),
                 if (_scene == BackgroundScene.nowPlaying &&
@@ -319,8 +327,8 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                             size: 18),
                         label: Text(ui(layered ? '多层流动' : '柔和漂移')),
                         selected: value.layeredMotion == layered,
-                        onSelected: (_) =>
-                            _update(value.copyWith(layeredMotion: layered)),
+                        onSelected: (_) => _update((current) =>
+                            current.copyWith(layeredMotion: layered)),
                       ),
                   ]),
                   const SizedBox(height: 6),
@@ -340,8 +348,8 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                             Text(ui('复用歌词页实时频谱，让背景随低频轻缓缩放；关闭该频谱时不启用，不额外采样。')),
                         value: value.bassReactive,
                         onChanged: rendering.lyricSpectrum
-                            ? (enabled) =>
-                                _update(value.copyWith(bassReactive: enabled))
+                            ? (enabled) => _update((current) =>
+                                current.copyWith(bassReactive: enabled))
                             : null,
                       ),
                     ),
@@ -373,7 +381,8 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                     key: const ValueKey('background-reset'),
                     onPressed: () {
                       setState(_cancelImport);
-                      _update(const BackgroundPreferences().forScene(_scene));
+                      _update((_) =>
+                          const BackgroundPreferences().forScene(_scene));
                     },
                     icon: const Icon(Icons.restore_rounded, size: 20),
                     label: Text(ui("还原{0}默认背景", [ui(_scene.label)])),
@@ -403,10 +412,7 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
               key: const ValueKey('background-pick-image'),
               onPressed: _imageBusy ? null : _chooseImage,
               icon: _imageBusy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                  ? const SettingsBusyIndicator.circular(size: 18)
                   : const Icon(Icons.image_outlined, size: 20),
               label: Text(isBackgroundImageId(value.customImageId)
                   ? ui("更换自定义图片")
@@ -419,14 +425,15 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                     ? null
                     : () {
                         setState(_cancelImport);
-                        _update(value.copyWith(
-                          clearCustomImage: true,
-                          source: value.source == BackgroundSource.customImage
-                              ? const BackgroundPreferences()
-                                  .forScene(_scene)
-                                  .source
-                              : value.source,
-                        ));
+                        _update((current) => current.copyWith(
+                              clearCustomImage: true,
+                              source:
+                                  current.source == BackgroundSource.customImage
+                                      ? const BackgroundPreferences()
+                                          .forScene(_scene)
+                                          .source
+                                      : current.source,
+                            ));
                       },
                 icon: const Icon(Icons.hide_image_outlined, size: 20),
                 label: Text(ui("移除图片选择")),

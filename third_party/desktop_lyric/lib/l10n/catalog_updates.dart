@@ -49,6 +49,21 @@ const Map<String, List<String>> catalogUpdates = {
     'プレビュー版 {0} が利用できます',
     '미리 보기 버전 {0} 사용 가능'
   ],
+  '发现同版本新构建 {0}': [
+    'A new build of {0} is available',
+    '{0} の新しいビルドが利用できます',
+    '{0}의 새 빌드를 사용할 수 있습니다'
+  ],
+  '此版本已重新发布新构建，可选择下载更新。': [
+    'A new build of this version was published. Choose whether to download it.',
+    'このバージョンの新しいビルドが公開されました。ダウンロードするか選択してください。',
+    '이 버전의 새 빌드가 게시되었습니다. 다운로드할지 선택하세요.'
+  ],
+  '若同版本附件已替换，请关闭弹窗重新检查更新。': [
+    'If this version\'s assets were replaced, close this dialog and check for updates again.',
+    '同じバージョンの添付ファイルが差し替えられた場合は、この画面を閉じて更新を再確認してください。',
+    '같은 버전의 첨부 파일이 교체되었다면 이 창을 닫고 업데이트를 다시 확인하세요.'
+  ],
   '自动检查更新（每天最多一次）': [
     'Check for updates automatically (at most once a day)',
     '更新を自動確認（1日最大1回）',
@@ -95,6 +110,8 @@ const Map<String, List<String>> catalogUpdates = {
     '업데이트를 시작하지 못했습니다. 플레이어는 열린 상태입니다. 다시 시도하거나 파일 탐색기에서 설치 프로그램을 직접 실행하세요.'
   ],
   '预览版 {0}{1}': ['Preview {0}{1}', 'プレビュー版 {0}{1}', '미리 보기 {0}{1}'],
+  '同版本新构建 {0}{1}': ['New build of {0}{1}', '{0} の新しいビルド{1}', '{0}의 새 빌드{1}'],
+  '忽略此构建': ['Ignore this build', 'このビルドを無視', '이 빌드 무시'],
   '这是预览版，可能存在问题；请选择是否下载。': [
     'This is a preview and may contain issues. Choose whether to download it.',
     'これはプレビュー版のため、不具合が含まれる場合があります。ダウンロードするか選択してください。',
@@ -134,6 +151,11 @@ const Map<String, List<String>> catalogUpdates = {
     'The update URL is not a trusted GitHub HTTPS address.',
     '更新パッケージの URL が信頼できる GitHub HTTPS アドレスではありません。',
     '업데이트 주소가 신뢰할 수 있는 GitHub HTTPS 주소가 아닙니다.'
+  ],
+  '更新包与已发布的构建标识不一致，已停止更新。': [
+    'The package does not match the published build identity. The update was stopped.',
+    'パッケージが公開されたビルド識別情報と一致しないため、更新を停止しました。',
+    '패키지가 게시된 빌드 식별 정보와 일치하지 않아 업데이트를 중단했습니다.'
   ],
   '更新包文件名无效。': [
     'The update filename is invalid.',

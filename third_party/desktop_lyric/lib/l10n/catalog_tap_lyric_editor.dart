@@ -80,6 +80,8 @@ const Map<String, List<String>> catalogTapLyricEditor = {
     "본문에 구분자가 있으면 양쪽 공백 수를 늘리세요. 아래 예시와 정확히 같은 구분자를 입력하세요."
   ],
   "分隔符空格数": ["Separator spaces per side", "区切りの片側の空白数", "구분자 한쪽 공백 수"],
+  "减少": ["Decrease", "減らす", "줄이기"],
+  "增加": ["Increase", "増やす", "늘리기"],
   "纯文本歌词": ["Plain-text lyrics", "歌詞テキスト", "일반 텍스트 가사"],
   "联网填入纯文本": [
     "Fetch lyrics as plain text",

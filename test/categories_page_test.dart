@@ -800,10 +800,9 @@ void main() {
     expect(find.text('编辑歌曲信息'), findsOneWidget);
     expect(find.text('编辑歌词'), findsOneWidget);
     expect(find.text('加入歌单…'), findsOneWidget);
-    // Use the supported outside-tap dismissal, and verify that the old overlay
-    // is gone before clicking the next row. A raw MenuAnchor right-click does
-    // not automatically focus menu items for an immediate Escape key press.
-    await tester.tap(find.byKey(const ValueKey('category-track-search')));
+    // Dismiss outside the menu before using another row. The search field can
+    // be covered by the popup, so its center can accidentally select an item.
+    await tester.tapAt(const Offset(8, 8));
     await tester.pumpAndSettle();
     expect(find.text('编辑歌曲信息'), findsNothing);
     await _rightClick(tester, _audioTile(remote));

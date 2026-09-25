@@ -277,7 +277,8 @@ class PlaybackService extends ChangeNotifier {
             .instance.experience.value
             .copyWith(exclusiveOutput: _player.wasapiExclusive);
         try {
-          await AppSettings.instance.saveSettings(throwOnError: true);
+          await AppSettings.instance.saveSettings(
+              throwOnError: true, captureWindowSize: false);
         } catch (error, trace) {
           LOGGER.w('[save output preference] $error', stackTrace: trace);
           if (_isCurrentSourceRequest(token)) {

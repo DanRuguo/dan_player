@@ -9,6 +9,7 @@ import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/online/app_network_proxy.dart';
 import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/page/settings_page/network_proxy_settings.dart';
+import 'package:dan_player/utils.dart' show SCAFFOLD_MESSAGER;
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -155,6 +156,42 @@ void main() {
     expect(find.byKey(const ValueKey('network-proxy-test')), findsOneWidget);
   });
 
+  testWidgets('hidden custom draft does not block active proxy updates',
+      (tester) async {
+    final preferences = ValueNotifier(const NetworkProxyPreferences());
+    addTearDown(preferences.dispose);
+    final probes = <NetworkProxyMode>[];
+    await tester.pumpWidget(_host(NetworkProxySettings(
+      preferences: preferences,
+      persist: () async {},
+      probe: (candidate) async {
+        probes.add(candidate.mode);
+        return const NetworkProxyProbeResult(
+            reachable: true, elapsed: Duration(milliseconds: 1));
+      },
+    )));
+
+    await _mode(tester, NetworkProxyMode.custom);
+    await tester.enterText(
+        find.byKey(const ValueKey('network-proxy-address')), '127.0.0.1');
+    await tester.enterText(
+        find.byKey(const ValueKey('network-proxy-port')), '7890');
+    await _mode(tester, NetworkProxyMode.system);
+    await tester.pumpAndSettle();
+
+    preferences.value =
+        const NetworkProxyPreferences(mode: NetworkProxyMode.direct);
+    await tester.pump();
+    expect(
+        tester
+            .widget<AppSegmentedControl<NetworkProxyMode>>(
+                find.byKey(const ValueKey('network-proxy-mode')))
+            .value,
+        NetworkProxyMode.direct);
+    await _tap(tester, 'network-proxy-test');
+    expect(probes, [NetworkProxyMode.direct]);
+  });
+
   testWidgets('rapid choices serialize writes and persist the latest selection',
       (tester) async {
     final preferences = ValueNotifier(const NetworkProxyPreferences());
@@ -178,6 +215,98 @@ void main() {
     expect(saves, [NetworkProxyMode.direct, NetworkProxyMode.system]);
     expect(find.textContaining('已应用并保存'), findsOneWidget);
     expect(find.byKey(const ValueKey('network-proxy-retry')), findsNothing);
+  });
+
+  testWidgets('queued last choice persists after leaving proxy settings',
+      (tester) async {
+    final preferences = ValueNotifier(const NetworkProxyPreferences());
+    addTearDown(preferences.dispose);
+    final first = Completer<void>();
+    final committed = <NetworkProxyMode>[];
+    await tester.pumpWidget(_host(NetworkProxySettings(
+      preferences: preferences,
+      persist: () async {
+        final mode = preferences.value.mode;
+        if (mode == NetworkProxyMode.direct) await first.future;
+        committed.add(mode);
+      },
+    )));
+    await _mode(tester, NetworkProxyMode.direct);
+    await _mode(tester, NetworkProxyMode.system);
+    expect(committed, isEmpty);
+    expect(preferences.value.mode, NetworkProxyMode.system);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    first.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(committed, [NetworkProxyMode.direct, NetworkProxyMode.system]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('failed old proxy save still drains last choice after dispose',
+      (tester) async {
+    final preferences = ValueNotifier(const NetworkProxyPreferences());
+    addTearDown(preferences.dispose);
+    final first = Completer<void>();
+    final attempted = <NetworkProxyMode>[];
+    final committed = <NetworkProxyMode>[];
+    await tester.pumpWidget(_host(NetworkProxySettings(
+      preferences: preferences,
+      persist: () async {
+        final mode = preferences.value.mode;
+        attempted.add(mode);
+        if (mode == NetworkProxyMode.direct) await first.future;
+        committed.add(mode);
+      },
+    )));
+    await _mode(tester, NetworkProxyMode.direct);
+    await _mode(tester, NetworkProxyMode.system);
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    first.completeError(StateError('superseded old write'));
+    await tester.pump();
+    await tester.pump();
+    expect(attempted, [NetworkProxyMode.direct, NetworkProxyMode.system]);
+    expect(committed, [NetworkProxyMode.system]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('latest proxy save failure after leaving settings is announced',
+      (tester) async {
+    final preferences = ValueNotifier(const NetworkProxyPreferences());
+    final visible = ValueNotifier(true);
+    addTearDown(preferences.dispose);
+    addTearDown(visible.dispose);
+    final pending = Completer<void>();
+    await tester.pumpWidget(MaterialApp(
+      scaffoldMessengerKey: SCAFFOLD_MESSAGER,
+      home: UiLanguageScope(
+        child: Scaffold(
+          body: ValueListenableBuilder<bool>(
+            valueListenable: visible,
+            builder: (_, showSettings, __) => showSettings
+                ? NetworkProxySettings(
+                    preferences: preferences,
+                    persist: () => pending.future,
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    ));
+    await _mode(tester, NetworkProxyMode.direct);
+    expect(preferences.value.mode, NetworkProxyMode.direct);
+
+    visible.value = false;
+    await tester.pump();
+    pending.completeError(StateError('disk write failed'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.textContaining('保存失败；请重试'), findsOneWidget);
+    expect(find.byType(SnackBar), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('an older failed write cannot replace the latest choice',
@@ -397,6 +526,35 @@ void main() {
                 Future.value(ByteData.sublistView(await korean.readAsBytes()))))
           .load();
     }
+  });
+
+  testWidgets(
+      'proxy probe stays visible without an endless ticker when motion is off',
+      (tester) async {
+    final preferences = ValueNotifier(const NetworkProxyPreferences());
+    addTearDown(preferences.dispose);
+    final probe = Completer<NetworkProxyProbeResult>();
+    await tester.pumpWidget(MaterialApp(
+      home: MotionPreferencesScope(
+        preferences: const MotionPreferences(disabled: {MotionKind.feedback}),
+        child: UiLanguageScope(
+          child: Scaffold(
+            body: NetworkProxySettings(
+                preferences: preferences,
+                persist: () async {},
+                probe: (_) => probe.future),
+          ),
+        ),
+      ),
+    ));
+    await _tap(tester, 'network-proxy-test');
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.hourglass_top), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    probe.complete(const NetworkProxyProbeResult(
+        reachable: true, elapsed: Duration(milliseconds: 10), statusCode: 200));
+    await tester.pump();
   });
 
   for (final language in UiLanguage.values) {

@@ -297,7 +297,7 @@ class DesktopLyricService extends ChangeNotifier {
         // ask for the canonical direction without affecting its clock.
         _syncDisplayPreference();
         unawaited(AppSettings.instance
-            .saveSettings(throwOnError: true)
+            .saveSettings(throwOnError: true, captureWindowSize: false)
             .catchError((Object error, StackTrace trace) {
           LOGGER.e('[desktop lyric preference] $error', stackTrace: trace);
           showAppNotice(ui('桌面歌词方向保存失败；当前会话仍生效，请在设置中重试。'),

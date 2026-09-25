@@ -115,15 +115,175 @@ class AvailableUpdate {
     required this.version,
     this.asset,
     this.checksumAsset,
+    this.releaseBuild,
   });
 
   final Release release;
   final AppVersion version;
   final ReleaseAsset? asset;
   final ReleaseAsset? checksumAsset;
+  final ReleaseBuildMarker? releaseBuild;
 
   bool get isPreview =>
       release.isPrerelease == true || version.preRelease.isNotEmpty;
+
+  bool get isSameVersionReissue => releaseBuild != null;
+
+  String get ignoreKey => releaseBuild == null
+      ? version.toString()
+      : '${version.toString()}@${releaseBuild!.installerSha256}';
+}
+
+/// The identity embedded in each signed installer and portable payload.
+class InstalledBuild {
+  const InstalledBuild({
+    required this.version,
+    required this.sourceRevision,
+    required this.assembledUtc,
+  });
+
+  final String version;
+  final String sourceRevision;
+  final DateTime assembledUtc;
+
+  static InstalledBuild? fromProvenance(Object? value) {
+    if (value is! Map) return null;
+    if (value['Product'] != 'Dan Player' ||
+        value['SourceProject'] != 'https://github.com/DanRuguo/dan_player') {
+      return null;
+    }
+    final version = value['Version'];
+    final revision = value['SourceRevision'];
+    final assembledText = value['AssembledUtc'];
+    if (version is! String ||
+        AppVersion.tryParse(version) == null ||
+        revision is! String ||
+        !RegExp(r'^[0-9a-f]{40}$').hasMatch(revision) ||
+        assembledText is! String) {
+      return null;
+    }
+    final assembled = DateTime.tryParse(assembledText);
+    if (assembled == null || !assembled.isUtc) return null;
+    return InstalledBuild(
+      version: version,
+      sourceRevision: revision,
+      assembledUtc: assembled,
+    );
+  }
+
+  static Future<InstalledBuild?> besideExecutable() async {
+    try {
+      final file = File(path.join(
+          path.dirname(Platform.resolvedExecutable), 'BUILD-PROVENANCE.json'));
+      if (!await file.exists() || await file.length() > 64 * 1024) return null;
+      return fromProvenance(jsonDecode(await file.readAsString()));
+    } catch (_) {
+      // A source checkout or older installation has no trusted build identity.
+      return null;
+    }
+  }
+}
+
+/// Written to the release notes only after all uploaded assets are verified.
+/// GitHub's release and push timestamps do not identify the installed build.
+class ReleaseBuildMarker {
+  const ReleaseBuildMarker({
+    required this.version,
+    required this.sourceRevision,
+    required this.assembledUtc,
+    required this.installerAssetId,
+    required this.installerSize,
+    required this.installerSha256,
+    required this.checksumAssetId,
+    required this.checksumSize,
+  });
+
+  static const prefix = '<!-- DanPlayer-Update-Build-v1 ';
+  static const suffix = ' -->';
+
+  static String visibleNotes(String? body) => const LineSplitter()
+      .convert(body ?? '')
+      .where((line) => !line.startsWith(prefix))
+      .join('\n')
+      .trim();
+
+  final String version;
+  final String sourceRevision;
+  final DateTime assembledUtc;
+  final int installerAssetId;
+  final int installerSize;
+  final String installerSha256;
+  final int checksumAssetId;
+  final int checksumSize;
+
+  static ReleaseBuildMarker? fromReleaseBody(String? body) {
+    if (body == null || body.length > 1024 * 1024) return null;
+    String? payload;
+    for (final line in const LineSplitter().convert(body)) {
+      if (!line.startsWith(prefix)) continue;
+      if (payload != null || !line.endsWith(suffix) || line.length > 1024) {
+        return null;
+      }
+      payload = line.substring(prefix.length, line.length - suffix.length);
+    }
+    if (payload == null) return null;
+    try {
+      final value = jsonDecode(payload);
+      if (value is! Map) return null;
+      final version = value['version'];
+      final revision = value['sourceRevision'];
+      final assembledText = value['assembledUtc'];
+      final installerId = value['installerAssetId'];
+      final installerSize = value['installerSize'];
+      final installerSha = value['installerSha256'];
+      final checksumId = value['checksumAssetId'];
+      final checksumSize = value['checksumSize'];
+      if (version is! String ||
+          AppVersion.tryParse(version) == null ||
+          revision is! String ||
+          !RegExp(r'^[0-9a-f]{40}$').hasMatch(revision) ||
+          assembledText is! String ||
+          installerId is! int ||
+          installerId <= 0 ||
+          installerSize is! int ||
+          installerSize <= 0 ||
+          installerSha is! String ||
+          !RegExp(r'^[0-9a-f]{64}$').hasMatch(installerSha) ||
+          checksumId is! int ||
+          checksumId <= 0 ||
+          checksumSize is! int ||
+          checksumSize <= 0) {
+        return null;
+      }
+      final assembled = DateTime.tryParse(assembledText);
+      if (assembled == null || !assembled.isUtc) return null;
+      return ReleaseBuildMarker(
+        version: version,
+        sourceRevision: revision,
+        assembledUtc: assembled,
+        installerAssetId: installerId,
+        installerSize: installerSize,
+        installerSha256: installerSha,
+        checksumAssetId: checksumId,
+        checksumSize: checksumSize,
+      );
+    } on FormatException {
+      return null;
+    }
+  }
+
+  bool matchesAssets(ReleaseAsset? installer, ReleaseAsset? checksum) =>
+      installer?.id == installerAssetId &&
+      installer?.size == installerSize &&
+      installer?.state == 'uploaded' &&
+      checksum?.id == checksumAssetId &&
+      checksum?.size == checksumSize &&
+      checksum?.state == 'uploaded' &&
+      checksum?.browserDownloadUrl != null;
+
+  bool isNewerThan(InstalledBuild installed) =>
+      installed.version == version &&
+      assembledUtc.isAfter(installed.assembledUtc);
 }
 
 class UpdateDownloadProgress {
@@ -198,7 +358,9 @@ class UpdateService {
       : _appDataDirectory = getAppDataDir,
         _httpClientFactory = (() => HttpClient()),
         _releaseLoader = _loadReleases,
+        _installedBuildLoader = InstalledBuild.besideExecutable,
         _currentVersion = AppSettings.version,
+        _architectureOverride = null,
         _savePreferences = _saveSettings;
 
   @visibleForTesting
@@ -206,12 +368,16 @@ class UpdateService {
     required Future<Directory> Function() appDataDirectory,
     required HttpClient Function() httpClientFactory,
     Future<List<Release>> Function()? releaseLoader,
+    Future<InstalledBuild?> Function()? installedBuildLoader,
     String currentVersion = AppSettings.version,
+    String? architecture,
     Future<void> Function()? savePreferences,
   })  : _appDataDirectory = appDataDirectory,
         _httpClientFactory = httpClientFactory,
         _releaseLoader = releaseLoader ?? (() async => const []),
+        _installedBuildLoader = installedBuildLoader ?? (() async => null),
         _currentVersion = currentVersion,
+        _architectureOverride = architecture,
         _savePreferences = savePreferences ?? (() async {});
 
   static final instance = UpdateService._();
@@ -224,7 +390,9 @@ class UpdateService {
   final Future<Directory> Function() _appDataDirectory;
   final HttpClient Function() _httpClientFactory;
   final Future<List<Release>> Function() _releaseLoader;
+  final Future<InstalledBuild?> Function() _installedBuildLoader;
   final String _currentVersion;
+  final String? _architectureOverride;
   final Future<void> Function() _savePreferences;
   final Map<(NetworkProxyMode, String?), Future<List<Release>>>
       _checksInFlight = {};
@@ -267,11 +435,23 @@ class UpdateService {
       if (current == null) {
         throw const UpdateException('当前版本号格式无效，无法安全比较更新。');
       }
+      InstalledBuild? installedBuild;
+      if (releases.any((release) =>
+          AppVersion.tryParse(release.tagName)?.compareTo(current) == 0 &&
+          release.body?.contains(ReleaseBuildMarker.prefix) == true)) {
+        try {
+          installedBuild = await _installedBuildLoader();
+        } catch (_) {
+          // A missing or unreadable local receipt cannot justify an update.
+        }
+      }
       final update = selectLatestRelease(releases,
-          current: current, includePreviews: previews);
+          current: current,
+          includePreviews: previews,
+          installedBuild: installedBuild,
+          architecture: _architectureOverride);
       if (!includeIgnored &&
-          update?.version.toString() ==
-              AppSettings.instance.ignoredUpdateVersion) {
+          update?.ignoreKey == AppSettings.instance.ignoredUpdateVersion) {
         return null;
       }
       return update;
@@ -282,21 +462,47 @@ class UpdateService {
     }
   }
 
-  Future<void> recordSuccessfulCheck() async {
-    AppSettings.instance.lastUpdateCheckAt = DateTime.now();
-    await _savePreferences();
-  }
-
-  Future<void> ignoreVersion(AppVersion version) async {
+  Future<bool> recordSuccessfulCheck({bool Function()? stillCurrent}) async {
+    if (stillCurrent?.call() == false) return false;
     final settings = AppSettings.instance;
-    final previous = settings.ignoredUpdateVersion;
-    final revision = ++_ignoreRevision;
-    settings.ignoredUpdateVersion = version.toString();
+    final previous = settings.lastUpdateCheckAt;
+    final recorded = DateTime.now();
+    settings.lastUpdateCheckAt = recorded;
     try {
       await _savePreferences();
     } catch (_) {
-      if (revision == _ignoreRevision &&
-          settings.ignoredUpdateVersion == version.toString()) {
+      if (identical(settings.lastUpdateCheckAt, recorded)) {
+        settings.lastUpdateCheckAt = previous;
+      }
+      rethrow;
+    }
+    if (stillCurrent?.call() != false) return true;
+    // The route changed while its timestamp was being saved. Correct both the
+    // in-memory value and the persisted snapshot, unless a newer check owns it.
+    if (identical(settings.lastUpdateCheckAt, recorded)) {
+      settings.lastUpdateCheckAt = previous;
+      await _savePreferences();
+    }
+    return false;
+  }
+
+  Future<void> ignoreVersion(AppVersion version) async {
+    await _ignoreKey(version.toString());
+  }
+
+  Future<void> ignoreUpdate(AvailableUpdate update) async {
+    await _ignoreKey(update.ignoreKey);
+  }
+
+  Future<void> _ignoreKey(String key) async {
+    final settings = AppSettings.instance;
+    final previous = settings.ignoredUpdateVersion;
+    final revision = ++_ignoreRevision;
+    settings.ignoredUpdateVersion = key;
+    try {
+      await _savePreferences();
+    } catch (_) {
+      if (revision == _ignoreRevision && settings.ignoredUpdateVersion == key) {
         settings.ignoredUpdateVersion = previous;
       }
       rethrow;
@@ -321,36 +527,46 @@ class UpdateService {
     Iterable<Release> releases, {
     required AppVersion current,
     required bool includePreviews,
+    InstalledBuild? installedBuild,
     String? architecture,
   }) {
-    Release? newest;
-    AppVersion? newestVersion;
+    AvailableUpdate? newest;
     for (final release in releases) {
       if (release.isDraft == true) continue;
       final version = AppVersion.tryParse(release.tagName);
-      if (version == null || version.compareTo(current) <= 0) continue;
+      if (version == null || version.compareTo(current) < 0) continue;
       final preview =
           release.isPrerelease == true || version.preRelease.isNotEmpty;
       if (preview && !includePreviews) continue;
-      final comparison =
-          newestVersion == null ? 1 : version.compareTo(newestVersion);
+      final asset = selectWindowsAsset(release.assets ?? const [],
+          architecture: architecture, version: version.toString());
+      final checksum = asset == null
+          ? null
+          : selectChecksumAsset(release.assets ?? const [], asset.name!);
+      ReleaseBuildMarker? releaseBuild;
+      if (version.compareTo(current) == 0) {
+        releaseBuild = ReleaseBuildMarker.fromReleaseBody(release.body);
+        if (installedBuild == null ||
+            releaseBuild == null ||
+            releaseBuild.version != version.toString() ||
+            !releaseBuild.isNewerThan(installedBuild) ||
+            !releaseBuild.matchesAssets(asset, checksum)) {
+          continue;
+        }
+      }
+      final comparison = newest == null ? 1 : version.compareTo(newest.version);
       if (comparison > 0 ||
-          (comparison == 0 && newest?.isPrerelease == true && !preview)) {
-        newest = release;
-        newestVersion = version;
+          (comparison == 0 && newest?.isPreview == true && !preview)) {
+        newest = AvailableUpdate(
+          release: release,
+          version: version,
+          asset: asset,
+          checksumAsset: checksum,
+          releaseBuild: releaseBuild,
+        );
       }
     }
-    if (newest == null || newestVersion == null) return null;
-    final asset = selectWindowsAsset(newest.assets ?? const [],
-        architecture: architecture, version: newestVersion.toString());
-    return AvailableUpdate(
-      release: newest,
-      version: newestVersion,
-      asset: asset,
-      checksumAsset: asset == null
-          ? null
-          : selectChecksumAsset(newest.assets ?? const [], asset.name!),
-    );
+    return newest;
   }
 
   static bool isProjectInstaller(String? name, {String? version}) {
@@ -477,6 +693,11 @@ class UpdateService {
       taskbar.update(null);
       final digest = await _sha256ForFile(partial, cancellation);
       _throwIfCancelled(cancellation);
+      final releaseBuild = update.releaseBuild;
+      if (releaseBuild != null &&
+          digest.toLowerCase() != releaseBuild.installerSha256) {
+        throw const UpdateException('更新包与已发布的构建标识不一致，已停止更新。');
+      }
       var checksumVerified = false;
       final checksumAsset = update.checksumAsset;
       if (checksumAsset?.browserDownloadUrl != null) {

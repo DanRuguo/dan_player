@@ -14,6 +14,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:github/github.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -121,6 +122,53 @@ void main() {
   });
   tearDown(() => uiLanguage.value = UiLanguage.zh);
 
+  testWidgets('standard Chinese update keeps notes and actions visible',
+      (tester) async {
+    uiLanguage.value = UiLanguage.zh;
+    final boundary = await _open(tester, NewestUpdateView(update: _update()),
+        size: const Size(900, 650), scale: 1);
+    final details = find.byKey(const ValueKey('update-details-scroll'));
+    expect(tester.getSize(details).height, greaterThan(100));
+    for (final key in ['update-download', 'update-github']) {
+      expect(find.byKey(ValueKey(key)).hitTestable(), findsOneWidget);
+    }
+    expect(tester.takeException(), isNull);
+    await tester.runAsync(() => _capture(boundary, 'zh-regular'));
+  });
+
+  testWidgets('same-version build marker stays out of visible release notes',
+      (tester) async {
+    uiLanguage.value = UiLanguage.zh;
+    final original = _update(
+      body:
+          '累计更新说明。\n${ReleaseBuildMarker.prefix}{"version":"26.0.6-snapshot.1"}${ReleaseBuildMarker.suffix}',
+    );
+    original.release.publishedAt = DateTime.utc(2026, 1, 1);
+    final update = AvailableUpdate(
+      release: original.release,
+      version: original.version,
+      asset: original.asset,
+      releaseBuild: ReleaseBuildMarker(
+        version: '26.0.6-snapshot.1',
+        sourceRevision: 'b' * 40,
+        assembledUtc: DateTime.utc(2026, 9, 25),
+        installerAssetId: 1,
+        installerSize: 1,
+        installerSha256: 'a' * 64,
+        checksumAssetId: 2,
+        checksumSize: 1,
+      ),
+    );
+    await _open(tester, NewestUpdateView(update: update),
+        size: const Size(900, 650), scale: 1);
+    final notes = tester.widget<MarkdownBody>(find.byType(MarkdownBody));
+    expect(notes.data, '累计更新说明。');
+    expect(find.text('此版本已重新发布新构建，可选择下载更新。'), findsOneWidget);
+    expect(find.text('忽略此构建'), findsOneWidget);
+    expect(find.textContaining('2026-09-25'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final language in UiLanguage.values) {
     testWidgets('GitHub action is a full secondary button in ${language.name}',
         (tester) async {
@@ -148,8 +196,8 @@ void main() {
           githubRect.right, lessThanOrEqualTo(tester.view.physicalSize.width));
       expect(tester.takeException(), isNull);
 
-      await tester.runAsync(
-          () => _capture(boundary, '${language.name}-narrow'));
+      await tester
+          .runAsync(() => _capture(boundary, '${language.name}-narrow'));
     });
 
     testWidgets('actions remain reachable at 200% text in ${language.name}',
@@ -370,7 +418,8 @@ void main() {
   });
 
   for (final language in UiLanguage.values) {
-    testWidgets('completed actions fit 200% text in ${language.name}',
+    testWidgets(
+        'completed actions remain reachable at 200% text in ${language.name}',
         (tester) async {
       uiLanguage.value = language;
       final update = _update();
@@ -391,6 +440,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('update-confirm-action')));
       await tester.pumpAndSettle();
+      await tester
+          .runAsync(() => _capture(boundary, '${language.name}-completed-200'));
       for (final label in [
         ui('重启并更新'),
         ui('显示安装包'),
@@ -398,14 +449,14 @@ void main() {
         ui('完成'),
       ]) {
         final action = find.text(label);
+        await tester.ensureVisible(action);
+        await tester.pumpAndSettle();
         expect(action.hitTestable(), findsOneWidget);
         final rect = tester.getRect(action);
         expect(rect.right, lessThanOrEqualTo(tester.view.physicalSize.width));
         expect(rect.bottom, lessThanOrEqualTo(tester.view.physicalSize.height));
       }
       expect(tester.takeException(), isNull);
-      await tester.runAsync(
-          () => _capture(boundary, '${language.name}-completed-200'));
     });
   }
 }
