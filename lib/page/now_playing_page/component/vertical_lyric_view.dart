@@ -428,6 +428,14 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   int _visualDistance(int index) => _singingLines.contains(index)
       ? 0
       : (index - _currentLine).abs().clamp(0, 4);
+  double _blurForIndex(int index) {
+    final ahead = index - _currentLine;
+    // Keep the already-sung context unchanged. Upcoming lines remain legible
+    // through the next three rows, without changing their size or emphasis.
+    if (_currentLine >= 0 && ahead >= 1 && ahead <= 3) return 0;
+    return LyricMotion.blurForDistance(_visualDistance(index));
+  }
+
   int _sourceGeneration = 0;
   int _followGeneration = 0;
   Timer? _manualScrollTimer;
@@ -729,7 +737,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         (_preferences?.value.surfaceBlur ?? true);
     final next = <int, Animation<double>>{};
     for (final index in _restBlur.keys.toList()) {
-      final target = LyricMotion.blurForDistance(_visualDistance(index));
+      final target = _blurForIndex(index);
       final previousVoice = _voiceBlurs[index];
       if (target == _restBlur[index] && previousVoice == null) continue;
       final flight = _followTransitions[index];
@@ -928,9 +936,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     final transitions = <int, LyricFollowTransition>{};
     final blur = <int, double>{};
     for (final index in rows) {
-      final targetBlur = blurAllowed
-          ? LyricMotion.blurForDistance(_visualDistance(index))
-          : 0.0;
+      final targetBlur = blurAllowed ? _blurForIndex(index) : 0.0;
       blur[index] = targetBlur;
       if (animate) {
         final previous = _followTransitions[index]?.sample(_followClock.value);

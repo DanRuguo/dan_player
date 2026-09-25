@@ -7,9 +7,220 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
+import 'package:dan_player/online/online_source_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('metadata-only lyric appears before scored search settles', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen((request) async {
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({
+        'type': 'lrc',
+        'lyric': '[00:01.00]Early custom lyric',
+      }));
+      await request.response.close();
+    });
+    final previous = AppSettings.instance.customMusicSources.value;
+    final profile = CustomMusicSourceProfile.legacyLyric(
+        'http://127.0.0.1:${server.port}/lyrics')!;
+    AppSettings.instance.customMusicSources.value = [profile];
+    addTearDown(() async {
+      AppSettings.instance.customMusicSources.value = previous;
+      await subscription.cancel();
+      await server.close(force: true);
+    });
+    final pendingRanked = Completer<LyricSearchResponse>();
+    final appeared = Completer<SongSearchResult>();
+    var finished = false;
+    final search = searchManualLyricCandidates(
+      Audio('Song', 'Artist', 'Album', 0, 120, null, null, 'fixture.mp3', 0, 0,
+          null),
+      rankedSearch: (_) => pendingRanked.future,
+      onProgress: (snapshot) {
+        if (snapshot.candidates.isNotEmpty && !appeared.isCompleted) {
+          appeared.complete(snapshot.candidates.single);
+        }
+      },
+    ).then((response) {
+      finished = true;
+      return response;
+    });
+    final early = await appeared.future.timeout(const Duration(seconds: 2));
+    expect(finished, isFalse);
+    expect(early.scoreVerified, isFalse);
+    expect(early.previewLyric, isNotNull);
+    pendingRanked.complete(
+        LyricSearchResponse(candidates: const [], failures: const {}));
+    final finalResult = await search;
+    expect(finalResult.candidates, [early]);
+  });
+
+  test('custom source deadlines report distinct failures for duplicate names',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    var requests = 0;
+    final subscription = server.listen((request) async {
+      requests++;
+      await Future<void>.delayed(const Duration(milliseconds: 110));
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({
+        'tracks': [
+          {
+            'id': 'late',
+            'title': 'Song',
+            'artist': 'Artist',
+            'duration': 120,
+          }
+        ]
+      }));
+      await request.response.close();
+    });
+    final settings = AppSettings.instance;
+    final oldProfiles = settings.customMusicSources.value;
+    final oldSources = settings.onlineSources.value;
+    final oldLrclib = settings.lrclibEnabled.value;
+    addTearDown(() async {
+      settings.customMusicSources.value = oldProfiles;
+      settings.onlineSources.value = oldSources;
+      settings.lrclibEnabled.value = oldLrclib;
+      await subscription.cancel();
+      await server.close(force: true);
+    });
+    CustomMusicSourceProfile source(String id) =>
+        CustomMusicSourceProfile.tryCreate(
+          id: id,
+          name: 'Slow',
+          baseUrl: 'http://127.0.0.1:${server.port}',
+          capabilities: const {
+            CustomMusicSourceCapability.search,
+            CustomMusicSourceCapability.lyrics,
+          },
+          endpoints: const {
+            CustomMusicSourceCapability.search: '/search',
+            CustomMusicSourceCapability.lyrics: '/lyrics',
+          },
+        )!;
+    settings.customMusicSources.value = [source('slow-a'), source('slow-b')];
+    settings.onlineSources.value =
+        const OnlineSourcePreferences(qqEnabled: false, neteaseEnabled: false);
+    settings.lrclibEnabled.value = false;
+
+    final snapshots = <LyricSearchResponse>[];
+    final stopwatch = Stopwatch()..start();
+    final result = await searchLyricCandidates(
+      Audio('Song', 'Artist', 'Album', 0, 120, null, null, 'fixture.mp3', 0, 0,
+          null),
+      providerBudget: const Duration(milliseconds: 35),
+      onProgress: snapshots.add,
+    );
+    stopwatch.stop();
+    expect(requests, 2);
+    expect(stopwatch.elapsed, lessThan(const Duration(milliseconds: 200)));
+    expect(result.candidates, isEmpty);
+    expect(result.customFailures, hasLength(2));
+    expect(result.customFailures.values, everyElement(contains('超时')));
+    expect(snapshots, hasLength(2));
+    await Future<void>.delayed(const Duration(milliseconds: 125));
+    expect(snapshots, hasLength(2));
+  });
+
+  test('metadata-only manual failure is reported by its source name', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen((request) async {
+      request.response.statusCode = HttpStatus.internalServerError;
+      await request.response.close();
+    });
+    final previous = AppSettings.instance.customMusicSources.value;
+    final profile = CustomMusicSourceProfile.legacyLyric(
+        'http://127.0.0.1:${server.port}/lyrics')!;
+    AppSettings.instance.customMusicSources.value = [profile];
+    addTearDown(() async {
+      AppSettings.instance.customMusicSources.value = previous;
+      await subscription.cancel();
+      await server.close(force: true);
+    });
+    final snapshots = <LyricSearchResponse>[];
+    final response = await searchManualLyricCandidates(
+      Audio('Song', 'Artist', 'Album', 0, 120, null, null, 'fixture.mp3', 0, 0,
+          null),
+      rankedSearch: (_) async =>
+          LyricSearchResponse(candidates: const [], failures: const {}),
+      onProgress: snapshots.add,
+    );
+    expect(response.candidates, isEmpty);
+    expect(response.customFailures, contains(profile.name));
+    expect(response.customFailures[profile.name], contains('联网失败'));
+    expect(snapshots.last.customFailures, response.customFailures);
+  });
+
+  test('canceling manual search stops active custom HTTP and later queries',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final started = Completer<void>();
+    final release = Completer<void>();
+    var requests = 0;
+    final subscription = server.listen((request) async {
+      requests++;
+      if (!started.isCompleted) started.complete();
+      await release.future;
+      try {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'tracks': const []}));
+        await request.response.close();
+      } on HttpException {
+        // Search cancellation may have already closed this HTTP client.
+      }
+    });
+    final settings = AppSettings.instance;
+    final oldProfiles = settings.customMusicSources.value;
+    final oldSources = settings.onlineSources.value;
+    final oldLrclib = settings.lrclibEnabled.value;
+    addTearDown(() async {
+      if (!release.isCompleted) release.complete();
+      settings.customMusicSources.value = oldProfiles;
+      settings.onlineSources.value = oldSources;
+      settings.lrclibEnabled.value = oldLrclib;
+      await subscription.cancel();
+      await server.close(force: true);
+    });
+    settings.customMusicSources.value = [
+      CustomMusicSourceProfile.tryCreate(
+        id: 'cancel-search',
+        name: 'Cancel search',
+        baseUrl: 'http://127.0.0.1:${server.port}',
+        capabilities: const {
+          CustomMusicSourceCapability.search,
+          CustomMusicSourceCapability.lyrics,
+        },
+        endpoints: const {
+          CustomMusicSourceCapability.search: '/search',
+          CustomMusicSourceCapability.lyrics: '/lyrics',
+        },
+      )!,
+    ];
+    settings.onlineSources.value =
+        const OnlineSourcePreferences(qqEnabled: false, neteaseEnabled: false);
+    settings.lrclibEnabled.value = false;
+
+    final cancellation = LyricSearchCancellation();
+    final snapshots = <LyricSearchResponse>[];
+    final search = searchManualLyricCandidates(
+      Audio('Song', 'Artist', 'Album', 0, 120, null, null, 'fixture.mp3', 0, 0,
+          null),
+      cancellation: cancellation,
+      onProgress: snapshots.add,
+    );
+    await started.future.timeout(const Duration(seconds: 2));
+    cancellation.cancel();
+    final result = await search.timeout(const Duration(milliseconds: 500));
+    release.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(result.candidates, isEmpty);
+    expect(requests, 1);
+    expect(snapshots, isEmpty);
+  });
+
   test(
       'versioned local track skips unverified text-only auto lookup but allows manual',
       () async {
@@ -101,9 +312,12 @@ void main() {
         null,
       );
 
-      final lyric = await getMostMatchedLyric(audio,
-          candidateSearch: (_) async =>
+      final manual = await searchManualLyricCandidates(audio,
+          rankedSearch: (_) async =>
               LyricSearchResponse(candidates: [], failures: {}));
+      expect(manual.candidates, hasLength(1));
+      expect(manual.candidates.single.scoreVerified, isFalse);
+      final lyric = await getLyricForCandidate(manual.candidates.single);
 
       expect(lyric, isA<Lrc>());
       expect(requests, hasLength(1));

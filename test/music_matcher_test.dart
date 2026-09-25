@@ -5,6 +5,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/music_matcher.dart';
@@ -210,6 +211,165 @@ void main() {
     expect(response.hasPartialFailure, isTrue);
   });
 
+  test(
+      'progress publishes provider results before slower sources finish and reorders ties',
+      () async {
+    final qqResult = Completer<Object?>();
+    final neteaseResult = Completer<Object?>();
+    final snapshots = <LyricSearchResponse>[];
+    var finished = false;
+    final search = searchLyricCandidates(
+      _audio(),
+      sources: const {ResultSource.qq, ResultSource.netease},
+      maxAttempts: 1,
+      qqSearch: (_, __) => qqResult.future,
+      neteaseSearch: (_, __) => neteaseResult.future,
+      onProgress: snapshots.add,
+    ).then((result) {
+      finished = true;
+      return result;
+    });
+    neteaseResult.complete(_neteasePayload([
+      {
+        'id': 7,
+        'name': 'Song A',
+        'artists': [
+          {'name': 'Artist A'},
+        ],
+        'album': {'name': 'Album A'},
+      },
+    ]));
+    await Future<void>.delayed(Duration.zero);
+    expect(finished, isFalse);
+    expect(snapshots, hasLength(1));
+    expect(snapshots.single.candidates.single.source, ResultSource.netease);
+
+    qqResult.complete(_qqPayload([_qqSong(8, 'Song A')]));
+    final finalResult = await search;
+    expect(snapshots, hasLength(2));
+    expect(snapshots.last.candidates.map((candidate) => candidate.source),
+        [ResultSource.qq, ResultSource.netease]);
+    expect(finalResult.candidates.map((candidate) => candidate.identity),
+        snapshots.last.candidates.map((candidate) => candidate.identity));
+  });
+
+  test('provider deadline covers title-only fallback and ignores late reply',
+      () async {
+    final snapshots = <LyricSearchResponse>[];
+    final queries = <String>[];
+    final result = await searchLyricCandidates(
+      _audio(),
+      sources: const {ResultSource.qq},
+      maxAttempts: 1,
+      providerBudget: const Duration(milliseconds: 65),
+      qqSearch: (query, _) async {
+        queries.add(query);
+        if (queries.length == 1) {
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+          return _qqPayload(const []);
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 90));
+        return _qqPayload([_qqSong(8, 'Song A')]);
+      },
+      onProgress: snapshots.add,
+    );
+    expect(queries, ['Song A Artist A', 'Song A']);
+    expect(result.candidates, isEmpty);
+    expect(result.failures[ResultSource.qq], contains('超时'));
+    expect(snapshots, hasLength(1));
+    await Future<void>.delayed(const Duration(milliseconds: 95));
+    expect(snapshots, hasLength(1),
+        reason: 'a timed-out loader must not add a stale late candidate');
+  });
+
+  test('provider deadline includes retry delay', () async {
+    var calls = 0;
+    final result = await searchLyricCandidates(
+      _audio(),
+      sources: const {ResultSource.qq},
+      maxAttempts: 3,
+      providerBudget: const Duration(milliseconds: 35),
+      retryDelay: const Duration(milliseconds: 80),
+      qqSearch: (_, __) async {
+        calls++;
+        throw const SocketException('retry');
+      },
+    );
+    expect(calls, 1);
+    expect(result.failures[ResultSource.qq], contains('超时'));
+  });
+
+  test('cancel during retry delay stops the next provider request', () async {
+    final cancellation = LyricSearchCancellation();
+    final firstCall = Completer<void>();
+    final snapshots = <LyricSearchResponse>[];
+    var calls = 0;
+    final search = searchLyricCandidates(
+      _audio(),
+      sources: const {ResultSource.qq},
+      maxAttempts: 3,
+      retryDelay: const Duration(milliseconds: 250),
+      providerBudget: const Duration(milliseconds: 600),
+      cancellation: cancellation,
+      qqSearch: (_, __) async {
+        calls++;
+        if (!firstCall.isCompleted) firstCall.complete();
+        throw const SocketException('retry');
+      },
+      onProgress: snapshots.add,
+    );
+    await firstCall.future;
+    cancellation.cancel();
+    final result = await search;
+    expect(calls, 1);
+    expect(result.candidates, isEmpty);
+    expect(snapshots, isEmpty);
+  });
+
+  test('cancel races an uncancelable loader and suppresses late results',
+      () async {
+    final cancellation = LyricSearchCancellation();
+    final started = Completer<void>();
+    final reply = Completer<Object?>();
+    final snapshots = <LyricSearchResponse>[];
+    final search = searchLyricCandidates(
+      _audio(),
+      sources: const {ResultSource.qq},
+      maxAttempts: 1,
+      cancellation: cancellation,
+      qqSearch: (_, __) {
+        started.complete();
+        return reply.future;
+      },
+      onProgress: snapshots.add,
+    );
+    await started.future;
+    cancellation.cancel();
+    final result = await search.timeout(const Duration(milliseconds: 250));
+    reply.complete(_qqPayload([_qqSong(9, 'Song A')]));
+    await Future<void>.delayed(Duration.zero);
+    expect(result.candidates, isEmpty);
+    expect(snapshots, isEmpty);
+  });
+
+  test('stale automatic generation stops before a title-only query', () async {
+    var wanted = true;
+    final queries = <String>[];
+    final result = await searchLyricCandidates(
+      _audio(),
+      sources: const {ResultSource.qq},
+      maxAttempts: 1,
+      stillWanted: () => wanted,
+      qqSearch: (query, _) async {
+        queries.add(query);
+        wanted = false;
+        return _qqPayload(const []);
+      },
+    );
+    expect(queries, ['Song A Artist A']);
+    expect(result.candidates, isEmpty);
+  });
+
   test('QQ business code 2001 is retried only within the configured bound',
       () async {
     var calls = 0;
@@ -270,6 +430,28 @@ void main() {
       hasLength(1),
     );
     expect(response.candidates, hasLength(8));
+  });
+
+  test('malformed non-finite score cannot break an incremental snapshot',
+      () async {
+    final valid = SongSearchResult(
+        ResultSource.kugou, 'Song A', 'Artist A', 'Album A', .6,
+        kugouSongHash: 'valid');
+    final snapshots = <LyricSearchResponse>[];
+    final response = await searchLyricCandidates(
+      _audio(),
+      sources: const {ResultSource.kugou},
+      maxAttempts: 1,
+      kugouSearch: (_, __) async => <SongSearchResult>[
+        SongSearchResult(ResultSource.kugou, 'Bad', '', '', double.nan,
+            kugouSongHash: 'bad'),
+        valid,
+      ],
+      onProgress: snapshots.add,
+    );
+    expect(response.candidates, [valid]);
+    expect(visibleManualLyricCandidates(snapshots.single.candidates), [valid],
+        reason: 'the exact 60% boundary remains selectable');
   });
 
   test(
@@ -503,6 +685,10 @@ void main() {
     expect(response.candidates.single.source, ResultSource.lrclib);
     expect(response.candidates.single.lrclibId, 38005804);
     expect(response.candidates.single.score, greaterThan(0.7));
+    final embedded = await getLyricForCandidate(response.candidates.single);
+    expect(embedded, isA<PlainLyric>(),
+        reason:
+            'LRCLIB search rows already contain lyrics; no detail fetch is needed');
   });
 
   test('LRCLIB plain text remains untimed instead of gaining fake timestamps',
@@ -715,8 +901,7 @@ void main() {
     expect(loaded, [1, 2, 3]);
   });
 
-  test(
-      'automatic matching uses the same score and source order as the manual list',
+  test('automatic skips mismatched recordings while manual order is unchanged',
       () async {
     final audio =
         _audio(title: '結想は花となる short ver.', artist: '堀江晶太', duration: 96);
@@ -740,10 +925,12 @@ void main() {
           return _lyric('selected short recording');
         });
     final manual = [...candidates]..sort(compareLyricCandidates);
-    expect(loaded, manual.map((candidate) => candidate.qqSongId));
+    expect(loaded, [5],
+        reason:
+            'only the 96-second short recording has enough version evidence');
     expect(lyric, isNotNull);
-    expect(candidates.length, 5,
-        reason: 'automatic matching does not mutate the manual candidate list');
+    expect(manual.map((candidate) => candidate.qqSongId), [1, 2, 3, 4, 5],
+        reason: 'manual users can still choose another recording explicitly');
     expect(
         isAutomaticLyricCandidateCompatible(audio, candidate(6, '結想は花となる', 96)),
         isTrue);
@@ -752,6 +939,42 @@ void main() {
             _audio(title: '結想は花となる', duration: 195),
             candidate(7, '結想は花となる', 96)),
         isFalse);
+  });
+
+  test('incompatible instrumental cannot suppress compatible lower match',
+      () async {
+    final local = _audio(title: 'Song A short ver.', duration: 96);
+    final wrongFull = SongSearchResult(
+      ResultSource.qq,
+      'Song A full ver.',
+      'Artist A',
+      'Album A',
+      .98,
+      qqSongId: 1,
+      durationSeconds: 195,
+    );
+    final matchingShort = SongSearchResult(
+      ResultSource.netease,
+      'Song A short ver.',
+      'Artist A',
+      'Album A',
+      .9,
+      neteaseSongId: '2',
+      durationSeconds: 96,
+    );
+    final loaded = <SongSearchResult>[];
+    final result = await getMostMatchedLyric(
+      local,
+      candidateSearch: (_) async => LyricSearchResponse(
+          candidates: [wrongFull, matchingShort], failures: const {}),
+      candidateLyricLoader: (candidate) async {
+        loaded.add(candidate);
+        if (identical(candidate, wrongFull)) throw const InstrumentalLyric();
+        return _lyric('matching short lyrics');
+      },
+    );
+    expect(loaded, [matchingShort]);
+    expect((result!.lines.single as LrcLine).content, 'matching short lyrics');
   });
 
   test('all search parsers retain supplied duration without detail requests',

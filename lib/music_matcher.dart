@@ -20,6 +20,10 @@ import 'package:dan_player/online/qq_public_search.dart';
 import 'package:dan_player/utils.dart';
 import 'package:music_api/music_api.dart';
 
+/// Owned by one manual-search generation. Canceling it never cancels the
+/// separate lyric request made after the user selects a row.
+typedef LyricSearchCancellation = CustomMusicSourceCancellation;
+
 enum ResultSource { qq, kugou, netease, lrclib }
 
 extension ResultSourceDisplay on ResultSource {
@@ -46,16 +50,25 @@ class LyricSearchResponse {
   LyricSearchResponse({
     required List<SongSearchResult> candidates,
     required Map<ResultSource, String> failures,
+    Map<String, String> customFailures = const {},
     this.sourcesDisabled = false,
   })  : candidates = List.unmodifiable(candidates),
-        failures = Map.unmodifiable(failures);
+        failures = Map.unmodifiable(failures),
+        customFailures = Map.unmodifiable(customFailures);
 
   final List<SongSearchResult> candidates;
   final Map<ResultSource, String> failures;
+  final Map<String, String> customFailures;
   final bool sourcesDisabled;
 
-  bool get hasPartialFailure => candidates.isNotEmpty && failures.isNotEmpty;
+  bool get hasPartialFailure =>
+      candidates.isNotEmpty &&
+      (failures.isNotEmpty || customFailures.isNotEmpty);
 }
+
+/// Each snapshot contains every provider that has completed so far. A later
+/// snapshot may reorder rows when a better match arrives from another source.
+typedef LyricSearchProgress = void Function(LyricSearchResponse response);
 
 class _LyricProviderException implements Exception {
   const _LyricProviderException(this.message, {this.retryable = false});
@@ -70,6 +83,21 @@ class _ProviderSearchResult {
   final ResultSource source;
   final List<SongSearchResult> candidates;
   final String? failure;
+}
+
+class _CustomProviderSearchResult {
+  const _CustomProviderSearchResult(this.candidates, [this.failure]);
+
+  final List<SongSearchResult> candidates;
+  final String? failure;
+}
+
+void _putCustomFailure(Map<String, String> failures,
+    CustomMusicSourceProfile profile, String message) {
+  final label = failures.containsKey(profile.name)
+      ? '${profile.name} (${profile.id})'
+      : profile.name;
+  failures[label] = message;
 }
 
 class LyricApiConnectivityResult {
@@ -231,6 +259,11 @@ class SongSearchResult {
   final bool scoreVerified;
   final Lyric? previewLyric;
 
+  /// LRCLIB includes lyric text in its search rows. Keep the parsed record so
+  /// a visible preview or a selected result can decode it without another API
+  /// request; no lyric objects are built for off-screen candidates.
+  final LrclibRecord? _embeddedLrclibRecord;
+
   /// Duration supplied by the search response; null means version unverified.
   final double? durationSeconds;
 
@@ -255,6 +288,7 @@ class SongSearchResult {
       this.source, this.title, this.artists, this.album, this.score,
       {this.scoreVerified = true,
       this.previewLyric,
+      LrclibRecord? embeddedLrclibRecord,
       this.durationSeconds,
       this.qqSongId,
       this.qqSongMid,
@@ -262,7 +296,8 @@ class SongSearchResult {
       this.kugouSongHash,
       this.lrclibId,
       this.customProfile,
-      this.customAudio});
+      this.customAudio})
+      : _embeddedLrclibRecord = embeddedLrclibRecord;
 
   String get sourceLabel => customProfile?.name ?? source.sourceLabel;
 
@@ -380,10 +415,11 @@ CustomMusicSourceProfile? _configuredKugouLyricProfile({
   return null;
 }
 
-Future<Object?> _loadQqSearchPayload(String query, int limit) async {
+Future<Object?> _loadQqSearchPayload(String query, int limit,
+    {LyricSearchCancellation? cancellation}) async {
   try {
     final songs = await QqPublicSearchTransport()
-        .search(query, limit)
+        .search(query, limit, cancellation: cancellation)
         .timeout(_providerTimeout);
     return {
       'code': 0,
@@ -434,7 +470,16 @@ Future<LyricSearchResponse> searchLyricCandidates(
   int perSourceLimit = 20,
   int maxAttempts = 2,
   Duration retryDelay = const Duration(milliseconds: 160),
+  LyricSearchProgress? onProgress,
+  Duration providerBudget = _providerTimeout,
+  LyricSearchCancellation? cancellation,
+  bool Function()? stillWanted,
 }) async {
+  // The override permits fast deterministic timeout tests, but production and
+  // callers can never extend a source beyond the documented 12-second cap.
+  final sourceBudget = providerBudget <= Duration.zero
+      ? Duration.zero
+      : (providerBudget < _providerTimeout ? providerBudget : _providerTimeout);
   final enabled = sources ?? _configuredLyricSearchSources();
   final extraProfiles = sources == null
       ? AppSettings.instance.customMusicSources.value
@@ -448,24 +493,36 @@ Future<LyricSearchResponse> searchLyricCandidates(
           .toList()
       : <CustomMusicSourceProfile>[];
   if (enabled.isEmpty && extraProfiles.isEmpty) {
-    return LyricSearchResponse(
+    final disabled = LyricSearchResponse(
       candidates: const [],
       failures: const {},
       sourcesDisabled: true,
     );
+    if (cancellation?.isCancelled != true &&
+        stillWanted?.call() != false &&
+        onProgress != null) {
+      try {
+        onProgress(disabled);
+      } catch (error, trace) {
+        LOGGER.w('[lyric/search] 候选进度回调失败', stackTrace: trace);
+      }
+    }
+    return disabled;
   }
   final limit = perSourceLimit.clamp(1, 50).toInt();
   final attempts = maxAttempts.clamp(1, 3).toInt();
   final queries = songMatchSearchQueries(audio);
   final lrclibTransport = LrclibLyricsTransport();
   final loaders = <ResultSource, LyricProviderPayloadLoader>{
-    ResultSource.qq: qqSearch ?? _loadQqSearchPayload,
+    ResultSource.qq: qqSearch ??
+        (query, limit) =>
+            _loadQqSearchPayload(query, limit, cancellation: cancellation),
     ResultSource.kugou: kugouSearch ??
         (query, limit) async {
           final profile = _configuredKugouLyricProfile(needsSearch: true);
           if (profile == null) return <SongSearchResult>[];
           final response = await CustomMusicSourceTransport(profile)
-              .search(query, limit: limit);
+              .search(query, limit: limit, cancellation: cancellation);
           if (!_isCurrentCustomLyricProfile(profile)) {
             return <SongSearchResult>[];
           }
@@ -502,39 +559,49 @@ Future<LyricSearchResponse> searchLyricCandidates(
                         ? audio.artist
                         : null,
                 limit: limit,
+                cancellation: cancellation,
               )
               .timeout(_providerTimeout);
           return [for (final record in records) record.toJson()];
         },
   };
-  final extraSearch = Future.wait(extraProfiles.map((profile) async {
-    final found = <SongSearchResult>[];
-    try {
-      for (final query in queries) {
-        final response = await CustomMusicSourceTransport(profile)
-            .search(query, limit: limit)
-            .timeout(_providerTimeout);
-        if (!_isCurrentCustomLyricProfile(profile)) return <SongSearchResult>[];
-        for (final track in response.tracks) {
-          found.add(SongSearchResult(
-              ResultSource.kugou,
-              track.title,
-              track.artist,
-              track.album,
-              computeSongMatchScore(
-                  audio, track.title, track.artist, track.album),
-              customProfile: profile,
-              customAudio: track,
-              durationSeconds: _positiveSeconds(track.duration)));
-        }
-        if (found.isNotEmpty) break;
+  final failures = <ResultSource, String>{};
+  final customFailures = <String, String>{};
+  final unique = <String, SongSearchResult>{};
+  void merge(Iterable<SongSearchResult> candidates) {
+    for (final candidate in candidates) {
+      if (candidate.scoreVerified &&
+          (!candidate.score.isFinite || candidate.score < 0)) {
+        continue;
       }
-    } catch (error, trace) {
-      LOGGER.w('[lyric/custom-search:${profile.id}] 候选搜索失败', stackTrace: trace);
+      final previous = unique[candidate.identity];
+      if (previous == null || candidate.score > previous.score) {
+        unique[candidate.identity] = candidate;
+      }
     }
-    return found;
-  }));
-  final outcomes = await Future.wait([
+  }
+
+  LyricSearchResponse snapshot() => LyricSearchResponse(
+        candidates: unique.values.toList()..sort(compareLyricCandidates),
+        failures: failures,
+        customFailures: customFailures,
+      );
+
+  void publish() {
+    if (onProgress == null ||
+        cancellation?.isCancelled == true ||
+        stillWanted?.call() == false) {
+      return;
+    }
+    try {
+      onProgress(snapshot());
+    } catch (error, trace) {
+      // A dismissed dialog must not turn a successful source into a failure.
+      LOGGER.w('[lyric/search] 候选进度回调失败', stackTrace: trace);
+    }
+  }
+
+  final searches = <Future<void>>[
     for (final source in ResultSource.values)
       if (enabled.contains(source))
         _searchLyricSource(
@@ -545,30 +612,92 @@ Future<LyricSearchResponse> searchLyricCandidates(
           attempts: attempts,
           retryDelay: retryDelay,
           loader: loaders[source]!,
-        ),
-  ]);
+          providerBudget: sourceBudget,
+          cancellation: cancellation,
+          stillWanted: stillWanted,
+        ).then((outcome) {
+          if (cancellation?.isCancelled == true ||
+              stillWanted?.call() == false) {
+            return;
+          }
+          if (outcome.failure != null) {
+            failures[outcome.source] = outcome.failure!;
+          }
+          merge(outcome.candidates);
+          publish();
+        }),
+    for (final profile in extraProfiles)
+      _searchCustomLyricProfile(profile, audio, queries, limit, sourceBudget,
+              cancellation, stillWanted)
+          .then((outcome) {
+        if (cancellation?.isCancelled == true || stillWanted?.call() == false) {
+          return;
+        }
+        if (outcome.failure != null) {
+          _putCustomFailure(customFailures, profile, outcome.failure!);
+        }
+        merge(outcome.candidates);
+        publish();
+      }),
+  ];
+  await Future.wait(searches);
+  return snapshot();
+}
 
-  final failures = <ResultSource, String>{};
-  final unique = <String, SongSearchResult>{};
-  for (final outcome in outcomes) {
-    if (outcome.failure != null) failures[outcome.source] = outcome.failure!;
-    for (final candidate in outcome.candidates) {
-      final previous = unique[candidate.identity];
-      if (previous == null || candidate.score > previous.score) {
-        unique[candidate.identity] = candidate;
+Future<_CustomProviderSearchResult> _searchCustomLyricProfile(
+  CustomMusicSourceProfile profile,
+  Audio audio,
+  List<String> queries,
+  int limit,
+  Duration providerBudget,
+  LyricSearchCancellation? cancellation,
+  bool Function()? stillWanted,
+) async {
+  final budget = Stopwatch()..start();
+  try {
+    for (final query in queries) {
+      if (stillWanted?.call() == false) {
+        return const _CustomProviderSearchResult([]);
       }
-    }
-  }
-  for (final group in await extraSearch) {
-    for (final candidate in group) {
-      final previous = unique[candidate.identity];
-      if (previous == null || candidate.score > previous.score) {
-        unique[candidate.identity] = candidate;
+      cancellation?.check();
+      final remaining = providerBudget - budget.elapsed;
+      if (remaining <= Duration.zero) {
+        throw TimeoutException('search budget', providerBudget);
       }
+      final response = await CustomMusicSourceTransport(profile)
+          .search(query, limit: limit, cancellation: cancellation)
+          .timeout(remaining);
+      cancellation?.check();
+      if (stillWanted?.call() == false) {
+        return const _CustomProviderSearchResult([]);
+      }
+      if (!_isCurrentCustomLyricProfile(profile)) {
+        return const _CustomProviderSearchResult([]);
+      }
+      final found = <SongSearchResult>[
+        for (final track in response.tracks)
+          SongSearchResult(
+            ResultSource.kugou,
+            track.title,
+            track.artist,
+            track.album,
+            computeSongMatchScore(
+                audio, track.title, track.artist, track.album),
+            customProfile: profile,
+            customAudio: track,
+            durationSeconds: _positiveSeconds(track.duration),
+          ),
+      ];
+      if (found.isNotEmpty) return _CustomProviderSearchResult(found);
     }
+  } catch (error, trace) {
+    if (cancellation?.isCancelled == true) {
+      return const _CustomProviderSearchResult([]);
+    }
+    LOGGER.w('[lyric/custom-search:${profile.id}] 候选搜索失败', stackTrace: trace);
+    return _CustomProviderSearchResult(const [], _searchFailureMessage(error));
   }
-  final candidates = unique.values.toList()..sort(compareLyricCandidates);
-  return LyricSearchResponse(candidates: candidates, failures: failures);
+  return const _CustomProviderSearchResult([]);
 }
 
 List<SongSearchResult> visibleManualLyricCandidates(
@@ -583,13 +712,48 @@ List<SongSearchResult> visibleManualLyricCandidates(
 /// Only explicit manual lookup queries metadata-only providers. Their returned
 /// lyrics are selectable, clearly unscored, and never eligible for automation.
 Future<LyricSearchResponse> searchManualLyricCandidates(Audio audio,
-    {Future<LyricSearchResponse> Function(Audio)? rankedSearch}) async {
-  final unscored = Future.wait(customLyricSourceChoicesFor(audio)
+    {Future<LyricSearchResponse> Function(Audio)? rankedSearch,
+    LyricSearchProgress? onProgress,
+    LyricSearchCancellation? cancellation}) async {
+  final unscored = <SongSearchResult>[];
+  final unscoredFailures = <(CustomMusicSourceProfile, String)>[];
+  LyricSearchResponse? rankedSnapshot;
+  Map<String, String> customFailureSnapshot() {
+    final failures = <String, String>{...?rankedSnapshot?.customFailures};
+    for (final (profile, message) in unscoredFailures) {
+      _putCustomFailure(failures, profile, message);
+    }
+    return failures;
+  }
+
+  void publish() {
+    if (onProgress == null || cancellation?.isCancelled == true) return;
+    final ranked = rankedSnapshot;
+    final candidates = visibleManualLyricCandidates([
+      ...?ranked?.candidates,
+      ...unscored,
+    ]);
+    try {
+      onProgress(LyricSearchResponse(
+        candidates: candidates,
+        failures: ranked?.failures ?? const {},
+        customFailures: customFailureSnapshot(),
+        sourcesDisabled: ranked?.sourcesDisabled == true && candidates.isEmpty,
+      ));
+    } catch (error, trace) {
+      LOGGER.w('[lyric/search] 手动候选进度回调失败', stackTrace: trace);
+    }
+  }
+
+  final unscoredSearch = Future.wait(customLyricSourceChoicesFor(audio)
       .where((choice) => !choice.profile.capabilities
           .contains(CustomMusicSourceCapability.search))
       .map((choice) async {
     try {
-      final lyric = await getLyricForCustomSourceChoice(audio, choice);
+      if (cancellation?.isCancelled == true) return null;
+      final lyric = await getLyricForCustomSourceChoice(audio, choice,
+          cancellation: cancellation);
+      if (cancellation?.isCancelled == true) return null;
       if (lyric == null || !hasLyricContent(lyric)) return null;
       return SongSearchResult(
           ResultSource.kugou, audio.title, audio.artist, audio.album, 0,
@@ -597,18 +761,58 @@ Future<LyricSearchResponse> searchManualLyricCandidates(Audio audio,
           previewLyric: lyric,
           customProfile: choice.profile,
           customAudio: audio);
-    } catch (_) {
+    } catch (error) {
+      if (cancellation?.isCancelled != true) {
+        unscoredFailures.add((
+          choice.profile,
+          error is CustomMusicSourceCancelled
+              ? '搜索超时，请重试。'
+              : _searchFailureMessage(error),
+        ));
+        publish();
+      }
       return null;
     }
-  }));
-  final ranked = await (rankedSearch ?? searchLyricCandidates)(audio);
+  }).map((future) => future.then((candidate) {
+            if (candidate != null && cancellation?.isCancelled != true) {
+              unscored.add(candidate);
+              publish();
+            }
+            return candidate;
+          })));
+  final rankedFuture = rankedSearch != null
+      ? rankedSearch(audio)
+      : searchLyricCandidates(audio, onProgress: (snapshot) {
+          rankedSnapshot = snapshot;
+          publish();
+        }, cancellation: cancellation);
+  LyricSearchResponse ranked;
+  try {
+    ranked = await (cancellation?.race(rankedFuture) ?? rankedFuture);
+  } on CustomMusicSourceCancelled {
+    return LyricSearchResponse(candidates: const [], failures: const {});
+  }
+  if (cancellation?.isCancelled == true) {
+    return LyricSearchResponse(candidates: const [], failures: const {});
+  }
+  rankedSnapshot = ranked;
+  publish();
+  try {
+    await (cancellation?.race(unscoredSearch) ?? unscoredSearch);
+  } on CustomMusicSourceCancelled {
+    return LyricSearchResponse(candidates: const [], failures: const {});
+  }
+  if (cancellation?.isCancelled == true) {
+    return LyricSearchResponse(candidates: const [], failures: const {});
+  }
   final candidates = visibleManualLyricCandidates([
     ...ranked.candidates,
-    ...(await unscored).whereType<SongSearchResult>(),
+    ...unscored,
   ]);
   return LyricSearchResponse(
       candidates: candidates,
       failures: ranked.failures,
+      customFailures: customFailureSnapshot(),
       sourcesDisabled: ranked.sourcesDisabled && candidates.isEmpty);
 }
 
@@ -651,13 +855,34 @@ Future<_ProviderSearchResult> _searchLyricSource({
   required int attempts,
   required Duration retryDelay,
   required LyricProviderPayloadLoader loader,
+  required Duration providerBudget,
+  LyricSearchCancellation? cancellation,
+  bool Function()? stillWanted,
 }) async {
+  // One source gets one wall-clock budget, including retry delays and the
+  // title-only fallback. A 12 s request must not become several 12 s waits.
+  final budget = Stopwatch()..start();
+  Duration remaining() => providerBudget - budget.elapsed;
+  _ProviderSearchResult timedOut() => _ProviderSearchResult(source, const [],
+      _searchFailureMessage(TimeoutException('search budget')));
   for (final query in queries) {
+    if (cancellation?.isCancelled == true || stillWanted?.call() == false) {
+      return _ProviderSearchResult(source, const []);
+    }
+    if (remaining() <= Duration.zero) return timedOut();
     Object? lastError;
     StackTrace? lastTrace;
     for (var attempt = 1; attempt <= attempts; attempt++) {
+      if (cancellation?.isCancelled == true || stillWanted?.call() == false) {
+        return _ProviderSearchResult(source, const []);
+      }
+      if (remaining() <= Duration.zero) return timedOut();
       try {
-        final payload = await loader(query, limit).timeout(_providerTimeout);
+        final pending = loader(query, limit).timeout(remaining());
+        final payload = await (cancellation?.race(pending) ?? pending);
+        if (cancellation?.isCancelled == true || stillWanted?.call() == false) {
+          return _ProviderSearchResult(source, const []);
+        }
         final candidates = switch (source) {
           ResultSource.qq => parseQqLyricSearchPayload(payload, audio, limit),
           ResultSource.kugou => payload is List<SongSearchResult>
@@ -675,11 +900,22 @@ Future<_ProviderSearchResult> _searchLyricSource({
         // Try the title-only variant without repeating the same empty query.
         break;
       } catch (error, trace) {
+        if (cancellation?.isCancelled == true || stillWanted?.call() == false) {
+          return _ProviderSearchResult(source, const []);
+        }
         lastError = error;
         lastTrace = trace;
         if (attempt < attempts && _isRetryableSearchError(error)) {
           if (retryDelay > Duration.zero) {
-            await Future<void>.delayed(retryDelay);
+            final delay = remaining();
+            if (delay <= Duration.zero) return timedOut();
+            final pause =
+                Future<void>.delayed(delay < retryDelay ? delay : retryDelay);
+            try {
+              await (cancellation?.race(pause) ?? pause);
+            } on CustomMusicSourceCancelled {
+              return _ProviderSearchResult(source, const []);
+            }
           }
           continue;
         }
@@ -706,6 +942,17 @@ bool _isRetryableSearchError(Object error) =>
 String _searchFailureMessage(Object? error) {
   if (error is _LyricProviderException) return error.message;
   if (error is LrclibException) return error.message;
+  if (error is CustomMusicSourceException) {
+    return switch (error.kind) {
+      CustomMusicSourceFailureKind.timeout => '搜索超时，请重试。',
+      CustomMusicSourceFailureKind.network ||
+      CustomMusicSourceFailureKind.redirect ||
+      CustomMusicSourceFailureKind.http ||
+      CustomMusicSourceFailureKind.unavailable =>
+        '联网失败，请检查网络。',
+      _ => '返回的数据无法解析，请重试。',
+    };
+  }
   if (error is TimeoutException) return '搜索超时，请重试。';
   if (error is SocketException ||
       error is HandshakeException ||
@@ -853,6 +1100,7 @@ List<SongSearchResult> parseLrclibLyricSearchPayload(
         ),
         lrclibId: record.id,
         durationSeconds: _positiveSeconds(record.durationSeconds),
+        embeddedLrclibRecord: record,
       ),
   ];
 }
@@ -1337,6 +1585,12 @@ Future<Lyric?> getOnlineLyric({
 }
 
 Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) {
+  if (candidate._embeddedLrclibRecord case final record?) {
+    if (record.instrumental) {
+      return Future.error(const InstrumentalLyric());
+    }
+    return Future.value(parseLrclibLyricPayload(record));
+  }
   if (candidate.customProfile case final profile?) {
     final audio = candidate.customAudio;
     if (audio == null || !_isCurrentCustomLyricProfile(profile)) {
@@ -1367,6 +1621,7 @@ Future<Lyric?> getLyricForCustomSourceChoice(
   Audio audio,
   CustomLyricSourceChoice choice, {
   Duration timeout = _customLyricSweepTimeout,
+  LyricSearchCancellation? cancellation,
 }) async {
   final profile = choice.profile;
   if (!_customLyricProfileCanQuery(profile, audio) ||
@@ -1374,20 +1629,23 @@ Future<Lyric?> getLyricForCustomSourceChoice(
     return null;
   }
 
-  final cancellation = CustomMusicSourceCancellation();
-  final deadlineTimer = Timer(timeout, cancellation.cancel);
+  final requestCancellation = CustomMusicSourceCancellation();
+  final unlink = cancellation?.onCancel(requestCancellation.cancel);
+  final deadlineTimer = Timer(timeout, requestCancellation.cancel);
   try {
     final response = await CustomMusicSourceTransport(
       profile,
       requestTimeout: timeout,
-    ).lyrics(audio, cancellation: cancellation).timeout(timeout);
+    ).lyrics(audio, cancellation: requestCancellation).timeout(timeout);
+    if (cancellation?.isCancelled == true) return null;
     if (!_isCurrentCustomLyricProfile(profile)) return null;
     return _parseCustomLyricResponse(response.rawBody);
   } on TimeoutException {
-    cancellation.cancel();
+    requestCancellation.cancel();
     rethrow;
   } finally {
     deadlineTimer.cancel();
+    unlink?.call();
   }
 }
 
@@ -1494,17 +1752,21 @@ Future<Lyric?> getMostMatchedLyric(
   if (!current()) return null;
   LyricSearchResponse response;
   try {
-    response = await (candidateSearch ?? searchLyricCandidates).call(audio);
+    response = await (candidateSearch == null
+        ? searchLyricCandidates(audio, stillWanted: current)
+        : candidateSearch(audio));
   } catch (err, trace) {
     LOGGER.w('[lyric/search] 候选搜索失败', stackTrace: trace);
     response = LyricSearchResponse(candidates: const [], failures: const {});
   }
+  if (!current()) return null;
   final load = candidateLyricLoader ?? getLyricForCandidate;
   final candidates = response.candidates
       .where((candidate) =>
           candidate.scoreVerified &&
           candidate.score.isFinite &&
-          candidate.score >= .6)
+          candidate.score >= .6 &&
+          isAutomaticLyricCandidateCompatible(audio, candidate))
       .toList()
     ..sort(compareLyricCandidates);
   for (var start = 0; start < candidates.length;) {

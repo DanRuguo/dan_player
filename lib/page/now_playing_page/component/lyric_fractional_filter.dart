@@ -19,10 +19,11 @@ class LyricFractionalFilterScope extends InheritedWidget {
   final Object repaintToken;
   @override
   bool updateShouldNotify(LyricFractionalFilterScope oldWidget) =>
-      sigma != oldWidget.sigma ||
-      dpr != oldWidget.dpr ||
       enabled != oldWidget.enabled ||
-      repaintToken != oldWidget.repaintToken;
+      (enabled &&
+          (sigma != oldWidget.sigma ||
+              dpr != oldWidget.dpr ||
+              repaintToken != oldWidget.repaintToken));
 }
 
 class ScopedLyricFractionalFilter extends StatelessWidget {
@@ -37,7 +38,7 @@ class ScopedLyricFractionalFilter extends StatelessWidget {
         sigma: scope.sigma,
         dpr: scope.dpr,
         enabled: scope.enabled,
-        repaint: Scrollable.maybeOf(context)?.position,
+        repaint: scope.enabled ? Scrollable.maybeOf(context)?.position : null,
         repaintToken: scope.repaintToken,
         child: child);
   }
@@ -184,6 +185,11 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
       // Interlude opacity can require its own layer. Its few geometric dots
       // need no high-resolution glyph sampling; never span canvas state across
       // independently recorded child layers.
+      if (_sigma == 0) {
+        _fallbackFilter.layer = null;
+        super.paint(context, offset);
+        return;
+      }
       final fallback = _fallbackFilter.layer ??= ImageFilterLayer();
       fallback.imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
       context.pushLayer(fallback, super.paint, offset);
@@ -193,14 +199,19 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
     final remainder = lyricFilterRemainder(getTransformTo(null), _dpr);
     final anchor = offset - remainder;
     const samplingScale = 1.5;
-    final filter = ui.ImageFilter.compose(
-        outer: ui.ImageFilter.blur(
-            sigmaX: sigma * samplingScale, sigmaY: sigma * samplingScale),
-        inner: ui.ImageFilter.matrix(
-            (Matrix4.translationValues(remainder.dx, remainder.dy, 0)
-                  ..scaleByDouble(1 / samplingScale, 1 / samplingScale, 1, 1))
-                .storage,
-            filterQuality: ui.FilterQuality.medium));
+    final sampling = ui.ImageFilter.matrix(
+        (Matrix4.translationValues(remainder.dx, remainder.dy, 0)
+              ..scaleByDouble(1 / samplingScale, 1 / samplingScale, 1, 1))
+            .storage,
+        filterQuality: ui.FilterQuality.medium);
+    // The matrix keeps the same supersampled glyph geometry at the last frame.
+    // A clear row needs no Gaussian convolution over that retained layer.
+    final filter = _sigma == 0
+        ? sampling
+        : ui.ImageFilter.compose(
+            outer: ui.ImageFilter.blur(
+                sigmaX: sigma * samplingScale, sigmaY: sigma * samplingScale),
+            inner: sampling);
     final canvas = context.canvas;
     canvas.save();
     canvas.translate(anchor.dx, anchor.dy);

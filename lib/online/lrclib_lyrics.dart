@@ -81,6 +81,7 @@ class LrclibLyricsTransport {
     String? artistName,
     String? albumName,
     int limit = 20,
+    OnlineHttpCancellation? cancellation,
   }) async {
     final title = trackName.trim();
     if (title.isEmpty) return const [];
@@ -90,7 +91,7 @@ class LrclibLyricsTransport {
         'artist_name': artistName!.trim(),
       if (albumName?.trim().isNotEmpty == true) 'album_name': albumName!.trim(),
     });
-    final payload = await _getJson(uri);
+    final payload = await _getJson(uri, cancellation: cancellation);
     return parseLrclibSearchPayload(payload, limit: limit);
   }
 
@@ -106,10 +107,12 @@ class LrclibLyricsTransport {
     return record;
   }
 
-  Future<Object?> _getJson(Uri uri) async {
+  Future<Object?> _getJson(Uri uri,
+      {OnlineHttpCancellation? cancellation}) async {
     return runBoundedOnlineRequest(
       createClient: _httpClientFactory,
       timeout: _requestTimeout,
+      cancellation: cancellation,
       request: (client) async {
         final request = await client.getUrl(uri);
         request.followRedirects = false;

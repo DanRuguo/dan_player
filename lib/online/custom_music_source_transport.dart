@@ -8,6 +8,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/kugou_music_api.dart';
 import 'package:dan_player/online/netease_music_api.dart';
+import 'package:dan_player/online/online_http_request.dart';
 
 enum CustomMusicSourceFailureKind {
   unavailable,
@@ -42,7 +43,7 @@ class CustomMusicSourceCancelled extends CustomMusicSourceException {
 }
 
 /// Cancels one custom-source request without affecting another source or task.
-class CustomMusicSourceCancellation {
+class CustomMusicSourceCancellation implements OnlineHttpCancellation {
   final Completer<void> _cancelled = Completer<void>();
   final Set<void Function()> _listeners = <void Function()>{};
 
@@ -57,10 +58,12 @@ class CustomMusicSourceCancellation {
     _listeners.clear();
   }
 
+  @override
   void check() {
     if (isCancelled) throw const CustomMusicSourceCancelled();
   }
 
+  @override
   void Function() onCancel(void Function() listener) {
     if (isCancelled) {
       listener();
@@ -70,6 +73,7 @@ class CustomMusicSourceCancellation {
     return () => _listeners.remove(listener);
   }
 
+  @override
   Future<T> race<T>(Future<T> operation) => Future.any(<Future<T>>[
         operation,
         _cancelled.future

@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
@@ -11,6 +14,8 @@ import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.d
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
@@ -19,7 +24,23 @@ class _Lyric extends Lyric {
 }
 
 class _Fixture {
-  _Fixture() {
+  _Fixture({bool chinese = false})
+      : lyric = _Lyric([
+          for (var i = 0; i < 320; i++)
+            LrcLine(
+              Duration(seconds: i * 4),
+              chinese
+                  ? const [
+                      '风吹过了街角',
+                      '脚步慢慢靠近',
+                      '星光落在窗边',
+                      '一起听完这首歌',
+                    ][i % 4]
+                  : 'Lyric line $i',
+              isBlank: false,
+              length: const Duration(seconds: 4),
+            ),
+        ]) {
     settings.lyricFontSize = 22;
     settings.translationFontSize = 17;
     settings.lyricTextAlign = LyricTextAlign.left;
@@ -35,11 +56,7 @@ class _Fixture {
   final positions = StreamController<double>.broadcast(sync: true);
   final hidden = ValueNotifier(false);
   final preferences = ValueNotifier(const RenderingPreferences());
-  final lyric = _Lyric([
-    for (var i = 0; i < 320; i++)
-      LrcLine(Duration(seconds: i * 4), 'Lyric line $i',
-          isBlank: false, length: const Duration(seconds: 4)),
-  ]);
+  final _Lyric lyric;
   double position = 400;
   bool highContrast = false;
   bool reduced = false;
@@ -49,8 +66,9 @@ class _Fixture {
     positions.add(value);
   }
 
-  Widget app() => MaterialApp(
-        theme: ThemeData(platform: TargetPlatform.windows),
+  Widget app({double height = 480, String? fontFamily}) => MaterialApp(
+        theme:
+            ThemeData(platform: TargetPlatform.windows, fontFamily: fontFamily),
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(
             highContrast: highContrast,
@@ -63,7 +81,7 @@ class _Fixture {
           body: Center(
             child: SizedBox(
               width: 440,
-              height: 480,
+              height: height,
               child: ChangeNotifierProvider.value(
                 value: settings,
                 child: VerticalLyricScrollView(
@@ -91,6 +109,12 @@ double _offset(LyricFollowEffects effect) =>
 Iterable<LyricFractionalFilter> _enabledFilters(WidgetTester tester) => tester
     .widgetList<LyricFractionalFilter>(find.byType(LyricFractionalFilter))
     .where((filter) => filter.enabled);
+List<LyricFractionalFilter> _rowFilters(WidgetTester tester, int index) =>
+    tester
+        .widgetList<LyricFractionalFilter>(find.descendant(
+            of: find.byType(LyricViewTile).at(index),
+            matching: find.byType(LyricFractionalFilter)))
+        .toList();
 
 Future<void> _advance(
     WidgetTester tester, _Fixture fixture, double value) async {
@@ -101,6 +125,80 @@ Future<void> _advance(
 }
 
 void main() {
+  testWidgets(
+      'the next three lyric lines stay clear while earlier lines retain blur',
+      (tester) async {
+    await (FontLoader(danEmbeddedFontFamily)
+          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+        .load();
+    final fixture = _Fixture(chinese: true);
+    tester.view.physicalSize = const Size(960, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final captureKey = GlobalKey();
+    await tester.pumpWidget(RepaintBoundary(
+        key: captureKey,
+        child: fixture.app(height: 720, fontFamily: danEmbeddedFontFamily)));
+    await tester.pumpAndSettle();
+
+    var effects = _effects(tester);
+    expect(effects[99].blur, LyricMotion.blurForDistance(1));
+    expect(effects[100].blur, 0);
+    for (final index in [101, 102, 103]) {
+      expect(effects[index].blur, 0, reason: 'Upcoming line $index');
+    }
+    expect(effects[104].blur, LyricMotion.blurForDistance(4));
+    for (final index in [100, 101, 102, 103]) {
+      final filters = _rowFilters(tester, index);
+      expect(filters, isNotEmpty);
+      expect(filters.every((filter) => filter.enabled && filter.sigma == 0),
+          isTrue,
+          reason: 'Clear line $index should retain sampling without Gaussian');
+    }
+    expect(_rowFilters(tester, 99).any((filter) => filter.enabled), isTrue);
+    expect(_rowFilters(tester, 104).any((filter) => filter.enabled), isTrue);
+
+    final output = Platform.environment['DAN_LYRIC_BLUR_RENDER'];
+    if (output != null) {
+      await tester.runAsync(() async {
+        final image = await (captureKey.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary)
+            .toImage();
+        try {
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          final file = File(output);
+          await file.parent.create(recursive: true);
+          await file.writeAsBytes(bytes!.buffer.asUint8List());
+        } finally {
+          image.dispose();
+        }
+      });
+    }
+
+    await _advance(tester, fixture, 404.1);
+    await tester.pumpAndSettle();
+    effects = _effects(tester);
+    expect(effects[100].blur, LyricMotion.blurForDistance(1));
+    for (final index in [102, 103, 104]) {
+      expect(effects[index].blur, 0, reason: 'Upcoming line $index');
+    }
+    for (final index in [102, 103, 104]) {
+      final filters = _rowFilters(tester, index);
+      expect(filters, isNotEmpty);
+      expect(filters.every((filter) => filter.enabled && filter.sigma == 0),
+          isTrue,
+          reason: 'Settled clear line $index should skip Gaussian');
+    }
+    fixture.reduced = true;
+    await tester.pumpWidget(RepaintBoundary(
+        key: captureKey,
+        child: fixture.app(height: 720, fontFamily: danEmbeddedFontFamily)));
+    await tester.pumpAndSettle();
+    expect(_enabledFilters(tester), isEmpty);
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
   test('interlude pose grows and closes as one group on the media timeline',
       () {
     const length = Duration(seconds: 12);

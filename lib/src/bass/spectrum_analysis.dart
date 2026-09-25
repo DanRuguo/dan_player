@@ -8,6 +8,11 @@ class SpectrumAnalysis {
   static const fftValues = fftSize ~/ 2;
   final tones = List<double>.filled(7, 0);
   final frequencies = List<double>.filled(48, 0);
+  // Reuse scratch storage while the seven-tone display is subscribed. These
+  // values are completely overwritten on every synchronous FFT update.
+  final _chroma = List<double>.filled(12, 0);
+  final _counts = List<int>.filled(12, 0);
+  final _targets = List<double>.filled(7, 0);
 
   /// Reuse the 40–180 Hz portion of the existing logarithmic display bands.
   /// Reading this snapshot never requests FFT data or allocates a level list.
@@ -57,8 +62,12 @@ class SpectrumAnalysis {
   }
 
   void _updateTones(Float32List fft) {
-    final chroma = List.filled(12, 0.0);
-    final counts = List.filled(12, 0);
+    final chroma = _chroma;
+    final counts = _counts;
+    for (var i = 0; i < chroma.length; i++) {
+      chroma[i] = 0;
+      counts[i] = 0;
+    }
     for (final note in _notes) {
       var magnitude = 0.0;
       final start = note.start;
@@ -74,15 +83,14 @@ class SpectrumAnalysis {
       if (counts[i] > 0) chroma[i] /= counts[i];
     }
 
-    final targets = <double>[
-      chroma[0] + chroma[1] * 0.5,
-      chroma[2] + (chroma[1] + chroma[3]) * 0.5,
-      chroma[4] + chroma[3] * 0.5,
-      chroma[5] + chroma[6] * 0.5,
-      chroma[7] + (chroma[6] + chroma[8]) * 0.5,
-      chroma[9] + (chroma[8] + chroma[10]) * 0.5,
-      chroma[11] + chroma[10] * 0.5,
-    ];
+    final targets = _targets;
+    targets[0] = chroma[0] + chroma[1] * 0.5;
+    targets[1] = chroma[2] + (chroma[1] + chroma[3]) * 0.5;
+    targets[2] = chroma[4] + chroma[3] * 0.5;
+    targets[3] = chroma[5] + chroma[6] * 0.5;
+    targets[4] = chroma[7] + (chroma[6] + chroma[8]) * 0.5;
+    targets[5] = chroma[9] + (chroma[8] + chroma[10]) * 0.5;
+    targets[6] = chroma[11] + chroma[10] * 0.5;
 
     for (var i = 0; i < tones.length; i++) {
       var target = (targets[i] * 3.2).clamp(0.0, 1.0).toDouble();

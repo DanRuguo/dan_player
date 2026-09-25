@@ -866,9 +866,9 @@ class BassPlayer {
 
         if (_spectrumStreamController.hasListener ||
             _frequencySpectrumStreamController.hasListener) {
-          final levels = _updateSpectrum();
+          _updateSpectrum();
           if (_spectrumStreamController.hasListener) {
-            _spectrumStreamController.add(levels);
+            _spectrumStreamController.add(List.unmodifiable(_spectrumLevels));
           }
           if (_frequencySpectrumStreamController.hasListener) {
             _frequencySpectrumStreamController.add(
@@ -944,9 +944,10 @@ class BassPlayer {
       ffi.Uint32 Function(ffi.Pointer<ffi.Void>, ffi.Uint32),
       int Function(ffi.Pointer<ffi.Void>, int)>('BASS_WASAPI_GetData');
 
-  List<double> _updateSpectrum() {
+  void _updateSpectrum() {
     if (_fstream == null || playerState != PlayerState.playing) {
-      return _resetSpectrum(emit: false);
+      _resetSpectrum(emit: false);
+      return;
     }
 
     const flags = _bassDataFft4096 | _bassDataFftRemoveDc;
@@ -954,7 +955,8 @@ class BassPlayer {
         ? _bassWasapiGetData(_fftBuffer.cast(), flags)
         : _bassChannelGetData(_fstream!, _fftBuffer.cast(), flags);
     if (result == _bassErrorValue) {
-      return _decaySpectrum();
+      _decaySpectrum();
+      return;
     }
 
     var sampleRate = 48000.0;
@@ -987,36 +989,34 @@ class BassPlayer {
     _spectrumAnalysis.update(fft, sampleRate,
         frequencyDemand: _frequencySpectrumStreamController.hasListener,
         toneDemand: _spectrumStreamController.hasListener);
-    return List.unmodifiable(_spectrumLevels);
   }
 
-  List<double> _decaySpectrum() {
+  void _decaySpectrum() {
     for (var i = 0; i < _spectrumLevels.length; i++) {
       _spectrumLevels[i] *= 0.82;
     }
     for (var i = 0; i < _frequencySpectrumLevels.length; i++) {
       _frequencySpectrumLevels[i] *= 0.82;
     }
-    return List.unmodifiable(_spectrumLevels);
   }
 
-  List<double> _resetSpectrum({bool emit = true}) {
+  void _resetSpectrum({bool emit = true}) {
     for (var i = 0; i < _spectrumLevels.length; i++) {
       _spectrumLevels[i] = 0.0;
     }
     for (var i = 0; i < _frequencySpectrumLevels.length; i++) {
       _frequencySpectrumLevels[i] = 0.0;
     }
-    final result = List<double>.unmodifiable(_spectrumLevels);
-    if (emit && !_spectrumStreamController.isClosed) {
-      _spectrumStreamController.add(result);
+    if (emit && !_spectrumStreamController.isClosed &&
+        _spectrumStreamController.hasListener) {
+      _spectrumStreamController.add(List<double>.unmodifiable(_spectrumLevels));
     }
-    if (emit && !_frequencySpectrumStreamController.isClosed) {
+    if (emit && !_frequencySpectrumStreamController.isClosed &&
+        _frequencySpectrumStreamController.hasListener) {
       _frequencySpectrumStreamController.add(
         List.unmodifiable(_frequencySpectrumLevels),
       );
     }
-    return result;
   }
 
   static const List<double> eqBandCenters = [

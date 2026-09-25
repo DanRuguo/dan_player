@@ -246,10 +246,9 @@ class LyricFollowEffects extends StatelessWidget {
                 : null,
             child: Transform.translate(
               offset: Offset(0, offset),
-              // Keep the cached paragraph, but sample its fractional position
-              // inside the filter. ImageFiltered rounds the incoming scroll/lag
-              // transform in the Windows raster cache: the slow spring return
-              // otherwise stalls, then jumps by a physical pixel.
+              // Keep fractional glyph sampling at zero blur too. Switching to
+              // direct text paint on the final frame shifts glyph ink by up to
+              // half a physical pixel; the leaf skips only its Gaussian pass.
               child: LyricFractionalFilterScope(
                 repaintToken: (
                   clock.value,
@@ -259,9 +258,7 @@ class LyricFollowEffects extends StatelessWidget {
                 ),
                 enabled: blurEnabled,
                 dpr: View.of(context).devicePixelRatio,
-                // Preserve the same clear-filter path during hover and after
-                // follow cleanup; zero blur changes glyph sampling on Windows.
-                sigma: math.max(.1, sigma),
+                sigma: sigma,
                 child: child!,
               ),
             ),

@@ -17,6 +17,11 @@ const Map<String, List<String>> catalogAutomaticOnlineLyrics = {
     '一致度を優先し、同点では単語同期歌詞と内蔵ソースを優先します。外部ソースは設定順に試します。',
     '일치도를 우선하며 동점이면 단어별 가사와 내장 소스를 우선합니다. 외부 소스는 설정 순서로 시도합니다.'
   ],
+  '候选按匹配度和来源排序；自动选词时，同分优先逐字歌词。': [
+    'Candidates are sorted by match and source. Automatic selection favors word timing for ties.',
+    '候補は一致度とソース順に表示します。自動選択では、同点なら単語同期歌詞を優先します。',
+    '후보는 일치도와 소스 순으로 정렬합니다. 자동 선택에서는 동점일 때 단어별 가사를 우선합니다.',
+  ],
   "批量缓存歌词": ["Batch cache lyrics", "歌詞を一括キャッシュ", "가사 일괄 캐시"],
   "选择已导入的文件夹": ["Choose an imported folder", "取り込み済みフォルダーを選択", "가져온 폴더 선택"],
   "请先将音乐文件夹导入乐库。": [
@@ -66,5 +71,35 @@ const Map<String, List<String>> catalogAutomaticOnlineLyrics = {
     'Source: {0} · Match unknown; manual selection only',
     'ソース：{0} · 一致度不明、手動選択のみ',
     '소스: {0} · 일치도 알 수 없음, 수동 선택 전용'
+  ],
+  '正在搜索其他歌词来源…': [
+    'Searching other lyric sources…',
+    'ほかの歌詞ソースを検索中…',
+    '다른 가사 소스 검색 중…',
+  ],
+  '正在识别歌词格式': [
+    'Identifying lyric format',
+    '歌詞形式を確認中',
+    '가사 형식 확인 중',
+  ],
+  '歌词格式未知': [
+    'Lyric format unknown',
+    '歌詞形式は不明',
+    '가사 형식 알 수 없음',
+  ],
+  '无法预览歌词，点选可重试。': [
+    'Preview unavailable; select to retry.',
+    'プレビューできません。選択すると再試行します。',
+    '미리 볼 수 없습니다. 선택하여 다시 시도하세요.',
+  ],
+  '已停止搜索其他来源，当前候选仍可选择。': [
+    'Searching other sources stopped. You can still choose a listed candidate.',
+    'ほかのソースの検索を停止しました。表示中の候補は選択できます。',
+    '다른 소스 검색을 중지했습니다. 표시된 후보는 계속 선택할 수 있습니다.',
+  ],
+  '继续搜索': [
+    'Continue searching',
+    '検索を続ける',
+    '검색 계속',
   ],
 };

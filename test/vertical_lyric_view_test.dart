@@ -303,7 +303,9 @@ void main() {
         (tester) async {
       tester.view.devicePixelRatio = dpi;
       addTearDown(tester.view.resetDevicePixelRatio);
-      final harness = _Harness();
+      // Keep the sampled rows above the current line: upcoming rows now paint
+      // clearly and no longer exercise the deblur transition on hover.
+      final harness = _Harness(position: 15);
       final boundary = GlobalKey();
       await tester.pumpWidget(RepaintBoundary(
           key: boundary,
