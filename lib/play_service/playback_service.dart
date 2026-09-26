@@ -5,8 +5,10 @@ import 'dart:io';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/play_service/waveform_service.dart';
 import 'package:dan_player/library/audio_duration_correction.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/library/track_resume_store.dart';
 import 'package:dan_player/src/bass/audio_segment.dart';
@@ -19,6 +21,7 @@ import 'package:dan_player/play_service/playback_modes.dart';
 import 'package:dan_player/play_service/replay_gain.dart';
 import 'package:dan_player/play_service/queue_navigation.dart';
 import 'package:dan_player/play_service/queue_edits.dart';
+import 'package:dan_player/play_service/queue_order.dart' as queue_order;
 import 'package:dan_player/play_service/queue_track_identity.dart';
 import 'package:dan_player/play_service/queue_stop_boundary.dart';
 import 'package:dan_player/play_service/guarded_playback_seek.dart';
@@ -277,8 +280,8 @@ class PlaybackService extends ChangeNotifier {
             .instance.experience.value
             .copyWith(exclusiveOutput: _player.wasapiExclusive);
         try {
-          await AppSettings.instance.saveSettings(
-              throwOnError: true, captureWindowSize: false);
+          await AppSettings.instance
+              .saveSettings(throwOnError: true, captureWindowSize: false);
         } catch (error, trace) {
           LOGGER.w('[save output preference] $error', stackTrace: trace);
           if (_isCurrentSourceRequest(token)) {
@@ -751,6 +754,48 @@ class PlaybackService extends ChangeNotifier {
     return queue.length - edit.items.length;
   }
 
+  /// One atomic edit; shuffle-off still restores the retained original order.
+  int trimQueue({required bool before}) {
+    if (!canEditQueue) return 0;
+    final edit =
+        QueueEdit.trim(_queueOccurrences, _currentQueueIndex, before: before);
+    if (edit == null) return 0;
+    final removed = _queueOccurrences.length - edit.items.length;
+    final retainedIds = edit.items.map((entry) => entry.id).toSet();
+    _commitQueueEdit(
+        edit,
+        shuffle.value
+            ? _backupOccurrences
+                .where((entry) => retainedIds.contains(entry.id))
+                .toList()
+            : edit.items);
+    return removed;
+  }
+
+  /// Leaves the active decoder, played prefix, repeated occurrences and stop
+  /// target identity intact. This is a queue edit, not a new shuffle mode.
+  bool orderUpcomingQueue({AudioSortField? field, bool reverse = false}) {
+    if (!canEditQueue) return false;
+    final edit = QueueEdit.orderUpcoming<QueueOccurrence<Audio>>(
+        _queueOccurrences, _currentQueueIndex,
+        reverse: reverse,
+        compare: field == null
+            ? null
+            : (a, b) => compareAudioSort(a.item, b.item, field));
+    if (edit == null) return false;
+    _commitQueueEdit(edit, shuffle.value ? _backupOccurrences : edit.items);
+    return true;
+  }
+
+  bool arrangeUpcomingQueue(queue_order.UpcomingQueueOrder order) {
+    if (!canEditQueue) return false;
+    final edit = queue_order.organizeUpcomingQueue(
+        _queueOccurrences, _currentQueueIndex, order);
+    if (edit == null) return false;
+    _commitQueueEdit(edit, shuffle.value ? _backupOccurrences : edit.items);
+    return true;
+  }
+
   Timer? _stateSaveTimer;
   Future<void> _stateWrite = Future.value();
   Future<void>? _sessionRestoreFuture;
@@ -826,6 +871,7 @@ class PlaybackService extends ChangeNotifier {
         state == PlayerState.pausedDevice;
     final savedPosition = wasCurrent ? position : 0.0;
     _deletingAudioPath = audioPath;
+    await WaveformService.shared.cancelForPath(audioPath);
     if (wasCurrent) segmentLoop.clear();
 
     if (wasCurrent || wasPending) {
@@ -2093,6 +2139,7 @@ class PlaybackService extends ChangeNotifier {
   Future<void> _close() async {
     final resumeWrite = _captureTrackResume(force: true);
     _closed = true;
+    final waveformShutdown = WaveformService.shared.close();
     _queueEditHistory.clear(QueueHistoryInvalidation.closed);
     _sourceRequestToken += 1;
     OnlineMusicService.instance.cancelPendingStreamResolution();
@@ -2145,6 +2192,7 @@ class PlaybackService extends ChangeNotifier {
           stackTrace: trace);
     }
 
+    await waveformShutdown;
     await _player.free();
     _wasapiExclusive.dispose();
     isChangingOutput.dispose();

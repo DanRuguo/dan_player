@@ -7,7 +7,7 @@ import 'package:dan_player/search/lyric_search_index.dart';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
-import 'package:dan_player/lyric/lrc.dart';
+import 'package:dan_player/lyric/local_lyric_reader.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
@@ -31,6 +31,7 @@ Future<Lyric?> resolveAutomaticLyricSources({
   for (final readSaved in savedSources) {
     if (stillCurrent?.call() == false) return null;
     final result = await readSaved();
+    if (stillCurrent?.call() == false) return null;
     if (result != null) return result;
   }
   return null;
@@ -151,8 +152,9 @@ class LyricService extends ChangeNotifier {
         _rawResolvedLyric = value;
         if (_resolveDefaultForTesting == null &&
             audio != null &&
-            value is Lrc &&
-            value.source == LrcSource.local) {
+            _isPlaying(audio) &&
+            value != null &&
+            isDiscoveredLocalLyric(value)) {
           LyricSearchIndex.instance.rememberLoadedLocal(audio, value);
           cacheLocalLyric(audio, value,
                   shouldStore: () => _isCurrent(token) && _isPlaying(audio))
@@ -326,16 +328,36 @@ class LyricService extends ChangeNotifier {
     final nowPlaying = _getNowPlaying();
     if (nowPlaying == null) return Future.value(null);
 
-    if (nowPlaying.isOnline) return readCachedOnlineLyric(nowPlaying);
-
-    return resolveAutomaticLyricSources(
-      localFirst: localFirst,
-      local: () => Lrc.fromAudioPath(nowPlaying),
-      cachedOnline: () =>
-          readAvailableCachedLyric(nowPlaying, localFirst: false),
-      stillCurrent: () => _isPlaying(nowPlaying),
-    );
+    final token = _lyricToken + 1;
+    return _resolveSavedForRequest(nowPlaying, token,
+        localFirst: nowPlaying.isOnline ? false : localFirst);
   }
+
+  Future<Lyric?> _readLocalForRequest(Audio audio, int token) =>
+      Future<Lyric?>.value().then((_) async {
+        bool current() => _isCurrent(token) && _isPlaying(audio);
+        if (!current()) return null;
+        final fresh = await readLocalLyric(audio, stillCurrent: current);
+        if (!current()) return null;
+        if (fresh != null) return fresh;
+        return readCachedLocalLyric(audio,
+            cache: _onlineCacheForTesting, stillCurrent: current);
+      });
+
+  Future<Lyric?> _resolveSavedForRequest(Audio audio, int token,
+          {required bool localFirst, LyricSource? source}) =>
+      Future<Lyric?>.value().then((_) {
+        bool current() => _isCurrent(token) && _isPlaying(audio);
+        return resolveAutomaticLyricSources(
+          localFirst: localFirst,
+          local: () => _readLocalForRequest(audio, token),
+          cachedOnline: () => readAvailableCachedOnlineLyric(audio,
+              source: source,
+              cache: _onlineCacheForTesting,
+              stillCurrent: current),
+          stillCurrent: current,
+        );
+      });
 
   /// 根据默认歌词来源获取歌词：
   /// 1. 如果没有指定来源，按照现在的方式寻找歌词（本地优先或在线优先）
@@ -376,23 +398,18 @@ class LyricService extends ChangeNotifier {
       LYRIC_SOURCES.remove(nowPlaying.path);
     }
     final lyricSource = hasInvalidOnlineLocalSource ? null : configuredSource;
+    final token = _lyricToken + 1;
     Future<Lyric?> raw;
     if (lyricSource == null) {
       raw = _getLyricDefault(AppSettings.instance.localLyricFirst);
     } else {
       if (lyricSource.source == LyricSourceType.local) {
-        raw = Lrc.fromAudioPath(nowPlaying);
+        raw = _readLocalForRequest(nowPlaying, token);
       } else {
-        raw = resolveAutomaticLyricSources(
-          localFirst: false,
-          stillCurrent: () => _isPlaying(nowPlaying),
-          cachedOnline: () => readAvailableCachedLyric(nowPlaying,
-              source: lyricSource, localFirst: false),
-          local: () => Lrc.fromAudioPath(nowPlaying),
-        );
+        raw = _resolveSavedForRequest(nowPlaying, token,
+            localFirst: false, source: lyricSource);
       }
     }
-    final token = _lyricToken + 1;
     bool allowed() =>
         _isCurrent(token) &&
         _isPlaying(nowPlaying) &&
@@ -439,7 +456,8 @@ class LyricService extends ChangeNotifier {
       return true;
     }
 
-    _useExplicitFuture(nowPlaying, Lrc.fromAudioPath(nowPlaying),
+    _useExplicitFuture(
+        nowPlaying, _readLocalForRequest(nowPlaying, _lyricToken + 1),
         source: LyricSource(LyricSourceType.local));
     return true;
   }

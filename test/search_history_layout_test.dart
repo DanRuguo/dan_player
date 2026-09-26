@@ -27,6 +27,9 @@ void main() {
   });
   Finder capsule(String query) =>
       find.byKey(ValueKey(('search-history', query)));
+  Finder capsules() => find.descendant(
+      of: find.byType(SearchHistoryCapsules),
+      matching: find.byType(TextButton));
 
   Future<void> mount(WidgetTester tester,
       {Size size = const Size(900, 760), double scale = 1}) async {
@@ -52,7 +55,7 @@ void main() {
     await mount(tester);
     final field = tester.getRect(find.byType(TextField));
     expect(field.center.dy, lessThan(760 * .45));
-    expect(find.byType(TextButton), findsNWidgets(12));
+    expect(capsules(), findsNWidgets(12));
     final rows = <double, List<Rect>>{};
     for (final query in history.value) {
       final rect = tester.getRect(capsule(query));
@@ -79,14 +82,14 @@ void main() {
     final original = [...history.value];
     tester.view.physicalSize = const Size(320, 430);
     await tester.pumpAndSettle();
-    final count = find.byType(TextButton).evaluate().length;
+    final count = capsules().evaluate().length;
     expect(count, inExclusiveRange(0, 12));
     expect(capsule('song 11'), findsOneWidget);
     expect(capsule('song 0'), findsNothing);
     expect(history.value, original);
     tester.view.physicalSize = const Size(900, 760);
     await tester.pumpAndSettle();
-    expect(find.byType(TextButton), findsNWidgets(12));
+    expect(capsules(), findsNWidgets(12));
     expect(history.value, original);
     expect(tester.takeException(), isNull);
   });

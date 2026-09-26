@@ -20,6 +20,7 @@ import 'package:dan_player/page/categories_page.dart';
 import 'package:dan_player/page/category_detail_page.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:dan_player/page/audio_detail_page.dart';
+import 'package:dan_player/page/now_playing_audio_detail_page.dart';
 import 'package:dan_player/page/audios_page.dart';
 import 'package:dan_player/page/collection_detail_page.dart';
 import 'package:dan_player/page/collections_page.dart';
@@ -526,6 +527,15 @@ class Entry extends StatelessWidget {
           maintainState: false,
           child: const NowPlayingPage(),
         ),
+        routes: [
+          GoRoute(
+            path: 'detail',
+            pageBuilder: (context, state) => SlideTransitionPage(
+              key: state.pageKey,
+              child: NowPlayingAudioDetailPage(audio: state.extra as Audio),
+            ),
+          ),
+        ],
       ),
 
       /// welcoming page

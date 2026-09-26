@@ -11,6 +11,7 @@ import 'package:dan_player/data/app_data_location.dart';
 import 'package:dan_player/data/backup_encryption.dart';
 import 'package:dan_player/data/backup_selection.dart';
 import 'package:dan_player/data/backup_restore_preservation.dart';
+import 'package:dan_player/library/smart_condition.dart';
 import 'package:dan_player/taskbar_progress.dart';
 import 'package:path/path.dart' as path;
 
@@ -21,6 +22,34 @@ part 'cache_backup_music.dart';
 const _backupFormat = 'dan-player-cache-backup';
 const _backupVersion = 2;
 const _tokenPrefix = '@dan-player-backup/';
+const _smartFolderPrefix = '${_tokenPrefix}folder-reference/';
+const _smartLiteralPrefix = '${_tokenPrefix}smart-literal/';
+
+// These are rule values, not asset references. Keep this exemption scoped to
+// actual serialized leaves and only their value; other map entries still pass
+// through the normal path conversion and absolute-path checks.
+SmartField? _smartLeafField(Map value) {
+  if (value.keys
+          .any((key) => !const {'field', 'value', 'exclude'}.contains(key)) ||
+      value['value'] is! String ||
+      (value['exclude'] != null && value['exclude'] is! bool)) {
+    return null;
+  }
+  return SmartField.values
+      .where((field) => field.name == value['field'])
+      .firstOrNull;
+}
+
+bool _isLiteralSmartField(SmartField? field) => const {
+      SmartField.titleContains,
+      SmartField.artistContains,
+      SmartField.albumContains,
+      SmartField.composerContains,
+      SmartField.albumArtistContains,
+      SmartField.languageIs,
+      SmartField.fileNameContains,
+      SmartField.personalTag,
+    }.contains(field);
 
 class CacheBackupException implements Exception {
   const CacheBackupException(this.message);
@@ -187,6 +216,12 @@ class CacheBackupService {
               'A cache document is damaged: ${path.basename(relative)}');
         }
         if (isJson) {
+          final documentName =
+              path.basename(relative).replaceFirst(RegExp(r'\.bak$'), '');
+          if (['smart_playlists.json', 'playback_statistics.json']
+              .contains(documentName)) {
+            Snapshot3Upgrade.validateDocument(documentName, decoded);
+          }
           final portable = await encoder.convert(decoded);
           await _copyReferencedCacheAssets(portable, source, payload, control);
           await output.writeAsString(json.encode(portable), flush: true);
@@ -485,9 +520,15 @@ class CacheBackupService {
             preserveMissing: _preservesMusicReferences(relative));
         final documentName =
             path.basename(relative).replaceFirst(RegExp(r'\.bak$'), '');
-        if (['personal_library.json', 'named_queues.json', 'eq_presets.json']
-            .contains(documentName))
+        if ([
+          'personal_library.json',
+          'named_queues.json',
+          'eq_presets.json',
+          'playback_statistics.json',
+          'smart_playlists.json'
+        ].contains(documentName)) {
           Snapshot3Upgrade.validateDocument(documentName, restored);
+        }
         await entity.writeAsString(
             json.encode(identical(restored, _dropValue) ? null : restored),
             flush: true);
@@ -791,9 +832,24 @@ class _PortablePathEncoder {
     }
     if (value is Map) {
       final result = <String, Object?>{};
+      final field = _smartLeafField(value);
       for (final entry in value.entries) {
         final convertedKey = await _convertString(entry.key.toString());
-        if (const {'tags', 'label', 'name', 'backup'}.contains(entry.key)) {
+        if (entry.key == 'value' && _isLiteralSmartField(field)) {
+          final text = entry.value as String;
+          // Escape token-looking text so generic asset/dependency collectors
+          // cannot treat a search phrase as a request to include a cache file.
+          result[convertedKey] = text.startsWith(_tokenPrefix)
+              ? '$_smartLiteralPrefix${Uri.encodeComponent(text)}'
+              : text;
+          continue;
+        }
+        if (entry.key == 'value' && field == SmartField.folderWithin) {
+          result[convertedKey] = _encodeSmartFolder(entry.value as String);
+          continue;
+        }
+        if (const {'tags', 'label', 'name', 'backup', 'ArtistSeparator'}
+            .contains(entry.key)) {
           result[convertedKey] = entry.value;
           continue;
         }
@@ -803,6 +859,24 @@ class _PortablePathEncoder {
       return result;
     }
     return value;
+  }
+
+  String _encodeSmartFolder(String value) {
+    final normalized = path.normalize(value.trim());
+    final root = _rootFor(normalized);
+    if (root != null) {
+      if (path.equals(normalized, root.path)) {
+        return '${_tokenPrefix}root/${root.id}';
+      }
+      final relative =
+          _portableRelative(path.relative(normalized, from: root.path));
+      // This rule explicitly names a directory, even when it is currently
+      // absent or its name resembles an audio file. Do not probe or collect it.
+      return '${_tokenPrefix}root-directory/${root.id}/${Uri.encodeComponent(relative)}';
+    }
+    // A dormant rule outside imported library roots must keep its original
+    // folder instead of becoming an unrelated missing-song placeholder.
+    return '$_smartFolderPrefix${Uri.encodeComponent(value)}';
   }
 
   Future<String> _convertString(String value, {bool aliasOnly = false}) async {
@@ -984,14 +1058,39 @@ class _PortablePathDecoder {
     }
     if (value is Map) {
       final result = <String, Object?>{};
+      final field = _smartLeafField(value);
       for (final entry in value.entries) {
         final convertedKey = _convertString(entry.key.toString(),
             preserveMissing: preserveMissing);
         if (identical(convertedKey, _dropValue)) continue;
-        final converted =
-            const {'tags', 'label', 'name', 'backup'}.contains(entry.key)
-                ? entry.value
-                : convert(entry.value, preserveMissing: preserveMissing);
+        final Object? converted;
+        if (entry.key == 'value' && _isLiteralSmartField(field)) {
+          final text = entry.value as String;
+          converted = text.startsWith(_smartLiteralPrefix)
+              ? Uri.decodeComponent(text.substring(_smartLiteralPrefix.length))
+              : text;
+        } else if (entry.key == 'value' && field == SmartField.folderWithin) {
+          final text = entry.value as String;
+          final folder = text.startsWith(_smartFolderPrefix)
+              ? Uri.decodeComponent(text.substring(_smartFolderPrefix.length))
+              : _convertString(text, preserveMissing: preserveMissing);
+          if (folder is! String ||
+              folder.length > 160 ||
+              !path.windows.isAbsolute(folder.trim())) {
+            throw const FormatException('Invalid smart folder reference');
+          }
+          converted = folder;
+        } else {
+          converted = const {
+            'tags',
+            'label',
+            'name',
+            'backup',
+            'ArtistSeparator'
+          }.contains(entry.key)
+              ? entry.value
+              : convert(entry.value, preserveMissing: preserveMissing);
+        }
         if (identical(converted, _dropValue)) {
           if (entry.key == 'path' || entry.key == 'audio') return _dropValue;
           continue;
@@ -1383,7 +1482,9 @@ bool _preservesMusicReferences(String relative) {
   if (relative
       .replaceAll('\\', '/')
       .toLowerCase()
-      .startsWith('lyric_tap_progress/')) { return true; }
+      .startsWith('lyric_tap_progress/')) {
+    return true;
+  }
   var name = path.basename(relative).toLowerCase();
   if (name.endsWith('.bak')) name = name.substring(0, name.length - 4);
   return const {
@@ -1483,9 +1584,12 @@ bool _containsAbsolutePath(Object? value) {
   if (value is String) return path.isAbsolute(value);
   if (value is List) return value.any(_containsAbsolutePath);
   if (value is Map) {
+    final literalRule = _isLiteralSmartField(_smartLeafField(value));
     return value.entries.any((entry) =>
         _containsAbsolutePath(entry.key.toString()) ||
-        (!const {'tags', 'label', 'name', 'backup'}.contains(entry.key) &&
+        (!const {'tags', 'label', 'name', 'backup', 'ArtistSeparator'}
+                .contains(entry.key) &&
+            !(literalRule && entry.key == 'value') &&
             _containsAbsolutePath(entry.value)));
   }
   return false;

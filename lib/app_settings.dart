@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:dan_player/lyric/local_lyric_preferences.dart';
+export 'package:dan_player/lyric/local_lyric_preferences.dart';
 import 'dart:io';
 
 import 'package:dan_player/library/artist_separators.dart';
@@ -137,7 +139,7 @@ Future<void> scheduleAppDataDirectorySwitch(
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.6-snapshot.1";
+  static const String version = "26.0.6-snapshot.2";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";
@@ -213,6 +215,11 @@ class AppSettings {
 
   /// 歌词来源：true，本地优先；false，在线优先
   bool localLyricFirst = true;
+
+  LocalLyricLineOrder localLyricLineOrder = LocalLyricLineOrder.automatic;
+  final nowPlayingProgressStyle =
+      ValueNotifier(NowPlayingProgressStyle.standard);
+  final waveformBarDensity = ValueNotifier(WaveformBarDensity.automatic);
 
   /// Backwards-compatible view of the old single custom lyric endpoint.
   ///
@@ -338,6 +345,12 @@ class AppSettings {
         artistSeparatorPattern(_instance.artistSeparator);
 
     final llf = settingsMap["LocalLyricFirst"];
+    _instance.localLyricLineOrder =
+        LocalLyricLineOrder.decode(settingsMap['LocalLyricLineOrder']);
+    _instance.nowPlayingProgressStyle.value =
+        NowPlayingProgressStyle.decode(settingsMap['NowPlayingProgressStyle']);
+    _instance.waveformBarDensity.value =
+        WaveformBarDensity.decode(settingsMap['WaveformBarDensity']);
     if (llf != null) {
       _instance.localLyricFirst =
           _readCompatibleBoolean(llf, _instance.localLyricFirst);
@@ -456,6 +469,12 @@ class AppSettings {
       }
 
       final llf = settingsMap["LocalLyricFirst"];
+      _instance.localLyricLineOrder =
+          LocalLyricLineOrder.decode(settingsMap['LocalLyricLineOrder']);
+      _instance.nowPlayingProgressStyle.value = NowPlayingProgressStyle.decode(
+          settingsMap['NowPlayingProgressStyle']);
+      _instance.waveformBarDensity.value =
+          WaveformBarDensity.decode(settingsMap['WaveformBarDensity']);
       if (llf != null) {
         _instance.localLyricFirst =
             _readCompatibleBoolean(llf, _instance.localLyricFirst);
@@ -556,6 +575,9 @@ class AppSettings {
         "DefaultTheme": defaultTheme,
         "ArtistSeparator": artistSeparator,
         "LocalLyricFirst": localLyricFirst,
+        "LocalLyricLineOrder": localLyricLineOrder.name,
+        "NowPlayingProgressStyle": nowPlayingProgressStyle.value.name,
+        "WaveformBarDensity": waveformBarDensity.value.name,
         "LyricApiUrl": lyricApiUrl,
         "RestoreLastSession": restoreLastSession,
         "OnboardingCompleted": onboardingCompleted,

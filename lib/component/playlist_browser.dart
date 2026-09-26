@@ -7,6 +7,7 @@ import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/anchored_menu_action.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/playlist_management_dialog.dart';
 import 'package:dan_player/component/audio_columns.dart';
@@ -42,6 +43,7 @@ import 'package:dan_player/component/playlist_ui_actions.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/library/smart_library_candidates.dart';
 import 'package:dan_player/ui_layout_preferences.dart';
 import 'package:dan_player/playlist_view.dart';
 import 'package:dan_player/page/page_scaffold.dart';
@@ -1523,7 +1525,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     );
   }
 
-  Widget _breadcrumbs(Playlist? current) => SingleChildScrollView(
+  Widget _breadcrumbs(Playlist? current) => AppHorizontalWheelRegion(
+          child: SingleChildScrollView(
+        key: const ValueKey('playlist-breadcrumb-scroll'),
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
@@ -1575,7 +1579,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
               ],
           ],
         ),
-      );
+      ));
 
   Widget _headerActions(Playlist? current, List<_PlaylistRowData> rows,
           int selectedCount, List<Audio> queue) =>
@@ -1601,7 +1605,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             ? null
             : () async {
                 await showPlaylistPresentation(context, current);
-                if (mounted)
+                if (mounted) {
                   setState(() {
                     _view = PlaylistViewMode.values
                             .where(
@@ -1610,12 +1614,18 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                         widget.initialView ??
                         PlaylistViewMode.list;
                   });
+                }
               },
         onImportCue: _importCue,
         onOpenSmartPlaylists: () => unawaited(showSmartPlaylists(context,
-            library: () =>
+            library: () => smartLibraryCandidates(
                 widget.library ?? AudioLibrary.instance.audioCollection,
-            libraryChanges: AudioLibrary.changes)),
+                tree: _tree),
+            libraryChanges: Listenable.merge([
+              AudioLibrary.changes,
+              playlistChanges,
+              playlistUiRevision,
+            ]))),
         onExportM3u: current == null
             ? null
             : () => unawaited(

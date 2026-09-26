@@ -179,6 +179,7 @@ void main() {
           onClose: () => calls.add('close'),
           onDragStart: () => calls.add('drag'),
         ));
+    expect(tester.widget<IconButton>(_key('compact-close')).tooltip, '关闭窗口');
     for (final name in [
       'previous',
       'play-pause',

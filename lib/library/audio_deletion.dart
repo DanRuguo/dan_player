@@ -10,6 +10,7 @@ import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/online/song_comment_association.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
+import 'package:dan_player/play_service/waveform_service.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/utils.dart';
 import 'package:path/path.dart' as path_util;
@@ -130,7 +131,26 @@ class AudioDeletionService {
     }
 
     try {
-      await File(audioPath).delete();
+      await WaveformService.shared.withSourceReleased(audioPath, () async {
+        // Native prescan can take time to release its read handle. Recheck
+        // the revision after draining so an external replacement is not
+        // deleted using the earlier menu confirmation.
+        final latestType =
+            await FileSystemEntity.type(audioPath, followLinks: false);
+        final latest = await File(audioPath).stat();
+        if (latestType != FileSystemEntityType.file ||
+            latest.size != currentStat.size ||
+            latest.modified != currentStat.modified) {
+          throw const AudioDeletionException(
+              '歌曲文件在确认期间已被其他程序更改。请刷新曲库并重新确认后再删除。');
+        }
+        return File(audioPath).delete();
+      });
+    } on AudioDeletionException {
+      if (playbackTicket != null) {
+        playback?.cancelAudioDeletion(playbackTicket);
+      }
+      rethrow;
     } on FileSystemException catch (error, trace) {
       if (playbackTicket != null) {
         playback?.cancelAudioDeletion(playbackTicket);
@@ -146,6 +166,8 @@ class AudioDeletionService {
           stackTrace: trace);
       throw const AudioDeletionException('删除歌曲文件失败，请稍后重试。');
     }
+
+    await WaveformService.shared.invalidatePath(audioPath);
 
     // The irreversible operation succeeded. Keep every in-memory projection
     // accurate before awaiting persistence, so the UI and playback queue can

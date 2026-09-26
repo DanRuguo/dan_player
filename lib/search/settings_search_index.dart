@@ -36,7 +36,16 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("lyrics", "automatic", "自动联网", ["歌曲评论"]),
   SettingsSearchEntry("lyrics", "source", "首选歌词来源", ["本地", "联网"]),
   SettingsSearchEntry("lyrics", "batch", "批量缓存歌词", ["选择已导入的文件夹", "开始缓存"]),
-  SettingsSearchEntry("lyrics", "experience", "歌词体验", ["歌词弹性滚动", "桌面歌词竖排"]),
+  SettingsSearchEntry("lyrics", "experience", "歌词体验", [
+    "歌词弹性滚动",
+    "桌面歌词竖排",
+    "本地歌词多轨顺序",
+    "歌词页进度条",
+    "波形音柱密度",
+    "音频波形",
+    "默认样式",
+    "LDDC"
+  ]),
   SettingsSearchEntry(
       "lyrics", "platforms", "平台直连与公开 API", ["QQ音乐", "网易云音乐", "LRCLIB"]),
   SettingsSearchEntry(
@@ -60,14 +69,17 @@ const settingsSearchEntries = <SettingsSearchEntry>[
     "歌词动画",
     "交互反馈动画",
     "主题与封面渐变",
-    "播放时图标旋转"
+    "播放时图标旋转",
+    "滚动边缘拉伸"
   ]),
   SettingsSearchEntry("desktop", "desktop-lyrics", "桌面歌词显示", []),
   SettingsSearchEntry("desktop", "integration", "桌面与快捷键",
-      ["托盘菜单高斯模糊", "任务栏缩略图播放控制", "任务栏歌曲预览", "任务栏播放进度", "关闭窗口后在后台继续播放"]),
+      ["托盘菜单高斯模糊", "任务栏缩略图播放控制", "任务栏歌曲预览", "任务栏播放进度"]),
   SettingsSearchEntry("desktop", "shortcuts", "应用内快捷键", []),
   SettingsSearchEntry(
       "backup", "backup", "播放器备份与恢复", ["创建播放器备份", "从备份恢复", "密码加密"]),
+  SettingsSearchEntry("backup", "close-behavior", "退出后操作",
+      ["关闭窗口后在后台继续播放", "关闭窗口", "直接退出程序", "缩小到任务栏托盘", "Alt+F4"]),
   SettingsSearchEntry(
       "backup", "performance", "性能快捷设置", ["一键省电", "一键高性能", "恢复原设置"]),
   SettingsSearchEntry(

@@ -261,6 +261,11 @@ Future<List<Audio>> resolveCueEntries(
             ? original?.albumArtist
             : entry.albumArtist,
         composer: entry.composer ?? original?.composer,
+        // Slice metadata shares the indexed source's evidence. An unindexed or
+        // pending source must not masquerade as fully read, missing tags.
+        language: original?.language,
+        classificationVersion: original?.classificationVersion ?? 0,
+        metadataReadPending: original?.metadataReadPending ?? true,
         fileSizeBytes: stat.size,
         modifiedNanos: '${stat.modified.microsecondsSinceEpoch * 1000}'));
   }

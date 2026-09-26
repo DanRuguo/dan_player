@@ -188,8 +188,18 @@ class Lrc extends Lyric {
     final sidecar = File(path.setExtension(belongTo.path, '.lrc'));
     try {
       if (await sidecar.exists()) {
+        final file = await sidecar.open();
+        late List<int> bytes;
+        try {
+          bytes = await file.read(2 * 1024 * 1024 + 1);
+          if (bytes.length > 2 * 1024 * 1024) {
+            throw const FormatException('歌词文件过大');
+          }
+        } finally {
+          await file.close();
+        }
         final local = Lrc.fromLrcText(
-          decodeLyricText(await sidecar.readAsBytes()),
+          decodeLyricText(bytes),
           LrcSource.local,
           separator: separator,
         );
@@ -198,13 +208,18 @@ class Lrc extends Lyric {
     } catch (error) {
       LOGGER.w('[lyric] sidecar could not be read: $error');
     }
-    Lrc? lyric = await getLyricFromPath(path: belongTo.path).then((value) {
-      if (value == null) {
-        return null;
-      }
-      return Lrc.fromLrcText(value, LrcSource.local, separator: separator);
-    });
+    try {
+      Lrc? lyric = await getLyricFromPath(path: belongTo.path).then((value) {
+        if (value == null) {
+          return null;
+        }
+        return Lrc.fromLrcText(value, LrcSource.local, separator: separator);
+      });
 
-    return lyric;
+      return lyric;
+    } catch (error) {
+      LOGGER.w('[lyric] embedded lyrics could not be read: $error');
+      return null;
+    }
   }
 }

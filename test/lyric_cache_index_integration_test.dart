@@ -9,9 +9,11 @@ import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/lyric/online_lyric_cache.dart';
 import 'package:dan_player/lyric/lrc.dart';
+import 'package:dan_player/lyric/local_lyric_reader.dart';
 import 'package:dan_player/search/lyric_search_index.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as path;
 
 void main() {
   late Directory directory;
@@ -234,24 +236,58 @@ void main() {
   });
 
   test(
-      'batch skips a cache hit before reading media and reads a missing track only once',
+      'batch preserves online cache and refreshes added or modified local sidecars',
       () async {
     await cache.resolve(
         onlineLyricCacheIdentity(audios[0]), () async => lyric('existing'));
+    for (final audio in audios.take(2)) {
+      await File(audio.localFilePath).writeAsBytes([0]);
+    }
+    await File(path.setExtension(audios[0].path, '.lrc'))
+        .writeAsString('[00:02.000]online choice must survive');
+    await cacheLocalLyric(audios[1], lyric('old local'), cache: cache);
+    final sidecar = File(path.setExtension(audios[1].path, '.lrc'));
+    await sidecar.writeAsString('[00:02.000]newly added local');
     final localReads = <Audio>[];
     final batch = LyricCacheBatch(
         cache: cache,
         documents: documents,
-        scan: (_, __) async => audios.take(2).toList(),
+        scan: (_, __) async => audios.toList(),
         readLocal: (audio) async {
           localReads.add(audio);
-          return null;
+          return readLocalLyric(audio);
         },
         lookup: (_, __) async => lyric('fetched'));
     await batch.start(directory.path);
-    expect(localReads, [audios[1]]);
+    expect(localReads, [audios[1], audios[2]]);
     expect(batch.saved, 1);
-    expect(batch.skipped, 1);
+    expect(batch.skipped, 2);
+    expect(
+        ((await readCachedLocalLyric(audios[1], cache: cache))!.lines.single
+                as LrcLine)
+            .content,
+        'newly added local');
+    await sidecar.writeAsString('[00:02.000]modified external local lyric');
+    localReads.clear();
+    await batch.start(directory.path);
+    expect(localReads, [audios[1]]);
+    expect(batch.saved, 0);
+    expect(batch.skipped, 3);
+    expect(
+        ((await readCachedLocalLyric(audios[1], cache: cache))!.lines.single
+                as LrcLine)
+            .content,
+        'modified external local lyric');
+    expect(
+        ((await readCachedOnlineLyric(audios[0], cache: cache))!.lines.single
+                as LrcLine)
+            .content,
+        'existing');
+    await sidecar.delete();
+    localReads.clear();
+    await batch.start(directory.path);
+    expect(localReads, [audios[1]]);
+    expect(batch.skipped, 3, reason: 'saved local remains an offline fallback');
     batch.dispose();
   });
 

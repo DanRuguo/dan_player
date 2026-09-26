@@ -9,9 +9,13 @@ import 'package:crypto/crypto.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/utils.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path_util;
 
 List<Playlist> PLAYLISTS = [];
+/// Model consumers observe both successful reads and in-memory edits submitted
+/// for saving. A failed disk write must not hide the current visible tree.
+final playlistChanges = ValueNotifier<int>(0);
 final List<Map<String, dynamic>> playlistTrash = [];
 Future<void> _playlistWriteQueue = Future.value();
 Future<void>? _playlistReadOperation;
@@ -131,6 +135,7 @@ Future<void> _readPlaylists() async {
     _preservePlaylistBackup = recoveredFromBackup;
     _playlistReadError = null;
     _playlistSaveError = null;
+    playlistChanges.value++;
     if (recoveredFromBackup) LOGGER.w("[playlists] recovered from backup");
     if (migrated) {
       try {
@@ -188,6 +193,7 @@ Future<void> savePlaylists() {
   }
   final generation = ++_playlistSaveGeneration;
   _pendingPlaylistSnapshot = contents;
+  playlistChanges.value++;
   final result = _playlistWriteQueue.then((_) async {
     try {
       await _savePlaylistContents(contents);

@@ -14,6 +14,7 @@ import 'package:dan_player/library/library_mutation_gate.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/online/song_comment_association.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/waveform_service.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:path/path.dart' as path_util;
@@ -216,7 +217,15 @@ class AudioMetadataEditCoordinator {
       final oldPath = audio.path;
       final String newPath;
       try {
-        newPath = await _write(oldPath, edit);
+        newPath =
+            await WaveformService.shared.withSourceReleased(oldPath, () async {
+          final savedPath = await _write(oldPath, edit);
+          await WaveformService.shared.invalidatePath(oldPath);
+          if (savedPath != oldPath) {
+            await WaveformService.shared.invalidatePath(savedPath);
+          }
+          return savedPath;
+        });
       } catch (error) {
         throw AudioMetadataEditException.fromNative(error);
       }

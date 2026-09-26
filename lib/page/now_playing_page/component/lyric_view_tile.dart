@@ -69,8 +69,9 @@ class LyricViewTile extends StatelessWidget {
               if (syncLine.translation?.trim().isNotEmpty ?? false)
                 syncLine.translation!,
             ]),
-      if (line.romanization?.trim().isNotEmpty ?? false) line.romanization!,
     ];
+    final romanization =
+        line.romanization?.trim().isNotEmpty == true ? line.romanization : null;
     final blank = text.trim().isEmpty;
     final duration = switch (line) {
       LrcLine value => value.length,
@@ -86,7 +87,11 @@ class LyricViewTile extends StatelessWidget {
         );
     final label = blank
         ? ui("间奏")
-        : [syncLine == null ? parts.first : text, ...translations].join('\n');
+        : [
+            if (romanization != null) romanization,
+            syncLine == null ? parts.first : text,
+            ...translations
+          ].join('\n');
 
     // The hit region and semantics remain outside the smaller context-row
     // transform. Even a blank/distant line keeps its complete 48px touch area.
@@ -119,6 +124,30 @@ class LyricViewTile extends StatelessWidget {
                     scheme.primary,
                     activation,
                   )!;
+                  Widget auxiliary(String text, {required bool above}) =>
+                      Padding(
+                        key:
+                            above ? const ValueKey('lyric-romanization') : null,
+                        padding: EdgeInsets.only(
+                            top: above ? 0 : 4, bottom: above ? 4 : 0),
+                        child: _LyricParagraphSurface(
+                          child: BalancedLyricText(
+                            text,
+                            // Auxiliary tracks share the focus/return effect;
+                            // they never acquire the original word timeline.
+                            wordFollow: isMainLine && !reducedMotion,
+                            textAlign: textAlign,
+                            style: DefaultTextStyle.of(context).style.copyWith(
+                                  color: foreground.withValues(
+                                      alpha: highContrast
+                                          ? 1
+                                          : .78 + .12 * activation),
+                                  fontSize: controller.translationFontSize,
+                                  height: 1.35,
+                                ),
+                          ),
+                        ),
+                      );
                   final contents = Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -146,6 +175,8 @@ class LyricViewTile extends StatelessWidget {
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: crossAxisAlignment,
                               children: [
+                                if (romanization != null)
+                                  auxiliary(romanization, above: true),
                                 if (syncLine != null)
                                   _LyricParagraphSurface(
                                       child: _TimedLyricText(
@@ -178,30 +209,7 @@ class LyricViewTile extends StatelessWidget {
                                     ),
                                   )),
                                 for (final translation in translations)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: _LyricParagraphSurface(
-                                        child: BalancedLyricText(
-                                      translation,
-                                      // Translation and phonetics have no word
-                                      // timestamps. Share the lead/return of
-                                      // the main row without inventing them.
-                                      wordFollow: isMainLine && !reducedMotion,
-                                      textAlign: textAlign,
-                                      style: DefaultTextStyle.of(context)
-                                          .style
-                                          .copyWith(
-                                            color: foreground.withValues(
-                                              alpha: highContrast
-                                                  ? 1
-                                                  : .78 + .12 * activation,
-                                            ),
-                                            fontSize:
-                                                controller.translationFontSize,
-                                            height: 1.35,
-                                          ),
-                                    )),
-                                  ),
+                                  auxiliary(translation, above: false),
                               ],
                             ),
                     ),

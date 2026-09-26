@@ -19,6 +19,9 @@ import 'package:dan_player/component/playlist_exchange_dialog.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/smart_playlist.dart';
+import 'package:dan_player/library/smart_library_candidates.dart';
+import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -76,8 +79,8 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
   final _historyDays = TextEditingController(text: '30');
   final _resultLimit = TextEditingController();
   final _scroll = ScrollController();
-  late final Listenable _libraryChanges =
-      widget.libraryChanges ?? AudioLibrary.changes;
+  late final Listenable _libraryChanges = widget.libraryChanges ??
+      Listenable.merge([AudioLibrary.changes, playlistChanges]);
   late final PlaybackStatistics _statistics =
       widget.statistics ?? PlaybackStatistics.instance;
   Map<String, ({int count, int last})>? _observedHistory;
@@ -86,6 +89,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
   String? _editingId;
   bool _newRule = false;
   SmartCondition? _condition;
+  int _editorEpoch = 0;
   SmartPlaylistSort _sort = SmartPlaylistSort.name;
   SmartPlaylistHistory _history = SmartPlaylistHistory.any;
   List<Audio> _audios = [];
@@ -136,6 +140,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
     _historyRefresh?.cancel();
     _generation++;
     _condition = rule?.condition;
+    _editorEpoch++;
     _name.text = rule?.name ?? '';
     _query.text = rule?.query ?? '';
     _artist.text = rule?.artist ?? '';
@@ -180,6 +185,51 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
             },
             maxResults: 100),
         asNew: true);
+  }
+
+  void _duplicate(SmartPlaylist rule) {
+    if (_saving ||
+        _store == null ||
+        _rules.length >= SmartPlaylistStore.maxPlaylists) {
+      return;
+    }
+    // Copy the entire validated document, including nested exclusions and sort.
+    // Only the new identity/name differ; nothing is written before Save.
+    final suffix = ' (${ui('副本')})';
+    var name = '';
+    for (final grapheme in rule.name.characters) {
+      if (name.length + grapheme.length + suffix.length > 120) break;
+      name += grapheme;
+    }
+    _open(
+        SmartPlaylist.fromJson({
+          ...rule.toJson(),
+          'id': 'smart-${DateTime.now().microsecondsSinceEpoch}',
+          'name': '$name$suffix',
+        }),
+        asNew: true);
+  }
+
+  Future<void> _restoreSaved() async {
+    final rule = _rules.where((rule) => rule.id == _editingId).firstOrNull;
+    if (_saving || _newRule || rule == null) return;
+    final confirmed = await showAppDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+                scrollable: true,
+                title: AppDialogTitle(ui('恢复已保存规则')),
+                content: Text(ui('放弃当前未保存的修改，恢复上次保存的规则？')),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: Text(ui('取消'))),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: Text(ui('恢复'))),
+                ]));
+    if (mounted && confirmed == true && !_saving && _editingId == rule.id) {
+      _open(rule);
+    }
   }
 
   void _back() {
@@ -300,8 +350,8 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
       return;
     }
     try {
-      final library = List<Audio>.of(
-          widget.library?.call() ?? AudioLibrary.instance.audioCollection);
+      final library = List<Audio>.of(widget.library?.call() ??
+          smartLibraryCandidates(AudioLibrary.instance.audioCollection));
       _observedHistory = draft.usesPlaybackHistory ? _readHistory() : null;
       final results = await (widget.evaluate?.call(draft, library) ??
           draft.evaluate(library,
@@ -476,7 +526,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                       elevation: 3,
                       dropdownColor:
                           Theme.of(context).colorScheme.surfaceContainerLow,
-                      key: ValueKey('smart-history-$_editingId'),
+                      key: ValueKey('smart-history-$_editingId-$_editorEpoch'),
                       initialValue: _history,
                       isExpanded: true,
                       itemHeight: null,
@@ -506,7 +556,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                       elevation: 3,
                       dropdownColor:
                           Theme.of(context).colorScheme.surfaceContainerLow,
-                      key: ValueKey('smart-sort-$_editingId'),
+                      key: ValueKey('smart-sort-$_editingId-$_editorEpoch'),
                       initialValue: _sort,
                       isExpanded: true,
                       itemHeight: null,
@@ -535,14 +585,18 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                   SizedBox(
                       width: constraints.maxWidth,
                       child: SmartConditionEditor(
+                          key: ValueKey('smart-conditions-$_editorEpoch'),
                           value: _condition ?? const SmartCondition.group([]),
                           onChanged: (v) {
                             setState(() => _condition = v);
                             _queuePreview();
                           })),
+                  Text(ui(
+                      '分组条件支持标签、音质、文件大小、评分和播放次数；数值排除不匹配未知数据，缺失标签条件不把等待补读当作缺失。')),
+                  Text(ui('文件大小使用扫描时的字节快照；CUE 分轨使用来源文件大小。语言按原始标签匹配，不推断语种。')),
                   if (_draft(forPreview: true).usesPlaybackHistory)
                     Text(ui(
-                        '使用本机听歌记录；相同标题、歌手、专辑及时长的副本共享记录。天数按最近 N×24 小时计算，未播放也包含在“最近未播放”中。')),
+                        '使用本机听歌记录；不同文件和 CUE 分轨分别记录。天数按最近 N×24 小时计算，历史归属不明的歌曲不会算作零次播放。')),
                 ]);
               }),
             ),
@@ -676,7 +730,9 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                               _saving ? null : () => Navigator.pop(context),
                           icon: const Icon(Symbols.close))),
                   const SizedBox(height: 8),
-                  if (_saving) const LinearProgressIndicator(),
+                  if (_saving)
+                    const SettingsBusyIndicator.linear(
+                        key: ValueKey('smart-saving-busy')),
                   Flexible(
                       child: AbsorbPointer(
                           absorbing: _saving,
@@ -774,8 +830,11 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                                         const Padding(
                                             padding: EdgeInsets.all(24),
                                             child: Center(
-                                                child:
-                                                    CircularProgressIndicator())),
+                                                child: SettingsBusyIndicator
+                                                    .circular(
+                                                        key: ValueKey(
+                                                            'smart-loading-busy'),
+                                                        size: 36))),
                                       if (!_loading && _store == null)
                                         TextButton(
                                             onPressed: _load,
@@ -791,7 +850,9 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                                     ] else ...[
                                       _fields(),
                                       if (_previewing)
-                                        const LinearProgressIndicator(),
+                                        const SettingsBusyIndicator.linear(
+                                            key:
+                                                ValueKey('smart-preview-busy')),
                                       if (_previewError != null) ...[
                                         Text(ui(_previewError!),
                                             style: TextStyle(
@@ -831,12 +892,28 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                                           leading:
                                               const Icon(Symbols.auto_awesome),
                                           onTap: () => _open(rule),
-                                          trailing: IconButton(
-                                              tooltip: ui('删除智能歌单规则'),
-                                              onPressed: () =>
-                                                  unawaited(_remove(rule)),
-                                              icon:
-                                                  const Icon(Symbols.delete)));
+                                          trailing: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                IconButton(
+                                                    key: ValueKey(
+                                                        'smart-copy-${rule.id}'),
+                                                    tooltip: ui('复制智能歌单规则'),
+                                                    onPressed: _rules.length >=
+                                                            SmartPlaylistStore
+                                                                .maxPlaylists
+                                                        ? null
+                                                        : () =>
+                                                            _duplicate(rule),
+                                                    icon: const Icon(
+                                                        Symbols.content_copy)),
+                                                IconButton(
+                                                    tooltip: ui('删除智能歌单规则'),
+                                                    onPressed: () => unawaited(
+                                                        _remove(rule)),
+                                                    icon: const Icon(
+                                                        Symbols.delete)),
+                                              ]));
                                     })
                               else if (!_previewing && _previewError == null)
                                 SliverList.builder(
@@ -871,6 +948,14 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                     Padding(
                         padding: const EdgeInsets.only(top: 12),
                         child: AppDialogActions(children: [
+                          if (!_newRule)
+                            TextButton.icon(
+                                key: const ValueKey('smart-restore-saved'),
+                                onPressed: _saving
+                                    ? null
+                                    : () => unawaited(_restoreSaved()),
+                                icon: const Icon(Symbols.restore),
+                                label: Text(ui('恢复已保存规则'))),
                           TextButton(
                               onPressed: _saving ? null : _back,
                               child: Text(ui('取消'))),
@@ -919,6 +1004,7 @@ String _sortLabel(SmartPlaylistSort sort) => switch (sort) {
       SmartPlaylistSort.recentlyPlayed => '最近播放优先',
       SmartPlaylistSort.mostPlayed => '播放次数从多到少',
       SmartPlaylistSort.leastPlayed => '播放次数从少到多',
+      SmartPlaylistSort.albumTrack => '专辑与音轨顺序',
     };
 
 String _historyLabel(SmartPlaylistHistory value) => switch (value) {

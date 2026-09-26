@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -49,10 +50,13 @@ class LibrarySearchField extends StatelessWidget {
                     padding: const EdgeInsets.all(14),
                     child: SizedBox.square(
                       dimension: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        semanticsLabel: ui('正在搜索'),
-                      ),
+                      child: AppMotion.enabled(context, MotionKind.feedback)
+                          ? CircularProgressIndicator(
+                              strokeWidth: 2,
+                              semanticsLabel: ui('正在搜索'),
+                            )
+                          : Icon(Symbols.hourglass_top,
+                              size: 20, semanticLabel: ui('正在搜索')),
                     ),
                   )
                 else

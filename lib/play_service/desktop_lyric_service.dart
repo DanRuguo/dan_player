@@ -704,6 +704,7 @@ class DesktopLyricService extends ChangeNotifier {
         lengthMilliseconds: length.inMilliseconds,
         content: content,
         translation: translation,
+        romanization: line.romanization,
         words: words,
       ),
     );

@@ -1,5 +1,8 @@
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/rendering_preferences.dart';
+import 'package:dan_player/lyric/local_lyric_preferences.dart';
+import 'package:dan_player/page/now_playing_page/component/detail_waveform_track.dart';
+import 'package:dan_player/page/now_playing_page/component/detail_position_follow.dart';
 import 'dart:async';
 
 import 'package:desktop_lyric/ui_language.dart';
@@ -9,8 +12,9 @@ import 'package:flutter/material.dart';
 /// A rounded vertical handle keeps the timeline light without using a dot.
 /// Its visual size changes; Slider retains its full 48px interaction surface.
 class DetailProgressHandleShape extends SliderComponentShape {
-  const DetailProgressHandleShape({required this.emphasis});
+  const DetailProgressHandleShape({required this.emphasis, this.resolveHeight});
   final double emphasis;
+  final double Function(double target)? resolveHeight;
 
   double get width => 4 + 2 * emphasis;
   double get height => 18 + 3 * emphasis;
@@ -35,9 +39,15 @@ class DetailProgressHandleShape extends SliderComponentShape {
   }) {
     final color = Color.lerp(sliderTheme.disabledThumbColor,
         sliderTheme.thumbColor, enableAnimation.value)!;
+    final track = sliderTheme.trackShape;
+    final targetHeight = track is DetailWaveformTrackShape
+        ? track.handleHeight(emphasis) ?? height
+        : height;
+    final paintedHeight = resolveHeight?.call(targetHeight) ?? targetHeight;
     context.canvas.drawRRect(
         RRect.fromRectAndRadius(
-            Rect.fromCenter(center: center, width: width, height: height),
+            Rect.fromCenter(
+                center: center, width: width, height: paintedHeight),
             const Radius.circular(3)),
         Paint()..color = color);
   }
@@ -55,6 +65,9 @@ class DetailProgressSlider extends StatefulWidget {
     required this.onSeek,
     this.enabled = true,
     this.hidden,
+    this.waveform,
+    this.waveformTooltip,
+    this.waveformDensity = WaveformBarDensity.automatic,
   });
 
   final Stream<double> positions;
@@ -65,13 +78,34 @@ class DetailProgressSlider extends StatefulWidget {
   final bool enabled;
   final ValueListenable<bool>? hidden;
 
+  /// Decoded 0..1 peaks, bounded to 512 points by the track shape.
+  final List<double>? waveform;
+
+  /// Availability or source information, shown without changing seek labels.
+  final String? waveformTooltip;
+  final WaveformBarDensity waveformDensity;
+
   @override
   State<DetailProgressSlider> createState() => _DetailProgressSliderState();
 }
 
 class _DetailProgressSliderState extends State<DetailProgressSlider>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _smoothing;
+  DetailPositionFollow? _follow;
+  late final AnimationController _waveformTransition;
+  late final AnimationController _handleTransition;
+  double _handleFrom = 18, _handleTo = 18, _handlePaintedHeight = 18;
+  bool _handleJumpPending = false, _handleTweenActive = false;
+  int _handleGeneration = 0;
+  double? _handleMorphAnchor, _handleMorphCorrection;
+  WaveformTrackVisual _waveformFrom = const WaveformTrackVisual.line();
+  WaveformTrackVisual _waveformTo = const WaveformTrackVisual.line();
+  WaveformTrackSource? _waveformTarget;
+  final _waveformSources = <WaveformBarDensity, WaveformTrackSource>{};
+  List<double>? _rawWaveform;
+  List<double> _waveformPeaks = const [];
+  bool _waveformInitialized = false;
   late final ValueNotifier<double> _display;
   final _elapsed = ValueNotifier<int>(0);
   StreamSubscription<double>? _subscription;
@@ -86,7 +120,6 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   bool _dragging = false;
   Object? _dragIdentity;
   int? _pointer;
-  double _from = 0;
   double _target = 0;
   int _generation = 0;
 
@@ -113,12 +146,26 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _elapsed.value = _display.value.floor();
     _display.addListener(() => _elapsed.value = _display.value.floor());
     _target = _display.value;
-    _smoothing =
-        AnimationController(vsync: this, duration: AppMotion.followSample)
-          ..addListener(() {
-            _display.value =
-                _safe(_from + (_target - _from) * _smoothing.value);
-          });
+    _smoothing = AnimationController.unbounded(vsync: this)
+      ..addListener(() {
+        _display.value = _safe(_smoothing.value);
+      });
+    _waveformTransition = AnimationController(
+        vsync: this, value: 1, duration: const Duration(milliseconds: 240))
+      ..addListener(() {
+        if (mounted) setState(() {});
+      })
+      ..addStatusListener((status) {
+        if (status == AnimationStatus.completed) _waveformFrom = _waveformTo;
+      });
+    _handleTransition = AnimationController(
+        vsync: this, value: 1, duration: const Duration(milliseconds: 80))
+      ..addListener(() {
+        if (mounted) setState(() {});
+      })
+      ..addStatusListener((status) {
+        if (status == AnimationStatus.completed) _handleTweenActive = false;
+      });
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     widget.hidden?.addListener(_syncActivity);
@@ -138,6 +185,10 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _treeVisible = TickerMode.valuesOf(context).enabled;
     _mediaReduced = !AppMotion.enabled(context, MotionKind.feedback);
     _syncActivity();
+    if (!_waveformInitialized) {
+      _waveformInitialized = true;
+      _updateWaveform(clearPrevious: true);
+    }
   }
 
   @override
@@ -162,6 +213,99 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
       _active = false;
     }
     _syncActivity();
+    _updateWaveform(
+        clearPrevious: oldWidget.trackIdentity != widget.trackIdentity);
+  }
+
+  WaveformTrackVisual get _waveformVisual => WaveformTrackVisual.interpolate(
+      _waveformFrom,
+      _waveformTo,
+      Curves.easeInOutCubic.transform(_waveformTransition.value));
+
+  void _updateWaveform({bool clearPrevious = false}) {
+    final raw = widget.waveform;
+    if (clearPrevious ||
+        (!identical(raw, _rawWaveform) && !listEquals(raw, _rawWaveform))) {
+      _waveformPeaks = boundedWaveformPeaks(raw ?? const []);
+      _waveformSources.clear();
+    }
+    _rawWaveform = raw;
+    final target = _waveformPeaks.isEmpty
+        ? null
+        : _waveformSources.putIfAbsent(widget.waveformDensity,
+            () => WaveformTrackSource(_waveformPeaks, widget.waveformDensity));
+    if (!clearPrevious && identical(target, _waveformTarget)) return;
+    _handleGeneration++;
+    _handleMorphAnchor =
+        !clearPrevious && _handleTweenActive ? _handlePaintedHeight : null;
+    _handleMorphCorrection = null;
+    _handleTransition.stop();
+    _handleJumpPending = false;
+    _handleTweenActive = false;
+    if (clearPrevious) _handlePaintedHeight = 18;
+    final current =
+        clearPrevious ? const WaveformTrackVisual.line() : _waveformVisual;
+    _waveformTransition.stop();
+    _waveformFrom = current;
+    _waveformTarget = target;
+    _waveformTo = target == null
+        ? const WaveformTrackVisual.line()
+        : WaveformTrackVisual.wave(target);
+    if (!_active || _reduced || (target == null && current.layers.isEmpty)) {
+      _waveformTransition.value = 1;
+    } else {
+      _waveformTransition.forward(from: 0);
+    }
+  }
+
+  // The painter supplies the exact bucket/geometry height. A large pointer or
+  // seek jump moves x immediately; only this short visual height tween follows.
+  double _resolveHandleHeight(double target) {
+    if (!_active || _reduced) {
+      _handleJumpPending = _handleTweenActive = false;
+      return _handlePaintedHeight = target;
+    }
+    if (_waveformTransition.isAnimating) {
+      final anchor = _handleMorphAnchor;
+      if (anchor != null) {
+        _handleMorphCorrection ??= anchor - target;
+        target += _handleMorphCorrection! *
+            (1 - Curves.easeInOutCubic.transform(_waveformTransition.value));
+      }
+      return _handlePaintedHeight = target;
+    }
+    if (_handleJumpPending) {
+      _handleJumpPending = false;
+      _handleFrom = _handlePaintedHeight;
+      _handleTo = target;
+      _handleTweenActive = (_handleTo - _handleFrom).abs() > .1;
+      if (_handleTweenActive) {
+        final generation = ++_handleGeneration;
+        // A controller cannot mark the tree dirty during paint. Start after
+        // this frame, retaining the old height at the already-updated x.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted &&
+              generation == _handleGeneration &&
+              _active &&
+              !_reduced) {
+            _handleTransition.forward(from: 0);
+          }
+        });
+        return _handlePaintedHeight = _handleFrom;
+      }
+    }
+    if (_handleTweenActive) {
+      return _handlePaintedHeight = _handleFrom +
+          (_handleTo - _handleFrom) *
+              Curves.easeOutCubic.transform(_handleTransition.value);
+    }
+    return _handlePaintedHeight = target;
+  }
+
+  void _markHandleJump(double previous, double next) {
+    if (_waveformPeaks.isNotEmpty && (next - previous).abs() > .75) {
+      _handleJumpPending = true;
+    }
   }
 
   void _detach() {
@@ -208,6 +352,16 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
       _smoothing.stop();
       _display.value = _target;
     }
+    if ((!_active || _reduced) && _waveformTransition.isAnimating) {
+      _waveformTransition.stop();
+      _waveformTransition.value = 1;
+    }
+    if (!_active || _reduced) {
+      _handleGeneration++;
+      _handleJumpPending = _handleTweenActive = false;
+      _handleTransition.stop();
+      _handleTransition.value = 1;
+    }
   }
 
   void _receive(double position, {bool immediate = false}) {
@@ -215,14 +369,23 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     final target = _safe(position);
     final delta = target - _display.value;
     if (target == _target && !immediate) return;
-    _smoothing.stop();
-    _from = _display.value;
+    _markHandleJump(_display.value, target);
     _target = target;
     // Seeks, loop jumps and track changes must never slide through old time.
     if (immediate || _reduced || !_active || delta <= 0 || delta > .75) {
+      _smoothing.stop();
       _display.value = target;
+    } else if (_smoothing.isAnimating) {
+      _follow!.retarget(
+          from: _display.value,
+          target: target,
+          elapsed: _smoothing.lastElapsedDuration ?? Duration.zero);
     } else {
-      _smoothing.forward(from: 0);
+      _follow = DetailPositionFollow(
+          from: _display.value,
+          target: target,
+          duration: AppMotion.followSample);
+      _smoothing.animateWith(_follow!);
     }
   }
 
@@ -242,6 +405,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _smoothing.stop();
     _dragIdentity = widget.trackIdentity;
     setState(() => _dragging = true);
+    _markHandleJump(_display.value, _safe(value));
     _display.value = _safe(value);
   }
 
@@ -286,6 +450,8 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     widget.hidden?.removeListener(_syncActivity);
     _preferences?.removeListener(_syncActivity);
     _smoothing.dispose();
+    _waveformTransition.dispose();
+    _handleTransition.dispose();
     _display.dispose();
     _elapsed.dispose();
     super.dispose();
@@ -304,7 +470,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                 : 0.0;
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
     final motion = _active && !_reduced;
-    return RepaintBoundary(
+    final timeline = RepaintBoundary(
       child: Column(children: [
         MouseRegion(
           cursor:
@@ -326,8 +492,12 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                 builder: (context, emphasis, child) => SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 4 + emphasis,
-                    trackShape: const RoundedRectSliderTrackShape(),
-                    thumbShape: DetailProgressHandleShape(emphasis: emphasis),
+                    trackShape: _waveformVisual.layers.isEmpty
+                        ? const RoundedRectSliderTrackShape()
+                        : DetailWaveformTrackShape.visual(_waveformVisual),
+                    thumbShape: DetailProgressHandleShape(
+                        emphasis: emphasis,
+                        resolveHeight: _resolveHandleHeight),
                     overlayShape: SliderComponentShape.noOverlay,
                     activeTrackColor: scheme.primary,
                     inactiveTrackColor: highContrast
@@ -341,7 +511,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                   ),
                   child: child!,
                 ),
-                child: ValueListenableBuilder<double>(
+                child: _withWaveformTooltip(ValueListenableBuilder<double>(
                   valueListenable: _display,
                   builder: (context, position, _) => Semantics(
                     label: ui('播放进度'),
@@ -355,13 +525,16 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                       onChangeStart: _enabled ? _begin : null,
                       onChanged: _enabled
                           ? (value) {
-                              if (_dragging) _display.value = _safe(value);
+                              if (_dragging) {
+                                _markHandleJump(_display.value, _safe(value));
+                                _display.value = _safe(value);
+                              }
                             }
                           : null,
                       onChangeEnd: _enabled ? _finish : null,
                     ),
                   ),
-                ),
+                )),
               ),
             ),
           ),
@@ -393,5 +566,14 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
         ),
       ]),
     );
+    // Native hiding does not necessarily insert an ancestor TickerMode.
+    // Mute stock Slider enable/hover animations as well as our finite tickers.
+    return TickerMode(enabled: _active, child: timeline);
+  }
+
+  Widget _withWaveformTooltip(Widget child) {
+    final message = widget.waveformTooltip;
+    if (message == null || message.trim().isEmpty) return child;
+    return Tooltip(message: message, excludeFromSemantics: true, child: child);
   }
 }

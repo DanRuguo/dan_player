@@ -147,6 +147,44 @@ void main() {
     expect(saved?.text, '你好\n世界');
   });
 
+  for (final stage in [TapStage.lines, TapStage.words]) {
+    testWidgets(
+        'tap ${stage.name} places pronunciation before original and translation',
+        (tester) async {
+      final boundary = GlobalKey();
+      await pumpEditor(tester, fixture(stage), boundary: boundary);
+      final roman = tester
+          .getRect(find.byKey(const ValueKey('tap-current-romanization')));
+      final original =
+          tester.getRect(find.byKey(const ValueKey('tap-current-original')));
+      final translated =
+          tester.getRect(find.byKey(const ValueKey('tap-current-translation')));
+      expect(roman.bottom, lessThanOrEqualTo(original.top));
+      expect(original.bottom, lessThanOrEqualTo(translated.top));
+      expect(roman.center.dx, closeTo(original.center.dx, 1));
+      expect(tester.takeException(), isNull);
+      const output = String.fromEnvironment('DAN_ROMAN_RENDER');
+      if (output.isNotEmpty) {
+        await tester.runAsync(() async {
+          final image = await (boundary.currentContext!.findRenderObject()!
+                  as RenderRepaintBoundary)
+              .toImage();
+          try {
+            final bytes =
+                (await image.toByteData(format: drawing.ImageByteFormat.png))!
+                    .buffer
+                    .asUint8List();
+            final file = File('$output/tap-${stage.name}.png');
+            await file.parent.create(recursive: true);
+            await file.writeAsBytes(bytes, flush: true);
+          } finally {
+            image.dispose();
+          }
+        });
+      }
+    });
+  }
+
   testWidgets('empty online result keeps the text being edited',
       (tester) async {
     final session = TapLyricSession()..text = '正在编辑的正文';

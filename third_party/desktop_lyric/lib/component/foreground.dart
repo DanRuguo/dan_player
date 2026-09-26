@@ -49,7 +49,12 @@ class _DesktopLyricForegroundState extends State<DesktopLyricForeground> {
     return ChangeNotifierProvider.value(
       value: texts,
       child: ListenableBuilder(
-        listenable: Listenable.merge([source.vertical, texts]),
+        listenable: Listenable.merge([
+          source.vertical,
+          texts,
+          source.detailedLyricLine,
+          source.lyricLine
+        ]),
         builder: (context, _) => LayoutBuilder(builder: (context, constraints) {
           if (texts.value.taskbarMode) {
             final height = math.max(
@@ -89,23 +94,26 @@ class _DesktopLyricForegroundState extends State<DesktopLyricForeground> {
           // prevents the outgoing large-text metadata from being squeezed and
           // also avoids changing HWND minimum geometry on each hover change.
           final headerHeight = math.max(controlsHeight, infoHeight);
+          // Reserve the established translation slot and an additional slot
+          // when pronunciation is present. Scale individual font sizes before
+          // adding them: nonlinear accessibility scalers are not additive.
+          final auxiliaryCount =
+              source.detailedLyricLine.value?.romanization?.trim().isNotEmpty ==
+                      true
+                  ? 2
+                  : 1;
+          final trackFontHeight = scaler.scale(texts.lyricFontSize) +
+              auxiliaryCount * scaler.scale(texts.translationFontSize);
           final minimum = Size(
             vertical
                 ? math.max(
-                    200,
-                    32 +
-                        scaler.scale(texts.lyricFontSize +
-                                texts.translationFontSize) *
-                            1.3)
+                    200, 16 + auxiliaryCount * 16 + trackFontHeight * 1.3)
                 : 320,
             headerHeight +
                 24 +
                 (vertical
                     ? math.max(96, scaler.scale(texts.lyricFontSize) * 2.6)
-                    : scaler.scale(texts.lyricFontSize +
-                                texts.translationFontSize) *
-                            1.3 +
-                        4),
+                    : trackFontHeight * 1.3 + auxiliaryCount * 4),
           );
           final identity = (minimum, vertical, window);
           if (_minimumIdentity != identity) {

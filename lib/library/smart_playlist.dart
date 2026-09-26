@@ -19,6 +19,7 @@ enum SmartPlaylistSort {
   recentlyPlayed,
   mostPlayed,
   leastPlayed,
+  albumTrack,
 }
 
 enum SmartPlaylistHistory { any, played, unplayed, recent, notRecent }
@@ -55,13 +56,14 @@ class SmartPlaylist {
       history != SmartPlaylistHistory.any ||
       sort == SmartPlaylistSort.recentlyPlayed ||
       sort == SmartPlaylistSort.mostPlayed ||
-      sort == SmartPlaylistSort.leastPlayed;
+      sort == SmartPlaylistSort.leastPlayed ||
+      (condition?.usesPlaybackHistory ?? false);
 
   String? validate() {
     try {
       if (condition != null) SmartCondition.fromJson(condition!.toJson());
     } catch (_) {
-      return '分组条件无效：最多两层、32 条条件，请检查日期和取值。';
+      return '分组条件无效：最多两层、32 条条件，请检查日期、数值和文件夹路径。';
     }
     if (id.isEmpty ||
         id.length > 100 ||
@@ -150,7 +152,6 @@ class SmartPlaylist {
     if (failure != null) throw FormatException(failure);
     if (shouldCancel?.call() == true) return const [];
     final referencedPlaylists = <String>{};
-    var needsPersonalData = false;
     void collectDependencies(SmartCondition value) {
       if (value.isGroup) {
         for (final child in value.children) {
@@ -158,8 +159,6 @@ class SmartPlaylist {
         }
       } else if (value.field == SmartField.playlist) {
         referencedPlaylists.add(value.value);
-      } else {
-        needsPersonalData = true;
       }
     }
 
@@ -168,7 +167,7 @@ class SmartPlaylist {
     // personal rule does not need every playlist subtree expanded. Apart from
     // avoiding unrelated disk failures, this bounds preparation to the data
     // actually referenced by the (possibly nested or excluded) conditions.
-    final personal = !needsPersonalData
+    final personal = !(condition?.usesPersonalData ?? false)
         ? <String, PersonalTrack>{}
         : await (await PersonalLibrary.instance).snapshot();
     if (shouldCancel?.call() == true) return const [];
@@ -193,6 +192,9 @@ class SmartPlaylist {
         .where((s) => s.isNotEmpty)
         .toSet();
     final output = <Audio>[];
+    // Validate the whole tree first, then prepare once; a short-circuited branch
+    // can never hide invalid serialized fields or out-of-range input.
+    final preparedCondition = condition?.prepare();
     final snapshot = List<Audio>.of(library);
     // Capture immutable scalar history before the first yield. A track start
     // or history reset during evaluation must not mix two different snapshots.
@@ -223,13 +225,16 @@ class SmartPlaylist {
       }
       final audio = snapshot[index];
       if (!audio.isLocal) continue;
-      if (condition != null &&
-          condition!.evaluate(audio.stableTrackId,
-                  personal[audio.stableTrackId], members) !=
-              RuleTruth.yes) continue;
       final uncertain = recorder != null &&
           uncertainHistory.contains(recorder.identityFor(audio));
       final playback = playbackOf(audio);
+      if (preparedCondition != null &&
+          preparedCondition.evaluate(
+                  audio.stableTrackId, personal[audio.stableTrackId], members,
+                  audio: audio, playCount: uncertain ? null : playback.count) !=
+              RuleTruth.yes) {
+        continue;
+      }
       final played = playback.count > 0 || playback.last > 0;
       final recent = playback.last > 0 &&
           playback.last >= cutoff &&
@@ -284,6 +289,9 @@ class SmartPlaylist {
           SmartPlaylistSort.name => audio.displayTitle.toLowerCase(),
           SmartPlaylistSort.artist => audio.artist.toLowerCase(),
           SmartPlaylistSort.album => audio.album.toLowerCase(),
+          SmartPlaylistSort.albumTrack =>
+            '${audio.albumIdentity.title?.toLowerCase() ?? '\uffff'}\u0000'
+                '${audio.albumIdentity.owner?.toLowerCase() ?? '\uffff'}',
           _ => '',
         },
         number: switch (sort) {
@@ -291,6 +299,10 @@ class SmartPlaylist {
           SmartPlaylistSort.recentlyPlayed => -playback.last,
           SmartPlaylistSort.mostPlayed => -playback.count,
           SmartPlaylistSort.leastPlayed => playback.count,
+          SmartPlaylistSort.albumTrack =>
+            (audio.cueTrack?.number ?? audio.track) > 0
+                ? audio.cueTrack?.number ?? audio.track
+                : 0x7fffffff,
           _ => audio.duration,
         },
         tie: audio.path.toLowerCase()
@@ -298,9 +310,11 @@ class SmartPlaylist {
     }
     final numeric = sort != SmartPlaylistSort.name &&
         sort != SmartPlaylistSort.artist &&
-        sort != SmartPlaylistSort.album;
+        sort != SmartPlaylistSort.album &&
+        sort != SmartPlaylistSort.albumTrack;
     // Send only immutable scalar keys, never Audio objects or their caches.
-    final order = await _sortSmartKeysInBackground(keys, numeric);
+    final order = await _sortSmartKeysInBackground(keys, numeric,
+        albumTrack: sort == SmartPlaylistSort.albumTrack);
     if (shouldCancel?.call() == true) return const [];
     return List.unmodifiable([
       for (final index in maxResults == null ? order : order.take(maxResults!))
@@ -313,14 +327,20 @@ typedef _SmartSortKey = ({int index, String text, int number, String tie});
 typedef _SmartPlayback = ({int count, int last});
 
 Future<List<int>> _sortSmartKeysInBackground(
-        List<_SmartSortKey> keys, bool numeric) =>
-    Isolate.run(() => _sortSmartKeys(keys, numeric));
+        List<_SmartSortKey> keys, bool numeric,
+        {bool albumTrack = false}) =>
+    Isolate.run(() => _sortSmartKeys(keys, numeric, albumTrack: albumTrack));
 
-List<int> _sortSmartKeys(List<_SmartSortKey> keys, bool numeric) {
+List<int> _sortSmartKeys(List<_SmartSortKey> keys, bool numeric,
+    {bool albumTrack = false}) {
   keys.sort((a, b) {
     final value =
         numeric ? a.number.compareTo(b.number) : a.text.compareTo(b.text);
     if (value != 0) return value;
+    if (albumTrack) {
+      final track = a.number.compareTo(b.number);
+      if (track != 0) return track;
+    }
     final tie = a.tie.compareTo(b.tie);
     return tie != 0 ? tie : a.index.compareTo(b.index);
   });
@@ -373,12 +393,12 @@ class SmartPlaylistStore {
           throw const FormatException('Smart playlist file too large');
         }
         final json = jsonDecode(utf8.decode(bytes));
-        if (json is Map && json['version'] is int && json['version'] > 2) {
+        if (json is Map && json['version'] is int && json['version'] > 4) {
           throw UnsupportedError(
               'Smart playlists were created by a newer version');
         }
         if (json is! Map ||
-            ![1, 2].contains(json['version']) ||
+            ![1, 2, 3, 4].contains(json['version']) ||
             json['playlists'] is! List ||
             (json['playlists'] as List).length > maxPlaylists) {
           throw const FormatException('Invalid smart playlist file');
@@ -430,7 +450,9 @@ class SmartPlaylistStore {
 
   Future<void> _save(List<SmartPlaylist> next) async {
     final bytes = utf8.encode(jsonEncode({
-      'version': 2,
+      // Older readers must refuse these new fields rather than recover an old
+      // backup and overwrite rules they cannot understand.
+      'version': 4,
       'playlists': next.map((item) => item.toJson()).toList()
     }));
     if (bytes.length > maxBytes) {

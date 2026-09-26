@@ -10,6 +10,7 @@ import 'desktop_lyric_theme_transition.dart';
 import 'message.dart';
 import 'app_input_theme.dart';
 import 'app_scrollbar.dart';
+import 'app_motion.dart';
 import 'appearance_palette_bridge.dart';
 import 'component/desktop_lyric_appearance_options.dart';
 import 'component/desktop_lyric_taskbar_options.dart';
@@ -29,7 +30,8 @@ class DesktopLyricAppearanceApp extends StatelessWidget {
                   // newest palette, including forced frames while still hidden.
                   key: ValueKey(client.presentationId),
                   colors: client.theme.value,
-                  enabled: client.active,
+                  enabled: client.active &&
+                      desktopMotionPreferences.value.allows(MotionKind.theme),
                   builder: (context, colors, _) => _themedApp(context, colors),
                 )),
       );
@@ -90,13 +92,15 @@ class DesktopLyricAppearanceApp extends StatelessWidget {
       locale: uiLanguage.value.locale,
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: UiLanguage.values.map((e) => e.locale),
-      builder: (context, child) => TickerMode(
-          enabled: client.active,
-          child: ExcludeFocus(
-              excluding: !client.active,
-              child: UiLanguageTransition(
-                  key: ValueKey(client.presentationId),
-                  child: child ?? const SizedBox.shrink()))),
+      builder: (context, child) => MotionPreferencesScope(
+          preferences: desktopMotionPreferences.value,
+          child: TickerMode(
+              enabled: client.active,
+              child: ExcludeFocus(
+                  excluding: !client.active,
+                  child: UiLanguageTransition(
+                      key: ValueKey(client.presentationId),
+                      child: child ?? const SizedBox.shrink())))),
       home: CallbackShortcuts(
           bindings: {
             const SingleActivator(LogicalKeyboardKey.escape): () =>

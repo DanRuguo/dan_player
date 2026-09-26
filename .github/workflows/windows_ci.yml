@@ -101,10 +101,43 @@ jobs:
       - name: Analyze and test Dan Player
         if: steps.impact.outputs.profile != 'documents'
         run: |
+          # Legacy persistence tests mock path_provider and deliberately require
+          # no override. New real-storage tests use a separate disposable root.
+          $testTemp = Join-Path $env:GITHUB_WORKSPACE 'tool/ci-test-temp'
+          $null = New-Item -ItemType Directory -Path $testTemp -Force
+          $env:TEMP = $testTemp
+          $env:TMP = $testTemp
+          Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue
           flutter analyze --no-pub --no-fatal-infos lib test
           if ($LASTEXITCODE -ne 0) { throw 'Dan Player analysis failed.' }
           $impact = Get-Content -LiteralPath tool/ci-impact.json -Raw | ConvertFrom-Json
-          if ($impact.Profile -eq 'integration' -or $impact.AllDartTests) { flutter test --no-pub }
+          if ($impact.Profile -eq 'integration' -or $impact.AllDartTests) {
+            $storageTests = @(
+              'listening_calendar_storage_test.dart',
+              'local_lyric_discovery_test.dart',
+              'local_lyric_preferences_test.dart',
+              'local_lyric_settings_render_test.dart',
+              'search_cache_settings_render_test.dart',
+              'snapshot2_followup_data_test.dart'
+            )
+            $isolated = @(Get-ChildItem -LiteralPath test -Recurse -Filter '*_test.dart' | Where-Object { $_.Name -in $storageTests })
+            if ($isolated.Count -ne $storageTests.Count) { throw 'Missing isolated storage test.' }
+            $remaining = @(Get-ChildItem -LiteralPath test -Recurse -Filter '*_test.dart' | Where-Object { $_.Name -notin $storageTests } | ForEach-Object FullName)
+            # Explicit exclusions preserve all tests without exceeding Windows'
+            # command-line limit as the suite grows beyond 480 files.
+            for ($offset = 0; $offset -lt $remaining.Count; $offset += 50) {
+              $last = [Math]::Min($offset + 49, $remaining.Count - 1)
+              $batch = @($remaining[$offset..$last])
+              flutter test --no-pub @batch
+              if ($LASTEXITCODE -ne 0) { throw 'Dan Player tests failed.' }
+            }
+            $env:DAN_PLAYER_DATA_DIR = Join-Path (Split-Path -Parent $env:GITHUB_WORKSPACE) 'tool/qa-local/ci-storage'
+            $null = New-Item -ItemType Directory -Path $env:DAN_PLAYER_DATA_DIR -Force
+            try {
+              flutter test --no-pub --concurrency=1 @($isolated | ForEach-Object FullName)
+              if ($LASTEXITCODE -ne 0) { throw 'Isolated storage tests failed.' }
+            } finally { Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue }
+          }
           else {
             $tests = @($impact.Tests)
             if ($tests.Count -eq 0) { throw 'A business change must have explicit dependent test coverage.' }
@@ -222,6 +255,18 @@ jobs:
           Write-Host "Verified runtime: $($runtime.RuntimeDirectory)"
           $tempoRuntime = & .\scripts\prepare_bass_fx_runtime.ps1 -CacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass-fx')
           Write-Host "Verified tempo runtime: $($tempoRuntime.RuntimeDirectory)"
+
+      - name: Test real BASS waveform decoding with synthetic audio
+        if: steps.impact.outputs.profile == 'integration'
+        run: |
+          $nativeTemp = Join-Path $env:GITHUB_WORKSPACE 'tool/ci-native-waveform-temp'
+          $null = New-Item -ItemType Directory -Path $nativeTemp -Force
+          $env:TEMP = $nativeTemp
+          $env:TMP = $nativeTemp
+          $env:DAN_PLAYER_WAVEFORM_BASS_DLL = Join-Path $env:GITHUB_WORKSPACE 'tool/bass/runtime-x64-9pkg/BASS/bass.dll'
+          $env:DAN_PLAYER_WAVEFORM_VBR_FIXTURE = Join-Path $env:GITHUB_WORKSPACE 'test/fixtures/waveform-vbr-no-xing.mp3'
+          flutter test --no-pub --concurrency=1 test/waveform_native_test.dart test/waveform_review_native_snapshot2_test.dart
+          if ($LASTEXITCODE -ne 0) { throw 'Native waveform decoding tests failed.' }
 
       # This path never invokes the local signing script and has no private
       # certificate/secret configuration. It produces an unsigned CI artifact,

@@ -66,16 +66,6 @@ class _DesktopIntegrationSettingsState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SettingsSwitchTile(
-            controlKey: const ValueKey('close-to-tray-setting'),
-            icon: Icons.system_update_alt,
-            value: preferences.closeToTray,
-            onChanged: (value) => unawaited(
-                _change(_preferences.value.copyWith(closeToTray: value))),
-            title: Text(ui("关闭窗口后在后台继续播放")),
-            subtitle: Text(ui("隐藏到系统托盘；可从托盘恢复主窗、迷你播放器或真正退出。托盘不可用时正常退出。")),
-          ),
-          const SizedBox(height: 12),
-          SettingsSwitchTile(
             controlKey: const ValueKey('taskbar-controls-setting'),
             icon: Icons.skip_next_outlined,
             value: preferences.taskbarControls,

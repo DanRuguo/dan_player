@@ -1,6 +1,8 @@
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/app_horizontal_wheel_region.dart';
+import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/component/listening_tools_dialog.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
@@ -10,6 +12,9 @@ import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/page/now_playing_page/component/segment_loop_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/queue_stop_status.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/audio_sort.dart';
+import 'package:dan_player/play_service/queue_duration_summary.dart';
+import 'package:dan_player/play_service/queue_order.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
@@ -48,6 +53,7 @@ class CurrentPlaylistView extends StatefulWidget {
 class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   late PlaybackService playbackService;
   late final ScrollController scrollController;
+  final _toolbarScroll = ScrollController();
   int? _lastIndex;
   double _rowHeight = 0;
   bool _alignQueued = false;
@@ -97,6 +103,132 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         ui(removed == 0 ? '队列中没有重复歌曲' : '已移除 {0} 个重复项，可撤销整理', [removed]),
         context: context,
         kind: removed == 0 ? AppNoticeKind.info : AppNoticeKind.success);
+  }
+
+  void _trimQueue(bool before) {
+    final stopTarget = playbackService.queueStopBoundary.target;
+    final removed = playbackService.trimQueue(before: before);
+    if (removed > 0 &&
+        stopTarget != null &&
+        !playbackService.queueStopBoundary.active) {
+      showAppNotice(
+          ui(
+              playbackService.canUndoQueueEdit
+                  ? '已移除 {0} 个队列项，停止目标已取消；撤销不会恢复停止目标'
+                  : '已移除 {0} 个队列项，停止目标已取消；队列过大，无法撤销',
+              [removed]),
+          context: context,
+          kind: AppNoticeKind.info);
+      return;
+    }
+    if (removed > 0 && !playbackService.canUndoQueueEdit) return;
+    showAppNotice(
+        ui(removed == 0 ? '队列顺序无需改变' : '已移除 {0} 个队列项，可撤销整理', [removed]),
+        context: context,
+        kind: removed == 0 ? AppNoticeKind.info : AppNoticeKind.success);
+  }
+
+  void _orderUpcoming({AudioSortField? field, bool reverse = false}) {
+    final changed =
+        playbackService.orderUpcomingQueue(field: field, reverse: reverse);
+    if (changed && !playbackService.canUndoQueueEdit) return;
+    showAppNotice(ui(changed ? '已整理待播歌曲，可撤销整理' : '队列顺序无需改变'),
+        context: context,
+        kind: changed ? AppNoticeKind.success : AppNoticeKind.info);
+  }
+
+  void _arrangeUpcoming(UpcomingQueueOrder order) {
+    final changed = playbackService.arrangeUpcomingQueue(order);
+    if (changed && !playbackService.canUndoQueueEdit) return;
+    showAppNotice(ui(changed ? '已整理待播歌曲，可撤销整理' : '队列顺序无需改变'),
+        context: context,
+        kind: changed ? AppNoticeKind.success : AppNoticeKind.info);
+  }
+
+  Widget _organizeMenu(List<Audio> queue, int current) {
+    final editable = playbackService.canEditQueue && current >= 0;
+    final hasUpcoming = editable && queue.length - current - 1 > 1;
+    Widget label(String text) => SizedBox(
+        width: (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0),
+        child: Text(ui(text), softWrap: true));
+    return AppMenuAnchor(
+        menuChildren: [
+          MenuItemButton(
+              key: const ValueKey('queue-trim-before'),
+              onPressed:
+                  editable && current > 0 ? () => _trimQueue(true) : null,
+              leadingIcon: const Icon(Symbols.playlist_remove),
+              child: label('移除当前歌曲之前的队列项')),
+          MenuItemButton(
+              key: const ValueKey('queue-trim-after'),
+              onPressed: editable && current < queue.length - 1
+                  ? () => _trimQueue(false)
+                  : null,
+              leadingIcon: const Icon(Symbols.playlist_remove),
+              child: label('移除当前歌曲之后的队列项')),
+          const Divider(),
+          for (final arrangement in [false, true])
+            SubmenuButton(
+              key: ValueKey('queue-extra-${arrangement ? 'arrange' : 'sort'}'),
+              leadingIcon: Icon(arrangement ? Symbols.shuffle : Symbols.sort),
+              menuChildren: [
+                if (!arrangement) ...[
+                  for (final option in const [
+                    (AudioSortField.name, '待播歌曲按名称排序'),
+                    (AudioSortField.artist, '待播歌曲按艺术家排序'),
+                    (AudioSortField.album, '待播歌曲按专辑排序'),
+                    (AudioSortField.duration, '待播歌曲按时长排序'),
+                  ])
+                    MenuItemButton(
+                        key: ValueKey('queue-sort-${option.$1.name}'),
+                        onPressed: hasUpcoming
+                            ? () => _orderUpcoming(field: option.$1)
+                            : null,
+                        leadingIcon: const Icon(Symbols.sort),
+                        child: label(option.$2)),
+                  const Divider(),
+                ],
+                for (final order in UpcomingQueueOrder.values
+                    .where((order) => order.arrangement == arrangement))
+                  MenuItemButton(
+                    key: ValueKey('queue-order-${order.name}'),
+                    onPressed:
+                        hasUpcoming ? () => _arrangeUpcoming(order) : null,
+                    leadingIcon:
+                        Icon(arrangement ? Symbols.shuffle : Symbols.sort),
+                    child: Tooltip(
+                      message: ui(order == UpcomingQueueOrder.added
+                          ? '本地使用文件创建时间；联网使用加入乐库时间。'
+                          : audioSortMissingValueNote),
+                      child: label(order.label),
+                    ),
+                  ),
+                if (!arrangement) ...[
+                  const Divider(),
+                  MenuItemButton(
+                      key: const ValueKey('queue-reverse-upcoming'),
+                      onPressed: hasUpcoming
+                          ? () => _orderUpcoming(reverse: true)
+                          : null,
+                      leadingIcon: const Icon(Symbols.swap_vert),
+                      child: label('反转待播歌曲顺序')),
+                ],
+              ],
+              child: label(arrangement ? '待播洗牌与编排' : '待播排序'),
+            ),
+        ],
+        builder: (context, controller, child) => IconButton(
+            key: const ValueKey('queue-organize'),
+            tooltip: widget.showTitle
+                ? ui('整理队列（保留当前播放，可撤销）')
+                : '${ui('整理队列（保留当前播放，可撤销）')}\n'
+                    '${current < 0 ? 0 : current + 1} / ${queue.length} · '
+                    '${_queueDurationTooltip(queue, current)}',
+            onPressed: editable
+                ? () =>
+                    controller.isOpen ? controller.close() : controller.open()
+                : null,
+            icon: const Icon(Symbols.sort)));
   }
 
   KeyEventResult _queueShortcut(FocusNode node, KeyEvent event) {
@@ -266,6 +398,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
             playbackService.playMode,
             playbackService.queueStopBoundary,
             OnlineLibrary.instance,
+            AudioLibrary.changes,
           ]),
           builder: (context, _) {
             final queue = playbackService.playlist.value;
@@ -286,14 +419,16 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                 if (widget.showTitle)
                   _PlaylistHeader(
                     count: queue.length,
+                    queue: queue,
                     immersive: widget.immersive,
                     currentIndex: currentIndex,
                   ),
                 Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
+                    child: _QueueToolbarRail(
+                        controller: _toolbarScroll,
                         child: Row(spacing: 4, children: [
+                          _organizeMenu(queue, currentIndex),
                           IconButton(
                               tooltip: ui('收听会话'),
                               onPressed: () =>
@@ -359,16 +494,15 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                   ? null
                                   : playbackService.stopAfterQueueRound,
                               icon: const Icon(Symbols.stop_circle)),
-                          Tooltip(
-                              message: ui('A-B 片段循环'),
-                              child: TextButton.icon(
-                                  key: const ValueKey('queue-segment-loop'),
-                                  onPressed: () => showSegmentLoopDialog(
-                                      context, playbackService),
-                                  icon: Icon(playbackService.segmentLoop.enabled
-                                      ? Symbols.repeat_on
-                                      : Symbols.repeat),
-                                  label: const Text('A-B'))),
+                          IconButton(
+                            tooltip: ui('A-B 片段循环'),
+                            key: const ValueKey('queue-segment-loop'),
+                            onPressed: () =>
+                                showSegmentLoopDialog(context, playbackService),
+                            icon: Icon(playbackService.segmentLoop.enabled
+                                ? Symbols.repeat_on
+                                : Symbols.repeat),
+                          ),
                         ]))),
                 QueueStopStatus(playbackService: playbackService),
                 Padding(
@@ -479,9 +613,44 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     playbackService.removeListener(_toNowPlaying);
     playbackService.playlist.removeListener(_onQueueChanged);
     _searchController.dispose();
+    _toolbarScroll.dispose();
     scrollController.dispose();
     super.dispose();
   }
+}
+
+/// Wheel input is redirected only while the pointer is over this independent
+/// toolbar. The song list keeps its vertical scrolling and touch gestures.
+class _QueueToolbarRail extends StatelessWidget {
+  const _QueueToolbarRail({required this.controller, required this.child});
+  final ScrollController controller;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => FocusTraversalGroup(
+      child: AppHorizontalWheelRegion(
+          controller: controller,
+          child: ScrollConfiguration(
+              behavior: const DanPlayerScrollBehavior(),
+              child: AppScrollbar(
+                  controller: controller,
+                  child: SingleChildScrollView(
+                      key: const ValueKey('queue-toolbar-scroll'),
+                      controller: controller,
+                      scrollDirection: Axis.horizontal,
+                      child: child)))));
+}
+
+String _queueDurationTooltip(List<Audio> queue, int current) {
+  final total = QueueDurationSummary.of(queue);
+  final upcoming =
+      QueueDurationSummary.of(current < 0 ? queue : queue.skip(current + 1));
+  final label = current < 0
+      ? ui('队列时长 {0}', [total.clock])
+      : ui('队列时长 {0} · 待播 {1}', [total.clock, upcoming.clock]);
+  return total.unknownCount == 0
+      ? label
+      : '$label · ${ui('另有 {0} 首时长未知', [total.unknownCount])}';
 }
 
 /// Queue rows already leave a small symmetric edge inset. Paint the thumb in
@@ -522,14 +691,40 @@ class _QueueScrollbar extends StatelessWidget {
   }
 }
 
+class _QueueDurationLabel extends StatelessWidget {
+  const _QueueDurationLabel(
+      {required this.queue, required this.current, required this.status});
+  final List<Audio> queue;
+  final int current;
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = QueueDurationSummary.of(queue);
+    return Tooltip(
+        message: _queueDurationTooltip(queue, current),
+        child: Text(
+            queue.isEmpty
+                ? status
+                : '$status · ${total.clock}${total.unknownCount > 0 ? ' + ?' : ''}',
+            key: const ValueKey('queue-duration-summary'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant)));
+  }
+}
+
 class _PlaylistHeader extends StatelessWidget {
   const _PlaylistHeader(
       {required this.count,
+      required this.queue,
       required this.currentIndex,
       required this.immersive});
   final bool immersive;
 
   final int count;
+  final List<Audio> queue;
   final int currentIndex;
 
   @override
@@ -575,14 +770,8 @@ class _PlaylistHeader extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  status,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
+                _QueueDurationLabel(
+                    queue: queue, current: currentIndex, status: status),
               ],
             ),
           ),
@@ -665,7 +854,15 @@ class _PlaylistViewItem extends StatelessWidget {
     if (onOpenDetails != null) {
       onOpenDetails!(item);
     } else {
-      context.push(app_paths.AUDIO_DETAIL_PAGE, extra: item);
+      // Pushing a ShellRoute from its sibling root lyric route would mount the
+      // same shell page key twice. Keep detail on the lyric navigator instead.
+      final path = GoRouterState.of(context).uri.path;
+      context.push(
+          path == app_paths.NOW_PLAYING_PAGE ||
+                  path.startsWith('${app_paths.NOW_PLAYING_PAGE}/')
+              ? '${app_paths.NOW_PLAYING_PAGE}/detail'
+              : app_paths.AUDIO_DETAIL_PAGE,
+          extra: item);
     }
   }
 

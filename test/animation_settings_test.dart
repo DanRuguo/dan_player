@@ -66,6 +66,38 @@ void main() {
     expect(saves, 3);
     expect(tester.binding.hasScheduledFrame, isFalse);
   });
+  testWidgets(
+      'ten motion categories include edge feedback and report save failure',
+      (tester) async {
+    final settings = AppSettings.instance;
+    final originalMotion = settings.rendering.value;
+    addTearDown(() {
+      settings.rendering.value = originalMotion;
+    });
+    settings.rendering.value = const RenderingPreferences();
+    var attempts = 0;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+        body: SingleChildScrollView(child: AnimationSettings(persist: () async {
+      attempts++;
+      if (attempts == 1) throw const FileSystemException('test full disk');
+    })))));
+    expect(find.byType(SwitchListTile), findsNWidgets(10));
+    expect(find.byKey(const ValueKey('edge-stretch-enabled')), findsNothing);
+    final finder = find.byKey(const ValueKey('animation-feedback'));
+    tester.widget<SwitchListTile>(finder).onChanged!(false);
+    await tester.pumpAndSettle();
+    expect(settings.rendering.value.animations.allows(MotionKind.feedback),
+        isFalse);
+    expect(
+        settings.rendering.value.animations.allows(MotionKind.lyrics), isTrue);
+    expect(find.text('保存界面设置失败；本次会话仍然有效。'), findsOneWidget);
+    tester.widget<SwitchListTile>(finder).onChanged!(true);
+    await tester.pumpAndSettle();
+    expect(settings.rendering.value.animations.allows(MotionKind.feedback),
+        isTrue);
+    expect(attempts, 2);
+    expect(find.text('保存界面设置失败；本次会话仍然有效。'), findsNothing);
+  });
   testWidgets('two animation switches in one frame retain both choices',
       (tester) async {
     final settings = AppSettings.instance;

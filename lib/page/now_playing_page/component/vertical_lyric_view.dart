@@ -1,5 +1,6 @@
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'dart:async';
+import 'package:dan_player/component/touch_gestures.dart';
 import 'dart:math' as math;
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -1068,7 +1069,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
             child: NotificationListener<ScrollNotification>(
               onNotification: _onScrollNotification,
               child: ScrollConfiguration(
-                behavior: const ScrollBehavior().copyWith(scrollbars: false),
+                behavior:
+                    const DanPlayerScrollBehavior().copyWith(scrollbars: false),
                 child: LyricViewportFade(
                   enabled: followEnabled && !highContrast,
                   child: CustomScrollView(

@@ -72,6 +72,7 @@ class DesktopLyricLineContent extends StatelessWidget {
     final translation = detailedLine == null
         ? legacyLine.translation
         : detailedLine!.translation;
+    final romanization = detailedLine?.romanization;
     final text = content.trim().isEmpty &&
             (detailedLine?.lengthMilliseconds ??
                     legacyLine.length.inMilliseconds) >
@@ -104,6 +105,7 @@ class DesktopLyricLineContent extends StatelessWidget {
           ],
         );
     final hasTranslation = translation?.trim().isNotEmpty == true;
+    final hasRomanization = romanization?.trim().isNotEmpty == true;
     Widget columns({double? verticalColumnWidth}) {
       Widget column(Widget child) => verticalColumnWidth == null
           ? child
@@ -119,6 +121,21 @@ class DesktopLyricLineContent extends StatelessWidget {
         crossAxisAlignment:
             vertical ? CrossAxisAlignment.start : CrossAxisAlignment.center,
         children: [
+          if (hasRomanization) ...[
+            column(DesktopLyricText(
+              key: const ValueKey('desktop-romanization-lyric'),
+              text: romanization!,
+              clock: clock,
+              vertical: vertical,
+              maxVerticalUnitWidth: verticalColumnWidth,
+              style: style(translationFontSize),
+              playedColor: color.withValues(alpha: highContrast ? 1 : .78),
+              unplayedColor: color,
+              strokeColor: strokeColor,
+              reducedMotion: reduced,
+            )),
+            SizedBox(width: vertical ? 16 : 0, height: vertical ? 0 : 4),
+          ],
           column(DesktopLyricText(
             key: const ValueKey('desktop-primary-lyric'),
             text: text,
@@ -163,15 +180,19 @@ class DesktopLyricLineContent extends StatelessWidget {
             final availableWidth = constraints.hasBoundedWidth
                 ? constraints.maxWidth
                 : MediaQuery.sizeOf(context).width;
-            final gap = hasTranslation ? 16.0 : 0.0;
-            final count = hasTranslation ? 2 : 1;
+            final count =
+                1 + (hasTranslation ? 1 : 0) + (hasRomanization ? 1 : 0);
+            final gap = (count - 1) * 16.0;
             final columnWidth = math.max(1.0, (availableWidth - gap) / count);
             return animatedColumns(columns(verticalColumnWidth: columnWidth));
           })
         : animatedColumns(columns());
     return Semantics(
-      label: [text, if (translation?.trim().isNotEmpty == true) translation!]
-          .join('\n'),
+      label: [
+        if (hasRomanization) romanization!,
+        text,
+        if (hasTranslation) translation!
+      ].join('\n'),
       child: ExcludeSemantics(
         child: Opacity(
           key: const ValueKey('desktop-lyric-text-opacity'),

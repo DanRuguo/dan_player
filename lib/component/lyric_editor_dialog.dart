@@ -18,6 +18,8 @@ import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/ffmpeg_runtime.dart';
 import 'package:dan_player/lyric/lrc.dart';
+import 'package:dan_player/lyric/local_lyric_reader.dart';
+import 'package:dan_player/lyric/local_lyric_parser.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
@@ -597,7 +599,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         lyric = widget.initialLyric;
       } else if (widget.localLyricLoader != null) {
         final text = await widget.localLyricLoader!(widget.audio);
-        lyric = Lrc.fromLrcText(text, LrcSource.local, separator: '┃');
+        lyric = parseLocalLyricText(text);
       } else {
         final store = LyricDocumentStore.instance;
         await store.load();
@@ -605,16 +607,11 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         _documentRevision = document?.revision ?? 0;
         lyric = document?.draft?.toLyric() ?? document?.effective?.toLyric();
         if (lyric == null && document?.noLyrics != true) {
+          lyric =
+              await readLocalLyric(widget.audio, stillCurrent: () => mounted);
           if (!widget.audio.isCueTrack) {
-            for (final extension in [
-              'lrc',
-              'elrc',
-              'qrc',
-              'krc',
-              'yrc',
-              'danlyrics.json',
-              'txt'
-            ]) {
+            for (final extension in ['danlyrics.json', 'txt']) {
+              if (lyric != null) break;
               final file = File(
                   path_util.setExtension(widget.audio.path, '.$extension'));
               if (await file.exists()) {
@@ -625,9 +622,6 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
           }
           lyric ??= await readAvailableCachedLyric(widget.audio,
               source: LYRIC_SOURCES[widget.audio.path]);
-          if (lyric == null && !widget.audio.isCueTrack) {
-            lyric = await Lrc.fromAudioPath(widget.audio, separator: '┃');
-          }
         }
       }
       if (!mounted) return;

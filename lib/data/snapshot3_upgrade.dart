@@ -9,6 +9,7 @@ import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/library/smart_playlist.dart';
 import 'package:dan_player/play_service/eq_preset_store.dart';
 import 'package:dan_player/play_service/named_queue_store.dart';
+import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:path/path.dart' as p;
 
 /// Runs before stores, playback and folder watchers start. The existing backup
@@ -22,7 +23,7 @@ class Snapshot3Upgrade {
     }
     const versions = {
       'playlists.json': 4,
-      'smart_playlists.json': 2,
+      'smart_playlists.json': 4,
       'index.json': 113,
       'personal_library.json': 1,
       'named_queues.json': 1,
@@ -30,7 +31,7 @@ class Snapshot3Upgrade {
       'track_identities.json': 1,
       'lyric_documents.json': 1,
       'playback_bookmarks.json': 1,
-      'playback_statistics.json': 2,
+      'playback_statistics.json': 3,
       'playback_statistics.pre-track-id-v1.json': 2,
     };
     final maxVersion = versions[name];
@@ -51,10 +52,12 @@ class Snapshot3Upgrade {
         NamedQueueStore.validate(Map<String, dynamic>.from(raw));
       case 'eq_presets.json':
         EqPresetStore.validate(Map<String, dynamic>.from(raw));
+      case 'playback_statistics.json':
+        PlaybackStatistics.validateSnapshot(raw);
       case 'playlists.json':
         decodePlaylists(raw);
       case 'smart_playlists.json':
-        if (![1, 2].contains(version) || raw['playlists'] is! List)
+        if (![1, 2, 3, 4].contains(version) || raw['playlists'] is! List)
           throw const FormatException('Invalid smart playlists');
         for (final value in raw['playlists'] as List) {
           SmartPlaylist.fromJson(value);

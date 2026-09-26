@@ -4,6 +4,7 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/category_presentation.dart';
 import 'package:dan_player/component/category_display_controls.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:dan_player/component/app_content_transition.dart';
 import 'dart:async';
 
@@ -533,57 +534,59 @@ class _CategorySelectorState extends State<_CategorySelector> {
     UiLanguageScope.watch(context);
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-      child: AppScrollbar(
-        controller: _scroll,
-        interactive: true,
-        child: SingleChildScrollView(
-          key: const ValueKey('category-kind-scroll'),
+      child: AppHorizontalWheelRegion(
           controller: _scroll,
-          primary: false,
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final kind in MusicCategoryKind.browsableValues) ...[
-                if (kind != MusicCategoryKind.browsableValues.first)
+          child: AppScrollbar(
+            controller: _scroll,
+            interactive: true,
+            child: SingleChildScrollView(
+              key: const ValueKey('category-kind-scroll'),
+              controller: _scroll,
+              primary: false,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final kind in MusicCategoryKind.browsableValues) ...[
+                    if (kind != MusicCategoryKind.browsableValues.first)
+                      const SizedBox(width: 8),
+                    ConstrainedBox(
+                      key: _chipKeys[kind],
+                      constraints: const BoxConstraints(minHeight: 44),
+                      child: ChoiceChip(
+                        key: ValueKey('category-kind-${kind.name}'),
+                        avatar: Icon(categoryIcon(kind), size: 18),
+                        label: Text(ui(kind.label)),
+                        selected: widget.selected == kind,
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.standard,
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        shape: AppShape.control,
+                        onSelected: (_) => widget.onSelected(kind),
+                      ),
+                    ),
+                  ],
                   const SizedBox(width: 8),
-                ConstrainedBox(
-                  key: _chipKeys[kind],
-                  constraints: const BoxConstraints(minHeight: 44),
-                  child: ChoiceChip(
-                    key: ValueKey('category-kind-${kind.name}'),
-                    avatar: Icon(categoryIcon(kind), size: 18),
-                    label: Text(ui(kind.label)),
-                    selected: widget.selected == kind,
-                    showCheckmark: false,
-                    visualDensity: VisualDensity.standard,
-                    materialTapTargetSize: MaterialTapTargetSize.padded,
-                    shape: AppShape.control,
-                    onSelected: (_) => widget.onSelected(kind),
+                  ConstrainedBox(
+                    key: _personalKey,
+                    constraints: const BoxConstraints(minHeight: 44),
+                    child: ChoiceChip(
+                      key: const ValueKey('category-kind-personal'),
+                      avatar: const Icon(Symbols.bookmarks, size: 18),
+                      label: Text(ui('个人整理')),
+                      selected: widget.selected == null,
+                      showCheckmark: false,
+                      visualDensity: VisualDensity.standard,
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
+                      shape: AppShape.control,
+                      onSelected: (_) => widget.onPersonal(),
+                    ),
                   ),
-                ),
-              ],
-              const SizedBox(width: 8),
-              ConstrainedBox(
-                key: _personalKey,
-                constraints: const BoxConstraints(minHeight: 44),
-                child: ChoiceChip(
-                  key: const ValueKey('category-kind-personal'),
-                  avatar: const Icon(Symbols.bookmarks, size: 18),
-                  label: Text(ui('个人整理')),
-                  selected: widget.selected == null,
-                  showCheckmark: false,
-                  visualDensity: VisualDensity.standard,
-                  materialTapTargetSize: MaterialTapTargetSize.padded,
-                  shape: AppShape.control,
-                  onSelected: (_) => widget.onPersonal(),
-                ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ),
+            ),
+          )),
     );
   }
 

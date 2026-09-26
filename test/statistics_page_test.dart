@@ -21,7 +21,7 @@ void main() {
     AudioLibrary.revision = previousRevision;
   });
 
-  testWidgets('idle local-library changes refresh once per frame',
+  testWidgets('idle local-library changes retain display until manual refresh',
       (tester) async {
     final previousNotification = AudioLibrary.changes.value;
     addTearDown(() => AudioLibrary.changes.value = previousNotification);
@@ -43,13 +43,16 @@ void main() {
                     })))));
     await tester.pumpAndSettle();
     expect(reads, 1);
-    // Several notifications can describe one index update. No playback or
-    // parent rebuild should be required, and only the latest list is scanned.
+    // Library notifications change recording/search inputs, but the displayed
+    // session capture changes only after an explicit refresh.
     for (var i = 0; i < 5; i++) {
       AudioLibrary.instance.audioCollection = [audio('one'), audio('two')];
       AudioLibrary.revision++;
       AudioLibrary.changes.value = AudioLibrary.revision;
     }
+    await tester.pumpAndSettle();
+    expect(reads, 1);
+    await tester.tap(find.byKey(const ValueKey('statistics-refresh')));
     await tester.pumpAndSettle();
     expect(reads, 3);
     await tester.pump(const Duration(seconds: 6));
@@ -68,8 +71,16 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(body: StatisticsPage()),
+    final stats = PlaybackStatistics.inMemory();
+    addTearDown(stats.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+          body: StatisticsPage(
+              statistics: stats,
+              scanner: LibraryStatisticsScanner(
+                  readLyrics: (_) async => null,
+                  inspectFile: (_) async =>
+                      const LocalAudioFileInfo.available(0)))),
     ));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -120,14 +131,14 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
     }
     expect(reads, 1);
-    await tester.tap(find.byTooltip('重新核实文件大小与语言'));
+    await tester.tap(find.byKey(const ValueKey('statistics-refresh')));
     await tester.pumpAndSettle();
     expect(reads, 2);
 
     AudioLibrary.revision++;
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    expect(reads, 3);
+    expect(reads, 2);
     expect(tester.takeException(), isNull);
   });
 }

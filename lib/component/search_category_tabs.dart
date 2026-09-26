@@ -1,11 +1,14 @@
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'app_horizontal_wheel_region.dart';
 
 /// A theme-colored pill rail, retaining native TabBar keyboard navigation and
 /// horizontal scrolling when labels grow or the content window becomes narrow.
 class SearchCategoryTabs extends StatelessWidget {
-  const SearchCategoryTabs({super.key});
+  const SearchCategoryTabs({super.key, this.trailing});
+
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -31,35 +34,43 @@ class SearchCategoryTabs extends StatelessWidget {
           border:
               Border.all(color: scheme.outlineVariant.withValues(alpha: .45)),
         ),
-        child: TabBar(
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          dividerColor: Colors.transparent,
-          indicatorSize: TabBarIndicatorSize.tab,
-          indicatorPadding: const EdgeInsets.symmetric(horizontal: 2),
-          indicator: BoxDecoration(
-            color: scheme.primaryContainer,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          splashBorderRadius: BorderRadius.circular(24),
-          labelPadding: const EdgeInsets.symmetric(horizontal: 14),
-          labelColor: scheme.onPrimaryContainer,
-          unselectedLabelColor: scheme.onSurfaceVariant,
-          labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-          unselectedLabelStyle: Theme.of(context).textTheme.labelLarge,
-          tabs: [
-            for (final category in categories)
-              Tab(
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(category.$2, size: 19),
-                  const SizedBox(width: 7),
-                  Text(ui(category.$1)),
-                ]),
-              ),
+        child: Row(children: [
+          Expanded(
+              child: AppHorizontalWheelRegion(
+                  child: TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            dividerColor: Colors.transparent,
+            indicatorSize: TabBarIndicatorSize.tab,
+            indicatorPadding: const EdgeInsets.symmetric(horizontal: 2),
+            indicator: BoxDecoration(
+              color: scheme.primaryContainer,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            splashBorderRadius: BorderRadius.circular(24),
+            labelPadding: const EdgeInsets.symmetric(horizontal: 14),
+            labelColor: scheme.onPrimaryContainer,
+            unselectedLabelColor: scheme.onSurfaceVariant,
+            labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+            unselectedLabelStyle: Theme.of(context).textTheme.labelLarge,
+            tabs: [
+              for (final category in categories)
+                Tab(
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(category.$2, size: 19),
+                    const SizedBox(width: 7),
+                    Text(ui(category.$1)),
+                  ]),
+                ),
+            ],
+          ))),
+          if (trailing != null) ...[
+            const SizedBox(width: 4),
+            trailing!,
           ],
-        ),
+        ]),
       ),
     );
   }

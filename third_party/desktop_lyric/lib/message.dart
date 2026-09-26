@@ -322,6 +322,7 @@ class LyricLineTimelineMessage extends Message {
   final int lengthMilliseconds;
   final String content;
   final String? translation;
+  final String? romanization;
   final List<DesktopLyricWord> words;
 
   const LyricLineTimelineMessage({
@@ -331,6 +332,7 @@ class LyricLineTimelineMessage extends Message {
     required this.lengthMilliseconds,
     required this.content,
     required this.translation,
+    this.romanization,
     required this.words,
   });
 
@@ -343,6 +345,7 @@ class LyricLineTimelineMessage extends Message {
       lengthMilliseconds: (json['lengthMilliseconds'] as num?)?.toInt() ?? 0,
       content: json['content'] as String? ?? '',
       translation: json['translation'] as String?,
+      romanization: json['romanization'] as String?,
       words: rawWords is List
           ? rawWords
               .whereType<Map>()
@@ -364,6 +367,7 @@ class LyricLineTimelineMessage extends Message {
         'lengthMilliseconds': lengthMilliseconds,
         'content': content,
         'translation': translation,
+        'romanization': romanization,
         'words': words.map((word) => word.toJson()).toList(growable: false),
       };
 }

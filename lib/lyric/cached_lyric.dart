@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:dan_player/lyric/local_lyric_origin.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -36,6 +37,35 @@ Future<Lyric?> readCachedOnlineLyric(Audio audio,
       legacyIdentity: () => _legacyOnlineCacheIdentity(audio, source: source),
     );
 
+/// The online priority stage must not consume a local snapshot before the
+/// fresh sidecar/tag stage has had a chance to see externally authored lyrics.
+Future<Lyric?> readAvailableCachedOnlineLyric(Audio audio,
+    {LyricSource? source,
+    OnlineLyricCache? cache,
+    bool Function()? stillCurrent}) async {
+  if (source?.source == LyricSourceType.local) return null;
+  for (final candidate in <LyricSource?>[if (source != null) source, null]) {
+    if (stillCurrent?.call() == false) return null;
+    final lyric =
+        await readCachedOnlineLyric(audio, source: candidate, cache: cache);
+    if (stillCurrent?.call() == false) return null;
+    if (lyric != null) return lyric;
+  }
+  return null;
+}
+
+Future<Lyric?> readCachedLocalLyric(Audio audio,
+    {OnlineLyricCache? cache, bool Function()? stillCurrent}) async {
+  if (audio.isOnline || stillCurrent?.call() == false) return null;
+  final lyric = await readCachedOnlineLyric(audio,
+      source: LyricSource(LyricSourceType.local), cache: cache);
+  if (stillCurrent?.call() == false) return null;
+  if (lyric != null) {
+    markDiscoveredLocalLyric(lyric, 'cache:${audio.stableTrackId}');
+  }
+  return lyric;
+}
+
 /// One offline entry point for source-specific, default and local snapshots.
 Future<Lyric?> readAvailableCachedLyric(Audio audio,
     {LyricSource? source,
@@ -58,7 +88,12 @@ Future<Lyric?> readAvailableCachedLyric(Audio audio,
   for (final candidate in sources) {
     final lyric =
         await readCachedOnlineLyric(audio, source: candidate, cache: cache);
-    if (lyric != null) return lyric;
+    if (lyric != null) {
+      if (candidate?.source == LyricSourceType.local) {
+        markDiscoveredLocalLyric(lyric, 'cache:${audio.stableTrackId}');
+      }
+      return lyric;
+    }
   }
   return null;
 }

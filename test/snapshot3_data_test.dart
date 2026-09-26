@@ -6,6 +6,7 @@ import 'package:archive/archive_io.dart';
 import 'package:dan_player/data/cache_backup_service.dart';
 import 'package:dan_player/library/personal_library.dart';
 import 'package:dan_player/library/smart_condition.dart';
+import 'package:dan_player/library/smart_playlist.dart';
 import 'package:dan_player/data/snapshot3_upgrade.dart';
 import 'package:dan_player/play_service/eq_preset_store.dart';
 import 'package:dan_player/play_service/named_queue_store.dart';
@@ -265,5 +266,76 @@ void main() {
         () => Snapshot3Upgrade.validateDocument(
             'named_queues.json', {'version': 2}),
         throwsUnsupportedError);
+  });
+
+  test('startup accepts snapshot2 smart schema and refuses future schema', () {
+    final rule = {
+      'id': 'quality',
+      'name': 'Quality',
+      'query': '',
+      'artist': '',
+      'album': '',
+      'formats': '',
+      'sort': 'name',
+      'condition': {
+        'field': 'sampleRateAtLeast',
+        'value': '48000',
+        'exclude': false
+      },
+    };
+    for (final version in [1, 2, 3, 4]) {
+      Snapshot3Upgrade.validateDocument('smart_playlists.json', {
+        'version': version,
+        'playlists': [rule]
+      });
+    }
+    expect(
+        () => Snapshot3Upgrade.validateDocument('smart_playlists.json', {
+              'version': 5,
+              'playlists': [rule]
+            }),
+        throwsUnsupportedError);
+    expect(
+        () => Snapshot3Upgrade.validateDocument('smart_playlists.json', {
+              'version': 3,
+              'playlists': [
+                {'invalid': true}
+              ]
+            }),
+        throwsFormatException);
+  });
+
+  test(
+      'backup round trip keeps new smart rules readable without touching music',
+      () async {
+    final source = Directory('${root.path}/smart-source');
+    final folder = Directory('${root.path}/Music')..createSync();
+    final song = File('${folder.path}/unchanged.flac');
+    await song.writeAsBytes([1, 2, 3, 4]);
+    final rule = SmartPlaylist(
+        id: 'new-rule',
+        name: 'Folder and quality',
+        condition: SmartCondition.group([
+          SmartCondition.term(SmartField.folderWithin, folder.path),
+          const SmartCondition.term(SmartField.sampleRateAtLeast, '48000'),
+          const SmartCondition.term(SmartField.playCountAtMost, '3'),
+        ]));
+    final file = File('${source.path}/smart_playlists.json');
+    await SmartPlaylistStore(file).upsert(rule);
+    final backup = File('${root.path}/smart-backup.zip');
+    const service = CacheBackupService();
+    await service.exportBackup(source: source, destination: backup);
+    Directory? staged;
+    await service.restoreBackup(
+        backup: backup,
+        destination: Directory('${root.path}/smart-restored'),
+        currentData: source,
+        activateLocation: (_, value) async => staged = value);
+    final restored = File('${staged!.path}/smart_playlists.json');
+    Snapshot3Upgrade.validateDocument(
+        'smart_playlists.json', jsonDecode(await restored.readAsString()));
+    expect((await SmartPlaylistStore(restored).list()).single.toJson(),
+        rule.toJson());
+    expect(await song.readAsBytes(), [1, 2, 3, 4]);
   });
 }

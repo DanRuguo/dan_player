@@ -6,6 +6,64 @@ class QueueEdit<T> {
   final List<T> items;
   final int currentIndex;
 
+  /// Validate a permutation before publishing a suffix-only edit. Every
+  /// occurrence, including repeated tracks, must appear exactly once.
+  static QueueEdit<T>? replaceUpcoming<T>(
+      List<T> items, int current, List<T> ordered) {
+    if (current < 0 || current >= items.length - 2) return null;
+    final suffix = items.sublist(current + 1);
+    if (suffix.length != ordered.length) {
+      throw ArgumentError('Upcoming order must retain every occurrence');
+    }
+    final counts = <T, int>{};
+    for (final item in suffix) {
+      counts[item] = (counts[item] ?? 0) + 1;
+    }
+    for (final item in ordered) {
+      final count = counts[item] ?? 0;
+      if (count == 0) {
+        throw ArgumentError('Upcoming order contains a foreign occurrence');
+      }
+      counts[item] = count - 1;
+    }
+    if (QueueSnapshot._sameItems(suffix, ordered)) return null;
+    return QueueEdit([...items.take(current + 1), ...ordered], current);
+  }
+
+  /// Trim one side of the active occurrence without changing that occurrence.
+  static QueueEdit<T>? trim<T>(List<T> items, int current,
+      {required bool before}) {
+    if (current < 0 || current >= items.length) return null;
+    if (before) {
+      return current == 0 ? null : QueueEdit(items.sublist(current), 0);
+    }
+    return current == items.length - 1
+        ? null
+        : QueueEdit(items.sublist(0, current + 1), current);
+  }
+
+  /// Reorder only the upcoming suffix. Equal keys retain occurrence order.
+  /// No-op edits do not consume undo history.
+  static QueueEdit<T>? orderUpcoming<T>(List<T> items, int current,
+      {int Function(T, T)? compare, bool reverse = false}) {
+    if (current < 0 || current >= items.length - 2) return null;
+    final suffix = items.sublist(current + 1);
+    final List<T> ordered;
+    if (reverse) {
+      ordered = suffix.reversed.toList();
+    } else {
+      if (compare == null) return null;
+      final rows = [for (var i = 0; i < suffix.length; i++) (suffix[i], i)];
+      rows.sort((a, b) {
+        final result = compare(a.$1, b.$1);
+        return result == 0 ? a.$2.compareTo(b.$2) : result;
+      });
+      ordered = [for (final row in rows) row.$1];
+    }
+    if (QueueSnapshot._sameItems(suffix, ordered)) return null;
+    return QueueEdit([...items.take(current + 1), ...ordered], current);
+  }
+
   /// Keep the active occurrence even if an equivalent item appeared earlier.
   /// All other retained items stay in their original order; no-op is null.
   static QueueEdit<T>? deduplicate<T, K>(List<T> items, int current,

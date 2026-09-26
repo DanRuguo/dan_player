@@ -2,6 +2,11 @@ import 'dart:collection';
 import 'dart:math';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/album_identity.dart';
+import 'package:dan_player/search/audio_search_query.dart';
+import 'package:dan_player/search/audio_search_snapshot.dart';
+import 'package:dan_player/library/personal_library.dart';
+import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:pinyin/pinyin.dart';
 
 /// A revision-aware search index for raw text, full pinyin and initials.
@@ -16,6 +21,34 @@ class AudioSearchIndex {
 
   int _builtRevision = -1;
   Future<void>? _building;
+  Map<String, PersonalTrack>? _personalSnapshot;
+  int _personalRevision = -1;
+  Future<Map<String, PersonalTrack>>? _readingPersonal;
+
+  Future<Map<String, PersonalTrack>> _readPersonal() async {
+    while (true) {
+      final revision = PersonalLibrary.changes.value;
+      if (_personalRevision == revision && _personalSnapshot != null) {
+        return _personalSnapshot!;
+      }
+      final active = _readingPersonal;
+      if (active != null) {
+        await active;
+        continue;
+      }
+      final read = (() async => (await PersonalLibrary.instance).snapshot())();
+      _readingPersonal = read;
+      try {
+        final snapshot = await read;
+        if (revision == PersonalLibrary.changes.value) {
+          _personalSnapshot = snapshot;
+          _personalRevision = revision;
+        }
+      } finally {
+        if (identical(_readingPersonal, read)) _readingPersonal = null;
+      }
+    }
+  }
 
   bool get _isStale => _builtRevision != AudioLibrary.searchRevision;
 
@@ -148,48 +181,82 @@ class AudioSearchIndex {
     int audioLimit = 200,
     int nameLimit = 50,
     void Function()? checkCancelled,
+    PlaybackStatistics? statistics,
+    Future<Map<String, PersonalTrack>> Function()? loadPersonal,
   }) async {
+    final parsed = AudioSearchQuery.parse(query);
     checkCancelled?.call();
-    while (true) {
-      await ensureBuilt();
-      checkCancelled?.call();
-      final revision = _builtRevision;
-      final audios = _audioEntries;
-      final artists = _artistEntries;
-      final albums = _albumEntries;
-      void checkCurrent() {
+    var historyRevision = 0;
+    final recorder = statistics ?? PlaybackStatistics.instance;
+    void historyChanged() => historyRevision++;
+    if (parsed.usesPlaybackHistory) recorder.addListener(historyChanged);
+    try {
+      while (true) {
+        await ensureBuilt();
         checkCancelled?.call();
-        if (revision != AudioLibrary.searchRevision) {
-          throw const _SearchRevisionChanged();
+        final personalRevision = PersonalLibrary.changes.value;
+        final personal = parsed.usesPersonalData
+            ? await (loadPersonal?.call() ?? _readPersonal())
+            : const <String, PersonalTrack>{};
+        checkCancelled?.call();
+        if (parsed.usesPersonalData &&
+            personalRevision != PersonalLibrary.changes.value) {
+          continue;
+        }
+        final revision = _builtRevision;
+        final durationRevision = AudioLibrary.revision;
+        final capturedHistoryRevision = historyRevision;
+        final snapshot = AudioSearchSnapshot.capture(parsed,
+            personal: personal,
+            statistics: recorder,
+            audios: _audioEntries.map((entry) => entry.audio));
+        final audios = _audioEntries;
+        final artists = _artistEntries;
+        final albums = _albumEntries;
+        void checkCurrent() {
+          checkCancelled?.call();
+          if (revision != AudioLibrary.searchRevision ||
+              (parsed.usesLiveMetadata &&
+                  durationRevision != AudioLibrary.revision) ||
+              (parsed.usesPersonalData &&
+                  personalRevision != PersonalLibrary.changes.value) ||
+              (parsed.usesPlaybackHistory &&
+                  capturedHistoryRevision != historyRevision)) {
+            throw const _SearchRevisionChanged();
+          }
+        }
+
+        try {
+          final foundAudios = await _searchChunked(
+              audios, parsed, audioLimit, checkCurrent, snapshot);
+          final foundArtists = await _searchChunked(
+              artists, parsed, nameLimit, checkCurrent, snapshot);
+          final foundAlbums = await _searchChunked(
+              albums, parsed, nameLimit, checkCurrent, snapshot);
+          checkCurrent();
+          return LocalSearchResults(
+            audios: [for (final entry in foundAudios) entry.audio],
+            artists: [for (final entry in foundArtists) entry.value],
+            albums: [for (final entry in foundAlbums) entry.value],
+          );
+        } on _SearchRevisionChanged {
+          // A metadata edit/refresh superseded this query while it was yielding.
+          // Join the current index build rather than publish mixed old/new rows.
+          continue;
         }
       }
-
-      try {
-        final foundAudios =
-            await _searchChunked(audios, query, audioLimit, checkCurrent);
-        final foundArtists =
-            await _searchChunked(artists, query, nameLimit, checkCurrent);
-        final foundAlbums =
-            await _searchChunked(albums, query, nameLimit, checkCurrent);
-        checkCurrent();
-        return LocalSearchResults(
-          audios: [for (final entry in foundAudios) entry.audio],
-          artists: [for (final entry in foundArtists) entry.value],
-          albums: [for (final entry in foundAlbums) entry.value],
-        );
-      } on _SearchRevisionChanged {
-        // A metadata edit/refresh superseded this query while it was yielding.
-        // Join the current index build rather than publish mixed old/new rows.
-        continue;
-      }
+    } finally {
+      if (parsed.usesPlaybackHistory) recorder.removeListener(historyChanged);
     }
   }
 
-  static Future<List<T>> _searchChunked<T extends _Scorable>(List<T> entries,
-      String query, int limit, void Function() checkCurrent) async {
-    final raw = query.trim().toLowerCase();
-    if (raw.isEmpty || limit <= 0 || entries.isEmpty) return [];
-    final compact = raw.replaceAll(RegExp(r'\s+'), '');
+  static Future<List<T>> _searchChunked<T extends _Scorable>(
+      List<T> entries,
+      AudioSearchQuery query,
+      int limit,
+      void Function() checkCurrent,
+      AudioSearchSnapshot snapshot) async {
+    if (query.text.isEmpty || limit <= 0 || entries.isEmpty) return [];
     final best = _SearchCandidates<T>(min(limit, entries.length));
     // Even a warm index must return to the event loop before scoring starts.
     await Future<void>.delayed(Duration.zero);
@@ -198,7 +265,7 @@ class AudioSearchIndex {
       checkCurrent();
       final end = min(start + batchSize, entries.length);
       for (var i = start; i < end; i++) {
-        final score = entries[i].score(raw, compact);
+        final score = entries[i].scoreQuery(query, snapshot);
         if (score > 0) best.add(score, entries[i], i);
       }
       if (end < entries.length) await Future<void>.delayed(Duration.zero);
@@ -212,14 +279,15 @@ class AudioSearchIndex {
     String query,
     int limit,
   ) {
-    final rawQuery = query.trim().toLowerCase();
-    if (rawQuery.isEmpty || limit <= 0) return [];
-    final compactQuery = rawQuery.replaceAll(RegExp(r"\s+"), "");
+    final parsed = AudioSearchQuery.parse(query);
+    if (parsed.text.isEmpty || limit <= 0) return [];
     final scored = _SearchCandidates<T>(min(limit, entries.length));
+    final snapshot = AudioSearchSnapshot.capture(parsed,
+        audios: entries.whereType<_AudioEntry>().map((entry) => entry.audio));
 
     for (var i = 0; i < entries.length; i++) {
       final entry = entries[i];
-      final score = entry.score(rawQuery, compactQuery);
+      final score = entry.scoreQuery(parsed, snapshot);
       if (score > 0) scored.add(score, entry, i);
     }
     return scored.sorted();
@@ -300,6 +368,15 @@ class _SearchCandidates<T extends _Scorable> {
 abstract class _Scorable {
   int score(String rawQuery, String compactQuery);
 
+  int? scoreTerm(AudioSearchTerm term, AudioSearchSnapshot snapshot);
+
+  int scoreQuery(AudioSearchQuery query, AudioSearchSnapshot snapshot) {
+    if (!query.hasStructuredSyntax) {
+      return score(query.text, query.compact);
+    }
+    return query.expression!.evaluate((term) => scoreTerm(term, snapshot)) ?? 0;
+  }
+
   String get sortText;
 }
 
@@ -312,13 +389,189 @@ class _AudioEntry extends _Scorable {
                 ? null
                 : _SearchKeys.of(audio.title),
         _artist = _SearchKeys.of(audio.artist),
-        _album = _SearchKeys.of(audio.album);
+        _album = _SearchKeys.of(audio.album),
+        _composer = _knownKeys(audio.composer),
+        _albumArtist = _knownKeys(audio.albumArtist),
+        _language = _knownKeys(audio.language),
+        _titleExists = _knownText(audio.title),
+        _artistExists = _knownText(audio.artist),
+        _albumExists = _knownText(audio.album),
+        _filename = _SearchKeys.of(
+            audio.localFilePath.replaceAll('\\', '/').split('/').last),
+        _pendingMetadata = audio.metadataReadPending,
+        _classificationRead = audio.classificationTagsRead,
+        _path = normalizeSearchText(audio.localFilePath).replaceAll('\\', '/');
 
   final Audio audio;
   final _SearchKeys _display;
   final _SearchKeys? _tagTitle;
   final _SearchKeys _artist;
   final _SearchKeys _album;
+  final String _path;
+  final _SearchKeys? _composer, _albumArtist, _language;
+  final _SearchKeys _filename;
+  final bool _titleExists, _artistExists, _albumExists;
+  final bool _pendingMetadata, _classificationRead;
+  static bool _knownText(String? value) => normalizedMusicTag(value) != null;
+  static _SearchKeys? _knownKeys(String? value) =>
+      _knownText(value) ? _SearchKeys.of(value!) : null;
+
+  @override
+  int? scoreTerm(AudioSearchTerm term, AudioSearchSnapshot snapshot) {
+    int yes(bool value) => value ? 30 : 0;
+    final metadata = snapshot.metadata[audio];
+    switch (term.field) {
+      case 'title':
+        return max(_display.scoreTerm(term), _tagTitle?.scoreTerm(term) ?? 0) *
+            3;
+      case 'artist':
+        return _artist.scoreTerm(term) * 2;
+      case 'album':
+        return _album.scoreTerm(term);
+      case 'filename':
+        return audio.isLocal ? _filename.scoreTerm(term) : null;
+      case 'composer':
+        return _pendingMetadata || !_classificationRead
+            ? null
+            : _composer?.scoreTerm(term);
+      case 'albumartist':
+        return _pendingMetadata || !_classificationRead
+            ? null
+            : _albumArtist?.scoreTerm(term);
+      case 'language':
+        return _pendingMetadata || _language == null
+            ? null
+            : yes(_language!.raw == term.value);
+      case 'folder':
+      case 'path':
+        if (audio.isOnline) return null;
+        final end = _path.lastIndexOf('/');
+        final value = term.field == 'folder'
+            ? (end < 0 ? '' : _path.substring(0, end))
+            : _path;
+        var pathQuery = term.value.replaceAll('\\', '/');
+        if (term.field == 'folder' && pathQuery.length > 1) {
+          pathQuery = pathQuery.replaceFirst(RegExp(r'/+$'), '');
+        }
+        return value.contains(pathQuery) ? 30 : 0;
+      case 'format':
+        if (audio.isOnline) return null;
+        final file = _path.split('/').last;
+        final dot = file.lastIndexOf('.');
+        return dot >= 0 && term.formats!.contains(file.substring(dot + 1))
+            ? 30
+            : 0;
+      case 'duration':
+        return metadata == null || metadata.duration <= 0
+            ? null
+            : yes(term.duration!.matches(metadata.duration));
+      case 'track':
+      case 'bitrate':
+      case 'samplerate':
+      case 'filesize':
+        if (_pendingMetadata && term.field != 'filesize') return null;
+        final value = switch (term.field) {
+          'track' => metadata?.track,
+          'bitrate' => metadata?.bitrate,
+          'samplerate' => metadata?.sampleRate,
+          _ => audio.isLocal ? metadata?.fileSize : null,
+        };
+        return value == null || value <= 0
+            ? null
+            : yes(term.number!.matches(value));
+      case 'rating':
+        final rating = snapshot.personal[audio.stableTrackId]?.rating;
+        if (term.value == 'unrated') return yes(rating == null);
+        return rating == null ? null : yes(term.number!.matches(rating));
+      case 'tag':
+        final tags =
+            snapshot.personal[audio.stableTrackId]?.tags ?? const <String>[];
+        return yes(tags.any((tag) => normalizeSearchText(tag) == term.value));
+      case 'added':
+        final added = snapshot.personal[audio.stableTrackId]?.firstAddedAtUtc;
+        return added == null
+            ? null
+            : yes(term.date!.matches(added.millisecondsSinceEpoch));
+      case 'playcount':
+      case 'completed':
+      case 'skipped':
+      case 'listened':
+      case 'lastplayed':
+        final playback = snapshot.playbackOf(audio);
+        if (playback == null) return null;
+        if (term.field == 'lastplayed') {
+          if (term.value == 'never') {
+            return playback.last == 0 && playback.count > 0
+                ? null
+                : yes(playback.last == 0);
+          }
+          return playback.last <= 0
+              ? null
+              : yes(term.date!.matches(playback.last));
+        }
+        final count = switch (term.field) {
+          'playcount' => playback.count,
+          'completed' => playback.completed,
+          'skipped' => playback.skipped,
+          _ => playback.listened
+        };
+        if (count < 0) return null;
+        return term.field == 'listened'
+            ? yes(term.duration!.matches(count / 1000))
+            : yes(term.number!.matches(count));
+      case 'has':
+        if (_pendingMetadata &&
+            const {
+              'title',
+              'artist',
+              'album',
+              'composer',
+              'albumartist',
+              'language',
+              'track',
+              'duration',
+              'bitrate',
+              'samplerate'
+            }.contains(term.value)) {
+          return null;
+        }
+        if (!_classificationRead &&
+            const {'composer', 'albumartist'}.contains(term.value)) {
+          return null;
+        }
+        final exists = switch (term.value) {
+          'title' => _titleExists,
+          'artist' => _artistExists,
+          'album' => _albumExists,
+          'composer' => _composer != null,
+          'albumartist' => _albumArtist != null,
+          'language' => _language != null,
+          'track' => (metadata?.track ?? 0) > 0,
+          'duration' => (metadata?.duration ?? 0) > 0,
+          'bitrate' => (metadata?.bitrate ?? 0) > 0,
+          'samplerate' => (metadata?.sampleRate ?? 0) > 0,
+          'filesize' => audio.isLocal && (metadata?.fileSize ?? 0) > 0,
+          'rating' => snapshot.personal[audio.stableTrackId]?.rating != null,
+          'tag' =>
+            snapshot.personal[audio.stableTrackId]?.tags.isNotEmpty ?? false,
+          'added' =>
+            snapshot.personal[audio.stableTrackId]?.firstAddedAtUtc != null,
+          'history' => snapshot.playbackOf(audio) == null
+              ? null
+              : snapshot.history.containsKey(audio.isOnline
+                  ? 'online:${audio.onlineProvider}:${audio.onlineId}'
+                  : audio.stableTrackId),
+          _ => false,
+        };
+        return exists == null ? null : yes(exists);
+      default:
+        if (!term.literal) return score(term.value, term.compact);
+        return max(_display.scoreTerm(term), _tagTitle?.scoreTerm(term) ?? 0) *
+                3 +
+            _artist.scoreTerm(term) * 2 +
+            _album.scoreTerm(term);
+    }
+  }
 
   @override
   int score(String rawQuery, String compactQuery) {
@@ -344,6 +597,13 @@ class _NameEntry<T> extends _Scorable {
   final T value;
   final String name;
   final _SearchKeys _keys;
+
+  @override
+  int? scoreTerm(AudioSearchTerm term, AudioSearchSnapshot snapshot) =>
+      term.field.isNotEmpty &&
+              term.field != (value is Artist ? 'artist' : 'album')
+          ? null
+          : _keys.scoreTerm(term);
 
   @override
   int score(String rawQuery, String compactQuery) =>
@@ -397,13 +657,13 @@ class _SearchKeys {
   }
 
   factory _SearchKeys._fromText(String text) {
-    final raw = text.toLowerCase();
+    final raw = normalizeSearchText(text);
     final compact = raw.replaceAll(RegExp(r"\s+"), "");
     return _SearchKeys._(
       raw,
       compact,
-      _toFullPinyin(text, compact),
-      _toInitials(text),
+      _toFullPinyin(raw, compact),
+      _toInitials(raw),
     );
   }
 
@@ -476,6 +736,14 @@ class _SearchKeys {
     }
     return value;
   }
+
+  int scoreTerm(AudioSearchTerm term) => term.literal
+      ? (raw == term.value
+          ? 100
+          : raw.contains(term.value)
+              ? 30
+              : 0)
+      : score(term.value, term.compact);
 }
 
 final class _SearchKeyCacheEntry extends LinkedListEntry<_SearchKeyCacheEntry> {

@@ -1866,13 +1866,15 @@ pub fn get_picture_from_path(path: String, width: u32, height: u32) -> Option<Ve
     }
 }
 
+const MAX_LOCAL_LYRIC_BYTES: usize = 2 * 1024 * 1024;
+
 fn _get_lyric_from_lofty(path: &String) -> Option<String> {
     if let Ok(tagged_file) = read_tagged_file_by_content(path) {
         for tag in ordered_tags(&tagged_file) {
             if let Some(lyric) = tag
                 .get(&ItemKey::Lyrics)
                 .and_then(|item| item.value().text())
-                .filter(|value| !value.trim().is_empty())
+                .filter(|value| !value.trim().is_empty() && value.len() <= MAX_LOCAL_LYRIC_BYTES)
             {
                 return Some(lyric.to_string());
             }
@@ -1886,7 +1888,16 @@ fn _get_lyric_from_lrc_file(path: &String) -> anyhow::Result<String> {
     let mut lrc_file_path = PathBuf::from(path);
     lrc_file_path.set_extension("lrc");
 
-    let lrc_bytes = fs::read(lrc_file_path)?;
+    // Also bound the legacy native fallback: Dart's primary local reader has
+    // already capped sidecars, and this fallback must not bypass that limit.
+    let mut lrc_bytes = Vec::new();
+    fs::File::open(lrc_file_path)?
+        .take((MAX_LOCAL_LYRIC_BYTES + 1) as u64)
+        .read_to_end(&mut lrc_bytes)?;
+    anyhow::ensure!(
+        lrc_bytes.len() <= MAX_LOCAL_LYRIC_BYTES,
+        "Local lyrics too large"
+    );
 
     let is_le = lrc_bytes.starts_with(&[0xFF, 0xFE]);
     let is_utf16 = (is_le || lrc_bytes.starts_with(&[0xFE, 0xFF])) && lrc_bytes.len() % 2 == 0;
@@ -2130,6 +2141,58 @@ pub fn update_index(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_lyrics_legacy_fallback_bounds_utf8_and_utf16_sidecars() {
+        let directory = test_directory("local_lyrics_bounded_sidecars");
+        let audio = directory.join("source.mp3").to_string_lossy().into_owned();
+        let sidecar = directory.join("source.lrc");
+        let content = "[00:01.000]Synthetic lyric";
+        fs::write(&sidecar, content).unwrap();
+        assert_eq!(_get_lyric_from_lrc_file(&audio).unwrap(), content);
+        let utf16: Vec<u8> = [0xff, 0xfe]
+            .into_iter()
+            .chain(content.encode_utf16().flat_map(u16::to_le_bytes))
+            .collect();
+        fs::write(&sidecar, utf16).unwrap();
+        assert_eq!(_get_lyric_from_lrc_file(&audio).unwrap(), content);
+        fs::write(&sidecar, vec![b'x'; MAX_LOCAL_LYRIC_BYTES + 1]).unwrap();
+        assert!(_get_lyric_from_lrc_file(&audio).is_err());
+        assert!(get_lyric_from_path(audio).is_none());
+    }
+
+    #[test]
+    fn local_lyrics_embedded_lddc_content_and_limit() {
+        let directory = test_directory("local_lyrics_embedded_lddc");
+        let audio = directory.join("source.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&audio);
+        let mut tag = Id3v2Tag::new();
+        let content = "[tool:LDDC]\n[00:01.000]Synthetic[00:02.000]";
+        tag.insert(Frame::UnsynchronizedText(
+            lofty::id3::v2::UnsynchronizedTextFrame::new(
+                lofty::TextEncoding::UTF8,
+                *b"eng",
+                String::new(),
+                content.into(),
+            ),
+        ));
+        tag.save_to_path(&audio, WriteOptions::default()).unwrap();
+        let audio_path = audio.to_string_lossy().into_owned();
+        assert_eq!(_get_lyric_from_lofty(&audio_path).as_deref(), Some(content));
+        let mut too_large = Id3v2Tag::new();
+        too_large.insert(Frame::UnsynchronizedText(
+            lofty::id3::v2::UnsynchronizedTextFrame::new(
+                lofty::TextEncoding::UTF8,
+                *b"eng",
+                String::new(),
+                "x".repeat(MAX_LOCAL_LYRIC_BYTES + 1),
+            ),
+        ));
+        too_large
+            .save_to_path(&audio, WriteOptions::default())
+            .unwrap();
+        assert!(_get_lyric_from_lofty(&audio_path).is_none());
+    }
+
     #[test]
     fn metadata_unchanged_basename_keeps_legal_leading_space() {
         let directory = test_directory("metadata_unchanged_basename");

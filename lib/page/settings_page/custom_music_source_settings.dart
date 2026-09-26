@@ -738,6 +738,7 @@ class _CustomSourceCard extends StatelessWidget {
           const SizedBox(height: 8),
           Wrap(
             alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
             spacing: 6,
             runSpacing: 6,
             children: [

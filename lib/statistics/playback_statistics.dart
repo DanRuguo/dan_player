@@ -8,6 +8,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/track_identity.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
+import 'package:dan_player/statistics/listening_calendar.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart';
 
@@ -98,11 +99,32 @@ class PlaybackStatistics extends ChangeNotifier {
 
   static final PlaybackStatistics instance = PlaybackStatistics._();
 
+  /// Detached adapter for the immutable session display capture. It has no
+  /// timers or disk writes and never shares mutable records with the recorder.
+  factory PlaybackStatistics.displayCopy(Map<String, Object?>? data,
+      {String? storageWarning}) {
+    final statistics = PlaybackStatistics._(persist: false);
+    if (data != null) statistics._restoreSnapshot(data);
+    statistics.storageWarning = storageWarning;
+    return statistics;
+  }
+
+  static void validateSnapshot(Object? data) {
+    final isolated = PlaybackStatistics._(persist: false);
+    try {
+      isolated._restoreSnapshot(data);
+    } finally {
+      isolated.dispose();
+    }
+  }
+
   final DateTime Function() _clock;
   final bool _persist;
 
   final Map<String, TrackPlaybackStatistics> tracks = {};
   final Map<String, int> dailyMilliseconds = {};
+  final Map<String, int> dailyPlayCounts = {};
+  String? playCountTrackingStartedOn;
   final List<int> hourlyMilliseconds = List.filled(24, 0);
 
   Audio? _activeAudio;
@@ -215,6 +237,8 @@ class PlaybackStatistics extends ChangeNotifier {
     storageWarning = null;
     tracks.clear();
     dailyMilliseconds.clear();
+    dailyPlayCounts.clear();
+    playCountTrackingStartedOn = null;
     hourlyMilliseconds.fillRange(0, hourlyMilliseconds.length, 0);
     if (!_persist) {
       notifyListeners();
@@ -240,9 +264,13 @@ class PlaybackStatistics extends ChangeNotifier {
           }
           break;
         } catch (error) {
+          // A newer primary must survive even when an older backup exists.
+          if (error is UnsupportedError) rethrow;
           firstError ??= error;
           tracks.clear();
           dailyMilliseconds.clear();
+          dailyPlayCounts.clear();
+          playCountTrackingStartedOn = null;
           hourlyMilliseconds.fillRange(0, hourlyMilliseconds.length, 0);
         }
       }
@@ -266,10 +294,20 @@ class PlaybackStatistics extends ChangeNotifier {
         } catch (_) {
           tracks.clear();
           dailyMilliseconds.clear();
+          dailyPlayCounts.clear();
+          playCountTrackingStartedOn = null;
           hourlyMilliseconds.fillRange(0, hourlyMilliseconds.length, 0);
           _restoreSnapshot(previous);
           rethrow;
         }
+      }
+      // Called by the playback recorder during application startup, never by
+      // the statistics page. Older all-time counters cannot recover day counts.
+      if (playCountTrackingStartedOn == null) {
+        playCountTrackingStartedOn =
+            listeningDayKey(localCalendarDate(_clock()));
+        _loadedVersion = 3;
+        _scheduleSave(immediate: true);
       }
     } catch (error, trace) {
       _storageWritable = false;
@@ -284,10 +322,33 @@ class PlaybackStatistics extends ChangeNotifier {
       throw const FormatException("Statistics root must be an object");
     }
     final version = decoded['version'] ?? 1;
-    if (version is! int || version < 1 || version > 2) {
+    if (version is int && version > 3) {
+      throw UnsupportedError('Newer statistics version');
+    }
+    if (version is! int || version < 1) {
       throw const FormatException('Unsupported statistics version');
     }
     _loadedVersion = version;
+    final tracking = decoded['playCountTrackingStartedOn'];
+    if (tracking != null && parseListeningDay(tracking) == null) {
+      throw const FormatException('Invalid daily play-count tracking date');
+    }
+    final counts = decoded['dailyPlayCounts'];
+    if (counts != null && counts is! Map) {
+      throw const FormatException('Daily play counts must be an object');
+    }
+    if (counts is Map) {
+      for (final entry in counts.entries) {
+        if (parseListeningDay(entry.key) == null ||
+            entry.value is! int ||
+            (entry.value as int) < 0 ||
+            tracking == null) {
+          throw const FormatException('Invalid daily play-count record');
+        }
+        dailyPlayCounts[entry.key as String] = entry.value as int;
+      }
+    }
+    playCountTrackingStartedOn = tracking as String?;
     final trackMaps = decoded["tracks"];
     if (trackMaps != null && trackMaps is! List) {
       throw const FormatException('Statistics tracks must be a list');
@@ -408,7 +469,7 @@ class PlaybackStatistics extends ChangeNotifier {
     if (!listEquals(before, after)) {
       throw StateError('Statistics identity migration changed totals');
     }
-    _loadedVersion = 2;
+    _loadedVersion = playCountTrackingStartedOn == null ? 2 : 3;
     return migrated;
   }
 
@@ -416,6 +477,8 @@ class PlaybackStatistics extends ChangeNotifier {
         'version': _loadedVersion,
         'tracks': tracks.values.map((item) => item.toMap()).toList(),
         'days': Map<String, int>.of(dailyMilliseconds),
+        'dailyPlayCounts': Map<String, int>.of(dailyPlayCounts),
+        'playCountTrackingStartedOn': playCountTrackingStartedOn,
         'hours': List<int>.of(hourlyMilliseconds),
       };
 
@@ -458,6 +521,10 @@ class PlaybackStatistics extends ChangeNotifier {
       ..online = audio.isOnline
       ..playCount += 1
       ..lastPlayedAt = now.millisecondsSinceEpoch;
+    final day = listeningDayKey(localCalendarDate(now));
+    playCountTrackingStartedOn ??= day;
+    dailyPlayCounts[day] = (dailyPlayCounts[day] ?? 0) + 1;
+    _loadedVersion = 3;
     _lastNotifyMilliseconds = stats.listenMilliseconds;
     _scheduleSave();
     notifyListeners();
@@ -628,9 +695,11 @@ class PlaybackStatistics extends ChangeNotifier {
       await target.parent.create(recursive: true);
       await temporary.writeAsString(
         const JsonEncoder.withIndent("  ").convert({
-          "version": 2,
+          "version": 3,
           "tracks": tracks.values.map((item) => item.toMap()).toList(),
           "days": dailyMilliseconds,
+          "dailyPlayCounts": dailyPlayCounts,
+          "playCountTrackingStartedOn": playCountTrackingStartedOn,
           "hours": hourlyMilliseconds,
         }),
         flush: true,

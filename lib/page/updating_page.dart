@@ -21,6 +21,7 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
+import 'package:dan_player/statistics/statistics_display_service.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/windows_shell.dart';
 import 'package:flutter/material.dart';
@@ -183,6 +184,12 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
       LibraryAutoRefresh.instance.start();
       await _subscription?.cancel();
       StartupProgress.instance.advance(StartupStage.ready);
+      // Warm the session display once after the first usable player frame.
+      // Do not delay session restoration, navigation or playback for this scan.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(StatisticsDisplayService.instance.prewarmOnce());
+      });
+      WidgetsBinding.instance.ensureVisualUpdate();
       if (mounted) {
         context.go(app_paths.START_PAGES[AppPreference.instance.startPage]);
         if (_usingCachedIndex) {

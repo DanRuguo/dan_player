@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/play_service/desktop_lyric_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lrc.dart';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
 import 'package:desktop_lyric/message.dart' as msg;
 import 'package:flutter/foundation.dart';
@@ -68,8 +70,63 @@ class _Process extends Fake implements Process {
   }
 }
 
+class _PhoneticWord extends SyncLyricWord {
+  _PhoneticWord()
+      : super(const Duration(milliseconds: 1200),
+            const Duration(milliseconds: 1800), '你好');
+}
+
+class _PhoneticLine extends SyncLyricLine {
+  _PhoneticLine()
+      : super(const Duration(milliseconds: 1200),
+            const Duration(milliseconds: 1800), [_PhoneticWord()], 'Hello') {
+    romanization = 'ni hao';
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+      'real desktop sender separates pronunciation from word timing and legacy',
+      () async {
+    final process = _Process();
+    final readiness = ValueNotifier(false);
+    final service = DesktopLyricService(PlayService.instance,
+        executableExists: (_) => true,
+        startProcess: (_, __) async => process,
+        playbackReady: readiness,
+        saveAppearance: () async {});
+    addTearDown(() async {
+      service.dispose();
+      readiness.dispose();
+      await process.dispose();
+    });
+    await service.startDesktopLyric();
+    service.sendLyricLineMessage(_PhoneticLine(), lineIndex: 3);
+    var messages = await process.messages();
+    final detailed = messages.lastWhere(
+        (message) => message['type'] == 'LyricLineTimelineMessage')['message'];
+    expect(detailed['romanization'], 'ni hao');
+    expect(detailed['translation'], 'Hello');
+    expect(detailed['words'].single['content'], '你好');
+    expect(detailed['words'].single['startMilliseconds'], 1200);
+    final legacy = messages.lastWhere(
+        (message) => message['type'] == 'LyricLineChangedMessage')['message'];
+    expect(legacy.containsKey('romanization'), isFalse);
+    expect(legacy['translation'], 'Hello');
+    final lrc = LrcLine(Duration.zero, '青い鳥┃蓝色的鸟', isBlank: false)
+      ..romanization = 'aoi tori';
+    service.sendLyricLineMessage(lrc, lineIndex: 4);
+    messages = await process.messages();
+    final unsynced = messages.last['message'];
+    expect(unsynced['content'], '青い鳥');
+    expect(unsynced['romanization'], 'aoi tori');
+    expect(unsynced['translation'], '蓝色的鸟');
+    expect(unsynced['words'], isEmpty);
+    service.sendNoLyricMessage();
+    expect((await process.messages()).last['message']['romanization'], isNull);
+  });
 
   test('real facade shutdown waits for an already-running appearance save',
       () async {

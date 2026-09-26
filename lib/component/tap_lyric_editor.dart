@@ -546,6 +546,13 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
             Text(ui('第 {0} / {1} 行',
                 ['${session.index + 1}', '${session.rows.length}'])),
           if (!review) const SizedBox(height: 20),
+          if (!review && row.romanization.isNotEmpty)
+            Padding(
+                key: const ValueKey('tap-current-romanization'),
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(row.romanization,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall)),
           if (review)
             SizedBox(
                 height: MediaQuery.sizeOf(context).height < 700 ? 140 : 260,
@@ -564,6 +571,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
                             .instance.experience.value.springLyrics)))
           else if (words)
             Wrap(
+                key: const ValueKey('tap-current-original'),
                 alignment: WrapAlignment.center,
                 spacing: 4,
                 runSpacing: 8,
@@ -610,18 +618,14 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
                 ])
           else
             Text(row.text,
+                key: const ValueKey('tap-current-original'),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineSmall),
           if (!review && row.translation.isNotEmpty)
             Padding(
+                key: const ValueKey('tap-current-translation'),
                 padding: const EdgeInsets.only(top: 10),
                 child: Text(row.translation, textAlign: TextAlign.center)),
-          if (!review && row.romanization.isNotEmpty)
-            Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(row.romanization,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall)),
           if (!review) const SizedBox(height: 20),
         ]));
   }

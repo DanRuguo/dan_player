@@ -1,114 +1,76 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/listening_calendar_card.dart';
 import 'package:dan_player/component/statistics_bar_row.dart';
-import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
+import 'package:dan_player/statistics/statistics_display_service.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 class StatisticsPage extends StatefulWidget {
-  const StatisticsPage({super.key, this.scanner, this.statistics});
+  const StatisticsPage(
+      {super.key,
+      this.scanner,
+      this.statistics,
+      this.now,
+      this.displayService});
 
   /// Allows filesystem-free previews and deterministic widget tests.
   final LibraryStatisticsScanner? scanner;
   final PlaybackStatistics? statistics;
+  final DateTime? now;
+  final StatisticsDisplayService? displayService;
 
   @override
   State<StatisticsPage> createState() => _StatisticsPageState();
 }
 
 class _StatisticsPageState extends State<StatisticsPage> {
-  late final LibraryStatisticsScanner _scanner;
-  LibraryStatisticsSnapshot? _librarySnapshot;
-  int _requestedRevision = -1;
-  int _generation = 0;
-  int _scanned = 0;
-  int _scanTotal = 0;
-  bool _scanning = false;
-  bool _refreshScheduled = false;
-  String? _scanError;
+  late final StatisticsDisplayService _display;
+  late final bool _ownsDisplay;
+  late PlaybackStatistics _displayStats;
+  StatisticsDisplaySnapshot? _displaySnapshot;
 
   @override
   void initState() {
     super.initState();
-    _scanner = widget.scanner ?? LibraryStatisticsScanner();
-    AudioLibrary.changes.addListener(_libraryChanged);
-    _refreshLibrary(notify: false);
+    _ownsDisplay = widget.displayService == null &&
+        (widget.statistics != null || widget.scanner != null);
+    _display = widget.displayService ??
+        (_ownsDisplay
+            ? StatisticsDisplayService(
+                statistics: widget.statistics,
+                scanner: widget.scanner,
+                clock: widget.now == null ? null : () => widget.now!)
+            : StatisticsDisplayService.instance);
+    _displayStats = PlaybackStatistics.displayCopy(null);
+    _syncSnapshot();
+    // Standalone previews have no application startup. The real application
+    // warms its session cache once from startup, never from this page.
+    if (_ownsDisplay) unawaited(_display.prewarmOnce());
   }
 
-  void _libraryChanged() => _refreshIfLibraryChanged();
-
-  Future<void> _refreshLibrary({bool notify = true}) async {
-    final generation = ++_generation;
-    _requestedRevision = AudioLibrary.revision;
-    final audios = List<Audio>.of(AudioLibrary.instance.audioCollection);
-    void begin() {
-      _scanning = true;
-      _scanned = 0;
-      _scanTotal = audios.length;
-      _scanError = null;
-    }
-
-    if (notify) {
-      setState(begin);
-    } else {
-      begin();
-    }
-    try {
-      final snapshot = await _scanner.scan(
-        audios,
-        isCancelled: () => !mounted || generation != _generation,
-        onProgress: (completed, total) {
-          if (!mounted || generation != _generation) return;
-          setState(() {
-            _scanned = completed;
-            _scanTotal = total;
-          });
-        },
-      );
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _librarySnapshot = snapshot;
-        _scanning = false;
-      });
-    } on LibraryScanCancelled {
-      // A newer library revision owns the next result, or the page is gone.
-    } catch (_) {
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _scanning = false;
-        _scanError = ui("暂时无法完成统计，请重试。已有结果会保留。");
-      });
-    }
-  }
-
-  void _refreshIfLibraryChanged() {
-    // PlaybackStatistics notifies every few seconds. Only a changed library
-    // revision can schedule disk work; ordinary playback rebuilds reuse data.
-    if (_requestedRevision == AudioLibrary.revision || _refreshScheduled) {
-      return;
-    }
-    _refreshScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshScheduled = false;
-      if (mounted && _requestedRevision != AudioLibrary.revision) {
-        _refreshLibrary();
-      }
-    });
-    // Library notifications can arrive while playback and the UI are idle.
-    // Coalesce them into one upcoming frame rather than waiting for playback.
-    WidgetsBinding.instance.ensureVisualUpdate();
+  void _syncSnapshot() {
+    final next = _display.snapshot;
+    if (identical(next, _displaySnapshot)) return;
+    final previous = _displayStats;
+    _displayStats = PlaybackStatistics.displayCopy(next?.playbackData,
+        storageWarning: next?.storageWarning);
+    _displaySnapshot = next;
+    previous.dispose();
   }
 
   @override
   void dispose() {
-    _generation++;
-    AudioLibrary.changes.removeListener(_libraryChanged);
+    _displayStats.dispose();
+    if (_ownsDisplay) _display.dispose();
     super.dispose();
   }
 
@@ -116,11 +78,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return ListenableBuilder(
-      listenable: widget.statistics ?? PlaybackStatistics.instance,
+      listenable: _display,
       builder: (context, _) {
-        _refreshIfLibraryChanged();
-        final stats = widget.statistics ?? PlaybackStatistics.instance;
-        final library = _librarySnapshot;
+        _syncSnapshot();
+        final stats = _displayStats;
+        final library = _displaySnapshot?.library;
         return ColoredBox(
           color: Theme.of(context).colorScheme.surface,
           child: AppEntranceScope(
@@ -150,8 +112,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                     foregroundColor: Theme.of(context)
                                         .colorScheme
                                         .onSecondaryContainer),
-                                tooltip: ui("重新核实文件大小与语言"),
-                                onPressed: _scanning ? null : _refreshLibrary,
+                                key: const ValueKey('statistics-refresh'),
+                                tooltip: ui("刷新统计展示"),
+                                onPressed: _display.refreshing
+                                    ? null
+                                    : _display.refresh,
                                 icon: const Icon(Icons.refresh_rounded),
                               ),
                             ],
@@ -165,6 +130,22 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                   .onSurfaceVariant,
                             ),
                           ),
+                          const SizedBox(height: 4),
+                          Text(
+                              _displaySnapshot == null
+                                  ? ui('启动时准备统计展示；后台播放记录持续保存。')
+                                  : ui('展示截至 {0} · 后台持续记录，点击右上角刷新更新。', [
+                                      _snapshotClock(
+                                          _displaySnapshot!.capturedAt)
+                                    ]),
+                              key: const ValueKey('statistics-display-asof'),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant)),
                           if (stats.storageWarning != null) ...[
                             const SizedBox(height: 8),
                             Text(ui(stats.storageWarning!),
@@ -186,9 +167,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
                   sliver: SliverToBoxAdapter(
                     child: AppEntrance(
-                      identity: 'statistics-listening-behavior',
+                      identity: 'statistics-calendar',
                       order: 1,
-                      child: _ListeningBehavior(statistics: stats),
+                      child: ListeningCalendarCard(
+                          statistics: stats,
+                          now: _displaySnapshot?.capturedAt ?? widget.now,
+                          dailyChart:
+                              _DailyListeningDistribution(statistics: stats)),
                     ),
                   ),
                 ),
@@ -215,16 +200,18 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (_scanning) ...[
+                        if (_display.refreshing) ...[
                           LinearProgressIndicator(
-                            value:
-                                _scanTotal == 0 ? null : _scanned / _scanTotal,
+                            value: _display.total == 0
+                                ? null
+                                : _display.completed / _display.total,
                           ),
                           const SizedBox(height: 8),
-                          Text(ui("正在核实曲库 {0} / {1}…", [_scanned, _scanTotal])),
-                        ] else if (_scanError != null)
+                          Text(ui("正在核实曲库 {0} / {1}…",
+                              [_display.completed, _display.total])),
+                        ] else if (_display.failure != null)
                           Text(
-                            _scanError!,
+                            ui("暂时无法完成统计，请重试。已有结果会保留。"),
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.error,
                             ),
@@ -339,6 +326,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
+  static String _snapshotClock(DateTime time) =>
+      '${time.year}-${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')} '
+      '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+
   static String _clock(DateTime time) =>
       '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
 }
@@ -369,189 +360,48 @@ String _formatListeningDuration(int milliseconds, {bool precise = false}) {
 String _hourRange(int hour) => '${hour.toString().padLeft(2, '0')}:00–'
     '${(hour + 1).toString().padLeft(2, '0')}:00';
 
-class _ListeningBehavior extends StatelessWidget {
-  const _ListeningBehavior({required this.statistics});
-
+class _DailyListeningDistribution extends StatelessWidget {
+  const _DailyListeningDistribution({required this.statistics});
   final PlaybackStatistics statistics;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    final peaks = statistics.mostActiveHours;
-    final peakDuration =
-        peaks.isEmpty ? 0 : statistics.hourlyMilliseconds[peaks.first];
-    final peakDescription = peaks.isEmpty
-        ? ui("播放后显示高峰时段")
-        : peaks.length == 1
-            ? ui("{0} · 按本机时间", [_formatListeningDuration(peakDuration)])
-            : ui("{0} 个并列时段 · 每段 {1}",
-                [peaks.length, _formatListeningDuration(peakDuration)]);
-    final metrics = [
-      _BehaviorMetric(
-        key: const ValueKey('statistics-behavior-duration'),
-        icon: Symbols.headphones,
-        label: ui("听歌时长"),
-        value: _formatListeningDuration(statistics.totalListenMilliseconds),
-        detail: ui("仅累计实际播放采样时间"),
-      ),
-      _BehaviorMetric(
-        key: const ValueKey('statistics-behavior-count'),
-        icon: Symbols.play_circle,
-        label: ui("播放次数"),
-        value: ui('{0} 次', [statistics.totalPlayCount]),
-        detail: ui("{0} 首有记录 · 恢复播放不重复计次", [statistics.tracks.length]),
-      ),
-      _BehaviorMetric(
-        key: const ValueKey('statistics-behavior-peak'),
-        icon: Symbols.schedule,
-        label: ui("最活跃时段"),
-        value: peaks.isEmpty ? '—' : _hourRange(peaks.first),
-        detail: peakDescription,
-        tooltip: peaks.isEmpty ? null : peaks.map(_hourRange).join('、'),
-      ),
-    ];
-    return _StatisticsCard(
-      key: const ValueKey('listening-behavior'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _StatisticsHeading(
-            title: ui("听歌行为"),
-            icon: Symbols.headphones,
-            trailing: Tooltip(
-              message: ui("包含所有已保存记录。历史小时分布没有日期维度，不作为近7天或近30天数据展示。"),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: scheme.secondaryContainer,
-                  borderRadius: AppShape.smallRadius,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 5,
-                  ),
-                  child: Text(
-                    ui("全部记录"),
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: scheme.onSecondaryContainer,
-                        ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            ui("本地与联网歌曲一并统计，发现你一天中的听歌习惯。"),
-            style: TextStyle(color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 18),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-              final effectiveWidth =
-                  constraints.maxWidth / math.max(1, textScale);
-              final columns = effectiveWidth >= 720
-                  ? 3
-                  : effectiveWidth >= 460
-                      ? 2
-                      : 1;
-              return _EqualHeightRows(
-                columns: columns,
-                spacing: 12,
-                children: metrics,
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 18,
-            runSpacing: 6,
-            children: [
-              Text(ui("完整 {0} 次", [statistics.totalCompletedCount])),
-              Text(ui("提前跳过 {0} 次", [statistics.totalSkippedCount])),
-            ],
-          ),
-          const SizedBox(height: 24),
-          _StatisticsHeading(
-            title: ui("24 小时收听分布"),
-            icon: Symbols.bar_chart,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            ui("每根柱表示该时段累计收听时长，强调色柱为最高时段。"),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 16),
-          _HourlyListeningChart(
-            values: List<int>.of(statistics.hourlyMilliseconds),
-            peakHours: peaks,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            ui("暂停、缓冲和拖动播放进度不补算时长。休眠或采样间隔超过 2 秒时，仅计最近 2 秒，未观测的间隔不补记。"),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BehaviorMetric extends StatelessWidget {
-  const _BehaviorMetric({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.detail,
-    this.tooltip,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String detail;
-  final String? tooltip;
-
-  @override
-  Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
-    final metric = DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: AppShape.controlRadius,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _StatisticsHeading(title: label, icon: icon),
-            const SizedBox(height: 10),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                value,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(detail, style: Theme.of(context).textTheme.bodySmall),
-          ],
+    return Column(
+      key: const ValueKey('statistics-daily-distribution'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(spacing: 18, runSpacing: 6, children: [
+          Text(ui("完整 {0} 次", [statistics.totalCompletedCount])),
+          Text(ui("提前跳过 {0} 次", [statistics.totalSkippedCount])),
+        ]),
+        const SizedBox(height: 24),
+        _StatisticsHeading(
+          title: ui("24 小时收听分布"),
+          icon: Symbols.bar_chart,
         ),
-      ),
+        const SizedBox(height: 4),
+        Text(
+          ui("每根柱表示该时段累计收听时长，强调色柱为最高时段。"),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 16),
+        _HourlyListeningChart(
+          values: List<int>.of(statistics.hourlyMilliseconds),
+          peakHours: statistics.mostActiveHours,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          ui("暂停、缓冲和拖动播放进度不补算时长。休眠或采样间隔超过 2 秒时，仅计最近 2 秒，未观测的间隔不补记。"),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+        ),
+      ],
     );
-    return tooltip == null ? metric : Tooltip(message: tooltip!, child: metric);
   }
 }
 
@@ -636,144 +486,152 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AppScrollbar(
+                AppHorizontalWheelRegion(
                   controller: _scrollController,
-                  child: SingleChildScrollView(
-                    key: const ValueKey('listening-hours-scroll'),
+                  child: AppScrollbar(
                     controller: _scrollController,
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: SizedBox(
-                      width: chartWidth,
-                      child: Stack(
-                        children: [
-                          Positioned(
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            height: plotHeight,
-                            child: CustomPaint(
-                              painter: _HourlyGridPainter(
-                                color: scheme.outlineVariant,
+                    child: SingleChildScrollView(
+                      key: const ValueKey('listening-hours-scroll'),
+                      controller: _scrollController,
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: SizedBox(
+                        width: chartWidth,
+                        child: Stack(
+                          children: [
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              height: plotHeight,
+                              child: CustomPaint(
+                                painter: _HourlyGridPainter(
+                                  color: scheme.outlineVariant,
+                                ),
                               ),
                             ),
-                          ),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              for (var hour = 0; hour < 24; hour++)
-                                Expanded(
-                                  child: Semantics(
-                                    key: ValueKey('listening-hour-$hour'),
-                                    button: true,
-                                    selected: hour == selectedHour,
-                                    label: ui("{0}，收听 {1}{2}", [
-                                      _hourRange(hour),
-                                      _formatListeningDuration(_value(hour),
-                                          precise: true),
-                                      widget.peakHours.contains(hour)
-                                          ? ' · ${ui("最高时段")}'
-                                          : ''
-                                    ]),
-                                    onTap: () => _selectHour(hour),
-                                    excludeSemantics: true,
-                                    child: Tooltip(
-                                      message: '${_hourRange(hour)} · '
-                                          '${_formatListeningDuration(_value(hour), precise: true)}'
-                                          '${widget.peakHours.contains(hour) ? ' · ${ui("最高时段")}' : ''}',
-                                      child: InkWell(
-                                        onTap: () => _selectHour(hour),
-                                        borderRadius: BorderRadius.circular(6),
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            SizedBox(
-                                              height: plotHeight,
-                                              child: Align(
-                                                alignment:
-                                                    Alignment.bottomCenter,
-                                                child: SizedBox(
-                                                  width: chartWidth / 24 * 0.58,
-                                                  height: maximum == 0
-                                                      ? 0
-                                                      : plotHeight *
-                                                          _value(hour) /
-                                                          maximum,
-                                                  child: DecoratedBox(
-                                                    key: ValueKey(
-                                                        'listening-bar-$hour'),
-                                                    decoration: BoxDecoration(
-                                                      color:
-                                                          StatisticsMagnitudeColor
-                                                              .resolve(
-                                                        scheme,
-                                                        maximum == 0
-                                                            ? 0
-                                                            : _value(hour) /
-                                                                maximum,
-                                                      ),
-                                                      borderRadius:
-                                                          const BorderRadius
-                                                              .vertical(
-                                                        top: Radius.circular(4),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (var hour = 0; hour < 24; hour++)
+                                  Expanded(
+                                    child: Semantics(
+                                      key: ValueKey('listening-hour-$hour'),
+                                      button: true,
+                                      selected: hour == selectedHour,
+                                      label: ui("{0}，收听 {1}{2}", [
+                                        _hourRange(hour),
+                                        _formatListeningDuration(_value(hour),
+                                            precise: true),
+                                        widget.peakHours.contains(hour)
+                                            ? ' · ${ui("最高时段")}'
+                                            : ''
+                                      ]),
+                                      onTap: () => _selectHour(hour),
+                                      excludeSemantics: true,
+                                      child: Tooltip(
+                                        message: '${_hourRange(hour)} · '
+                                            '${_formatListeningDuration(_value(hour), precise: true)}'
+                                            '${widget.peakHours.contains(hour) ? ' · ${ui("最高时段")}' : ''}',
+                                        child: InkWell(
+                                          onTap: () => _selectHour(hour),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              SizedBox(
+                                                height: plotHeight,
+                                                child: Align(
+                                                  alignment:
+                                                      Alignment.bottomCenter,
+                                                  child: SizedBox(
+                                                    width:
+                                                        chartWidth / 24 * 0.58,
+                                                    height: maximum == 0
+                                                        ? 0
+                                                        : plotHeight *
+                                                            _value(hour) /
+                                                            maximum,
+                                                    child: DecoratedBox(
+                                                      key: ValueKey(
+                                                          'listening-bar-$hour'),
+                                                      decoration: BoxDecoration(
+                                                        color:
+                                                            StatisticsMagnitudeColor
+                                                                .resolve(
+                                                          scheme,
+                                                          maximum == 0
+                                                              ? 0
+                                                              : _value(hour) /
+                                                                  maximum,
+                                                        ),
+                                                        borderRadius:
+                                                            const BorderRadius
+                                                                .vertical(
+                                                          top: Radius.circular(
+                                                              4),
+                                                        ),
                                                       ),
                                                     ),
                                                   ),
                                                 ),
                                               ),
-                                            ),
-                                            const SizedBox(height: 6),
-                                            Container(
-                                              key: ValueKey(
-                                                  'listening-hour-label-$hour'),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 3,
-                                                      vertical: 4),
-                                              decoration: BoxDecoration(
-                                                borderRadius:
-                                                    BorderRadius.circular(5),
-                                                border: Border.all(
-                                                  color: hour == selectedHour
-                                                      ? scheme.primary
-                                                      : Colors.transparent,
+                                              const SizedBox(height: 6),
+                                              Container(
+                                                key: ValueKey(
+                                                    'listening-hour-label-$hour'),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 3,
+                                                        vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(5),
+                                                  border: Border.all(
+                                                    color: hour == selectedHour
+                                                        ? scheme.primary
+                                                        : Colors.transparent,
+                                                  ),
+                                                ),
+                                                child: Text(
+                                                  hour
+                                                      .toString()
+                                                      .padLeft(2, '0'),
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .labelSmall
+                                                      ?.copyWith(
+                                                        fontSize: 12,
+                                                        color: hour ==
+                                                                selectedHour
+                                                            ? scheme.primary
+                                                            : scheme
+                                                                .onSurfaceVariant,
+                                                        fontWeight: hour ==
+                                                                selectedHour
+                                                            ? FontWeight.bold
+                                                            : FontWeight.normal,
+                                                      ),
                                                 ),
                                               ),
-                                              child: Text(
-                                                hour.toString().padLeft(2, '0'),
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .labelSmall
-                                                    ?.copyWith(
-                                                      fontSize: 12,
-                                                      color: hour ==
-                                                              selectedHour
-                                                          ? scheme.primary
-                                                          : scheme
-                                                              .onSurfaceVariant,
-                                                      fontWeight: hour ==
-                                                              selectedHour
-                                                          ? FontWeight.bold
-                                                          : FontWeight.normal,
-                                                    ),
-                                              ),
-                                            ),
-                                          ],
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                            ],
-                          ),
-                        ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
                 if (scrollable)
                   Text(
-                    ui("横向滑动查看全部 24 个时段"),
+                    ui("滚轮或横向滑动查看全部 24 个时段"),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
@@ -943,7 +801,10 @@ class _LibraryOverview extends StatelessWidget {
               label: ui("文件读取情况"),
               value: library == null
                   ? '—'
-                  : '${library.missingLocalTracks + library.inaccessibleLocalTracks} 首未计入空间',
+                  : ui('{0} 首未计入空间', [
+                      library.missingLocalTracks +
+                          library.inaccessibleLocalTracks
+                    ]),
               detail: library == null
                   ? ui("只读检查，不修改源文件")
                   : ui("缺失 {0} · 无权限/不可读 {1}", [
@@ -1679,7 +1540,7 @@ class _MetricCard extends StatelessWidget {
 
 /// Shared card chrome and headings keep every statistics section at one level.
 class _StatisticsCard extends StatelessWidget {
-  const _StatisticsCard({super.key, required this.child});
+  const _StatisticsCard({required this.child});
   final Widget child;
 
   @override
@@ -1698,10 +1559,9 @@ class _StatisticsCard extends StatelessWidget {
 }
 
 class _StatisticsHeading extends StatelessWidget {
-  const _StatisticsHeading({required this.title, this.icon, this.trailing});
+  const _StatisticsHeading({required this.title, this.icon});
   final String title;
   final IconData? icon;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -1717,16 +1577,7 @@ class _StatisticsHeading extends StatelessWidget {
                   color: theme.colorScheme.primary,
                   fontWeight: FontWeight.w600))),
     ]);
-    return Semantics(
-        header: true,
-        child: trailing == null
-            ? heading
-            : Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [heading, trailing!],
-              ));
+    return Semantics(header: true, child: heading);
   }
 }
 

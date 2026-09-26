@@ -40,35 +40,12 @@ void main() {
     expect(PlayService.isInitialized, isFalse);
     expect(rig.native.calls, isEmpty);
     expect(rig.playback.starts, 0);
-    expect(find.text('关闭窗口后在后台继续播放'), findsOneWidget);
+    expect(find.text('关闭窗口后在后台继续播放'), findsNothing,
+        reason: 'close behavior now shares the backup settings section');
     expect(find.textContaining('不在任务栏显示歌词'), findsOneWidget);
     await tester.pumpWidget(
         const MaterialApp(home: DesktopVisibilityHost(child: Text('cold'))));
     expect(PlayService.isInitialized, isFalse);
-  });
-
-  testWidgets('background preference change preserves unrelated player choices',
-      (tester) async {
-    final rig = DesktopTestRig();
-    addTearDown(rig.dispose);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    rig.preferences.value = rig.preferences.value.copyWith(
-        springLyrics: false, playbackRate: 1.5, desktopLyricVertical: true);
-    var saves = 0;
-    await mount(tester, rig, persist: () async {
-      saves++;
-    });
-    await tester.tap(find.byKey(const ValueKey('close-to-tray-setting')));
-    await tester.pumpAndSettle();
-    final current = rig.preferences.value;
-    expect(current.closeToTray, isTrue);
-    expect(current.taskbarControls, isTrue);
-    expect(current.springLyrics, isFalse);
-    expect(current.desktopLyricVertical, isTrue);
-    expect(current.playbackRate, 1.5);
-    expect(saves, 1);
-    expect(rig.native.calls, isEmpty);
   });
 
   testWidgets('two desktop switches in one frame retain both choices',
@@ -168,7 +145,6 @@ void main() {
         await mount(tester, rig, width: width, scale: scale);
         expect(tester.takeException(), isNull);
         for (final key in [
-          'close-to-tray-setting',
           'taskbar-controls-setting',
           'taskbar-song-preview-setting',
           'taskbar-playback-progress-setting',

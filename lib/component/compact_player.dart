@@ -544,7 +544,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
           ),
           _button(
             key: 'compact-close',
-            tooltip: ui("退出播放器"),
+            tooltip: ui("关闭窗口"),
             icon: Icons.close,
             onPressed: widget.isBusy ? null : widget.onClose,
           ),

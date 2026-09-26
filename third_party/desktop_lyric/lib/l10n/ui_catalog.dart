@@ -1,5 +1,10 @@
 import 'catalog_tap_lyric_editor.dart';
+import 'catalog_local_lyrics_2606.dart';
 import 'catalog_network_proxy.dart';
+import 'catalog_snapshot2_2606.dart';
+import 'catalog_advanced_search_2606.dart';
+import 'catalog_smart_rules_2606.dart';
+import 'catalog_snapshot2_expansion_2606.dart';
 import 'catalog_lyric_editor_formats.dart';
 import 'catalog_automatic_online_lyrics.dart';
 import 'catalog_artist_separators.dart';
@@ -61,6 +66,11 @@ import 'catalog_search_history.dart';
 import 'catalog_comments_feedback_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
+  ...catalogLocalLyrics2606,
+  ...catalogSnapshot2Expansion2606,
+  ...catalogSnapshot22606,
+  ...catalogAdvancedSearch2606,
+  ...catalogSmartRules2606,
   ...catalogLyricEditorFormats,
   ...catalogTapLyricEditor,
   ...catalogNetworkProxy,

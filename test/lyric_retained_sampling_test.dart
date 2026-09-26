@@ -66,12 +66,17 @@ void main() {
         (widget.painter is PlainLyricWordFollowPainter ||
             widget.painter is LyricWordHighlightPainter));
     final boundaries = <RenderRepaintBoundary>[];
+    RenderRepaintBoundary? sungBoundary;
     for (final element in painters.evaluate()) {
       RenderObject? render = element.renderObject;
       while (render != null && render is! RenderRepaintBoundary) {
         render = render.parent;
       }
       boundaries.add(render! as RenderRepaintBoundary);
+      if ((element.widget as CustomPaint).painter
+          is LyricWordHighlightPainter) {
+        sungBoundary = render as RenderRepaintBoundary;
+      }
     }
     expect(boundaries.toSet(), hasLength(3),
         reason: 'Sung ink must not invalidate the static secondary paragraphs');
@@ -82,9 +87,10 @@ void main() {
       position.value = Duration(milliseconds: milliseconds);
       await tester.pump();
     }
-    expect(paints(boundaries.first), greaterThan(initial.first));
-    for (var i = 1; i < boundaries.length; i++) {
-      expect(paints(boundaries[i]), initial[i]);
+    expect(sungBoundary, isNotNull);
+    for (var i = 0; i < boundaries.length; i++) {
+      expect(paints(boundaries[i]),
+          boundaries[i] == sungBoundary ? greaterThan(initial[i]) : initial[i]);
     }
     for (final element in find.byType(LyricFractionalFilter).evaluate()) {
       expect((element.renderObject! as RenderProxyBox).child!.needsCompositing,

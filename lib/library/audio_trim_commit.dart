@@ -14,6 +14,7 @@ import 'package:dan_player/lyric/audio_trim_lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
+import 'package:dan_player/play_service/waveform_service.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/src/rust/api/audio_trim.dart' as native;
 import 'package:dan_player/taskbar_progress.dart';
@@ -209,9 +210,19 @@ Future<AudioTrimResult> _performAudioTrim(
     // Publish the prepared lyric first, retaining its rollback copy. A failed
     // audio commit below restores it before playback can reopen the source.
     await lyrics?.commit();
-    final receipt = jsonDecode(await operations.commit(
-            audio.path, temporary.path, request, fingerprint))
-        as Map<String, dynamic>;
+    Future<String> publish() async {
+      final result = await operations.commit(
+          audio.path, temporary.path, request, fingerprint);
+      if (request.overwrite) {
+        await WaveformService.shared.invalidatePath(audio.path);
+      }
+      return result;
+    }
+
+    final publication = request.overwrite
+        ? await WaveformService.shared.withSourceReleased(audio.path, publish)
+        : await publish();
+    final receipt = jsonDecode(publication) as Map<String, dynamic>;
     committed = true;
     final savedPath = receipt['path'] as String;
     final savedAudio = Map<String, dynamic>.from(receipt['audio'] as Map);
@@ -301,6 +312,7 @@ Future<void> synchronizeTrimmedAudio(Audio source, AudioTrimRequest request,
   library.registerSavedAudio(saved);
   await CoverCache.instance.invalidate(saved.path);
   if (request.overwrite) {
+    await WaveformService.shared.invalidatePath(source.path);
     final playlistsChanged =
         replaceAudioInPlaylists(source.path, saved.path, saved);
     if (PlayService.playbackReady.value) {

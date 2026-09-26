@@ -548,7 +548,7 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
               ),
             ),
             IconButton(
-              tooltip: ui("退出"),
+              tooltip: ui("关闭窗口"),
               onPressed: requestAppClose,
               style: controlStyle,
               icon: const AppEntrance(

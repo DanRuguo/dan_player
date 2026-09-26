@@ -1,14 +1,19 @@
 import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/app_shell.dart';
+import 'package:dan_player/app_paths.dart' as app_paths;
+import 'package:dan_player/page/audio_detail_page.dart';
 import 'dart:io';
 import 'dart:ui' as raster;
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/entry.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/page/now_playing_page/component/current_playlist_view.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/play_service/queue_edits.dart';
+import 'package:dan_player/play_service/queue_order.dart';
 import 'package:dan_player/play_service/queue_track_identity.dart';
 import 'package:dan_player/play_service/queue_stop_boundary.dart';
 import 'package:dan_player/play_service/segment_loop.dart';
@@ -17,8 +22,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import 'support/music_category_fixtures.dart';
@@ -173,6 +179,39 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   }
 
   @override
+  int trimQueue({required bool before}) {
+    if (!canEditQueue) return 0;
+    final edit = QueueEdit.trim(entries, selectedIndex, before: before);
+    if (edit == null) return 0;
+    final removed = entries.length - edit.items.length;
+    commit(edit);
+    return removed;
+  }
+
+  @override
+  bool orderUpcomingQueue({AudioSortField? field, bool reverse = false}) {
+    if (!canEditQueue) return false;
+    final edit = QueueEdit.orderUpcoming<QueueOccurrence<Audio>>(
+        entries, selectedIndex,
+        reverse: reverse,
+        compare: field == null
+            ? null
+            : (a, b) => compareAudioSort(a.item, b.item, field));
+    if (edit == null) return false;
+    commit(edit);
+    return true;
+  }
+
+  @override
+  bool arrangeUpcomingQueue(UpcomingQueueOrder order) {
+    if (!canEditQueue) return false;
+    final edit = organizeUpcomingQueue(entries, selectedIndex, order);
+    if (edit == null) return false;
+    commit(edit);
+    return true;
+  }
+
+  @override
   int get playlistIndex => selectedIndex;
 
   @override
@@ -247,6 +286,387 @@ void main() {
   setUp(() => uiLanguage.value = UiLanguage.zh);
   tearDown(() => uiLanguage.value = UiLanguage.zh);
 
+  testWidgets(
+      '666-song compact toolbar scrolls by wheel, touch and keyboard while list scroll stays vertical',
+      (tester) async {
+    final playback = _QueuePlayback(
+        List.generate(666, (i) => CategoryTestAudio('Track $i')));
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: Center(
+                child: SizedBox(
+                    width: 280,
+                    height: 440,
+                    child: CurrentPlaylistView(
+                        showTitle: false, playbackService: playback))))));
+    await tester.pumpAndSettle();
+    final rail = find.byKey(const ValueKey('queue-toolbar-scroll'));
+    final controller = tester.widget<SingleChildScrollView>(rail).controller!;
+    final list = tester
+        .widget<ListView>(find.byKey(const ValueKey('current-playlist-list')))
+        .controller!;
+    final undo = tester
+        .widget<IconButton>(find.byKey(const ValueKey('queue-undo-edit')));
+    final redo = tester
+        .widget<IconButton>(find.byKey(const ValueKey('queue-redo-edit')));
+    expect(undo.onPressed, isNull);
+    expect(redo.onPressed, isNull);
+    expect(controller.position.maxScrollExtent, greaterThan(0));
+    await tester.sendEventToBinding(PointerScrollEvent(
+        position: tester.getCenter(rail), scrollDelta: const Offset(0, 180)));
+    await tester.pumpAndSettle();
+    expect(controller.offset, greaterThan(0));
+    expect(list.offset, 0);
+    controller.jumpTo(0);
+    await tester.pump();
+    await tester.drag(rail, const Offset(-180, 0));
+    await tester.pumpAndSettle();
+    expect(controller.offset, greaterThan(0));
+    final beforeRail = controller.offset;
+    await tester.sendEventToBinding(PointerScrollEvent(
+        position: tester
+            .getCenter(find.byKey(const ValueKey('current-playlist-list'))),
+        scrollDelta: const Offset(0, 180)));
+    await tester.pumpAndSettle();
+    expect(list.offset, greaterThan(0));
+    expect(controller.offset, beforeRail);
+    controller.jumpTo(0);
+    await tester.pump();
+    for (var i = 0; i < 18; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+    }
+    expect(controller.offset, greaterThan(0),
+        reason:
+            'Keyboard traversal must reveal controls beyond the compact viewport');
+    expect(playback.lastPlayed, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'render 666-song compact toolbar four languages and extra queue menus',
+      (tester) async {
+    const output = String.fromEnvironment('DAN_QUEUE_FOLLOWUP_RENDER');
+    if (output.isEmpty) return;
+    final oldShadows = debugDisableShadows;
+    debugDisableShadows = false;
+    addTearDown(() => debugDisableShadows = oldShadows);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(430, 740);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final playback = _QueuePlayback(
+        List.generate(666, (i) => CategoryTestAudio('Track $i')));
+    addTearDown(playback.dispose);
+    final boundaryKey = GlobalKey();
+    Future<void> capture(String name) async {
+      await tester.runAsync(() async {
+        final boundary = boundaryKey.currentContext!.findRenderObject()!
+            as RenderRepaintBoundary;
+        final image = await boundary.toImage();
+        try {
+          final bytes =
+              (await image.toByteData(format: raster.ImageByteFormat.png))!
+                  .buffer
+                  .asUint8List();
+          final destination = File('$output/$name.png');
+          await destination.parent.create(recursive: true);
+          await destination.writeAsBytes(bytes, flush: true);
+        } finally {
+          image.dispose();
+        }
+      });
+    }
+
+    for (final language in UiLanguage.values) {
+      uiLanguage.value = language;
+      await tester.pumpWidget(RepaintBoundary(
+          key: boundaryKey,
+          child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              locale: language.locale,
+              supportedLocales: [
+                for (final item in UiLanguage.values) item.locale
+              ],
+              localizationsDelegates: GlobalMaterialLocalizations.delegates,
+              theme: Entry(welcome: false).fromSchemeAndFontFamily(
+                  colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
+              home: Scaffold(
+                  body: Center(
+                      child: MediaQuery(
+                          data: const MediaQueryData(
+                              size: Size(430, 740), disableAnimations: true),
+                          child: AlertDialog(
+                              insetPadding: const EdgeInsets.all(16),
+                              title: AppDialogTitle(ui('播放列表'),
+                                  leading: const Icon(Symbols.queue_music),
+                                  trailing: const Text('666')),
+                              content: SizedBox(
+                                  width: 340,
+                                  height: 460,
+                                  child: CurrentPlaylistView(
+                                      showTitle: false,
+                                      playbackService: playback)),
+                              actions: [
+                                TextButton(
+                                    onPressed: () {}, child: Text(ui('关闭')))
+                              ])))))));
+      await tester.pumpAndSettle();
+      final rail = find.byKey(const ValueKey('queue-toolbar-scroll'));
+      final controller = tester.widget<SingleChildScrollView>(rail).controller!;
+      controller.jumpTo(0);
+      await tester.pumpAndSettle();
+      expect(
+          find.byKey(const ValueKey('queue-duration-summary')), findsNothing);
+      expect(find.text('A-B'), findsNothing);
+      await capture('compact-${language.name}-start');
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      await capture('compact-${language.name}-end');
+      controller.jumpTo(0);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('queue-organize')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('queue-extra-sort')));
+      await tester.pumpAndSettle();
+      await capture('compact-${language.name}-more-sort');
+      await tester.tap(find.byKey(const ValueKey('queue-organize')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('queue-organize')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('queue-extra-arrange')));
+      await tester.pumpAndSettle();
+      await capture('compact-${language.name}-arrange');
+      expect(tester.takeException(), isNull, reason: language.name);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    }
+    debugDisableShadows = oldShadows;
+  });
+
+  testWidgets(
+      'all eleven upcoming menu commands preserve current decoder and exact stop occurrence',
+      (tester) async {
+    final active = CategoryTestAudio('Active', artist: 'A');
+    final playback = _QueuePlayback([
+      active,
+      CategoryTestAudio('Zulu', artist: 'A', album: 'Z', bitrate: 128),
+      CategoryTestAudio('Alpha', artist: 'B', album: 'A', bitrate: 960),
+      CategoryTestAudio('Beta', artist: 'B', album: 'B')
+    ]);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(_host(playback));
+    await tester.pumpAndSettle();
+    playback.stopAfterQueueItem(3);
+    final target = playback.queueStopBoundary.target;
+    for (final order in UpcomingQueueOrder.values) {
+      await tester.tap(find.byKey(const ValueKey('queue-organize')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(
+          ValueKey('queue-extra-${order.arrangement ? 'arrange' : 'sort'}')));
+      await tester.pumpAndSettle();
+      await tester
+          .ensureVisible(find.byKey(ValueKey('queue-order-${order.name}')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey('queue-order-${order.name}')));
+      await tester.pumpAndSettle();
+      expect(playback.nowPlaying, same(active));
+      expect(playback.playlist.value.first, same(active));
+      expect(playback.position, 47.25);
+      expect(playback.queueStopBoundary.target, target);
+      expect(playback.lastPlayed, isNull);
+      if (playback.canUndoQueueEdit) {
+        expect(playback.undoQueueEdit(), isTrue);
+        await tester.pumpAndSettle();
+      }
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final menu in [false, true]) {
+    testWidgets(
+        'root lyric queue opens real shell details via ${menu ? 'menu' : 'icon'} and returns',
+        (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 800);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final audio = CategoryTestAudio('Detail fixture');
+      final playback = _QueuePlayback([audio, CategoryTestAudio('Next')]);
+      addTearDown(playback.dispose);
+      const windowChannel = MethodChannel('window_manager');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowChannel, (_) async => false);
+      addTearDown(() => TestDefaultBinaryMessengerBinding
+          .instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowChannel, null));
+      final source = Entry(welcome: false).config;
+      addTearDown(source.dispose);
+      final lyricRoute = source.configuration.routes
+          .whereType<GoRoute>()
+          .singleWhere((route) => route.path == app_paths.NOW_PLAYING_PAGE);
+      final router = GoRouter(initialLocation: app_paths.AUDIOS_PAGE, routes: [
+        ShellRoute(
+            builder: (context, state, page) => Scaffold(
+                appBar: AppBar(
+                    leading: IconButton(
+                        key: const ValueKey('shell-back'),
+                        onPressed: () => context.pop(),
+                        icon: const Icon(Icons.arrow_back))),
+                body: AppContentSurface(child: page)),
+            routes: [
+              GoRoute(
+                  path: app_paths.AUDIOS_PAGE,
+                  pageBuilder: (context, state) => SlideTransitionPage(
+                      key: state.pageKey,
+                      child: CurrentPlaylistView(playbackService: playback)),
+                  routes: [
+                    GoRoute(
+                        path: 'detail',
+                        pageBuilder: (context, state) => SlideTransitionPage(
+                            key: state.pageKey,
+                            child:
+                                AudioDetailPage(audio: state.extra as Audio))),
+                  ]),
+            ]),
+        GoRoute(
+            path: app_paths.NOW_PLAYING_PAGE,
+            pageBuilder: (context, state) => SlideTransitionPage(
+                key: state.pageKey,
+                maintainState: false,
+                child: Scaffold(
+                    body: CurrentPlaylistView(
+                        immersive: true, playbackService: playback))),
+            routes: lyricRoute.routes),
+      ]);
+      addTearDown(router.dispose);
+      final detailBoundary = GlobalKey();
+      final oldShadows = debugDisableShadows;
+      debugDisableShadows = false;
+      addTearDown(() => debugDisableShadows = oldShadows);
+      await tester.pumpWidget(RepaintBoundary(
+          key: detailBoundary,
+          child: UiLanguageScope(
+              child: MaterialApp.router(
+                  debugShowCheckedModeBanner: false,
+                  routerConfig: router,
+                  theme: Entry(welcome: false).fromSchemeAndFontFamily(
+                      colorScheme:
+                          ColorScheme.fromSeed(seedColor: Colors.teal))))));
+      await tester.pumpAndSettle();
+      router.push(app_paths.NOW_PLAYING_PAGE);
+      await tester.pumpAndSettle();
+      if (menu) {
+        final pointer = await tester.startGesture(
+            tester.getCenter(
+                find.byKey(const ValueKey('current-playlist-item-0'))),
+            kind: PointerDeviceKind.mouse,
+            buttons: kSecondaryButton);
+        await pointer.up();
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('本地歌曲详情'));
+      } else {
+        await tester.tap(find.byIcon(Symbols.info).first);
+      }
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(AudioDetailPage), findsOneWidget);
+      expect(find.text('Detail fixture'), findsWidgets);
+      final detail = find.byType(AudioDetailPage);
+      expect(
+          tester.hitTestOnBinding(tester.getCenter(detail)).path, isNotEmpty);
+      final opacity = find.ancestor(of: detail, matching: find.byType(Opacity));
+      for (final widget in tester.widgetList<Opacity>(opacity)) {
+        expect(widget.opacity, 1);
+      }
+      const output = String.fromEnvironment('DAN_QUEUE_FOLLOWUP_RENDER');
+      if (output.isNotEmpty && !menu) {
+        for (final language in UiLanguage.values) {
+          uiLanguage.value = language;
+          await tester.pumpAndSettle();
+          await tester.runAsync(() async {
+            final boundary = detailBoundary.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary;
+            final image = await boundary.toImage();
+            try {
+              final bytes =
+                  (await image.toByteData(format: raster.ImageByteFormat.png))!
+                      .buffer
+                      .asUint8List();
+              await File('$output/lyric-detail-${language.name}.png')
+                  .writeAsBytes(bytes, flush: true);
+            } finally {
+              image.dispose();
+            }
+          });
+        }
+        uiLanguage.value = UiLanguage.zh;
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.byTooltip('返回'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CurrentPlaylistView), findsOneWidget);
+      expect(find.byType(AudioDetailPage), findsNothing);
+      expect(playback.lastPlayed, isNull);
+      expect(playback.position, 47.25);
+      // The same nested detail can reopen without reserving the old page key.
+      await tester.tap(find.byIcon(Symbols.info).first);
+      await tester.pumpAndSettle();
+      expect(find.byType(AudioDetailPage), findsOneWidget);
+      await tester.tap(find.byTooltip('返回'));
+      await tester.pumpAndSettle();
+      router.pop();
+      await tester.pumpAndSettle();
+      // Shell queue details retain the original /audios/detail destination.
+      await tester.tap(find.byIcon(Symbols.info).first);
+      await tester.pumpAndSettle();
+      expect(
+          GoRouterState.of(tester.element(find.byType(AudioDetailPage)))
+              .uri
+              .path,
+          app_paths.AUDIO_DETAIL_PAGE);
+      expect(find.byType(AudioDetailPage), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('shell-back')));
+      await tester.pumpAndSettle();
+      expect(find.byType(CurrentPlaylistView), findsOneWidget);
+      // Mini-player dialogs close with the selected Audio, then their shell
+      // caller pushes detail. Exercise the same handoff with a real navigator.
+      final shellContext = tester.element(find.byType(CurrentPlaylistView));
+      final selected = showAppDialog<Audio>(
+          context: shellContext,
+          builder: (dialogContext) => AlertDialog(
+              content: SizedBox(
+                  width: 600,
+                  height: 400,
+                  child: CurrentPlaylistView(
+                      showTitle: false,
+                      playbackService: playback,
+                      onOpenDetails: (audio) =>
+                          Navigator.of(dialogContext).pop(audio)))));
+      selected.then((audio) {
+        if (audio != null && shellContext.mounted) {
+          shellContext.push(app_paths.AUDIO_DETAIL_PAGE, extra: audio);
+        }
+      });
+      await tester.pumpAndSettle();
+      await tester.tap(find
+          .descendant(
+              of: find.byType(AlertDialog), matching: find.byIcon(Symbols.info))
+          .first);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AudioDetailPage), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('shell-back')));
+      await tester.pumpAndSettle();
+      expect(find.byType(CurrentPlaylistView), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      debugDisableShadows = oldShadows;
+    });
+  }
+
   testWidgets('queue keyboard undo redo yields to the focused text editor',
       (tester) async {
     final playback = _QueuePlayback(
@@ -319,6 +739,202 @@ void main() {
     expect(playback.lastPlayed, isNull);
     expect(playback.position, 47.25);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'organize upcoming queue keeps playback and reduced motion menus usable',
+      (tester) async {
+    final active = CategoryTestAudio('Active');
+    final playback = _QueuePlayback([
+      CategoryTestAudio('Before'),
+      active,
+      CategoryTestAudio('Zulu'),
+      CategoryTestAudio('Alpha'),
+    ], selectedIndex: 1);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(_host(playback));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-organize')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-extra-sort')));
+    await tester.pumpAndSettle();
+    Focus.of(tester.element(find.text(ui('待播歌曲按名称排序')).last)).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(playback.playlist.value.map((a) => a.displayTitle),
+        ['Before', 'Active', 'Alpha', 'Zulu']);
+    expect(playback.nowPlaying, same(active));
+    expect(playback.position, 47.25);
+    expect(playback.lastPlayed, isNull);
+    expect(playback.canUndoQueueEdit, isTrue);
+    playback.undoQueueEdit();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-organize')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-trim-before')));
+    await tester.pumpAndSettle();
+    expect(playback.playlist.value.first, same(active));
+    expect(playback.selectedIndex, 0);
+    playback.undoQueueEdit();
+    playback.resolvingAudioPath.value = active.path;
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<IconButton>(find.byKey(const ValueKey('queue-organize')))
+            .onPressed,
+        isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'queue summary follows duration-only changes and trim explains stop cancellation',
+      (tester) async {
+    final current = CategoryTestAudio('Active', duration: 0);
+    final playback = _QueuePlayback([current, CategoryTestAudio('Next')]);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(_host(playback));
+    await tester.pumpAndSettle();
+    expect(find.text('1 / 2 · 2:00 + ?'), findsOneWidget);
+    final queue = playback.playlist.value;
+    current.duration = 180;
+    AudioLibrary.instance.publishDurationChanges();
+    await tester.pumpAndSettle();
+    expect(playback.playlist.value, same(queue));
+    expect(find.text('1 / 2 · 5:00'), findsOneWidget);
+    playback.stopAfterQueueItem(1);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-organize')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('queue-trim-after')));
+    await tester.pumpAndSettle();
+    expect(playback.queueStopBoundary.active, isFalse);
+    expect(find.textContaining('撤销不会恢复停止目标'), findsOneWidget);
+    playback.undoQueueEdit();
+    expect(playback.playlist.value.length, 2);
+    expect(playback.queueStopBoundary.active, isFalse);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'compact queue toolbar keeps status in tooltip and contains only icons',
+      (tester) async {
+    final playback = _QueuePlayback(
+        [CategoryTestAudio('Active'), CategoryTestAudio('Next')]);
+    addTearDown(playback.dispose);
+    await tester.pumpWidget(MaterialApp(
+        theme: Entry(welcome: false).fromSchemeAndFontFamily(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
+        home: Scaffold(
+            body: Center(
+                child: SizedBox(
+                    width: 320,
+                    height: 400,
+                    child: MediaQuery(
+                        data: const MediaQueryData(
+                            textScaler: TextScaler.linear(2)),
+                        child: CurrentPlaylistView(
+                            playbackService: playback,
+                            showTitle: false,
+                            shrinkWrap: true)))))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('queue-duration-summary')), findsNothing);
+    expect(find.text('A-B'), findsNothing);
+    expect(
+        tester
+            .widget<IconButton>(find.byKey(const ValueKey('queue-organize')))
+            .tooltip,
+        contains('1 / 2'));
+    expect(
+        find.byKey(const ValueKey('current-playlist-heading')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('render queue organizer four languages narrow and reduced motion',
+      (tester) async {
+    const output = String.fromEnvironment('DAN_PLAYER_UPDATE_RENDER_DIR');
+    if (output.isEmpty) return;
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final playback = _QueuePlayback([
+      CategoryTestAudio('Before'),
+      CategoryTestAudio('Active'),
+      CategoryTestAudio('Zulu'),
+      CategoryTestAudio('Alpha'),
+      CategoryTestAudio('Unknown duration', duration: 0),
+    ], selectedIndex: 1);
+    addTearDown(playback.dispose);
+    for (final language in UiLanguage.values) {
+      uiLanguage.value = language;
+      for (final narrow in [false, true]) {
+        final size = Size(narrow ? 420 : 720, narrow ? 900 : 720);
+        tester.view.physicalSize = size;
+        final boundaryKey = GlobalKey();
+        await tester.pumpWidget(RepaintBoundary(
+            key: boundaryKey,
+            child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                locale: language.locale,
+                supportedLocales: [
+                  for (final item in UiLanguage.values) item.locale
+                ],
+                localizationsDelegates: GlobalMaterialLocalizations.delegates,
+                theme: Entry(welcome: false).fromSchemeAndFontFamily(
+                    colorScheme: ColorScheme.fromSeed(
+                        seedColor: Colors.teal,
+                        brightness:
+                            narrow ? Brightness.dark : Brightness.light)),
+                builder: (context, child) => MediaQuery(
+                    data: MediaQuery.of(context).copyWith(
+                        textScaler: TextScaler.linear(narrow ? 2 : 1),
+                        disableAnimations: narrow),
+                    child: child!),
+                home: Scaffold(
+                    body: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child:
+                            CurrentPlaylistView(playbackService: playback))))));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('queue-organize')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull,
+            reason: '${language.name} narrow=$narrow');
+        expect(find.byKey(const ValueKey('queue-trim-before')), findsOneWidget);
+        Future<void> renderMenu(String stage) => tester.runAsync(() async {
+              final boundary = boundaryKey.currentContext!.findRenderObject()!
+                  as RenderRepaintBoundary;
+              final image = await boundary.toImage();
+              try {
+                final bytes = (await image.toByteData(
+                        format: raster.ImageByteFormat.png))!
+                    .buffer
+                    .asUint8List();
+                final file = File(
+                    '$output/organizer-${language.name}-${narrow ? 'narrow-dark' : 'wide-light'}$stage.png');
+                await file.parent.create(recursive: true);
+                await file.writeAsBytes(bytes, flush: true);
+              } finally {
+                image.dispose();
+              }
+            });
+        await renderMenu('');
+        await tester.tap(find.byKey(const ValueKey('queue-extra-sort')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('queue-sort-name')), findsOneWidget);
+        expect(
+            find.byKey(const ValueKey('queue-order-language')), findsOneWidget);
+        await renderMenu('-sort');
+        if (narrow) {
+          await tester.ensureVisible(
+              find.byKey(const ValueKey('queue-reverse-upcoming')));
+          await tester.pumpAndSettle();
+          await renderMenu('-sort-tail');
+        }
+        await tester.tapAt(Offset(size.width - 20, size.height - 20));
+        await tester.pumpAndSettle();
+      }
+    }
   });
 
   testWidgets('render updated queue history and stop controls', (tester) async {
@@ -403,14 +1019,18 @@ void main() {
     for (final width in [280.0, 520.0]) {
       await tester.pumpWidget(_host(playback, width: width));
       await tester.pumpAndSettle();
-      final bounds = tester.getRect(find.byType(AppScrollbar));
+      final bounds = tester.getRect(find.ancestor(
+          of: find.byKey(const ValueKey('current-playlist-list')),
+          matching: find.byType(AppScrollbar)));
       final row =
           tester.getRect(find.byKey(const ValueKey('current-playlist-item-0')));
       expect(row.left - bounds.left, closeTo(6, .01));
       expect(bounds.right - row.right, closeTo(6, .01));
       expect(tester.takeException(), isNull);
     }
-    final scrollbar = find.byType(AppScrollbar);
+    final scrollbar = find.ancestor(
+        of: find.byKey(const ValueKey('current-playlist-list')),
+        matching: find.byType(AppScrollbar));
     final bounds = tester.getRect(scrollbar);
     final list = tester
         .widget<ListView>(find.byKey(const ValueKey('current-playlist-list')));

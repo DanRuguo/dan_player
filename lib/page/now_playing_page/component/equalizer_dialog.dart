@@ -6,6 +6,7 @@ import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
@@ -170,7 +171,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
               OutlinedButton(
                   onPressed: () async {
                     await showEqPresets(context, playbackService);
-                    if (mounted)
+                    if (mounted) {
                       setState(() {
                         _ownedRevision = playbackService.eqEditRevision;
                         _adjusted = null;
@@ -179,6 +180,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
                         enabled = playbackService.eqEnabled.value;
                         preset = _matchPreset(gains);
                       });
+                    }
                   },
                   child: Text(ui('用户预设'))),
               OutlinedButton(
@@ -230,7 +232,9 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
               ],
             ),
             const SizedBox(height: 16),
-            SingleChildScrollView(
+            AppHorizontalWheelRegion(
+                child: SingleChildScrollView(
+              key: const ValueKey('equalizer-bands-scroll'),
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
@@ -253,7 +257,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
                     ),
                 ],
               ),
-            ),
+            )),
             const SizedBox(height: 4),
             Text(
               ui("调节范围 ±15 dB，换歌后继续保持。"),

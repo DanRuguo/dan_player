@@ -40,6 +40,16 @@ void main() {
             contains('performance'),
             reason: translated);
       }
+      for (final title in ['本地歌词多轨顺序', '歌词页进度条', '波形音柱密度']) {
+        expect(
+            searchSettings(translateUi(title, language))
+                .map((entry) => entry.id),
+            contains('experience'));
+      }
+      expect(
+          searchSettings(translateUi('滚动边缘拉伸', language))
+              .map((entry) => entry.id),
+          contains('animation'));
       expect(searchSettings('  '), isEmpty);
     });
   }

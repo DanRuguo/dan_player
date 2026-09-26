@@ -138,6 +138,12 @@ class _BalancedLyricTextState extends State<BalancedLyricText> {
             textScaler: scaler,
             locale: locale);
         _width = layoutBalancedLyric(painter, textMaxWidth);
+        // The retained painter and its transparent Text child must use the
+        // same paragraph width, otherwise short centered/right-aligned ink
+        // paints at the paragraph's leading edge while the child is aligned.
+        if (_width!.isFinite) {
+          painter.layout(minWidth: _width!, maxWidth: _width!);
+        }
         _slots = widget.wordFollow
             ? lyricFollowWordSlots(painter, widget.text)
             : const [];
@@ -147,7 +153,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText> {
       if (_painter != null && _color != widget.style.color) {
         _painter!
           ..text = TextSpan(text: widget.text, style: widget.style)
-          ..layout(maxWidth: _width!);
+          ..layout(minWidth: _width!.isFinite ? _width! : 0, maxWidth: _width!);
         _color = widget.style.color;
       }
       final alignment = switch (widget.textAlign) {

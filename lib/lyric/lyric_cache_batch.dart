@@ -1,6 +1,6 @@
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/library/audio_library.dart';
-import 'package:dan_player/lyric/lrc.dart';
+import 'package:dan_player/lyric/local_lyric_reader.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
@@ -148,18 +148,32 @@ class LyricCacheBatch extends ChangeNotifier {
     await _documents.load();
     final document = _documents.forAudio(audio);
     if (document?.noLyrics == true || document?.effective != null) return true;
+    final revision = _documents.revisionFor(audio);
+    bool unchanged() => _active && _documents.revisionFor(audio) == revision;
     final source = document?.source ?? LYRIC_SOURCES[audio.path];
-    if (await readAvailableCachedLyric(audio, source: source, cache: cache) !=
+    if (await readAvailableCachedOnlineLyric(audio,
+            source: source, cache: cache, stillCurrent: unchanged) !=
         null) {
       return true;
     }
-    if (!_active) return false;
-    final local = await (readLocal ?? Lrc.fromAudioPath)(audio);
-    if (local == null || !hasLyricContent(local)) return false;
+    if (!unchanged()) {
+      final latest = _documents.forAudio(audio);
+      return latest?.noLyrics == true || latest?.effective != null;
+    }
+    final local = await (readLocal?.call(audio) ??
+        readLocalLyric(audio, stillCurrent: unchanged));
+    if (!unchanged()) {
+      final latest = _documents.forAudio(audio);
+      return latest?.noLyrics == true || latest?.effective != null;
+    }
+    if (local == null || !hasLyricContent(local)) {
+      return await readCachedLocalLyric(audio,
+              cache: cache, stillCurrent: unchanged) !=
+          null;
+    }
     (searchIndex ?? LyricSearchIndex.instance)
         .rememberLoadedLocal(audio, local);
-    await cacheLocalLyric(audio, local,
-        cache: cache, shouldStore: () => _active);
+    await cacheLocalLyric(audio, local, cache: cache, shouldStore: unchanged);
     return true;
   }
 

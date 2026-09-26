@@ -10,7 +10,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/library/audio_library.dart';
-import 'package:dan_player/lyric/lrc.dart';
+import 'package:dan_player/lyric/local_lyric_reader.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
@@ -43,8 +43,15 @@ class SetLyricSourceBtn extends StatelessWidget {
               : null;
           final isLocal = lyricNullable == null
               ? null
-              : (lyricNullable is Lrc &&
-                  lyricNullable.source == LrcSource.local);
+              : (audio != null &&
+                      LyricDocumentStore.instance
+                              .forAudio(audio)
+                              ?.source
+                              ?.source ==
+                          LyricSourceType.local) ||
+                  isDiscoveredLocalLyric(
+                      PlayService.instance.lyricService.rawCurrentLyric ??
+                          lyricNullable);
           // A slow automatic lyric lookup must never prevent manual selection.
           return LyricSourceMenuButton(
             enabled: audio != null,
@@ -597,7 +604,8 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
         bool stillCurrent() =>
             _isSelectionCurrent(generation) &&
             service.resolutionGeneration == session;
-        final lyric = await Lrc.fromAudioPath(widget.audio);
+        final lyric =
+            await readLocalLyric(widget.audio, stillCurrent: stillCurrent);
         if (!stillCurrent() || _currentTrackPath() != widget.audio.path) {
           return;
         }
@@ -940,7 +948,8 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                                   enabled: !_trackChanged,
                                   leading: const Icon(Symbols.folder),
                                   title: Text(ui("使用本地歌词")),
-                                  subtitle: Text(ui("读取内嵌歌词或同目录同名 LRC 文件")),
+                                  subtitle: Text(ui(
+                                      "优先读取同目录同名 QRC/YRC/KRC、增强 LRC 和 LRC，再读取内嵌歌词；支持 LDDC 文本导出，加密 QRC 需先转为文本。")),
                                   trailing: _loadingCandidate == 'local'
                                       ? SizedBox.square(
                                           dimension: 20,

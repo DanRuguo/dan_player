@@ -24,7 +24,7 @@ const animationLabels = <MotionKind, (String, String, IconData)>{
   ),
   MotionKind.feedback: (
     '交互反馈动画',
-    '悬停光效、水波纹、按钮和控件的状态过渡。',
+    '悬停光效、水波纹、按钮、滚动边缘拉伸和进度柄的状态过渡。',
     Icons.touch_app_outlined
   ),
   MotionKind.theme: ('主题与封面渐变', '主题、语言和封面更新时的渐变过渡。', Icons.palette_outlined),

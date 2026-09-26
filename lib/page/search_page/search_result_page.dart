@@ -12,9 +12,12 @@ import 'package:dan_player/component/search_category_tabs.dart';
 import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/personal_library.dart';
+import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/page/search_page/search_page.dart';
 import 'package:dan_player/search/audio_search_index.dart';
+import 'package:dan_player/search/audio_search_query.dart';
 import 'package:dan_player/search/search_history.dart';
 import 'package:dan_player/page/search_page/search_history_capsules.dart';
 import 'package:flutter/material.dart';
@@ -28,11 +31,15 @@ class SearchResultPage extends StatefulWidget {
       {super.key,
       required this.searchResult,
       this.history,
+      this.statistics,
+      this.loadPersonal,
       this.search = UnionSearchResult.search});
 
   final UnionSearchResult searchResult;
   final LibrarySearch search;
   final SearchHistoryStore? history;
+  final PlaybackStatistics? statistics;
+  final Future<Map<String, PersonalTrack>> Function()? loadPersonal;
 
   @override
   State<SearchResultPage> createState() => _SearchResultPageState();
@@ -45,6 +52,9 @@ class _SearchResultPageState extends State<SearchResultPage> {
   );
   int _libraryRefresh = 0;
   late int _searchRevision;
+  late int _durationRevision;
+  late final PlaybackStatistics _statistics =
+      widget.statistics ?? PlaybackStatistics.instance;
   OnlineSearchCancellation? _pendingOnlineSearch;
   int _searchRequest = 0;
   String? _pendingQuery;
@@ -64,16 +74,37 @@ class _SearchResultPageState extends State<SearchResultPage> {
   void initState() {
     super.initState();
     _searchRevision = AudioLibrary.searchRevision;
+    _durationRevision = AudioLibrary.revision;
     AudioLibrary.changes.addListener(_refreshLocalResults);
+    PersonalLibrary.changes.addListener(_personalChanged);
+    _statistics.addListener(_historyChanged);
   }
 
-  void _refreshLocalResults() {
+  void _personalChanged() {
+    if (AudioSearchQuery.parse(searchResult.query).usesPersonalData) {
+      _refreshLocalResults(force: true);
+    }
+  }
+
+  void _historyChanged() {
+    if (AudioSearchQuery.parse(searchResult.query).usesPlaybackHistory) {
+      _refreshLocalResults(force: true);
+    }
+  }
+
+  void _refreshLocalResults({bool force = false}) {
     final revision = AudioLibrary.searchRevision;
-    if (revision == _searchRevision) return;
+    final durationChanged =
+        AudioSearchQuery.parse(searchResult.query).usesLiveMetadata &&
+            _durationRevision != AudioLibrary.revision;
+    if (!force && revision == _searchRevision && !durationChanged) return;
     _searchRevision = revision;
+    _durationRevision = AudioLibrary.revision;
     final request = ++_libraryRefresh;
     final query = searchResult.query;
-    unawaited(AudioSearchIndex.instance.searchAll(query, checkCancelled: () {
+    unawaited(AudioSearchIndex.instance.searchAll(query,
+        statistics: _statistics,
+        loadPersonal: widget.loadPersonal, checkCancelled: () {
       if (!mounted || request != _libraryRefresh) {
         throw const _LocalRefreshSuperseded();
       }
@@ -93,6 +124,12 @@ class _SearchResultPageState extends State<SearchResultPage> {
   Future<void> _search(String query) async {
     final value = query.trim();
     if (value.isEmpty || value == _pendingQuery) return;
+    try {
+      AudioSearchQuery.parse(value);
+    } on AudioSearchQueryException catch (error) {
+      setState(() => _error = ui(error.message));
+      return;
+    }
     final request = ++_searchRequest;
     _pendingOnlineSearch?.cancel();
     final cancellation = OnlineSearchCancellation();
@@ -118,7 +155,8 @@ class _SearchResultPageState extends State<SearchResultPage> {
     } catch (error, trace) {
       if (!mounted || request != _searchRequest) return;
       LOGGER.w('[library search] $error', stackTrace: trace);
-      setState(() => _error = ui('搜索暂时不可用，请重试。'));
+      setState(() => _error = ui(
+          error is AudioSearchQueryException ? error.message : '搜索暂时不可用，请重试。'));
     } finally {
       if (mounted && request == _searchRequest) {
         setState(() => _pendingQuery = null);
@@ -133,6 +171,8 @@ class _SearchResultPageState extends State<SearchResultPage> {
     _pendingOnlineSearch?.cancel();
     searchResult.cancelOnlineSearch();
     AudioLibrary.changes.removeListener(_refreshLocalResults);
+    PersonalLibrary.changes.removeListener(_personalChanged);
+    _statistics.removeListener(_historyChanged);
     searchBarController.dispose();
     super.dispose();
   }
@@ -147,57 +187,79 @@ class _SearchResultPageState extends State<SearchResultPage> {
         padding: const EdgeInsets.all(16.0),
         child: DefaultTabController(
           length: _SearchResultFilter.values.length,
-          child: Column(
-            children: [
-              AppEntrance(
-                identity: 'search-result-input',
-                child: Hero(
-                  tag: SEARCH_BAR_KEY,
-                  child: Material(
-                    type: MaterialType.transparency,
-                    child: LibrarySearchField(
-                      controller: searchBarController,
-                      busy: _pendingQuery != null,
-                      onChanged: _queryChanged,
-                      onSubmitted: _search,
-                    ),
-                  ),
-                ),
-              ),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_error!, style: TextStyle(color: scheme.error)),
-                ),
-              const SizedBox(height: 8.0),
-              const AppEntrance(
-                identity: 'search-result-tabs',
-                order: 1,
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: SearchCategoryTabs(),
-                ),
-              ),
-              Expanded(
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: TabBarView(
+          child: LayoutBuilder(
+              builder: (context, constraints) => Column(
                     children: [
-                      for (final filter in _SearchResultFilter.values)
-                        _SearchResultBody(
-                          key: ValueKey("${searchResult.query}-${filter.name}"),
-                          result: searchResult,
-                          filter: filter,
-                          retryOnline: () {
-                            unawaited(_search(searchResult.query));
-                          },
+                      ConstrainedBox(
+                          constraints: BoxConstraints(
+                              maxHeight: (constraints.maxHeight - 80)
+                                  .clamp(0.0, double.infinity)),
+                          child: AppContentScrollbar(
+                              builder: (context, controller) =>
+                                  SingleChildScrollView(
+                                      controller: controller,
+                                      child: Column(children: [
+                                        AppEntrance(
+                                          identity: 'search-result-input',
+                                          child: Hero(
+                                            tag: SEARCH_BAR_KEY,
+                                            child: Material(
+                                              type: MaterialType.transparency,
+                                              child: LibrarySearchField(
+                                                controller: searchBarController,
+                                                busy: _pendingQuery != null,
+                                                onChanged: _queryChanged,
+                                                onSubmitted: _search,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        if (_error != null)
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 8),
+                                            child: Text(_error!,
+                                                style: TextStyle(
+                                                    color: scheme.error)),
+                                          ),
+                                      ])))),
+                      const SizedBox(height: 12),
+                      AppEntrance(
+                        identity: 'search-result-tabs',
+                        order: 1,
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: SearchCategoryTabs(
+                            trailing: LocalSearchHelpEntry(
+                              inResults: true,
+                              compact: constraints.maxWidth < 600 ||
+                                  MediaQuery.textScalerOf(context).scale(14) >
+                                      21,
+                            ),
+                          ),
                         ),
+                      ),
+                      Expanded(
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: TabBarView(
+                            children: [
+                              for (final filter in _SearchResultFilter.values)
+                                _SearchResultBody(
+                                  key: ValueKey(
+                                      "${searchResult.query}-${filter.name}"),
+                                  result: searchResult,
+                                  filter: filter,
+                                  retryOnline: () {
+                                    unawaited(_search(searchResult.query));
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
-                  ),
-                ),
-              ),
-            ],
-          ),
+                  )),
         ),
       ),
     );
@@ -321,6 +383,13 @@ class _SearchResultBody extends StatelessWidget {
     BuildContext context, {
     bool showHeader = true,
   }) {
+    if (result.localOnly) {
+      return SliverMainAxisGroup(slivers: [
+        if (showHeader) _header(context, ui('联网音乐')),
+        SliverToBoxAdapter(
+            child: _EmptyResult(label: ui('高级筛选仅查询本地乐库，不会发送给联网服务'))),
+      ]);
+    }
     return FutureBuilder<OnlineSearchResponse>(
       future: result.online,
       builder: (context, snapshot) {
@@ -384,8 +453,10 @@ class _SearchResultBody extends StatelessWidget {
     final slivers = <Widget>[];
     switch (filter) {
       case _SearchResultFilter.all:
-        if (result.audios.isNotEmpty) slivers.addAll(_librarySlivers(context));
-        slivers.add(_onlineSliver(context));
+        if (result.audios.isNotEmpty || result.localOnly) {
+          slivers.addAll(_librarySlivers(context));
+        }
+        if (!result.localOnly) slivers.add(_onlineSliver(context));
         if (result.artists.isNotEmpty) slivers.addAll(_artistSlivers(context));
         if (result.album.isNotEmpty) slivers.addAll(_albumSlivers(context));
         break;
@@ -430,6 +501,7 @@ class _EmptyResult extends StatelessWidget {
         child: Center(
           child: Text(
             label,
+            textAlign: TextAlign.center,
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),

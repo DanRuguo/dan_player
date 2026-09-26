@@ -28,7 +28,8 @@ import 'package:dan_player/page/now_playing_page/component/current_playlist_view
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/playback_bookmarks_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/detail_transport_button.dart';
-import 'package:dan_player/page/now_playing_page/component/detail_progress_slider.dart';
+import 'package:dan_player/page/now_playing_page/component/waveform_progress.dart';
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/page/settings_page/playback_settings.dart';
@@ -425,13 +426,21 @@ class _NowPlayingSlider extends StatelessWidget {
         playback.isBuffering,
         playback.resolvingAudioPath,
         playback.isChangingOutput,
+        AppSettings.instance.nowPlayingProgressStyle,
+        AppSettings.instance.waveformBarDensity,
       ]),
-      builder: (context, _) => DetailProgressSlider(
+      builder: (context, _) => WaveformProgress(
+        audio: playback.nowPlaying,
+        waveformDensity: AppSettings.instance.waveformBarDensity.value,
+        waveformEnabled: AppSettings.instance.nowPlayingProgressStyle.value ==
+            NowPlayingProgressStyle.waveform,
         positions: playback.positionStream,
         readPosition: () => playback.position,
         duration: playback.length,
-        trackIdentity:
-            (playback.nowPlaying?.path, playback.playbackSessionToken),
+        trackIdentity: (
+          playback.nowPlaying?.path,
+          playback.playbackSessionToken
+        ),
         enabled: playback.nowPlaying != null && playback.canEditQueue,
         onSeek: playback.seek,
         hidden: DesktopIntegration.instance.isHidden,
