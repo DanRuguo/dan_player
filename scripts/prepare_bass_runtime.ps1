@@ -31,8 +31,10 @@ $CacheRoot = [IO.Path]::GetFullPath($CacheRoot)
 $runtimeDirectory = Join-Path $CacheRoot 'runtime-x64-9pkg'
 
 # Pin both the complete official archive and the exact x64 DLL copied from it.
-# These values match the official downloads inspected through 2026-09-02. Updating a
+# These values match the official downloads inspected through 2026-09-26. Updating a
 # version requires an explicit review of the new archive and its licence text.
+# BASSWASAPI 2.4.4.1 was repacked with a sample-source fix; its DLL is unchanged.
+# BASSMIX 2.4.13 is the reviewed 2026-09-09 release, including its new x64 DLL.
 $packages = @(
     [pscustomobject]@{
         Name = 'BASS'; Version = '2.4.18.3'; Archive = 'bass24.zip'; Dll = 'bass.dll'; Notice = 'bass.txt'
@@ -42,15 +44,15 @@ $packages = @(
     }
     [pscustomobject]@{
         Name = 'BASSWASAPI'; Version = '2.4.4.1'; Archive = 'basswasapi24.zip'; Dll = 'basswasapi.dll'; Notice = 'basswasapi.txt'
-        Url = 'https://www.un4seen.com/files/basswasapi24.zip'; ArchiveSize = 151147
-        ArchiveSha256 = '4BA99200EBEF8DCA11CC99CBA9B5DC3E51A1C467E570DE2CBC0631A038F7EA2D'
+        Url = 'https://www.un4seen.com/files/basswasapi24.zip'; ArchiveSize = 151148
+        ArchiveSha256 = '74B754A925FEDED1DDD6B8B7B1A37BDC9B185E86ABEBDD46B1A7E0FF67815779'
         DllSha256 = '6F0869C11431E01F759FBE1CD6080299C833C519EB8AB1FEAE12106907B1FBD1'
     }
     [pscustomobject]@{
-        Name = 'BASSMIX'; Version = '2.4.12'; Archive = 'bassmix24.zip'; Dll = 'bassmix.dll'; Notice = 'bassmix.txt'
-        Url = 'https://www.un4seen.com/files/bassmix24.zip'; ArchiveSize = 157731
-        ArchiveSha256 = 'C22D3D6135B5D14AF23AE1D54100BE6C30FE500D9B0F253B5EBC7E9130DBAD85'
-        DllSha256 = 'F782CAE8090700A456C9E7AEAA7770C3B90CB60A1E765C4B3CBAE739D3B4D58D'
+        Name = 'BASSMIX'; Version = '2.4.13'; Archive = 'bassmix24.zip'; Dll = 'bassmix.dll'; Notice = 'bassmix.txt'
+        Url = 'https://www.un4seen.com/files/bassmix24.zip'; ArchiveSize = 168153
+        ArchiveSha256 = '9E7FE1AF3122C0D78D07CB2788CD52AEF4E47B6C6F8AD0022AD5E40320516796'
+        DllSha256 = '3A1777CD14C0FC6E2D6F879CE9B66CB60CD1C6607F344D70D2434164526063AB'
     }
     [pscustomobject]@{
         Name = 'BASSAPE'; Version = '2.4.1'; Archive = 'bassape24.zip'; Dll = 'bassape.dll'; Notice = 'bassape.txt'
@@ -322,7 +324,7 @@ Assert-Runtime $runtimeDirectory
 $provenance = [Collections.Generic.List[string]]::new()
 $provenance.Add('# UN4SEEN BASS x64 runtime provenance')
 $provenance.Add('')
-$provenance.Add('Pinned official HTTPS archives reviewed through 2026-09-02. DLLs and original TXT notices are copied byte-for-byte; no signature is added or changed.')
+$provenance.Add('Pinned official HTTPS archives reviewed through 2026-09-26. DLLs and original TXT notices are copied byte-for-byte; no signature is added or changed.')
 $provenance.Add('Official download page: https://www.un4seen.com/bass.html')
 $provenance.Add('')
 $provenance.Add('| Package | Version | Official archive | Archive SHA-256 | DLL SHA-256 |')
