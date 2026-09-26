@@ -241,12 +241,27 @@ void main() {
   });
 
   test(
-      'upgrade accepts legacy arrays and current statistics but blocks future stores',
-      () {
+      'upgrade accepts legacy arrays and statistics v2/v3 but preserves future stores',
+      () async {
     Snapshot3Upgrade.validateDocument('collections.json', []);
     Snapshot3Upgrade.validateDocument('custom_audio_order.json', []);
     Snapshot3Upgrade.validateDocument(
         'playback_statistics.json', {'version': 2});
+    final currentStatistics = {
+      'version': 3,
+      'tracks': [
+        {
+          'id': 'online:netease:startup',
+          'playCount': 7,
+          'listenMilliseconds': 5000,
+        }
+      ],
+      'days': {'2026-09-25': 5000},
+      'dailyPlayCounts': {'2026-09-25': 7},
+      'playCountTrackingStartedOn': '2026-09-25',
+    };
+    Snapshot3Upgrade.validateDocument(
+        'playback_statistics.json', currentStatistics);
     Snapshot3Upgrade.validateDocument('index.json', {
       'version': 113,
       'folders': [
@@ -266,6 +281,22 @@ void main() {
         () => Snapshot3Upgrade.validateDocument(
             'named_queues.json', {'version': 2}),
         throwsUnsupportedError);
+    final primary = File('${root.path}/playback_statistics.json');
+    final backup = File('${primary.path}.bak');
+    final futureBytes = utf8.encode(jsonEncode({
+      ...currentStatistics,
+      'version': 4,
+      'futurePrivateCounter': 987654321,
+    }));
+    final oldBackupBytes = utf8.encode('{"version":2,"tracks":[]}');
+    await primary.writeAsBytes(futureBytes);
+    await backup.writeAsBytes(oldBackupBytes);
+    await expectLater(Snapshot3Upgrade.prepare(root), throwsUnsupportedError);
+    expect(await primary.readAsBytes(), futureBytes,
+        reason:
+            'Startup must not replace a future primary with an older backup.');
+    expect(await backup.readAsBytes(), oldBackupBytes);
+    expect(await File('${root.path}/snapshot3_upgrade.json').exists(), isFalse);
   });
 
   test('startup accepts snapshot2 smart schema and refuses future schema', () {

@@ -146,8 +146,7 @@ void main() {
     expect(stats.tracks, hasLength(1));
   });
 
-  test(
-      'duplicate or corrupt history is rejected instead of silently discarding totals',
+  test('corrupt supported history and future schemas are rejected distinctly',
       () {
     expect(
         () => PlaybackStatistics.inMemory(initialData: {
@@ -157,9 +156,23 @@ void main() {
         throwsFormatException);
     expect(
         () => PlaybackStatistics.inMemory(initialData: {
-              'version': 99,
+              'version': 3,
+              'tracks': [
+                {..._legacy('local:negative'), 'playCount': -1}
+              ],
+            }),
+        throwsFormatException);
+    expect(
+        () => PlaybackStatistics.inMemory(initialData: {
+              'version': '3',
               'tracks': [],
             }),
         throwsFormatException);
+    expect(
+        () => PlaybackStatistics.inMemory(initialData: {
+              'version': 4,
+              'tracks': [],
+            }),
+        throwsUnsupportedError);
   });
 }

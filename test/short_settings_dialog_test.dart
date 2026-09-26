@@ -1,6 +1,12 @@
+import 'dart:io';
+import 'dart:ui' as drawing;
+
+import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/component/font_preview_loader.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/entry.dart';
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
 import 'package:dan_player/page/settings_page/check_update.dart';
 import 'package:dan_player/page/settings_page/other_settings.dart';
@@ -14,7 +20,10 @@ import 'package:dan_player/update/update_service.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:github/github.dart' show Release;
 import 'package:provider/provider.dart';
 
@@ -44,11 +53,34 @@ class _EqualizerPlayback extends Fake implements PlaybackService {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    for (final font in [
+      (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
+      ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
+      (
+        'packages/material_symbols_icons/MaterialSymbolsOutlined',
+        'packages/material_symbols_icons/lib/fonts/MaterialSymbolsOutlined.ttf'
+      ),
+    ]) {
+      await (FontLoader(font.$1)..addFont(rootBundle.load(font.$2))).load();
+    }
+    final korean = File('C:/Windows/Fonts/malgun.ttf');
+    if (await korean.exists()) {
+      await (FontLoader('Malgun Gothic')
+            ..addFont(
+                Future.value(ByteData.sublistView(await korean.readAsBytes()))))
+          .load();
+    }
+  });
+  tearDown(() => uiLanguage.value = UiLanguage.zh);
   late BuildContext pageContext;
   final bubble = find.byKey(const ValueKey('app-notice-bubble'));
 
   Future<void> mount(WidgetTester tester, double scale,
-      {Widget? content}) async {
+      {Widget? content,
+      bool faithfulTheme = false,
+      GlobalKey? boundary}) async {
     tester.view.physicalSize = const Size(507, 320);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -58,11 +90,21 @@ void main() {
       child: MaterialApp(
         // Match the Windows player. Android selection handles can otherwise
         // float over dialog actions after a text field is scrolled offscreen.
-        theme: ThemeData(platform: TargetPlatform.windows),
+        scrollBehavior: faithfulTheme ? const DanPlayerScrollBehavior() : null,
+        theme: faithfulTheme
+            ? Entry(welcome: false)
+                .fromSchemeAndFontFamily(
+                    colorScheme: ColorScheme.fromSeed(
+                        seedColor: Colors.teal, brightness: Brightness.dark))
+                .copyWith(platform: TargetPlatform.windows)
+            : ThemeData(platform: TargetPlatform.windows),
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context)
               .copyWith(textScaler: TextScaler.linear(scale)),
-          child: AppPresentationHost(child: child!),
+          child: boundary == null
+              ? AppPresentationHost(child: child!)
+              : RepaintBoundary(
+                  key: boundary, child: AppPresentationHost(child: child!)),
         ),
         home: Scaffold(
           body: Padding(
@@ -311,6 +353,10 @@ void main() {
       showAppNotice('请先阅读更新说明，再选择下载或稍后处理。',
           duration: const Duration(seconds: 30));
       await tester.pumpAndSettle();
+      // At 200% the existing bounded actions region scrolls separately from
+      // release details; reaching its last row is part of the actual UI flow.
+      await tester.ensureVisible(find.text('稍后'));
+      await tester.pumpAndSettle();
       expectActionAboveNotice(tester, '稍后');
       final details = tester
           .widget<SingleChildScrollView>(
@@ -323,12 +369,106 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('打开发布页').hitTestable(), findsOneWidget);
       expect(find.text('忽略此版本'), findsOneWidget);
+      await tester.ensureVisible(find.text('稍后'));
+      await tester.pumpAndSettle();
       expectActionAboveNotice(tester, '稍后');
       await tester.tap(find.text('稍后'));
       await tester.pumpAndSettle();
       await result;
       expect(find.byType(NewestUpdateView), findsNothing);
       expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final language in UiLanguage.values) {
+    testWidgets(
+        'current update short window remains reachable ${language.name}',
+        (tester) async {
+      uiLanguage.value = language;
+      final previousShadows = debugDisableShadows;
+      debugDisableShadows = false;
+      addTearDown(() => debugDisableShadows = previousShadows);
+      final boundary = GlobalKey();
+      await mount(tester, 2, faithfulTheme: true, boundary: boundary);
+      final update = AvailableUpdate(
+        release: Release(
+          tagName: 'v${AppSettings.version}',
+          name: 'Dan Player 26.0.6 snapshot2',
+          body:
+              '${List.generate(35, (index) => '${index + 1}. ${ui('本地歌词多轨顺序')} · ${ui('歌词页进度条')}').join('\n\n')}\n\n${ui('完成')}',
+          publishedAt: DateTime.utc(2026, 9, 26),
+          htmlUrl:
+              'https://github.com/DanRuguo/dan_player/releases/tag/v${AppSettings.version}',
+        ),
+        version: AppVersion.tryParse(AppSettings.version)!,
+      );
+      final closed = showAppDialog<void>(
+          context: pageContext,
+          builder: (_) => NewestUpdateView(update: update));
+      await tester.pumpAndSettle();
+      showAppNotice(ui('设置保存失败，本次会话仍保留当前选择'),
+          duration: const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      Future<void> capture(String stage) async {
+        const output = String.fromEnvironment('DAN_SHORT_SETTINGS_RENDER');
+        if (output.isEmpty) return;
+        await tester.runAsync(() async {
+          final image = await (boundary.currentContext!.findRenderObject()
+                  as RenderRepaintBoundary)
+              .toImage();
+          try {
+            final bytes =
+                await image.toByteData(format: drawing.ImageByteFormat.png);
+            final file =
+                File('$output/update-${language.name}-507x320-200-$stage.png');
+            await file.parent.create(recursive: true);
+            await file.writeAsBytes(bytes!.buffer.asUint8List(), flush: true);
+          } finally {
+            image.dispose();
+          }
+        });
+      }
+
+      await capture('initial');
+      final details = tester
+          .widget<SingleChildScrollView>(
+              find.byKey(const ValueKey('update-details-scroll')))
+          .controller!;
+      final actionsFinder = find.byKey(const ValueKey('update-actions-scroll'));
+      final actions =
+          tester.widget<SingleChildScrollView>(actionsFinder).controller!;
+      expect(
+          tester
+              .getSize(find.byKey(const ValueKey('update-details-scroll')))
+              .height,
+          greaterThan(0));
+      expect(details.position.maxScrollExtent, greaterThan(100));
+      if (actions.position.maxScrollExtent > 0) {
+        await tester.drag(actionsFinder, const Offset(0, -300));
+        await tester.pumpAndSettle();
+        expect(actions.position.pixels, greaterThan(0),
+            reason: 'the real touch scroll reaches hidden action rows');
+      }
+      for (final label in ['忽略此版本', '打开发布页', '在 GitHub 查看', '稍后']) {
+        await tester.ensureVisible(find.text(ui(label)));
+        await tester.pumpAndSettle();
+        expectActionAboveNotice(tester, ui(label));
+      }
+      if (actions.position.maxScrollExtent > 0) {
+        expect(actions.position.pixels, greaterThan(0));
+      }
+      await capture('actions-end');
+      details.jumpTo(details.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(find.text(ui('完成')).hitTestable(), findsOneWidget);
+      expectActionAboveNotice(tester, ui('稍后'));
+      await capture('details-end');
+      await tester.tap(find.text(ui('稍后')));
+      await tester.pumpAndSettle();
+      await closed;
+      expect(find.byType(NewestUpdateView), findsNothing);
+      expect(tester.takeException(), isNull);
+      debugDisableShadows = previousShadows;
     });
   }
 }

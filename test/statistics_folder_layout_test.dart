@@ -139,8 +139,8 @@ void main() {
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           _expectAlignedRows(tester, [
-            for (final name in ['duration', 'count', 'peak'])
-              'statistics-behavior-$name'
+            for (final name in ['plays', 'duration', 'active'])
+              'statistics-activity-$name'
           ]);
           await _show(tester,
               find.byKey(const ValueKey('statistics-local-folder-metric')));

@@ -14,6 +14,25 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+Future<void> _captureStatistics(
+    WidgetTester tester, GlobalKey key, String name) async {
+  const output = String.fromEnvironment('DAN_STATISTICS_RENDER');
+  if (output.isEmpty) return;
+  await tester.runAsync(() async {
+    final image =
+        await (key.currentContext!.findRenderObject() as RenderRepaintBoundary)
+            .toImage();
+    try {
+      final bytes = await image.toByteData(format: drawing.ImageByteFormat.png);
+      final file = File('$output/$name.png');
+      await file.parent.create(recursive: true);
+      await file.writeAsBytes(bytes!.buffer.asUint8List());
+    } finally {
+      image.dispose();
+    }
+  });
+}
+
 void main() {
   setUpAll(() async {
     for (final font in [
@@ -143,7 +162,7 @@ void main() {
           AudioLibrary.revision = revision;
           uiLanguage.value = UiLanguage.zh;
         });
-        tester.view.physicalSize = Size(narrow ? 400 : 1120, 880);
+        tester.view.physicalSize = Size(narrow ? 320 : 1000, 1000);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
@@ -180,8 +199,8 @@ void main() {
               supportedLocales: UiLanguage.values.map((v) => v.locale),
               localizationsDelegates: GlobalMaterialLocalizations.delegates,
               builder: (context, child) => MediaQuery(
-                  data: MediaQuery.of(context).copyWith(
-                      textScaler: TextScaler.linear(narrow ? 1.4 : 1)),
+                  data: MediaQuery.of(context)
+                      .copyWith(textScaler: TextScaler.linear(narrow ? 2 : 1)),
                   child: child!),
               home: Scaffold(
                   body: StatisticsPage(
@@ -202,9 +221,12 @@ void main() {
                           readLyrics: (_) async => null))),
             ))));
         await tester.pumpAndSettle();
+        await tester
+            .tap(find.byKey(const ValueKey('statistics-calendar-daily')));
+        await tester.pumpAndSettle();
         final metricBounds = [
-          for (final name in ['duration', 'count', 'peak'])
-            tester.getRect(find.byKey(ValueKey('statistics-behavior-$name'))),
+          for (final name in ['plays', 'duration', 'active'])
+            tester.getRect(find.byKey(ValueKey('statistics-activity-$name'))),
         ];
         if (!narrow) {
           for (final bounds in metricBounds.skip(1)) {
@@ -215,6 +237,19 @@ void main() {
         } else {
           expect(metricBounds[1].top, greaterThan(metricBounds[0].bottom));
           expect(metricBounds[2].top, greaterThan(metricBounds[1].bottom));
+        }
+        const output = String.fromEnvironment('DAN_STATISTICS_RENDER');
+        if (output.isNotEmpty) {
+          await tester.ensureVisible(
+              find.byKey(const ValueKey('statistics-activity-plays')));
+          await tester.pumpAndSettle();
+          await _captureStatistics(
+              tester, key, '${language.name}-$narrow-activity-metrics');
+          tester
+              .state<ScrollableState>(find.byType(Scrollable).first)
+              .position
+              .jumpTo(0);
+          await tester.pumpAndSettle();
         }
         for (final section in ['音乐统计', '24 小时收听分布', '歌曲语言', '占用空间最多', '播放最多']) {
           if (section != '音乐统计') {
@@ -232,21 +267,8 @@ void main() {
             expect(heading.style?.fontWeight, FontWeight.w600);
             expect(heading.style?.color, theme.colorScheme.primary);
           }
-          const output = String.fromEnvironment('DAN_STATISTICS_RENDER');
-          if (output.isNotEmpty) {
-            await tester.runAsync(() async {
-              final image = await (key.currentContext!.findRenderObject()
-                      as RenderRepaintBoundary)
-                  .toImage();
-              final bytes =
-                  await image.toByteData(format: drawing.ImageByteFormat.png);
-              final file =
-                  File('$output/${language.name}-$narrow-$section.png');
-              await file.parent.create(recursive: true);
-              await file.writeAsBytes(bytes!.buffer.asUint8List());
-              image.dispose();
-            });
-          }
+          await _captureStatistics(
+              tester, key, '${language.name}-$narrow-$section');
         }
       });
     }

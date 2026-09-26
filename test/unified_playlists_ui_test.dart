@@ -245,22 +245,45 @@ void main() {
     fixture.tree.addAudio(parent, _audio('Keep'));
     final ids = parent.entries.map((entry) => entry.id).toList();
     final image = File('assets/images/RCE_logo_transparent.png').absolute.path;
+    final originalBytes =
+        await tester.runAsync(() => File(image).readAsBytes());
     await _show(
-        tester, fixture.browser(current: parent, pickImage: () => image));
+        tester,
+        fixture.browser(
+            current: parent,
+            pickImage: () async {
+              // Cover selection/decoding may exceed the old 200ms CI assumption.
+              await Future<void>.delayed(const Duration(milliseconds: 350));
+              return image;
+            }));
     await _settings(tester, '更改歌单封面');
     await tester.runAsync(() async {
       await tester.tap(find.byKey(const ValueKey('playlist-cover-file')));
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      // Wait for actual import and persistence, not an arbitrary sleep before
+      // returning to fake time while the file/codec operation is still busy.
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (fixture.saves == 0) {
+        if (DateTime.now().isAfter(deadline)) {
+          fail('Cover import did not complete its playlist save.');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await tester.pump();
+      }
     });
     await tester.pumpAndSettle();
     expect(parent.imagePath, isNot(image));
+    final savedCover = File(parent.imagePath!);
     expect(isImportedCoverId(File(parent.imagePath!).uri.pathSegments.last),
         isTrue);
+    expect(await tester.runAsync(savedCover.readAsBytes), originalBytes);
     expect(parent.entries.map((entry) => entry.id), ids);
     await _settings(tester, '恢复默认封面');
     expect(parent.imagePath, isNull);
     expect(parent.entries.map((entry) => entry.id), ids);
     expect(fixture.saves, 2);
+    expect(
+        await tester.runAsync(() => File(image).readAsBytes()), originalBytes);
+    expect(await tester.runAsync(savedCover.readAsBytes), originalBytes);
     expect(tester.takeException(), isNull);
   });
 

@@ -145,6 +145,8 @@ void main() {
           await fixture('playback_statistics.json.bak').readAsString(), valid,
           reason:
               'Recovery must not rotate a corrupt primary over the backup.');
+      final trackingStartedOn = statistics.playCountTrackingStartedOn;
+      expect(trackingStartedOn, isNotNull);
       statistics.tick(audio, PlayerState.paused);
       await statistics.flush();
 
@@ -152,8 +154,13 @@ void main() {
       final primary =
           jsonDecode(await fixture('playback_statistics.json').readAsString())
               as Map;
-      expect(primary['version'], 2);
+      expect(primary['version'], 3);
       expect(primary['tracks'], isEmpty);
+      expect(primary['dailyPlayCounts'], isEmpty,
+          reason: 'A paused restoration must not create calendar play counts.');
+      expect(primary['playCountTrackingStartedOn'], trackingStartedOn,
+          reason:
+              'Paused playback must not change the startup tracking marker.');
       final originalV1 = fixture('playback_statistics.pre-track-id-v1.json');
       if (version == 1) {
         // The .bak file is a rotating healthy snapshot. The v1 migration keeps
@@ -161,11 +168,18 @@ void main() {
         expect(await originalV1.readAsString(), valid);
         final backup = jsonDecode(
             await fixture('playback_statistics.json.bak').readAsString());
-        expect(backup, primary);
+        expect(backup['version'], 3);
+        for (final field in ['tracks', 'days', 'hours', 'dailyPlayCounts']) {
+          expect(backup[field], primary[field], reason: field);
+        }
+        // Identity migration saved a healthy v3 snapshot before initialize()
+        // marked the start of daily play-count tracking. History remains equal.
+        expect(backup['playCountTrackingStartedOn'], isNull);
         await statistics.initialize();
         await statistics.flush();
         expect(await originalV1.readAsString(), valid);
         expect(statistics.totalPlayCount, 0);
+        expect(statistics.playCountTrackingStartedOn, trackingStartedOn);
       } else {
         expect(await originalV1.exists(), isFalse);
         expect(await fixture('playback_statistics.json.bak').readAsString(),

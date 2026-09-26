@@ -308,7 +308,7 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                         final width =
                             (constraints.maxWidth - (columns - 1) * 12) /
                                 columns;
-                        return Wrap(spacing: 12, runSpacing: 12, children: [
+                        final metrics = [
                           _metric(
                               width,
                               ui('播放次数'),
@@ -341,7 +341,34 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                                       ? Icons.schedule_rounded
                                       : Icons.today_rounded,
                                   'statistics-activity-active')),
-                        ]);
+                        ];
+                        // Text fallback fonts can have different line heights.
+                        // Stretch only these three metric tiles to the tallest
+                        // tile in their responsive row.
+                        return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (var start = 0;
+                                  start < metrics.length;
+                                  start += columns) ...[
+                                if (start > 0) const SizedBox(height: 12),
+                                IntrinsicHeight(
+                                    child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                      for (var index = start;
+                                          index <
+                                              math.min(start + columns,
+                                                  metrics.length);
+                                          index++) ...[
+                                        if (index > start)
+                                          const SizedBox(width: 12),
+                                        metrics[index],
+                                      ]
+                                    ])),
+                              ]
+                            ]);
                       }),
                       const SizedBox(height: 10),
                       Text(

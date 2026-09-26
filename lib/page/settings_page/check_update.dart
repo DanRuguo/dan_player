@@ -654,12 +654,6 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
     final visibleNotes = ReleaseBuildMarker.visibleNotes(release.body);
     final releaseTime =
         widget.update.releaseBuild?.assembledUtc ?? release.publishedAt;
-    // Keep the version and some release detail visible when completed actions
-    // need more rows in a short window with enlarged text.
-    final actionsMaxHeight =
-        (maxHeight - 24.0 - 12.0 - (result == null ? 56.0 : 112.0))
-            .clamp(0.0, double.infinity);
-    final prioritizePrimary = result != null && actionsMaxHeight < 250;
     final ignoreAction = TextButton(
       onPressed: _installing || _confirming || _ignoring ? null : _ignore,
       child: Text(ui(widget.update.isSameVersionReissue ? "忽略此构建" : "忽略此版本")),
@@ -673,238 +667,254 @@ class _NewestUpdateViewState extends State<NewestUpdateView> {
             maxHeight: maxHeight,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Flexible(
-                    child: AppScrollbar(
-                      controller: _detailsScroll,
-                      child: SingleChildScrollView(
-                        key: const ValueKey('update-details-scroll'),
+              child: LayoutBuilder(builder: (context, constraints) {
+                // The notice host can reserve more space than MediaQuery
+                // reports. Size both scroll regions from their real viewport,
+                // leaving a readable notes line even at enlarged text sizes.
+                final readableDetails =
+                    MediaQuery.textScalerOf(context).scale(24) + 32;
+                final detailsMinimum = result == null
+                    ? readableDetails
+                    : readableDetails.clamp(112.0, double.infinity);
+                final actionsMaxHeight =
+                    (constraints.maxHeight - 12 - detailsMinimum)
+                        .clamp(0.0, double.infinity);
+                final prioritizePrimary =
+                    result != null && actionsMaxHeight < 250;
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Flexible(
+                      child: AppScrollbar(
                         controller: _detailsScroll,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            AppDialogTitle(
-                              release.name ??
-                                  'Dan Player ${widget.update.version}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleLarge,
-                              subtitle: Text(
-                                ui(
-                                    widget.update.isSameVersionReissue
-                                        ? "同版本新构建 {0}{1}"
-                                        : widget.update.isPreview
-                                            ? "预览版 {0}{1}"
-                                            : "稳定版 {0}{1}",
-                                    [
-                                      widget.update.version,
-                                      releaseTime == null
-                                          ? ''
-                                          : ' · ${releaseTime.toLocal().toString().split('.').first}'
-                                    ]),
-                                style:
-                                    TextStyle(color: scheme.onSurfaceVariant),
+                        child: SingleChildScrollView(
+                          key: const ValueKey('update-details-scroll'),
+                          controller: _detailsScroll,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AppDialogTitle(
+                                release.name ??
+                                    'Dan Player ${widget.update.version}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge,
+                                subtitle: Text(
+                                  ui(
+                                      widget.update.isSameVersionReissue
+                                          ? "同版本新构建 {0}{1}"
+                                          : widget.update.isPreview
+                                              ? "预览版 {0}{1}"
+                                              : "稳定版 {0}{1}",
+                                      [
+                                        widget.update.version,
+                                        releaseTime == null
+                                            ? ''
+                                            : ' · ${releaseTime.toLocal().toString().split('.').first}'
+                                      ]),
+                                  style:
+                                      TextStyle(color: scheme.onSurfaceVariant),
+                                ),
+                                leading: Icon(Symbols.new_releases,
+                                    color: scheme.primary, size: 30.0),
                               ),
-                              leading: Icon(Symbols.new_releases,
-                                  color: scheme.primary, size: 30.0),
-                            ),
-                            const SizedBox(height: 16.0),
-                            if (widget.update.isSameVersionReissue) ...[
-                              Text(ui("此版本已重新发布新构建，可选择下载更新。"),
-                                  style: TextStyle(color: scheme.primary)),
-                              const SizedBox(height: 12.0),
-                            ],
-                            if (widget.update.isPreview) ...[
-                              Text(ui("这是预览版，可能存在问题；请选择是否下载。"),
-                                  style: TextStyle(color: scheme.primary)),
-                              const SizedBox(height: 12),
-                            ],
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: scheme.surfaceContainerLow,
-                                borderRadius: AppShape.surfaceRadius,
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: MarkdownBody(
-                                  data: visibleNotes.isNotEmpty
-                                      ? visibleNotes
-                                      : ui("此版本没有提供更新说明。"),
-                                  selectable: true,
-                                  onTapLink: (_, href, __) {
-                                    if (href != null) {
-                                      unawaited(_openLink(href));
-                                    }
-                                  },
-                                  styleSheet: MarkdownStyleSheet.fromTheme(
-                                      Theme.of(context)),
+                              const SizedBox(height: 16.0),
+                              if (widget.update.isSameVersionReissue) ...[
+                                Text(ui("此版本已重新发布新构建，可选择下载更新。"),
+                                    style: TextStyle(color: scheme.primary)),
+                                const SizedBox(height: 12.0),
+                              ],
+                              if (widget.update.isPreview) ...[
+                                Text(ui("这是预览版，可能存在问题；请选择是否下载。"),
+                                    style: TextStyle(color: scheme.primary)),
+                                const SizedBox(height: 12),
+                              ],
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: scheme.surfaceContainerLow,
+                                  borderRadius: AppShape.surfaceRadius,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: MarkdownBody(
+                                    data: visibleNotes.isNotEmpty
+                                        ? visibleNotes
+                                        : ui("此版本没有提供更新说明。"),
+                                    selectable: true,
+                                    onTapLink: (_, href, __) {
+                                      if (href != null) {
+                                        unawaited(_openLink(href));
+                                      }
+                                    },
+                                    styleSheet: MarkdownStyleSheet.fromTheme(
+                                        Theme.of(context)),
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (_downloading || progress != null) ...[
-                              const SizedBox(height: 14.0),
-                              SettingsBusyIndicator.linear(
-                                  progress: progress?.fraction),
-                              const SizedBox(height: 6.0),
-                              Text(
-                                progress == null
-                                    ? ui("正在准备下载…")
-                                    : ui("已下载 {0}{1}", [
-                                        _formatBytes(progress.receivedBytes),
-                                        progress.totalBytes == null
-                                            ? ''
-                                            : ' / ${_formatBytes(progress.totalBytes!)}'
-                                      ]),
-                                style:
-                                    TextStyle(color: scheme.onSurfaceVariant),
-                              ),
-                            ],
-                            if (_error != null) ...[
-                              const SizedBox(height: 12.0),
-                              Text(_error!,
-                                  key: _errorContentKey,
-                                  style: TextStyle(color: scheme.error)),
-                            ],
-                            if (result != null) ...[
-                              const SizedBox(height: 12.0),
-                              Row(
-                                children: [
-                                  Icon(
-                                    result.checksumVerified && !_packageRejected
-                                        ? Symbols.verified_user
-                                        : Symbols.download_done,
-                                    color: _packageRejected
-                                        ? scheme.error
-                                        : scheme.primary,
-                                  ),
-                                  const SizedBox(width: 8.0),
-                                  Expanded(
-                                    child: Text(
-                                      _packageRejected
-                                          ? ui("下载文件未通过再次校验，请重新下载。")
-                                          : result.checksumVerified
-                                              ? ui(
-                                                  "下载完成，SHA-256 校验通过。可选择重启并更新，或稍后手动安装。")
-                                              : ui(
-                                                  "下载完成；发布者未提供校验文件。为安全起见不会自动执行，请在资源管理器中确认后安装。"),
+                              if (_downloading || progress != null) ...[
+                                const SizedBox(height: 14.0),
+                                SettingsBusyIndicator.linear(
+                                    progress: progress?.fraction),
+                                const SizedBox(height: 6.0),
+                                Text(
+                                  progress == null
+                                      ? ui("正在准备下载…")
+                                      : ui("已下载 {0}{1}", [
+                                          _formatBytes(progress.receivedBytes),
+                                          progress.totalBytes == null
+                                              ? ''
+                                              : ' / ${_formatBytes(progress.totalBytes!)}'
+                                        ]),
+                                  style:
+                                      TextStyle(color: scheme.onSurfaceVariant),
+                                ),
+                              ],
+                              if (_error != null) ...[
+                                const SizedBox(height: 12.0),
+                                Text(_error!,
+                                    key: _errorContentKey,
+                                    style: TextStyle(color: scheme.error)),
+                              ],
+                              if (result != null) ...[
+                                const SizedBox(height: 12.0),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      result.checksumVerified &&
+                                              !_packageRejected
+                                          ? Symbols.verified_user
+                                          : Symbols.download_done,
+                                      color: _packageRejected
+                                          ? scheme.error
+                                          : scheme.primary,
                                     ),
-                                  ),
-                                ],
-                              ),
+                                    const SizedBox(width: 8.0),
+                                    Expanded(
+                                      child: Text(
+                                        _packageRejected
+                                            ? ui("下载文件未通过再次校验，请重新下载。")
+                                            : result.checksumVerified
+                                                ? ui(
+                                                    "下载完成，SHA-256 校验通过。可选择重启并更新，或稍后手动安装。")
+                                                : ui(
+                                                    "下载完成；发布者未提供校验文件。为安全起见不会自动执行，请在资源管理器中确认后安装。"),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12.0),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: actionsMaxHeight),
-                    child: AppScrollbar(
-                      controller: _actionsScroll,
-                      child: SingleChildScrollView(
-                        key: const ValueKey('update-actions-scroll'),
+                    const SizedBox(height: 12.0),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: actionsMaxHeight),
+                      child: AppScrollbar(
                         controller: _actionsScroll,
-                        child: Wrap(
-                          key: const ValueKey('update-actions-wrap'),
-                          alignment: WrapAlignment.end,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          spacing: 10,
-                          runSpacing: 8,
-                          children: [
-                            if (!_downloading && !prioritizePrimary)
-                              ignoreAction,
-                            if (result != null) ...[
-                              if (_packageRejected)
-                                FilledButton.icon(
-                                  key: const ValueKey('update-redownload'),
+                        child: SingleChildScrollView(
+                          key: const ValueKey('update-actions-scroll'),
+                          controller: _actionsScroll,
+                          child: Wrap(
+                            key: const ValueKey('update-actions-wrap'),
+                            alignment: WrapAlignment.end,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 10,
+                            runSpacing: 8,
+                            children: [
+                              if (!_downloading && !prioritizePrimary)
+                                ignoreAction,
+                              if (result != null) ...[
+                                if (_packageRejected)
+                                  FilledButton.icon(
+                                    key: const ValueKey('update-redownload'),
+                                    onPressed:
+                                        _confirming || _installing || _ignoring
+                                            ? null
+                                            : _download,
+                                    icon: const Icon(Symbols.download),
+                                    label: Text(ui("重新下载")),
+                                  ),
+                                if (!_packageRejected &&
+                                    result.canInstall(widget.update))
+                                  FilledButton.icon(
+                                    key: const ValueKey('update-restart'),
+                                    onPressed: _installing || _ignoring
+                                        ? null
+                                        : _restartAndUpdate,
+                                    icon: _installing
+                                        ? SettingsBusyIndicator.circular(
+                                            key: const ValueKey(
+                                                'update-install-progress'),
+                                            size: 18,
+                                            color: scheme.onSurface,
+                                          )
+                                        : const Icon(Symbols.restart_alt),
+                                    label: Text(_installing
+                                        ? (_installerLaunched
+                                            ? ui("正在退出…")
+                                            : ui("正在验证安装器…"))
+                                        : (_installerLaunched
+                                            ? ui("重试退出")
+                                            : ui("重启并更新"))),
+                                  ),
+                                OutlinedButton.icon(
                                   onPressed:
-                                      _confirming || _installing || _ignoring
+                                      _installing ? null : _showDownloadedFile,
+                                  icon: const Icon(Symbols.folder_open),
+                                  label: Text(ui("显示安装包")),
+                                ),
+                              ] else
+                                FilledButton.icon(
+                                  key: const ValueKey('update-download'),
+                                  onPressed:
+                                      _downloading || _confirming || _ignoring
                                           ? null
                                           : _download,
-                                  icon: const Icon(Symbols.download),
-                                  label: Text(ui("重新下载")),
+                                  icon: Icon(widget.update.asset == null
+                                      ? Symbols.open_in_new
+                                      : Symbols.download),
+                                  label: Text(widget.update.asset == null
+                                      ? ui("打开发布页")
+                                      : ui("下载更新")),
                                 ),
-                              if (!_packageRejected &&
-                                  result.canInstall(widget.update))
-                                FilledButton.icon(
-                                  key: const ValueKey('update-restart'),
-                                  onPressed: _installing || _ignoring
-                                      ? null
-                                      : _restartAndUpdate,
-                                  icon: _installing
-                                      ? SettingsBusyIndicator.circular(
-                                          key: const ValueKey(
-                                              'update-install-progress'),
-                                          size: 18,
-                                          color: scheme.onSurface,
-                                        )
-                                      : const Icon(Symbols.restart_alt),
-                                  label: Text(_installing
-                                      ? (_installerLaunched
-                                          ? ui("正在退出…")
-                                          : ui("正在验证安装器…"))
-                                      : (_installerLaunched
-                                          ? ui("重试退出")
-                                          : ui("重启并更新"))),
-                                ),
+                              if (!_downloading && prioritizePrimary)
+                                ignoreAction,
                               OutlinedButton.icon(
-                                onPressed:
-                                    _installing ? null : _showDownloadedFile,
-                                icon: const Icon(Symbols.folder_open),
-                                label: Text(ui("显示安装包")),
-                              ),
-                            ] else
-                              FilledButton.icon(
-                                key: const ValueKey('update-download'),
-                                onPressed:
-                                    _downloading || _confirming || _ignoring
-                                        ? null
-                                        : _download,
-                                icon: Icon(widget.update.asset == null
-                                    ? Symbols.open_in_new
-                                    : Symbols.download),
-                                label: Text(widget.update.asset == null
-                                    ? ui("打开发布页")
-                                    : ui("下载更新")),
-                              ),
-                            if (!_downloading && prioritizePrimary)
-                              ignoreAction,
-                            OutlinedButton.icon(
-                              key: const ValueKey('update-github'),
-                              onPressed: _installing
-                                  ? null
-                                  : () => _openLink(_releasePageUrl,
-                                      githubOnly: true),
-                              icon: const Icon(Symbols.open_in_new),
-                              label: Text(ui("在 GitHub 查看")),
-                            ),
-                            // Keep exit/recovery available even in a narrow window.
-                            if (_downloading)
-                              TextButton.icon(
-                                onPressed: _cancelDownload,
-                                icon: const Icon(Symbols.cancel),
-                                label: Text(ui("取消下载")),
-                              )
-                            else
-                              TextButton(
+                                key: const ValueKey('update-github'),
                                 onPressed: _installing
                                     ? null
-                                    : () => Navigator.pop(context),
-                                child:
-                                    Text(result == null ? ui("稍后") : ui("完成")),
+                                    : () => _openLink(_releasePageUrl,
+                                        githubOnly: true),
+                                icon: const Icon(Symbols.open_in_new),
+                                label: Text(ui("在 GitHub 查看")),
                               ),
-                          ],
+                              // Keep exit/recovery available even in a narrow window.
+                              if (_downloading)
+                                TextButton.icon(
+                                  onPressed: _cancelDownload,
+                                  icon: const Icon(Symbols.cancel),
+                                  label: Text(ui("取消下载")),
+                                )
+                              else
+                                TextButton(
+                                  onPressed: _installing
+                                      ? null
+                                      : () => Navigator.pop(context),
+                                  child: Text(
+                                      result == null ? ui("稍后") : ui("完成")),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                );
+              }),
             ),
           ),
         ));
