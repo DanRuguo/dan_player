@@ -118,14 +118,17 @@ class AudioMetadataEditCoordinator {
     Future<void> Function(AudioMetadataCommittedEdit)? recordCommit,
     Future<void> Function()? clearCommit,
     Audio? Function(String path)? currentAudio,
+    WaveformService? waveforms,
   })  : _write = write,
         _synchronize = synchronize,
+        _waveforms = waveforms ?? WaveformService.shared,
         _currentAudio = currentAudio,
         _recordCommit = recordCommit,
         _clearCommit = clearCommit;
 
   final AudioMetadataWriter _write;
   final AudioMetadataSynchronizer _synchronize;
+  final WaveformService _waveforms;
   final Audio? Function(String path)? _currentAudio;
   final Future<void> Function(AudioMetadataCommittedEdit)? _recordCommit;
   final Future<void> Function()? _clearCommit;
@@ -217,12 +220,11 @@ class AudioMetadataEditCoordinator {
       final oldPath = audio.path;
       final String newPath;
       try {
-        newPath =
-            await WaveformService.shared.withSourceReleased(oldPath, () async {
+        newPath = await _waveforms.withSourceReleased(oldPath, () async {
           final savedPath = await _write(oldPath, edit);
-          await WaveformService.shared.invalidatePath(oldPath);
+          await _waveforms.invalidatePath(oldPath);
           if (savedPath != oldPath) {
-            await WaveformService.shared.invalidatePath(savedPath);
+            await _waveforms.invalidatePath(savedPath);
           }
           return savedPath;
         });

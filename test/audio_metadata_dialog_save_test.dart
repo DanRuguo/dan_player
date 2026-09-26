@@ -4,10 +4,20 @@ import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/audio_metadata_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_metadata_update.dart';
+import 'package:dan_player/play_service/waveform_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/metadata_test_audio.dart';
+
+// Keep the real source-release/cancellation flow, with no cache-file I/O in
+// widget fake time. Successful commit and retry still verify invalidation.
+class _MemoryWaveformService extends WaveformService {
+  final invalidatedPaths = <String>[];
+
+  @override
+  Future<void> invalidatePath(String path) async => invalidatedPaths.add(path);
+}
 
 void main() {
   late BuildContext pageContext;
@@ -63,8 +73,10 @@ void main() {
     await mount(tester);
     final audio = MetadataTestAudio();
     final native = Completer<String>();
+    final waveforms = _MemoryWaveformService();
     var synced = false;
     final coordinator = AudioMetadataEditCoordinator(
+        waveforms: waveforms,
         write: (_, __) => native.future,
         synchronize: (_, __) async {
           synced = true;
@@ -83,6 +95,8 @@ void main() {
     expect(synced, isTrue);
     expect(audio.path, endsWith('/renamed.mp3'));
     expect(audio.title, 'Saved after disposal');
+    expect(waveforms.invalidatedPaths,
+        ['D:/metadata-fixture/old.mp3', 'D:/metadata-fixture/renamed.mp3']);
     expect(tester.takeException(), isNull);
   });
 
@@ -90,14 +104,18 @@ void main() {
       (tester) async {
     await mount(tester);
     final audio = MetadataTestAudio();
+    final waveforms = _MemoryWaveformService();
     var writes = 0;
     var syncs = 0;
-    final coordinator = AudioMetadataEditCoordinator(write: (_, __) async {
-      writes++;
-      return 'D:/metadata-fixture/new.mp3';
-    }, synchronize: (_, __) async {
-      if (++syncs == 1) throw StateError('fixture');
-    });
+    final coordinator = AudioMetadataEditCoordinator(
+        waveforms: waveforms,
+        write: (_, __) async {
+          writes++;
+          return 'D:/metadata-fixture/new.mp3';
+        },
+        synchronize: (_, __) async {
+          if (++syncs == 1) throw StateError('fixture');
+        });
     final result = showEditAudioMetadataDialog(pageContext, audio,
         saveMetadata: coordinator.apply);
     await tester.pumpAndSettle();
@@ -117,6 +135,8 @@ void main() {
     expect(await result, isTrue);
     expect(writes, 1);
     expect(syncs, 2);
+    expect(waveforms.invalidatedPaths,
+        ['D:/metadata-fixture/old.mp3', 'D:/metadata-fixture/new.mp3']);
     expect(tester.takeException(), isNull);
   });
 }

@@ -34,7 +34,16 @@ void main() {
       fixture = await parent.createTemp('app-settings-legacy-boolean-');
       messenger.setMockMethodCallHandler(channel, (_) async => fixture.path);
     }
-    settingsFile = File(path.join(fixture.path, 'settings.json'));
+    // The mocked provider returns Documents/Support, while the default data
+    // root adds the player's directory name. Write the file the real reader
+    // will consume in both the default and explicit-override test modes.
+    final data = await getAppDataDir();
+    expect(
+        path.equals(fixture.path, data.path) ||
+            path.isWithin(fixture.path, data.path),
+        isTrue,
+        reason: 'settings reader must remain inside the isolated fixture');
+    settingsFile = File(path.join(data.path, 'settings.json'));
   });
 
   tearDownAll(() async {

@@ -111,6 +111,7 @@ jobs:
           flutter analyze --no-pub --no-fatal-infos lib test
           if ($LASTEXITCODE -ne 0) { throw 'Dan Player analysis failed.' }
           $impact = Get-Content -LiteralPath tool/ci-impact.json -Raw | ConvertFrom-Json
+          $testFailures = [Collections.Generic.List[string]]::new()
           if ($impact.Profile -eq 'integration' -or $impact.AllDartTests) {
             $storageTests = @(
               'listening_calendar_storage_test.dart',
@@ -129,25 +130,26 @@ jobs:
               $last = [Math]::Min($offset + 49, $remaining.Count - 1)
               $batch = @($remaining[$offset..$last])
               flutter test --no-pub @batch
-              if ($LASTEXITCODE -ne 0) { throw 'Dan Player tests failed.' }
+              if ($LASTEXITCODE -ne 0) { $testFailures.Add("Dart files $offset through $last") }
             }
             $env:DAN_PLAYER_DATA_DIR = Join-Path (Split-Path -Parent $env:GITHUB_WORKSPACE) 'tool/qa-local/ci-storage'
             $null = New-Item -ItemType Directory -Path $env:DAN_PLAYER_DATA_DIR -Force
             try {
               flutter test --no-pub --concurrency=1 @($isolated | ForEach-Object FullName)
-              if ($LASTEXITCODE -ne 0) { throw 'Isolated storage tests failed.' }
+              if ($LASTEXITCODE -ne 0) { $testFailures.Add('Isolated storage tests') }
             } finally { Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue }
           }
           else {
             $tests = @($impact.Tests)
             if ($tests.Count -eq 0) { throw 'A business change must have explicit dependent test coverage.' }
             flutter test --no-pub @tests
+            if ($LASTEXITCODE -ne 0) { $testFailures.Add('Selected Dart tests') }
           }
-          if ($LASTEXITCODE -ne 0) { throw 'Dan Player tests failed.' }
           if ($impact.Profile -eq 'integration') {
             rustup run stable cargo test --manifest-path rust/Cargo.toml --locked
-            if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
+            if ($LASTEXITCODE -ne 0) { $testFailures.Add('Rust tests') }
           }
+          if ($testFailures.Count -gt 0) { throw ("Test groups failed: " + ($testFailures -join '; ')) }
 
       - name: Analyze and test desktop lyrics
         if: steps.impact.outputs.profile == 'integration'
