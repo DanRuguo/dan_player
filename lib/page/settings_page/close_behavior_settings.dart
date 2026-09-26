@@ -89,21 +89,13 @@ class _CloseBehaviorSettingsState extends State<CloseBehaviorSettings> {
         ),
         menuChildren: [
           for (final option in [
-            (false, '直接退出程序', 0, 'close-behavior-exit'),
-            (true, '缩小到任务栏托盘', 1, 'close-behavior-tray'),
+            (false, '直接退出程序', 'close-behavior-exit'),
+            (true, '缩小到任务栏托盘', 'close-behavior-tray'),
           ])
             MenuItemButton(
-              key: ValueKey(option.$4),
+              key: ValueKey(option.$3),
               autofocus: option.$1 == closeToTray,
-              // One glyph keeps visible area and stroke weight matched. The
-              // tray choice points down into the same window-shaped outline.
-              leadingIcon: SizedBox.square(
-                dimension: 20,
-                child: RotatedBox(
-                  quarterTurns: option.$3,
-                  child: const Icon(Icons.exit_to_app, size: 20),
-                ),
-              ),
+              leadingIcon: _actionIcon(option.$1),
               trailingIcon: SizedBox.square(
                   dimension: 20,
                   child: option.$1 == closeToTray
@@ -125,6 +117,8 @@ class _CloseBehaviorSettingsState extends State<CloseBehaviorSettings> {
             onPressed: () =>
                 controller.isOpen ? controller.close() : controller.open(),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
+              _actionIcon(closeToTray),
+              const SizedBox(width: appToolbarLabelGap),
               Flexible(child: Text(selected, textAlign: TextAlign.center)),
               const SizedBox(width: 8),
               const Icon(Icons.expand_more, size: 20),
@@ -134,4 +128,14 @@ class _CloseBehaviorSettingsState extends State<CloseBehaviorSettings> {
       ),
     );
   }
+
+  // The same window-arrow glyph and slot appear in the current choice and menu.
+  // Rotation preserves visible area and stroke weight for the tray action.
+  Widget _actionIcon(bool closeToTray) => SizedBox.square(
+        dimension: 20,
+        child: RotatedBox(
+          quarterTurns: closeToTray ? 1 : 0,
+          child: const Icon(Icons.exit_to_app, size: 20),
+        ),
+      );
 }

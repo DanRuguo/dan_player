@@ -117,9 +117,14 @@ void main() {
     expect(PlayService.isInitialized, isFalse);
     expect(rig.preferences.value.closeToTray, isFalse);
     expect(find.text(ui('直接退出程序')), findsOneWidget);
+    RotatedBox currentIcon() => tester.widget<RotatedBox>(find.descendant(
+        of: find.byKey(const ValueKey('close-to-tray-setting')),
+        matching: find.byType(RotatedBox)));
+    expect(currentIcon().quarterTurns, 0);
     await _choose(tester, true);
     final selected = rig.preferences.value;
     expect(selected.closeToTray, isTrue);
+    expect(currentIcon().quarterTurns, 1);
     expect(selected.taskbarControls, isTrue);
     expect(selected.springLyrics, isFalse);
     expect(selected.desktopLyricVertical, isTrue);
@@ -133,6 +138,7 @@ void main() {
         reason: 'selecting the current action does not write again');
     await _choose(tester, false);
     expect(rig.preferences.value.closeToTray, isFalse);
+    expect(currentIcon().quarterTurns, 0);
     expect(saves, 2);
   });
 
@@ -287,6 +293,9 @@ void main() {
         Future<void> render(String stage) async {
           final menu = stage.endsWith('menu');
           if (renderDirectory.isEmpty && !menu) return;
+          final buttonGlyph = tester.getRect(find.descendant(
+              of: choice, matching: find.byIcon(Icons.exit_to_app)));
+          expect(buttonGlyph.size, const Size(20, 20));
           final glyphAreas = menu
               ? [
                   for (final entry in [
@@ -350,6 +359,31 @@ void main() {
                     (metrics.last['inkPixels'] as int);
                 expect(areaRatio, inInclusiveRange(.9, 1.1),
                     reason: 'paired window arrows match visible ink area');
+                final buttonInk = _inkBounds(rgba, image.width, buttonGlyph);
+                final selectedMenu =
+                    AppSettings.instance.experience.value.closeToTray
+                        ? metrics.last
+                        : metrics.first;
+                expect(
+                    (buttonInk.$1.width - (selectedMenu['inkWidth'] as double))
+                        .abs(),
+                    lessThanOrEqualTo(1));
+                expect(
+                    (buttonInk.$1.height -
+                            (selectedMenu['inkHeight'] as double))
+                        .abs(),
+                    lessThanOrEqualTo(1));
+                expect(buttonInk.$2 / (selectedMenu['inkPixels'] as int),
+                    inInclusiveRange(.85, 1.15),
+                    reason: 'current choice uses the same visible menu glyph');
+                expect((buttonInk.$1.center.dy - buttonGlyph.center.dy).abs(),
+                    lessThanOrEqualTo(1.5));
+                metrics.add({
+                  'item': 'close-current-choice',
+                  'inkWidth': buttonInk.$1.width,
+                  'inkHeight': buttonInk.$1.height,
+                  'inkPixels': buttonInk.$2,
+                });
               }
               if (renderDirectory.isEmpty) return;
               final bytes =
