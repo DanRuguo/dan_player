@@ -27,6 +27,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  shaders:
+    - shaders/app_edge_stretch.frag
+  assets:
+    - shaders/FLUTTER-LICENSE.txt
   fonts:
     - family: DanPingFangSC
       fonts:

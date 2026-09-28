@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -37,6 +38,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   late final bool _ownsDisplay;
   late PlaybackStatistics _displayStats;
   StatisticsDisplaySnapshot? _displaySnapshot;
+  String _rankingGroup = 'tracks';
 
   @override
   void initState() {
@@ -172,8 +174,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       child: ListeningCalendarCard(
                           statistics: stats,
                           now: _displaySnapshot?.capturedAt ?? widget.now,
-                          dailyChart:
-                              _DailyListeningDistribution(statistics: stats)),
+                          dailyChart: _DailyListeningDistribution(
+                              statistics: stats,
+                              now: _displaySnapshot?.capturedAt ??
+                                  widget.now ??
+                                  DateTime.now())),
                     ),
                   ),
                 ),
@@ -203,7 +208,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         if (_display.refreshing) ...[
                           LinearProgressIndicator(
                             value: _display.total == 0
-                                ? null
+                                ? AppMotion.enabled(
+                                        context, MotionKind.feedback)
+                                    ? null
+                                    : 0
                                 : _display.completed / _display.total,
                           ),
                           const SizedBox(height: 8),
@@ -264,17 +272,61 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     ),
                   ),
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 0.0),
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                  sliver: SliverToBoxAdapter(
+                      child: Wrap(spacing: 8, runSpacing: 8, children: [
+                    for (final item in [
+                      ('tracks', '歌曲'),
+                      ('artists', '艺术家'),
+                      ('albums', '专辑')
+                    ])
+                      ChoiceChip(
+                          key: ValueKey('statistics-ranking-${item.$1}'),
+                          label: Text(ui(item.$2)),
+                          selected: _rankingGroup == item.$1,
+                          onSelected: (selected) {
+                            if (selected) {
+                              setState(() => _rankingGroup = item.$1);
+                            }
+                          }),
+                  ])),
+                ),
+                if (_rankingGroup != 'tracks')
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+                    sliver: SliverToBoxAdapter(
+                        child: Text(ui('按已明确归属的历史记录汇总；同名专辑按艺术家区分。'),
+                            style: Theme.of(context).textTheme.bodySmall)),
+                  ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 0.0),
                   sliver: SliverToBoxAdapter(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final topPlay = stats.topPlayCount(limit: 10);
-                        final topTime = stats.topListeningTime(limit: 10);
+                        final grouped = _rankingGroup == 'tracks'
+                            ? null
+                            : stats.groupedRankings(
+                                albums: _rankingGroup == 'albums');
+                        final topPlay = grouped == null
+                            ? stats.topPlayCount(limit: 10)
+                            : ((List<TrackPlaybackStatistics>.of(grouped)
+                                  ..sort((a, b) =>
+                                      b.playCount.compareTo(a.playCount)))
+                                .take(10)
+                                .toList());
+                        final topTime = grouped == null
+                            ? stats.topListeningTime(limit: 10)
+                            : ((List<TrackPlaybackStatistics>.of(grouped)
+                                  ..sort((a, b) => b.listenMilliseconds
+                                      .compareTo(a.listenMilliseconds)))
+                                .take(10)
+                                .toList());
                         final cards = [
                           _RankingCard(
                             title: ui("播放最多"),
                             icon: Symbols.play_circle,
                             tracks: topPlay,
+                            grouped: _rankingGroup != 'tracks',
                             value: (item) => ui("{0} 次", [item.playCount]),
                             magnitude: (item) => item.playCount.toDouble(),
                           ),
@@ -282,6 +334,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                             title: ui("收听最久"),
                             icon: Symbols.headphones,
                             tracks: topTime,
+                            grouped: _rankingGroup != 'tracks',
                             value: (item) => _formatListeningDuration(
                                 item.listenMilliseconds),
                             magnitude: (item) =>
@@ -360,38 +413,86 @@ String _formatListeningDuration(int milliseconds, {bool precise = false}) {
 String _hourRange(int hour) => '${hour.toString().padLeft(2, '0')}:00–'
     '${(hour + 1).toString().padLeft(2, '0')}:00';
 
-class _DailyListeningDistribution extends StatelessWidget {
-  const _DailyListeningDistribution({required this.statistics});
+class _DailyListeningDistribution extends StatefulWidget {
+  const _DailyListeningDistribution(
+      {required this.statistics, required this.now});
   final PlaybackStatistics statistics;
+  final DateTime now;
+  @override
+  State<_DailyListeningDistribution> createState() =>
+      _DailyListeningDistributionState();
+}
+
+class _DailyListeningDistributionState
+    extends State<_DailyListeningDistribution> {
+  bool _history = false;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
+    final recent = widget.statistics.recentActivity(widget.now);
+    String stamp(DateTime time) =>
+        '${time.month}/${time.day} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
     return Column(
       key: const ValueKey('statistics-daily-distribution'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(spacing: 18, runSpacing: 6, children: [
-          Text(ui("完整 {0} 次", [statistics.totalCompletedCount])),
-          Text(ui("提前跳过 {0} 次", [statistics.totalSkippedCount])),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          ChoiceChip(
+              key: const ValueKey('statistics-hours-recent'),
+              label: Text(ui('最近24小时')),
+              selected: !_history,
+              onSelected: (_) => setState(() => _history = false)),
+          ChoiceChip(
+              key: const ValueKey('statistics-hours-history'),
+              label: Text(ui('历史时段分布')),
+              selected: _history,
+              onSelected: (_) => setState(() => _history = true)),
         ]),
-        const SizedBox(height: 24),
+        if (_history) ...[
+          const SizedBox(height: 12),
+          Text(ui('全部历史记录'), style: Theme.of(context).textTheme.labelMedium),
+          const SizedBox(height: 6),
+          Wrap(spacing: 18, runSpacing: 6, children: [
+            Text(ui("完整 {0} 次", [widget.statistics.totalCompletedCount])),
+            Text(ui("提前跳过 {0} 次", [widget.statistics.totalSkippedCount])),
+          ]),
+        ],
+        const SizedBox(height: 16),
         _StatisticsHeading(
           title: ui("24 小时收听分布"),
           icon: Symbols.bar_chart,
         ),
         const SizedBox(height: 4),
         Text(
-          ui("每根柱表示该时段累计收听时长，强调色柱为最高时段。"),
+          ui(_history
+              ? "每根柱表示该时段累计收听时长，强调色柱为最高时段。"
+              : "每根柱表示最近24小时内一个小时的收听时长；日期和时刻随展示快照固定。"),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
         ),
         const SizedBox(height: 16),
         _HourlyListeningChart(
-          values: List<int>.of(statistics.hourlyMilliseconds),
-          peakHours: statistics.mostActiveHours,
+          key: ValueKey(_history),
+          values: _history
+              ? List<int>.of(widget.statistics.hourlyMilliseconds)
+              : recent.hourlyMilliseconds,
+          peakHours:
+              _history ? widget.statistics.mostActiveHours : recent.peakHours,
+          labels: _history
+              ? null
+              : [
+                  for (var i = 0; i < 24; i++)
+                    '${recent.hourStart(i).hour.toString().padLeft(2, '0')}:${recent.hourStart(i).minute.toString().padLeft(2, '0')}'
+                ],
+          ranges: _history
+              ? null
+              : [
+                  for (var i = 0; i < 24; i++)
+                    '${stamp(recent.hourStart(i))} – ${stamp(recent.hourStart(i + 1))}'
+                ],
         ),
         const SizedBox(height: 12),
         Text(
@@ -406,10 +507,17 @@ class _DailyListeningDistribution extends StatelessWidget {
 }
 
 class _HourlyListeningChart extends StatefulWidget {
-  const _HourlyListeningChart({required this.values, required this.peakHours});
+  const _HourlyListeningChart(
+      {super.key,
+      required this.values,
+      required this.peakHours,
+      this.labels,
+      this.ranges});
 
   final List<int> values;
   final List<int> peakHours;
+  final List<String>? labels;
+  final List<String>? ranges;
 
   @override
   State<_HourlyListeningChart> createState() => _HourlyListeningChartState();
@@ -468,7 +576,7 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
             Text(
               ui("顶格 {0}", [_formatListeningDuration(maximum)]),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
+                    color: scheme.primary,
                   ),
             ),
           ],
@@ -479,7 +587,9 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
             const plotHeight = 168.0;
             final slotMinimum = math.max(
               30.0,
-              MediaQuery.textScalerOf(context).scale(12) * 2.2 + 8,
+              MediaQuery.textScalerOf(context).scale(12) *
+                      (widget.labels == null ? 2.2 : 3.6) +
+                  8,
             );
             final chartWidth = math.max(constraints.maxWidth, slotMinimum * 24);
             final scrollable = chartWidth > constraints.maxWidth;
@@ -520,7 +630,8 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                                       button: true,
                                       selected: hour == selectedHour,
                                       label: ui("{0}，收听 {1}{2}", [
-                                        _hourRange(hour),
+                                        (widget.ranges?[hour] ??
+                                            _hourRange(hour)),
                                         _formatListeningDuration(_value(hour),
                                             precise: true),
                                         widget.peakHours.contains(hour)
@@ -530,7 +641,8 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                                       onTap: () => _selectHour(hour),
                                       excludeSemantics: true,
                                       child: Tooltip(
-                                        message: '${_hourRange(hour)} · '
+                                        message:
+                                            '${(widget.ranges?[hour] ?? _hourRange(hour))} · '
                                             '${_formatListeningDuration(_value(hour), precise: true)}'
                                             '${widget.peakHours.contains(hour) ? ' · ${ui("最高时段")}' : ''}',
                                         child: InkWell(
@@ -595,19 +707,16 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                                                   ),
                                                 ),
                                                 child: Text(
-                                                  hour
-                                                      .toString()
-                                                      .padLeft(2, '0'),
+                                                  widget.labels?[hour] ??
+                                                      hour
+                                                          .toString()
+                                                          .padLeft(2, '0'),
                                                   style: Theme.of(context)
                                                       .textTheme
                                                       .labelSmall
                                                       ?.copyWith(
                                                         fontSize: 12,
-                                                        color: hour ==
-                                                                selectedHour
-                                                            ? scheme.primary
-                                                            : scheme
-                                                                .onSurfaceVariant,
+                                                        color: scheme.primary,
                                                         fontWeight: hour ==
                                                                 selectedHour
                                                             ? FontWeight.bold
@@ -661,8 +770,10 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                     Text(
                       selectedHour == null
                           ? ui("选择一个时段")
-                          : _hourRange(selectedHour),
-                      style: Theme.of(context).textTheme.titleSmall,
+                          : (widget.ranges?[selectedHour] ??
+                              _hourRange(selectedHour)),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: selectedHour == null ? null : scheme.primary),
                     ),
                     Text(
                       selectedHour == null
@@ -670,7 +781,9 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                           : '${_formatListeningDuration(_value(selectedHour), precise: true)}'
                               '${selectedIsPeak ? ' · ${ui("最高时段")}' : ''}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                            color: selectedHour == null
+                                ? scheme.onSurfaceVariant
+                                : scheme.primary,
                           ),
                     ),
                   ],
@@ -1604,7 +1717,9 @@ class _RankingCard extends StatelessWidget {
       required this.icon,
       required this.tracks,
       required this.value,
-      required this.magnitude});
+      required this.magnitude,
+      this.grouped = false});
+  final bool grouped;
   final String title;
   final IconData icon;
   final List<TrackPlaybackStatistics> tracks;
@@ -1624,12 +1739,15 @@ class _RankingCard extends StatelessWidget {
             : Column(children: [
                 for (final (index, track) in tracks.indexed)
                   StatisticsBarRow(
-                      label: track.title,
-                      detail:
-                          '${track.artist} · ${ui(track.online ? "联网" : "本地")}'
-                          '${track.legacyUnassigned ? " · ${ui('旧版未明确归属 · {0} 个候选', [
-                                  track.candidateTrackIds.length
-                                ])}" : ""}',
+                      label: grouped && track.artist.isNotEmpty
+                          ? '${track.title} · ${track.artist}'
+                          : track.title,
+                      detail: grouped
+                          ? track.artist
+                          : '${track.artist} · ${ui(track.online ? "联网" : "本地")}'
+                              '${track.legacyUnassigned ? " · ${ui('旧版未明确归属 · {0} 个候选', [
+                                      track.candidateTrackIds.length
+                                    ])}" : ""}',
                       rank: index + 1,
                       valueColumnWidth: StatisticsBarRow.measureValues(
                           context, tracks.map(value)),

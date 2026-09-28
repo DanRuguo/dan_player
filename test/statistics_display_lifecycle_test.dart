@@ -130,6 +130,8 @@ void main() {
       final stats = PlaybackStatistics.inMemory(clock: () => now, initialData: {
         'version': 3,
         'playCountTrackingStartedOn': '2026-09-26',
+        'recentTrackingStartedAt':
+            now.subtract(const Duration(hours: 48)).millisecondsSinceEpoch,
       });
       final service = StatisticsDisplayService(
           statistics: stats,
@@ -173,18 +175,18 @@ void main() {
               .widget<Text>(
                   find.byKey(const ValueKey('statistics-activity-range')))
               .data,
-          endsWith('2026-09-26'));
+          endsWith('2026-09-26 10:00'));
       await _capture(tester, boundary, '${language.name}-reentered-stale');
       await tester.tap(refresh());
       await tester.pumpAndSettle();
       expect(reads, 3);
-      expect(plays(ui('{0} 次', [2])), findsOneWidget);
+      expect(plays(ui('{0} 次', [1])), findsOneWidget);
       expect(
           tester
               .widget<Text>(
                   find.byKey(const ValueKey('statistics-activity-range')))
               .data,
-          endsWith('2026-09-27'));
+          endsWith('2026-09-27 11:00'));
       expect(service.snapshot!.library.totalTracks, 2);
       expect(service.snapshot!.capturedAt, now);
       await _capture(tester, boundary, '${language.name}-manual-current');
@@ -192,7 +194,7 @@ void main() {
       await tester.pumpAndSettle();
       await open(tester);
       expect(reads, 3);
-      expect(plays(ui('{0} 次', [2])), findsOneWidget);
+      expect(plays(ui('{0} 次', [1])), findsOneWidget);
       await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 1));
@@ -231,6 +233,7 @@ void main() {
     final stats = PlaybackStatistics.inMemory(initialData: {
       'version': 3,
       'playCountTrackingStartedOn': '2026-09-26',
+      'recentTrackingStartedAt': DateTime(2026, 9, 24).millisecondsSinceEpoch,
     }, clock: () => DateTime(2026, 9, 26));
     var reads = 0;
     Completer<void>? gate;

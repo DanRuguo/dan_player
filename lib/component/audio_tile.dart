@@ -432,7 +432,7 @@ class _AudioTileState extends State<AudioTile> {
             durationText,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: metadataColor),
+            style: TextStyle(color: scheme.primary),
           );
           final sourceStatus = !audio.isOnline
               ? null

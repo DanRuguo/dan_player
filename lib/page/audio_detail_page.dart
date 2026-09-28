@@ -173,6 +173,7 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                       icon: Symbols.schedule,
                       label: ui("时长"),
                       value: Duration(seconds: audio.duration).toStringHMMSS(),
+                      emphasize: true,
                     ),
                     _SpecCard(
                       icon: Symbols.cloud,
@@ -206,6 +207,7 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                       _SpecCard(
                         icon: Symbols.play_circle,
                         label: ui("播放统计"),
+                        emphasize: true,
                         value: ui("{0} 次 · {1}", [
                           trackStats.playCount,
                           Duration(milliseconds: trackStats.listenMilliseconds)
@@ -525,7 +527,11 @@ class _TrackSpectrum extends StatelessWidget {
 
 class _SpecCard extends StatelessWidget {
   const _SpecCard(
-      {required this.icon, required this.label, required this.value});
+      {required this.icon,
+      required this.label,
+      required this.value,
+      this.emphasize = false});
+  final bool emphasize;
   final IconData icon;
   final String label;
   final String value;
@@ -567,7 +573,11 @@ class _SpecCard extends StatelessWidget {
                     value,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: emphasize
+                            ? Theme.of(context).colorScheme.primary
+                            : null),
                   ),
                 ],
               ),

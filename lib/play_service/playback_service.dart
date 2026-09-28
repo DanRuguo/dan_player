@@ -26,6 +26,7 @@ import 'package:dan_player/play_service/queue_track_identity.dart';
 import 'package:dan_player/play_service/queue_stop_boundary.dart';
 import 'package:dan_player/play_service/guarded_playback_seek.dart';
 import 'package:dan_player/play_service/segment_loop.dart';
+import 'package:dan_player/play_service/sleep_timer.dart';
 import 'package:dan_player/play_service/track_resume_capture_cadence.dart';
 import 'package:dan_player/play_service/track_resume_restore.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
@@ -1020,55 +1021,58 @@ class PlaybackService extends ChangeNotifier {
         onError: (_) => AppPreference.instance.save());
   }
 
-  Timer? _sleepTicker;
-  DateTime? _sleepDeadline;
-  final ValueNotifier<Duration?> sleepTimerRemaining = ValueNotifier(null);
+  late final _sleepTimer = SleepTimerController(onElapsed: _sleepTimerElapsed);
+  ValueNotifier<Duration?> get sleepTimerRemaining => _sleepTimer.remaining;
+  ValueNotifier<bool> get sleepTimerPaused => _sleepTimer.paused;
+  ValueNotifier<bool> get sleepTimerFinishCurrent => _sleepTimer.finishCurrent;
   final ValueNotifier<bool> stopAfterCurrent = ValueNotifier(false);
 
   void startSleepTimer(Duration duration) {
-    cancelSleepTimer();
-    if (duration <= Duration.zero) return;
-
-    _sleepDeadline = DateTime.now().add(duration);
-    sleepTimerRemaining.value = duration;
-    _sleepTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      final deadline = _sleepDeadline;
-      if (deadline == null) {
-        cancelSleepTimer();
-        return;
-      }
-      final remaining = deadline.difference(DateTime.now());
-      if (remaining > Duration.zero) {
-        sleepTimerRemaining.value = remaining;
-        return;
-      }
-
-      cancelSleepTimer();
-      segmentLoop.setEnabled(false);
-      queueStopBoundary.sleepExpired();
-      stopAfterCurrent.value = false;
-      // Invalidate an in-flight open before it can start after the timer.
-      if (resolvingAudioPath.value != null) {
-        _sourceRequestToken++;
-        OnlineMusicService.instance.cancelPendingStreamResolution();
-        _player.cancelPendingSource();
-        resolvingAudioPath.value = null;
-        isBuffering.value = false;
-        _loadingPlaylistIndex = null;
-      }
-      if (playerState == PlayerState.playing ||
-          playerState == PlayerState.stalled) {
-        pause();
-      }
-    });
+    if (!_closed) _sleepTimer.start(duration);
   }
 
-  void cancelSleepTimer() {
-    _sleepTicker?.cancel();
-    _sleepTicker = null;
-    _sleepDeadline = null;
-    sleepTimerRemaining.value = null;
+  void adjustSleepTimer(Duration delta) => _sleepTimer.adjust(delta);
+  void toggleSleepTimerPaused() => _sleepTimer.togglePaused();
+  void setSleepTimerFinishCurrent(bool enabled) =>
+      sleepTimerFinishCurrent.value = enabled;
+
+  void _sleepTimerElapsed(bool finishCurrent) {
+    if (_closed) return;
+    segmentLoop.setEnabled(false);
+    queueStopBoundary.sleepExpired();
+    stopAfterCurrent.value = false;
+    final occurrence = _currentOccurrence;
+    if (finishCurrent &&
+        occurrence != null &&
+        resolvingAudioPath.value == null &&
+        !isChangingOutput.value &&
+        playerState == PlayerState.playing &&
+        length > 0 &&
+        position < length) {
+      // Bind to this occurrence/session, rather than a flag that could stop
+      // an unrelated track after the user explicitly changes the source.
+      queueStopBoundary.arm(occurrence.id);
+      queueStopBoundary.resumeAdvance();
+      showAppNotice(ui('睡眠定时已到，将播完当前歌曲后停止'));
+      return;
+    }
+    // Invalidate an in-flight open before it can start after the timer.
+    if (resolvingAudioPath.value != null) {
+      _sourceRequestToken++;
+      OnlineMusicService.instance.cancelPendingStreamResolution();
+      _player.cancelPendingSource();
+      resolvingAudioPath.value = null;
+      isBuffering.value = false;
+      _loadingPlaylistIndex = null;
+    }
+    if (playerState == PlayerState.playing ||
+        playerState == PlayerState.stalled) {
+      pause();
+    }
+    showAppNotice(ui('睡眠定时已到，播放已暂停'));
   }
+
+  void cancelSleepTimer() => _sleepTimer.cancel();
 
   double get length {
     final value = _player.length;
@@ -2200,7 +2204,7 @@ class PlaybackService extends ChangeNotifier {
     _eqEnabled.dispose();
     _playMode.dispose();
     _shuffle.dispose();
-    sleepTimerRemaining.dispose();
+    _sleepTimer.dispose();
     stopAfterCurrent.dispose();
     queueStopBoundary.removeListener(_onQueueStopChanged);
     queueStopBoundary.dispose();

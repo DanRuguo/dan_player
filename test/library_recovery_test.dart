@@ -154,7 +154,9 @@ void main() {
       final primary =
           jsonDecode(await fixture('playback_statistics.json').readAsString())
               as Map;
-      expect(primary['version'], 3);
+      expect(primary['version'], 4);
+      expect(primary['recentPlayStarts'], isEmpty);
+      expect(primary['recentListeningIntervals'], isEmpty);
       expect(primary['tracks'], isEmpty);
       expect(primary['dailyPlayCounts'], isEmpty,
           reason: 'A paused restoration must not create calendar play counts.');
@@ -168,11 +170,11 @@ void main() {
         expect(await originalV1.readAsString(), valid);
         final backup = jsonDecode(
             await fixture('playback_statistics.json.bak').readAsString());
-        expect(backup['version'], 3);
+        expect(backup['version'], 4);
         for (final field in ['tracks', 'days', 'hours', 'dailyPlayCounts']) {
           expect(backup[field], primary[field], reason: field);
         }
-        // Identity migration saved a healthy v3 snapshot before initialize()
+        // Identity migration saved a healthy snapshot before initialize()
         // marked the start of daily play-count tracking. History remains equal.
         expect(backup['playCountTrackingStartedOn'], isNull);
         await statistics.initialize();

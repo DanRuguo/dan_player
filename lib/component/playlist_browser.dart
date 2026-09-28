@@ -5,6 +5,7 @@ import 'package:dan_player/component/playlist_cover_picker.dart';
 import 'package:dan_player/component/playlist_cover_transition.dart';
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/anchored_menu_action.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_horizontal_wheel_region.dart';
@@ -35,6 +36,8 @@ import 'package:dan_player/component/playlist_name_dialog.dart';
 import 'package:dan_player/component/playlist_reorder_surface.dart';
 import 'package:dan_player/component/playlist_song_picker.dart';
 import 'package:dan_player/component/playlist_toolbar.dart';
+import 'package:dan_player/component/playlist_tree_pane.dart';
+import 'package:dan_player/component/playlist_tree_item.dart';
 import 'package:dan_player/component/audio_selection_toolbar.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
 import 'package:dan_player/component/smart_playlist_dialog.dart';
@@ -112,6 +115,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   PlaylistTree? _cachedTree;
   final _selectedEntries = <String>{};
   bool _selecting = false;
+  Set<String> _expandedTree = {};
+  String _treeQuery = '';
   late PlaylistViewMode _rootView = widget.initialPlaylist == null
       ? widget.initialView ??
           PlaylistViewMode.resolve(null, legacy: widget.initialContentView.name)
@@ -127,6 +132,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
       : PlaylistViewMode.parse(playlist.presentation['view']) ??
           _detailDefaultView;
   late PlaylistViewMode _view = _viewFor(widget.initialPlaylist);
+  PlaylistViewMode? _requestedView;
   final Map<String, String> _testSortModes = {};
   late CategoryPresentation _rootTiles = widget.tree == null
       ? AppPreference.instance.playlistTilePresentation
@@ -134,6 +140,14 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   CategoryPresentation _tilePresentation(Playlist? parent) => parent == null
       ? _rootTiles
       : CategoryPresentation.fromMap(parent.presentation['tiles']);
+
+  bool _countChildren(Playlist? scope) =>
+      _tilePresentation(scope).countPlaylistChildren(_view.name);
+
+  int _displaySongCount(Playlist playlist, Playlist? scope) =>
+      _countChildren(scope)
+          ? playlist.flattenEntries().length
+          : playlist.entries.where((entry) => entry.audio != null).length;
 
   Future<void> _setTilePresentation(
       Playlist? parent, CategoryPresentation value,
@@ -167,6 +181,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   final _warningScrollController = ScrollController();
 
   void _cancelCoverTransition() {
+    _requestedView = null;
     if (_coverTransition.busy) _coverTransition.cancel();
   }
 
@@ -210,6 +225,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   void didUpdateWidget(covariant PlaylistBrowser oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initialPlaylist?.id != widget.initialPlaylist?.id) {
+      _requestedView = null;
       _coverTransition.cancel();
       _reorderController.cancel();
       _current = widget.initialPlaylist;
@@ -243,6 +259,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }
 
   void _navigate(Playlist? playlist) {
+    _requestedView = null;
     _coverTransition.cancel();
     _reorderController.cancel();
     _clearSelection();
@@ -281,24 +298,52 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }
 
   void _selectAll(List<_PlaylistRowData> rows) {
-    setState(() => _selectedEntries.addAll(rows.map((row) => row.id)));
+    setState(() =>
+        _selectedEntries.addAll(_selectionScope(rows).map((row) => row.id)));
+  }
+
+  Iterable<_PlaylistRowData> _selectionScope(List<_PlaylistRowData> rows) {
+    final query = _treeQuery.trim().toLowerCase();
+    if (_view != PlaylistViewMode.tree || query.isEmpty) return rows;
+    // Ancestors shown for context are not implicit search matches.
+    return rows.where((row) =>
+        '${row.label} ${row.audio?.artist ?? ''} ${row.audio?.album ?? ''}'
+            .toLowerCase()
+            .contains(query));
   }
 
   void _invertSelection(List<_PlaylistRowData> rows) {
     setState(() {
-      for (final row in rows) {
+      for (final row in _selectionScope(rows)) {
         if (!_selectedEntries.remove(row.id)) _selectedEntries.add(row.id);
       }
     });
   }
 
   List<Audio> _selectedAudios(List<_PlaylistRowData> rows) => [
-        for (final row in rows.where(_isSelected))
+        for (final row in _topSelected(rows))
           if (row.audio != null)
             row.audio!
           else if (row.playlist != null)
             ..._orderedOccurrences(row.playlist!).map((entry) => entry.audio),
       ];
+
+  List<_PlaylistRowData> _topSelected(List<_PlaylistRowData> rows) {
+    if (_selectedEntries.isEmpty) return [];
+    if (_view != PlaylistViewMode.tree) return rows.where(_isSelected).toList();
+    final parents = {
+      for (final n in _treeNodes(_current)) n.id: n.value.parent
+    };
+    return rows.where((row) {
+      if (!_isSelected(row)) return false;
+      var parent = parents[row.id];
+      while (parent != null && parent != _current) {
+        if (_selectedEntries.contains(parent.id)) return false;
+        parent = parent.parent;
+      }
+      return true;
+    }).toList();
+  }
 
   Future<void> _importM3u() async {
     if (_editingBlocked) return;
@@ -497,7 +542,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }
 
   Future<void> _removeSelected(Playlist? parent) async {
-    final selected = _rows(parent).where(_isSelected).toList(growable: false);
+    final nodes = _view == PlaylistViewMode.tree ? _treeNodes(_current) : null;
+    final selected = _topSelected(
+        nodes == null ? _rows(parent) : nodes.map((n) => n.value.row).toList());
     if (selected.isEmpty || _editingBlocked) return;
     final folders = selected.where((row) => row.playlist != null).length;
     final songReferences = selected.fold<int>(
@@ -530,10 +577,15 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     );
     if (confirmed != true || !mounted) return;
     await _edit(() {
-      _tree.removeEntries(
-        parent: parent,
-        entryIds: selected.map((row) => row.id),
-      );
+      if (nodes == null) {
+        _tree.removeEntries(
+            parent: parent, entryIds: selected.map((row) => row.id));
+      } else {
+        final parents = {for (final n in nodes) n.id: n.value.parent};
+        for (final row in selected) {
+          _tree.removeEntry(parent: parents[row.id], entryId: row.id);
+        }
+      }
       _clearSelection();
     });
   }
@@ -564,6 +616,11 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
   Future<void> _move(PlaylistDragData data, Playlist? target,
       {int? index}) async {
+    if (index != null && data.sourceParent?.id == target?.id) {
+      final currentIndex =
+          _customRows(target).indexWhere((row) => row.id == data.entryId);
+      if (currentIndex == index) return;
+    }
     await _edit(() => _tree.moveEntry(
           sourceParent: data.sourceParent,
           entryId: data.entryId,
@@ -627,8 +684,10 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             b.modifiedAt > 0 ? b.modifiedAt : null,
             direction: direction,
           ),
-        null =>
-          compareSortNumbers(a.songCount, b.songCount, direction: direction),
+        null => compareSortNumbers(
+            a.playlist == null ? 1 : _displaySongCount(a.playlist!, parent),
+            b.playlist == null ? 1 : _displaySongCount(b.playlist!, parent),
+            direction: direction),
         _ => compareAudioSort(a.audio, b.audio, field, direction: direction),
       };
       return result == 0
@@ -637,6 +696,131 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     });
     return sorted;
   }
+
+  List<PlaylistTreeNode<_TreeRow>> _treeNodes(Playlist? root) {
+    final result = <PlaylistTreeNode<_TreeRow>>[];
+    final visited = <String>{};
+    void append(Playlist? parent, int depth) {
+      if (depth > PlaylistTree.maxDepth ||
+          (parent != null && !visited.add(parent.id))) {
+        return;
+      }
+      final rows = _rows(parent);
+      for (var index = 0; index < rows.length; index++) {
+        final row = rows[index];
+        result.add(PlaylistTreeNode(
+            id: row.id,
+            parentId: depth == 0 ? null : parent?.id,
+            depth: depth,
+            branch: row.playlist != null,
+            searchText:
+                '${row.label} ${row.audio?.artist ?? ''} ${row.audio?.album ?? ''}',
+            value: _TreeRow(row, parent, index, rows.length)));
+        if (row.playlist != null) append(row.playlist, depth + 1);
+      }
+    }
+
+    append(root, 0);
+    return result;
+  }
+
+  Widget _treePane(Playlist? current, List<PlaylistTreeNode<_TreeRow>> nodes,
+          List<Audio> queue, Map<String, int> indices) =>
+      PlaylistTreePane<_TreeRow>(
+        key: ValueKey(('playlist-tree', current?.id)),
+        nodes: nodes,
+        expanded: _expandedTree,
+        initialQuery: _treeQuery,
+        onQueryChanged: (value) {
+          _cancelCoverTransition();
+          setState(() {
+            _treeQuery = value;
+            _selectedEntries.clear();
+          });
+        },
+        onActivate: (node) {
+          final row = node.value.row;
+          if (_selecting) {
+            _toggleSelection(row);
+          } else if (indices[row.id] case final int index) {
+            _play(queue, index);
+          }
+        },
+        onExpandedChanged: (value) {
+          final before =
+              visiblePlaylistTreeNodes(nodes, _expandedTree, _treeQuery);
+          final after = visiblePlaylistTreeNodes(nodes, value, _treeQuery);
+          var prefix = 0;
+          while (prefix < before.length &&
+              prefix < after.length &&
+              before[prefix].id == after[prefix].id) {
+            prefix++;
+          }
+          final retained = after.skip(prefix).map((node) => node.id).toSet();
+          return _coverTransition.transition(() {
+            if (mounted) setState(() => _expandedTree = value);
+          },
+              preserveAnchor: false,
+              animateArrival: false,
+              captureIds: before
+                  .skip(prefix)
+                  .map((node) => node.id)
+                  .where(retained.contains)
+                  .toSet());
+        },
+        revealId: widget.trackBuilder != null
+            ? null
+            : () {
+                final path = PlayService.playbackReady.value
+                    ? PlayService.instance.playbackService.nowPlaying?.path
+                    : null;
+                final match = nodes
+                    .where(
+                        (n) => n.value.row.audio?.path == path && path != null)
+                    .firstOrNull;
+                if (match == null) {
+                  _message(ui('当前歌曲不在此歌单树中'), kind: AppNoticeKind.info);
+                }
+                return match?.id;
+              },
+        itemBuilder: (context, node, toggle) {
+          final item = node.value;
+          final line = _row(
+              item.parent, item.row, item.index, item.count, queue, indices,
+              onOpenFolder: toggle);
+          if (_sortMode(item.parent) != PlaylistSortMode.custom) {
+            return line;
+          }
+          // Keep the draggable at the same element slot throughout the drag.
+          // Replacing the bare row with a Column can dispose its DragSource
+          // before onDragEnd clears _draggingId after a no-op drop.
+          final siblings = _draggingId == null ? null : _rows(item.parent);
+          Widget gap(int slot, bool active) {
+            final child = active
+                ? _dropGap(item.parent, siblings!, slot)
+                : const SizedBox(height: 0, width: double.infinity);
+            if (appToolbarReduceMotion(context, kind: MotionKind.layout)) {
+              return child;
+            }
+            return AnimatedSize(
+              duration: AppMotion.quick,
+              curve: AppMotion.standardCurve,
+              alignment: Alignment.topCenter,
+              child: child,
+            );
+          }
+
+          return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                gap(item.index, siblings != null),
+                line,
+                if (item.index == item.count - 1)
+                  gap(item.count, siblings != null),
+              ]);
+        },
+      );
 
   void _sort(Playlist? parent, PlaylistSortMode method) {
     _cancelCoverTransition();
@@ -1005,6 +1189,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
   Widget _freeGridDragSource({
     Rect Function()? mouseBounds,
+    VoidCallback? activate,
     required Key key,
     required _PlaylistRowData row,
     required Playlist? parent,
@@ -1016,8 +1201,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
               ? Duration.zero
               : const Duration(milliseconds: 250),
           mouseBounds: mouseBounds,
-          onMouseClick:
-              mouseBounds == null ? null : () => _navigate(row.playlist!),
+          onMouseClick: mouseBounds == null
+              ? null
+              : activate ?? () => _navigate(row.playlist!),
           dragKey: key,
           data: PlaylistDragData(
             entryId: row.id,
@@ -1063,86 +1249,289 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         ),
       );
 
+  Widget _treeDragSource(_PlaylistRowData row, Playlist? parent,
+      VoidCallback activate, Widget child) {
+    if (_editingBlocked ||
+        _selecting ||
+        _sortMode(parent) != PlaylistSortMode.custom) {
+      return child;
+    }
+    return Builder(
+        builder: (context) => _freeGridDragSource(
+            key: ValueKey('playlist-tree-drag-${row.id}'),
+            row: row,
+            parent: parent,
+            activate: activate,
+            mouseBounds: () {
+              final box = context.findRenderObject()! as RenderBox;
+              return box.localToGlobal(Offset.zero) & box.size;
+            },
+            child: child));
+  }
+
   Widget _row(Playlist? parent, _PlaylistRowData row, int index, int count,
       List<Audio> queue, Map<String, int> queueIndices,
-      {PlaylistCircleGeometry? circleGeometry}) {
+      {PlaylistCircleGeometry? circleGeometry, VoidCallback? onOpenFolder}) {
     final scheme = Theme.of(context).colorScheme;
     final folder = row.playlist;
-    final folderSongCount = folder?.flattenAudios().length ?? 0;
+    final folderSongCount =
+        folder == null ? 0 : _displaySongCount(folder, parent);
     final compact = UiLayoutScope.of(context).compactPlaylists;
     final menuItems = _menuItems(row, parent, index, count);
-    return AppEntrance(
-      key: ValueKey(('playlist-entry', row.id)),
-      identity: ('playlist-entry', row.id),
-      order: index,
-      child: TooltipVisibility(
-        visible: false,
-        child: AppMenuAnchor(
-          useRootOverlay: true,
-          menuChildren: menuItems,
-          builder: (context, controller, _) {
-            final menuButton = Builder(
-                builder: (actionContext) => AppIconActionButton(
-                      key: ValueKey('playlist-menu-${row.id}'),
-                      tooltip: _sortMode(parent) == PlaylistSortMode.custom &&
-                              !_selecting
-                          ? ui("拖动排序 · 点按打开菜单")
-                          : ui("歌单项目操作（切到自定义可拖动）"),
-                      onPressed: _selecting
+    final entry = TooltipVisibility(
+      visible: false,
+      child: AppMenuAnchor(
+        useRootOverlay: true,
+        menuChildren: menuItems,
+        builder: (context, controller, _) {
+          final menuButton = Builder(
+              builder: (actionContext) => AppIconActionButton(
+                    key: ValueKey('playlist-menu-${row.id}'),
+                    tooltip: _sortMode(parent) == PlaylistSortMode.custom &&
+                            !_selecting
+                        ? ui("拖动排序 · 点按打开菜单")
+                        : ui("歌单项目操作（切到自定义可拖动）"),
+                    onPressed: _selecting
+                        ? null
+                        : () => toggleMenuAtAction(
+                            controller, context, actionContext),
+                    selected: controller.isOpen,
+                    glyph: AppActionGlyph.moreVertical,
+                  ));
+          final rowAction = _dragHandle(row, parent, index, menuButton);
+          final audio = row.audio;
+          final queueIndex = queueIndices[row.id] ?? -1;
+          Widget wrapGridIdentity(Widget child) {
+            final draggable =
+                _gridIdentityDragSource(row, parent, child, mouseBounds: () {
+              final box = context.findRenderObject()! as RenderBox;
+              return box.localToGlobal(Offset.zero) & box.size;
+            });
+            return folder == null
+                ? draggable
+                : _folderTarget(
+                    target: folder,
+                    targetKey: 'playlist-drop-folder-${folder.id}',
+                    child: draggable,
+                  );
+          }
+
+          final Widget content;
+          if (_view == PlaylistViewMode.tree) {
+            Widget treeItem(VoidCallback activate,
+                    GestureTapDownCallback secondary, VoidCallback longPress) =>
+                _treeDragSource(
+                    row,
+                    parent,
+                    activate,
+                    PlaylistTreeItem(
+                      key: ValueKey('playlist-open-${row.id}'),
+                      title: row.label,
+                      shortMetadata: folder == null
                           ? null
-                          : () => toggleMenuAtAction(
-                              controller, context, actionContext),
-                      selected: controller.isOpen,
-                      glyph: AppActionGlyph.moreVertical,
+                          : ui('{0} 项 · {1} 首',
+                              [folder.entries.length, folderSongCount]),
+                      metadata: folder != null
+                          ? ui('{0} 个直接项目 · {1} 首歌曲',
+                              [folder.entries.length, folderSongCount])
+                          : '${audio?.artist ?? ''} · ${audio?.album ?? ''}',
+                      time: audio == null
+                          ? null
+                          : Duration(seconds: audio.duration).toStringHMMSS(),
+                      cover: folder != null
+                          ? PlaylistCover(
+                              playlist: folder,
+                              size: 40,
+                              loadSongArtwork: widget.trackBuilder == null,
+                              artworkWrapper: (cover) =>
+                                  PlaylistCoverTransitionMarker(
+                                      entryId: row.id,
+                                      borderRadius: AppShape.smallRadius,
+                                      child: cover))
+                          : ClipRRect(
+                              borderRadius: AppShape.smallRadius,
+                              child: PlaylistCoverTransitionMarker(
+                                  entryId: row.id,
+                                  borderRadius: AppShape.smallRadius,
+                                  child: AudioArtwork(
+                                      audio: audio!,
+                                      size: 40,
+                                      loadArtwork: widget.trackBuilder == null
+                                          ? null
+                                          : (_, __) async => null,
+                                      placeholder: ColoredBox(
+                                          color: scheme.surfaceContainerHighest,
+                                          child: Center(
+                                              child: Icon(Icons.music_note,
+                                                  color: scheme.primary)))))),
+                      onTap: activate,
+                      onSecondaryTapDown: secondary,
+                      onLongPress: longPress,
+                      identityWrapper: folder == null
+                          ? null
+                          : (child) => _folderTarget(
+                              target: folder,
+                              targetKey: 'playlist-drop-folder-${folder.id}',
+                              child: child),
                     ));
-            final rowAction = _dragHandle(row, parent, index, menuButton);
-            final audio = row.audio;
-            final queueIndex = queueIndices[row.id] ?? -1;
-            Widget wrapGridIdentity(Widget child) {
-              final draggable =
-                  _gridIdentityDragSource(row, parent, child, mouseBounds: () {
-                final box = context.findRenderObject()! as RenderBox;
-                return box.localToGlobal(Offset.zero) & box.size;
-              });
-              return folder == null
-                  ? draggable
-                  : _folderTarget(
-                      target: folder,
-                      targetKey: 'playlist-drop-folder-${folder.id}',
-                      child: draggable,
-                    );
+            if (audio != null && widget.trackBuilder == null) {
+              content = PlayingAudioListRow(
+                  audioPath: audio.path,
+                  child: AudioTile(
+                      audioIndex: queueIndex,
+                      playlist: queue,
+                      additionalMenuItems: menuItems,
+                      selection: AudioTileSelection(
+                          enabled: _selecting,
+                          selected: _isSelected(row),
+                          onToggle: () => _toggleSelection(row),
+                          onStart: () => _startSelection(row)),
+                      presentationBuilder:
+                          (_, __, activate, secondary, longPress, action) =>
+                              treeItem(activate, secondary, longPress)));
+            } else {
+              content = treeItem(() {
+                if (_selecting) {
+                  _toggleSelection(row);
+                } else if (folder != null) {
+                  (onOpenFolder ?? () => _navigate(folder))();
+                } else {
+                  _play(queue, queueIndex);
+                }
+              }, (details) => controller.open(position: details.localPosition),
+                  () => controller.open());
+            }
+          } else if (_view == PlaylistViewMode.grid) {
+            Widget rectangle(VoidCallback activate,
+                    GestureTapDownCallback secondary, VoidCallback longPress) =>
+                PlaylistRectangleTile(
+                  key: ValueKey('playlist-rectangle-${row.id}'),
+                  title: row.label,
+                  showTitle: _tilePresentation(parent).showTitle,
+                  audio: audio ?? folder?.firstAudioOrNull,
+                  imagePath: folder?.imagePath,
+                  revision: folder?.modifiedAt,
+                  loadArtwork: widget.trackBuilder == null,
+                  selected: _selecting && _isSelected(row),
+                  onTap: activate,
+                  onSecondaryTapDown: secondary,
+                  onLongPress: longPress,
+                  contentWrapper: wrapGridIdentity,
+                  artworkWrapper: (cover) => PlaylistCoverTransitionMarker(
+                    entryId: row.id,
+                    borderRadius: BorderRadius.zero,
+                    child: cover,
+                  ),
+                );
+            if (audio != null &&
+                queueIndex >= 0 &&
+                widget.trackBuilder == null) {
+              content = AudioTile(
+                key: ValueKey('playlist-audio-${row.id}'),
+                audioIndex: queueIndex,
+                playlist: queue,
+                selection: AudioTileSelection(
+                    enabled: _selecting,
+                    selected: _isSelected(row),
+                    onToggle: () => _toggleSelection(row),
+                    onStart: () => _startSelection(row)),
+                additionalMenuItems: menuItems,
+                menuActionBuilder: (songAnchor, songMenu) => Builder(
+                    builder: (actionContext) => _dragHandle(
+                        row,
+                        parent,
+                        index,
+                        AppIconActionButton(
+                            key: ValueKey('playlist-menu-${row.id}'),
+                            tooltip: ui('歌曲操作'),
+                            onPressed: _selecting
+                                ? null
+                                : () => toggleMenuAtAction(
+                                    songMenu, songAnchor, actionContext),
+                            selected: songMenu.isOpen,
+                            glyph: AppActionGlyph.moreVertical))),
+                presentationBuilder:
+                    (context, menu, activate, secondary, longPress, action) =>
+                        rectangle(activate, secondary, longPress),
+              );
+            } else {
+              content = rectangle(() {
+                if (_selecting) {
+                  _toggleSelection(row);
+                } else if (folder != null) {
+                  _navigate(folder);
+                } else if (queueIndex >= 0) {
+                  _play(queue, queueIndex);
+                }
+              }, (details) => controller.open(position: details.localPosition),
+                  () => controller.open());
+            }
+          } else if (_view == PlaylistViewMode.circular) {
+            final details = folder == null
+                ? '${audio?.artist ?? ''}\n${audio?.album ?? ''}'
+                : [
+                    ui("{0} 个直接项目 · {1} 首歌曲",
+                        [folder.entries.length, folderSongCount]),
+                    if (folder.modifiedAt > 0)
+                      ui('更新于 {0}', [
+                        DateTime.fromMillisecondsSinceEpoch(folder.modifiedAt)
+                            .toIso8601String()
+                            .substring(0, 10)
+                      ]),
+                  ].join('\n');
+            void play() {
+              if (folder != null) {
+                _play(_orderedOccurrences(folder)
+                    .map((entry) => entry.audio)
+                    .toList());
+              } else if (audio != null && queueIndex >= 0) {
+                _play(queue, queueIndex);
+              }
             }
 
-            final Widget content;
-            if (_view == PlaylistViewMode.grid) {
-              Widget rectangle(
-                      VoidCallback activate,
-                      GestureTapDownCallback secondary,
-                      VoidCallback longPress) =>
-                  PlaylistRectangleTile(
-                    key: ValueKey('playlist-rectangle-${row.id}'),
+            Widget circle(VoidCallback activate,
+                    GestureTapDownCallback secondary, VoidCallback longPress) =>
+                AppItemInkWell(
+                  key: ValueKey('playlist-circle-open-${row.id}'),
+                  borderRadius: AppShape.controlRadius,
+                  onTap: activate,
+                  onSecondaryTapDown: secondary,
+                  onLongPress: longPress,
+                  child: PlaylistCircleTile(
+                    showTooltip: false,
+                    key: ValueKey('playlist-circle-${row.id}'),
+                    entryId: row.id,
                     title: row.label,
-                    showTitle: _tilePresentation(parent).showTitle,
-                    audio: audio ?? folder?.firstAudioOrNull,
-                    imagePath: folder?.imagePath,
-                    revision: folder?.modifiedAt,
-                    loadArtwork: widget.trackBuilder == null,
-                    selected: _selecting && _isSelected(row),
-                    onTap: activate,
-                    onSecondaryTapDown: secondary,
-                    onLongPress: longPress,
+                    details: details,
+                    geometry: circleGeometry!,
+                    artworkBuilder: (size) => PlaylistCoverTransitionMarker(
+                        entryId: row.id,
+                        borderRadius: BorderRadius.circular(size / 2),
+                        child: folder != null
+                            ? PlaylistCover(
+                                playlist: folder,
+                                size: size,
+                                loadSongArtwork: widget.trackBuilder == null,
+                              )
+                            : AudioArtwork(
+                                audio: audio!,
+                                size: size,
+                                loadArtwork: widget.trackBuilder == null
+                                    ? null
+                                    : (_, __) async => null,
+                                placeholder: ColoredBox(
+                                    color: scheme.surfaceContainerHighest,
+                                    child: Center(
+                                        child: Icon(Icons.music_note,
+                                            size: size * .45,
+                                            color: scheme.primary))))),
                     contentWrapper: wrapGridIdentity,
-                    artworkWrapper: (cover) => PlaylistCoverTransitionMarker(
-                      entryId: row.id,
-                      borderRadius: BorderRadius.zero,
-                      child: cover,
-                    ),
-                  );
-              if (audio != null &&
-                  queueIndex >= 0 &&
-                  widget.trackBuilder == null) {
-                content = AudioTile(
-                  key: ValueKey('playlist-audio-${row.id}'),
+                  ),
+                );
+            if (audio != null &&
+                queueIndex >= 0 &&
+                widget.trackBuilder == null) {
+              content = AudioTile(
                   audioIndex: queueIndex,
                   playlist: queue,
                   selection: AudioTileSelection(
@@ -1151,377 +1540,273 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                       onToggle: () => _toggleSelection(row),
                       onStart: () => _startSelection(row)),
                   additionalMenuItems: menuItems,
-                  menuActionBuilder: (songAnchor, songMenu) => Builder(
-                      builder: (actionContext) => _dragHandle(
-                          row,
-                          parent,
-                          index,
-                          AppIconActionButton(
-                              key: ValueKey('playlist-menu-${row.id}'),
-                              tooltip: ui('歌曲操作'),
-                              onPressed: _selecting
-                                  ? null
-                                  : () => toggleMenuAtAction(
-                                      songMenu, songAnchor, actionContext),
-                              selected: songMenu.isOpen,
-                              glyph: AppActionGlyph.moreVertical))),
                   presentationBuilder:
                       (context, menu, activate, secondary, longPress, action) =>
-                          rectangle(activate, secondary, longPress),
-                );
-              } else {
-                content = rectangle(() {
-                  if (_selecting) {
-                    _toggleSelection(row);
-                  } else if (folder != null) {
-                    _navigate(folder);
-                  } else if (queueIndex >= 0) {
-                    _play(queue, queueIndex);
-                  }
-                },
-                    (details) =>
-                        controller.open(position: details.localPosition),
-                    () => controller.open());
-              }
-            } else if (_view == PlaylistViewMode.circular) {
-              final details = folder == null
-                  ? '${audio?.artist ?? ''}\n${audio?.album ?? ''}'
-                  : [
-                      ui("{0} 个直接项目 · {1} 首歌曲（含子歌单）",
-                          [folder.entries.length, folderSongCount]),
-                      if (folder.modifiedAt > 0)
-                        ui('更新于 {0}', [
-                          DateTime.fromMillisecondsSinceEpoch(folder.modifiedAt)
-                              .toIso8601String()
-                              .substring(0, 10)
-                        ]),
-                    ].join('\n');
-              void play() {
-                if (folder != null) {
-                  _play(_orderedOccurrences(folder)
-                      .map((entry) => entry.audio)
-                      .toList());
-                } else if (audio != null && queueIndex >= 0) {
-                  _play(queue, queueIndex);
-                }
-              }
-
-              Widget circle(
-                      VoidCallback activate,
-                      GestureTapDownCallback secondary,
-                      VoidCallback longPress) =>
-                  AppItemInkWell(
-                    key: ValueKey('playlist-circle-open-${row.id}'),
-                    borderRadius: AppShape.controlRadius,
-                    onTap: activate,
-                    onSecondaryTapDown: secondary,
-                    onLongPress: longPress,
-                    child: PlaylistCircleTile(
-                      showTooltip: false,
-                      key: ValueKey('playlist-circle-${row.id}'),
-                      entryId: row.id,
-                      title: row.label,
-                      details: details,
-                      geometry: circleGeometry!,
-                      artworkBuilder: (size) => PlaylistCoverTransitionMarker(
-                          entryId: row.id,
-                          borderRadius: BorderRadius.circular(size / 2),
-                          child: folder != null
-                              ? PlaylistCover(
-                                  playlist: folder,
-                                  size: size,
-                                  loadSongArtwork: widget.trackBuilder == null,
-                                )
-                              : AudioArtwork(
-                                  audio: audio!,
-                                  size: size,
-                                  loadArtwork: widget.trackBuilder == null
+                          circle(activate, secondary, longPress));
+            } else {
+              content = circle(
+                  () => _selecting
+                      ? _toggleSelection(row)
+                      : folder != null
+                          ? _navigate(folder)
+                          : play(),
+                  (details) => controller.open(position: details.localPosition),
+                  () => controller.open());
+            }
+          } else if (audio != null && queueIndex >= 0) {
+            final track = widget.trackBuilder?.call(
+                    context,
+                    audio,
+                    () => _selecting
+                        ? _toggleSelection(row)
+                        : _play(queue, queueIndex),
+                    rowAction) ??
+                AudioColumnsScope(
+                    enabled: true,
+                    configuration: _current?.presentation,
+                    child: AudioTile(
+                      columns: true,
+                      key: ValueKey('playlist-audio-${row.id}'),
+                      artworkWrapper: (cover) => PlaylistCoverTransitionMarker(
+                        entryId: row.id,
+                        borderRadius: AppShape.smallRadius,
+                        child: cover,
+                      ),
+                      audioIndex: queueIndex,
+                      playlist: queue,
+                      menuActionBuilder: (songAnchor, songMenu) => Builder(
+                          builder: (actionContext) => _dragHandle(
+                              row,
+                              parent,
+                              index,
+                              AppIconActionButton(
+                                  key: ValueKey('playlist-menu-${row.id}'),
+                                  tooltip: ui('歌曲操作'),
+                                  onPressed: _selecting
                                       ? null
-                                      : (_, __) async => null,
-                                  placeholder: ColoredBox(
-                                      color: scheme.surfaceContainerHighest,
-                                      child: Center(
-                                          child: Icon(Icons.music_note,
-                                              size: size * .45,
-                                              color: scheme.primary))))),
-                      contentWrapper: wrapGridIdentity,
-                    ),
-                  );
-              if (audio != null &&
-                  queueIndex >= 0 &&
-                  widget.trackBuilder == null) {
-                content = AudioTile(
-                    audioIndex: queueIndex,
-                    playlist: queue,
-                    selection: AudioTileSelection(
+                                      : () => toggleMenuAtAction(
+                                          songMenu, songAnchor, actionContext),
+                                  selected: songMenu.isOpen,
+                                  glyph: AppActionGlyph.moreVertical))),
+                      selection: AudioTileSelection(
                         enabled: _selecting,
                         selected: _isSelected(row),
                         onToggle: () => _toggleSelection(row),
-                        onStart: () => _startSelection(row)),
-                    additionalMenuItems: menuItems,
-                    presentationBuilder: (context, menu, activate, secondary,
-                            longPress, action) =>
-                        circle(activate, secondary, longPress));
-              } else {
-                content = circle(
-                    () => _selecting
-                        ? _toggleSelection(row)
-                        : folder != null
-                            ? _navigate(folder)
-                            : play(),
-                    (details) =>
-                        controller.open(position: details.localPosition),
-                    () => controller.open());
-              }
-            } else if (audio != null && queueIndex >= 0) {
-              final track = widget.trackBuilder?.call(
-                      context,
-                      audio,
-                      () => _selecting
-                          ? _toggleSelection(row)
-                          : _play(queue, queueIndex),
-                      rowAction) ??
-                  AudioColumnsScope(
-                      enabled: true,
-                      configuration: _current?.presentation,
-                      child: AudioTile(
-                        columns: true,
-                        key: ValueKey('playlist-audio-${row.id}'),
-                        artworkWrapper: (cover) =>
-                            PlaylistCoverTransitionMarker(
-                          entryId: row.id,
-                          borderRadius: AppShape.smallRadius,
-                          child: cover,
-                        ),
-                        audioIndex: queueIndex,
-                        playlist: queue,
-                        menuActionBuilder: (songAnchor, songMenu) => Builder(
-                            builder: (actionContext) => _dragHandle(
-                                row,
-                                parent,
-                                index,
-                                AppIconActionButton(
-                                    key: ValueKey('playlist-menu-${row.id}'),
-                                    tooltip: ui('歌曲操作'),
-                                    onPressed: _selecting
-                                        ? null
-                                        : () => toggleMenuAtAction(songMenu,
-                                            songAnchor, actionContext),
-                                    selected: songMenu.isOpen,
-                                    glyph: AppActionGlyph.moreVertical))),
-                        selection: AudioTileSelection(
-                          enabled: _selecting,
-                          selected: _isSelected(row),
-                          onToggle: () => _toggleSelection(row),
-                          onStart: () => _startSelection(row),
-                        ),
-                        additionalMenuItems: menuItems,
-                      ));
-              content = _view == PlaylistViewMode.grid
-                  ? widget.trackBuilder != null
-                      ? wrapGridIdentity(track)
-                      : MusicGridReorderScope(
-                          dragSourceBuilder: (_, __, ___, child) =>
-                              wrapGridIdentity(child),
-                          child: track,
-                        )
-                  : PlayingAudioListRow(audioPath: audio.path, child: track);
-            } else {
-              content = AppItemInkWell(
-                key: ValueKey('playlist-open-${row.id}'),
-                borderRadius: AppShape.controlRadius,
-                onTap: folder == null
-                    ? null
-                    : () =>
-                        _selecting ? _toggleSelection(row) : _navigate(folder),
-                onSecondaryTapDown: (details) =>
-                    controller.open(position: details.localPosition),
-                onLongPress: () => controller.open(),
-                child: _view == PlaylistViewMode.grid
-                    ? MusicGridTileBody(
-                        title: row.label,
-                        tooltip: folder == null
-                            ? row.label
-                            : ui("{0} · {1} 首歌曲（含子歌单）",
-                                [row.label, folderSongCount]),
-                        artwork: folder == null
-                            ? const Icon(Icons.music_note_outlined)
-                            : PlaylistCover(
-                                playlist: folder,
-                                loadSongArtwork: widget.trackBuilder == null,
-                              ),
-                        contentWrapper: wrapGridIdentity,
-                        action: rowAction,
+                        onStart: () => _startSelection(row),
+                      ),
+                      additionalMenuItems: menuItems,
+                    ));
+            content = _view == PlaylistViewMode.grid
+                ? widget.trackBuilder != null
+                    ? wrapGridIdentity(track)
+                    : MusicGridReorderScope(
+                        dragSourceBuilder: (_, __, ___, child) =>
+                            wrapGridIdentity(child),
+                        child: track,
                       )
-                    : Padding(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: 8, vertical: compact ? 6 : 10),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: folder == null
-                                  ? Text(row.label)
-                                  : _folderTarget(
-                                      target: folder,
-                                      targetKey:
-                                          'playlist-drop-folder-${folder.id}',
-                                      child: Row(
-                                        children: [
-                                          PlaylistCover(
-                                            playlist: folder,
-                                            artworkWrapper: (cover) =>
-                                                PlaylistCoverTransitionMarker(
-                                              entryId: row.id,
-                                              borderRadius:
-                                                  AppShape.smallRadius,
-                                              child: cover,
-                                            ),
-                                            loadSongArtwork:
-                                                widget.trackBuilder == null,
+                : PlayingAudioListRow(audioPath: audio.path, child: track);
+          } else {
+            content = AppItemInkWell(
+              key: ValueKey('playlist-open-${row.id}'),
+              borderRadius: AppShape.controlRadius,
+              onTap: folder == null
+                  ? null
+                  : () => _selecting
+                      ? _toggleSelection(row)
+                      : (onOpenFolder ?? () => _navigate(folder))(),
+              onSecondaryTapDown: (details) =>
+                  controller.open(position: details.localPosition),
+              onLongPress: () => controller.open(),
+              child: _view == PlaylistViewMode.grid
+                  ? MusicGridTileBody(
+                      title: row.label,
+                      tooltip: folder == null
+                          ? row.label
+                          : ui("{0} · {1} 首歌曲", [row.label, folderSongCount]),
+                      artwork: folder == null
+                          ? const Icon(Icons.music_note_outlined)
+                          : PlaylistCover(
+                              playlist: folder,
+                              loadSongArtwork: widget.trackBuilder == null,
+                            ),
+                      contentWrapper: wrapGridIdentity,
+                      action: rowAction,
+                    )
+                  : Padding(
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 8, vertical: compact ? 6 : 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: folder == null
+                                ? Text(row.label)
+                                : _folderTarget(
+                                    target: folder,
+                                    targetKey:
+                                        'playlist-drop-folder-${folder.id}',
+                                    child: Row(
+                                      children: [
+                                        PlaylistCover(
+                                          playlist: folder,
+                                          artworkWrapper: (cover) =>
+                                              PlaylistCoverTransitionMarker(
+                                            entryId: row.id,
+                                            borderRadius: AppShape.smallRadius,
+                                            child: cover,
                                           ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(row.label,
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .titleMedium),
-                                                Text(
-                                                  ui(
-                                                      "{0} 个直接项目 · {1} 首歌曲（含子歌单）",
-                                                      [
-                                                        folder.entries.length,
-                                                        folderSongCount
-                                                      ]),
-                                                  maxLines: compact ? 1 : 2,
+                                          loadSongArtwork:
+                                              widget.trackBuilder == null,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(row.label,
+                                                  maxLines: 1,
                                                   overflow:
                                                       TextOverflow.ellipsis,
                                                   style: Theme.of(context)
                                                       .textTheme
-                                                      .bodySmall,
-                                                ),
-                                              ],
-                                            ),
+                                                      .titleMedium),
+                                              Text(
+                                                ui("{0} 个直接项目 · {1} 首歌曲", [
+                                                  folder.entries.length,
+                                                  folderSongCount
+                                                ]),
+                                                maxLines: compact ? 1 : 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall,
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
                                     ),
-                            ),
-                            AppIconActionButton(
-                              key: ValueKey('playlist-play-${row.id}'),
-                              tooltip: ui("播放此歌单（含子歌单）"),
-                              onPressed: folder == null ||
-                                      _selecting ||
-                                      folderSongCount == 0
-                                  ? null
-                                  : () => _play(_orderedOccurrences(folder)
-                                      .map((entry) => entry.audio)
-                                      .toList()),
-                              glyph: AppActionGlyph.play,
-                            ),
-                            rowAction,
-                          ],
-                        ),
+                                  ),
+                          ),
+                          AppIconActionButton(
+                            key: ValueKey('playlist-play-${row.id}'),
+                            tooltip: ui("播放此歌单（含子歌单）"),
+                            onPressed: folder == null ||
+                                    _selecting ||
+                                    folder.flattenEntries().isEmpty
+                                ? null
+                                : () => _play(_orderedOccurrences(folder)
+                                    .map((entry) => entry.audio)
+                                    .toList()),
+                            glyph: AppActionGlyph.play,
+                          ),
+                          rowAction,
+                        ],
                       ),
-              );
-            }
-            final line = Focus(
-              key: ValueKey('playlist-focus-${row.id}'),
-              onKeyEvent: (_, event) {
-                if (event is! KeyDownEvent || _editingBlocked) {
-                  return KeyEventResult.ignored;
-                }
-                final keyboard = HardwareKeyboard.instance;
-                if (_selecting &&
-                    event.logicalKey == LogicalKeyboardKey.escape) {
-                  _clearSelection();
-                  return KeyEventResult.handled;
-                }
-                if (_selecting &&
-                    event.logicalKey == LogicalKeyboardKey.delete) {
-                  unawaited(_removeSelected(parent));
-                  return KeyEventResult.handled;
-                }
-                if (keyboard.isAltPressed &&
-                    event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                  if (index > 0) {
-                    unawaited(_nudge(row, parent, index - 1));
-                  }
-                  return KeyEventResult.handled;
-                }
-                if (keyboard.isAltPressed &&
-                    event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                  if (index < count - 1) {
-                    unawaited(_nudge(row, parent, index + 1));
-                  }
-                  return KeyEventResult.handled;
-                }
-                if ((keyboard.isShiftPressed &&
-                        event.logicalKey == LogicalKeyboardKey.f10) ||
-                    event.logicalKey == LogicalKeyboardKey.contextMenu) {
-                  controller.open();
-                  return KeyEventResult.handled;
-                }
-                if (event.logicalKey == LogicalKeyboardKey.f2 &&
-                    folder != null) {
-                  unawaited(_rename(folder));
-                  return KeyEventResult.handled;
-                }
-                if (event.logicalKey == LogicalKeyboardKey.delete) {
-                  unawaited(_remove(row, parent));
-                  return KeyEventResult.handled;
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Material(
-                animationDuration: Duration.zero,
-                color: _selecting && _isSelected(row)
-                    ? scheme.secondaryContainer.withValues(alpha: 0.4)
-                    : _draggingId == row.id
-                        ? scheme.primaryContainer.withValues(alpha: 0.2)
-                        : compact && folder != null
-                            ? scheme.surfaceContainerLow
-                            : Colors.transparent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: _view == PlaylistViewMode.grid
-                      ? BorderRadius.zero
-                      : AppShape.controlRadius,
-                  side: _selecting && _isSelected(row)
-                      ? BorderSide(color: scheme.primary, width: 2)
-                      : BorderSide.none,
-                ),
-                borderOnForeground: true,
-                child: Semantics(
-                  key: ValueKey('playlist-select-${row.id}'),
-                  selected: _selecting ? _isSelected(row) : null,
-                  child: _view == PlaylistViewMode.circular && audio != null
-                      ? PlaylistSongSurface(
-                          audio: audio,
-                          artworkColors:
-                              _tilePresentation(parent).artworkBackground,
-                          loadArtwork: widget.trackBuilder == null,
-                          child: content)
-                      : content,
-                ),
-              ),
+                    ),
             );
-            return compact && folder != null && _view == PlaylistViewMode.list
-                ? Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: PlaylistItemArrival(child: line))
-                : PlaylistItemArrival(child: line);
-          },
-        ),
+          }
+          final line = Focus(
+            key: ValueKey('playlist-focus-${row.id}'),
+            onKeyEvent: (_, event) {
+              if (event is! KeyDownEvent || _editingBlocked) {
+                return KeyEventResult.ignored;
+              }
+              final keyboard = HardwareKeyboard.instance;
+              if (_selecting && event.logicalKey == LogicalKeyboardKey.escape) {
+                _clearSelection();
+                return KeyEventResult.handled;
+              }
+              if (_selecting && event.logicalKey == LogicalKeyboardKey.delete) {
+                unawaited(_removeSelected(parent));
+                return KeyEventResult.handled;
+              }
+              if (keyboard.isAltPressed &&
+                  event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                if (index > 0) {
+                  unawaited(_nudge(row, parent, index - 1));
+                }
+                return KeyEventResult.handled;
+              }
+              if (keyboard.isAltPressed &&
+                  event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                if (index < count - 1) {
+                  unawaited(_nudge(row, parent, index + 1));
+                }
+                return KeyEventResult.handled;
+              }
+              if ((keyboard.isShiftPressed &&
+                      event.logicalKey == LogicalKeyboardKey.f10) ||
+                  event.logicalKey == LogicalKeyboardKey.contextMenu) {
+                controller.open();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.f2 && folder != null) {
+                unawaited(_rename(folder));
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.delete) {
+                unawaited(_remove(row, parent));
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: Material(
+              animationDuration: Duration.zero,
+              color: _selecting && _isSelected(row)
+                  ? scheme.secondaryContainer.withValues(alpha: 0.4)
+                  : _draggingId == row.id
+                      ? scheme.primaryContainer.withValues(alpha: 0.2)
+                      : _view == PlaylistViewMode.tree && folder != null
+                          ? Color.alphaBlend(
+                              scheme.primaryContainer.withValues(alpha: .5),
+                              scheme.surfaceContainerLow)
+                          : compact && folder != null
+                              ? scheme.surfaceContainerLow
+                              : Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: _view == PlaylistViewMode.grid
+                    ? BorderRadius.zero
+                    : AppShape.controlRadius,
+                side: _selecting && _isSelected(row)
+                    ? BorderSide(color: scheme.primary, width: 2)
+                    : BorderSide.none,
+              ),
+              borderOnForeground: true,
+              child: Semantics(
+                key: ValueKey('playlist-select-${row.id}'),
+                selected: _selecting ? _isSelected(row) : null,
+                child: _view == PlaylistViewMode.circular && audio != null
+                    ? PlaylistSongSurface(
+                        audio: audio,
+                        artworkColors:
+                            _tilePresentation(parent).artworkBackground,
+                        loadArtwork: widget.trackBuilder == null,
+                        child: content)
+                    : content,
+              ),
+            ),
+          );
+          return compact && folder != null && _view == PlaylistViewMode.list
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: PlaylistItemArrival(child: line))
+              : PlaylistItemArrival(child: line);
+        },
       ),
+    );
+    // Tree expansion already gives newly visible groups one entrance. A
+    // second per-item entrance moves and fades the same text on a different
+    // clock, which makes thin English and numeric glyphs visibly shimmer.
+    if (_view == PlaylistViewMode.tree) return entry;
+    return AppEntrance(
+      key: ValueKey(('playlist-entry', row.id)),
+      identity: ('playlist-entry', row.id),
+      order: index,
+      child: entry,
     );
   }
 
@@ -1592,7 +1877,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         canPlay: queue.isNotEmpty,
         editingEnabled: !_editingBlocked,
         sortMode: _sortMode(current),
-        view: _view,
+        view: _requestedView ?? _view,
         onCreate: () => unawaited(_create(current)),
         onImportM3u: _importM3u,
         onTrash: widget.tree != null
@@ -1656,6 +1941,15 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         onSelectAll: () => _selectAll(rows),
         onRemoveSelected: () => unawaited(_removeSelected(current)),
         onSortChanged: (mode) => _sort(current, mode),
+        countChildren: _countChildren(current),
+        onToggleCountChildren: rows.any((row) => row.playlist != null)
+            ? () => _setTilePresentation(
+                current,
+                _tilePresentation(current).copyWith(playlistCountChildren: {
+                  ..._tilePresentation(current).playlistCountChildren,
+                  _view.name: !_countChildren(current),
+                }))
+            : null,
         autoFill: _tilePresentation(current).autoFill,
         showSongTitles: _tilePresentation(current).showTitle,
         onToggleSongTitles: () => _setTilePresentation(
@@ -1671,11 +1965,17 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         onAutoFillChanged: (value) => _setTilePresentation(
             current, _tilePresentation(current).copyWith(autoFill: value)),
         onViewChanged: (view) {
-          if (_view == view) return;
+          if ((_requestedView ?? _view) == view) return;
+          setState(() => _requestedView = view);
           unawaited(_coverTransition.transition(() {
             if (!mounted) return;
             _reorderController.cancel();
-            setState(() => _view = view);
+            setState(() {
+              _view = view;
+              _requestedView = null;
+              _selectedEntries.clear();
+              _selecting = false;
+            });
             if (current != null) {
               unawaited(_edit(
                   () => current.presentation = {
@@ -1694,7 +1994,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                 }));
               }
             }
-            if (current == null && view != PlaylistViewMode.circular) {
+            if (current == null &&
+                (view == PlaylistViewMode.list ||
+                    view == PlaylistViewMode.grid)) {
               widget.onContentViewChanged?.call(view == PlaylistViewMode.list
                   ? ContentView.list
                   : ContentView.table);
@@ -1721,7 +2023,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         title: AppDialogTitle(ui("歌单操作")),
         content: SingleChildScrollView(
           child: Text(
-            ui("自定义排序：拖动歌曲或子歌单右侧的三个点，其他行会连续让位；点按三个点、右键或长按行可打开菜单。\n\n拖到子歌单的封面/名称区域并稍作停留，高亮后松开即可移入；也可通过菜单“移动到…”选择目标。\n\n名称等排序仅改变显示和播放次序，不覆盖自定义顺序；切回“自定义”即可继续拖动。\n\n顺序播放会按各层次序进入子歌单，播完再返回父歌单。Alt + ↑ / ↓ 可在自定义模式调序，Shift + F10 打开菜单。"),
+            ui(_view == PlaylistViewMode.tree
+                ? '点击歌单或箭头展开、折叠；单击歌曲播放。同一歌单的歌曲按窗口宽度紧凑排列。\n\n右键、长按或 Shift + F10 打开项目菜单；自定义排序下按住卡片拖动，可调整顺序或移入歌单。\n\n方向键浏览层级，Home / End 跳到首尾；搜索保留所属歌单，清除搜索恢复展开状态。'
+                : "自定义排序：拖动歌曲或子歌单右侧的三个点，其他行会连续让位；点按三个点、右键或长按行可打开菜单。\n\n拖到子歌单的封面/名称区域并稍作停留，高亮后松开即可移入；也可通过菜单“移动到…”选择目标。\n\n名称等排序仅改变显示和播放次序，不覆盖自定义顺序；切回“自定义”即可继续拖动。\n\n顺序播放会按各层次序进入子歌单，播完再返回父歌单。Alt + ↑ / ↓ 可在自定义模式调序，Shift + F10 打开菜单。"),
           ),
         ),
         actions: [
@@ -1858,7 +2162,11 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         final current =
             _current == null ? null : _tree.findPlaylist(_current!.id);
         final rows = _rows(current);
-        final selectedCount = rows.where(_isSelected).length;
+        final treeNodes =
+            _view == PlaylistViewMode.tree ? _treeNodes(current) : null;
+        final selectionRows =
+            treeNodes?.map((n) => n.value.row).toList() ?? rows;
+        final selectedCount = _topSelected(selectionRows).length;
         final occurrences = _orderedOccurrences(current);
         final queue = [for (final item in occurrences) item.audio];
         final circleGeometry = _view == PlaylistViewMode.circular
@@ -1877,11 +2185,15 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                     rows.length,
               }
             : const <Key, int>{};
+        final displayedSongCount = current == null
+            ? _tree.roots.fold<int>(
+                0, (sum, folder) => sum + _displaySongCount(folder, null))
+            : _displaySongCount(current, current);
         final subtitle = current == null
-            ? ui("{0} 个顶层歌单 · {1} 首歌曲引用", [rows.length, queue.length])
-            : ui("{0} 个直接项目 · {1} 首歌曲（含子歌单）", [rows.length, queue.length]);
+            ? ui("{0} 个顶层歌单 · {1} 首歌曲引用", [rows.length, displayedSongCount])
+            : ui("{0} 个直接项目 · {1} 首歌曲", [rows.length, displayedSongCount]);
         final headerActions =
-            _headerActions(current, rows, selectedCount, queue);
+            _headerActions(current, selectionRows, selectedCount, queue);
         return PageScaffold(
           title: current?.name ?? ui("歌单"),
           subtitle: subtitle,
@@ -1920,7 +2232,12 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                 Expanded(
                   child: PlaylistCoverTransitionHost(
                     controller: _coverTransition,
-                    itemIds: [for (final row in rows) row.id],
+                    itemIds: treeNodes == null
+                        ? [for (final row in rows) row.id]
+                        : visiblePlaylistTreeNodes(
+                                treeNodes, _expandedTree, _treeQuery)
+                            .map((n) => n.id)
+                            .toList(),
                     child: Material(
                       type: MaterialType.transparency,
                       child: rows.isEmpty
@@ -1938,42 +2255,50 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                 ),
                               ),
                             )
-                          : _view != PlaylistViewMode.list
-                              ? MusicGridScope(
-                                  child: AppContentScrollbar(
-                                    key: ValueKey((
-                                      'playlist-grid-scroll',
-                                      current?.id,
-                                      _view
-                                    )),
-                                    builder: (context, controller) =>
-                                        GridEdgeAutoScrollRegion(
-                                      controller: controller,
-                                      child: _view == PlaylistViewMode.grid
-                                          ? PlaylistTileGrid(
-                                              key: ValueKey((
-                                                'playlist-tiles',
-                                                current?.id
-                                              )),
-                                              ids: [
-                                                for (final row in rows) row.id
-                                              ],
-                                              presentation:
-                                                  _tilePresentation(current),
-                                              controller: controller,
-                                              padding: EdgeInsets.only(
-                                                  bottom: NowPlayingBarMetrics
-                                                      .reservedSpace(context)),
-                                              onLayoutChanged: (layouts) =>
-                                                  _setTilePresentation(
-                                                      current,
-                                                      _tilePresentation(current)
-                                                          .copyWith(
-                                                              layouts: layouts),
-                                                      preserveCoverTransition:
-                                                          true),
-                                              tailBuilder:
-                                                  _draggingId != null &&
+                          : treeNodes != null
+                              ? _treePane(current, treeNodes, queue, indices)
+                              : _view != PlaylistViewMode.list
+                                  ? MusicGridScope(
+                                      child: AppContentScrollbar(
+                                        key: ValueKey((
+                                          'playlist-grid-scroll',
+                                          current?.id,
+                                          _view
+                                        )),
+                                        builder: (context, controller) =>
+                                            GridEdgeAutoScrollRegion(
+                                          controller: controller,
+                                          child: _view == PlaylistViewMode.grid
+                                              ? PlaylistTileGrid(
+                                                  key: ValueKey((
+                                                    'playlist-tiles',
+                                                    current?.id
+                                                  )),
+                                                  ids: [
+                                                    for (final row in rows)
+                                                      row.id
+                                                  ],
+                                                  presentation:
+                                                      _tilePresentation(
+                                                          current),
+                                                  controller: controller,
+                                                  padding: EdgeInsets.only(
+                                                      bottom:
+                                                          NowPlayingBarMetrics
+                                                              .reservedSpace(
+                                                                  context)),
+                                                  onLayoutChanged: (layouts) =>
+                                                      _setTilePresentation(
+                                                          current,
+                                                          _tilePresentation(
+                                                                  current)
+                                                              .copyWith(
+                                                                  layouts:
+                                                                      layouts),
+                                                          preserveCoverTransition:
+                                                              true),
+                                                  tailBuilder: _draggingId !=
+                                                              null &&
                                                           _sortMode(current) ==
                                                               PlaylistSortMode
                                                                   .custom
@@ -1981,96 +2306,23 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                                           rows, rows.length,
                                                           grid: true)
                                                       : null,
-                                              itemBuilder: (context, index) =>
-                                                  Stack(
-                                                      fit: StackFit.expand,
-                                                      children: [
-                                                    _row(
-                                                        current,
-                                                        rows[index],
-                                                        index,
-                                                        rows.length,
-                                                        queue,
-                                                        indices),
-                                                    PositionedDirectional(
-                                                        top: 0,
-                                                        bottom: 0,
-                                                        start: 0,
-                                                        width: 24,
-                                                        child: IgnorePointer(
-                                                            ignoring: _draggingId ==
-                                                                    null ||
-                                                                _sortMode(
-                                                                        current) !=
-                                                                    PlaylistSortMode
-                                                                        .custom,
-                                                            child: _dropGap(
-                                                                current,
-                                                                rows,
-                                                                index,
-                                                                grid: true))),
-                                                  ]),
-                                            )
-                                          : GridView.builder(
-                                              controller: controller,
-                                              key: PageStorageKey(
-                                                  'playlist-${_view.name}-${current?.id ?? 'root'}'),
-                                              padding: EdgeInsets.only(
-                                                  bottom: NowPlayingBarMetrics
-                                                      .reservedSpace(context)),
-                                              gridDelegate: _view ==
-                                                      PlaylistViewMode.circular
-                                                  ? CompactMusicGridDelegate(
-                                                      mainAxisExtent:
-                                                          circleGeometry!
-                                                              .extent,
-                                                      minimumTileWidth:
-                                                          PlaylistCircleTile
-                                                              .minimumWidth,
-                                                      spacing: 12)
-                                                  : CompactMusicGridDelegate.of(
-                                                      context),
-                                              itemCount: rows.length +
-                                                  (_draggingId == null ||
-                                                          _sortMode(current) !=
-                                                              PlaylistSortMode
-                                                                  .custom
-                                                      ? 0
-                                                      : 1),
-                                              findChildIndexCallback: (key) =>
-                                                  gridChildIndices[key],
-                                              itemBuilder: (context, index) =>
-                                                  index == rows.length
-                                                      ? _dropGap(current, rows,
-                                                          rows.length,
-                                                          grid: true)
-                                                      : Stack(
-                                                          key: ValueKey((
-                                                            'playlist-grid-entry',
-                                                            rows[index].id
-                                                          )),
+                                                  itemBuilder:
+                                                      (context, index) => Stack(
                                                           fit: StackFit.expand,
                                                           children: [
-                                                            _row(
-                                                                current,
-                                                                rows[index],
-                                                                index,
-                                                                rows.length,
-                                                                queue,
-                                                                indices,
-                                                                circleGeometry:
-                                                                    circleGeometry),
-                                                            // Reading order advances across
-                                                            // a grid row, so the leading
-                                                            // edge is the unambiguous
-                                                            // "insert before" target.
-                                                            PositionedDirectional(
-                                                              top: 0,
-                                                              bottom: 0,
-                                                              start: 0,
-                                                              width: 36,
-                                                              child:
-                                                                  IgnorePointer(
+                                                        _row(
+                                                            current,
+                                                            rows[index],
+                                                            index,
+                                                            rows.length,
+                                                            queue,
+                                                            indices),
+                                                        PositionedDirectional(
+                                                            top: 0,
+                                                            bottom: 0,
+                                                            start: 0,
+                                                            width: 24,
+                                                            child: IgnorePointer(
                                                                 ignoring: _draggingId ==
                                                                         null ||
                                                                     _sortMode(
@@ -2081,47 +2333,126 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                                                     current,
                                                                     rows,
                                                                     index,
-                                                                    grid: true),
-                                                              ),
+                                                                    grid:
+                                                                        true))),
+                                                      ]),
+                                                )
+                                              : GridView.builder(
+                                                  controller: controller,
+                                                  key: PageStorageKey(
+                                                      'playlist-${_view.name}-${current?.id ?? 'root'}'),
+                                                  padding: EdgeInsets.only(
+                                                      bottom:
+                                                          NowPlayingBarMetrics
+                                                              .reservedSpace(
+                                                                  context)),
+                                                  gridDelegate: _view ==
+                                                          PlaylistViewMode
+                                                              .circular
+                                                      ? CompactMusicGridDelegate(
+                                                          mainAxisExtent:
+                                                              circleGeometry!
+                                                                  .extent,
+                                                          minimumTileWidth:
+                                                              PlaylistCircleTile
+                                                                  .minimumWidth,
+                                                          spacing: 12)
+                                                      : CompactMusicGridDelegate
+                                                          .of(context),
+                                                  itemCount: rows.length +
+                                                      (_draggingId == null ||
+                                                              _sortMode(
+                                                                      current) !=
+                                                                  PlaylistSortMode
+                                                                      .custom
+                                                          ? 0
+                                                          : 1),
+                                                  findChildIndexCallback:
+                                                      (key) =>
+                                                          gridChildIndices[key],
+                                                  itemBuilder: (context,
+                                                          index) =>
+                                                      index == rows.length
+                                                          ? _dropGap(current,
+                                                              rows, rows.length,
+                                                              grid: true)
+                                                          : Stack(
+                                                              key: ValueKey((
+                                                                'playlist-grid-entry',
+                                                                rows[index].id
+                                                              )),
+                                                              fit: StackFit
+                                                                  .expand,
+                                                              children: [
+                                                                _row(
+                                                                    current,
+                                                                    rows[index],
+                                                                    index,
+                                                                    rows.length,
+                                                                    queue,
+                                                                    indices,
+                                                                    circleGeometry:
+                                                                        circleGeometry),
+                                                                // Reading order advances across
+                                                                // a grid row, so the leading
+                                                                // edge is the unambiguous
+                                                                // "insert before" target.
+                                                                PositionedDirectional(
+                                                                  top: 0,
+                                                                  bottom: 0,
+                                                                  start: 0,
+                                                                  width: 36,
+                                                                  child:
+                                                                      IgnorePointer(
+                                                                    ignoring: _draggingId ==
+                                                                            null ||
+                                                                        _sortMode(current) !=
+                                                                            PlaylistSortMode.custom,
+                                                                    child: _dropGap(
+                                                                        current,
+                                                                        rows,
+                                                                        index,
+                                                                        grid:
+                                                                            true),
+                                                                  ),
+                                                                ),
+                                                              ],
                                                             ),
-                                                          ],
-                                                        ),
-                                            ),
-                                    ),
-                                  ),
-                                )
-                              : PlaylistReorderSurface(
-                                  key: PageStorageKey(
-                                      'playlist-contents-${current?.id ?? 'root'}'),
-                                  controller: _reorderController,
-                                  enabled: !_editingBlocked &&
-                                      !_selecting &&
-                                      _sortMode(current) ==
-                                          PlaylistSortMode.custom,
-                                  padding: EdgeInsets.only(
-                                      bottom:
-                                          NowPlayingBarMetrics.reservedSpace(
-                                              context)),
-                                  items: [
-                                    for (final row in rows)
-                                      PlaylistDragData(
-                                        entryId: row.id,
-                                        sourceParent: current,
-                                        label: row.label,
+                                                ),
+                                        ),
                                       ),
-                                  ],
-                                  onReorder: (data, correctedIndex) =>
-                                      unawaited(_move(data, current,
-                                          index: correctedIndex)),
-                                  itemBuilder: (context, index) => _row(
-                                    current,
-                                    rows[index],
-                                    index,
-                                    rows.length,
-                                    queue,
-                                    indices,
-                                  ),
-                                ),
+                                    )
+                                  : PlaylistReorderSurface(
+                                      key: PageStorageKey(
+                                          'playlist-contents-${current?.id ?? 'root'}'),
+                                      controller: _reorderController,
+                                      enabled: !_editingBlocked &&
+                                          !_selecting &&
+                                          _sortMode(current) ==
+                                              PlaylistSortMode.custom,
+                                      padding: EdgeInsets.only(
+                                          bottom: NowPlayingBarMetrics
+                                              .reservedSpace(context)),
+                                      items: [
+                                        for (final row in rows)
+                                          PlaylistDragData(
+                                            entryId: row.id,
+                                            sourceParent: current,
+                                            label: row.label,
+                                          ),
+                                      ],
+                                      onReorder: (data, correctedIndex) =>
+                                          unawaited(_move(data, current,
+                                              index: correctedIndex)),
+                                      itemBuilder: (context, index) => _row(
+                                        current,
+                                        rows[index],
+                                        index,
+                                        rows.length,
+                                        queue,
+                                        indices,
+                                      ),
+                                    ),
                     ),
                   ),
                 ),
@@ -2146,4 +2477,11 @@ class _PlaylistRowData {
   int get modifiedAt =>
       audio == null ? playlist?.modifiedAt ?? 0 : audio!.modified * 1000;
   int get songCount => playlist?.flattenAudios().length ?? 1;
+}
+
+class _TreeRow {
+  const _TreeRow(this.row, this.parent, this.index, this.count);
+  final _PlaylistRowData row;
+  final Playlist? parent;
+  final int index, count;
 }

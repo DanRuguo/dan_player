@@ -52,6 +52,12 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
   @override
   final playMode = ValueNotifier(PlayMode.loop);
   @override
+  final sleepTimerRemaining = ValueNotifier<Duration?>(null);
+  @override
+  final sleepTimerPaused = ValueNotifier(false);
+  @override
+  final stopAfterCurrent = ValueNotifier(false);
+  @override
   int? queueOccurrenceId(int index) =>
       index >= 0 && index < entries.length ? entries[index].id : null;
   @override
@@ -232,6 +238,9 @@ class _QueuePlayback extends ChangeNotifier implements PlaybackService {
     segmentLoop.dispose();
     queueStopBoundary.dispose();
     playMode.dispose();
+    sleepTimerRemaining.dispose();
+    sleepTimerPaused.dispose();
+    stopAfterCurrent.dispose();
     super.dispose();
   }
 

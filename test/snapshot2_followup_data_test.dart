@@ -149,6 +149,37 @@ void main() {
     WaveformService.validateCache(Map<String, dynamic>.from(actual as Map));
   });
 
+  test('statistics v4 exact timeline survives export and restore unchanged',
+      () async {
+    final start = DateTime(2026, 9, 26, 13).millisecondsSinceEpoch;
+    final expected = {
+      ..._statistics(),
+      'version': 4,
+      'recentTrackingStartedAt': start,
+      'recentPlayStarts': [start, start + 60000],
+      'recentListeningIntervals': [
+        [start, start + 18000],
+        [start + 60000, start + 120000]
+      ],
+    };
+    await _json(stats, expected);
+    await const CacheBackupService()
+        .exportBackup(source: source, destination: backup);
+    Directory? staged;
+    await const CacheBackupService().restoreBackup(
+        backup: backup,
+        destination: Directory(path.join(fixture.path, 'v4-target')),
+        currentData: current,
+        activateLocation: (_, staging) async {
+          staged = staging;
+        });
+    final actual = jsonDecode(
+        await File(path.join(staged!.path, 'playback_statistics.json'))
+            .readAsString());
+    expect(actual, expected);
+    PlaybackStatistics.validateSnapshot(actual);
+  });
+
   test('followup lyric and waveform settings survive real backup restoration',
       () async {
     final expected = {
@@ -181,7 +212,27 @@ void main() {
       () async {
     final original = [112, 114, 101, 118, 105, 111, 117, 115];
     final invalid = <Map<String, Object?>>[
-      {..._statistics(), 'version': 4},
+      {..._statistics(), 'version': 5},
+      {
+        ..._statistics(),
+        'version': 4,
+        'recentPlayStarts': [100]
+      },
+      {
+        ..._statistics(),
+        'version': 4,
+        'recentTrackingStartedAt': 0,
+        'recentPlayStarts': [100, 99]
+      },
+      {
+        ..._statistics(),
+        'version': 4,
+        'recentTrackingStartedAt': 0,
+        'recentListeningIntervals': [
+          [10, 20],
+          [19, 30]
+        ]
+      },
       {
         ..._statistics(),
         'dailyPlayCounts': {'2026-09-26': -1}
@@ -217,7 +268,16 @@ void main() {
     final live = File(path.join(current.path, 'playback_statistics.json'));
     final liveBefore = await live.readAsBytes();
     final invalid = <Map<String, Object?>>[
-      {..._statistics(), 'version': 4},
+      {..._statistics(), 'version': 5},
+      {
+        ..._statistics(),
+        'version': 4,
+        'recentTrackingStartedAt': 0,
+        'recentListeningIntervals': [
+          [20, 10]
+        ]
+      },
+      {..._statistics(), 'version': 4, 'recentTrackingStartedAt': 'yesterday'},
       {
         ..._statistics(),
         'dailyPlayCounts': {'2026-09-26': -1}

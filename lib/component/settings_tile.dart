@@ -50,10 +50,15 @@ class SettingsSurface extends StatelessWidget {
 
 class SettingsHeader extends StatelessWidget {
   const SettingsHeader(
-      {super.key, required this.title, required this.icon, this.subtitle});
+      {super.key,
+      required this.title,
+      required this.icon,
+      this.subtitle,
+      this.subtitleColor});
   final String title;
   final IconData icon;
   final String? subtitle;
+  final Color? subtitleColor;
 
   @override
   Widget build(BuildContext context) {
@@ -74,8 +79,9 @@ class SettingsHeader extends StatelessWidget {
             if (subtitle != null) ...[
               const SizedBox(height: 4),
               Text(subtitle!,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                      color:
+                          subtitleColor ?? theme.colorScheme.onSurfaceVariant)),
             ],
           ])),
     ]);

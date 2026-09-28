@@ -108,7 +108,7 @@ void main() {
             reason: 'The final punctuation needs source ink room at its edge');
         expect(lastGlyph.bottom, lessThanOrEqualTo(paintSize.height - 3));
         if (primaryPaint is PlainLyricWordFollowPainter) {
-          expect(primaryPaint.text.text?.style?.fontSize,
+          expect(primaryPaint.text.text!.style!.fontSize!,
               22 * LyricMotion.focusedFontScale);
           expect(primaryPaint.text.text?.style?.fontWeight,
               LyricMotion.focusedFontWeight);
@@ -130,7 +130,10 @@ void main() {
             tester.renderObject<RenderParagraph>(paragraphs);
         expect(translationRender.didExceedMaxLines, isFalse);
         expect(
-            translationRender.size.width, lessThanOrEqualTo(width - 24 + .1));
+            MatrixUtils.transformRect(translationRender.getTransformTo(null),
+                    Offset.zero & translationRender.size)
+                .width,
+            lessThanOrEqualTo(width - 24 + .1));
         if (timed) {
           final romanization = find.text(romaji);
           expect(romanization, findsOneWidget);
@@ -433,12 +436,17 @@ void main() {
             .length,
         greaterThan(1));
     expect(rich.didExceedMaxLines, isFalse);
-    expect(rich.size.width, lessThanOrEqualTo(276.1));
+    expect(
+        MatrixUtils.transformRect(
+                rich.getTransformTo(null), Offset.zero & rich.size)
+            .width,
+        lessThanOrEqualTo(276.1));
     settings.dispose();
     position.dispose();
   });
 
-  testWidgets('inactive or reduced secondary lines use no follow painter',
+  testWidgets(
+      'inactive or reduced secondary lines retain static ink without a follow clock',
       (tester) async {
     final settings = LyricViewController();
     final position = ValueNotifier(const Duration(seconds: 2));
@@ -474,8 +482,9 @@ void main() {
           tester
               .widgetList<CustomPaint>(find.byType(CustomPaint))
               .map((widget) => widget.painter)
-              .whereType<PlainLyricWordFollowPainter>(),
-          isEmpty);
+              .whereType<PlainLyricWordFollowPainter>()
+              .map((painter) => painter.follow),
+          everyElement(isNull));
       expect(find.text(chinese), findsOneWidget);
       expect(find.text(romaji), findsOneWidget);
       expect(tester.takeException(), isNull);

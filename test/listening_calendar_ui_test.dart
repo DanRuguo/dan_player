@@ -121,6 +121,9 @@ void main() {
                                     const LocalAudioFileInfo.available(
                                         0)))))))));
     await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const ValueKey('statistics-calendar-twelveWeeks')));
+    await tester.pumpAndSettle();
     return key;
   }
 
@@ -137,7 +140,8 @@ void main() {
             findsOneWidget);
         final plays = find.byKey(const ValueKey('statistics-activity-plays'));
         expect(
-            find.descendant(of: plays, matching: find.text(ui('{0} 次', [9]))),
+            find.descendant(
+                of: plays, matching: find.text('≥ ${ui('{0} 次', [9])}')),
             findsOneWidget);
         await _capture(
             tester, key, '${language.name}-${brightness.name}-weeks');
@@ -216,7 +220,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(metric('plays', '10 次'), findsOneWidget);
     expect(metric('duration', '1 小时 2 分'), findsOneWidget);
-    expect(metric('active', '2 天'), findsOneWidget);
+    expect(metric('active', '2 周'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('statistics-calendar-daily')));
     await tester.pump();
     expect(
@@ -235,15 +239,16 @@ void main() {
             .value,
         inExclusiveRange(0.0, 1.0));
     await tester.pumpAndSettle();
-    expect(metric('plays', '99 次'), findsOneWidget);
-    expect(metric('duration', '8 小时 0 分'), findsOneWidget);
-    expect(metric('active', '06:00–07:00'), findsOneWidget);
+    expect(metric('plays', '—'), findsOneWidget);
+    expect(metric('duration', '—'), findsOneWidget);
+    expect(metric('active', '—'), findsOneWidget);
     expect(
         find.byKey(const ValueKey('statistics-calendar-scroll')), findsNothing);
     expect(find.byKey(const ValueKey('statistics-daily-distribution')),
         findsOneWidget);
-    expect(find.text('全部记录 · 按小时累计'), findsOneWidget);
-    expect(find.text('小时分布包含全部历史记录，不表示某一天；恢复播放不重复计次。'), findsOneWidget);
+    expect(find.text('旧记录只有每日合计，不能还原最近24小时；新的播放将开始精确记录。'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('statistics-hours-history')), findsOneWidget);
     await tester
         .tap(find.byKey(const ValueKey('statistics-calendar-twelveWeeks')));
     await tester.pumpAndSettle();
@@ -365,16 +370,16 @@ void main() {
         find.descendant(of: plays, matching: find.text('—')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('statistics-refresh')));
     await tester.pumpAndSettle();
-    expect(
-        find.descendant(of: plays, matching: find.text('1 次')), findsOneWidget);
+    expect(find.descendant(of: plays, matching: find.text('≥ 1 次')),
+        findsOneWidget);
     expect(find.text('播放次数自 2026-09-26 开始记录，该范围此前次数未知。'), findsOneWidget);
     expect(stats.dailyMilliseconds, {'2026-09-21': 60000});
     expect(stats.dailyPlayCounts, {'2026-09-26': 1});
     stats.pause();
     stats.start(audio);
     await tester.pumpAndSettle();
-    expect(
-        find.descendant(of: plays, matching: find.text('1 次')), findsOneWidget);
+    expect(find.descendant(of: plays, matching: find.text('≥ 1 次')),
+        findsOneWidget);
   });
 
   testWidgets('day cells support keyboard activation and readable semantics',
@@ -416,7 +421,7 @@ void main() {
     final rail = tester
         .getRect(find.byKey(const ValueKey('statistics-calendar-scroll')));
     final first =
-        tester.getRect(find.byKey(const ValueKey('listening-day-2026-07-06')));
+        tester.getRect(find.byKey(const ValueKey('listening-day-2026-07-05')));
     final last =
         tester.getRect(find.byKey(const ValueKey('listening-day-2026-09-21')));
     expect(first.left, closeTo(rail.left, .01));

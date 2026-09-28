@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/app_edge_stretch.dart';
 import 'dart:io';
 import 'dart:ui' as raster;
 
@@ -98,6 +99,9 @@ void main() {
     final harness = _Harness();
     addTearDown(harness.dispose);
     await tester.pumpWidget(harness.build());
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const ValueKey('statistics-calendar-twelveWeeks')));
     await tester.pumpAndSettle();
     return harness;
   }
@@ -283,9 +287,9 @@ void main() {
       (tester) async {
     final harness = await setup(tester);
     final indicator = find.descendant(
-        of: getRail(), matching: find.byType(StretchingOverscrollIndicator));
+        of: getRail(), matching: find.byType(AppStretchingOverscrollIndicator));
     expect(indicator, findsOneWidget);
-    final native = tester.widget<StretchingOverscrollIndicator>(indicator);
+    final native = tester.widget<AppStretchingOverscrollIndicator>(indicator);
     expect(native.axis, Axis.horizontal);
     final before = tester.getRect(find.text('周一'));
     expect(controller(tester).position.maxScrollExtent, 0);
@@ -294,8 +298,8 @@ void main() {
     await touch.moveBy(const Offset(80, 0));
     await touch.moveBy(const Offset(90, 0));
     await tester.pump();
-    final effect = tester.widget<StretchEffect>(
-        find.descendant(of: indicator, matching: find.byType(StretchEffect)));
+    final effect = tester.widget<AppStretchEffect>(find.descendant(
+        of: indicator, matching: find.byType(AppStretchEffect)));
     expect(effect.stretchStrength.abs(), greaterThan(0));
     expect(tester.getRect(find.text('周一')), before);
     await _capture(harness.boundary, tester, 'touch-stretch-held');
@@ -303,8 +307,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(
         tester
-            .widget<StretchEffect>(find.descendant(
-                of: indicator, matching: find.byType(StretchEffect)))
+            .widget<AppStretchEffect>(find.descendant(
+                of: indicator, matching: find.byType(AppStretchEffect)))
             .stretchStrength,
         0);
     await _capture(harness.boundary, tester, 'touch-stretch-rest');
@@ -318,7 +322,8 @@ void main() {
         (tester) async {
       final harness = await setup(tester);
       final indicator = find.descendant(
-          of: getRail(), matching: find.byType(StretchingOverscrollIndicator));
+          of: getRail(),
+          matching: find.byType(AppStretchingOverscrollIndicator));
       final touch = await tester.startGesture(tester.getCenter(getRail()),
           kind: PointerDeviceKind.touch);
       await touch.moveBy(const Offset(80, 0));
@@ -326,8 +331,8 @@ void main() {
       await tester.pump();
       expect(
           tester
-              .widget<StretchEffect>(find.descendant(
-                  of: indicator, matching: find.byType(StretchEffect)))
+              .widget<AppStretchEffect>(find.descendant(
+                  of: indicator, matching: find.byType(AppStretchEffect)))
               .stretchStrength
               .abs(),
           greaterThan(0));
@@ -378,7 +383,7 @@ void main() {
     expect(
         find.descendant(
             of: getRail(),
-            matching: find.byType(StretchingOverscrollIndicator)),
+            matching: find.byType(AppStretchingOverscrollIndicator)),
         findsNothing);
     for (var tick = 0; tick < 3; tick++) {
       await tester.pump(const Duration(seconds: 1));

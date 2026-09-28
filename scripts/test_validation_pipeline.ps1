@@ -73,7 +73,10 @@ Assert-Policy (-not ($plan.Arguments -match 'EXPORT_PUBLIC_UI=true')) 'Layout-on
 $plan = & (Join-Path $PSScriptRoot 'render_public_ui.ps1') -TestFile test/current_playlist_view_test.dart -TestName 'render updated queue history and stop controls' -OutputDirectory (Join-Path $repo 'tool/render-updates') -PlanOnly
 Assert-Policy ('--plain-name' -cin $plan.Arguments -and ($plan.Arguments -match 'DAN_PLAYER_UPDATE_RENDER_DIR=').Count -eq 1) 'Focused render selection/output must reach the chosen production fixture.'
 
-foreach ($path in @('support/validation_receipt.ps1','support/signature_integrity.ps1','support/ci_impact.ps1','select_windows_ci_checks.ps1','build_windows_release.ps1','sign_windows_release.ps1','verify_interaction_regressions.ps1','render_public_ui.ps1')) {
+$buildScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build_windows_release.ps1') -Raw
+$displayGate = $buildScript.IndexOf('verify_native_display_regressions.ps1')
+Assert-Policy ($displayGate -ge 0 -and $displayGate -lt $buildScript.IndexOf('& $flutter build windows --release')) 'Native display regressions must block release builds before signing/packaging.'
+foreach ($path in @('support/validation_receipt.ps1','support/signature_integrity.ps1','support/ci_impact.ps1','select_windows_ci_checks.ps1','build_windows_release.ps1','sign_windows_release.ps1','verify_interaction_regressions.ps1','verify_native_display_regressions.ps1','render_public_ui.ps1')) {
     $tokens=$null; $errors=$null
     $null = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $path), [ref]$tokens, [ref]$errors)
     Assert-Policy ($errors.Count -eq 0) "PowerShell syntax errors in $path : $errors"

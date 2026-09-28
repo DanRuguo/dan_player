@@ -9,6 +9,7 @@ import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -419,8 +420,10 @@ void main() {
     final focused = tester.widget<Text>(find.text('Line 0')).style!;
     final contextStyle = tester.widget<Text>(find.text('Line 1')).style!;
     expect(focused.fontWeight, FontWeight.w800);
+    // The source paragraph uses its displayed font size directly; context
+    // emphasis remains a paint-only transform outside that paragraph.
     expect(
-        focused.fontSize, closeTo(22 * LyricMotion.focusedFontScale, .000001));
+        focused.fontSize!, closeTo(22 * LyricMotion.focusedFontScale, .000001));
     final focusedSize = focused.fontSize! * _scale(tester, 0);
     final contextSize = contextStyle.fontSize! * _scale(tester, 1);
     expect(focusedSize / contextSize, greaterThanOrEqualTo(1.50));
@@ -657,6 +660,94 @@ void main() {
       expect(after[index], same(before[index]));
     }
     expect(_opacity(tester, 1), greaterThan(opacity));
+  });
+
+  testWidgets('font morph limits dual paragraphs to the current viewport',
+      (tester) async {
+    final harness = _Harness(lyric: _plainLyric(100), position: 100);
+    await _mount(tester, harness);
+    harness.settings.increaseFontSize();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(tester.widget<LyricViewTile>(_row(0)).reducedMotion, isTrue);
+    expect(tester.widget<LyricViewTile>(_row(20)).reducedMotion, isFalse);
+    expect(tester.widget<LyricViewTile>(_row(99)).reducedMotion, isTrue);
+    expect(
+        tester
+            .widget<LyricFontMorph>(find
+                .descendant(of: _row(20), matching: find.byType(LyricFontMorph))
+                .first)
+            .children,
+        hasLength(2));
+    expect(
+        tester
+            .widget<LyricFontMorph>(find
+                .descendant(of: _row(99), matching: find.byType(LyricFontMorph))
+                .first)
+            .children,
+        hasLength(1));
+    await tester.pumpAndSettle();
+    expect(tester.widget<LyricViewTile>(_row(99)).reducedMotion, isFalse);
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('manual reading keeps the visible row when font size changes',
+      (tester) async {
+    final harness = _Harness(lyric: _plainLyric(100), position: 100);
+    await _mount(tester, harness);
+    harness.settings.setReadingMode(true);
+    await tester.pump();
+    final scroll = _controller(tester);
+    scroll.jumpTo(scroll.position.maxScrollExtent * .72);
+    await tester.pumpAndSettle();
+    int firstVisible() {
+      final viewport = tester.getRect(_scroll());
+      for (var index = 0; index < 100; index++) {
+        if (tester.getRect(_row(index)).overlaps(viewport)) return index;
+      }
+      throw StateError('no visible lyric row');
+    }
+
+    final before = firstVisible();
+    expect(before, greaterThan(50));
+    harness.settings.increaseFontSize();
+    await tester.pump();
+    expect(firstVisible(), before);
+    expect(tester.widget<LyricViewTile>(_row(before)).reducedMotion, isFalse);
+    await tester.pumpAndSettle();
+    expect(tester.widget<LyricViewTile>(_row(99)).reducedMotion, isFalse);
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('seek interrupts bounded font morph and reduced motion settles',
+      (tester) async {
+    final harness = _Harness(lyric: _plainLyric(100), position: 100);
+    await _mount(tester, harness);
+    harness.settings.increaseFontSize();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(tester.widget<LyricViewTile>(_row(99)).reducedMotion, isTrue);
+    harness.emit(300);
+    await tester.pump();
+    expect(_active(tester), 60);
+    // The old size finishes in this layout before seek measures its target.
+    expect(tester.widget<LyricViewTile>(_row(99)).reducedMotion, isTrue);
+    await tester.pump();
+    expect(tester.widget<LyricViewTile>(_row(99)).reducedMotion, isFalse);
+    await tester.pumpAndSettle();
+    final expectedTop = tester.getTopLeft(_scroll()).dy +
+        (tester.getSize(_scroll()).height - tester.getSize(_row(60)).height) *
+            .34;
+    expect(tester.getTopLeft(_row(60)).dy, closeTo(expectedTop, .5));
+
+    await tester.pumpWidget(_app(harness, reduced: true));
+    harness.settings.decreaseFontSize();
+    await tester.pump();
+    expect(tester.widget<LyricViewTile>(_row(99)).reducedMotion, isTrue);
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('latest of several seeks owns the scroll target', (tester) async {

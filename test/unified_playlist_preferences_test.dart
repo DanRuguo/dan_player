@@ -26,9 +26,7 @@ void main() {
 
   setUp(() async {
     expect(Platform.environment['DAN_PLAYER_DATA_DIR']?.trim() ?? '', isEmpty);
-    final parent =
-        await Directory(path.join(Directory.current.path, 'build', 'test-data'))
-            .create(recursive: true);
+    final parent = Directory.systemTemp;
     root = await parent.createTemp('unified-preferences-');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (_) async => root.path);
@@ -59,9 +57,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
     final resolved = await root.resolveSymbolicLinks();
-    final parent =
-        await Directory(path.join(Directory.current.path, 'build', 'test-data'))
-            .resolveSymbolicLinks();
+    final parent = await Directory.systemTemp.resolveSymbolicLinks();
     if (!path.isWithin(parent, resolved) ||
         !path.basename(resolved).startsWith('unified-preferences-')) {
       throw StateError('Refusing to remove an unverified test fixture');
@@ -72,7 +68,11 @@ void main() {
   test(
       'root and per-playlist tile choices persist; old records use safe defaults',
       () async {
-    final choices = CategoryPresentation(autoFill: false, sizes: {
+    final choices =
+        CategoryPresentation(autoFill: false, playlistCountChildren: {
+      'tree': false,
+      'list': true
+    }, sizes: {
       'root-cover': CategoryTileSize.large
     }, layouts: {
       'root-cover': [5, 2, 0]
@@ -109,6 +109,17 @@ void main() {
     await AppPreference.read();
     expect(AppPreference.instance.playlistTilePresentation.sizes, isEmpty);
     expect(AppPreference.instance.playlistTilePresentation.autoFill, isTrue);
+    expect(
+        CategoryPresentation.fromMap(decoded.presentation['tiles'])
+            .countPlaylistChildren('tree'),
+        isFalse);
+    expect(
+        CategoryPresentation.fromMap(
+                decoded.entries.single.childPlaylist!.presentation['tiles'])
+            .countPlaylistChildren('tree'),
+        isTrue);
+    expect(CategoryPresentation.fromMap(null).countPlaylistChildren('tree'),
+        isTrue);
     final oldNode = parent.toMap()..remove('presentation');
     expect(
         CategoryPresentation.fromMap(

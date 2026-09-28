@@ -36,30 +36,56 @@ class NowPlayingPagePreference {
   LyricTextAlign lyricTextAlign;
   double lyricFontSize;
   double translationFontSize;
+  bool showLyricTranslation;
+  bool showLyricRomanization;
+  bool showLyricTimestamps;
 
   NowPlayingPagePreference(
     this.nowPlayingViewMode,
     this.lyricTextAlign,
     this.lyricFontSize,
-    this.translationFontSize,
-  );
+    this.translationFontSize, {
+    this.showLyricTranslation = true,
+    this.showLyricRomanization = true,
+    this.showLyricTimestamps = false,
+  });
 
   Map toMap() => {
         "nowPlayingViewMode": nowPlayingViewMode.name,
         "lyricTextAlign": lyricTextAlign.name,
         "lyricFontSize": lyricFontSize,
         "translationFontSize": translationFontSize,
+        'showLyricTranslation': showLyricTranslation,
+        'showLyricRomanization': showLyricRomanization,
+        'showLyricTimestamps': showLyricTimestamps,
       };
 
   factory NowPlayingPagePreference.fromMap(Map map) {
     return NowPlayingPagePreference(
-      NowPlayingViewMode.fromString(map["nowPlayingViewMode"]) ??
+      NowPlayingViewMode.fromString(map["nowPlayingViewMode"] is String
+              ? map["nowPlayingViewMode"] as String
+              : '') ??
           NowPlayingViewMode.withLyric,
-      LyricTextAlign.fromString(map["lyricTextAlign"]) ?? LyricTextAlign.left,
-      map["lyricFontSize"] ?? 22.0,
-      map["translationFontSize"] ?? 18.0,
+      LyricTextAlign.fromString(map["lyricTextAlign"] is String
+              ? map["lyricTextAlign"] as String
+              : '') ??
+          LyricTextAlign.left,
+      safeLyricFontSize(map["lyricFontSize"], fallback: 22),
+      safeLyricFontSize(map["translationFontSize"], fallback: 18),
+      showLyricTranslation: map['showLyricTranslation'] is bool
+          ? map['showLyricTranslation'] as bool
+          : true,
+      showLyricRomanization: map['showLyricRomanization'] is bool
+          ? map['showLyricRomanization'] as bool
+          : true,
+      showLyricTimestamps: map['showLyricTimestamps'] == true,
     );
   }
+
+  static double safeLyricFontSize(Object? value, {required double fallback}) =>
+      value is num && value.isFinite
+          ? value.toDouble().clamp(14, 64)
+          : fallback;
 }
 
 class PlaybackPreference {

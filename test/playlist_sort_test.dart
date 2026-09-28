@@ -179,6 +179,29 @@ void main() {
     });
   }
 
+  testWidgets('count-scope sorting keeps nested queue and source order',
+      (tester) async {
+    final fixture = _Fixture();
+    final a = fixture.tree.createPlaylist('A', parent: fixture.parent);
+    final b = fixture.tree.createPlaylist('B', parent: fixture.parent);
+    final nested = fixture.tree.createPlaylist('Nested', parent: a);
+    fixture.tree.addAudio(nested, fixture.low);
+    fixture.tree.addAudio(nested, fixture.high);
+    fixture.tree.addAudio(b, fixture.equal);
+    final entryIds = fixture.parent.entries.map((entry) => entry.id).toList();
+    await _show(tester, fixture);
+    await _choose(tester, 'playlist-sort-songCount');
+    await _play(tester);
+    expect(
+        fixture.played.last.queue, [fixture.low, fixture.high, fixture.equal]);
+    await tapPlaylistAction(tester, 'playlist-count-children');
+    await _play(tester);
+    expect(
+        fixture.played.last.queue, [fixture.equal, fixture.low, fixture.high]);
+    expect(fixture.parent.entries.map((entry) => entry.id), entryIds);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
       'source sort differentiates actual local/online descriptors and keeps folder last',
       (tester) async {

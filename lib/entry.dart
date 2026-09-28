@@ -82,6 +82,12 @@ class SlideTransitionPage<T> extends CustomTransitionPage<T> {
       AppRouteTransition(animation: animation, child: child);
 }
 
+/// The nested pages own their fades and entrances. Keep the shared window
+/// chrome fixed instead of adding Material's centred zoom around the shell.
+class AppShellPage<T> extends NoTransitionPage<T> {
+  const AppShellPage({required super.child, super.key});
+}
+
 class Entry extends StatelessWidget {
   Entry({super.key, required this.welcome});
   final bool welcome;
@@ -274,7 +280,10 @@ class Entry extends StatelessWidget {
         welcome ? app_paths.WELCOMING_PAGE : app_paths.UPDATING_DIALOG,
     routes: [
       ShellRoute(
-        builder: (context, state, page) => AppShell(page: page),
+        pageBuilder: (context, state, page) => AppShellPage(
+          key: state.pageKey,
+          child: AppShell(page: page),
+        ),
         routes: [
           /// audios page
           GoRoute(

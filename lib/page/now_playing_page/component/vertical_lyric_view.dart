@@ -36,6 +36,7 @@ class VerticalLyricView extends StatefulWidget {
 
 class _VerticalLyricViewState extends State<VerticalLyricView> {
   bool isHovering = false;
+  bool controlsFocused = false;
   final lyricViewController = LyricViewController();
 
   @override
@@ -71,11 +72,27 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
                   ),
                 ),
               ),
-              if (isHovering || ALWAYS_SHOW_LYRIC_VIEW_CONTROLS)
-                const Align(
-                  alignment: Alignment.bottomRight,
-                  child: LyricViewControls(),
+              Align(
+                alignment: Alignment.bottomRight,
+                // Keep the menu anchor mounted while its overlay has focus.
+                child: Focus(
+                  onFocusChange: (value) =>
+                      setState(() => controlsFocused = value),
+                  child: Opacity(
+                    opacity: isHovering ||
+                            controlsFocused ||
+                            ALWAYS_SHOW_LYRIC_VIEW_CONTROLS
+                        ? 1
+                        : 0,
+                    child: IgnorePointer(
+                      ignoring: !isHovering &&
+                          !controlsFocused &&
+                          !ALWAYS_SHOW_LYRIC_VIEW_CONTROLS,
+                      child: const LyricViewControls(),
+                    ),
+                  ),
                 ),
+              ),
             ],
           ),
         ),
@@ -441,8 +458,25 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   int _followGeneration = 0;
   Timer? _manualScrollTimer;
   bool _manualScrollActive = false;
+  bool _readingMode = false;
+  int _returnRequest = 0;
   bool _dragging = false;
-  Object? _layoutIdentity;
+  Object? _geometryIdentity;
+  Object? _presentationIdentity;
+  Object? _displayIdentity;
+  Object? _fontIdentity;
+  bool _fontSettingActive = false;
+  bool _snapFontOnLineChange = false;
+  bool _fontSnapReleaseScheduled = false;
+  bool _fontBandUpdateScheduled = false;
+  ({int first, int end})? _builtFontBand;
+  bool _settingsAnchor = false;
+  bool _contentSettingPending = false;
+  bool _presentationSettingPending = false;
+  int _settingsAnchorGeneration = 0;
+  int _settingsAnchorLine = -1;
+  ({double top, double height})? _anchorGeometry;
+  double _anchorLeading = 0;
   bool? _wasReduced;
   AppLifecycleState? _lifecycle;
   bool _exiting = false;
@@ -545,6 +579,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
 
   void _syncActivity() {
     if (_exiting) {
+      _settingsAnchor = false;
+      _fontSettingActive = false;
+      _snapFontOnLineChange = false;
       // Freeze presentation at the painted pose while the parent fades it.
       // Stopping media is not the same as requesting reduced-motion styling.
       _active = false;
@@ -596,6 +633,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _receivePosition(widget.readPosition(),
           forceFollow: true, immediate: true);
     } else {
+      _settingsAnchor = false;
+      _fontSettingActive = false;
+      _snapFontOnLineChange = false;
       _cancelFollowEffects();
       _sourceGeneration++;
       unawaited(_positionSubscription?.cancel());
@@ -614,6 +654,10 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _resetLyric() {
+    _settingsAnchor = false;
+    _fontSettingActive = false;
+    _snapFontOnLineChange = false;
+    _builtFontBand = null;
     _cancelFollowEffects();
     _manualScrollTimer?.cancel();
     _manualScrollActive = false;
@@ -699,6 +743,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     }
     final seek = (nextLine - _currentLine).abs() > 1;
     final anchorChanged = nextLine != _currentLine;
+    if (anchorChanged && _fontSettingActive) {
+      // Finish the old size before a new line claims the scroll target. The
+      // previous visible rows would otherwise keep changing height beneath
+      // an already-started seek animation.
+      _fontSettingActive = false;
+      _snapFontOnLineChange = true;
+    }
     if (nextLine != _currentLine || voicesChanged) {
       setState(() {
         _currentLine = nextLine;
@@ -788,14 +839,65 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _receivePosition(widget.readPosition(), forceFollow: true);
   }
 
+  void _finishContentSetting() {
+    if (!_settingsAnchor || !_contentSettingPending) return;
+    _contentSettingPending = false;
+    _finishSettingsAnchorIfReady();
+  }
+
+  void _finishPresentationSetting() {
+    if (_fontSettingActive) {
+      _fontSettingActive = false;
+      if (mounted) setState(() {});
+    }
+    if (!_settingsAnchor || !_presentationSettingPending) return;
+    _presentationSettingPending = false;
+    _finishSettingsAnchorIfReady();
+  }
+
+  void _finishSettingsAnchorIfReady() {
+    if (!_settingsAnchor ||
+        _contentSettingPending ||
+        _presentationSettingPending) {
+      return;
+    }
+    final generation = _settingsAnchorGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && generation == _settingsAnchorGeneration) {
+        _settingsAnchor = false;
+      }
+    });
+  }
+
+  double? _layoutAnchorOffset(ScrollMetrics dimensions) {
+    if (!_settingsAnchor ||
+        !_active ||
+        _manualScrollActive ||
+        _readingMode ||
+        _settingsAnchorLine != _currentLine) {
+      return null;
+    }
+    final geometry = _anchorGeometry;
+    if (geometry == null) return null;
+    final alignment =
+        geometry.height > dimensions.viewportDimension * .7 ? 0.0 : .34;
+    return (_anchorLeading +
+            geometry.top -
+            (dimensions.viewportDimension - geometry.height) * alignment)
+        .clamp(dimensions.minScrollExtent, dimensions.maxScrollExtent);
+  }
+
   void _scheduleFollow({bool immediate = false, bool seek = false}) {
-    if (!_active) return;
+    if (!_active || _readingMode) return;
+    // A playback line change or seek takes ownership from a settings reveal.
+    _settingsAnchor = false;
     final generation = ++_followGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted ||
           !_active ||
           generation != _followGeneration ||
           _manualScrollActive ||
+          _readingMode ||
           !_scrollController.hasClients ||
           _currentLine < 0 ||
           _currentLine >= _lineKeys.length) {
@@ -849,6 +951,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
 
   void _markManualInteraction({bool dragging = false}) {
     if (!_active) return;
+    _settingsAnchor = false;
     _followGeneration++;
     final enteringManual = !_manualScrollActive;
     _manualScrollActive = true;
@@ -867,10 +970,10 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _resumeAfterGrace() {
-    if (!_active) return;
+    if (!_active || _readingMode) return;
     _manualScrollTimer?.cancel();
     _manualScrollTimer = Timer(LyricMotion.manualScrollGrace, () {
-      if (!mounted || !_active || _dragging) return;
+      if (!mounted || !_active || _dragging || _readingMode) return;
       _manualScrollActive = false;
       setState(() {});
       _scheduleFollow();
@@ -888,6 +991,88 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _restBlur = {};
     _voiceBlurs = {};
     _releasingVoices.clear();
+  }
+
+  // The whole lyric remains mounted so seeking and the layout-phase current
+  // line anchor retain exact geometry. Only rows near the painted viewport
+  // need two shaped font endpoints during a size-setting transition.
+  ({int first, int end}) _fontAnimationBand() {
+    final count = _lineKeys.length;
+    final all = (first: 0, end: count);
+    if (!_scrollController.hasClients || count == 0) return all;
+    final position = _scrollController.position;
+    if (!position.hasViewportDimension ||
+        !position.viewportDimension.isFinite ||
+        position.viewportDimension <= 0) {
+      return all;
+    }
+    final viewport = position.viewportDimension;
+    final lower = math.max(0.0, position.pixels - viewport * .75);
+    final upper = position.pixels + viewport * 1.75;
+
+    ({double top, double bottom})? rowGeometry(int index) {
+      final row = _lineKeys[index].currentContext?.findRenderObject();
+      if (row is! RenderBox || !row.attached || !row.hasSize) return null;
+      final data = row.parentData;
+      if (data is! FlexParentData) return null;
+      final top = _anchorLeading + data.offset.dy;
+      return (top: top, bottom: top + row.size.height);
+    }
+
+    var missingGeometry = false;
+    var low = 0;
+    var high = count;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      final row = rowGeometry(middle);
+      if (row == null) {
+        missingGeometry = true;
+        break;
+      }
+      if (row.bottom < lower) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    if (missingGeometry) return all;
+    final first = low;
+    low = first;
+    high = count;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      final row = rowGeometry(middle);
+      if (row == null) return all;
+      if (row.top <= upper) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return (first: first, end: low);
+  }
+
+  void _scheduleFontBandUpdate() {
+    if (!_fontSettingActive || _fontBandUpdateScheduled || !mounted) return;
+    _fontBandUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fontBandUpdateScheduled = false;
+      if (!mounted || !_fontSettingActive) return;
+      if (_fontAnimationBand() != _builtFontBand) setState(() {});
+    });
+  }
+
+  void _scheduleFontSnapRelease() {
+    if (!_snapFontOnLineChange || _fontSnapReleaseScheduled || !mounted) {
+      return;
+    }
+    _fontSnapReleaseScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fontSnapReleaseScheduled = false;
+      if (!mounted || !_snapFontOnLineChange) return;
+      _snapFontOnLineChange = false;
+      setState(() {});
+    });
   }
 
   /// Find the viewport band by binary search over already-laid-out rows. No
@@ -969,6 +1154,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
 
   bool _onScrollNotification(ScrollNotification notification) {
     if (notification.depth != 0) return false;
+    _scheduleFontBandUpdate();
     final directDrag = notification is ScrollStartNotification &&
             notification.dragDetails != null ||
         notification is ScrollUpdateNotification &&
@@ -992,7 +1178,32 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _presentationEnabled = !_exiting && !reduced && widget.playing;
     _syncPresentationTicker();
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
-    final followEnabled = !reduced && !_manualScrollActive;
+    final settings = context.watch<LyricViewController>();
+    if (_readingMode != settings.readingMode) {
+      _readingMode = settings.readingMode;
+      _settingsAnchor = false;
+      _manualScrollTimer?.cancel();
+      _followGeneration++;
+      if (_readingMode) {
+        _cancelFollowEffects();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted &&
+              _readingMode &&
+              _scrollController.hasClients &&
+              _scrollController.position.isScrollingNotifier.value) {
+            _scrollController.jumpTo(_scrollController.offset);
+          }
+        });
+      }
+    }
+    if (_returnRequest != settings.returnRequest) {
+      _returnRequest = settings.returnRequest;
+      _manualScrollTimer?.cancel();
+      _manualScrollActive = false;
+      _dragging = false;
+      _scheduleFollow(seek: true);
+    }
+    final followEnabled = !reduced && !_manualScrollActive && !_readingMode;
     final blurEnabled = followEnabled &&
         !highContrast &&
         (_preferences?.value.surfaceBlur ?? true);
@@ -1005,9 +1216,38 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _scheduleFollow(immediate: true);
     }
     _wasReduced = reduced;
-    final settings = context.watch<LyricViewController>();
-    final tileIdentity =
-        (widget.lyric, _currentLine, _singingRevision, reduced);
+    final fontIdentity = (settings.lyricFontSize, settings.translationFontSize);
+    if (_fontIdentity != null && _fontIdentity != fontIdentity) {
+      _snapFontOnLineChange = false;
+      _fontSettingActive = !reduced &&
+          !_manualScrollActive &&
+          !_readingMode &&
+          !_dragging &&
+          _currentLine >= 0 &&
+          _currentLine < widget.lyric.lines.length;
+    }
+    _fontIdentity = fontIdentity;
+    // A user-held viewport has no current-line anchor. Instantly completing
+    // the many offscreen rows above it would shift its visible lyric index.
+    if (reduced || _manualScrollActive || _readingMode || _dragging) {
+      _fontSettingActive = false;
+    }
+    final fontBand = _fontSettingActive ? _fontAnimationBand() : null;
+    _builtFontBand = fontBand;
+    bool reducedAt(int index) =>
+        reduced ||
+        _snapFontOnLineChange ||
+        (fontBand != null &&
+            (index < fontBand.first || index >= fontBand.end) &&
+            (index - _currentLine).abs() > 4);
+    final tileIdentity = (
+      widget.lyric,
+      _currentLine,
+      _singingRevision,
+      reduced,
+      fontBand,
+      _snapFontOnLineChange
+    );
     if (_tileCacheIdentity != tileIdentity) {
       final previous = _tileCache;
       _tileCacheIdentity = tileIdentity;
@@ -1016,7 +1256,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
           if (index < previous.length &&
               identical(previous[index].line, widget.lyric.lines[index]) &&
               previous[index].distance == _visualDistance(index) &&
-              previous[index].reducedMotion == reduced)
+              previous[index].reducedMotion == reducedAt(index))
             previous[index]
           else
             LyricViewTile(
@@ -1025,19 +1265,24 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               position: _position,
               distance: _visualDistance(index),
               opacity: LyricMotion.opacityForDistance(_visualDistance(index)),
-              reducedMotion: reduced,
+              reducedMotion: reducedAt(index),
+              onContentRevealEnd: _finishContentSetting,
+              onPresentationEnd: _finishPresentationSetting,
               onTap:
                   widget.lyric is PlainLyric ? null : () => _seekToLine(index),
             ),
       ];
     }
+    _scheduleFontBandUpdate();
+    _scheduleFontSnapRelease();
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final height = constraints.maxHeight.isFinite
             ? constraints.maxHeight
             : MediaQuery.sizeOf(context).height;
-        final layoutIdentity = (
+        _anchorLeading = height * .34;
+        final geometryIdentity = (
           constraints.maxWidth,
           height,
           settings.lyricFontSize,
@@ -1045,81 +1290,148 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
           settings.lyricTextAlign,
           MediaQuery.textScalerOf(context),
         );
-        if (_layoutIdentity != null && _layoutIdentity != layoutIdentity) {
+        final presentationIdentity = (
+          settings.lyricFontSize,
+          settings.translationFontSize,
+          settings.lyricTextAlign,
+        );
+        final displayIdentity = (
+          settings.showTranslation,
+          settings.showRomanization,
+          settings.showTimestamps,
+        );
+        final geometryChanged =
+            _geometryIdentity != null && _geometryIdentity != geometryIdentity;
+        final presentationChanged = _presentationIdentity != null &&
+            _presentationIdentity != presentationIdentity;
+        final displayChanged =
+            _displayIdentity != null && _displayIdentity != displayIdentity;
+        if (displayChanged || presentationChanged) {
+          // Row heights change during content reveals and font transitions.
+          // ScrollPhysics corrects the
+          // position during viewport layout, before the changed frame paints.
+          // Post-frame jumpTo would show the old offset for one frame.
+          if (_active &&
+              !_manualScrollActive &&
+              !_readingMode &&
+              _currentLine >= 0 &&
+              _currentLine < _lineKeys.length &&
+              _scrollController.hasClients &&
+              !_scrollController.position.isScrollingNotifier.value) {
+            _settingsAnchor = true;
+            _contentSettingPending = displayChanged && !reduced;
+            _presentationSettingPending = presentationChanged && !reduced;
+            _settingsAnchorGeneration++;
+            _settingsAnchorLine = _currentLine;
+            _followGeneration++;
+            _followClock.stop();
+            _followTransitions = {};
+            if (reduced) {
+              _finishSettingsAnchorIfReady();
+            }
+          } else {
+            _settingsAnchor = false;
+          }
+        } else if (geometryChanged) {
           _scheduleFollow(immediate: true);
         }
-        _layoutIdentity = layoutIdentity;
-        return MouseRegion(
-          onEnter: (_) => _setPointerReading(true),
-          onExit: (_) => _setPointerReading(false),
-          child: Listener(
-            onPointerSignal: (event) {
-              if (event is PointerScrollEvent) _markManualInteraction();
-            },
-            onPointerPanZoomStart: (_) =>
-                _markManualInteraction(dragging: true),
-            onPointerPanZoomEnd: (_) {
-              _dragging = false;
-              if (_manualScrollActive) _resumeAfterGrace();
-            },
-            onPointerCancel: (_) {
-              _dragging = false;
-              if (_manualScrollActive) _resumeAfterGrace();
-            },
-            child: NotificationListener<ScrollNotification>(
-              onNotification: _onScrollNotification,
-              child: ScrollConfiguration(
-                behavior:
-                    const DanPlayerScrollBehavior().copyWith(scrollbars: false),
-                child: LyricViewportFade(
-                  enabled: followEnabled && !highContrast,
-                  child: CustomScrollView(
-                    key: const ValueKey('vertical-lyric-scroll'),
-                    controller: _scrollController,
-                    slivers: [
-                      SliverToBoxAdapter(child: SizedBox(height: height * .34)),
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        sliver: SliverToBoxAdapter(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (var index = 0;
-                                  index < widget.lyric.lines.length;
-                                  index++)
-                                SizedBox(
-                                  key: _lineKeys[index],
-                                  width: double.infinity,
-                                  child: LyricFollowEffects(
-                                    clock: _followClock,
-                                    transition: followEnabled
-                                        ? _followTransitions[index]
-                                        : null,
-                                    blur:
-                                        blurEnabled ? _restBlur[index] ?? 0 : 0,
-                                    blurAnimation: _voiceBlurs[index],
-                                    blurEnabled: blurEnabled &&
-                                        _restBlur.containsKey(index),
-                                    reading: (_restBlur[index] ?? 0) > 0 ||
-                                            _followTransitions
-                                                .containsKey(index)
-                                        ? _readingClock
-                                        : null,
-                                    child: _tileCache[index],
+        _geometryIdentity = geometryIdentity;
+        _presentationIdentity = presentationIdentity;
+        _displayIdentity = displayIdentity;
+        return Stack(children: [
+          MouseRegion(
+            onEnter: (_) => _setPointerReading(true),
+            onExit: (_) => _setPointerReading(false),
+            child: Listener(
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent) _markManualInteraction();
+              },
+              onPointerPanZoomStart: (_) =>
+                  _markManualInteraction(dragging: true),
+              onPointerPanZoomEnd: (_) {
+                _dragging = false;
+                if (_manualScrollActive) _resumeAfterGrace();
+              },
+              onPointerCancel: (_) {
+                _dragging = false;
+                if (_manualScrollActive) _resumeAfterGrace();
+              },
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: ScrollConfiguration(
+                  behavior: const DanPlayerScrollBehavior()
+                      .copyWith(scrollbars: false),
+                  child: LyricViewportFade(
+                    enabled: followEnabled && !highContrast,
+                    child: CustomScrollView(
+                      key: const ValueKey('vertical-lyric-scroll'),
+                      physics: _LyricSettingsAnchorPhysics(
+                          anchor: _layoutAnchorOffset),
+                      controller: _scrollController,
+                      slivers: [
+                        SliverToBoxAdapter(
+                            child: SizedBox(height: height * .34)),
+                        SliverPadding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          sliver: SliverToBoxAdapter(
+                            child: _LyricAnchorColumn(
+                              index: _currentLine,
+                              onGeometry: (geometry) =>
+                                  _anchorGeometry = geometry,
+                              children: [
+                                for (var index = 0;
+                                    index < widget.lyric.lines.length;
+                                    index++)
+                                  SizedBox(
+                                    key: _lineKeys[index],
+                                    width: double.infinity,
+                                    child: LyricFollowEffects(
+                                      clock: _followClock,
+                                      transition: followEnabled
+                                          ? _followTransitions[index]
+                                          : null,
+                                      blur: blurEnabled
+                                          ? _restBlur[index] ?? 0
+                                          : 0,
+                                      blurAnimation: _voiceBlurs[index],
+                                      blurEnabled: blurEnabled &&
+                                          _restBlur.containsKey(index),
+                                      reading: (_restBlur[index] ?? 0) > 0 ||
+                                              _followTransitions
+                                                  .containsKey(index)
+                                          ? _readingClock
+                                          : null,
+                                      child: _tileCache[index],
+                                    ),
                                   ),
-                                ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                      SliverToBoxAdapter(child: SizedBox(height: height * .75)),
-                    ],
+                        SliverToBoxAdapter(
+                            child: SizedBox(height: height * .75)),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        );
+          if ((_manualScrollActive || _readingMode) &&
+              widget.lyric is! PlainLyric)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: Center(
+                  child: FilledButton.tonalIcon(
+                key: const ValueKey('lyric-return-current'),
+                onPressed: settings.returnToCurrent,
+                icon: const Icon(Icons.my_location, size: 18),
+                label: Text(ui('回到当前歌词'), textAlign: TextAlign.center),
+              )),
+            ),
+        ]);
       },
     );
   }
@@ -1140,5 +1452,92 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _scrollController.dispose();
     _position.dispose();
     super.dispose();
+  }
+}
+
+/// Reconcile a changing lyric column while the viewport is laying it out.
+/// A post-frame scroll correction has already painted the wrong position.
+class _LyricSettingsAnchorPhysics extends ScrollPhysics {
+  const _LyricSettingsAnchorPhysics({required this.anchor, super.parent});
+
+  final double? Function(ScrollMetrics dimensions) anchor;
+
+  @override
+  _LyricSettingsAnchorPhysics applyTo(ScrollPhysics? ancestor) =>
+      _LyricSettingsAnchorPhysics(
+          anchor: anchor, parent: buildParent(ancestor));
+
+  @override
+  double adjustPositionForNewDimensions({
+    required ScrollMetrics oldPosition,
+    required ScrollMetrics newPosition,
+    required bool isScrolling,
+    required double velocity,
+  }) =>
+      anchor(newPosition) ??
+      super.adjustPositionForNewDimensions(
+        oldPosition: oldPosition,
+        newPosition: newPosition,
+        isScrolling: isScrolling,
+        velocity: velocity,
+      );
+}
+
+/// The column publishes its own child geometry during layout; scroll physics
+/// then reads plain numbers instead of asking a descendant RenderBox to lay
+/// itself out from the viewport's dimension callback.
+class _LyricAnchorColumn extends MultiChildRenderObjectWidget {
+  const _LyricAnchorColumn(
+      {required this.index, required this.onGeometry, required super.children});
+
+  final int index;
+  final ValueChanged<({double top, double height})> onGeometry;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderLyricAnchorColumn(index, onGeometry, Directionality.of(context));
+
+  @override
+  void updateRenderObject(
+      BuildContext context, covariant _RenderLyricAnchorColumn renderObject) {
+    renderObject
+      ..index = index
+      ..onGeometry = onGeometry
+      ..textDirection = Directionality.of(context);
+  }
+}
+
+class _RenderLyricAnchorColumn extends RenderFlex {
+  _RenderLyricAnchorColumn(
+      this._index, this.onGeometry, TextDirection direction)
+      : super(
+          direction: Axis.vertical,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          textDirection: direction,
+        );
+
+  int _index;
+  ValueChanged<({double top, double height})> onGeometry;
+
+  set index(int value) {
+    if (_index == value) return;
+    _index = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    var child = firstChild;
+    for (var i = 0; i < _index && child != null; i++) {
+      child = childAfter(child);
+    }
+    if (child != null && _index >= 0) {
+      onGeometry((
+        top: (child.parentData! as FlexParentData).offset.dy,
+        height: child.size.height,
+      ));
+    }
   }
 }

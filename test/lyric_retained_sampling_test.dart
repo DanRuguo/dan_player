@@ -65,36 +65,61 @@ void main() {
         widget is CustomPaint &&
         (widget.painter is PlainLyricWordFollowPainter ||
             widget.painter is LyricWordHighlightPainter));
-    final boundaries = <RenderRepaintBoundary>[];
-    RenderRepaintBoundary? sungBoundary;
+    final boundaries = <RenderObject>[];
+    RenderObject? sungBoundary;
     for (final element in painters.evaluate()) {
       RenderObject? render = element.renderObject;
-      while (render != null && render is! RenderRepaintBoundary) {
+      while (render != null && !render.isRepaintBoundary) {
         render = render.parent;
       }
-      boundaries.add(render! as RenderRepaintBoundary);
+      boundaries.add(render!);
       if ((element.widget as CustomPaint).painter
           is LyricWordHighlightPainter) {
-        sungBoundary = render as RenderRepaintBoundary;
+        sungBoundary = render;
       }
     }
     expect(boundaries.toSet(), hasLength(3),
         reason: 'Sung ink must not invalidate the static secondary paragraphs');
-    int paints(RenderRepaintBoundary boundary) =>
-        boundary.debugSymmetricPaintCount + boundary.debugAsymmetricPaintCount;
-    final initial = [for (final boundary in boundaries) paints(boundary)];
+    // Inspect the innermost display lists. The sung paragraph repaints as
+    // playback advances while its separate secondary paragraphs stay retained.
+    Set<ui.Picture> pictures(RenderObject boundary) {
+      final result = <ui.Picture>{};
+      void visit(Layer layer) {
+        if (layer is PictureLayer && layer.picture != null) {
+          result.add(layer.picture!);
+        }
+        if (layer is ContainerLayer) {
+          Layer? child = layer.firstChild;
+          while (child != null) {
+            visit(child);
+            child = child.nextSibling;
+          }
+        }
+      }
+
+      visit(boundary.debugLayer!);
+      expect(result, isNotEmpty);
+      return result;
+    }
+
+    final initial = [for (final boundary in boundaries) pictures(boundary)];
     for (final milliseconds in [600, 1300, 2700, 4000]) {
       position.value = Duration(milliseconds: milliseconds);
       await tester.pump();
     }
     expect(sungBoundary, isNotNull);
     for (var i = 0; i < boundaries.length; i++) {
-      expect(paints(boundaries[i]),
-          boundaries[i] == sungBoundary ? greaterThan(initial[i]) : initial[i]);
+      expect(
+          pictures(boundaries[i]),
+          boundaries[i] == sungBoundary
+              ? isNot(equals(initial[i]))
+              : equals(initial[i]));
     }
     for (final element in find.byType(LyricFractionalFilter).evaluate()) {
-      expect((element.renderObject! as RenderProxyBox).child!.needsCompositing,
-          isFalse);
+      final filter = element.widget as LyricFractionalFilter;
+      expect(filter.enabled, isTrue);
+      expect(filter.sigma, .1,
+          reason: 'Each paragraph should receive the row blur directly');
     }
     await tester.pumpWidget(const SizedBox());
     settings.dispose();

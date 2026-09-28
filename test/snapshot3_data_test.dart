@@ -262,6 +262,12 @@ void main() {
     };
     Snapshot3Upgrade.validateDocument(
         'playback_statistics.json', currentStatistics);
+    Snapshot3Upgrade.validateDocument('playback_statistics.json', {
+      ...currentStatistics, 'version': 4,
+      'recentTrackingStartedAt': 100,
+      'recentPlayStarts': [100],
+      'recentListeningIntervals': [[100, 200]],
+    });
     Snapshot3Upgrade.validateDocument('index.json', {
       'version': 113,
       'folders': [
@@ -285,7 +291,7 @@ void main() {
     final backup = File('${primary.path}.bak');
     final futureBytes = utf8.encode(jsonEncode({
       ...currentStatistics,
-      'version': 4,
+      'version': 5,
       'futurePrivateCounter': 987654321,
     }));
     final oldBackupBytes = utf8.encode('{"version":2,"tracks":[]}');

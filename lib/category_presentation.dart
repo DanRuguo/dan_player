@@ -25,7 +25,8 @@ class CategoryPresentation {
       this.sort = CategorySort.standard,
       this.descending = false,
       this.autoFill = true,
-      this.categories = const {}});
+      this.categories = const {},
+      this.playlistCountChildren = const {}});
 
   /// Legacy shared settings remain the initial defaults for each category.
   final Map<String, CategoryPresentation> categories;
@@ -48,6 +49,11 @@ class CategoryPresentation {
   final CategorySort sort;
   final bool descending;
   final bool autoFill;
+
+  /// Song-count scope is independent for every playlist view at this level.
+  final Map<String, bool> playlistCountChildren;
+  bool countPlaylistChildren(String view) =>
+      playlistCountChildren[view] ?? true;
 
   factory CategoryPresentation.fromMap(Object? value) {
     final map = value is Map ? value : const {};
@@ -89,6 +95,12 @@ class CategoryPresentation {
               CategorySort.standard,
       descending: map['descending'] == true,
       autoFill: map['autoFill'] != false,
+      playlistCountChildren: {
+        if (map['playlistCountChildren'] is Map)
+          for (final entry in (map['playlistCountChildren'] as Map).entries)
+            if (entry.key is String && entry.value is bool)
+              entry.key: entry.value,
+      },
       categories: {
         if (map['categories'] is Map)
           for (final entry in (map['categories'] as Map).entries)
@@ -109,6 +121,8 @@ class CategoryPresentation {
         'sort': sort.name,
         'descending': descending,
         'autoFill': autoFill,
+        if (playlistCountChildren.isNotEmpty)
+          'playlistCountChildren': playlistCountChildren,
         if (categories.isNotEmpty)
           'categories':
               categories.map((key, value) => MapEntry(key, value.toMap())),
@@ -124,6 +138,7 @@ class CategoryPresentation {
           CategorySort? sort,
           bool? descending,
           bool? autoFill,
+          Map<String, bool>? playlistCountChildren,
           Map<String, CategoryPresentation>? categories}) =>
       CategoryPresentation(
           shape: shape ?? this.shape,
@@ -136,5 +151,7 @@ class CategoryPresentation {
           sort: sort ?? this.sort,
           descending: descending ?? this.descending,
           autoFill: autoFill ?? this.autoFill,
+          playlistCountChildren:
+              playlistCountChildren ?? this.playlistCountChildren,
           categories: categories ?? this.categories);
 }

@@ -9,13 +9,37 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+final _displayNow = DateTime(2026, 9, 27, 12, 30);
+
 PlaybackStatistics _recordedStatistics() {
   final hours = List<int>.filled(24, 0)
     ..[14] = const Duration(minutes: 30).inMilliseconds
     ..[20] = const Duration(hours: 1).inMilliseconds
     ..[23] = const Duration(hours: 1).inMilliseconds;
   return PlaybackStatistics.inMemory(initialData: {
-    'version': 1,
+    'version': 4,
+    'recentTrackingStartedAt':
+        _displayNow.subtract(const Duration(hours: 48)).millisecondsSinceEpoch,
+    'recentPlayStarts': [
+      for (final hours in [30, 5, 1])
+        _displayNow.subtract(Duration(hours: hours)).millisecondsSinceEpoch
+    ],
+    'recentListeningIntervals': [
+      [
+        _displayNow.subtract(const Duration(hours: 5)).millisecondsSinceEpoch,
+        _displayNow
+            .subtract(const Duration(hours: 5))
+            .add(const Duration(seconds: 30))
+            .millisecondsSinceEpoch
+      ],
+      [
+        _displayNow.subtract(const Duration(hours: 1)).millisecondsSinceEpoch,
+        _displayNow
+            .subtract(const Duration(hours: 1))
+            .add(const Duration(minutes: 1))
+            .millisecondsSinceEpoch
+      ],
+    ],
     'tracks': [
       TrackPlaybackStatistics(
         id: 'online:netease:history',
@@ -39,6 +63,7 @@ Widget _app({
   required ColorScheme scheme,
   double textScale = 1,
   LibraryStatisticsScanner? scanner,
+  DateTime? now,
 }) =>
     MaterialApp(
       theme: ThemeData(useMaterial3: true, colorScheme: scheme),
@@ -50,7 +75,8 @@ Widget _app({
         child: child!,
       ),
       home: Scaffold(
-        body: StatisticsPage(statistics: statistics, scanner: scanner),
+        body: StatisticsPage(
+            statistics: statistics, scanner: scanner, now: now ?? _displayNow),
       ),
     );
 
@@ -82,6 +108,17 @@ Future<void> _showDaily(WidgetTester tester) async {
   if (!tester.widget<ChoiceChip>(daily).selected) {
     await tester.ensureVisible(daily);
     await tester.tap(daily);
+    await tester.pumpAndSettle();
+  }
+}
+
+Future<void> _showHistory(WidgetTester tester) async {
+  await _showDaily(tester);
+  final history = find.byKey(const ValueKey('statistics-hours-history'));
+  if (!tester.widget<ChoiceChip>(history).selected) {
+    await tester.ensureVisible(history);
+    await tester.pumpAndSettle();
+    await tester.tap(history);
     await tester.pumpAndSettle();
   }
 }
@@ -127,11 +164,28 @@ void main() {
           );
           expect(find.text('听歌行为'), findsOneWidget);
           await _showDaily(tester);
-          expect(find.text('全部记录 · 按小时累计'), findsOneWidget);
+          expect(
+              tester
+                  .widget<ChoiceChip>(
+                      find.byKey(const ValueKey('statistics-calendar-daily')))
+                  .selected,
+              isTrue);
+          expect(
+              find.text('2026-09-26 12:30 – 2026-09-27 12:30'), findsOneWidget);
           expect(find.text('听歌时长'), findsOneWidget);
           expect(find.text('播放次数'), findsOneWidget);
           expect(find.text('活跃时间'), findsOneWidget);
-          expect(find.text('42 次'), findsWidgets);
+          expect(
+              find.descendant(
+                  of: find.byKey(const ValueKey('statistics-activity-plays')),
+                  matching: find.text('2 次')),
+              findsOneWidget);
+          expect(
+              find.descendant(
+                  of: find
+                      .byKey(const ValueKey('statistics-activity-duration')),
+                  matching: find.text('1 分钟')),
+              findsOneWidget);
           expect(find.text('近7天'), findsNothing);
           expect(find.text('近30天'), findsNothing);
           expect(tester.takeException(), isNull);
@@ -180,7 +234,7 @@ void main() {
     addTearDown(statistics.dispose);
     final lightScheme = ColorScheme.fromSeed(seedColor: Colors.teal);
     await tester.pumpWidget(_app(statistics: statistics, scheme: lightScheme));
-    await _showDaily(tester);
+    await _showHistory(tester);
 
     Color barColor(int hour) => (tester
             .widget<DecoratedBox>(find.byKey(ValueKey('listening-bar-$hour')))
@@ -198,14 +252,15 @@ void main() {
         84);
     expect(tester.getSize(find.byKey(const ValueKey('listening-bar-0'))).height,
         0);
-    expect(find.byTooltip('20:00–21:00、23:00–24:00'), findsOneWidget);
+    expect(find.byTooltip('20:00–21:00 · 1 小时 0 分 0 秒 · 最高时段'), findsOneWidget);
+    expect(find.byTooltip('23:00–24:00 · 1 小时 0 分 0 秒 · 最高时段'), findsOneWidget);
 
     final darkScheme = ColorScheme.fromSeed(
       seedColor: Colors.deepPurple,
       brightness: Brightness.dark,
     );
     await tester.pumpWidget(_app(statistics: statistics, scheme: darkScheme));
-    await _showDaily(tester);
+    await _showHistory(tester);
     expect(barColor(20).toARGB32(), darkScheme.primary.toARGB32());
     expect(barColor(23).toARGB32(), darkScheme.primary.toARGB32());
     expect(barColor(14), isNot(softerColor));
@@ -222,7 +277,7 @@ void main() {
       statistics: statistics,
       scheme: ColorScheme.fromSeed(seedColor: Colors.blue),
     ));
-    await _showDaily(tester);
+    await _showHistory(tester);
     final hour = find.byKey(const ValueKey('listening-hour-14'));
     final colorBefore = (tester
             .widget<DecoratedBox>(
@@ -230,7 +285,7 @@ void main() {
             .decoration as BoxDecoration)
         .color;
     await tester.tap(hour);
-    await _showDaily(tester);
+    await _showHistory(tester);
     final selection = find.byKey(const ValueKey('listening-hour-selection'));
     expect(find.descendant(of: selection, matching: find.text('14:00–15:00')),
         findsOneWidget);
@@ -254,7 +309,7 @@ void main() {
             .color,
         colorBefore);
     await tester.longPress(hour);
-    await _showDaily(tester);
+    await _showHistory(tester);
     expect(find.text('14:00–15:00 · 30 分 0 秒'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -273,7 +328,7 @@ void main() {
         await tester.pumpWidget(_app(
             statistics: statistics,
             scheme: ColorScheme.fromSeed(seedColor: Colors.blue)));
-        await _showDaily(tester);
+        await _showHistory(tester);
         final peak = ui('最高时段');
         final node = tester
             .getSemantics(find.byKey(const ValueKey('listening-hour-20')));
@@ -306,12 +361,12 @@ void main() {
       scheme: ColorScheme.fromSeed(seedColor: Colors.teal),
       textScale: 2,
     ));
-    await _showDaily(tester);
+    await _showHistory(tester);
     await _showChart(tester);
     await tester.ensureVisible(find.byTooltip('前一个时段'));
-    await _showDaily(tester);
+    await _showHistory(tester);
     await tester.tap(find.byTooltip('前一个时段'));
-    await _showDaily(tester);
+    await _showHistory(tester);
     final selection = find.byKey(const ValueKey('listening-hour-selection'));
     expect(find.descendant(of: selection, matching: find.text('23:00–24:00')),
         findsOneWidget);
@@ -320,7 +375,7 @@ void main() {
     );
     expect(scroll.controller!.offset, greaterThan(0));
     await tester.tap(find.byTooltip('后一个时段'));
-    await _showDaily(tester);
+    await _showHistory(tester);
     expect(find.descendant(of: selection, matching: find.text('00:00–01:00')),
         findsOneWidget);
     expect(scroll.controller!.offset, 0);
@@ -338,7 +393,7 @@ void main() {
         statistics: statistics,
         scheme: ColorScheme.fromSeed(seedColor: Colors.blue),
       ));
-      await _showDaily(tester);
+      await _showHistory(tester);
       final node = tester.getSemantics(
         find.byKey(const ValueKey('listening-hour-20')),
       );
@@ -360,7 +415,12 @@ void main() {
         language: 'en');
     AudioLibrary.instance.audioCollection = [audio];
     var now = DateTime(2026, 8, 27, 14);
-    final statistics = PlaybackStatistics.inMemory(clock: () => now);
+    final statistics =
+        PlaybackStatistics.inMemory(clock: () => now, initialData: {
+      'version': 4,
+      'recentTrackingStartedAt':
+          now.subtract(const Duration(hours: 48)).millisecondsSinceEpoch,
+    });
     addTearDown(statistics.dispose);
     var reads = 0;
     final scanner = LibraryStatisticsScanner(inspectFile: (_) async {
@@ -371,6 +431,7 @@ void main() {
       statistics: statistics,
       scheme: ColorScheme.fromSeed(seedColor: Colors.teal),
       scanner: scanner,
+      now: now,
     ));
     await _showDaily(tester);
     expect(reads, 1);
@@ -389,6 +450,12 @@ void main() {
             of: find.byKey(const ValueKey('statistics-activity-duration')),
             matching: find.text('0 秒')),
         findsOneWidget);
+    // Advance the captured display clock without creating a new page/service.
+    await tester.pumpWidget(_app(
+        statistics: statistics,
+        scheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+        scanner: scanner,
+        now: now));
     tester
         .state<ScrollableState>(find.byType(Scrollable).first)
         .position

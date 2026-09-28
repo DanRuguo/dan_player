@@ -710,8 +710,10 @@ class _QueueDurationLabel extends StatelessWidget {
             key: const ValueKey('queue-duration-summary'),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant)));
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Theme.of(context).colorScheme.primary)));
   }
 }
 
@@ -1059,8 +1061,7 @@ class _PlaylistViewItem extends StatelessWidget {
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: current
                                 ? scheme.onPrimaryContainer
-                                    .withValues(alpha: .72)
-                                : scheme.onSurfaceVariant,
+                                : scheme.primary,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),

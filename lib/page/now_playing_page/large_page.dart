@@ -9,37 +9,33 @@ class _NowPlayingPage_Large extends StatelessWidget {
     const spacer = SizedBox(width: 8.0);
     return Padding(
       padding: const EdgeInsets.fromLTRB(32.0, 8.0, 32.0, 12.0),
-      child: Column(
-        children: [
-          Expanded(
-            child: AppEntrance(
-              identity: 'now-playing-display',
-              child: Row(
-                children: [
-                  const Expanded(child: _NowPlayingInfo()),
-                  Expanded(
-                    child: ValueListenableBuilder(
-                      valueListenable: NOW_PLAYING_VIEW_MODE,
-                      builder: (context, value, _) => AnimatedSwitcher(
-                        duration: AppMotion.duration(
-                            context, MotionKind.layout, AppMotion.standard),
-                        child: switch (value) {
-                          NowPlayingViewMode.onlyMain =>
-                            const VerticalLyricView(),
-                          NowPlayingViewMode.withLyric =>
-                            const VerticalLyricView(),
-                          NowPlayingViewMode.withPlaylist =>
-                            const CurrentPlaylistView(immersive: true),
-                        },
-                      ),
-                    ),
+      child: DetailPlaybackLayout(
+        display: AppEntrance(
+          identity: 'now-playing-display',
+          child: Row(
+            children: [
+              const Expanded(child: _NowPlayingInfo()),
+              Expanded(
+                child: ValueListenableBuilder(
+                  valueListenable: NOW_PLAYING_VIEW_MODE,
+                  builder: (context, value, _) => AnimatedSwitcher(
+                    duration: AppMotion.duration(
+                        context, MotionKind.layout, AppMotion.standard),
+                    child: switch (value) {
+                      NowPlayingViewMode.onlyMain => const VerticalLyricView(),
+                      NowPlayingViewMode.withLyric => const VerticalLyricView(),
+                      NowPlayingViewMode.withPlaylist =>
+                        const CurrentPlaylistView(immersive: true),
+                    },
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
-          const SizedBox(height: 16.0),
-          const AppEntrance(
+        ),
+        controls: const Column(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(height: 16.0),
+          AppEntrance(
             identity: 'now-playing-slider',
             order: 1,
             child: SpectrumProgressSection(
@@ -47,7 +43,7 @@ class _NowPlayingPage_Large extends StatelessWidget {
               progress: _NowPlayingSlider(),
             ),
           ),
-          const AppEntrance(
+          AppEntrance(
             identity: 'now-playing-controls',
             order: 2,
             child: Padding(
@@ -88,7 +84,7 @@ class _NowPlayingPage_Large extends StatelessWidget {
               ),
             ),
           ),
-        ],
+        ]),
       ),
     );
   }

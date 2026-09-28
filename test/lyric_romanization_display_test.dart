@@ -132,10 +132,23 @@ void main() {
             final painter = painted.painter! as PlainLyricWordFollowPainter;
             final boxes = painter.text.getBoxesForSelection(TextSelection(
                 baseOffset: 0, extentOffset: line.romanization!.length));
-            final left =
-                boxes.map((box) => box.left).reduce((a, b) => a < b ? a : b);
-            final right =
-                boxes.map((box) => box.right).reduce((a, b) => a > b ? a : b);
+            final metrics = painter.text.computeLineMetrics();
+            final translatedBoxes = [
+              for (var i = 0; i < boxes.length; i++)
+                boxes[i].toRect().shift(Offset(
+                    painter.alignmentX == null
+                        ? 0
+                        : (painter.text.width - metrics[i].width) *
+                            (painter.alignmentX! + 1) /
+                            2,
+                    0))
+            ];
+            final left = translatedBoxes
+                .map((box) => box.left)
+                .reduce((a, b) => a < b ? a : b);
+            final right = translatedBoxes
+                .map((box) => box.right)
+                .reduce((a, b) => a > b ? a : b);
             if (align == LyricTextAlign.center) {
               expect((left + right) / 2, closeTo(painter.text.width / 2, .5),
                   reason:

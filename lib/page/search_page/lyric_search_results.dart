@@ -149,7 +149,11 @@ class _LyricSearchResultsViewState extends State<LyricSearchResultsView> {
                                             Text(_timeLabel(hit.song, line),
                                                 style: Theme.of(context)
                                                     .textTheme
-                                                    .labelMedium),
+                                                    .labelMedium
+                                                    ?.copyWith(
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .primary)),
                                             if (line.start != null)
                                               TextButton.icon(
                                                   onPressed: _busy

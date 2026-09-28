@@ -55,7 +55,9 @@ flutter:
   uses-material-design: true
   shaders:
     - assets/shaders/artwork_flow.frag
+    - shaders/app_edge_stretch.frag
   assets:
+    - third_party/desktop_lyric/shaders/FLUTTER-LICENSE.txt
     - app_icon.ico
     - app_icon_dark.ico
     - assets/images/RCE_logo_transparent.png

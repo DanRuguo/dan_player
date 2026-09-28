@@ -51,6 +51,7 @@ try {
             Write-Host 'Development coverage complete. No release build, signing or packaging was requested by this scope.'
             return
         }
+        & (Join-Path $PSScriptRoot 'verify_native_display_regressions.ps1') -ProjectRoot $repositoryRoot
         $buildInputs = Get-ValidationInputs $repositoryRoot -BuildOnly
         $buildTools = Get-ValidationToolchain $flutter -Native
         $mainRelease = Join-Path $repositoryRoot 'build/windows/x64/runner/Release'

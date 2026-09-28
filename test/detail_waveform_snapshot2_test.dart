@@ -204,7 +204,11 @@ void main() {
         tooltip: 'Decoded local waveform',
         reduced: true));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Decoded local waveform'), findsOneWidget);
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is Tooltip &&
+            w.message?.split('\n').first == 'Decoded local waveform'),
+        findsOneWidget);
     expect(slider(tester).semanticFormatterCallback!(25), '0:25');
     var increased = false;
     tester.getSemantics(find.byType(Slider)).visitChildren((node) {
@@ -314,7 +318,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(sliderTheme(tester).trackShape.runtimeType,
         RoundedRectSliderTrackShape);
-    expect(find.byTooltip('Waveform unavailable'), findsOneWidget);
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is Tooltip &&
+            w.message?.split('\n').first == 'Waveform unavailable'),
+        findsOneWidget);
     expect(slider(tester).onChanged, isNull);
     await tester.tap(find.byType(Slider));
     await tester.pumpAndSettle();

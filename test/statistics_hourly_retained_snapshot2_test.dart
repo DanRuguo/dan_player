@@ -146,6 +146,11 @@ void main() {
       expect(card, findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('statistics-calendar-daily')));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(
+          find.byKey(const ValueKey('statistics-hours-history')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('statistics-hours-history')));
+      await tester.pumpAndSettle();
       expect(
           tester
               .widget<ChoiceChip>(

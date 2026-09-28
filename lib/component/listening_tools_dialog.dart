@@ -614,7 +614,8 @@ class _BookmarkCard extends StatelessWidget {
                     Text(time,
                         key: ValueKey(('bookmark-time', time)),
                         maxLines: 1,
-                        style: Theme.of(context).textTheme.bodyMedium),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.primary)),
                     const Spacer(),
                     Row(
                         mainAxisAlignment: MainAxisAlignment.end,

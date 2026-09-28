@@ -30,9 +30,9 @@ void main() {
         );
     final weeks = calendar(ListeningCalendarRange.twelveWeeks);
     final year = calendar(ListeningCalendarRange.year);
-    expect(weeks.rangeMilliseconds, 300000);
-    expect(weeks.rangePlayCount, 6);
-    expect(weeks.rangeActiveDays, 2);
+    expect(weeks.rangeMilliseconds, 360000);
+    expect(weeks.rangePlayCount, 9);
+    expect(weeks.rangeActiveDays, 3);
     expect(weeks.completeRangePlayCounts, isTrue);
     expect(year.rangeMilliseconds, 3960000);
     expect(year.rangePlayCount, 16);
@@ -170,7 +170,7 @@ void main() {
               }),
           throwsFormatException);
     }
-    expect(() => PlaybackStatistics.validateSnapshot({'version': 4}),
+    expect(() => PlaybackStatistics.validateSnapshot({'version': 5}),
         throwsUnsupportedError);
     expect(() => PlaybackStatistics.validateSnapshot({'version': 2}),
         returnsNormally);
@@ -194,12 +194,12 @@ void main() {
         dailyMilliseconds: {'2026-09-21': 1000, '2026-09-27': 9000},
         dailyPlayCounts: {'2026-09-21': 2, '2026-09-27': 99},
         playCountTrackingStartedOn: '2026-09-21');
-    expect(calendar.weeks.length, 12);
+    expect(calendar.weeks.length, 13);
     expect(
         calendar.weeks
             .every((week) => week.first.date.weekday == DateTime.monday),
         isTrue);
-    expect(calendar.start, DateTime(2026, 7, 6));
+    expect(calendar.start, DateTime(2026, 7, 5));
     expect(calendar.thisWeek.length, 6);
     expect(calendar.weekMilliseconds, 1000);
     expect(calendar.weekPlayCount, 2);

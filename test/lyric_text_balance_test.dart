@@ -103,6 +103,119 @@ void main() {
     expect(tester.binding.hasScheduledFrame, isFalse);
   });
 
+  testWidgets('retained ink reserves the same paragraph size and semantics',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    const cases = <({
+      String text,
+      double width,
+      double fontSize,
+      double scale,
+      TextDirection direction,
+      bool customHeight
+    })>[
+      (
+        text: 'Short lyric',
+        width: 340,
+        fontSize: 20,
+        scale: 1,
+        direction: TextDirection.ltr,
+        customHeight: false
+      ),
+      (
+        text: 'A long translation underneath the current line',
+        width: 190,
+        fontSize: 20,
+        scale: 1,
+        direction: TextDirection.ltr,
+        customHeight: false
+      ),
+      (
+        text: '音もない世界、何を見てるの?音もない世界、何を見てるの?',
+        width: 210,
+        fontSize: 25,
+        scale: 1.25,
+        direction: TextDirection.ltr,
+        customHeight: false
+      ),
+      (
+        text: 'Romanization o to mo na i se ka i',
+        width: 190,
+        fontSize: 18,
+        scale: 1.25,
+        direction: TextDirection.ltr,
+        customHeight: true
+      ),
+      (
+        text: 'مرحبا بالعالم مرة أخرى',
+        width: 170,
+        fontSize: 22,
+        scale: 1,
+        direction: TextDirection.rtl,
+        customHeight: false
+      ),
+      (
+        text: '',
+        width: 180,
+        fontSize: 20,
+        scale: 1,
+        direction: TextDirection.ltr,
+        customHeight: false
+      ),
+    ];
+    for (final sample in cases) {
+      const customBehavior = ui.TextHeightBehavior(
+          applyHeightToFirstAscent: false, applyHeightToLastDescent: false);
+      const style = TextStyle(fontFamily: 'Ahem', height: 1.3);
+      Widget host(Widget child) => MaterialApp(
+            home: Scaffold(
+              body: Directionality(
+                textDirection: sample.direction,
+                child: MediaQuery(
+                  data: MediaQueryData(
+                      textScaler: TextScaler.linear(sample.scale)),
+                  child: DefaultTextHeightBehavior(
+                    textHeightBehavior: sample.customHeight
+                        ? customBehavior
+                        : const ui.TextHeightBehavior(),
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: SizedBox(width: sample.width, child: child),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+      final styled = style.copyWith(fontSize: sample.fontSize);
+      await tester.pumpWidget(host(BalancedLyricText(sample.text,
+          style: styled, textAlign: TextAlign.left, alignmentX: -1)));
+      final balanced = find.byType(BalancedLyricText);
+      final painting = find.descendant(
+          of: balanced, matching: find.byType(CustomPaint)).first;
+      final paint = tester.widget<CustomPaint>(painting);
+      final ink = paint.painter! as PlainLyricWordFollowPainter;
+      final canvasSize = tester.getSize(painting);
+      final painterWidth = ink.text.width;
+      final painterHeight = ink.text.height;
+      expect(
+          canvasSize.width, closeTo(painterWidth + ink.inkOffset.dx * 2, .02));
+      expect(canvasSize.height,
+          closeTo(painterHeight + ink.inkOffset.dy * 2, .02));
+      if (sample.text.isNotEmpty) {
+        expect(find.bySemanticsLabel(sample.text), findsOneWidget);
+      }
+      await tester.pumpWidget(host(SizedBox(
+        width: painterWidth,
+        child: Text(sample.text, style: styled, textAlign: TextAlign.left),
+      )));
+      expect(tester.getSize(find.text(sample.text)).height,
+          closeTo(painterHeight, .02),
+          reason: 'Painter and Text must reserve equal line height');
+    }
+    semantics.dispose();
+  });
+
   test('CJK and emoji use original shaping and legal selection bounds', () {
     final painter = paragraph('夏夜空中出现在遥远的记忆👨‍👩‍👧‍👦');
     addTearDown(painter.dispose);

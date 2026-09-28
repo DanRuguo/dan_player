@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'lyric_reading_tools.dart';
 
 enum LyricTextAlign {
   left,
@@ -22,10 +23,55 @@ enum LyricTextAlign {
 }
 
 class LyricViewController extends ChangeNotifier {
-  final nowPlayingPagePref = AppPreference.instance.nowPlayingPagePref;
+  LyricViewController({NowPlayingPagePreference? preferences})
+      : nowPlayingPagePref =
+            preferences ?? AppPreference.instance.nowPlayingPagePref;
+  final NowPlayingPagePreference nowPlayingPagePref;
   late LyricTextAlign lyricTextAlign = nowPlayingPagePref.lyricTextAlign;
   late double lyricFontSize = nowPlayingPagePref.lyricFontSize;
   late double translationFontSize = nowPlayingPagePref.translationFontSize;
+  late bool showTranslation = nowPlayingPagePref.showLyricTranslation;
+  late bool showRomanization = nowPlayingPagePref.showLyricRomanization;
+  late bool showTimestamps = nowPlayingPagePref.showLyricTimestamps;
+  bool readingMode = false;
+  int returnRequest = 0;
+
+  void setShowTranslation(bool value) {
+    if (showTranslation == value) return;
+    nowPlayingPagePref.showLyricTranslation = showTranslation = value;
+    notifyListeners();
+  }
+
+  void setShowRomanization(bool value) {
+    if (showRomanization == value) return;
+    nowPlayingPagePref.showLyricRomanization = showRomanization = value;
+    notifyListeners();
+  }
+
+  void setShowTimestamps(bool value) {
+    if (showTimestamps == value) return;
+    nowPlayingPagePref.showLyricTimestamps = showTimestamps = value;
+    notifyListeners();
+  }
+
+  void setReadingMode(bool value) {
+    if (readingMode == value) return;
+    readingMode = value;
+    if (!value) returnRequest++;
+    notifyListeners();
+  }
+
+  void returnToCurrent() {
+    readingMode = false;
+    returnRequest++;
+    notifyListeners();
+  }
+
+  void resetFontSize() {
+    nowPlayingPagePref.lyricFontSize = lyricFontSize = 22;
+    nowPlayingPagePref.translationFontSize = translationFontSize = 18;
+    notifyListeners();
+  }
 
   /// 在左对齐、居中、右对齐之间循环切换
   void switchLyricTextAlign() {
@@ -40,6 +86,7 @@ class LyricViewController extends ChangeNotifier {
   }
 
   void increaseFontSize() {
+    if (lyricFontSize >= 64 || translationFontSize >= 64) return;
     lyricFontSize += 1;
     translationFontSize += 1;
 
@@ -49,7 +96,7 @@ class LyricViewController extends ChangeNotifier {
   }
 
   void decreaseFontSize() {
-    if (translationFontSize <= 14) return;
+    if (lyricFontSize <= 14 || translationFontSize <= 14) return;
 
     lyricFontSize -= 1;
     translationFontSize -= 1;
@@ -68,7 +115,8 @@ class LyricViewControls extends StatelessWidget {
     UiLanguageScope.watch(context);
     return const Padding(
       padding: EdgeInsets.all(8.0),
-      child: Column(
+      child: SingleChildScrollView(
+          child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
@@ -80,6 +128,8 @@ class LyricViewControls extends StatelessWidget {
           SizedBox(height: 8.0),
           _LyricAlignSwitchBtn(),
           SizedBox(height: 8.0),
+          _LyricReadingMenu(),
+          SizedBox(height: 8.0),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -89,9 +139,17 @@ class LyricViewControls extends StatelessWidget {
             ],
           )
         ],
-      ),
+      )),
     );
   }
+}
+
+class _LyricReadingMenu extends StatelessWidget {
+  const _LyricReadingMenu();
+  @override
+  Widget build(BuildContext context) => LyricReadingMenu(
+      controller: context.watch<LyricViewController>(),
+      readLyric: () => PlayService.instance.lyricService.currLyricFuture);
 }
 
 class _LyricWorkbenchBtn extends StatelessWidget {

@@ -1,12 +1,162 @@
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_route_transition.dart';
+import 'package:dan_player/component/category_tile_grid.dart';
+import 'package:dan_player/category_presentation.dart';
 import 'package:dan_player/entry.dart';
+import 'package:dan_player/library/category_cover_store.dart';
+import 'package:dan_player/library/music_categories.dart';
+import 'package:dan_player/page/page_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'dart:ui' as ui;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'support/music_category_fixtures.dart';
+
+class _InMemoryCovers extends CategoryCoverStore {
+  _InMemoryCovers()
+      : super(dataDirectory: () async => throw StateError('No fixture I/O'));
+
+  @override
+  Future<ImageProvider?> imageFor(MusicCategoryGroup group) async => null;
+}
 
 void main() {
+  testWidgets('page groups preserve the baseline staggered fade and rise',
+      (tester) async {
+    final animation = AnimationController(
+        vsync: tester, value: .1, duration: AppRouteTransition.enterDuration);
+    addTearDown(animation.dispose);
+    const key = ValueKey('baseline-page-group');
+    await tester.pumpWidget(MaterialApp(
+        home: AppRouteTransition(
+            animation: animation,
+            child: const AppEntranceScope(
+                child:
+                    AppEntrance(order: 6, child: Text('Music', key: key))))));
+    final first = tester.getTopLeft(find.byKey(key));
+    final entrance = find.byType(AppEntrance);
+    expect(
+        tester
+            .widget<Opacity>(find
+                .descendant(of: entrance, matching: find.byType(Opacity))
+                .first)
+            .opacity,
+        0);
+    expect(tester.binding.transientCallbackCount, 1);
+    await tester.pump(const Duration(milliseconds: 180));
+    final opacity = tester
+        .widget<Opacity>(
+            find.descendant(of: entrance, matching: find.byType(Opacity)).first)
+        .opacity;
+    expect(opacity, allOf(greaterThan(0), lessThan(1)));
+    final middle = tester.getTopLeft(find.byKey(key));
+    expect(middle.dx, first.dx);
+    expect(middle.dy,
+        allOf(lessThan(first.dy), greaterThan(first.dy - AppEntrance.distance)));
+    animation.value = 1;
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(find.byKey(key)),
+        first.translate(0, -AppEntrance.distance));
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('category tiles preserve the baseline fade and scaling',
+      (tester) async {
+    final covers = _InMemoryCovers();
+    addTearDown(covers.dispose);
+    final groups = MusicCategories([CategoryTestAudio('Track')])
+        .groups(MusicCategoryKind.artist);
+    await tester.pumpWidget(MaterialApp(
+        home: AppRouteTransition(
+            animation: const AlwaysStoppedAnimation(1),
+            child: PageScaffold(
+                title: 'Categories',
+                actions: const [],
+                body: CustomScrollView(slivers: [
+                  CategoryTileGrid(
+                      groups: groups,
+                      presentation: const CategoryPresentation(),
+                      onChanged: (_) {},
+                      onOpen: (_) {},
+                      covers: covers,
+                      changing: const {},
+                      onChangeCover: (_) {},
+                      onRemoveCover: (_) {},
+                      icon: Icons.album,
+                      persistLayout: false)
+                ])))));
+    final category = find.byWidgetPredicate((widget) =>
+        widget is AppEntrance &&
+        widget.identity == ('category-tile', groups.single.persistenceKey));
+    expect(category, findsOneWidget);
+    Transform scale() => tester
+        .widgetList<Transform>(
+            find.descendant(of: category, matching: find.byType(Transform)))
+        .firstWhere((widget) => widget.alignment == Alignment.center);
+    double opacity() => tester
+        .widget<Opacity>(
+            find.descendant(of: category, matching: find.byType(Opacity)).first)
+        .opacity;
+    expect(scale().transform.storage[0], closeTo(.9, .001));
+    expect(opacity(), 0);
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(scale().transform.storage[0], allOf(greaterThan(.9), lessThan(1)));
+    expect(opacity(), allOf(greaterThan(0), lessThan(1)));
+    await tester.pumpAndSettle();
+    expect(scale().transform.storage[0], 1);
+    expect(opacity(), 1);
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('incoming page preserves the baseline whole-surface crossfade',
+      (tester) async {
+    final boundary = GlobalKey();
+    final animation = AnimationController(
+        vsync: tester, value: .2, duration: AppRouteTransition.enterDuration);
+    addTearDown(animation.dispose);
+    final scheme = ColorScheme.fromSeed(seedColor: Colors.teal)
+        .copyWith(surface: Colors.white);
+    await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(colorScheme: scheme),
+        home: RepaintBoundary(
+            key: boundary,
+            child: Stack(fit: StackFit.expand, children: [
+              const ColoredBox(
+                  color: Color(0xFFFF0000),
+                  child: Center(child: Text('OLD PAGE'))),
+              AppRouteTransition(
+                  animation: animation,
+                  child: const ColoredBox(color: Colors.white)),
+            ]))));
+    final data = (await tester.runAsync(() async {
+      final image = await (boundary.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary)
+          .toImage();
+      try {
+        return (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!
+            .buffer
+            .asUint8List();
+      } finally {
+        image.dispose();
+      }
+    }))!;
+    final alpha = AppMotion.emphasizedCurve.transform(animation.value);
+    expect(data[0], 255);
+    expect(data[1], closeTo(255 * alpha, 1));
+    expect(data[2], closeTo(255 * alpha, 1));
+    expect(data[3], 255,
+        reason: 'The route surface follows the original opacity path');
+    animation.reverse();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 30));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   for (final reduced in [false, true]) {
     testWidgets(
         'page pop preserves base state and ${reduced ? 'skips' : 'finishes'} exit animation',

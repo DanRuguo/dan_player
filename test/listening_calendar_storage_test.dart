@@ -46,7 +46,8 @@ void main() {
     expect(recorder.playCountTrackingStartedOn, today);
     expect(recorder.dailyMilliseconds, {'2026-09-21': 5000});
     final saved = jsonDecode(await primary.readAsString()) as Map;
-    expect(saved['version'], 3);
+    expect(saved['version'], 4);
+    expect(saved['recentTrackingStartedAt'], isA<int>());
     expect(saved['dailyPlayCounts'], isEmpty);
     expect(saved['playCountTrackingStartedOn'], today);
   });
@@ -79,7 +80,7 @@ void main() {
   test(
       'future primary survives initialization and new playback despite an older valid backup',
       () async {
-    const future = '{"version":4,"futurePrivateCounter":987654321}';
+    const future = '{"version":5,"futurePrivateCounter":987654321}';
     const older = '{"version":2,"tracks":[],"days":{"2026-09-21":1}}';
     await primary.writeAsString(future);
     await backup.writeAsString(older);

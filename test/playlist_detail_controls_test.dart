@@ -47,13 +47,14 @@ void main() {
           tester.getRect(find.byKey(const ValueKey('playback-mode-shuffle')));
       expect(tester.getRect(view).center.dy, closeTo(playRect.center.dy, .1));
       expect(tester.getRect(view).height, closeTo(playRect.height, .1));
-      await tester.tap(find.byTooltip(ui('圆形封面')));
+      await tester.tap(find.byTooltip(ui('圆形')));
       expect(changes, [PlaylistViewMode.circular]);
       expect(tester.takeException(), isNull);
     });
   }
 
-  testWidgets('root retains text labels for all three views', (tester) async {
+  testWidgets('root retains short text labels for all four views',
+      (tester) async {
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
             body: PlaylistToolbar(
@@ -70,7 +71,8 @@ void main() {
       onViewChanged: (_) {},
     ))));
     expect(find.text('列表'), findsOneWidget);
-    expect(find.text('矩形封面'), findsOneWidget);
-    expect(find.text('圆形封面'), findsOneWidget);
+    expect(find.text('矩形'), findsOneWidget);
+    expect(find.text('圆形'), findsOneWidget);
+    expect(find.text('树状'), findsOneWidget);
   });
 }

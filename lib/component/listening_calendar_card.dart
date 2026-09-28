@@ -26,7 +26,7 @@ enum _ListeningActivityRange { daily, twelveWeeks, year }
 
 class _ListeningCalendarCardState extends State<ListeningCalendarCard>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  _ListeningActivityRange _range = _ListeningActivityRange.twelveWeeks;
+  _ListeningActivityRange _range = _ListeningActivityRange.daily;
   late final ScrollController _scroll = _CalendarScrollController(_scrollBy);
   String? _selectedDay;
   String? _positionedRange;
@@ -231,11 +231,12 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
     final selectedDay =
         selected.isEmpty ? calendar.thisWeek.last : selected.first;
     final daily = _range == _ListeningActivityRange.daily;
-    final countValue =
-        daily ? widget.statistics.totalPlayCount : calendar.rangePlayCount;
-    final peaks = widget.statistics.mostActiveHours;
-    String hourRange(int hour) => '${hour.toString().padLeft(2, '0')}:00–'
-        '${(hour + 1).toString().padLeft(2, '0')}:00';
+    final recent =
+        widget.statistics.recentActivity(widget.now ?? DateTime.now());
+    final countValue = daily ? recent.playCount : calendar.rangePlayCount;
+    final complete = daily ? recent.complete : calendar.completeRangePlayCounts;
+    String dateTime(DateTime value) =>
+        '${listeningDayKey(value)} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
     return DecoratedBox(
       key: const ValueKey('statistics-calendar-card'),
       decoration: BoxDecoration(
@@ -290,7 +291,7 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                     children: [
                       Text(
                           daily
-                              ? ui('全部记录 · 按小时累计')
+                              ? '${dateTime(recent.start)} – ${dateTime(recent.now)}'
                               : '${listeningDayKey(calendar.start)} – ${listeningDayKey(calendar.today)}',
                           key: const ValueKey('statistics-activity-range'),
                           style: Theme.of(context).textTheme.bodySmall),
@@ -314,29 +315,37 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                               ui('播放次数'),
                               countValue == null
                                   ? '—'
-                                  : ui('{0} 次', [countValue]),
+                                  : '${complete ? '' : '≥ '}${ui('{0} 次', [
+                                          countValue
+                                        ])}',
                               Icons.play_circle_outline_rounded,
                               'statistics-activity-plays'),
                           _metric(
                               width,
                               ui('听歌时长'),
-                              _duration(daily
-                                  ? widget.statistics.totalListenMilliseconds
-                                  : calendar.rangeMilliseconds),
+                              daily && recent.recordedSince == null
+                                  ? '—'
+                                  : '${daily && !recent.complete ? '≥ ' : ''}${_duration(daily ? recent.milliseconds : calendar.rangeMilliseconds)}',
                               Icons.headphones_rounded,
                               'statistics-activity-duration'),
                           Tooltip(
-                              message: daily && peaks.isNotEmpty
-                                  ? peaks.map(hourRange).join('、')
-                                  : ui('活跃时间'),
+                              message: ui(daily
+                                  ? '有收听记录的小时数，不等同于收听时长。'
+                                  : _range == _ListeningActivityRange.year
+                                      ? '一年按日历周年计算，包含实际的2月29日；有收听记录的周计为活跃周。'
+                                      : '活跃时间'),
                               child: _metric(
                                   width,
                                   ui('活跃时间'),
                                   daily
-                                      ? peaks.isEmpty
+                                      ? recent.recordedSince == null
                                           ? '—'
-                                          : hourRange(peaks.first)
-                                      : ui('{0} 天', [calendar.rangeActiveDays]),
+                                          : ui('{0} 小时', [recent.activeHours])
+                                      : _range == _ListeningActivityRange.year
+                                          ? ui('{0} 周',
+                                              [calendar.rangeActiveWeeks])
+                                          : ui('{0} 天',
+                                              [calendar.rangeActiveDays]),
                                   daily
                                       ? Icons.schedule_rounded
                                       : Icons.today_rounded,
@@ -373,7 +382,12 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                       const SizedBox(height: 10),
                       Text(
                           daily
-                              ? ui('小时分布包含全部历史记录，不表示某一天；恢复播放不重复计次。')
+                              ? recent.complete
+                                  ? ui('最近24小时的真实记录；恢复播放不重复计次。')
+                                  : recent.recordedSince == null
+                                      ? ui('旧记录只有每日合计，不能还原最近24小时；新的播放将开始精确记录。')
+                                      : ui('精确记录始于 {0}，此前的小时数据未知；≥ 表示已记录的部分。',
+                                          [dateTime(recent.recordedSince!)])
                               : calendar.completeRangePlayCounts
                                   ? ui('按所选日期范围统计；恢复播放不重复计次。')
                                   : countValue == null
@@ -390,6 +404,8 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                         const SizedBox(height: 18),
                         if (widget.dailyChart != null) widget.dailyChart!,
                       ] else ...[
+                        const SizedBox(height: 12),
+                        _insights(calendar),
                         const SizedBox(height: 12),
                         LayoutBuilder(
                             builder: (context, constraints) => _heatmap(
@@ -438,7 +454,10 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                             child: Text(_detail(selectedDay),
                                 key: const ValueKey(
                                     'statistics-calendar-detail'),
-                                style: Theme.of(context).textTheme.bodySmall)),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: scheme.primary))),
                         const SizedBox(height: 4),
                         Text(ui('颜色按真实每日时长显示；悬停或点击查看详情，最近一周在右侧。'),
                             style: Theme.of(context)
@@ -449,6 +468,97 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                     ])),
           ])),
     );
+  }
+
+  Widget _insights(ListeningCalendar calendar) {
+    final favorite = calendar.favoriteWeekday;
+    final weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    final best = calendar.busiestDay;
+    final scheme = Theme.of(context).colorScheme;
+    final values = [
+      (
+        Icons.timelapse_rounded,
+        ui('日均收听'),
+        _duration(calendar.averageDailyMilliseconds)
+      ),
+      (
+        Icons.local_fire_department_outlined,
+        ui('连续活跃'),
+        ui('{0} 天', [calendar.currentStreak])
+      ),
+      (
+        Icons.emoji_events_outlined,
+        ui('最长连续'),
+        ui('{0} 天', [calendar.longestStreak])
+      ),
+      (
+        Icons.date_range_rounded,
+        ui('最常听的星期'),
+        favorite == null ? '—' : ui(weekdays[favorite - 1])
+      ),
+      (
+        Icons.weekend_outlined,
+        ui('周末收听占比'),
+        calendar.weekendPercent == null ? '—' : '${calendar.weekendPercent}%'
+      ),
+    ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(
+          key: const ValueKey('statistics-listening-insights'),
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final value in values)
+              Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                      color:
+                          scheme.surfaceContainerHighest.withValues(alpha: .45),
+                      borderRadius: AppShape.controlRadius),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(value.$1, size: 17, color: scheme.primary),
+                    const SizedBox(width: 6),
+                    Flexible(
+                        child: Text('${value.$2} · ${value.$3}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: scheme.primary))),
+                  ])),
+          ]),
+      if (best != null)
+        Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: TextButton.icon(
+              key: const ValueKey('statistics-busiest-day'),
+              icon: const Icon(Icons.today_rounded, size: 18),
+              label: Text(ui('最投入的一天 · {0} · {1}',
+                  [best.key, _duration(best.milliseconds)])),
+              onPressed: () {
+                setState(() => _selectedDay = best.key);
+                if (_scroll.hasClients) {
+                  final index = calendar.weeks.indexWhere(
+                      (week) => week.any((day) => day.key == best.key));
+                  final position = _scroll.position;
+                  final content =
+                      position.viewportDimension + position.maxScrollExtent;
+                  final target =
+                      ((index + .5) * content / calendar.weeks.length -
+                              position.viewportDimension / 2)
+                          .clamp(0.0, position.maxScrollExtent)
+                          .toDouble();
+                  _alignEnd = target >= position.maxScrollExtent - .5;
+                  _moveTo(target);
+                }
+              },
+            )),
+      Text(ui('洞察按所选范围的已保存时长计算；今天尚未收听时，连续天数截至昨天。'),
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: scheme.onSurfaceVariant)),
+    ]);
   }
 
   Widget _metric(
@@ -478,7 +588,13 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                           style: Theme.of(context)
                               .textTheme
                               .headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.w600)),
+                              ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: key ==
+                                              'statistics-activity-duration' ||
+                                          key == 'statistics-activity-active'
+                                      ? scheme.primary
+                                      : null)),
                     ]))));
   }
 

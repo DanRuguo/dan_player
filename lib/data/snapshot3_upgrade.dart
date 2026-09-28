@@ -31,7 +31,7 @@ class Snapshot3Upgrade {
       'track_identities.json': 1,
       'lyric_documents.json': 1,
       'playback_bookmarks.json': 1,
-      'playback_statistics.json': 3,
+      'playback_statistics.json': 4,
       'playback_statistics.pre-track-id-v1.json': 2,
     };
     final maxVersion = versions[name];

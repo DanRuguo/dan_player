@@ -144,10 +144,13 @@ void main() {
     final boundary = GlobalKey();
     await tester.pumpWidget(_app(RepaintBoundary(
         key: boundary,
-        child: CategoriesPage(initialCategory: MusicCategoryKind.artist, audios: [
-          CategoryTestAudio('One', artist: 'First'),
-          CategoryTestAudio('Two', artist: 'Second'),
-        ], onOpenGroup: (_) {}))));
+        child: CategoriesPage(
+            initialCategory: MusicCategoryKind.artist,
+            audios: [
+              CategoryTestAudio('One', artist: 'First'),
+              CategoryTestAudio('Two', artist: 'Second'),
+            ],
+            onOpenGroup: (_) {}))));
     await tester.pumpAndSettle();
     final mouse = await tester.createGesture(
         kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
@@ -182,9 +185,12 @@ void main() {
     final prior = AppPreference.instance.categoryPresentation;
     AppPreference.instance.categoryPresentation = const CategoryPresentation();
     addTearDown(() => AppPreference.instance.categoryPresentation = prior);
-    await tester.pumpWidget(_app(CategoriesPage(initialCategory: MusicCategoryKind.artist, audios: [
-      CategoryTestAudio('Song', artist: 'Unique Artist', album: 'Album'),
-    ], onOpenGroup: (_) {})));
+    await tester.pumpWidget(_app(CategoriesPage(
+        initialCategory: MusicCategoryKind.artist,
+        audios: [
+          CategoryTestAudio('Song', artist: 'Unique Artist', album: 'Album'),
+        ],
+        onOpenGroup: (_) {})));
     await tester.pumpAndSettle();
     final search = find.byKey(const ValueKey('category-search'));
     await tester.enterText(search, 'Unique');
@@ -406,7 +412,7 @@ void main() {
 
   for (final view in PlaylistViewMode.values) {
     for (final isSong in [false, true]) {
-      testWidgets('ellipsis uses visible action for ${view.name} song=$isSong',
+      testWidgets('menu uses visible action for ${view.name} song=$isSong',
           (tester) async {
         _size(tester, const Size(1100, 900));
         final tree = PlaylistTree([]);
@@ -428,11 +434,13 @@ void main() {
                 onTap: play,
                 trailing: action))));
         await tester.pumpAndSettle();
-        final action = find.byKey(ValueKey(view == PlaylistViewMode.grid
-            ? 'playlist-rectangle-$id'
-            : view == PlaylistViewMode.circular
-                ? 'playlist-circle-open-$id'
-                : 'playlist-menu-$id'));
+        final action = find.byKey(ValueKey(view == PlaylistViewMode.tree
+            ? 'playlist-open-$id'
+            : view == PlaylistViewMode.grid
+                ? 'playlist-rectangle-$id'
+                : view == PlaylistViewMode.circular
+                    ? 'playlist-circle-open-$id'
+                    : 'playlist-menu-$id'));
         await tester.ensureVisible(action);
         final actionRect = tester.getRect(action);
         await tester.tap(action,

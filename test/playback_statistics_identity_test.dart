@@ -170,7 +170,7 @@ void main() {
         throwsFormatException);
     expect(
         () => PlaybackStatistics.inMemory(initialData: {
-              'version': 4,
+              'version': 5,
               'tracks': [],
             }),
         throwsUnsupportedError);

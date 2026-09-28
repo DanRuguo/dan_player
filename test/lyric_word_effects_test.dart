@@ -342,13 +342,17 @@ void main() {
     final line = _Line([_Word(0, 2400, 'HHH')]);
     position.value = const Duration(milliseconds: -400);
     // Isolate geometry from the separately checked dim-to-bright alpha ramp.
-    await tester.pumpWidget(_host(line, position, settings, highContrast: true));
+    await tester
+        .pumpWidget(_host(line, position, settings, highContrast: true));
     await tester.pumpAndSettle();
     final size = tester.getSize(_paintFinder());
     final original = _ink(await _pixels(tester, name: 'word-before'));
     position.value = const Duration(milliseconds: 1200);
     await tester.pump();
     expect(_painter(tester).movingWordCount, 1);
+    final lift = _painter(tester).movingWordLifts.single;
+    expect(lift, inInclusiveRange(9.59, 9.61),
+        reason: 'Held notes have a clear bounded rise, not a tiny tremor');
     final raised = _ink(await _pixels(tester, name: 'word-held'));
     expect(raised.top, lessThan(original.top));
     expect(raised.bottom, lessThan(original.bottom),
@@ -507,7 +511,9 @@ void main() {
     await tester.pumpWidget(_host(line, position, settings));
     await tester.pumpAndSettle();
     expect(_paintFinder(), findsNothing);
-    expect(find.text('Plain lyric'), findsOneWidget);
+    final semantics = tester.ensureSemantics();
+    expect(find.bySemanticsLabel('Plain lyric'), findsOneWidget);
+    semantics.dispose();
     expect(position.listeners, 0);
     await tester.pumpWidget(const SizedBox.shrink());
   });

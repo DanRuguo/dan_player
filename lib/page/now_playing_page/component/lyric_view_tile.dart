@@ -12,9 +12,11 @@ import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.d
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:desktop_lyric/lyric_word_effects.dart';
+import 'lyric_reading_tools.dart';
 
 class LyricViewTile extends StatelessWidget {
   const LyricViewTile({
@@ -25,6 +27,8 @@ class LyricViewTile extends StatelessWidget {
     required this.reducedMotion,
     this.distance = 1,
     this.onTap,
+    this.onContentRevealEnd,
+    this.onPresentationEnd,
   });
 
   final LyricLine line;
@@ -33,6 +37,8 @@ class LyricViewTile extends StatelessWidget {
   final int distance;
   final bool reducedMotion;
   final VoidCallback? onTap;
+  final VoidCallback? onContentRevealEnd;
+  final VoidCallback? onPresentationEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -52,11 +58,6 @@ class LyricViewTile extends StatelessWidget {
       LyricTextAlign.left => TextAlign.left,
       LyricTextAlign.center => TextAlign.center,
       LyricTextAlign.right => TextAlign.right,
-    };
-    final crossAxisAlignment = switch (controller.lyricTextAlign) {
-      LyricTextAlign.left => CrossAxisAlignment.start,
-      LyricTextAlign.center => CrossAxisAlignment.center,
-      LyricTextAlign.right => CrossAxisAlignment.end,
     };
     final syncLine = line is SyncLyricLine ? line as SyncLyricLine : null;
     final text = syncLine?.content ??
@@ -78,19 +79,15 @@ class LyricViewTile extends StatelessWidget {
       SyncLyricLine value => value.length,
       _ => Duration.zero,
     };
-    final primaryStyle = DefaultTextStyle.of(context).style.copyWith(
-          // Reserve the focused paragraph once. Context rows use a paint-only
-          // scale, so increasing emphasis never changes line breaks mid-tween.
-          fontSize: controller.lyricFontSize * LyricMotion.focusedFontScale,
-          fontWeight: LyricMotion.focusedFontWeight,
-          height: 1.3,
-        );
     final label = blank
         ? ui("间奏")
         : [
-            if (romanization != null) romanization,
+            if (controller.showRomanization && romanization != null)
+              romanization,
+            if (controller.showTimestamps && onTap != null)
+              lyricReadingTimestamp(line.start),
             syncLine == null ? parts.first : text,
-            ...translations
+            if (controller.showTranslation) ...translations
           ].join('\n');
 
     // The hit region and semantics remain outside the smaller context-row
@@ -100,124 +97,307 @@ class LyricViewTile extends StatelessWidget {
       selected: isMainLine,
       button: onTap != null,
       onTap: onTap,
-      child: ExcludeSemantics(
-        child: RepaintBoundary(
-          child: InkWell(
-            // Context deblur is the hover feedback. Tinting beneath fractional
-            // glyph edges can change perceived ink bounds by a physical pixel.
-            hoverColor: Colors.transparent,
-            onTap: onTap,
-            borderRadius: AppShape.controlRadius,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 48),
-              child: LyricLineMotion(
-                opacity: highContrast ? 1 : opacity,
-                scale:
-                    reducedMotion ? 1 : LyricMotion.scaleForDistance(distance),
-                activation: isMainLine ? 1 : 0,
-                alignment: alignment,
-                reducedMotion: reducedMotion,
-                builder: (context, activation) {
-                  final foreground = scheme.onSecondaryContainer;
-                  final primaryColor = Color.lerp(
-                    foreground,
-                    scheme.primary,
-                    activation,
-                  )!;
-                  Widget auxiliary(String text, {required bool above}) =>
-                      Padding(
-                        key:
-                            above ? const ValueKey('lyric-romanization') : null,
-                        padding: EdgeInsets.only(
-                            top: above ? 0 : 4, bottom: above ? 4 : 0),
-                        child: _LyricParagraphSurface(
-                          child: BalancedLyricText(
-                            text,
-                            // Auxiliary tracks share the focus/return effect;
-                            // they never acquire the original word timeline.
-                            wordFollow: isMainLine && !reducedMotion,
-                            textAlign: textAlign,
-                            style: DefaultTextStyle.of(context).style.copyWith(
-                                  color: foreground.withValues(
-                                      alpha: highContrast
-                                          ? 1
-                                          : .78 + .12 * activation),
-                                  fontSize: controller.translationFontSize,
-                                  height: 1.35,
-                                ),
+      customSemanticsActions: {
+        CustomSemanticsAction(label: ui('复制这一句歌词')): () => copyLyricReadingText(
+            context,
+            lyricReadingText(line,
+                translation: controller.showTranslation,
+                romanization: controller.showRomanization)),
+      },
+      child: LyricLineReadingActions(
+        line: line,
+        controller: controller,
+        timed: onTap != null,
+        child: ExcludeSemantics(
+          child: RepaintBoundary(
+            child: InkWell(
+              // Context deblur is the hover feedback. Tinting beneath fractional
+              // glyph edges can change perceived ink bounds by a physical pixel.
+              hoverColor: Colors.transparent,
+              onTap: onTap,
+              borderRadius: AppShape.controlRadius,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
+                child: LyricLineMotion(
+                  opacity: highContrast ? 1 : opacity,
+                  scale: reducedMotion
+                      ? 1
+                      : LyricMotion.scaleForDistance(distance),
+                  activation: isMainLine ? 1 : 0,
+                  alignment: alignment,
+                  presentation: (
+                    fontSize: controller.lyricFontSize,
+                    translationFontSize: controller.translationFontSize,
+                    alignment: alignment,
+                  ),
+                  reducedMotion: reducedMotion,
+                  onEnd: isMainLine ? onPresentationEnd : null,
+                  builder: (context, activation, presentation, fontTransition) {
+                    TextStyle primaryStyle(double size) =>
+                        DefaultTextStyle.of(context).style.copyWith(
+                              // Reserve the focused paragraph once. Context
+                              // rows use paint-only scale for emphasis.
+                              fontSize: size * LyricMotion.focusedFontScale,
+                              fontWeight: LyricMotion.focusedFontWeight,
+                              height: 1.3,
+                            );
+                    Widget aligned(Widget child) =>
+                        Align(alignment: presentation.alignment, child: child);
+                    Widget fontMorph({
+                      required double fromSize,
+                      required double toSize,
+                      required double currentSize,
+                      bool moveWrappedSuffix = false,
+                      String? flightText,
+                      double paragraphFontScale = 1,
+                      required Widget Function(
+                              double size,
+                              double? wrapTargetFontSize,
+                              double wrapProgress,
+                              LyricWrapFlightStatus? wrapStatus)
+                          paragraph,
+                    }) {
+                      final moving = !reducedMotion &&
+                          (toSize - fromSize).abs() > .00001 &&
+                          fontTransition.progress < 1;
+                      final scaler = MediaQuery.textScalerOf(context);
+                      final scaledFrom =
+                          scaler.scale(fromSize * paragraphFontScale);
+                      final scaledTo =
+                          scaler.scale(toSize * paragraphFontScale);
+                      final canFlySuffix = moveWrappedSuffix &&
+                          flightText != null &&
+                          flightText.length <= 256 &&
+                          !flightText.contains('\n') &&
+                          presentation.alignment.x <= -.999 &&
+                          Directionality.of(context) == TextDirection.ltr &&
+                          (scaledFrom / scaledTo - fromSize / toSize).abs() <
+                              .0001;
+                      final wrapStatus = moving && canFlySuffix
+                          ? LyricWrapFlightStatus()
+                          : null;
+                      Widget fixed(double size, {required bool outgoing}) {
+                        // Keep the target paragraph mounted as the outgoing
+                        // child leaves. Recreating its TextPainter at the last
+                        // frame would change its glyph sampling again.
+                        return KeyedSubtree(
+                          key: ValueKey(size),
+                          // At rest this is an identity transform, painted
+                          // directly without a TransformLayer. The paragraph
+                          // already owns its sampling RepaintBoundary.
+                          child: Transform.scale(
+                            scale: moving ? currentSize / size : 1,
+                            // Paragraph height grows below its first baseline;
+                            // scaling around the vertical centre moves that
+                            // baseline in the opposite direction at the first
+                            // frame and makes the ink appear to jump.
+                            alignment: Alignment(presentation.alignment.x, -1),
+                            filterQuality: moving ? FilterQuality.medium : null,
+                            child: paragraph(
+                                size,
+                                moving && outgoing && canFlySuffix
+                                    ? toSize * paragraphFontScale
+                                    : null,
+                                fontTransition.progress,
+                                outgoing ? wrapStatus : null),
                           ),
-                        ),
+                        );
+                      }
+
+                      return LyricFontMorph(
+                        progress: moving ? fontTransition.progress : 1,
+                        alignmentX: presentation.alignment.x,
+                        wrapStatus: wrapStatus,
+                        children: [
+                          if (moving) fixed(fromSize, outgoing: true),
+                          fixed(toSize, outgoing: false),
+                        ],
                       );
-                  final contents = Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                    child: Align(
-                      alignment: alignment,
-                      child: blank
-                          ? SizedBox(
-                              // Leave room for the interlude's 25% expansion
-                              // and the neighbouring row's blur kernel.
-                              height: 40,
-                              child: duration > const Duration(seconds: 5)
-                                  ? LyricTransitionTile(
-                                      line: line,
-                                      length: duration,
-                                      position: position,
-                                      active: isMainLine,
-                                      reducedMotion: reducedMotion,
-                                      emphasisOpacity: activation,
-                                    )
-                                  : null,
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: crossAxisAlignment,
-                              children: [
-                                if (romanization != null)
-                                  auxiliary(romanization, above: true),
-                                if (syncLine != null)
-                                  _LyricParagraphSurface(
-                                      child: _TimedLyricText(
-                                    line: syncLine,
-                                    position: position,
-                                    active: isMainLine,
-                                    activation: activation,
-                                    reducedMotion: reducedMotion,
-                                    style: primaryStyle,
-                                    textAlign: textAlign,
-                                    baseColor: foreground.withValues(
-                                      alpha: highContrast || reducedMotion
-                                          ? foreground.a
-                                          : foreground.a *
-                                              (1 - .58 * activation),
-                                    ),
-                                    playedColor: primaryColor,
-                                    glowAllowed: glowAllowed,
-                                  ))
-                                else
-                                  // LRC has line times only. A uniform focus
-                                  // transition does not invent word timing.
-                                  _LyricParagraphSurface(
-                                      child: BalancedLyricText(
-                                    parts.first,
-                                    wordFollow: isMainLine && !reducedMotion,
-                                    textAlign: textAlign,
-                                    style: primaryStyle.copyWith(
-                                      color: primaryColor,
-                                    ),
-                                  )),
-                                for (final translation in translations)
-                                  auxiliary(translation, above: false),
-                              ],
+                    }
+
+                    final foreground = scheme.onSecondaryContainer;
+                    final primaryColor = Color.lerp(
+                      foreground,
+                      scheme.primary,
+                      activation,
+                    )!;
+                    Widget auxiliary(String text, {required bool above}) =>
+                        Padding(
+                          key: above
+                              ? const ValueKey('lyric-romanization')
+                              : null,
+                          padding: EdgeInsets.only(
+                              top: above ? 0 : 4, bottom: above ? 4 : 0),
+                          child: fontMorph(
+                            fromSize: fontTransition.fromTranslationFontSize,
+                            toSize: fontTransition.toTranslationFontSize,
+                            currentSize: presentation.translationFontSize,
+                            moveWrappedSuffix: true,
+                            flightText: text,
+                            paragraph: (size, wrapTargetFontSize, wrapProgress,
+                                    wrapStatus) =>
+                                _LyricParagraphSurface(
+                              child: BalancedLyricText(
+                                text,
+                                // Auxiliary tracks share the focus/return
+                                // effect but never acquire word timing.
+                                wordFollow: isMainLine && !reducedMotion,
+                                textAlign: textAlign,
+                                alignmentX: presentation.alignment.x,
+                                wrapTargetFontSize: wrapTargetFontSize,
+                                wrapProgress: wrapProgress,
+                                wrapStatus: wrapStatus,
+                                style:
+                                    DefaultTextStyle.of(context).style.copyWith(
+                                          color: foreground.withValues(
+                                              alpha: highContrast
+                                                  ? 1
+                                                  : .78 + .12 * activation),
+                                          fontSize: size,
+                                          height: 1.35,
+                                        ),
+                              ),
                             ),
-                    ),
-                  );
-                  return blank
-                      ? _LyricParagraphSurface(child: contents)
-                      : contents;
-                },
+                          ),
+                        );
+                    final contents = Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
+                      child: Align(
+                        alignment: presentation.alignment,
+                        child: blank
+                            ? LyricContentReveal(
+                                timestamp: controller.showTimestamps,
+                                romanization: controller.showRomanization,
+                                translation: controller.showTranslation,
+                                reducedMotion: reducedMotion,
+                                onEnd: isMainLine ? onContentRevealEnd : null,
+                                builder: (context, _) => SizedBox(
+                                  // Keep blank-row choreography and let the
+                                  // current row signal the end of a setting
+                                  // transition even when its own text is blank.
+                                  height: 40,
+                                  child: duration > const Duration(seconds: 5)
+                                      ? LyricTransitionTile(
+                                          line: line,
+                                          length: duration,
+                                          position: position,
+                                          active: isMainLine,
+                                          reducedMotion: reducedMotion,
+                                          emphasisOpacity: activation,
+                                        )
+                                      : null,
+                                ),
+                              )
+                            : LyricContentReveal(
+                                timestamp: controller.showTimestamps,
+                                romanization: controller.showRomanization,
+                                translation: controller.showTranslation,
+                                reducedMotion: reducedMotion,
+                                onEnd: isMainLine ? onContentRevealEnd : null,
+                                builder: (context, visibility) => Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    if (onTap != null)
+                                      LyricContentReveal.part(
+                                        visibility.timestamp,
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(bottom: 4),
+                                          child: Text(
+                                            lyricReadingTimestamp(line.start),
+                                            key: const ValueKey(
+                                                'lyric-line-timestamp'),
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelMedium
+                                                ?.copyWith(
+                                                    color: scheme.primary),
+                                          ),
+                                        ),
+                                        alignment: presentation.alignment,
+                                      ),
+                                    if (romanization != null)
+                                      LyricContentReveal.part(
+                                        visibility.romanization,
+                                        auxiliary(romanization, above: true),
+                                        alignment: presentation.alignment,
+                                      ),
+                                    if (syncLine != null)
+                                      fontMorph(
+                                        fromSize: fontTransition.fromFontSize,
+                                        toSize: fontTransition.toFontSize,
+                                        currentSize: presentation.fontSize,
+                                        paragraph: (size, _, __, ___) =>
+                                            aligned(_LyricParagraphSurface(
+                                                child: _TimedLyricText(
+                                          line: syncLine,
+                                          position: position,
+                                          active: isMainLine,
+                                          activation: activation,
+                                          reducedMotion: reducedMotion,
+                                          style: primaryStyle(size),
+                                          textAlign: textAlign,
+                                          alignmentX: presentation.alignment.x,
+                                          baseColor: foreground.withValues(
+                                            alpha: highContrast || reducedMotion
+                                                ? foreground.a
+                                                : foreground.a *
+                                                    (1 - .58 * activation),
+                                          ),
+                                          playedColor: primaryColor,
+                                          glowAllowed: glowAllowed,
+                                        ))),
+                                      )
+                                    else
+                                      // LRC has line times only. A uniform focus
+                                      // transition does not invent word timing.
+                                      fontMorph(
+                                        fromSize: fontTransition.fromFontSize,
+                                        toSize: fontTransition.toFontSize,
+                                        currentSize: presentation.fontSize,
+                                        moveWrappedSuffix: true,
+                                        flightText: parts.first,
+                                        paragraphFontScale:
+                                            LyricMotion.focusedFontScale,
+                                        paragraph: (size, wrapTargetFontSize,
+                                                wrapProgress, wrapStatus) =>
+                                            aligned(_LyricParagraphSurface(
+                                                child: BalancedLyricText(
+                                          parts.first,
+                                          wordFollow:
+                                              isMainLine && !reducedMotion,
+                                          textAlign: textAlign,
+                                          alignmentX: presentation.alignment.x,
+                                          wrapTargetFontSize:
+                                              wrapTargetFontSize,
+                                          wrapProgress: wrapProgress,
+                                          wrapStatus: wrapStatus,
+                                          style: primaryStyle(size).copyWith(
+                                            color: primaryColor,
+                                          ),
+                                        ))),
+                                      ),
+                                    for (final translation in translations)
+                                      LyricContentReveal.part(
+                                        visibility.translation,
+                                        auxiliary(translation, above: false),
+                                        alignment: presentation.alignment,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                      ),
+                    );
+                    return blank
+                        ? _LyricParagraphSurface(child: contents)
+                        : contents;
+                  },
+                ),
               ),
             ),
           ),
@@ -253,6 +433,7 @@ class _TimedLyricText extends StatefulWidget {
     required this.reducedMotion,
     required this.style,
     required this.textAlign,
+    this.alignmentX,
     required this.baseColor,
     required this.playedColor,
     required this.glowAllowed,
@@ -265,6 +446,7 @@ class _TimedLyricText extends StatefulWidget {
   final bool reducedMotion;
   final TextStyle style;
   final TextAlign textAlign;
+  final double? alignmentX;
   final Color baseColor;
   final Color playedColor;
   final bool glowAllowed;
@@ -302,11 +484,14 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
         final horizontalGuard =
             lyricHorizontalInkGuard(widget.style, scaler, width);
         final textMaxWidth = math.max(1.0, width - horizontalGuard * 2);
+        // Keep shaping fixed while the paragraph's lines travel horizontally.
+        final paintAlign =
+            widget.alignmentX == null ? widget.textAlign : TextAlign.left;
         final identity = (
           widget.line,
           widget.line.content,
           widget.style,
-          widget.textAlign,
+          paintAlign,
           direction,
           scaler,
           pixelRatio,
@@ -317,7 +502,7 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
           _layout = _TimedLyricLayout(
             line: widget.line,
             style: widget.style,
-            textAlign: widget.textAlign,
+            textAlign: paintAlign,
             direction: direction,
             scaler: scaler,
             pixelRatio: pixelRatio,
@@ -341,6 +526,7 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
               playedColor: widget.playedColor,
               glowAllowed: widget.glowAllowed,
               follow: follow,
+              alignmentX: widget.alignmentX,
               inkOffset: Offset(horizontalGuard, lyricVerticalInkGuard),
             ),
             isComplex: true,
@@ -753,6 +939,7 @@ class LyricWordHighlightPainter extends CustomPainter {
     required this.glowAllowed,
     required this.inkOffset,
     this.follow,
+    this.alignmentX,
   })  : _layout = layout,
         _position = position,
         super(
@@ -771,6 +958,7 @@ class LyricWordHighlightPainter extends CustomPainter {
   final Color playedColor;
   final bool glowAllowed;
   final LyricWordFollow? follow;
+  final double? alignmentX;
   final Offset inkOffset;
 
   Duration get position => _position.value;
@@ -787,7 +975,29 @@ class LyricWordHighlightPainter extends CustomPainter {
   int get shapedWordCount => _layout.words.length;
 
   @visibleForTesting
+  double get paintedFontSize => _layout.fontSize;
+
+  @visibleForTesting
   int get movingWordCount => _movingWords().length;
+
+  @visibleForTesting
+  Rect get paintedTextBounds {
+    final lines = _layout.base.computeLineMetrics();
+    if (lines.isEmpty) return Rect.zero;
+    final fraction =
+        alignmentX == null ? 0.0 : ((alignmentX! + 1) / 2).clamp(0.0, 1.0);
+    Rect? bounds;
+    for (final line in lines) {
+      final row = Rect.fromLTWH(
+        inkOffset.dx + line.left + (_layout.base.width - line.width) * fraction,
+        inkOffset.dy + line.baseline - line.ascent,
+        line.width,
+        line.height,
+      );
+      bounds = bounds == null ? row : bounds.expandToInclude(row);
+    }
+    return bounds!;
+  }
 
   @visibleForTesting
   List<double> get followWordOffsets => [
@@ -890,7 +1100,8 @@ class LyricWordHighlightPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.save();
     canvas.translate(inkOffset.dx, inkOffset.dy);
-    _paintInk(canvas, size);
+    paintLyricAlignment(
+        canvas, _layout.base, alignmentX, () => _paintInk(canvas, size));
     canvas.restore();
   }
 
@@ -1042,6 +1253,7 @@ class LyricWordHighlightPainter extends CustomPainter {
       follow?.clock != oldDelegate.follow?.clock ||
       follow?.curve != oldDelegate.follow?.curve ||
       follow?.distance != oldDelegate.follow?.distance ||
+      alignmentX != oldDelegate.alignmentX ||
       inkOffset != oldDelegate.inkOffset;
 }
 

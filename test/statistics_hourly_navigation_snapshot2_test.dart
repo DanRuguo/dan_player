@@ -117,6 +117,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('statistics-calendar-daily')));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(
+          find.byKey(const ValueKey('statistics-hours-history')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('statistics-hours-history')));
+      await tester.pumpAndSettle();
       final rail = find.byKey(const ValueKey('listening-hours-scroll'));
       final outer =
           tester.state<ScrollableState>(find.byType(Scrollable).first).position;

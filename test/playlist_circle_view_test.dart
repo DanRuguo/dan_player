@@ -128,7 +128,8 @@ void main() {
 
   test('view values remain stable and legacy grid names migrate', () {
     expect(PlaylistViewMode.values.map((view) => view.name),
-        ['list', 'grid', 'circular']);
+        ['list', 'grid', 'circular', 'tree']);
+    expect(PlaylistViewMode.parse('tree'), PlaylistViewMode.tree);
     expect(PlaylistViewMode.parse('table'), PlaylistViewMode.grid);
     expect(
         PlaylistViewMode.resolve(null, legacy: 'table'), PlaylistViewMode.grid);

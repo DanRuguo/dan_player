@@ -2,13 +2,15 @@
 enum PlaylistViewMode {
   list,
   grid,
-  circular;
+  circular,
+  tree;
 
   /// Accept the old shared grid name when migrating earlier preferences.
   static PlaylistViewMode? parse(Object? value) => switch (value) {
         'list' => list,
         'grid' || 'table' => grid,
         'circular' => circular,
+        'tree' => tree,
         _ => null,
       };
 

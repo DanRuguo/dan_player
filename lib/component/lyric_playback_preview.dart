@@ -277,7 +277,11 @@ class _LyricPlaybackPreviewState extends State<LyricPlaybackPreview> {
                                                         onChanged: !ready || closing || player.loading ? null : _changeSeek,
                                                         onChangeEnd: !ready || closing ? null : (value) => unawaited(_endSeek(value)))),
                                                 Text(
-                                                    '${lyricStamp(Duration(milliseconds: ((dragged ?? player.position) * 1000).round()))} / ${lyricStamp(Duration(milliseconds: (range.end * 1000).round()))}'),
+                                                    '${lyricStamp(Duration(milliseconds: ((dragged ?? player.position) * 1000).round()))} / ${lyricStamp(Duration(milliseconds: (range.end * 1000).round()))}',
+                                                    style: TextStyle(
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .primary)),
                                               ]))),
                           const SizedBox(height: 12),
                           Align(

@@ -357,13 +357,32 @@ class _LyricSpringCurve extends Curve {
 
 /// One stable animation state per lyric occurrence. A retargeted transition
 /// begins at the currently painted values, not at the previous target values.
+typedef LyricTextPresentation = ({
+  double fontSize,
+  double translationFontSize,
+  Alignment alignment,
+});
+
+/// The font endpoints remain fixed while a line changes size. Paragraphs can
+/// keep both line-break layouts alive and blend them instead of re-shaping text
+/// on every tick (which makes a one-line/two-line boundary jump in one frame).
+typedef LyricFontTransition = ({
+  double fromFontSize,
+  double toFontSize,
+  double fromTranslationFontSize,
+  double toTranslationFontSize,
+  double progress,
+});
+
 class LyricLineMotion extends ImplicitlyAnimatedWidget {
   const LyricLineMotion({
     super.key,
+    super.onEnd,
     required this.opacity,
     required this.scale,
     required this.activation,
     required this.alignment,
+    required this.presentation,
     required this.builder,
     required bool reducedMotion,
   }) : super(
@@ -375,7 +394,12 @@ class LyricLineMotion extends ImplicitlyAnimatedWidget {
   final double scale;
   final double activation;
   final Alignment alignment;
-  final Widget Function(BuildContext context, double activation) builder;
+  final LyricTextPresentation presentation;
+  final Widget Function(
+      BuildContext context,
+      double activation,
+      LyricTextPresentation presentation,
+      LyricFontTransition fontTransition) builder;
 
   @override
   AnimatedWidgetBaseState<LyricLineMotion> createState() =>
@@ -386,6 +410,9 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
   Tween<double>? _opacity;
   Tween<double>? _scale;
   Tween<double>? _activation;
+  Tween<double>? _fontSize;
+  Tween<double>? _translationFontSize;
+  AlignmentTween? _alignment;
 
   @override
   void didUpdateWidget(LyricLineMotion oldWidget) {
@@ -404,6 +431,15 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
         (value) => Tween<double>(begin: value as double)) as Tween<double>?;
     _activation = visitor(_activation, widget.activation,
         (value) => Tween<double>(begin: value as double)) as Tween<double>?;
+    _fontSize = visitor(_fontSize, widget.presentation.fontSize,
+        (value) => Tween<double>(begin: value as double)) as Tween<double>?;
+    _translationFontSize = visitor(
+        _translationFontSize,
+        widget.presentation.translationFontSize,
+        (value) => Tween<double>(begin: value as double)) as Tween<double>?;
+    _alignment = visitor(_alignment, widget.alignment,
+            (value) => AlignmentTween(begin: value as Alignment))
+        as AlignmentTween?;
   }
 
   @override
@@ -412,13 +448,111 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
         alwaysIncludeSemantics: true,
         child: Transform.scale(
           scale: _scale!.evaluate(animation),
-          alignment: widget.alignment,
-          // Sample the cached text image instead of rerasterizing glyphs at
-          // every intermediate scale. Reduced motion adds no sampling layer.
-          filterQuality:
-              widget.duration == Duration.zero ? null : FilterQuality.low,
+          alignment: _alignment!.evaluate(animation),
+          // An extra matrix image filter resamples context-row glyphs at a
+          // changing fractional origin. Direct scale painting keeps the next
+          // line's ink continuous through a content reveal's final frame.
           child: RepaintBoundary(
-              child: widget.builder(context, _activation!.evaluate(animation))),
+              child: widget.builder(
+            context,
+            _activation!.evaluate(animation),
+            (
+              fontSize: _fontSize!.evaluate(animation),
+              translationFontSize: _translationFontSize!.evaluate(animation),
+              alignment: _alignment!.evaluate(animation),
+            ),
+            (
+              fromFontSize: _fontSize!.begin!,
+              toFontSize: _fontSize!.end!,
+              fromTranslationFontSize: _translationFontSize!.begin!,
+              toTranslationFontSize: _translationFontSize!.end!,
+              progress: animation.value,
+            ),
+          )),
         ),
       );
+}
+
+/// Reveals optional lyric tracks without changing the timed paragraph's
+/// element position. Each row keeps its own finite transition so a setting
+/// change can expand every visible row without replacing its glyph painter.
+typedef LyricContentVisibility = ({
+  double timestamp,
+  double romanization,
+  double translation,
+});
+
+class LyricContentReveal extends ImplicitlyAnimatedWidget {
+  const LyricContentReveal({
+    super.key,
+    super.onEnd,
+    required this.timestamp,
+    required this.romanization,
+    required this.translation,
+    required this.builder,
+    required bool reducedMotion,
+  }) : super(
+          duration: reducedMotion ? Duration.zero : LyricMotion.lineDuration,
+          curve: LyricMotion.curve,
+        );
+
+  final bool timestamp;
+  final bool romanization;
+  final bool translation;
+  final Widget Function(BuildContext, LyricContentVisibility) builder;
+
+  /// A zero-height placeholder keeps the following primary paragraph at the
+  /// same child index even when an optional track is entirely hidden.
+  static Widget part(double value, Widget child,
+      {Alignment alignment = Alignment.center}) {
+    final progress = value.clamp(0.0, 1.0);
+    if (progress == 0) return const SizedBox.shrink();
+    return ClipRect(
+      child: Align(
+        alignment: Alignment.topCenter,
+        heightFactor: progress,
+        child: Opacity(
+            opacity: progress,
+            child: Align(alignment: alignment, child: child)),
+      ),
+    );
+  }
+
+  @override
+  AnimatedWidgetBaseState<LyricContentReveal> createState() =>
+      _LyricContentRevealState();
+}
+
+class _LyricContentRevealState
+    extends AnimatedWidgetBaseState<LyricContentReveal> {
+  Tween<double>? _timestamp;
+  Tween<double>? _romanization;
+  Tween<double>? _translation;
+
+  @override
+  void didUpdateWidget(LyricContentReveal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.duration == Duration.zero) {
+      controller.stop();
+      controller.value = 1;
+    }
+  }
+
+  @override
+  void forEachTween(TweenVisitor<dynamic> visitor) {
+    Tween<double>? number(Tween<double>? tween, bool visible) => visitor(
+        tween,
+        visible ? 1.0 : 0.0,
+        (value) => Tween<double>(begin: value as double)) as Tween<double>?;
+    _timestamp = number(_timestamp, widget.timestamp);
+    _romanization = number(_romanization, widget.romanization);
+    _translation = number(_translation, widget.translation);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, (
+        timestamp: _timestamp!.evaluate(animation),
+        romanization: _romanization!.evaluate(animation),
+        translation: _translation!.evaluate(animation),
+      ));
 }

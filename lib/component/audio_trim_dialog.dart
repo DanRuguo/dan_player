@@ -338,6 +338,7 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
           SettingsHeader(
               title: ui('选择片段'),
               icon: Icons.content_cut,
+              subtitleColor: Theme.of(context).colorScheme.primary,
               subtitle:
                   '${info.formatLabel} · ${ui('原始时长')} ${formatTrimTime(info.duration)}'),
           const SizedBox(height: 8),
@@ -353,6 +354,11 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
             final children = [
               TextField(
                   key: const ValueKey('trim-start'),
+                  style: TextStyle(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withValues(alpha: _busy ? .38 : 1)),
                   controller: _start,
                   enabled: !_busy,
                   onChanged: _editRange,
@@ -361,6 +367,11 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
                   decoration: InputDecoration(labelText: ui('开始时间'))),
               TextField(
                   key: const ValueKey('trim-end'),
+                  style: TextStyle(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withValues(alpha: _busy ? .38 : 1)),
                   controller: _end,
                   enabled: !_busy,
                   onChanged: _editRange,
@@ -397,7 +408,8 @@ class _AudioTrimDialogState extends State<AudioTrimDialog> {
               children: [
                 Text(
                     '${ui('选区时长')} ${formatTrimTime(_range.end - _range.start)}',
-                    style: Theme.of(context).textTheme.titleSmall),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.primary)),
                 OutlinedButton.icon(
                     key: const ValueKey('trim-preview'),
                     onPressed: _busy || _closing || _rangeError != null

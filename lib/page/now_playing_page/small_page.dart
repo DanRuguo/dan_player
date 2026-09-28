@@ -71,44 +71,41 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(
-        children: [
-          Expanded(
-            child: AppEntrance(
-              identity: 'now-playing-display',
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _NowPlayingSmallViewSwitch(
-                    onTap: () => changeView(views[0]),
-                    icon: viewSwitchIcon(views[0]),
-                  ),
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: AppMotion.duration(
-                          context, MotionKind.layout, AppMotion.standard),
-                      child: switch (views[1]) {
-                        NowPlayingViewMode.onlyMain => _NowPlayingInfo(
-                            key: ValueKey(_activeCoverGeneration.value),
-                            coverVisible: _coverVisible,
-                            activeCoverGeneration: _activeCoverGeneration,
-                            coverGeneration: _activeCoverGeneration.value,
-                          ),
-                        NowPlayingViewMode.withLyric =>
-                          const VerticalLyricView(),
-                        NowPlayingViewMode.withPlaylist =>
-                          const CurrentPlaylistView(immersive: true),
-                      },
-                    ),
-                  ),
-                  _NowPlayingSmallViewSwitch(
-                    onTap: () => changeView(views[2]),
-                    icon: viewSwitchIcon(views[2]),
-                  ),
-                ],
+      child: DetailPlaybackLayout(
+        display: AppEntrance(
+          identity: 'now-playing-display',
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _NowPlayingSmallViewSwitch(
+                onTap: () => changeView(views[0]),
+                icon: viewSwitchIcon(views[0]),
               ),
-            ),
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: AppMotion.duration(
+                      context, MotionKind.layout, AppMotion.standard),
+                  child: switch (views[1]) {
+                    NowPlayingViewMode.onlyMain => _NowPlayingInfo(
+                        key: ValueKey(_activeCoverGeneration.value),
+                        coverVisible: _coverVisible,
+                        activeCoverGeneration: _activeCoverGeneration,
+                        coverGeneration: _activeCoverGeneration.value,
+                      ),
+                    NowPlayingViewMode.withLyric => const VerticalLyricView(),
+                    NowPlayingViewMode.withPlaylist =>
+                      const CurrentPlaylistView(immersive: true),
+                  },
+                ),
+              ),
+              _NowPlayingSmallViewSwitch(
+                onTap: () => changeView(views[2]),
+                icon: viewSwitchIcon(views[2]),
+              ),
+            ],
           ),
+        ),
+        controls: Column(mainAxisSize: MainAxisSize.min, children: [
           const SizedBox(height: 8.0),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -143,7 +140,7 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
               ],
             ),
           ),
-        ],
+        ]),
       ),
     );
   }

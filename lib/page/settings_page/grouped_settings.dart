@@ -88,66 +88,73 @@ class _GroupedSettingsState extends State<GroupedSettings> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (compact)
-                InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: ui("设置分类"),
-                    border: AppShape.inputBorder,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      dropdownColor:
-                          Theme.of(context).colorScheme.surfaceContainerLow,
-                      elevation: 3,
-                      key: const ValueKey('settings-category-picker'),
-                      value: _selected,
-                      isExpanded: true,
-                      itemHeight: null,
-                      menuMaxHeight: MediaQuery.sizeOf(context).height * .65,
-                      borderRadius: AppShape.controlRadius,
-                      onChanged: (id) {
-                        if (id != null) _select(id);
-                      },
-                      selectedItemBuilder: (context) => [
-                        for (final section in widget.sections)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(section.title,
-                                maxLines: 1, overflow: TextOverflow.ellipsis),
+              AppEntrance(
+                identity: 'settings-category-navigation',
+                child: compact
+                    ? InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: ui("设置分类"),
+                          border: AppShape.inputBorder,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            dropdownColor: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerLow,
+                            elevation: 3,
+                            key: const ValueKey('settings-category-picker'),
+                            value: _selected,
+                            isExpanded: true,
+                            itemHeight: null,
+                            menuMaxHeight:
+                                MediaQuery.sizeOf(context).height * .65,
+                            borderRadius: AppShape.controlRadius,
+                            onChanged: (id) {
+                              if (id != null) _select(id);
+                            },
+                            selectedItemBuilder: (context) => [
+                              for (final section in widget.sections)
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(section.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                            ],
+                            items: [
+                              for (final section in widget.sections)
+                                DropdownMenuItem(
+                                  key: ValueKey(
+                                      'settings-category-${section.id}'),
+                                  value: section.id,
+                                  child: Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 8),
+                                    child: Row(children: [
+                                      Icon(section.icon, size: 20),
+                                      const SizedBox(width: 10),
+                                      Expanded(child: Text(section.title)),
+                                    ]),
+                                  ),
+                                ),
+                            ],
                           ),
-                      ],
-                      items: [
+                        ),
+                      )
+                    : Wrap(spacing: 8, runSpacing: 8, children: [
                         for (final section in widget.sections)
-                          DropdownMenuItem(
+                          ChoiceChip(
                             key: ValueKey('settings-category-${section.id}'),
-                            value: section.id,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Row(children: [
-                                Icon(section.icon, size: 20),
-                                const SizedBox(width: 10),
-                                Expanded(child: Text(section.title)),
-                              ]),
-                            ),
+                            avatar: Icon(section.icon, size: 18),
+                            showCheckmark: false,
+                            label: Text(section.title),
+                            selected: _selected == section.id,
+                            onSelected: (_) => _select(section.id),
                           ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                Wrap(spacing: 8, runSpacing: 8, children: [
-                  for (final section in widget.sections)
-                    ChoiceChip(
-                      key: ValueKey('settings-category-${section.id}'),
-                      avatar: Icon(section.icon, size: 18),
-                      showCheckmark: false,
-                      label: Text(section.title),
-                      selected: _selected == section.id,
-                      onSelected: (_) => _select(section.id),
-                    ),
-                ]),
+                      ]),
+              ),
               const SizedBox(height: 16),
               Expanded(
                 child: AppContentTransition(

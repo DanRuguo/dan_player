@@ -111,10 +111,7 @@ void main() {
   late List<Uint8List> images;
   const colors = [Color(0xff7e57c2), Color(0xff00838f), Color(0xffe65100)];
   setUpAll(() async {
-    data = Directory(
-            '.dart_tool/test-data/playlist-view-transition-${DateTime.now().microsecondsSinceEpoch}')
-        .absolute;
-    await data.create(recursive: true);
+    data = await Directory.systemTemp.createTemp('playlist-view-transition-');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
             const MethodChannel('plugins.flutter.io/path_provider'),
@@ -166,7 +163,10 @@ void main() {
           await tester.pumpAndSettle();
           final host = find.byType(PlaylistCoverTransitionHost);
           final scroll = tester.state<ScrollableState>(find
-              .descendant(of: host, matching: find.byType(Scrollable))
+              .descendant(
+                  of: host,
+                  matching: find.byWidgetPredicate((w) =>
+                      w is Scrollable && w.axisDirection == AxisDirection.down))
               .first);
           scroll.position.jumpTo(scroll.position.maxScrollExtent * depth);
           await tester.pumpAndSettle();
@@ -279,13 +279,23 @@ void main() {
         expect(controller.debugSnapshotCount, ids.length,
             reason: 'same-song folder and song retain independent entry IDs');
         final targets = [for (final id in ids) tester.getRect(_marker(id))];
-        await tester.pump(const Duration(milliseconds: 110));
+        expect(controller.debugReusedImageCount, ids.length,
+            reason: 'pure cover flights reuse decoded textures');
+        expect(controller.debugRasterCaptureCount, 0);
+        await tester.pump(const Duration(milliseconds: 77));
         final middle = await _capture(
             tester, boundary, '${from.name}-to-${to.name}-middle');
         // This last item stays above its peers when trajectories cross.
         final midpoint = Rect.lerp(startRects.last, targets.last, .5)!.center;
         expect(middle.at(midpoint), expected.last.toARGB32(),
             reason: 'moving cover center must contain real artwork');
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 20));
+        final handoff = await _capture(
+            tester, boundary, '${from.name}-to-${to.name}-handoff');
+        expect(handoff.at(targets.last.center), expected.last.toARGB32(),
+            reason:
+                'handoff must not dim identical artwork over the background');
         await tester.pumpAndSettle();
         final settled =
             await _capture(tester, boundary, '${from.name}-to-${to.name}-end');

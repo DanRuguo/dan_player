@@ -204,7 +204,10 @@ class _SegmentPositionState extends State<_SegmentPosition> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(ui('当前位置：{0}', [_SegmentLoopDialogState._time(value)]),
-                  style: Theme.of(context).textTheme.titleMedium),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(color: Theme.of(context).colorScheme.primary)),
               Slider(
                   key: const ValueKey('segment-loop-position'),
                   padding: const EdgeInsets.symmetric(vertical: 16),

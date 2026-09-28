@@ -111,6 +111,7 @@ enum _PlaylistToolbarAction {
   titles,
   autoFill,
   songBackground,
+  countChildren,
 }
 
 /// Compact, descriptor-only playlist actions. No playback/library singleton is
@@ -158,6 +159,8 @@ class PlaylistToolbar extends StatefulWidget {
     this.onToggleSongTitles,
     this.artworkBackground = false,
     this.onToggleSongBackground,
+    this.countChildren = true,
+    this.onToggleCountChildren,
     this.selectionTools,
     this.playbackService,
     this.alignment = WrapAlignment.end,
@@ -198,6 +201,8 @@ class PlaylistToolbar extends StatefulWidget {
   final VoidCallback? onTrash, onPresentation;
   final bool showSongTitles, artworkBackground;
   final VoidCallback? onToggleSongTitles, onToggleSongBackground;
+  final bool countChildren;
+  final VoidCallback? onToggleCountChildren;
   final Widget? selectionTools;
   final PlaybackService? playbackService;
   final WrapAlignment alignment;
@@ -252,6 +257,16 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
               label: ui('歌单回收站'),
               icon: Icons.restore_from_trash,
               onSelected: widget.onTrash),
+        if (widget.onToggleCountChildren != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.countChildren,
+              key: const ValueKey('playlist-count-children'),
+              label: ui(widget.countChildren ? '隐藏子歌单歌曲数量' : '显示子歌单歌曲数量'),
+              icon: widget.countChildren
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+              onSelected:
+                  widget.editingEnabled ? widget.onToggleCountChildren : null),
         if (widget.view == PlaylistViewMode.grid &&
             widget.onToggleSongTitles != null)
           _ToolbarMenuItem(
@@ -482,14 +497,19 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
                 key: const ValueKey('playlist-view-list')),
             AppSegmentOption(
                 value: PlaylistViewMode.grid,
-                label: ui('矩形封面'),
+                label: ui('矩形'),
                 icon: Icons.grid_view_outlined,
                 key: const ValueKey('playlist-view-grid')),
             AppSegmentOption(
                 value: PlaylistViewMode.circular,
-                label: ui('圆形封面'),
+                label: ui('圆形'),
                 icon: Icons.album_outlined,
                 key: const ValueKey('playlist-view-circular')),
+            AppSegmentOption(
+                value: PlaylistViewMode.tree,
+                label: ui('树状'),
+                icon: Icons.account_tree_outlined,
+                key: const ValueKey('playlist-view-tree')),
           ],
           onChanged: (value) {
             if (isCurrentMode()) widget.onViewChanged?.call(value);
@@ -775,8 +795,24 @@ class _ToolbarMenuState<T> extends State<_ToolbarMenu<T>> {
   Future<void> _show() async {
     if (_open || !widget.enabled || !widget.isCurrentMode()) return;
     final scheme = Theme.of(context).colorScheme;
-    final menuWidth =
-        math.max(44.0, math.min(340.0, MediaQuery.sizeOf(context).width - 32));
+    final theme = Theme.of(context);
+    final menuTheme = PopupMenuTheme.of(context);
+    final labelStyle = menuTheme.labelTextStyle?.resolve({}) ??
+        menuTheme.textStyle ??
+        theme.textTheme.labelLarge!;
+    var contentWidth = 44.0;
+    for (final item in widget.items.whereType<_ToolbarMenuItem<T>>()) {
+      final text = TextPainter(
+          text: TextSpan(text: item.label, style: labelStyle),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context))
+        ..layout();
+      contentWidth = math.max(
+          contentWidth, text.width + 24 + 20 + 10 + (item.checked ? 26 : 0));
+      text.dispose();
+    }
+    final menuWidth = math.min(contentWidth.ceilToDouble(),
+        math.max(44.0, math.min(340.0, MediaQuery.sizeOf(context).width - 32)));
     setState(() => _open = true);
     T? result;
     try {
@@ -789,7 +825,7 @@ class _ToolbarMenuState<T> extends State<_ToolbarMenu<T>> {
         shadowColor: scheme.shadow.withValues(alpha: .18),
         elevation: 4,
         requestFocus: true,
-        constraints: BoxConstraints(maxWidth: menuWidth),
+        constraints: BoxConstraints.tightFor(width: menuWidth),
         menuPadding: const EdgeInsets.symmetric(vertical: 6),
         popUpAnimationStyle: widget.reduced
             ? AnimationStyle.noAnimation

@@ -59,8 +59,15 @@ class ListeningCalendar {
     today = localCalendarDate(now);
     monday = DateTime(today.year, today.month, today.day - today.weekday + 1);
     start = range == ListeningCalendarRange.twelveWeeks
-        ? DateTime(monday.year, monday.month, monday.day - 11 * 7)
-        : DateTime(today.year - 1, today.month, today.day + 1);
+        ? DateTime(today.year, today.month, today.day - 83)
+        // Clamp the anniversary before advancing to the first inclusive date.
+        // On Feb 29 the preceding non-leap anniversary is Feb 28, not Mar 1.
+        : DateTime(
+            today.year - 1,
+            today.month,
+            today.day.clamp(
+                    1, DateTime(today.year - 1, today.month + 1, 0).day) +
+                1);
     final gridStart =
         DateTime(start.year, start.month, start.day - start.weekday + 1);
     final gridEnd = DateTime(monday.year, monday.month, monday.day + 6);
@@ -105,6 +112,65 @@ class ListeningCalendar {
       daysInRange.fold<int>(0, (sum, day) => sum + day.milliseconds);
   int get rangeActiveDays =>
       daysInRange.where((day) => day.milliseconds > 0).length;
+  int get rangeActiveWeeks => weeks
+      .where((week) => week.any((day) => day.inRange && day.milliseconds > 0))
+      .length;
+  int get averageDailyMilliseconds => rangeMilliseconds ~/ daysInRange.length;
+  int get longestStreak {
+    var current = 0, longest = 0;
+    for (final day in daysInRange) {
+      current = day.milliseconds > 0 ? current + 1 : 0;
+      if (current > longest) longest = current;
+    }
+    return longest;
+  }
+
+  int get currentStreak {
+    final days = daysInRange.toList();
+    var index = days.length - 1;
+    // An unfinished today does not break yesterday's active streak.
+    if (days[index].milliseconds == 0) index--;
+    var count = 0;
+    for (; index >= 0 && days[index].milliseconds > 0; index--) {
+      count++;
+    }
+    return count;
+  }
+
+  ListeningCalendarDay? get busiestDay {
+    ListeningCalendarDay? result;
+    for (final day in daysInRange) {
+      if (day.milliseconds > 0 &&
+          (result == null || day.milliseconds >= result.milliseconds)) {
+        result = day;
+      }
+    }
+    return result;
+  }
+
+  List<int> get weekdayMilliseconds {
+    final values = List.filled(7, 0);
+    for (final day in daysInRange) {
+      values[day.date.weekday - 1] += day.milliseconds;
+    }
+    return values;
+  }
+
+  int? get favoriteWeekday {
+    final values = weekdayMilliseconds;
+    var best = 0;
+    for (var i = 1; i < 7; i++) {
+      if (values[i] > values[best]) best = i;
+    }
+    return values[best] > 0 ? best + 1 : null;
+  }
+
+  int? get weekendPercent => rangeMilliseconds == 0
+      ? null
+      : ((weekdayMilliseconds[5] + weekdayMilliseconds[6]) *
+              100 /
+              rangeMilliseconds)
+          .round();
   int? get rangePlayCount => daysInRange.every((day) => day.playCount == null)
       ? null
       : daysInRange.fold<int>(0, (sum, day) => sum + (day.playCount ?? 0));

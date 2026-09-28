@@ -713,7 +713,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
 
   Widget _progress(ColorScheme scheme) {
     final timeStyle = TextStyle(
-      color: scheme.onSurface.withValues(alpha: _highContrast ? 1 : .8),
+      color: scheme.primary,
       fontSize: 12,
       height: 1.1,
     );

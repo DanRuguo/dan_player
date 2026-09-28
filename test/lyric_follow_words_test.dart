@@ -361,8 +361,9 @@ void main() {
         expect(rects.length, greaterThan(real ? 0 : 1),
             reason:
                 'Synthetic long fixtures must wrap; real LRC covers the boundary');
-        final origin =
-            tester.getTopLeft(paintFinder) - tester.getTopLeft(find.byKey(key));
+        final transform = tester
+            .renderObject<RenderBox>(paintFinder)
+            .getTransformTo(key.currentContext!.findRenderObject());
         Future<({List<int> rgba, int width})> capture(double phase) async {
           clock.value = phase;
           await tester.pump();
@@ -397,7 +398,7 @@ void main() {
         for (final phase in [.05, .3, .66, .8, .95]) {
           final frame = await capture(phase);
           for (final box in rects) {
-            final area = box.deflate(2).shift(origin);
+            final area = MatrixUtils.transformRect(transform, box).deflate(2);
             double mass = 0, difference = 0;
             for (var y = (area.top * 2).ceil();
                 y < (area.bottom * 2).floor();
@@ -482,14 +483,24 @@ void main() {
 
       await tester.pumpWidget(host());
       await tester.pumpAndSettle();
+      playing = true;
+      await tester.pumpWidget(host());
       await emit(4.1);
-      expect(offsets().any((value) => value.abs() > .3), isTrue);
+      expect(offsets().any((value) => value.abs() > .3), isTrue,
+          reason: 'Playback line changes should drive the word-follow painter');
       final filters = find.byType(LyricFractionalFilter);
       expect(filters, findsWidgets);
       for (final element in filters.evaluate()) {
+        final filter = element.widget as LyricFractionalFilter;
         final render = element.renderObject! as RenderProxyBox;
-        expect(render.child!.needsCompositing, isFalse,
-            reason: 'Text and its sampling filter must share one display list');
+        expect(render.child, isNotNull);
+        expect(
+            find.descendant(
+                of: find.byWidget(filter),
+                matching: find.byType(ImageFiltered)),
+            findsNothing,
+            reason: 'The direct-draw lyric filter must not gain a second '
+                'image-filter pass around its glyphs');
       }
       preferences.value = preferences.value.copyWith(
           animations: const MotionPreferences(disabled: {MotionKind.lyrics}));
@@ -498,8 +509,14 @@ void main() {
       expect(tester.binding.transientCallbackCount, 0);
       await emit(8.1);
       expect(offsets(), everyElement(0));
+      // A playing timed line intentionally keeps a media ticker alive. Pause
+      // that ticker before waiting for the preference transition to settle.
+      playing = false;
+      await tester.pumpWidget(host());
       preferences.value = const RenderingPreferences();
       await tester.pumpAndSettle();
+      playing = true;
+      await tester.pumpWidget(host());
       await emit(12.1);
       expect(offsets().any((value) => value.abs() > .3), isTrue);
       hidden.value = true;
@@ -507,6 +524,8 @@ void main() {
       expect(offsets(), everyElement(0));
       await emit(16.1);
       expect(tester.binding.transientCallbackCount, 0);
+      playing = false;
+      await tester.pumpWidget(host());
       hidden.value = false;
       await tester.pumpAndSettle();
       expect(offsets(), everyElement(0),
@@ -648,8 +667,9 @@ void main() {
             tester
                 .widgetList<CustomPaint>(find.byType(CustomPaint))
                 .map((widget) => widget.painter)
-                .whereType<PlainLyricWordFollowPainter>(),
-            isEmpty);
+                .whereType<PlainLyricWordFollowPainter>()
+                .map((painter) => painter.follow),
+            everyElement(isNull));
       }
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

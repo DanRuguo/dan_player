@@ -8,6 +8,16 @@ import 'category_tile_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+/// Tree song cards share a lazy row; map occurrence IDs to those visual rows.
+class PlaylistCoverLayoutIndices extends InheritedWidget {
+  const PlaylistCoverLayoutIndices(
+      {super.key, required this.indices, required super.child});
+  final Map<Object, int> indices;
+  @override
+  bool updateShouldNotify(PlaylistCoverLayoutIndices oldWidget) =>
+      oldWidget.indices != indices;
+}
+
 /// A one-shot transition between lazy playlist layouts. No images or ticker
 /// remain after settling. Rapid repeated changes deliberately switch directly.
 class PlaylistCoverTransitionController extends ChangeNotifier {
@@ -17,12 +27,25 @@ class PlaylistCoverTransitionController extends ChangeNotifier {
   @visibleForTesting
   int get debugSnapshotCount => _host?._flights.length ?? 0;
 
-  Future<void> transition(VoidCallback update) async {
+  @visibleForTesting
+  int get debugCaptureCount => _host?._captureCount ?? 0;
+  @visibleForTesting
+  int get debugRasterCaptureCount => _host?._rasterCaptureCount ?? 0;
+  @visibleForTesting
+  int get debugReusedImageCount => _host?._reusedImageCount ?? 0;
+
+  Future<void> transition(VoidCallback update,
+      {bool preserveAnchor = true,
+      bool animateArrival = true,
+      Set<Object>? captureIds}) async {
     final host = _host;
     if (host == null) {
       update();
     } else {
-      await host._transition(update);
+      await host._transition(update,
+          preserveAnchor: preserveAnchor,
+          animateArrival: animateArrival,
+          captureIds: captureIds);
     }
   }
 
@@ -81,6 +104,10 @@ class _PlaylistCoverTransitionHostState
   )..addStatusListener(_handoffStatus);
   late final Animation<double> _reveal =
       _handoff.drive(CurveTween(curve: Curves.easeOut));
+  // The old image fades over an opaque destination. Fading both surfaces
+  // against the background would dim identical artwork halfway through.
+  late final Animation<double> _destinationVisibility =
+      _handoff.drive(CurveTween(curve: const Threshold(0)));
   late final Animation<double> _arrival = _animation.drive(
       CurveTween(curve: const Interval(0, .7, curve: Curves.easeOutCubic)));
   Timer? _readinessTimeout;
@@ -90,6 +117,11 @@ class _PlaylistCoverTransitionHostState
   bool _starting = false;
   int _generation = 0;
   _CaptureJob? _capture;
+  Timer? _burstCooldown;
+  bool _animateArrival = true;
+  bool _instantHandoff = false;
+  int _captureCount = 0;
+  int _rasterCaptureCount = 0, _reusedImageCount = 0;
   BoxConstraints? _viewportConstraints;
 
   @override
@@ -151,11 +183,65 @@ class _PlaylistCoverTransitionHostState
     return _CoverGeometry(rect, marker.widget.borderRadius, render);
   }
 
-  Future<void> _transition(VoidCallback update) async {
+  Future<void> _transition(VoidCallback update,
+      {required bool preserveAnchor,
+      required bool animateArrival,
+      Set<Object>? captureIds}) async {
     if (!mounted) return;
-    if (_busy) {
+    final visible = <(Object, _CoverGeometry)>[
+      for (final entry in _markers.entries)
+        if (_geometry(entry.value) case final geometry?) (entry.key, geometry),
+    ]..sort((a, b) {
+        final vertical = a.$2.rect.top.compareTo(b.$2.rect.top);
+        return vertical != 0
+            ? vertical
+            : a.$2.rect.left.compareTo(b.$2.rect.left);
+      });
+    final anchor = visible.isEmpty ? null : visible.first.$1;
+    final sourceScroll = anchor == null
+        ? null
+        : Scrollable.maybeOf(_markers[anchor]!.context)?.position;
+    final atStart = sourceScroll == null ||
+        sourceScroll.pixels <= sourceScroll.minScrollExtent + 1;
+    if (_busy || _burstCooldown != null) {
+      final retained = <_CoverFlight>[];
+      if (!appToolbarReduceMotion(context, kind: MotionKind.tracking)) {
+        final oldFlights = {for (final flight in _flights) flight.id: flight};
+        for (final entry
+            in visible.take(PlaylistCoverTransitionHost.maximumSnapshots)) {
+          if (captureIds != null && !captureIds.contains(entry.$1)) continue;
+          final old = oldFlights[entry.$1];
+          final image = _coverImage(entry.$2.boundary) ??
+              (old?.hadImage == true ? old!.image : null);
+          if (image != null) {
+            retained.add(_CoverFlight(entry.$1, entry.$2, image.clone(),
+                hadImage: true));
+            _reusedImageCount++;
+          }
+        }
+      }
       _cancel();
+      _burstCooldown?.cancel();
+      // One finite cooldown covers the whole click burst. Keep decoded artwork
+      // until the new Image attaches, without another raster capture or flight.
+      _burstCooldown = Timer(const Duration(milliseconds: 250), () {
+        _burstCooldown = null;
+      });
+      if (retained.isNotEmpty) {
+        setState(() {
+          _animation.value = 1;
+          _handoff.value = 0;
+          _flights.addAll(retained);
+          _hidden = retained.map((flight) => flight.id).toSet();
+          _animateArrival = false;
+          _instantHandoff = true;
+          _busy = true;
+          _starting = true;
+        });
+      }
       update();
+      _land(_generation, preserveAnchor ? anchor : null, 0,
+          atStart: atStart, animate: retained.isNotEmpty, instant: true);
       return;
     }
     if (appToolbarReduceMotion(context, kind: MotionKind.tracking) ||
@@ -163,12 +249,10 @@ class _PlaylistCoverTransitionHostState
       update();
       return;
     }
-    final sources = <(Object, _CoverGeometry)>[];
-    for (final entry in _markers.entries) {
-      final geometry = _geometry(entry.value);
-      if (geometry != null) sources.add((entry.key, geometry));
-      if (sources.length == PlaylistCoverTransitionHost.maximumSnapshots) break;
-    }
+    final sources = visible
+        .where((entry) => captureIds == null || captureIds.contains(entry.$1))
+        .take(PlaylistCoverTransitionHost.maximumSnapshots)
+        .toList();
     if (sources.isEmpty) {
       update();
       return;
@@ -178,6 +262,9 @@ class _PlaylistCoverTransitionHostState
     final generation = ++_generation;
     final capture = _CaptureJob();
     _capture = capture;
+    _animateArrival = animateArrival;
+    _instantHandoff = false;
+    _captureCount++;
     _busy = true;
     widget.controller._notify();
     var next = 0;
@@ -198,7 +285,17 @@ class _PlaylistCoverTransitionHostState
                 math.max(geometry.boundary.size.width,
                     geometry.boundary.size.height),
           );
-          final image = await geometry.boundary.toImage(pixelRatio: ratio);
+          final retained = _coverImage(geometry.boundary);
+          final ui.Image image;
+          if (retained != null) {
+            // The decoded texture already exists. Clone only its handle, not
+            // pixels; pure cover flights need no GPU render/readback batch.
+            image = retained.clone();
+            _reusedImageCount++;
+          } else {
+            _rasterCaptureCount++;
+            image = await geometry.boundary.toImage(pixelRatio: ratio);
+          }
           if (capture.closed || !mounted || generation != _generation) {
             image.dispose();
           } else {
@@ -244,35 +341,38 @@ class _PlaylistCoverTransitionHostState
       _handoff.value = 0;
     });
     update();
-    sources.sort((a, b) {
-      final vertical = a.$2.rect.top.compareTo(b.$2.rect.top);
-      return vertical != 0
-          ? vertical
-          : a.$2.rect.left.compareTo(b.$2.rect.left);
-    });
-    _land(generation, sources.first.$1, 0);
+    _land(generation, preserveAnchor ? anchor : null, 0, atStart: atStart);
   }
 
-  void _land(int generation, Object anchor, int attempt) {
+  void _land(int generation, Object? anchor, int attempt,
+      {required bool atStart, bool animate = true, bool instant = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || generation != _generation) return;
-      if (attempt < 8 && _seekAnchor(anchor)) {
-        _land(generation, anchor, attempt + 1);
+      if (anchor != null &&
+          attempt < 8 &&
+          _seekAnchor(anchor, atStart: atStart)) {
+        _land(generation, anchor, attempt + 1,
+            atStart: atStart, animate: animate, instant: instant);
         WidgetsBinding.instance.ensureVisualUpdate();
         return;
       }
+      if (!animate) return;
       for (final flight in _flights) {
         final marker = _markers[flight.id];
         flight.target = marker == null ? null : _geometry(marker);
       }
       _starting = false;
-      _animation.forward(from: 0);
+      if (instant) {
+        _tryReveal();
+      } else {
+        _animation.forward(from: 0);
+      }
     });
   }
 
   // Reposition only the lazy viewport. Never build the full playlist to find a
   // destination, and never change model order or per-level view preferences.
-  bool _seekAnchor(Object id) {
+  bool _seekAnchor(Object id, {required bool atStart}) {
     final targetIndex = widget.itemIds.indexOf(id);
     if (targetIndex < 0 || _markers.isEmpty) return false;
     final marker = _markers[id] ?? _markers.values.first;
@@ -281,9 +381,22 @@ class _PlaylistCoverTransitionHostState
     if (scroll == null || geometry == null) return false;
     final position = scroll.position;
     if (!position.hasContentDimensions) return false;
+    // Tree search/actions sit above the list inside this host. Anchor against
+    // the actual scroll viewport, otherwise each retry adds that header again.
+    final viewport = scroll.context.findRenderObject();
+    final host = _hostBox;
+    final viewportTop = viewport is RenderBox && host != null
+        ? MatrixUtils.transformRect(
+                viewport.getTransformTo(host), Offset.zero & viewport.size)
+            .top
+        : 0.0;
     double offset;
-    if (marker.widget.entryId == id) {
-      offset = position.pixels + geometry.rect.top;
+    if (atStart) {
+      // A cover's inset is not a scroll offset. Keep the first row whole,
+      // regardless of the destination's search bar or card padding.
+      offset = position.minScrollExtent;
+    } else if (marker.widget.entryId == id) {
+      offset = position.pixels + geometry.rect.top - viewportTop;
     } else {
       RenderObject? child = marker._boundary.currentContext?.findRenderObject();
       while (child != null && child.parent is! RenderSliverMultiBoxAdaptor) {
@@ -303,11 +416,17 @@ class _PlaylistCoverTransitionHostState
             .getGeometryForChildIndex(index)
             .scrollOffset;
       } else if (child is RenderBox) {
-        final index = widget.itemIds.indexOf(marker.widget.entryId);
+        final visualRows = marker.context
+            .getInheritedWidgetOfExactType<PlaylistCoverLayoutIndices>()
+            ?.indices;
+        final index = visualRows?[marker.widget.entryId] ??
+            widget.itemIds.indexOf(marker.widget.entryId);
+        final rowTarget = visualRows?[id] ?? targetIndex;
         if (index < 0) return false;
         offset = position.pixels +
-            geometry.rect.top +
-            (targetIndex - index) * child.size.height;
+            geometry.rect.top -
+            viewportTop +
+            (rowTarget - index) * child.size.height;
       } else {
         return false;
       }
@@ -325,7 +444,7 @@ class _PlaylistCoverTransitionHostState
 
   bool _targetsReady() => _flights.every((flight) =>
       flight.target == null ||
-      !flight.source.hadImage ||
+      !flight.hadImage ||
       _hasImage(flight.target!.boundary));
 
   void _tryReveal() {
@@ -415,6 +534,7 @@ class _PlaylistCoverTransitionHostState
     final changed = _busy;
     _busy = false;
     _starting = false;
+    _instantHandoff = false;
     if (notify && mounted) {
       setState(() {});
       if (changed && identical(widget.controller._host, this)) {
@@ -447,9 +567,24 @@ class _PlaylistCoverTransitionHostState
     if (identical(widget.controller._host, this)) {
       widget.controller._host = null;
     }
+    _burstCooldown?.cancel();
     _animation.dispose();
     _handoff.dispose();
     super.dispose();
+  }
+
+  Rect? _visibleViewport() {
+    final host = _hostBox;
+    if (host == null) return null;
+    for (final marker in _markers.values) {
+      final viewport =
+          Scrollable.maybeOf(marker.context)?.context.findRenderObject();
+      if (viewport is RenderBox && viewport.attached && viewport.hasSize) {
+        return MatrixUtils.transformRect(
+            viewport.getTransformTo(host), Offset.zero & viewport.size);
+      }
+    }
+    return null;
   }
 
   @override
@@ -483,7 +618,16 @@ class _PlaylistCoverTransitionHostState
                         child: RepaintBoundary(
                   child: CustomPaint(
                       painter: _CoverFlightsPainter(
-                          List.unmodifiable(_flights), _animation, _reveal)),
+                          List.unmodifiable(_flights), _animation, _reveal,
+                          clip: _visibleViewport,
+                          resolveTarget: _instantHandoff
+                              ? (id) {
+                                  final marker = _markers[id];
+                                  return marker == null
+                                      ? null
+                                      : _geometry(marker);
+                                }
+                              : null)),
                 ))),
             ]),
           ),
@@ -510,9 +654,10 @@ class PlaylistItemArrival extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope =
         context.dependOnInheritedWidgetOfExactType<_CoverTransitionScope>();
-    final animation = scope != null && scope.hidden.isNotEmpty
-        ? scope.owner._arrival
-        : const AlwaysStoppedAnimation<double>(1);
+    final animation =
+        scope != null && scope.hidden.isNotEmpty && scope.owner._animateArrival
+            ? scope.owner._arrival
+            : const AlwaysStoppedAnimation<double>(1);
     return FadeTransition(
         opacity: animation,
         child: _ArrivalScale(animation: animation, child: child));
@@ -645,13 +790,15 @@ class _PlaylistCoverTransitionMarkerState
         context.dependOnInheritedWidgetOfExactType<_CoverTransitionScope>();
     return FadeTransition(
       opacity: scope?.hidden.contains(widget.entryId) == true
-          ? scope!.owner._reveal
+          ? scope!.owner._destinationVisibility
           : const AlwaysStoppedAnimation(1),
       child: RepaintBoundary(
           key: _boundary,
           child: _CoverReadinessObserver(
               onChanged: () => _owner?._imageMayBeReady(),
-              hidePlaceholder: scope?.hidden.contains(widget.entryId) == true,
+              hidePlaceholder: scope?.hidden.contains(widget.entryId) == true &&
+                  scope!.owner._flights.any((flight) =>
+                      flight.id == widget.entryId && flight.hadImage),
               child: widget.child)),
     );
   }
@@ -667,7 +814,9 @@ class _CoverGeometry {
 }
 
 class _CoverFlight {
-  _CoverFlight(this.id, this.source, this.image);
+  _CoverFlight(this.id, this.source, this.image, {bool? hadImage})
+      : hadImage = hadImage ?? source.hadImage;
+  final bool hadImage;
   final Object id;
   final _CoverGeometry source;
   final ui.Image image;
@@ -687,23 +836,31 @@ class _CaptureJob {
 }
 
 class _CoverFlightsPainter extends CustomPainter {
-  _CoverFlightsPainter(this.flights, this.animation, this.reveal)
+  _CoverFlightsPainter(this.flights, this.animation, this.reveal,
+      {required this.clip, this.resolveTarget})
       : super(repaint: Listenable.merge([animation, reveal]));
   final List<_CoverFlight> flights;
   final Animation<double> animation;
   final Animation<double> reveal;
+  final Rect? Function() clip;
+  final _CoverGeometry? Function(Object)? resolveTarget;
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
-    canvas.clipRect(Offset.zero & size);
-    final progress = Curves.easeInOutCubic.transform(animation.value);
+    canvas.clipRect(
+        (Offset.zero & size).intersect(clip() ?? (Offset.zero & size)));
+    // Finish geometry before revealing the destination; otherwise two covers
+    // at different positions overlap throughout the handoff.
+    final progress =
+        Curves.easeInOutCubic.transform((animation.value / .7).clamp(0.0, 1.0));
     for (final flight in flights) {
-      final target = flight.target ?? flight.source;
+      final destination = resolveTarget?.call(flight.id) ?? flight.target;
+      final target = destination ?? flight.source;
       final rect = Rect.lerp(flight.source.rect, target.rect, progress)!;
       final radius =
           BorderRadius.lerp(flight.source.radius, target.radius, progress)!;
-      final opacity = flight.target == null ? 1 - progress : 1 - reveal.value;
+      final opacity = destination == null ? 1 - progress : 1 - reveal.value;
       if (opacity <= 0) continue;
       final imageSize =
           Size(flight.image.width.toDouble(), flight.image.height.toDouble());
@@ -729,6 +886,43 @@ class _CoverFlightsPainter extends CustomPainter {
       flights != oldDelegate.flights ||
       animation != oldDelegate.animation ||
       reveal != oldDelegate.reveal;
+}
+
+ui.Image? _coverImage(RenderRepaintBoundary boundary) {
+  RenderImage? found;
+  var usable = true;
+  void visit(RenderObject render) {
+    if (!usable) return;
+    if (render is RenderOpacity && render.opacity != 1 ||
+        render is RenderAnimatedOpacity && render.opacity.value != 1) {
+      usable = false;
+      return;
+    }
+    if (render is RenderImage && render.image != null) {
+      if (found != null ||
+          render.fit != BoxFit.cover ||
+          render.color != null ||
+          render.centerSlice != null ||
+          render.repeat != ImageRepeat.noRepeat ||
+          render.matchTextDirection) {
+        usable = false;
+        return;
+      }
+      final rect = MatrixUtils.transformRect(
+          render.getTransformTo(boundary), Offset.zero & render.size);
+      final box = Offset.zero & boundary.size;
+      if ((rect.topLeft - box.topLeft).distance > .5 ||
+          (rect.bottomRight - box.bottomRight).distance > .5) {
+        usable = false;
+        return;
+      }
+      found = render;
+    }
+    render.visitChildren(visit);
+  }
+
+  visit(boundary);
+  return usable ? found?.image : null;
 }
 
 bool _hasImage(RenderObject render) {

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/playback_bookmarks.dart';
 import 'package:dan_player/lyric/local_lyric_preferences.dart';
 import 'package:dan_player/play_service/waveform_service.dart';
 import 'package:dan_player/src/bass/bass_waveform.dart';
@@ -25,6 +26,10 @@ class WaveformProgress extends StatefulWidget {
       required this.onSeek,
       this.enabled = true,
       this.hidden,
+      this.bookmarks = const [],
+      this.loopStart,
+      this.loopEnd,
+      this.loopEnabled = false,
       this.service});
   final Audio? audio;
   final bool waveformEnabled;
@@ -37,6 +42,9 @@ class WaveformProgress extends StatefulWidget {
   final bool enabled;
   final ValueListenable<bool>? hidden;
   final WaveformService? service;
+  final List<PlaybackBookmark> bookmarks;
+  final double? loopStart, loopEnd;
+  final bool loopEnabled;
 
   @override
   State<WaveformProgress> createState() => _WaveformProgressState();
@@ -204,6 +212,10 @@ class _WaveformProgressState extends State<WaveformProgress>
       waveform: _projectedPeaks,
       waveformDensity: widget.waveformDensity,
       waveformTooltip: message,
+      bookmarks: widget.bookmarks,
+      loopStart: widget.loopStart,
+      loopEnd: widget.loopEnd,
+      loopEnabled: widget.loopEnabled,
     );
   }
 }

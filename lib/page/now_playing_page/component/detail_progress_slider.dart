@@ -1,4 +1,9 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_menu_anchor.dart';
+import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/library/playback_bookmarks.dart';
+import 'package:dan_player/utils.dart' show showAppNotice;
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/lyric/local_lyric_preferences.dart';
 import 'package:dan_player/page/now_playing_page/component/detail_waveform_track.dart';
@@ -8,6 +13,10 @@ import 'dart:async';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
+
+import 'detail_timeline_annotations.dart';
 
 /// A rounded vertical handle keeps the timeline light without using a dot.
 /// Its visual size changes; Slider retains its full 48px interaction surface.
@@ -68,6 +77,10 @@ class DetailProgressSlider extends StatefulWidget {
     this.waveform,
     this.waveformTooltip,
     this.waveformDensity = WaveformBarDensity.automatic,
+    this.bookmarks = const [],
+    this.loopStart,
+    this.loopEnd,
+    this.loopEnabled = false,
   });
 
   final Stream<double> positions;
@@ -84,6 +97,9 @@ class DetailProgressSlider extends StatefulWidget {
   /// Availability or source information, shown without changing seek labels.
   final String? waveformTooltip;
   final WaveformBarDensity waveformDensity;
+  final List<PlaybackBookmark> bookmarks;
+  final double? loopStart, loopEnd;
+  final bool loopEnabled;
 
   @override
   State<DetailProgressSlider> createState() => _DetailProgressSliderState();
@@ -108,6 +124,14 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   bool _waveformInitialized = false;
   late final ValueNotifier<double> _display;
   final _elapsed = ValueNotifier<int>(0);
+  final _hoverPosition = ValueNotifier<double?>(null);
+  final _previewOverlay = OverlayPortalController();
+  final _previewLink = LayerLink();
+  late final FocusNode _sliderFocus;
+  bool _showRemaining = false;
+  double? _undoPosition;
+  double _dragOrigin = 0;
+  double _lastPreviewFraction = 0;
   StreamSubscription<double>? _subscription;
   AppLifecycleState? _lifecycle;
   ValueListenable<RenderingPreferences>? _preferences;
@@ -129,19 +153,15 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   double _safe(double value) =>
       value.isFinite ? value.clamp(0.0, _length).toDouble() : 0;
 
-  static String _time(double seconds) {
-    final value = seconds.floor();
-    final hours = value ~/ 3600;
-    final minutes = (value ~/ 60) % 60;
-    final remainder = (value % 60).toString().padLeft(2, '0');
-    return hours > 0
-        ? '$hours:${minutes.toString().padLeft(2, '0')}:$remainder'
-        : '$minutes:$remainder';
-  }
+  static String _time(double seconds) => detailTimelineTime(seconds);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _previewOverlay.show();
+    });
+    _sliderFocus = FocusNode(onKeyEvent: _handleKey);
     _display = ValueNotifier(_safe(widget.readPosition()));
     _elapsed.value = _display.value.floor();
     _display.addListener(() => _elapsed.value = _display.value.floor());
@@ -202,6 +222,8 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     if (oldWidget.trackIdentity != widget.trackIdentity ||
         sourceChanged ||
         !_enabled) {
+      _undoPosition = null;
+      _hoverPosition.value = null;
       _dragging = false;
       _dragIdentity = null;
       _receive(widget.readPosition(), immediate: true);
@@ -345,6 +367,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
       } else {
         _dragging = false;
         _dragIdentity = null;
+        _hoverPosition.value = null;
       }
       setState(() {});
     }
@@ -403,6 +426,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
 
   void _begin(double value) {
     _smoothing.stop();
+    _dragOrigin = _safe(widget.readPosition());
     _dragIdentity = widget.trackIdentity;
     setState(() => _dragging = true);
     _markHandleJump(_display.value, _safe(value));
@@ -412,10 +436,13 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   void _finish(double value) {
     final canSeek =
         _dragging && _enabled && _dragIdentity == widget.trackIdentity;
+    // MouseRegion does not emit hover while a button is down. Hand off at the
+    // last drag position instead of reviving the stale pre-drag hover point.
+    _hoverPosition.value = _hovered ? _safe(value) : null;
     setState(() => _dragging = false);
     _dragIdentity = null;
     try {
-      if (canSeek) widget.onSeek(_safe(value));
+      if (canSeek) _commitSeek(value, origin: _dragOrigin);
     } catch (error, stack) {
       // Let Slider finish its own gesture cleanup even if a caller fails.
       // Rethrowing here leaves its internal interaction active on the next
@@ -443,6 +470,103 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _receive(widget.readPosition(), immediate: true);
   }
 
+  void _commitSeek(double target, {double? origin, bool remember = true}) {
+    if (!_enabled || !_active) return;
+    final identity = widget.trackIdentity;
+    final before = origin ?? _safe(widget.readPosition());
+    final value = _safe(target);
+    widget.onSeek(value);
+    if (!mounted || identity != widget.trackIdentity) return;
+    // The service can reject a seek (buffering/device transition). Remember
+    // only a real position change, never offer an undo for a failed command.
+    final actual = _safe(widget.readPosition());
+    if (remember && (actual - before).abs() > .05) {
+      setState(() => _undoPosition = before);
+    }
+    _receive(actual, immediate: true);
+  }
+
+  void _seekFromAction(double target, {bool remember = true}) {
+    try {
+      _commitSeek(target, remember: remember);
+    } catch (error) {
+      if (mounted) {
+        _receive(widget.readPosition(), immediate: true);
+        showAppNotice(ui('操作失败：{0}', [error]),
+            context: context, kind: AppNoticeKind.error);
+      }
+    }
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (!_enabled ||
+        !_active ||
+        _dragging ||
+        (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    final step = keyboard.isShiftPressed ? 1.0 : 5.0;
+    double? target;
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight) {
+      final rtl = Directionality.of(context) == TextDirection.rtl;
+      final forward = (key == LogicalKeyboardKey.arrowRight) != rtl;
+      target = widget.readPosition() + (forward ? step : -step);
+    } else if (!keyboard.isShiftPressed) {
+      if (key == LogicalKeyboardKey.home) target = 0;
+      if (key == LogicalKeyboardKey.end) target = _length;
+      const digits = [
+        LogicalKeyboardKey.digit0,
+        LogicalKeyboardKey.digit1,
+        LogicalKeyboardKey.digit2,
+        LogicalKeyboardKey.digit3,
+        LogicalKeyboardKey.digit4,
+        LogicalKeyboardKey.digit5,
+        LogicalKeyboardKey.digit6,
+        LogicalKeyboardKey.digit7,
+        LogicalKeyboardKey.digit8,
+        LogicalKeyboardKey.digit9,
+      ];
+      final digit = digits.indexOf(key);
+      if (digit >= 0) target = _length * digit / 10;
+    }
+    if (target == null) return KeyEventResult.ignored;
+    _seekFromAction(target);
+    return KeyEventResult.handled;
+  }
+
+  void _hover(Offset local, double width) {
+    if (!_enabled || !_active || width <= 48) return;
+    var fraction = ((local.dx - 24) / (width - 48)).clamp(0.0, 1.0);
+    if (Directionality.of(context) == TextDirection.rtl) {
+      fraction = 1 - fraction;
+    }
+    _hoverPosition.value = (_length * fraction).floorToDouble();
+  }
+
+  Future<void> _copyTime() async {
+    final time = _time(_safe(widget.readPosition()));
+    try {
+      await Clipboard.setData(ClipboardData(text: time));
+      if (mounted) {
+        showAppNotice(ui('已复制播放时间'),
+            context: context, kind: AppNoticeKind.success);
+      }
+    } catch (error) {
+      if (mounted) {
+        showAppNotice(ui('复制播放时间失败：{0}', [error]),
+            context: context, kind: AppNoticeKind.error);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _detach();
@@ -454,6 +578,8 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _handleTransition.dispose();
     _display.dispose();
     _elapsed.dispose();
+    _hoverPosition.dispose();
+    _sliderFocus.dispose();
     super.dispose();
   }
 
@@ -471,79 +597,119 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
     final motion = _active && !_reduced;
     final timeline = RepaintBoundary(
-      child: Column(children: [
-        MouseRegion(
-          cursor:
-              _enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
-          child: Listener(
-            onPointerDown: (event) => _pointer ??= event.pointer,
-            onPointerUp: (event) {
-              if (_pointer == event.pointer) _pointer = null;
-            },
-            onPointerCancel: (event) => _cancelPointer(event.pointer),
-            child: Focus(
-              onFocusChange: (focused) => setState(() => _focused = focused),
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(end: emphasis),
-                duration: motion ? AppMotion.quick : Duration.zero,
-                curve: Curves.easeOutCubic,
-                builder: (context, emphasis, child) => SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 4 + emphasis,
-                    trackShape: _waveformVisual.layers.isEmpty
-                        ? const RoundedRectSliderTrackShape()
-                        : DetailWaveformTrackShape.visual(_waveformVisual),
-                    thumbShape: DetailProgressHandleShape(
-                        emphasis: emphasis,
-                        resolveHeight: _resolveHandleHeight),
-                    overlayShape: SliderComponentShape.noOverlay,
-                    activeTrackColor: scheme.primary,
-                    inactiveTrackColor: highContrast
-                        ? scheme.outline
-                        : scheme.primary.withValues(alpha: .18),
-                    thumbColor: scheme.primary,
-                    valueIndicatorColor: scheme.primaryContainer,
-                    valueIndicatorTextStyle:
-                        TextStyle(color: scheme.onPrimaryContainer),
-                    showValueIndicator: ShowValueIndicator.onDrag,
-                  ),
-                  child: child!,
-                ),
-                child: _withWaveformTooltip(ValueListenableBuilder<double>(
-                  valueListenable: _display,
-                  builder: (context, position, _) => Semantics(
-                    label: ui('播放进度'),
-                    child: Slider(
-                      key: const ValueKey('detail-progress-slider'),
-                      min: 0,
-                      max: _length > 0 ? _length : 1,
-                      value: _safe(position),
-                      label: _time(position),
-                      semanticFormatterCallback: _time,
-                      onChangeStart: _enabled ? _begin : null,
-                      onChanged: _enabled
-                          ? (value) {
-                              if (_dragging) {
-                                _markHandleJump(_display.value, _safe(value));
-                                _display.value = _safe(value);
-                              }
-                            }
-                          : null,
-                      onChangeEnd: _enabled ? _finish : null,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        DetailTimelineAnnotations(
+          duration: _length,
+          bookmarks: widget.bookmarks,
+          loopStart: widget.loopStart,
+          loopEnd: widget.loopEnd,
+          loopEnabled: widget.loopEnabled,
+          onBookmark: _enabled
+              ? (bookmark) => _seekFromAction(bookmark.position)
+              : null,
+        ),
+        LayoutBuilder(
+            builder: (context, constraints) => OverlayPortal(
+                controller: _previewOverlay,
+                overlayChildBuilder: (context) => Positioned(
+                    width:
+                        (constraints.maxWidth - 48).clamp(1.0, double.infinity),
+                    child: CompositedTransformFollower(
+                      link: _previewLink,
+                      targetAnchor: Alignment.topLeft,
+                      followerAnchor: Alignment.bottomLeft,
+                      offset: const Offset(24, 6),
+                      showWhenUnlinked: false,
+                      child: _previewBubble(scheme),
+                    )),
+                child: CompositedTransformTarget(
+                  link: _previewLink,
+                  child: MouseRegion(
+                    cursor: _enabled
+                        ? SystemMouseCursors.click
+                        : SystemMouseCursors.basic,
+                    onEnter: (_) => setState(() => _hovered = true),
+                    onHover: (event) =>
+                        _hover(event.localPosition, constraints.maxWidth),
+                    onExit: (_) {
+                      _hoverPosition.value = null;
+                      setState(() => _hovered = false);
+                    },
+                    child: Listener(
+                      onPointerDown: (event) => _pointer ??= event.pointer,
+                      onPointerUp: (event) {
+                        if (_pointer == event.pointer) _pointer = null;
+                      },
+                      onPointerCancel: (event) => _cancelPointer(event.pointer),
+                      child: Focus(
+                        onFocusChange: (focused) =>
+                            setState(() => _focused = focused),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(end: emphasis),
+                          duration: motion ? AppMotion.quick : Duration.zero,
+                          curve: Curves.easeOutCubic,
+                          builder: (context, emphasis, child) => SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 4 + emphasis,
+                              trackShape: _waveformVisual.layers.isEmpty
+                                  ? const RoundedRectSliderTrackShape()
+                                  : DetailWaveformTrackShape.visual(
+                                      _waveformVisual),
+                              thumbShape: DetailProgressHandleShape(
+                                  emphasis: emphasis,
+                                  resolveHeight: _resolveHandleHeight),
+                              overlayShape: SliderComponentShape.noOverlay,
+                              activeTrackColor: scheme.primary,
+                              inactiveTrackColor: highContrast
+                                  ? scheme.outline
+                                  : scheme.primary.withValues(alpha: .18),
+                              thumbColor: scheme.primary,
+                              valueIndicatorColor: scheme.primaryContainer,
+                              valueIndicatorTextStyle:
+                                  TextStyle(color: scheme.onPrimaryContainer),
+                              showValueIndicator: ShowValueIndicator.never,
+                            ),
+                            child: child!,
+                          ),
+                          child: ValueListenableBuilder<double>(
+                            valueListenable: _display,
+                            builder: (context, position, _) => Semantics(
+                              label: ui('播放进度'),
+                              child: Slider(
+                                key: const ValueKey('detail-progress-slider'),
+                                focusNode: _sliderFocus,
+                                min: 0,
+                                max: _length > 0 ? _length : 1,
+                                value: _safe(position),
+                                label: _dragging
+                                    ? '${_time(position)}  (${position >= _dragOrigin ? '+' : '−'}${_time((position - _dragOrigin).abs())})'
+                                    : _time(position),
+                                semanticFormatterCallback: _time,
+                                onChangeStart: _enabled ? _begin : null,
+                                onChanged: _enabled
+                                    ? (value) {
+                                        if (_dragging) {
+                                          _markHandleJump(
+                                              _display.value, _safe(value));
+                                          _display.value = _safe(value);
+                                        }
+                                      }
+                                    : null,
+                                onChangeEnd: _enabled ? _finish : null,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                )),
-              ),
-            ),
-          ),
-        ),
+                ))),
+        DetailTimelineScale(duration: _length),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: DefaultTextStyle(
             style: Theme.of(context).textTheme.labelMedium!.copyWith(
-                color: scheme.onSurfaceVariant,
+                color: scheme.primary,
                 fontFeatures: const [FontFeature.tabularFigures()]),
             child: OverflowBar(
                 alignment: MainAxisAlignment.spaceBetween,
@@ -551,16 +717,34 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                 overflowSpacing: 2,
                 overflowAlignment: OverflowBarAlignment.end,
                 children: [
-                  ValueListenableBuilder<int>(
-                    valueListenable: _elapsed,
-                    builder: (context, position, _) => Text(
-                        _time(position.toDouble()),
-                        key: const ValueKey('detail-progress-elapsed'),
-                        style: _dragging
-                            ? TextStyle(color: scheme.primary)
-                            : null),
+                  _withWaveformTooltip(_timeMenu(scheme)),
+                  Tooltip(
+                    message: ui(_showRemaining ? '显示总时长' : '显示剩余时间'),
+                    child: InkWell(
+                      key: const ValueKey('detail-progress-time-mode'),
+                      borderRadius: AppShape.smallRadius,
+                      onTap: () =>
+                          setState(() => _showRemaining = !_showRemaining),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: _elapsed,
+                          builder: (context, position, _) => Text(
+                            _showRemaining
+                                ? '−${_time((_length - position).clamp(0.0, _length))}'
+                                : _time(_length),
+                            key: const ValueKey('detail-progress-total'),
+                            semanticsLabel: _showRemaining
+                                ? ui('剩余 {0}', [
+                                    _time((_length - position)
+                                        .clamp(0.0, _length))
+                                  ])
+                                : null,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                  Text(_time(_length)),
                 ]),
           ),
         ),
@@ -573,7 +757,218 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
 
   Widget _withWaveformTooltip(Widget child) {
     final message = widget.waveformTooltip;
-    if (message == null || message.trim().isEmpty) return child;
-    return Tooltip(message: message, excludeFromSemantics: true, child: child);
+    final keyboard = ui('进度快捷键：←/→ 5 秒，Shift+←/→ 1 秒，Home/End 首尾，0–9 百分比');
+    return Tooltip(
+        message: [
+          if (message != null && message.trim().isNotEmpty) message,
+          keyboard
+        ].join('\n'),
+        excludeFromSemantics: true,
+        child: child);
+  }
+
+  Widget _previewBubble(ColorScheme scheme) => IgnorePointer(
+        child: ExcludeSemantics(
+          child: ListenableBuilder(
+            listenable: Listenable.merge([_display, _hoverPosition]),
+            builder: (context, _) {
+              final position =
+                  _dragging ? _display.value : _hoverPosition.value;
+              final visible = position != null && _enabled && _active;
+              if (visible) {
+                final fraction = position / _length;
+                _lastPreviewFraction =
+                    Directionality.of(context) == TextDirection.rtl
+                        ? 1 - fraction
+                        : fraction;
+              }
+              final duration =
+                  _active && !_reduced ? AppMotion.quick : Duration.zero;
+              // The numeral ink sits above the font's line-box centre. Balance
+              // its optical padding without moving the bubble's time anchor.
+              const opticalOffset = .5;
+              return _PreviewPosition(
+                fraction: _lastPreviewFraction,
+                child: AnimatedSwitcher(
+                  duration: duration,
+                  reverseDuration: duration,
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: ScaleTransition(
+                          alignment: Alignment.bottomCenter,
+                          scale: Tween<double>(begin: .8, end: 1)
+                              .animate(animation),
+                          child: child)),
+                  child: !visible
+                      ? const SizedBox.shrink()
+                      : Material(
+                          key: const ValueKey('detail-progress-preview-bubble'),
+                          color: scheme.primaryContainer,
+                          borderRadius: AppShape.smallRadius,
+                          elevation: 2,
+                          child: _previewSize(
+                              duration,
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(10,
+                                    5 + opticalOffset, 10, 5 - opticalOffset),
+                                child: Text(
+                                  _dragging
+                                      ? '${_time(position)}  (${position >= _dragOrigin ? '+' : '−'}${_time((position - _dragOrigin).abs())})'
+                                      : _time(position),
+                                  key: ValueKey(_dragging
+                                      ? 'detail-progress-drag-time'
+                                      : 'detail-progress-hover-time'),
+                                  textAlign: TextAlign.center,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelMedium
+                                      ?.copyWith(
+                                    color: scheme.onPrimaryContainer,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures()
+                                    ],
+                                  ),
+                                ),
+                              )),
+                        ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+  Widget _previewSize(Duration duration, Widget child) =>
+      duration == Duration.zero
+          ? child
+          : AnimatedSize(
+              duration: duration,
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.bottomCenter,
+              child: child);
+
+  Widget _timeMenu(ColorScheme scheme) {
+    final menuWidth =
+        (MediaQuery.sizeOf(context).width - 32).clamp(120.0, 360.0);
+    final menuStyle = MenuStyle(
+        maximumSize: WidgetStatePropertyAll(Size(menuWidth, double.infinity)));
+    Widget label(String text, {bool time = false}) => ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: menuWidth - 88),
+          child: Text(text,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: time
+                  ? TextStyle(
+                      color:
+                          scheme.primary.withValues(alpha: _enabled ? 1 : .38))
+                  : null),
+        );
+    final bookmarks = widget.bookmarks
+        .where((b) => b.fitsDuration(_length))
+        .toList()
+      ..sort((a, b) => a.positionMs.compareTo(b.positionMs));
+    return AppMenuAnchor(
+      style: menuStyle,
+      menuChildren: [
+        MenuItemButton(
+          key: const ValueKey('detail-progress-copy-time'),
+          onPressed: _enabled ? _copyTime : null,
+          leadingIcon: const Icon(Icons.content_copy),
+          child: label(ui('复制播放时间')),
+        ),
+        MenuItemButton(
+          key: const ValueKey('detail-progress-undo-seek'),
+          onPressed: !_enabled || _undoPosition == null
+              ? null
+              : () {
+                  final target = _undoPosition!;
+                  setState(() => _undoPosition = null);
+                  _seekFromAction(target, remember: false);
+                },
+          leadingIcon: const Icon(Icons.undo),
+          child: label(ui('撤销进度跳转')),
+        ),
+        if (bookmarks.isNotEmpty)
+          SubmenuButton(
+            menuStyle: menuStyle,
+            leadingIcon: const Icon(Icons.bookmarks_outlined),
+            menuChildren: [
+              for (final bookmark in bookmarks)
+                MenuItemButton(
+                  onPressed: _enabled
+                      ? () => _seekFromAction(bookmark.position)
+                      : null,
+                  child: label(
+                      '${_time(bookmark.position)} · ${bookmark.label}',
+                      time: true),
+                ),
+            ],
+            child: label(ui('播放书签')),
+          ),
+      ],
+      builder: (context, controller, _) => InkWell(
+        key: const ValueKey('detail-progress-time-menu'),
+        borderRadius: AppShape.smallRadius,
+        onTap: () => controller.isOpen ? controller.close() : controller.open(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: ValueListenableBuilder<int>(
+            valueListenable: _elapsed,
+            builder: (context, position, _) =>
+                Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(
+                  child: Text(_time(position.toDouble()),
+                      key: const ValueKey('detail-progress-elapsed'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          _dragging ? TextStyle(color: scheme.primary) : null)),
+              const SizedBox(width: 2),
+              Icon(Icons.expand_more,
+                  key: const ValueKey('detail-progress-time-chevron'),
+                  size: 14,
+                  color: scheme.primary),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Center the bubble on the media position, independently of the label width.
+/// Only clamp near the ends; Align would shift its center whenever text changes.
+class _PreviewPosition extends SingleChildRenderObjectWidget {
+  const _PreviewPosition({required this.fraction, required super.child});
+  final double fraction;
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderPreviewPosition(fraction);
+  @override
+  void updateRenderObject(
+          BuildContext context, _RenderPreviewPosition renderObject) =>
+      renderObject.fraction = fraction;
+}
+
+class _RenderPreviewPosition extends RenderShiftedBox {
+  _RenderPreviewPosition(this._fraction) : super(null);
+  double _fraction;
+  set fraction(double value) {
+    if (_fraction == value) return;
+    _fraction = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    child!.layout(constraints.loosen(), parentUsesSize: true);
+    size =
+        constraints.constrain(Size(constraints.maxWidth, child!.size.height));
+    (child!.parentData! as BoxParentData).offset = Offset(
+        (size.width * _fraction - child!.size.width / 2).clamp(
+            0.0, (size.width - child!.size.width).clamp(0.0, double.infinity)),
+        0);
   }
 }

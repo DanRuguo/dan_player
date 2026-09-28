@@ -9,6 +9,7 @@ import 'package:dan_player/library/track_identity.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/statistics/listening_calendar.dart';
+import 'package:dan_player/statistics/recent_listening_activity.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart';
 
@@ -126,6 +127,64 @@ class PlaybackStatistics extends ChangeNotifier {
   final Map<String, int> dailyPlayCounts = {};
   String? playCountTrackingStartedOn;
   final List<int> hourlyMilliseconds = List.filled(24, 0);
+  static const recentRecordLimit = 20000;
+  int? recentTrackingStartedAt;
+  final List<int> recentPlayStarts = [];
+  final List<List<int>> recentListeningIntervals = [];
+
+  RecentListeningActivity recentActivity(DateTime now) =>
+      RecentListeningActivity(
+          now: now,
+          trackingStartedAt: recentTrackingStartedAt,
+          playStarts: recentPlayStarts,
+          intervals: recentListeningIntervals);
+
+  void _clearRecentActivity() {
+    recentTrackingStartedAt = null;
+    recentPlayStarts.clear();
+    recentListeningIntervals.clear();
+  }
+
+  void _retainRecentActivity(DateTime now) {
+    final cutoff =
+        now.subtract(const Duration(hours: 48)).millisecondsSinceEpoch;
+    recentTrackingStartedAt =
+        math.max(recentTrackingStartedAt ?? now.millisecondsSinceEpoch, cutoff);
+    // Validated histories are ordered. Ordinary ticks inspect only their head,
+    // rather than scanning up to 40,000 retained records on every sample.
+    var expiredStarts = 0;
+    while (expiredStarts < recentPlayStarts.length &&
+        recentPlayStarts[expiredStarts] < cutoff) {
+      expiredStarts++;
+    }
+    if (expiredStarts > 0) recentPlayStarts.removeRange(0, expiredStarts);
+    var expiredIntervals = 0;
+    while (expiredIntervals < recentListeningIntervals.length &&
+        recentListeningIntervals[expiredIntervals][1] <= cutoff) {
+      expiredIntervals++;
+    }
+    if (expiredIntervals > 0) {
+      recentListeningIntervals.removeRange(0, expiredIntervals);
+    }
+    if (recentListeningIntervals.isNotEmpty &&
+        recentListeningIntervals.first[0] < cutoff) {
+      recentListeningIntervals.first[0] = cutoff;
+    }
+    // Pathological rapid starts or repeated gaps must not grow the file forever.
+    // If the cap removes observed history, move coverage forward truthfully.
+    if (recentPlayStarts.length > recentRecordLimit) {
+      final removed = recentPlayStarts.length - recentRecordLimit;
+      recentTrackingStartedAt =
+          math.max(recentTrackingStartedAt!, recentPlayStarts[removed - 1] + 1);
+      recentPlayStarts.removeRange(0, removed);
+    }
+    if (recentListeningIntervals.length > recentRecordLimit) {
+      final removed = recentListeningIntervals.length - recentRecordLimit;
+      recentTrackingStartedAt = math.max(
+          recentTrackingStartedAt!, recentListeningIntervals[removed - 1][1]);
+      recentListeningIntervals.removeRange(0, removed);
+    }
+  }
 
   Audio? _activeAudio;
   String? _activeId;
@@ -200,6 +259,33 @@ class PlaybackStatistics extends ChangeNotifier {
   List<TrackPlaybackStatistics> topListeningTime({int limit = 10}) =>
       _topRanked(limit, _compareListeningTime);
 
+  /// Group only records with a known owner. Album names alone are not unique.
+  List<TrackPlaybackStatistics> groupedRankings({required bool albums}) {
+    final groups = <String, TrackPlaybackStatistics>{};
+    for (final track in tracks.values) {
+      final artist = track.artist.trim();
+      final album = track.album.trim();
+      if (track.legacyUnassigned ||
+          artist.isEmpty ||
+          artist == 'UNKNOWN' ||
+          (albums && (album.isEmpty || album == 'UNKNOWN'))) {
+        continue;
+      }
+      final key = json.encode(albums ? [artist, album] : [artist]);
+      final group = groups.putIfAbsent(
+          key,
+          () => TrackPlaybackStatistics(
+              id: key,
+              title: albums ? album : artist,
+              artist: albums ? artist : '',
+              album: album,
+              online: false));
+      group.playCount += track.playCount;
+      group.listenMilliseconds += track.listenMilliseconds;
+    }
+    return groups.values.toList();
+  }
+
   List<TrackPlaybackStatistics> _topRanked(
       int limit, Comparator<TrackPlaybackStatistics> compare) {
     if (limit <= 0) return [];
@@ -240,6 +326,7 @@ class PlaybackStatistics extends ChangeNotifier {
     dailyPlayCounts.clear();
     playCountTrackingStartedOn = null;
     hourlyMilliseconds.fillRange(0, hourlyMilliseconds.length, 0);
+    _clearRecentActivity();
     if (!_persist) {
       notifyListeners();
       return;
@@ -272,6 +359,7 @@ class PlaybackStatistics extends ChangeNotifier {
           dailyPlayCounts.clear();
           playCountTrackingStartedOn = null;
           hourlyMilliseconds.fillRange(0, hourlyMilliseconds.length, 0);
+          _clearRecentActivity();
         }
       }
       if (!loaded && firstError != null) throw firstError;
@@ -297,6 +385,7 @@ class PlaybackStatistics extends ChangeNotifier {
           dailyPlayCounts.clear();
           playCountTrackingStartedOn = null;
           hourlyMilliseconds.fillRange(0, hourlyMilliseconds.length, 0);
+          _clearRecentActivity();
           _restoreSnapshot(previous);
           rethrow;
         }
@@ -306,7 +395,12 @@ class PlaybackStatistics extends ChangeNotifier {
       if (playCountTrackingStartedOn == null) {
         playCountTrackingStartedOn =
             listeningDayKey(localCalendarDate(_clock()));
-        _loadedVersion = 3;
+        _loadedVersion = 4;
+        _scheduleSave(immediate: true);
+      }
+      if (recentTrackingStartedAt == null) {
+        _retainRecentActivity(_clock());
+        _loadedVersion = 4;
         _scheduleSave(immediate: true);
       }
     } catch (error, trace) {
@@ -322,7 +416,7 @@ class PlaybackStatistics extends ChangeNotifier {
       throw const FormatException("Statistics root must be an object");
     }
     final version = decoded['version'] ?? 1;
-    if (version is int && version > 3) {
+    if (version is int && version > 4) {
       throw UnsupportedError('Newer statistics version');
     }
     if (version is! int || version < 1) {
@@ -349,6 +443,52 @@ class PlaybackStatistics extends ChangeNotifier {
       }
     }
     playCountTrackingStartedOn = tracking as String?;
+    final recentStart = decoded['recentTrackingStartedAt'];
+    final starts = decoded['recentPlayStarts'];
+    final intervals = decoded['recentListeningIntervals'];
+    if (recentStart != null &&
+        (recentStart is! int ||
+            recentStart < 0 ||
+            recentStart > 8640000000000000)) {
+      throw const FormatException('Invalid recent tracking time');
+    }
+    if (starts != null &&
+        (starts is! List || starts.length > recentRecordLimit)) {
+      throw const FormatException('Invalid recent play starts');
+    }
+    if (intervals != null &&
+        (intervals is! List || intervals.length > recentRecordLimit)) {
+      throw const FormatException('Invalid recent listening intervals');
+    }
+    int previous = -1;
+    for (final time in (starts as List? ?? const [])) {
+      if (recentStart == null ||
+          time is! int ||
+          time < 0 ||
+          time < previous ||
+          time > 8640000000000000) {
+        throw const FormatException('Invalid recent play timestamp');
+      }
+      recentPlayStarts.add(time);
+      previous = time;
+    }
+    previous = -1;
+    for (final interval in (intervals as List? ?? const [])) {
+      if (recentStart == null ||
+          interval is! List ||
+          interval.length != 2 ||
+          interval[0] is! int ||
+          interval[1] is! int ||
+          interval[0] < 0 ||
+          interval[1] <= interval[0] ||
+          interval[0] < previous ||
+          interval[1] > 8640000000000000) {
+        throw const FormatException('Invalid recent listening interval');
+      }
+      recentListeningIntervals.add([interval[0] as int, interval[1] as int]);
+      previous = interval[1] as int;
+    }
+    recentTrackingStartedAt = recentStart as int?;
     final trackMaps = decoded["tracks"];
     if (trackMaps != null && trackMaps is! List) {
       throw const FormatException('Statistics tracks must be a list');
@@ -469,7 +609,11 @@ class PlaybackStatistics extends ChangeNotifier {
     if (!listEquals(before, after)) {
       throw StateError('Statistics identity migration changed totals');
     }
-    _loadedVersion = playCountTrackingStartedOn == null ? 2 : 3;
+    _loadedVersion = recentTrackingStartedAt != null
+        ? 4
+        : playCountTrackingStartedOn == null
+            ? 2
+            : 3;
     return migrated;
   }
 
@@ -480,6 +624,12 @@ class PlaybackStatistics extends ChangeNotifier {
         'dailyPlayCounts': Map<String, int>.of(dailyPlayCounts),
         'playCountTrackingStartedOn': playCountTrackingStartedOn,
         'hours': List<int>.of(hourlyMilliseconds),
+        'recentTrackingStartedAt': recentTrackingStartedAt,
+        'recentPlayStarts': List<int>.of(recentPlayStarts),
+        'recentListeningIntervals': [
+          for (final interval in recentListeningIntervals)
+            List<int>.of(interval)
+        ],
       };
 
   void start(Audio audio, {double playbackRate = 1.0}) {
@@ -524,7 +674,24 @@ class PlaybackStatistics extends ChangeNotifier {
     final day = listeningDayKey(localCalendarDate(now));
     playCountTrackingStartedOn ??= day;
     dailyPlayCounts[day] = (dailyPlayCounts[day] ?? 0) + 1;
-    _loadedVersion = 3;
+    final timestamp = now.millisecondsSinceEpoch;
+    // Clock corrections cannot leave persisted timestamps out of order.
+    if (recentPlayStarts.isEmpty || recentPlayStarts.last <= timestamp) {
+      recentPlayStarts.add(timestamp);
+    } else {
+      var low = 0, high = recentPlayStarts.length;
+      while (low < high) {
+        final middle = (low + high) ~/ 2;
+        if (recentPlayStarts[middle] <= timestamp) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+      recentPlayStarts.insert(low, timestamp);
+    }
+    _retainRecentActivity(now);
+    _loadedVersion = 4;
     _lastNotifyMilliseconds = stats.listenMilliseconds;
     _scheduleSave();
     notifyListeners();
@@ -559,6 +726,10 @@ class PlaybackStatistics extends ChangeNotifier {
     final difference = now.difference(previous);
     if (difference.isNegative) {
       // A wall-clock correction must never subtract from saved counters.
+      // Previously recorded timestamps now overlap the corrected timeline.
+      // Restart precise coverage; daily/lifetime totals remain untouched.
+      _clearRecentActivity();
+      recentTrackingStartedAt = now.millisecondsSinceEpoch;
       _lastTick = now;
       return;
     }
@@ -587,6 +758,21 @@ class PlaybackStatistics extends ChangeNotifier {
   }
 
   void _recordClockBuckets(DateTime end, int milliseconds) {
+    final begin = end.millisecondsSinceEpoch - milliseconds;
+    final finish = end.millisecondsSinceEpoch;
+    // Merge adjacent samples; no per-tick event stream is written to disk.
+    if (recentListeningIntervals.isEmpty ||
+        begin > recentListeningIntervals.last[1]) {
+      recentListeningIntervals.add([begin, finish]);
+    } else if (begin == recentListeningIntervals.last[1]) {
+      recentListeningIntervals.last[1] = finish;
+    } else {
+      // Wall-clock rollback invalidates exact coverage, never saved daily totals.
+      _clearRecentActivity();
+      recentListeningIntervals.add([begin, finish]);
+      recentTrackingStartedAt = begin;
+    }
+    _retainRecentActivity(end);
     var cursor = end.subtract(Duration(milliseconds: milliseconds));
     while (cursor.isBefore(end)) {
       final nextHour = cursor.isUtc
@@ -695,12 +881,15 @@ class PlaybackStatistics extends ChangeNotifier {
       await target.parent.create(recursive: true);
       await temporary.writeAsString(
         const JsonEncoder.withIndent("  ").convert({
-          "version": 3,
+          "version": 4,
           "tracks": tracks.values.map((item) => item.toMap()).toList(),
           "days": dailyMilliseconds,
           "dailyPlayCounts": dailyPlayCounts,
           "playCountTrackingStartedOn": playCountTrackingStartedOn,
           "hours": hourlyMilliseconds,
+          "recentTrackingStartedAt": recentTrackingStartedAt,
+          "recentPlayStarts": recentPlayStarts,
+          "recentListeningIntervals": recentListeningIntervals,
         }),
         flush: true,
       );

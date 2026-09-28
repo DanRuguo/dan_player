@@ -126,6 +126,32 @@ Future<void> _advance(
 
 void main() {
   testWidgets(
+      'ordinary lyric relayout cannot cancel an in-flight playback scroll',
+      (tester) async {
+    final fixture = _Fixture();
+    await tester.pumpWidget(fixture.app());
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    await _advance(tester, fixture, 404.1);
+    await tester.pump(const Duration(milliseconds: 80));
+    final scroll = _controller(tester);
+    expect(scroll.position.isScrollingNotifier.value, isTrue);
+    final before = scroll.offset;
+    tester.binding.addPostFrameCallback((_) {
+      const SizeChangedLayoutNotification()
+          .dispatch(tester.element(find.byType(LyricViewTile).at(101)));
+    });
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(scroll.position.isScrollingNotifier.value, isTrue,
+        reason:
+            'Only explicit presentation changes can own jumpTo corrections');
+    expect(scroll.offset, greaterThan(before));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
+  testWidgets(
       'the next three lyric lines stay clear while earlier lines retain blur',
       (tester) async {
     await (FontLoader(danEmbeddedFontFamily)

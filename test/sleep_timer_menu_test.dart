@@ -18,6 +18,10 @@ class _Playback extends ChangeNotifier implements PlaybackService {
   @override
   final sleepTimerRemaining = ValueNotifier<Duration?>(null);
   @override
+  final sleepTimerPaused = ValueNotifier(false);
+  @override
+  final sleepTimerFinishCurrent = ValueNotifier(false);
+  @override
   final stopAfterCurrent = ValueNotifier(false);
   @override
   final queueStopBoundary = QueueStopBoundary();
@@ -32,6 +36,8 @@ class _Playback extends ChangeNotifier implements PlaybackService {
   @override
   void dispose() {
     sleepTimerRemaining.dispose();
+    sleepTimerPaused.dispose();
+    sleepTimerFinishCurrent.dispose();
     stopAfterCurrent.dispose();
     queueStopBoundary.dispose();
     segmentLoop.dispose();

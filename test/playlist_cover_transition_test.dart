@@ -228,8 +228,9 @@ void main() {
     expect(controller.active, isTrue);
     expect(controller.debugSnapshotCount, 1);
     final afterLayoutBuilds = builds;
-    await tester.pump(const Duration(milliseconds: 110));
+    await tester.pump(const Duration(milliseconds: 77));
     expect(builds, afterLayoutBuilds);
+    // Geometry finishes in the first 70%; 77ms is its midpoint.
     // Midpoint is (85,85)-(165,165), with a rounded but no longer circular corner.
     expect((await _pixel(tester, image, 125, 125)).toARGB32(),
         Colors.red.toARGB32());
@@ -329,6 +330,183 @@ void main() {
     expect(controller.busy, isFalse);
     expect(tester.binding.hasScheduledFrame, isFalse);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('top stays at zero with cover inset and a tree search header',
+      (tester) async {
+    final controller = PlaylistCoverTransitionController();
+    final scroll = ScrollController();
+    addTearDown(controller.dispose);
+    addTearDown(scroll.dispose);
+    late StateSetter change;
+    var tree = false;
+    await tester
+        .pumpWidget(MaterialApp(home: StatefulBuilder(builder: (_, update) {
+      change = update;
+      return PlaylistCoverTransitionHost(
+          controller: controller,
+          itemIds: List.generate(80, (i) => i),
+          child: Column(children: [
+            if (tree) const SizedBox(height: 72, child: Text('Search')),
+            Expanded(
+                child: ListView.builder(
+                    controller: scroll,
+                    itemCount: 80,
+                    itemExtent: 80,
+                    itemBuilder: (_, i) => Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: _cover(i, size: 48))))
+          ]));
+    })));
+    await tester.pumpAndSettle();
+    for (final next in [true, false, true, false]) {
+      await tester.runAsync(
+          () => controller.transition(() => change(() => tree = next)));
+      await tester.pumpAndSettle();
+      expect(scroll.offset, 0,
+          reason: 'Never turn the 16px cover inset into scrolling');
+      expect(
+          tester
+              .getTopLeft(find.byWidgetPredicate(
+                  (w) => w is PlaylistCoverTransitionMarker && w.entryId == 0))
+              .dy,
+          next ? 88 : 16);
+    }
+  });
+
+  testWidgets(
+      'a whole rapid click burst uses one capture batch and latest layout',
+      (tester) async {
+    final controller = PlaylistCoverTransitionController();
+    addTearDown(controller.dispose);
+    late StateSetter change;
+    var side = 60.0;
+    await tester
+        .pumpWidget(MaterialApp(home: StatefulBuilder(builder: (_, update) {
+      change = update;
+      return PlaylistCoverTransitionHost(
+          controller: controller,
+          child: Align(
+              alignment: Alignment.topLeft, child: _cover('a', size: side)));
+    })));
+    await tester.pumpAndSettle();
+    await tester
+        .runAsync(() => controller.transition(() => change(() => side = 80)));
+    await tester.pump();
+    for (var i = 0; i < 12; i++) {
+      await controller.transition(() => change(() => side = 90.0 + i));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    expect(controller.debugCaptureCount, 1);
+    expect(side, 101);
+    expect(controller.debugSnapshotCount, 0);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets(
+      'stationary branch prefix neither captures nor moves the first cover',
+      (tester) async {
+    final controller = PlaylistCoverTransitionController();
+    final scroll = ScrollController();
+    addTearDown(controller.dispose);
+    addTearDown(scroll.dispose);
+    late StateSetter change;
+    var expanded = false;
+    await tester
+        .pumpWidget(MaterialApp(home: StatefulBuilder(builder: (_, update) {
+      change = update;
+      return PlaylistCoverTransitionHost(
+          controller: controller,
+          itemIds: const ['root'],
+          child: ListView(controller: scroll, children: [
+            Padding(padding: const EdgeInsets.all(16), child: _cover('root')),
+            if (expanded) const SizedBox(height: 1200),
+          ]));
+    })));
+    await tester.pumpAndSettle();
+    final root = find.byWidgetPredicate(
+        (w) => w is PlaylistCoverTransitionMarker && w.entryId == 'root');
+    final before = tester.getRect(root);
+    await controller.transition(() => change(() => expanded = true),
+        preserveAnchor: false, animateArrival: false, captureIds: {});
+    await tester.pumpAndSettle();
+    expect(tester.getRect(root), before);
+    expect(controller.debugCaptureCount, 0);
+    expect(scroll.offset, 0);
+  });
+
+  testWidgets(
+      'rapid switches retain decoded art while destination reattaches without new readbacks',
+      (tester) async {
+    final recorder = ui.PictureRecorder();
+    Canvas(recorder).drawColor(Colors.red, BlendMode.src);
+    final picture = recorder.endRecording();
+    late ui.Image art;
+    await tester.runAsync(() async {
+      art = await picture.toImage(40, 40);
+    });
+    picture.dispose();
+    addTearDown(art.dispose);
+    final controller = PlaylistCoverTransitionController();
+    addTearDown(controller.dispose);
+    final boundary = GlobalKey();
+    late StateSetter change;
+    var x = 10.0;
+    var loaded = true;
+    await tester.pumpWidget(MaterialApp(
+        home: Center(
+            child: SizedBox.square(
+                dimension: 300,
+                child: StatefulBuilder(builder: (_, update) {
+                  change = update;
+                  return RepaintBoundary(
+                      key: boundary,
+                      child: ColoredBox(
+                          color: Colors.black,
+                          child: PlaylistCoverTransitionHost(
+                              controller: controller,
+                              child: Stack(children: [
+                                Positioned(
+                                    left: x,
+                                    top: 20,
+                                    child: SizedBox.square(
+                                        dimension: 40,
+                                        child: PlaylistCoverTransitionMarker(
+                                            entryId: 'a',
+                                            child: loaded
+                                                ? RawImage(
+                                                    image: art,
+                                                    fit: BoxFit.cover)
+                                                : const ColoredBox(
+                                                    color: Colors.blue))))
+                              ]))));
+                })))));
+    await tester.pumpAndSettle();
+    await controller.transition(() => change(() => x = 100));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+    await controller.transition(() => change(() {
+          x = 200;
+          loaded = false;
+        }));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect((await _pixel(tester, boundary, 220, 40)).toARGB32(),
+        Colors.red.toARGB32());
+    expect(controller.debugRasterCaptureCount, 0);
+    expect(controller.debugCaptureCount, 1);
+    expect(controller.debugReusedImageCount, 2);
+    expect(controller.busy, isTrue);
+    change(() => loaded = true);
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect((await _pixel(tester, boundary, 220, 40)).toARGB32(),
+        Colors.red.toARGB32());
+    expect(controller.busy, isFalse);
+    expect(controller.debugSnapshotCount, 0);
+    expect(tester.binding.hasScheduledFrame, isFalse);
   });
 
   testWidgets('disposing during capture and during flight is safe',

@@ -356,13 +356,16 @@ class _SongPreviewPainter {
   void _text(Canvas canvas, String value, Offset offset, double width,
       double size, int lines,
       {FontWeight weight = FontWeight.w400,
+      Color? color,
       TextAlign alignment = TextAlign.left}) {
-    _paragraph(value, width, size, lines, weight: weight, alignment: alignment)
+    _paragraph(value, width, size, lines,
+            weight: weight, alignment: alignment, color: color)
         .paint(canvas, offset);
   }
 
   TextPainter _paragraph(String value, double width, double size, int lines,
       {FontWeight weight = FontWeight.w400,
+      Color? color,
       TextAlign alignment = TextAlign.left}) {
     final bounded = value.characters
         .take(160)
@@ -376,7 +379,7 @@ class _SongPreviewPainter {
               fontFamilyFallback: danFontFamilyFallback,
               fontSize: size,
               height: 1.2,
-              color: foreground,
+              color: color ?? foreground,
               fontWeight: weight)),
       maxLines: lines,
       ellipsis: '…',
@@ -506,7 +509,7 @@ class _SongPreviewPainter {
     _text(canvas, track.album, const Offset(232, 144), 216, 14, 1);
     _state(canvas, const Rect.fromLTWH(232, 181, 135, 31), large: false);
     _text(canvas, _duration, const Offset(384, 189), 68, 13, 1,
-        weight: FontWeight.w500);
+        weight: FontWeight.w500, color: scheme.primary);
   }
 
   void _large(Canvas canvas) {
@@ -528,7 +531,9 @@ class _SongPreviewPainter {
         alignment: TextAlign.center);
     _state(canvas, const Rect.fromLTWH(670, 530, 252, 50), large: true);
     _text(canvas, _duration, const Offset(950, 540), 140, 25, 1,
-        weight: FontWeight.w500, alignment: TextAlign.center);
+        weight: FontWeight.w500,
+        alignment: TextAlign.center,
+        color: scheme.primary);
     // A static sound motif, never an imitation seek bar or animated spectrum.
     const bars = [
       8.0,
