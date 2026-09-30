@@ -23,7 +23,7 @@ class OnlineLyricCache {
 
   /// Committed identities; an empty set invalidates all entries after eviction.
   final changes = ValueNotifier<Set<String>>(const {});
-  final _pending = <String, Future<LyricSnapshot?>>{};
+  final _pending = <String, _PendingLyricLookup>{};
   static const maxEntryBytes = 2 * 1024 * 1024;
   static const maxTotalBytes = 64 * 1024 * 1024;
   DateTime? _lastPrune;
@@ -56,23 +56,37 @@ class OnlineLyricCache {
     final key = sha256.convert(utf8.encode(identity)).toString();
     // Serialize a forced refresh after a pending lookup so the older response
     // cannot overwrite the new choice. Ordinary readers share the same fetch.
-    final previous = _pending[key];
+    final pending = _pending[key];
+    // A playback generation or manual choice may already have superseded the
+    // owner. Its provider can still be running, but cannot commit its result.
+    final previous = pending?.isCurrent == true ? pending : null;
     if (!refresh && previous != null) {
-      return (await previous)?.toLyric();
+      LyricSnapshot? snapshot;
+      try {
+        snapshot = await previous.future;
+      } catch (_) {
+        if (previous.isCurrent) rethrow;
+      }
+      if (shouldStore?.call() == false) return null;
+      if (!previous.isCurrent) {
+        return resolve(identity, fetch, shouldStore: shouldStore);
+      }
+      return snapshot?.toLyric();
     }
     final future = () async {
       if (refresh && previous != null) {
         try {
-          await previous;
+          await previous.future;
         } catch (_) {}
       }
       return _resolve(key, identity, fetch, refresh, shouldStore);
     }();
-    _pending[key] = future;
+    final lookup = _PendingLyricLookup(future, shouldStore);
+    _pending[key] = lookup;
     try {
       return (await future)?.toLyric();
     } finally {
-      if (identical(_pending[key], future)) _pending.remove(key);
+      if (identical(_pending[key], lookup)) _pending.remove(key);
     }
   }
 
@@ -157,4 +171,12 @@ class OnlineLyricCache {
     }
     if (removed) changes.value = <String>{};
   }
+}
+
+class _PendingLyricLookup {
+  const _PendingLyricLookup(this.future, this.shouldStore);
+
+  final Future<LyricSnapshot?> future;
+  final bool Function()? shouldStore;
+  bool get isCurrent => shouldStore?.call() ?? true;
 }

@@ -117,12 +117,19 @@ class PlaybackPreference {
     final rawGains = map["eqGains"];
     final gains = rawGains is List
         ? [
-            for (final value in rawGains) value is num ? value.toDouble() : 0.0,
+            for (final value in rawGains)
+              value is num && value.isFinite ? value.toDouble() : 0.0,
           ]
         : null;
+    // JSON exponent values can decode to infinity. An invalid saved gain must
+    // not prevent every later source from starting or turn an EQ band positive.
+    final rawVolume = map["volumeDsp"];
+    final volume = rawVolume is num && rawVolume.isFinite && rawVolume >= 0
+        ? rawVolume.toDouble()
+        : 1.0;
     return PlaybackPreference(
       PlayMode.fromString(map["playMode"]) ?? PlayMode.forward,
-      (map["volumeDsp"] as num?)?.toDouble() ?? 1.0,
+      volume,
       shuffle: map["shuffle"] is bool ? map["shuffle"] as bool : null,
       eqEnabled: map["eqEnabled"] == true,
       eqGains: gains,

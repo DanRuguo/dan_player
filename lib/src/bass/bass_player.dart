@@ -1007,11 +1007,13 @@ class BassPlayer {
     for (var i = 0; i < _frequencySpectrumLevels.length; i++) {
       _frequencySpectrumLevels[i] = 0.0;
     }
-    if (emit && !_spectrumStreamController.isClosed &&
+    if (emit &&
+        !_spectrumStreamController.isClosed &&
         _spectrumStreamController.hasListener) {
       _spectrumStreamController.add(List<double>.unmodifiable(_spectrumLevels));
     }
-    if (emit && !_frequencySpectrumStreamController.isClosed &&
+    if (emit &&
+        !_frequencySpectrumStreamController.isClosed &&
         _frequencySpectrumStreamController.hasListener) {
       _frequencySpectrumStreamController.add(
         List.unmodifiable(_frequencySpectrumLevels),
@@ -1364,10 +1366,8 @@ class BassPlayer {
     // fresh observation stamp; opening cancellation remains independently
     // guarded by _sourceGeneration.
     _eventBoundary.command();
-    if (_positionUpdater != null) {
-      _positionUpdater!.cancel();
-      _positionUpdater = _freed ? null : _getPositionUpdater();
-    }
+    _positionUpdater = rearmBassPositionUpdater(_positionUpdater,
+        freed: _freed, create: _getPositionUpdater);
     if (_pendingUrlOpens.isEmpty) return;
 
     final cancelStream = _bassStreamCancel;
@@ -1846,22 +1846,30 @@ class BassPlayer {
   void _startCurrentStream() {
     final interrupted = _deviceInterrupted;
     _deviceInterrupted = false;
-    // Capture completion before rearming invalidates its event stamp. A CUE
-    // source must restart at its segment start, not the containing file start.
-    final restartSegment = _segment != null &&
-        (position >= length ||
-            (playerState == PlayerState.stopped &&
-                classifyPlaybackStop(
-                      validHandle: true,
-                      deviceAvailable: true,
-                      position: _boundaryPosition,
-                      duration: length,
-                      segment: true,
-                    ) ==
-                    PlaybackEndReason.segmentEnd));
+    // Capture completion before rearming invalidates its event stamp. Mixer
+    // sources do not rewind at EOF when their PAUSE flag is cleared. CUE
+    // sources must rewind to their segment start, not the containing file.
+    final duration = length;
+    final event = _lastEvent;
+    final completed =
+        event != null && event.completed && _eventBoundary.accepts(event.stamp);
+    final restartSource = duration.isFinite &&
+        duration > 0 &&
+        ((wasapiExclusive && completed) ||
+            (_segment != null &&
+                (position >= duration ||
+                    (playerState == PlayerState.stopped &&
+                        classifyPlaybackStop(
+                              validHandle: true,
+                              deviceAvailable: true,
+                              position: _boundaryPosition,
+                              duration: duration,
+                              segment: true,
+                            ) ==
+                            PlaybackEndReason.segmentEnd))));
     _eventBoundary.command(rearm: true);
 
-    if (restartSegment) _seekNative(0);
+    if (restartSource) _seekNative(0);
 
     _positionUpdater?.cancel();
 
@@ -1924,6 +1932,7 @@ class BassPlayer {
     _eventBoundary.command();
     _publishState(playerState);
     _positionUpdater?.cancel();
+    _positionUpdater = null;
     _resetSpectrum();
   }
 

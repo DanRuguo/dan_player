@@ -113,6 +113,7 @@ class LyricService extends ChangeNotifier {
 
   Lyric? _resolvedLyric;
   Lyric? _rawResolvedLyric;
+  bool _explicitLookupPending = false;
 
   /// Canonical timestamps, before the song's application offset. Locking and
   /// editing must use this copy instead of saving the displayed offset twice.
@@ -124,7 +125,10 @@ class LyricService extends ChangeNotifier {
   bool _isCurrent(int token) => !_disposed && token == _lyricToken;
 
   void _handleAutomaticOnlineChange() {
+    // Opting in starts a missing default lookup; it must not supersede the
+    // source the user is already loading explicitly on this track.
     if (AppSettings.instance.automaticOnlineLyrics.value &&
+        !_explicitLookupPending &&
         _rawResolvedLyric == null) {
       updateLyric();
     }
@@ -142,13 +146,16 @@ class LyricService extends ChangeNotifier {
     }
   }
 
-  void _useRawFuture(Future<Lyric?> raw, {int offsetMs = 0}) {
+  void _useRawFuture(Future<Lyric?> raw,
+      {int offsetMs = 0, bool explicit = false}) {
     currLyricFuture.ignore();
+    _explicitLookupPending = explicit;
     final token = _lyricToken + 1;
     final audio = _getNowPlaying();
     _rawResolvedLyric = null;
     currLyricFuture = raw.then((value) {
       if (_isCurrent(token)) {
+        _explicitLookupPending = false;
         _rawResolvedLyric = value;
         if (_resolveDefaultForTesting == null &&
             audio != null &&
@@ -187,6 +194,7 @@ class LyricService extends ChangeNotifier {
       },
       onError: (Object _, StackTrace __) {
         if (!_isCurrent(token)) return;
+        _explicitLookupPending = false;
         _resolvedLyric = null;
         _currentLyricLine = -1;
         playService.desktopLyricService.sendNoLyricMessage();
@@ -481,7 +489,7 @@ class LyricService extends ChangeNotifier {
       {LyricSource? source}) {
     final store = documents;
     if (store == null) {
-      _useRawFuture(raw);
+      _useRawFuture(raw, explicit: true);
       return;
     }
     final revision = store.revisionFor(audio);
@@ -497,7 +505,8 @@ class LyricService extends ChangeNotifier {
           stillCurrent: () => _isCurrent(token));
       return value;
     });
-    _useRawFuture(selected, offsetMs: store.forAudio(audio)?.offsetMs ?? 0);
+    _useRawFuture(selected,
+        offsetMs: store.forAudio(audio)?.offsetMs ?? 0, explicit: true);
   }
 
   void useSpecificLyric(Lyric lyric) {
@@ -513,7 +522,8 @@ class LyricService extends ChangeNotifier {
       return false;
     }
     _useRawFuture(Future.value(lyric),
-        offsetMs: documents?.forAudio(nowPlaying)?.offsetMs ?? 0);
+        offsetMs: documents?.forAudio(nowPlaying)?.offsetMs ?? 0,
+        explicit: true);
     return true;
   }
 

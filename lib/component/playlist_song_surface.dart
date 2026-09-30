@@ -2,6 +2,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/cover_caption_colors.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/artwork_size.dart';
+import 'package:dan_player/library/cover_cache.dart';
 import 'package:flutter/material.dart';
 
 /// Visible song cards share the bounded artwork/caption cache. No polling and
@@ -26,21 +27,47 @@ class _PlaylistSongSurfaceState extends State<PlaylistSongSurface> {
   Object? _surfaceKey;
   late ColorScheme _scheme;
   late Color _surface;
+
+  Object get _source => (
+        widget.audio.path,
+        widget.audio.modified,
+        widget.audio.coverFingerprint,
+        widget.audio.artworkUrl,
+        CoverCache.instance.generationFor(widget.audio.localFilePath),
+        widget.loadArtwork,
+      );
+
+  @override
+  void initState() {
+    super.initState();
+    CoverCache.instance.changes.addListener(_coverChanged);
+  }
+
+  void _coverChanged() {
+    // Cover repair broadcasts once per source. Unrelated visible songs keep
+    // their completed palette and do no artwork reads or color sampling.
+    if (mounted && _key != _source) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    CoverCache.instance.changes.removeListener(_coverChanged);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final key = (
-      widget.audio.path,
-      widget.audio.modified,
-      widget.audio.coverFingerprint,
-      widget.loadArtwork
-    );
+    final key = _source;
     if (_key != key) {
       _key = key;
+      final revision =
+          CoverCache.instance.generationFor(widget.audio.localFilePath);
       _colors = widget.loadArtwork
           ? widget.audio
               .artworkForSize(const ArtworkSize(48, 48))
-              .then<CoverCaptionColors?>((image) =>
-                  image == null ? null : CoverCaptionCache.resolve(image, 1))
+              .then<CoverCaptionColors?>((image) => image == null
+                  ? null
+                  : CoverCaptionCache.resolve(image, 1, revision: revision))
               .catchError((_) => null)
           : Future.value(null);
     }

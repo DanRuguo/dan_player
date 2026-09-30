@@ -1,6 +1,19 @@
+import 'dart:async';
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
+
+/// A source command invalidates the poll's event stamp. Rearm a running poll
+/// for the retained source, but never revive one cancelled by pause or failure.
+Timer? rearmBassPositionUpdater(
+  Timer? current, {
+  required bool freed,
+  required Timer Function() create,
+}) {
+  final running = current?.isActive == true;
+  current?.cancel();
+  return running && !freed ? create() : null;
+}
 
 /// BASS_ERROR_INIT permits one reinitialization; neither unknown failures nor
 /// repeated INIT responses may recurse forever on the UI isolate.

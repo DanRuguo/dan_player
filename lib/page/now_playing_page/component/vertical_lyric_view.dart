@@ -35,8 +35,6 @@ class VerticalLyricView extends StatefulWidget {
 }
 
 class _VerticalLyricViewState extends State<VerticalLyricView> {
-  bool isHovering = false;
-  bool controlsFocused = false;
   final lyricViewController = LyricViewController();
 
   @override
@@ -44,56 +42,27 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
     UiLanguageScope.watch(context);
     final playback = PlayService.instance.playbackService;
     final lyrics = PlayService.instance.lyricService;
-    return MouseRegion(
-      onEnter: (_) => setState(() => isHovering = true),
-      onExit: (_) => setState(() => isHovering = false),
-      child: Material(
-        type: MaterialType.transparency,
-        child: ChangeNotifierProvider.value(
-          value: lyricViewController,
-          child: Stack(
-            children: [
-              ValueListenableBuilder(
-                valueListenable: AppSettings.instance.experience,
-                builder: (context, experience, _) => ListenableBuilder(
-                  listenable: lyrics,
-                  builder: (context, _) => StreamBuilder<PlayerState>(
-                    stream: playback.playerStateStream,
-                    initialData: playback.playerState,
-                    builder: (context, state) => VerticalLyricContent(
-                      lyricFuture: lyrics.currLyricFuture,
-                      positionStream: playback.positionStream,
-                      readPosition: () => playback.position,
-                      onSeek: playback.seek,
-                      springLyrics: experience.springLyrics,
-                      hidden: DesktopIntegration.instance.isHidden,
-                      playing: state.data == PlayerState.playing,
-                    ),
-                  ),
-                ),
+    return ChangeNotifierProvider.value(
+      value: lyricViewController,
+      child: LyricControlsSurface(
+        controls: const LyricViewControls(),
+        child: ValueListenableBuilder(
+          valueListenable: AppSettings.instance.experience,
+          builder: (context, experience, _) => ListenableBuilder(
+            listenable: lyrics,
+            builder: (context, _) => StreamBuilder<PlayerState>(
+              stream: playback.playerStateStream,
+              initialData: playback.playerState,
+              builder: (context, state) => VerticalLyricContent(
+                lyricFuture: lyrics.currLyricFuture,
+                positionStream: playback.positionStream,
+                readPosition: () => playback.position,
+                onSeek: playback.seek,
+                springLyrics: experience.springLyrics,
+                hidden: DesktopIntegration.instance.isHidden,
+                playing: state.data == PlayerState.playing,
               ),
-              Align(
-                alignment: Alignment.bottomRight,
-                // Keep the menu anchor mounted while its overlay has focus.
-                child: Focus(
-                  onFocusChange: (value) =>
-                      setState(() => controlsFocused = value),
-                  child: Opacity(
-                    opacity: isHovering ||
-                            controlsFocused ||
-                            ALWAYS_SHOW_LYRIC_VIEW_CONTROLS
-                        ? 1
-                        : 0,
-                    child: IgnorePointer(
-                      ignoring: !isHovering &&
-                          !controlsFocused &&
-                          !ALWAYS_SHOW_LYRIC_VIEW_CONTROLS,
-                      child: const LyricViewControls(),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -104,6 +73,81 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
   void dispose() {
     lyricViewController.dispose();
     super.dispose();
+  }
+}
+
+/// Own the control hit targets and focus without rebuilding the media surface
+/// when the pointer enters or leaves it. Controls remain mounted across states.
+class LyricControlsSurface extends StatefulWidget {
+  const LyricControlsSurface(
+      {super.key, required this.child, required this.controls});
+
+  final Widget child;
+  final Widget controls;
+
+  @override
+  State<LyricControlsSurface> createState() => _LyricControlsSurfaceState();
+}
+
+class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
+  bool _hovering = false;
+  bool _controlsFocused = false;
+  bool _directControls = false;
+
+  void _hoverChanged(PointerEvent event, bool hovering) {
+    setState(() {
+      _hovering = hovering;
+      if (event.kind == PointerDeviceKind.mouse) _directControls = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = _hovering ||
+        _controlsFocused ||
+        _directControls ||
+        ALWAYS_SHOW_LYRIC_VIEW_CONTROLS;
+    return MouseRegion(
+      onEnter: (event) => _hoverChanged(event, true),
+      onExit: (event) => _hoverChanged(event, false),
+      onHover: (event) {
+        if (_directControls && event.kind == PointerDeviceKind.mouse) {
+          setState(() => _directControls = false);
+        }
+      },
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        // Observe direct interaction without claiming the gesture arena: lyric
+        // taps, scrolling, long presses and control buttons keep their actions.
+        onPointerDown: (event) {
+          if (!_directControls &&
+              (event.kind == PointerDeviceKind.touch ||
+                  event.kind == PointerDeviceKind.stylus ||
+                  event.kind == PointerDeviceKind.invertedStylus)) {
+            setState(() => _directControls = true);
+          }
+        },
+        child: Material(
+          type: MaterialType.transparency,
+          child: Stack(children: [
+            widget.child,
+            Align(
+              alignment: Alignment.bottomRight,
+              // Keep the menu anchor mounted while its overlay has focus.
+              child: Focus(
+                onFocusChange: (value) =>
+                    setState(() => _controlsFocused = value),
+                child: Opacity(
+                  opacity: visible ? 1 : 0,
+                  child:
+                      IgnorePointer(ignoring: !visible, child: widget.controls),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 }
 
@@ -174,6 +218,7 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
     if (oldWidget.hidden != widget.hidden) {
       oldWidget.hidden?.removeListener(_visibilityChanged);
       widget.hidden?.addListener(_visibilityChanged);
+      _syncEntrance();
     }
   }
 
@@ -806,14 +851,32 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _syncPresentationTicker() {
+    bool rowNeedsFrames(int index) =>
+        _presentationTimeline.needsFrames(index, _position.value) &&
+        _presentationRowVisible(index);
     final needsFrames = _active &&
         _presentationEnabled &&
-        (_singingLines.any((index) =>
-                _presentationTimeline.needsFrames(index, _position.value)) ||
-            _releasingVoices.any((index) =>
-                _presentationTimeline.needsFrames(index, _position.value)));
+        (_singingLines.any(rowNeedsFrames) ||
+            _releasingVoices.any(rowNeedsFrames));
     if (needsFrames && !_mediaTicker.isActive) _mediaTicker.start();
     if (!needsFrames) _mediaTicker.stop();
+  }
+
+  bool _presentationRowVisible(int index) {
+    // Automatic following may be bringing the singer into view. During
+    // manual reading only ink inside the held viewport needs display frames;
+    // the regular position stream still tracks the song while it is offscreen.
+    if (!_manualScrollActive && !_readingMode) return true;
+    if (!_scrollController.hasClients ||
+        !_scrollController.position.hasViewportDimension) {
+      return true;
+    }
+    final row = _rowExtent(index);
+    if (row == null) return false;
+    final offset = _scrollController.offset;
+    return row.bottom > offset &&
+        row.center * 2 - row.bottom <
+            offset + _scrollController.position.viewportDimension;
   }
 
   // A voice can finish (or rejoin after a short seek) while the scroll anchor
@@ -1264,6 +1327,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _dragging = false;
       _resumeAfterGrace();
     }
+    _syncPresentationTicker();
     return false;
   }
 
@@ -1274,7 +1338,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         ? (_wasReduced ?? false)
         : !_active || _motionHidden || LyricMotion.reducedOf(context);
     _presentationEnabled = !_exiting && !reduced && widget.playing;
-    _syncPresentationTicker();
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
     final settings = context.watch<LyricViewController>();
     if (_readingMode != settings.readingMode) {
@@ -1315,6 +1378,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _scheduleFollow(immediate: true);
     }
     _wasReduced = reduced;
+    _syncPresentationTicker();
     final fontIdentity = (settings.lyricFontSize, settings.translationFontSize);
     if (_fontIdentity != null && _fontIdentity != fontIdentity) {
       _snapFontOnLineChange = false;

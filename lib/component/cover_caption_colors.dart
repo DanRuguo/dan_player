@@ -18,19 +18,21 @@ class CoverCaptionColors {
 class CoverCaptionCache {
   static final _cache = LinkedHashMap<Object, Future<CoverCaptionColors>>();
   static final _resolved = <Object, CoverCaptionColors>{};
-  static Object _key(ImageProvider provider, double aspect) =>
-      (provider, (aspect * 100).round());
-  static CoverCaptionColors? cached(ImageProvider provider, double aspect) =>
-      _resolved[_key(provider, aspect)];
+  static Object _key(ImageProvider provider, double aspect, Object? revision) =>
+      (provider, (aspect * 100).round(), revision);
+  static CoverCaptionColors? cached(ImageProvider provider, double aspect,
+          {Object? revision}) =>
+      _resolved[_key(provider, aspect, revision)];
   static Future<CoverCaptionColors> resolve(
-      ImageProvider provider, double aspect) {
-    final key = _key(provider, aspect);
+      ImageProvider provider, double aspect,
+      {Object? revision}) {
+    final key = _key(provider, aspect, revision);
     final hit = _cache.remove(key);
     if (hit != null) {
       _cache[key] = hit;
       return hit;
     }
-    final future = _sample(provider, aspect).then((colors) {
+    final future = _sample(provider, aspect, revision).then((colors) {
       if (_cache.containsKey(key)) _resolved[key] = colors;
       return colors;
     });
@@ -44,13 +46,18 @@ class CoverCaptionCache {
   }
 
   static Future<CoverCaptionColors> _sample(
-      ImageProvider provider, double aspect) async {
+      ImageProvider provider, double aspect, Object? revision) async {
     final result = Completer<CoverCaptionColors>();
     var source = provider;
+    var sampleRevision = revision;
     while (source is ArtworkImageProvider) {
+      // Preserve a managed file/provider revision when replacing its decode
+      // size with the bounded sample size. Explicit callers own precedence.
+      sampleRevision ??= source.revision;
       source = source.source;
     }
-    final stream = ArtworkImageProvider(source, const ArtworkSize(48, 48))
+    final stream = ArtworkImageProvider(source, const ArtworkSize(48, 48),
+            revision: sampleRevision)
         .resolve(ImageConfiguration.empty);
     late ImageStreamListener listener;
     Timer? timeout;

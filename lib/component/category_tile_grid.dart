@@ -55,6 +55,7 @@ class _CategoryTileGridState extends State<CategoryTileGrid> {
   int _columns = 0;
   bool? _fill;
   CategoryCoverShape? _shape;
+  bool? _persistLayout;
   String? _dragging;
   bool _linear = false;
   int _layoutRevision = 0;
@@ -145,18 +146,29 @@ class _CategoryTileGridState extends State<CategoryTileGrid> {
                 .map((e) => e.$1)
                 .firstOrNull
             : null;
+        // Search and circle mode are temporary projections. Their packed
+        // positions must not become the saved full rectangle layout when the
+        // user returns with automatic gap filling disabled.
+        final restoreLayout = !circle &&
+            widget.persistLayout &&
+            (_persistLayout == false || _shape == CategoryCoverShape.circle);
+        _persistLayout = widget.persistLayout;
         if (!sameIds ||
             columns != _columns ||
             _shape != widget.presentation.shape ||
             _fill != widget.presentation.autoFill ||
-            changed != null) {
+            changed != null ||
+            restoreLayout) {
           _linear = _fill != null && _fill != widget.presentation.autoFill;
           List<CategoryTilePlacement>? previous;
-          if (sameIds &&
+          if (!restoreLayout &&
+              sameIds &&
               columns == _columns &&
               _shape == widget.presentation.shape) {
             previous = _placements;
-          } else if (_ids.isEmpty && !circle && widget.persistLayout) {
+          } else if ((_ids.isEmpty || restoreLayout) &&
+              !circle &&
+              widget.persistLayout) {
             previous = [
               for (var i = 0; i < ids.length; i++)
                 if (widget.presentation.layouts[ids[i]] case final saved?
