@@ -23,6 +23,10 @@ abstract class TrimMainPlayback extends ChangeNotifier {
   Object? get track;
   bool get playing;
   double get position;
+
+  /// Distinguishes an explicit command even when its visible state is unchanged.
+  /// Legacy/injected transports without a command clock retain state checks.
+  Object? get intent => null;
   void pause();
   void resume();
 }
@@ -87,6 +91,7 @@ Future<TrimPreviewProcess> _launchPreview(
 class _ExistingMainPlayback extends TrimMainPlayback {
   _ExistingMainPlayback(this.service) {
     service.addListener(notifyListeners);
+    service.playbackIntent.addListener(notifyListeners);
     _state = service.playerStateStream.listen((_) => notifyListeners());
     _position = service.positionStream.listen((_) => notifyListeners());
   }
@@ -102,12 +107,15 @@ class _ExistingMainPlayback extends TrimMainPlayback {
   @override
   double get position => service.position;
   @override
-  void pause() => service.pause();
+  Object get intent => service.playbackIntent.value;
   @override
-  void resume() => service.start();
+  void pause() => service.pause(recordIntent: false);
+  @override
+  void resume() => service.start(recordIntent: false);
   @override
   void dispose() {
     service.removeListener(notifyListeners);
+    service.playbackIntent.removeListener(notifyListeners);
     unawaited(_state.cancel());
     unawaited(_position.cancel());
     super.dispose();
@@ -140,6 +148,7 @@ class ProcessAudioTrimPreview extends AudioTrimPreview {
   Future<void>? _stopping;
   TrimMainPlayback? _main;
   Object? _track;
+  Object? _intent;
   double _position = 0;
   bool _resumeMain = false;
   bool _changingMain = false;
@@ -182,6 +191,7 @@ class ProcessAudioTrimPreview extends AudioTrimPreview {
         _changingMain = true;
         if (_resumeMain) main.pause();
         _position = main.position;
+        _intent = main.intent;
         _changingMain = false;
         main.addListener(_mainChanged);
         if (main.playing) throw StateError('Main playback did not pause');
@@ -216,6 +226,7 @@ class ProcessAudioTrimPreview extends AudioTrimPreview {
     final main = _main;
     return main != null &&
         identical(main.track, _track) &&
+        main.intent == _intent &&
         !main.playing &&
         (main.position - _position).abs() <= .15;
   }

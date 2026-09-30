@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_entrance.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -14,14 +15,18 @@ class PlaylistCoverLayoutIndices extends InheritedWidget {
       {super.key,
       required this.indices,
       this.seekTreeSong,
+      this.motion,
       required super.child});
   final Map<Object, int> indices;
+  final Listenable? motion;
 
   /// Returns null for a non-song, otherwise whether the lazy tree rail moved.
   final bool? Function(Object id, bool atStart)? seekTreeSong;
   @override
   bool updateShouldNotify(PlaylistCoverLayoutIndices oldWidget) =>
-      oldWidget.indices != indices || oldWidget.seekTreeSong != seekTreeSong;
+      oldWidget.indices != indices ||
+      oldWidget.seekTreeSong != seekTreeSong ||
+      oldWidget.motion != motion;
 }
 
 /// A one-shot transition between lazy playlist layouts. No images or ticker
@@ -95,6 +100,7 @@ class _PlaylistCoverTransitionHostState
   final _boxKey = GlobalKey();
   final _markers = <Object, _PlaylistCoverTransitionMarkerState>{};
   final _flights = <_CoverFlight>[];
+  final _geometryMotion = ValueNotifier(0);
   Set<Object> _hidden = const {};
   late final _animation = AnimationController(
     vsync: this,
@@ -125,7 +131,6 @@ class _PlaylistCoverTransitionHostState
   _CaptureJob? _capture;
   Timer? _burstCooldown;
   bool _animateArrival = true;
-  bool _instantHandoff = false;
   int _captureCount = 0;
   int _rasterCaptureCount = 0, _reusedImageCount = 0;
   BoxConstraints? _viewportConstraints;
@@ -192,17 +197,16 @@ class _PlaylistCoverTransitionHostState
   _CoverGeometry? _movingTarget(Object id) {
     final marker = _markers[id];
     if (marker == null) return null;
-    // Tree root covers rise during their entrance. A target captured on the
-    // first tree frame is lower than the marker by the time its flight lands.
-    // Follow that marker through the handoff; settled destinations keep their
-    // one-time geometry and avoid a per-frame lookup.
-    if (!_instantHandoff &&
-        marker.context
-                .getInheritedWidgetOfExactType<PlaylistCoverLayoutIndices>() ==
-            null) {
-      return null;
-    }
+    // A first circular/list appearance can still rise on its own staggered
+    // entrance clock. Its first laid-out rectangle is not its landing position.
+    // Resolve during paint, including while a late destination image is held.
     return _geometry(marker);
+  }
+
+  void _markerMotion(Object id) {
+    if (!_hidden.contains(id)) return;
+    _geometryMotion.value++;
+    _imageMayBeReady();
   }
 
   Future<void> _transition(VoidCallback update,
@@ -256,7 +260,6 @@ class _PlaylistCoverTransitionHostState
           _flights.addAll(retained);
           _hidden = retained.map((flight) => flight.id).toSet();
           _animateArrival = false;
-          _instantHandoff = true;
           _busy = true;
           _starting = true;
         });
@@ -285,7 +288,6 @@ class _PlaylistCoverTransitionHostState
     final capture = _CaptureJob();
     _capture = capture;
     _animateArrival = animateArrival;
-    _instantHandoff = false;
     _captureCount++;
     _busy = true;
     widget.controller._notify();
@@ -471,8 +473,8 @@ class _PlaylistCoverTransitionHostState
 
   bool _targetsReady() => _flights.every((flight) =>
       flight.target == null ||
-      !flight.hadImage ||
-      _hasImage(flight.target!.boundary));
+      ((_markers[flight.id]?._motionReady ?? true) &&
+          (!flight.hadImage || _hasImage(flight.target!.boundary))));
 
   void _tryReveal() {
     if (!_busy ||
@@ -561,7 +563,6 @@ class _PlaylistCoverTransitionHostState
     final changed = _busy;
     _busy = false;
     _starting = false;
-    _instantHandoff = false;
     if (notify && mounted) {
       setState(() {});
       if (changed && identical(widget.controller._host, this)) {
@@ -597,6 +598,7 @@ class _PlaylistCoverTransitionHostState
     _burstCooldown?.cancel();
     _animation.dispose();
     _handoff.dispose();
+    _geometryMotion.dispose();
     super.dispose();
   }
 
@@ -604,10 +606,9 @@ class _PlaylistCoverTransitionHostState
     final host = _hostBox;
     if (host == null) return null;
     for (final marker in _markers.values) {
-      final viewport =
-          Scrollable.maybeOf(marker.context, axis: Axis.vertical)
-              ?.context
-              .findRenderObject();
+      final viewport = Scrollable.maybeOf(marker.context, axis: Axis.vertical)
+          ?.context
+          .findRenderObject();
       if (viewport is RenderBox && viewport.attached && viewport.hasSize) {
         return MatrixUtils.transformRect(
             viewport.getTransformTo(host), Offset.zero & viewport.size);
@@ -648,6 +649,7 @@ class _PlaylistCoverTransitionHostState
                   child: CustomPaint(
                       painter: _CoverFlightsPainter(
                           List.unmodifiable(_flights), _animation, _reveal,
+                          geometryMotion: _geometryMotion,
                           clip: _visibleViewport,
                           resolveTarget: _movingTarget)),
                 ))),
@@ -757,6 +759,24 @@ class _PlaylistCoverTransitionMarkerState
     extends State<PlaylistCoverTransitionMarker> {
   final _boundary = GlobalKey();
   _PlaylistCoverTransitionHostState? _owner;
+  Animation<double>? _entranceMotion;
+  Listenable? _layoutMotion;
+
+  // Retiring an opaque flight before the card's first-appearance fade ends
+  // would briefly dim the artwork even when its moving geometry is aligned.
+  bool get _motionReady =>
+      (_entranceMotion?.value ?? 1) >= 1 &&
+      !(_layoutMotion is AnimationController &&
+          (_layoutMotion as AnimationController).isAnimating);
+
+  void _motionChanged() => _owner?._markerMotion(widget.entryId);
+
+  void _detachMotion() {
+    _entranceMotion?.removeListener(_motionChanged);
+    _layoutMotion?.removeListener(_motionChanged);
+    _entranceMotion = null;
+    _layoutMotion = null;
+  }
 
   void _unregister() {
     if (identical(_owner?._markers[widget.entryId], this)) {
@@ -775,6 +795,17 @@ class _PlaylistCoverTransitionMarkerState
       _owner = owner;
     }
     _owner?._markers[widget.entryId] = this;
+    final entranceMotion = AppEntrance.motionOf(context);
+    final layoutMotion = context
+        .dependOnInheritedWidgetOfExactType<PlaylistCoverLayoutIndices>()
+        ?.motion;
+    if (entranceMotion != _entranceMotion || layoutMotion != _layoutMotion) {
+      _detachMotion();
+      _entranceMotion = entranceMotion;
+      _layoutMotion = layoutMotion;
+      _entranceMotion?.addListener(_motionChanged);
+      _layoutMotion?.addListener(_motionChanged);
+    }
   }
 
   @override
@@ -796,12 +827,14 @@ class _PlaylistCoverTransitionMarkerState
 
   @override
   void deactivate() {
+    _detachMotion();
     _unregister();
     super.deactivate();
   }
 
   @override
   void dispose() {
+    _detachMotion();
     _unregister();
     super.dispose();
   }
@@ -859,8 +892,10 @@ class _CaptureJob {
 
 class _CoverFlightsPainter extends CustomPainter {
   _CoverFlightsPainter(this.flights, this.animation, this.reveal,
-      {required this.clip, this.resolveTarget})
-      : super(repaint: Listenable.merge([animation, reveal]));
+      {required this.clip,
+      required Listenable geometryMotion,
+      this.resolveTarget})
+      : super(repaint: Listenable.merge([animation, reveal, geometryMotion]));
   final List<_CoverFlight> flights;
   final Animation<double> animation;
   final Animation<double> reveal;

@@ -2,6 +2,7 @@ import 'package:dan_player/component/lyric_playback_preview.dart';
 import 'package:dan_player/component/tap_lyric_editor.dart';
 import 'package:dan_player/component/lyric_timing_dialog.dart';
 import 'package:dan_player/component/lyric_format_picker.dart';
+import 'package:dan_player/component/lyric_editor_canvas.dart';
 import 'package:dan_player/component/ffmpeg_setup_card.dart';
 import 'package:dan_player/lyric/lyric_edit_codec.dart';
 import 'package:dan_player/lyric/lyric_preview.dart';
@@ -153,74 +154,135 @@ Future<bool> showLyricEditorDialog(
   OnlineLyricEditorCandidateLoader? onlineLyricCandidateLoader,
   List<CustomLyricSourceChoice>? customLyricChoices,
   OnlineLyricEditorCustomCandidateLoader? customLyricCandidateLoader,
+  LocalLyricEditorLoader? localLyricLoader,
 }) async {
   if (audio.isOnline) {
     showAppNotice(ui("联网音乐的歌词为只读，不能修改"), kind: AppNoticeKind.warning);
     return false;
   }
-  final quick = await chooseLyricEditingMethod(context);
-  if (quick == null || !context.mounted) return false;
-  if (quick) {
+  // Method, format and editing are steps of one modal. Replacing routes would
+  // overlap their entering/exiting scrims and briefly dim the player twice.
+  final dismissible = ValueNotifier(true);
+  try {
     return await showAppDialog<bool>(
             context: context,
-            barrierDismissible: false,
-            builder: (tapContext) => TapLyricEditor(
+            barrierDismissibleListenable: dismissible,
+            builder: (_) => _LyricEditorFlow(
                 audio: audio,
-                fetchOnline: () => showAppDialog<Lyric>(
-                    context: tapContext,
-                    builder: (_) => _OnlineLyricCandidateDialog(
-                        audio: audio,
-                        search:
-                            onlineLyricSearch ?? searchManualLyricCandidates,
-                        loadCandidate:
-                            onlineLyricCandidateLoader ?? getLyricForCandidate,
-                        customChoices: customLyricChoices ?? const [],
-                        loadCustomCandidate: customLyricCandidateLoader ??
-                            getLyricForCustomSourceChoice)),
-                saveLyric: (lyric) async {
-                  if (lyric is PlainLyric) {
-                    final store = LyricDocumentStore.instance;
-                    await store.load();
-                    await store.saveDraft(audio, lyric,
-                        expectedRevision: store.revisionFor(audio));
-                    showAppNotice(ui('编辑副本已保存，手动选用后才用于播放'),
-                        kind: AppNoticeKind.success);
-                    return true;
-                  }
-                  final selected = await chooseLyricEditFormat(tapContext);
-                  if (selected == null || !tapContext.mounted) return false;
-                  return await showAppDialog<bool>(
-                          context: tapContext,
-                          barrierDismissible: false,
-                          builder: (_) => LyricEditorDialog(
-                              audio: audio,
-                              initialFormat: selected,
-                              initialLyric: lyric,
-                              onlineLyricSearch: onlineLyricSearch,
-                              onlineLyricCandidateLoader:
-                                  onlineLyricCandidateLoader,
-                              customLyricChoices: customLyricChoices,
-                              customLyricCandidateLoader:
-                                  customLyricCandidateLoader)) ==
-                      true;
-                })) ==
+                dismissible: dismissible,
+                onlineLyricSearch: onlineLyricSearch,
+                onlineLyricCandidateLoader: onlineLyricCandidateLoader,
+                customLyricChoices: customLyricChoices,
+                customLyricCandidateLoader: customLyricCandidateLoader,
+                localLyricLoader: localLyricLoader)) ==
         true;
+  } finally {
+    dismissible.dispose();
   }
-  final format = await chooseLyricEditFormat(context);
-  if (format == null || !context.mounted) return false;
-  return await showAppDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => LyricEditorDialog(
-          audio: audio,
-          initialFormat: format,
-          onlineLyricSearch: onlineLyricSearch,
-          onlineLyricCandidateLoader: onlineLyricCandidateLoader,
-          customLyricChoices: customLyricChoices,
-          customLyricCandidateLoader: customLyricCandidateLoader,
-        ),
-      ) ==
-      true;
+}
+
+class _LyricEditorFlow extends StatefulWidget {
+  const _LyricEditorFlow({
+    required this.audio,
+    required this.dismissible,
+    this.onlineLyricSearch,
+    this.onlineLyricCandidateLoader,
+    this.customLyricChoices,
+    this.customLyricCandidateLoader,
+    this.localLyricLoader,
+    this.chooseMethod = true,
+    this.initialLyric,
+  });
+
+  final Audio audio;
+  final ValueNotifier<bool> dismissible;
+  final OnlineLyricEditorSearch? onlineLyricSearch;
+  final OnlineLyricEditorCandidateLoader? onlineLyricCandidateLoader;
+  final List<CustomLyricSourceChoice>? customLyricChoices;
+  final OnlineLyricEditorCustomCandidateLoader? customLyricCandidateLoader;
+  final LocalLyricEditorLoader? localLyricLoader;
+  final bool chooseMethod;
+  final Lyric? initialLyric;
+
+  @override
+  State<_LyricEditorFlow> createState() => _LyricEditorFlowState();
+}
+
+class _LyricEditorFlowState extends State<_LyricEditorFlow> {
+  late bool? _quick = widget.chooseMethod ? null : false;
+  LyricEditFormat? _format;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_quick == null) {
+      return LyricEditingMethodDialog(onSelected: (quick) {
+        widget.dismissible.value = !quick;
+        setState(() => _quick = quick);
+      });
+    }
+    if (_quick!) {
+      return TapLyricEditor(
+          audio: widget.audio,
+          fetchOnline: () => showAppDialog<Lyric>(
+              context: context,
+              builder: (_) => _OnlineLyricCandidateDialog(
+                  audio: widget.audio,
+                  search:
+                      widget.onlineLyricSearch ?? searchManualLyricCandidates,
+                  loadCandidate:
+                      widget.onlineLyricCandidateLoader ?? getLyricForCandidate,
+                  customChoices: widget.customLyricChoices ?? const [],
+                  loadCustomCandidate: widget.customLyricCandidateLoader ??
+                      getLyricForCustomSourceChoice)),
+          saveLyric: (lyric) async {
+            if (lyric is PlainLyric) {
+              final store = LyricDocumentStore.instance;
+              await store.load();
+              await store.saveDraft(widget.audio, lyric,
+                  expectedRevision: store.revisionFor(widget.audio));
+              showAppNotice(ui('编辑副本已保存，手动选用后才用于播放'),
+                  kind: AppNoticeKind.success);
+              return true;
+            }
+            final dismissible = ValueNotifier(true);
+            try {
+              return await showAppDialog<bool>(
+                      context: context,
+                      barrierDismissibleListenable: dismissible,
+                      builder: (_) => _LyricEditorFlow(
+                          audio: widget.audio,
+                          dismissible: dismissible,
+                          chooseMethod: false,
+                          initialLyric: lyric,
+                          onlineLyricSearch: widget.onlineLyricSearch,
+                          onlineLyricCandidateLoader:
+                              widget.onlineLyricCandidateLoader,
+                          customLyricChoices: widget.customLyricChoices,
+                          customLyricCandidateLoader:
+                              widget.customLyricCandidateLoader)) ==
+                  true;
+            } finally {
+              dismissible.dispose();
+            }
+          });
+    }
+    if (_format == null) {
+      return LyricEditFormatDialog(onSelected: (format) {
+        widget.dismissible.value = false;
+        setState(() => _format = format);
+      });
+    }
+    return LyricEditorDialog(
+      audio: widget.audio,
+      initialFormat: _format!,
+      initialLyric: widget.initialLyric,
+      onlineLyricSearch: widget.onlineLyricSearch,
+      onlineLyricCandidateLoader: widget.onlineLyricCandidateLoader,
+      customLyricChoices: widget.customLyricChoices,
+      customLyricCandidateLoader: widget.customLyricCandidateLoader,
+      localLyricLoader: widget.localLyricLoader,
+    );
+  }
 }
 
 class LyricEditorDialog extends StatefulWidget {
@@ -1201,6 +1263,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                                       showValueIndicator:
                                           ShowValueIndicator.onDrag),
                                   child: Semantics(
+                                      container: true,
                                       label: ui('播放进度'),
                                       child: Slider(
                                           key: const ValueKey(
@@ -1476,7 +1539,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         child: Dialog(
             insetPadding:
                 const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: AppDialogContent(
+            child: LyricEditorCanvas(
               width: 900,
               maxHeight: (MediaQuery.sizeOf(context).height - 48)
                   .clamp(200, 800)
@@ -1500,7 +1563,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
                                 onPressed: saving ? null : _cancel,
                                 icon: const Icon(Symbols.close))),
                         const SizedBox(height: 12),
-                        Flexible(
+                        Expanded(
                             child: AppScrollbar(
                                 controller: _contentScroll,
                                 child: SingleChildScrollView(

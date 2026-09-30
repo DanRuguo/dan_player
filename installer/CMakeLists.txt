@@ -34,6 +34,12 @@ target_link_libraries(dan_installer_controls_test PRIVATE dan_installer_native g
 add_test(NAME dan_installer_controls_test COMMAND dan_installer_controls_test
   "${CMAKE_CURRENT_SOURCE_DIR}/../assets/fonts/PingFangSC-Regular.ttf"
   "${CMAKE_BINARY_DIR}/test-sandbox")
+add_executable(dan_installer_progress_test tests/installer_progress_test.cpp)
+target_compile_options(dan_installer_progress_test PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_definitions(dan_installer_progress_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(dan_installer_progress_test PRIVATE dan_installer_native gdi32 comctl32)
+add_test(NAME dan_installer_progress_test COMMAND dan_installer_progress_test
+  "${CMAKE_BINARY_DIR}/test-sandbox")
 add_executable(dan_installer_cleanup_fixture WIN32 tests/cleanup_fixture.cpp tests/cleanup_fixture.rc)
 target_compile_options(dan_installer_cleanup_fixture PRIVATE /W4 /WX /utf-8 /EHsc)
 add_executable(dan_installer_cleanup_test tests/installer_cleanup_test.cpp)

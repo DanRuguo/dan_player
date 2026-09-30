@@ -25,25 +25,42 @@ void FillPill(Gdiplus::Graphics& graphics, Gdiplus::Brush& brush,
   graphics.FillEllipse(&brush, Gdiplus::RectF(width - height, 0, height, height));
 }
 
-void PaintProgress(HWND window, HDC dc) {
+void PaintProgress(HWND window, HDC destination) {
   RECT bounds{};
   GetClientRect(window, &bounds);
-  if (!dc || bounds.right <= 0 || bounds.bottom <= 0) return;
-  dan::installer::PaintParentSurface(window, dc, bounds, surface_color);
-  Gdiplus::Graphics graphics(dc);
-  graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-  const bool dark = (GetRValue(surface_color) * 299 +
-      GetGValue(surface_color) * 587 + GetBValue(surface_color) * 114) < 128000;
-  Gdiplus::SolidBrush track(Gdiplus::Color(255, dark ? 83 : 216,
-      dark ? 83 : 216, dark ? 83 : 216));
-  const float width = static_cast<float>(bounds.right);
-  const float height = static_cast<float>(bounds.bottom);
-  FillPill(graphics, track, width, height);
-  if (progress_value > 0) {
-    Gdiplus::SolidBrush fill(Gdiplus::Color(255, GetRValue(accent_color),
-        GetGValue(accent_color), GetBValue(accent_color)));
-    FillPill(graphics, fill, width * progress_value / 100.0f, height);
+  if (!destination || bounds.right <= 0 || bounds.bottom <= 0) return;
+  HDC memory = CreateCompatibleDC(destination);
+  HBITMAP bitmap = CreateCompatibleBitmap(destination, bounds.right, bounds.bottom);
+  if (!memory || !bitmap) {
+    if (bitmap) DeleteObject(bitmap);
+    if (memory) DeleteDC(memory);
+    return;
   }
+  const auto previous = SelectObject(memory, bitmap);
+  // Background reconstruction and the pill's separate GDI+ draws must stay
+  // offscreen. Suppressing WM_ERASEBKGND alone still exposed the cleared track
+  // during every progress update, including native Inno gauge invalidations.
+  dan::installer::PaintParentSurface(window, memory, bounds, surface_color);
+  {
+    Gdiplus::Graphics graphics(memory);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    const bool dark = (GetRValue(surface_color) * 299 +
+        GetGValue(surface_color) * 587 + GetBValue(surface_color) * 114) < 128000;
+    Gdiplus::SolidBrush track(Gdiplus::Color(255, dark ? 83 : 216,
+        dark ? 83 : 216, dark ? 83 : 216));
+    const float width = static_cast<float>(bounds.right);
+    const float height = static_cast<float>(bounds.bottom);
+    FillPill(graphics, track, width, height);
+    if (progress_value > 0) {
+      Gdiplus::SolidBrush fill(Gdiplus::Color(255, GetRValue(accent_color),
+          GetGValue(accent_color), GetBValue(accent_color)));
+      FillPill(graphics, fill, width * progress_value / 100.0f, height);
+    }
+  }
+  BitBlt(destination, 0, 0, bounds.right, bounds.bottom, memory, 0, 0, SRCCOPY);
+  SelectObject(memory, previous);
+  DeleteObject(bitmap);
+  DeleteDC(memory);
 }
 
 LRESULT CALLBACK ProgressProcedure(HWND window, UINT message, WPARAM wparam,

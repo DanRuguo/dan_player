@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -358,6 +359,7 @@ Future<T?> showAppDialog<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   bool barrierDismissible = true,
+  ValueListenable<bool>? barrierDismissibleListenable,
   Color? barrierColor,
   String? barrierLabel,
   bool useRootNavigator = true,
@@ -388,6 +390,7 @@ Future<T?> showAppDialog<T>({
     useSafeArea: host == null,
     themes: InheritedTheme.capture(from: context, to: navigator.context),
     barrierDismissible: barrierDismissible,
+    barrierDismissibleListenable: barrierDismissibleListenable,
     barrierColor: barrierColor ??
         DialogTheme.of(context).barrierColor ??
         Theme.of(context).dialogTheme.barrierColor ??
@@ -423,7 +426,17 @@ class _CompletingDialogRoute<T> extends DialogRoute<T> {
     super.settings,
     super.traversalEdgeBehavior,
     super.animationStyle,
-  });
+    this.barrierDismissibleListenable,
+  }) {
+    barrierDismissibleListenable?.addListener(changedInternalState);
+  }
+
+  /// A multi-step modal can protect editing without replacing its scrim.
+  final ValueListenable<bool>? barrierDismissibleListenable;
+
+  @override
+  bool get barrierDismissible =>
+      barrierDismissibleListenable?.value ?? super.barrierDismissible;
 
   bool _completed = false;
 
@@ -435,6 +448,7 @@ class _CompletingDialogRoute<T> extends DialogRoute<T> {
 
   @override
   void dispose() {
+    barrierDismissibleListenable?.removeListener(changedInternalState);
     if (!_completed) didComplete(null);
     super.dispose();
   }

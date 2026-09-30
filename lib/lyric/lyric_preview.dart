@@ -169,11 +169,13 @@ class LyricAudioPreview extends ChangeNotifier {
   int _generation = 0;
   TrimMainPlayback? _main;
   Object? _mainTrack;
+  Object? _mainIntent;
   double _mainPosition = 0;
   Future<void>? _closing;
   bool get _mainUntouched =>
       _main != null &&
       identical(_main!.track, _mainTrack) &&
+      _main!.intent == _mainIntent &&
       !_main!.playing &&
       (_main!.position - _mainPosition).abs() <= .15;
   void _changed() {
@@ -195,6 +197,7 @@ class LyricAudioPreview extends ChangeNotifier {
     _changingMain = true;
     if (_resumeMain) main.pause();
     _mainPosition = main.position;
+    _mainIntent = main.intent;
     _changingMain = false;
     main.addListener(_mainChanged);
   }

@@ -853,6 +853,7 @@ class _PlaylistTreePaneState<T> extends State<PlaylistTreePane<T>>
               : PlaylistCoverLayoutIndices(
                   indices: rowIndices,
                   seekTreeSong: _seekTreeSong,
+                  motion: _entryClock,
                   child: AppContentScrollbar(
                     controller: _scroll,
                     builder: (context, controller) => GridEdgeAutoScrollRegion(

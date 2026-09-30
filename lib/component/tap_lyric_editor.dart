@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/utils.dart';
-import 'package:dan_player/component/app_dialog_content.dart';
+import 'package:dan_player/component/lyric_editor_canvas.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -27,47 +27,51 @@ import 'package:provider/provider.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 
-Future<bool?> chooseLyricEditingMethod(BuildContext context) =>
+Future<bool?> chooseLyricEditingMethod(
+        BuildContext context) =>
     showAppDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
-                title: AppDialogTitle(ui('你想如何编辑歌词😋？')),
-                content: SizedBox(
-                    width: 540,
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      for (final quick in [true, false])
-                        Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Material(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerLow,
-                                shape: AppShape.control,
-                                clipBehavior: Clip.antiAlias,
-                                child: ListTile(
-                                    key: ValueKey(quick
-                                        ? 'lyric-method-tap'
-                                        : 'lyric-method-text'),
-                                    leading: Icon(
-                                        quick
-                                            ? Symbols.keyboard
-                                            : Symbols.edit_note,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary),
-                                    title: Text(ui(quick ? '快捷点按' : '传统码字')),
-                                    subtitle: Text(ui(quick
-                                        ? '听歌点按，逐步制作逐句和逐字歌词。'
-                                        : '选择格式，直接编辑歌词代码。')),
-                                    trailing: const Icon(Symbols.chevron_right),
-                                    onTap: () =>
-                                        Navigator.pop(context, quick))))
-                    ])),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text(ui('取消')))
-                ]));
+        builder: (context) => LyricEditingMethodDialog(
+            onSelected: (quick) => Navigator.pop(context, quick)));
+
+/// The same selector is used by the standalone picker and editor workflow.
+class LyricEditingMethodDialog extends StatelessWidget {
+  const LyricEditingMethodDialog({super.key, required this.onSelected});
+  final ValueChanged<bool> onSelected;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+          title: AppDialogTitle(ui('你想如何编辑歌词😋？')),
+          content: SizedBox(
+              width: 540,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                for (final quick in [true, false])
+                  Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Material(
+                          color:
+                              Theme.of(context).colorScheme.surfaceContainerLow,
+                          shape: AppShape.control,
+                          clipBehavior: Clip.antiAlias,
+                          child: ListTile(
+                              key: ValueKey(quick
+                                  ? 'lyric-method-tap'
+                                  : 'lyric-method-text'),
+                              leading: Icon(
+                                  quick ? Symbols.keyboard : Symbols.edit_note,
+                                  color: Theme.of(context).colorScheme.primary),
+                              title: Text(ui(quick ? '快捷点按' : '传统码字')),
+                              subtitle: Text(ui(quick
+                                  ? '听歌点按，逐步制作逐句和逐字歌词。'
+                                  : '选择格式，直接编辑歌词代码。')),
+                              trailing: const Icon(Symbols.chevron_right),
+                              onTap: () => onSelected(quick))))
+              ])),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context), child: Text(ui('取消')))
+          ]);
+}
 
 class TapLyricEditor extends StatefulWidget {
   const TapLyricEditor(
@@ -541,93 +545,99 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
         decoration: BoxDecoration(
             color: scheme.surfaceContainerLow,
             borderRadius: AppShape.controlRadius),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          if (!review)
-            Text(ui('第 {0} / {1} 行',
-                ['${session.index + 1}', '${session.rows.length}'])),
-          if (!review) const SizedBox(height: 20),
-          if (!review && row.romanization.isNotEmpty)
-            Padding(
-                key: const ValueKey('tap-current-romanization'),
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(row.romanization,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall)),
-          if (review)
-            SizedBox(
-                height: MediaQuery.sizeOf(context).height < 700 ? 140 : 260,
-                child: ChangeNotifierProvider(
-                    key: ValueKey(
-                        'review-${session.index}-${session.stage.name}'),
-                    create: (_) => LyricViewController(),
-                    child: VerticalLyricScrollView(
-                        onSeek: (_) {},
-                        lyric: reviewLyric ??=
-                            session.lyric(words: words, onlyCurrent: true),
-                        positionStream: player.positionStream,
-                        readPosition: () => session.position,
-                        playing: player.playing,
-                        springLyrics: AppSettings
-                            .instance.experience.value.springLyrics)))
-          else if (words)
-            Wrap(
-                key: const ValueKey('tap-current-original'),
-                alignment: WrapAlignment.center,
-                spacing: 4,
-                runSpacing: 8,
+        // The row surface remains opaque while only its foreground changes.
+        child: AppContentTransition(
+            identity: (session.stage, session.index),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  for (var i = 0; i < tokens.length; i++)
-                    InkWell(
-                        key: ValueKey('tap-word-$i'),
-                        borderRadius: AppShape.controlRadius,
-                        onTap: !busy &&
-                                !review &&
-                                player.playing &&
-                                player.clockReady &&
-                                session.wordStarted &&
-                                i == row.wordEnds.length
-                            ? () => _run(_mark)
-                            : null,
-                        child: AnimatedContainer(
-                            duration:
-                                (!AppMotion.enabled(context, MotionKind.feedback) ||
-                                        WidgetsBinding
-                                            .instance
-                                            .platformDispatcher
-                                            .accessibilityFeatures
-                                            .reduceMotion)
-                                    ? Duration.zero
-                                    : const Duration(milliseconds: 120),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 8),
-                            decoration: BoxDecoration(
+                  if (!review)
+                    Text(ui('第 {0} / {1} 行',
+                        ['${session.index + 1}', '${session.rows.length}'])),
+                  if (!review) const SizedBox(height: 20),
+                  if (!review && row.romanization.isNotEmpty)
+                    Padding(
+                        key: const ValueKey('tap-current-romanization'),
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(row.romanization,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall)),
+                  if (review)
+                    SizedBox(
+                        height:
+                            MediaQuery.sizeOf(context).height < 700 ? 140 : 260,
+                        child: ChangeNotifierProvider(
+                            key: ValueKey(
+                                'review-${session.index}-${session.stage.name}'),
+                            create: (_) => LyricViewController(),
+                            child: VerticalLyricScrollView(
+                                onSeek: (_) {},
+                                lyric: reviewLyric ??= session.lyric(
+                                    words: words, onlyCurrent: true),
+                                positionStream: player.positionStream,
+                                readPosition: () => session.position,
+                                playing: player.playing,
+                                springLyrics: AppSettings
+                                    .instance.experience.value.springLyrics)))
+                  else if (words)
+                    Wrap(
+                        key: const ValueKey('tap-current-original'),
+                        alignment: WrapAlignment.center,
+                        spacing: 4,
+                        runSpacing: 8,
+                        children: [
+                          for (var i = 0; i < tokens.length; i++)
+                            InkWell(
+                                key: ValueKey('tap-word-$i'),
                                 borderRadius: AppShape.controlRadius,
-                                color: !review &&
+                                onTap: !busy &&
+                                        !review &&
+                                        player.playing &&
+                                        player.clockReady &&
                                         session.wordStarted &&
                                         i == row.wordEnds.length
-                                    ? scheme.primary
-                                    : i < row.wordEnds.length
-                                        ? scheme.primary.withValues(alpha: .14)
-                                        : Colors.transparent),
-                            child: Text(tokens[i],
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(
-                                        color: !review && session.wordStarted && i == row.wordEnds.length ? scheme.onPrimary : scheme.onSurface))))
-                ])
-          else
-            Text(row.text,
-                key: const ValueKey('tap-current-original'),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineSmall),
-          if (!review && row.translation.isNotEmpty)
-            Padding(
-                key: const ValueKey('tap-current-translation'),
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(row.translation, textAlign: TextAlign.center)),
-          if (!review) const SizedBox(height: 20),
-        ]));
+                                    ? () => _run(_mark)
+                                    : null,
+                                child: AnimatedContainer(
+                                    duration: (!AppMotion.enabled(context, MotionKind.feedback) ||
+                                            WidgetsBinding
+                                                .instance
+                                                .platformDispatcher
+                                                .accessibilityFeatures
+                                                .reduceMotion)
+                                        ? Duration.zero
+                                        : const Duration(milliseconds: 120),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 8),
+                                    decoration: BoxDecoration(
+                                        borderRadius: AppShape.controlRadius,
+                                        color: !review &&
+                                                session.wordStarted &&
+                                                i == row.wordEnds.length
+                                            ? scheme.primary
+                                            : i < row.wordEnds.length
+                                                ? scheme.primary
+                                                    .withValues(alpha: .14)
+                                                : Colors.transparent),
+                                    child: Text(tokens[i],
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .headlineSmall
+                                            ?.copyWith(color: !review && session.wordStarted && i == row.wordEnds.length ? scheme.onPrimary : scheme.onSurface))))
+                        ])
+                  else
+                    Text(row.text,
+                        key: const ValueKey('tap-current-original'),
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineSmall),
+                  if (!review && row.translation.isNotEmpty)
+                    Padding(
+                        key: const ValueKey('tap-current-translation'),
+                        padding: const EdgeInsets.only(top: 10),
+                        child:
+                            Text(row.translation, textAlign: TextAlign.center)),
+                  if (!review) const SizedBox(height: 20),
+                ])));
   }
 
   Widget _timingStage() =>
@@ -783,7 +793,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
           child: Dialog(
               insetPadding:
                   const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-              child: AppDialogContent(
+              child: LyricEditorCanvas(
                   width: 900,
                   maxHeight: 820,
                   child: Padding(
@@ -803,22 +813,19 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
                                 maxLines: 1, overflow: TextOverflow.ellipsis),
                             const SizedBox(height: 12),
                             if (player.loading) const LinearProgressIndicator(),
-                            Flexible(
+                            Expanded(
                                 child: AppScrollbar(
                                     controller: contentScroll,
                                     child: SingleChildScrollView(
                                         controller: contentScroll,
-                                        child: AppContentTransition(
-                                            identity: (
-                                              session.stage,
-                                              session.index
-                                            ),
-                                            child:
-                                                session.stage == TapStage.text
+                                        child: timing
+                                            ? _timingStage()
+                                            : AppContentTransition(
+                                                identity: session.stage,
+                                                child: session.stage ==
+                                                        TapStage.text
                                                     ? _textStage()
-                                                    : timing
-                                                        ? _timingStage()
-                                                        : _finishedStage())))),
+                                                    : _finishedStage())))),
                             const SizedBox(height: 8),
                             if (timing && ready)
                               ValueListenableBuilder<double>(

@@ -121,6 +121,7 @@ class PlaybackService extends ChangeNotifier {
         showAppNotice(ui(event.problem.toString()), kind: AppNoticeKind.error);
       }
       if (event.reason == PlaybackEndReason.userStop) {
+        _publishPlaybackIntent(transportCommand: true);
         PlaybackStatistics.instance.finish(markCompleted: false);
         _syncPausedToSystem();
       }
@@ -390,6 +391,24 @@ class PlaybackService extends ChangeNotifier {
   final ValueNotifier<String?> resolvingAudioPath = ValueNotifier(null);
   int _sourceRequestToken = 0;
   int _manualSeekRevision = 0;
+  int _transportCommandRevision = 0;
+  final _playbackIntent =
+      ValueNotifier<Object>((command: 0, source: 0, seek: 0, closed: false));
+
+  /// Explicit commands have an identity even when paused state/position does
+  /// not change. Position samples and native output recovery do not publish it.
+  ValueListenable<Object> get playbackIntent => _playbackIntent;
+
+  void _publishPlaybackIntent({bool transportCommand = false}) {
+    if (transportCommand) _transportCommandRevision++;
+    _playbackIntent.value = (
+      command: _transportCommandRevision,
+      source: _sourceRequestToken,
+      seek: _manualSeekRevision,
+      closed: _closed,
+    );
+  }
+
   // An explicit pause while a source opens must survive the async hand-off.
   // A later play or new song selection may request playback again.
   bool _playWhenReady = false;
@@ -1068,6 +1087,10 @@ class PlaybackService extends ChangeNotifier {
     if (playerState == PlayerState.playing ||
         playerState == PlayerState.stalled) {
       pause();
+    } else {
+      // A preview may already have paused the source. Timer expiry still
+      // revokes its right to resume playback when the preview closes.
+      _publishPlaybackIntent(transportCommand: true);
     }
     showAppNotice(ui('睡眠定时已到，播放已暂停'));
   }
@@ -1187,6 +1210,7 @@ class PlaybackService extends ChangeNotifier {
       return false;
     }
     final token = ++_sourceRequestToken;
+    _publishPlaybackIntent();
     _playWhenReady = true;
     OnlineMusicService.instance.cancelPendingStreamResolution();
     _player.cancelPendingSource();
@@ -1506,6 +1530,7 @@ class PlaybackService extends ChangeNotifier {
     _practiceTimer = null;
     _practiceRemaining = null;
     _manualSeekRevision++;
+    _publishPlaybackIntent();
     final actualPosition = position;
     segmentLoop.manualSeek(actualPosition);
     unawaited(
@@ -1610,6 +1635,7 @@ class PlaybackService extends ChangeNotifier {
     _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
     segmentLoop.clear();
     final token = ++_sourceRequestToken;
+    _publishPlaybackIntent();
     _playWhenReady = resumeAfterLoad;
     final occurrence = queueOccurrenceId(audioIndex);
     if (occurrence != null) queueStopBoundary.loading(occurrence, token);
@@ -1763,6 +1789,7 @@ class PlaybackService extends ChangeNotifier {
           seek: () {
             _player.seek(position);
             _manualSeekRevision++;
+            _publishPlaybackIntent();
             _practiceTimer?.cancel();
             _practiceTimer = null;
             _practiceRemaining = null;
@@ -2022,8 +2049,9 @@ class PlaybackService extends ChangeNotifier {
   }
 
   /// 暂停
-  void pause() {
+  void pause({bool recordIntent = true}) {
     if (_closed) return;
+    if (recordIntent) _publishPlaybackIntent(transportCommand: true);
     _playWhenReady = false;
     if (_practiceTimer != null) {
       _practiceRemaining = _practiceDeadline!.difference(DateTime.now());
@@ -2047,8 +2075,9 @@ class PlaybackService extends ChangeNotifier {
   }
 
   /// 恢复播放
-  void start() {
+  void start({bool recordIntent = true}) {
     if (_closed) return;
+    if (recordIntent) _publishPlaybackIntent(transportCommand: true);
     _playWhenReady = true;
     // Only the current output rebuild may forward transport intent to BASS.
     // A previous output request can still be saving settings while a newer
@@ -2117,6 +2146,7 @@ class PlaybackService extends ChangeNotifier {
         },
         commit: (actualPosition) {
           _manualSeekRevision++;
+          _publishPlaybackIntent();
           _practiceTimer?.cancel();
           _practiceTimer = null;
           _practiceRemaining = null;
@@ -2143,6 +2173,7 @@ class PlaybackService extends ChangeNotifier {
   Future<void> _close() async {
     final resumeWrite = _captureTrackResume(force: true);
     _closed = true;
+    _publishPlaybackIntent();
     final waveformShutdown = WaveformService.shared.close();
     _queueEditHistory.clear(QueueHistoryInvalidation.closed);
     _sourceRequestToken += 1;
@@ -2214,5 +2245,6 @@ class PlaybackService extends ChangeNotifier {
     isBuffering.dispose();
     resolvingAudioPath.dispose();
     diagnosticsRevision.dispose();
+    _playbackIntent.dispose();
   }
 }

@@ -100,6 +100,11 @@ class AppEntrance extends StatefulWidget {
   static const maximumStagger = Duration(milliseconds: 144);
   static const double distance = 8;
 
+  /// Reuse the nearest entrance's existing clock for paint that follows its
+  /// children from another layer. This does not rebuild dependents per tick.
+  static Animation<double>? motionOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_EntranceBoundary>()?.motion;
+
   final Widget child;
   final Object? identity;
   final int order;
@@ -234,6 +239,7 @@ class _AppEntranceState extends State<AppEntrance>
 
   @override
   Widget build(BuildContext context) => _EntranceBoundary(
+        motion: _progress,
         child: AnimatedBuilder(
           animation: _progress,
           // The child is built once per normal parent update, not every frame.
@@ -264,8 +270,11 @@ class _AppEntranceState extends State<AppEntrance>
 }
 
 class _EntranceBoundary extends InheritedWidget {
-  const _EntranceBoundary({required super.child});
+  const _EntranceBoundary({required this.motion, required super.child});
+
+  final Animation<double> motion;
 
   @override
-  bool updateShouldNotify(_EntranceBoundary oldWidget) => false;
+  bool updateShouldNotify(_EntranceBoundary oldWidget) =>
+      motion != oldWidget.motion;
 }

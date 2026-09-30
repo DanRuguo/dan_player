@@ -59,6 +59,7 @@ class _WaveformProgressState extends State<WaveformProgress>
   List<double>? _projectedPeaks;
   WaveformFailure? _failure;
   Object? _key;
+  bool? _wasActive;
   int _generation = 0;
   bool _visible = false;
   bool _pending = false;
@@ -104,15 +105,21 @@ class _WaveformProgressState extends State<WaveformProgress>
       audio?.cueTrack?.startFrame,
       audio?.cueTrack?.endFrame,
       widget.waveformEnabled,
-      _active,
       widget.enabled,
       audio?.modified,
       audio?.modifiedNanos,
       audio?.fileSizeBytes,
       widget.service
     );
-    if (_key == key) return;
+    final sourceChanged = _key != key;
+    final active = _active;
+    if (!sourceChanged && _wasActive == active) return;
     _key = key;
+    _wasActive = active;
+    // Hiding stops pending analysis and the slider's presentation clock, but
+    // cannot invalidate peaks already bound to this exact source revision.
+    // Retain them so restoring the window does no cache/file reads or morph.
+    if (!sourceChanged && _data != null) return;
     _generation++;
     _cancellation?.cancel();
     _cancellation = null;
