@@ -4,7 +4,10 @@ import 'dart:ui' as ui;
 
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/component/artwork_backdrop.dart';
+import 'package:dan_player/component/artwork_dither.dart';
+import 'package:dan_player/component/artwork_vignette.dart';
 import 'package:dan_player/component/background_image_motion.dart';
+import 'package:dan_player/component/cached_artwork_blur.dart';
 import 'package:dan_player/component/fluid_artwork.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -83,6 +86,22 @@ Future<Uint8List> _pixels(WidgetTester tester, GlobalKey key) async =>
     }))!;
 
 void main() {
+  testWidgets(
+      'static layered artwork keeps its blur and overlays without a resize snapshot',
+      (tester) async {
+    final source = (await tester.runAsync(_source))!;
+    await tester.pumpWidget(_app(source, enabled: false));
+    await _ready(tester, source);
+    expect(find.byType(CachedArtworkBlur), findsNothing);
+    expect(find.byType(SnapshotWidget), findsNothing);
+    expect(find.byType(ImageFiltered), findsOneWidget);
+    expect(find.byType(ArtworkDither), findsOneWidget);
+    expect(find.byType(ArtworkVignette), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
   testWidgets(
       'layered motion retains blurred spatial detail and pauses immediately',
       (tester) async {

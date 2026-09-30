@@ -12,10 +12,12 @@ class DetailVolumeButton extends StatefulWidget {
       {super.key,
       required this.readVolume,
       required this.onChanged,
-      this.changes});
+      this.changes,
+      this.compact = false});
   final double Function() readVolume;
   final ValueChanged<double> onChanged;
   final Listenable? changes;
+  final bool compact;
 
   @override
   State<DetailVolumeButton> createState() => _DetailVolumeButtonState();
@@ -87,6 +89,15 @@ class _DetailVolumeButtonState extends State<DetailVolumeButton> {
             onChanged: _change)
       ],
       builder: (context, controller, _) => IconButton(
+        style: widget.compact
+            ? IconButton.styleFrom(
+                minimumSize: const Size.square(44),
+                fixedSize: const Size.square(44),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.standard,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              )
+            : null,
         tooltip: ui('音量'),
         onPressed: () {
           if (controller.isOpen) {

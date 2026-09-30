@@ -244,11 +244,17 @@ class PlaybackRateMenu extends StatelessWidget {
       builder: (context, controller, _) => Tooltip(
         message: ui("播放速度（保音高）"),
         child: SizedBox(
-          width: 48,
-          height: 48,
-          child: TextButton(
+          width: 44,
+          height: 44,
+          child: IconButton(
             key: const ValueKey('playback-rate-menu'),
-            style: TextButton.styleFrom(padding: EdgeInsets.zero),
+            style: IconButton.styleFrom(
+              minimumSize: const Size.square(44),
+              fixedSize: const Size.square(44),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.standard,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
             onPressed: enabled
                 ? () {
                     if (controller.isOpen) {
@@ -258,7 +264,7 @@ class PlaybackRateMenu extends StatelessWidget {
                     }
                   }
                 : null,
-            child: PlaybackRateLabel(rate: rate),
+            icon: PlaybackRateLabel(rate: rate),
           ),
         ),
       ),

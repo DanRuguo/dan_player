@@ -116,6 +116,23 @@ List<LyricFractionalFilter> _rowFilters(WidgetTester tester, int index) =>
             matching: find.byType(LyricFractionalFilter)))
         .toList();
 
+double _viewportBlurFor(WidgetTester tester, int index, int current) {
+  final viewport = tester.getRect(_scroll);
+  final row = tester.getRect(find.byType(LyricViewTile).at(index));
+  final focus = tester.getRect(find.byType(LyricViewTile).at(current));
+  if (index == current || (index > current && index <= current + 2)) return 0;
+  final maximum = LyricMotion.blurForDistance(4);
+  if (index < current) {
+    final span = (focus.center.dy - viewport.top).clamp(1.0, double.infinity);
+    return maximum * ((focus.center.dy - row.center.dy) / span).clamp(0.0, 1.0);
+  }
+  final clearEdge = tester.getRect(find.byType(LyricViewTile).at(current + 2));
+  final span =
+      (viewport.bottom - clearEdge.center.dy).clamp(1.0, double.infinity);
+  return maximum *
+      ((row.center.dy - clearEdge.center.dy) / span).clamp(0.0, 1.0);
+}
+
 Future<void> _advance(
     WidgetTester tester, _Fixture fixture, double value) async {
   fixture.emit(value);
@@ -152,7 +169,7 @@ void main() {
   });
 
   testWidgets(
-      'the next three lyric lines stay clear while earlier lines retain blur',
+      'the next two lyric lines stay clear and context blurs across the viewport',
       (tester) async {
     await (FontLoader(danEmbeddedFontFamily)
           ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
@@ -169,13 +186,17 @@ void main() {
     await tester.pumpAndSettle();
 
     var effects = _effects(tester);
-    expect(effects[99].blur, LyricMotion.blurForDistance(1));
+    expect(effects[99].blur, closeTo(_viewportBlurFor(tester, 99, 100), .01));
     expect(effects[100].blur, 0);
-    for (final index in [101, 102, 103]) {
+    for (final index in [101, 102]) {
       expect(effects[index].blur, 0, reason: 'Upcoming line $index');
     }
-    expect(effects[104].blur, LyricMotion.blurForDistance(4));
-    for (final index in [100, 101, 102, 103]) {
+    for (final index in [103, 104]) {
+      expect(effects[index].blur,
+          closeTo(_viewportBlurFor(tester, index, 100), .01));
+      expect(effects[index].blur, greaterThan(0));
+    }
+    for (final index in [100, 101, 102]) {
       final filters = _rowFilters(tester, index);
       expect(filters, isNotEmpty);
       expect(filters.every((filter) => filter.enabled && filter.sigma == 0),
@@ -205,11 +226,12 @@ void main() {
     await _advance(tester, fixture, 404.1);
     await tester.pumpAndSettle();
     effects = _effects(tester);
-    expect(effects[100].blur, LyricMotion.blurForDistance(1));
-    for (final index in [102, 103, 104]) {
+    expect(effects[100].blur, closeTo(_viewportBlurFor(tester, 100, 101), .01));
+    for (final index in [102, 103]) {
       expect(effects[index].blur, 0, reason: 'Upcoming line $index');
     }
-    for (final index in [102, 103, 104]) {
+    expect(effects[104].blur, greaterThan(0));
+    for (final index in [102, 103]) {
       final filters = _rowFilters(tester, index);
       expect(filters, isNotEmpty);
       expect(filters.every((filter) => filter.enabled && filter.sigma == 0),
@@ -336,7 +358,7 @@ void main() {
         isTrue);
     expect(
         tester.getSize(find.byType(LyricViewTile).at(101)).height, rowHeight);
-    expect(_enabledFilters(tester).length,
+    expect(_enabledFilters(tester).where((filter) => filter.sigma > 0).length,
         lessThanOrEqualTo(LyricMotion.maximumFollowRows));
     await tester.pumpAndSettle();
     expect(
@@ -392,7 +414,9 @@ void main() {
     await tester.pump();
     expect(
         _effects(tester).every((effect) => effect.transition == null), isTrue);
-    expect(_enabledFilters(tester), isEmpty);
+    expect(_enabledFilters(tester), isNotEmpty);
+    expect(_enabledFilters(tester).every((filter) => filter.sigma == 0), isTrue,
+        reason: 'Manual reading retains glyph sampling while removing blur');
     expect(
         tester
             .widget<LyricViewportFade>(find.byType(LyricViewportFade))
@@ -402,7 +426,7 @@ void main() {
     fixture.emit(408.1);
     await tester.pump(const Duration(seconds: 1));
     expect(_controller(tester).offset, manualOffset);
-    await tester.tap(find.text('Lyric line 103'));
+    await tester.tapAt(tester.getCenter(find.byType(LyricViewTile).at(103)));
     await tester.pumpAndSettle();
     expect(fixture.position, 412);
     expect(

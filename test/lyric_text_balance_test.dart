@@ -1,7 +1,9 @@
 import 'dart:ui' as ui;
 
+import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -59,6 +61,41 @@ void main() {
     final word = painter.getBoxesForSelection(
         const TextSelection(baseOffset: 0, extentOffset: 13));
     expect(word.length, 1);
+  });
+
+  test('a steadily wider lyric does not move words back to a later line',
+      () async {
+    await (FontLoader(danEmbeddedFontFamily)
+          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+        .load();
+    const text = 'Maybe we should let this go';
+    final words = RegExp(r'\S+').allMatches(text).toList();
+    var previousFirstLineWords = 0;
+    for (var width = 150.0; width <= 500; width += 1) {
+      final painter = TextPainter(
+          text: const TextSpan(
+              text: text,
+              style: TextStyle(
+                  fontFamily: danEmbeddedFontFamily,
+                  fontSize: 33,
+                  fontWeight: FontWeight.w800)),
+          textDirection: TextDirection.ltr);
+      try {
+        layoutBalancedLyric(painter, width);
+        final firstLine = painter.computeLineMetrics().first;
+        final count = words.where((word) {
+          final boxes = painter.getBoxesForSelection(
+              TextSelection(baseOffset: word.start, extentOffset: word.end));
+          return boxes.isNotEmpty &&
+              boxes.first.top < firstLine.baseline + firstLine.descent;
+        }).length;
+        expect(count, greaterThanOrEqualTo(previousFirstLineWords),
+            reason: 'width $width moved a word from the first line back');
+        previousFirstLineWords = count;
+      } finally {
+        painter.dispose();
+      }
+    }
   });
 
   test('mixed-script phrases which fit intact keep their original boundaries',
@@ -191,8 +228,9 @@ void main() {
       await tester.pumpWidget(host(BalancedLyricText(sample.text,
           style: styled, textAlign: TextAlign.left, alignmentX: -1)));
       final balanced = find.byType(BalancedLyricText);
-      final painting = find.descendant(
-          of: balanced, matching: find.byType(CustomPaint)).first;
+      final painting = find
+          .descendant(of: balanced, matching: find.byType(CustomPaint))
+          .first;
       final paint = tester.widget<CustomPaint>(painting);
       final ink = paint.painter! as PlainLyricWordFollowPainter;
       final canvasSize = tester.getSize(painting);
@@ -214,6 +252,34 @@ void main() {
           reason: 'Painter and Text must reserve equal line height');
     }
     semantics.dispose();
+  });
+
+  testWidgets('word-follow changes reuse the shaped lyric paragraph',
+      (tester) async {
+    Widget host(bool follow) => MaterialApp(
+        home: SizedBox(
+            width: 300,
+            child: BalancedLyricText('Morning light returns',
+                style: const TextStyle(fontFamily: 'Ahem', fontSize: 24),
+                textAlign: TextAlign.left,
+                alignmentX: -1,
+                wordFollow: follow)));
+    PlainLyricWordFollowPainter painter() => tester
+        .widget<CustomPaint>(find
+            .descendant(
+                of: find.byType(BalancedLyricText),
+                matching: find.byType(CustomPaint))
+            .first)
+        .painter! as PlainLyricWordFollowPainter;
+    await tester.pumpWidget(host(false));
+    final shaped = painter().text;
+    expect(painter().slots, isEmpty);
+    await tester.pumpWidget(host(true));
+    expect(painter().text, same(shaped));
+    expect(painter().slots, isNotEmpty);
+    await tester.pumpWidget(host(false));
+    expect(painter().text, same(shaped));
+    expect(painter().slots, isEmpty);
   });
 
   test('CJK and emoji use original shaping and legal selection bounds', () {

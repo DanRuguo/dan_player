@@ -510,7 +510,7 @@ void main() {
   });
 
   testWidgets(
-      'all playlist views suppress cover details while song menu survives',
+      'tree covers show names on hover while other views suppress cover details',
       (tester) async {
     tester.view.physicalSize = const Size(1080, 820);
     tester.view.devicePixelRatio = 1;
@@ -535,13 +535,16 @@ void main() {
       await _decode(tester);
       for (final id in [child.id, song.id]) {
         final item = find.byKey(ValueKey('playlist-select-$id'));
-        expect(TooltipVisibility.of(tester.element(item)), isFalse);
+        expect(TooltipVisibility.of(tester.element(item)),
+            view == PlaylistViewMode.tree);
         await pointer.moveTo(tester.getCenter(item));
         await tester.pump(const Duration(seconds: 2));
         await tester.pumpAndSettle();
-        for (final tooltip in tester.stateList<TooltipState>(
-            find.descendant(of: item, matching: find.byType(Tooltip)))) {
-          expect(tooltip.ensureTooltipVisible(), isFalse);
+        if (view != PlaylistViewMode.tree) {
+          for (final tooltip in tester.stateList<TooltipState>(
+              find.descendant(of: item, matching: find.byType(Tooltip)))) {
+            expect(tooltip.ensureTooltipVisible(), isFalse);
+          }
         }
       }
       if (view == PlaylistViewMode.grid) {

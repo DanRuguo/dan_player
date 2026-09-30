@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/sorting/sort_direction.dart';
@@ -332,54 +333,56 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
     final maxWidth = widget.maxWidth ??
         math.max(44.0, math.min(320.0, MediaQuery.sizeOf(context).width - 32));
     const arrow = Icon(Icons.expand_more, size: 18);
-    // showMenu captures this inherited theme from the anchor context. Windows'
-    // standard scroll behavior supplies an independent controller per popup;
-    // the app's scrollbar reveals the bounded menu's scroll extent on input.
-    return ScrollbarTheme(
-      data: ScrollbarTheme.of(context).copyWith(
-        interactive: true,
-      ),
-      child: ConstrainedBox(
-        key: _anchor,
-        constraints: BoxConstraints(maxWidth: maxWidth),
-        child: Tooltip(
-          message: ui("排序：{0}", [label]),
-          triggerMode: TooltipTriggerMode.manual,
-          excludeFromSemantics: true,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
+    // showMenu captures these inherited themes from the trigger. Only its
+    // popup scroll viewport uses the retained shader stretch; page scrolls
+    // keep their existing raster path and the 120 ms popup animation remains.
+    return AppStableStretchScope(
+      child: ScrollbarTheme(
+        data: ScrollbarTheme.of(context).copyWith(
+          interactive: true,
+        ),
+        child: ConstrainedBox(
+          key: _anchor,
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: Tooltip(
+            message: ui("排序：{0}", [label]),
+            triggerMode: TooltipTriggerMode.manual,
             excludeFromSemantics: true,
-            onSecondaryTap: _enabled ? _show : null,
-            onLongPress: _enabled ? _show : null,
-            child: maxWidth < 90
-                ? IconButton.outlined(
-                    tooltip: ui("排序：{0}", [label]),
-                    onPressed: _enabled ? _show : null,
-                    style: appToolbarControlStyle(context,
-                        reduced: reduced, iconOnly: true),
-                    icon: const Icon(Icons.sort))
-                : OutlinedButton(
-                    onPressed: _enabled ? _show : null,
-                    style: appToolbarControlStyle(context, reduced: reduced),
-                    child: AppToolbarLabel(
-                      label: label,
-                      semanticsLabel: ui("排序：{0}", [label]),
-                      icon: widget.direction == null
-                          ? Icons.sort
-                          : widget.direction == SortDirection.ascending
-                              ? Icons.arrow_upward
-                              : Icons.arrow_downward,
-                      trailing: reduced
-                          ? arrow
-                          : AnimatedRotation(
-                              turns: _open ? .5 : 0,
-                              duration: AppMotion.duration(context,
-                                  MotionKind.feedback, AppMotion.quick),
-                              curve: AppMotion.standardCurve,
-                              child: arrow,
-                            ),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              excludeFromSemantics: true,
+              onSecondaryTap: _enabled ? _show : null,
+              onLongPress: _enabled ? _show : null,
+              child: maxWidth < 90
+                  ? IconButton.outlined(
+                      tooltip: ui("排序：{0}", [label]),
+                      onPressed: _enabled ? _show : null,
+                      style: appToolbarControlStyle(context,
+                          reduced: reduced, iconOnly: true),
+                      icon: const Icon(Icons.sort))
+                  : OutlinedButton(
+                      onPressed: _enabled ? _show : null,
+                      style: appToolbarControlStyle(context, reduced: reduced),
+                      child: AppToolbarLabel(
+                        label: label,
+                        semanticsLabel: ui("排序：{0}", [label]),
+                        icon: widget.direction == null
+                            ? Icons.sort
+                            : widget.direction == SortDirection.ascending
+                                ? Icons.arrow_upward
+                                : Icons.arrow_downward,
+                        trailing: reduced
+                            ? arrow
+                            : AnimatedRotation(
+                                turns: _open ? .5 : 0,
+                                duration: AppMotion.duration(context,
+                                    MotionKind.feedback, AppMotion.quick),
+                                curve: AppMotion.standardCurve,
+                                child: arrow,
+                              ),
+                      ),
                     ),
-                  ),
+            ),
           ),
         ),
       ),

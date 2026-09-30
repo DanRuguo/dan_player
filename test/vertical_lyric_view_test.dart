@@ -6,9 +6,11 @@ import 'dart:ui' show Tristate;
 import 'dart:ui' as drawing;
 
 import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filter.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
@@ -58,7 +60,8 @@ class _Harness {
   }
 
   final positions = StreamController<double>.broadcast();
-  final settings = LyricViewController();
+  final settings =
+      LyricViewController(preferences: NowPlayingPagePreference.fromMap({}));
   late Future<Lyric?> future;
   double position;
   bool failSeek = false;
@@ -281,16 +284,16 @@ void main() {
       }
 
       final before = await ink();
-      final textPosition = tester.getTopLeft(find.text('Line 0'));
+      final textPosition = tester.getTopLeft(_row(0));
       final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await pointer.addPointer(location: const Offset(1, 1));
-      await pointer.moveTo(tester.getCenter(find.text('Line 0')));
+      await pointer.moveTo(tester.getCenter(_row(0)));
       await tester.pumpAndSettle();
       final hovered = await ink();
       expect(hovered.left, before.left);
       expect(hovered.right, before.right);
       expect(hovered.center, closeTo(before.center, .1));
-      expect(tester.getTopLeft(find.text('Line 0')), textPosition);
+      expect(tester.getTopLeft(_row(0)), textPosition);
       await pointer.moveTo(const Offset(1, 1));
       await tester.pumpAndSettle();
       expect(await ink(), before);
@@ -381,7 +384,7 @@ void main() {
       final before = await inkRows();
       final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await pointer.addPointer(location: const Offset(1, 1));
-      await pointer.moveTo(tester.getCenter(find.text('Line 1')));
+      await pointer.moveTo(tester.getCenter(_row(1)));
       await tester.pump();
       for (final ms in [80, 80, 120]) {
         await tester.pump(Duration(milliseconds: ms));
@@ -417,8 +420,16 @@ void main() {
       (tester) async {
     final harness = _Harness();
     await _mount(tester, harness);
-    final focused = tester.widget<Text>(find.text('Line 0')).style!;
-    final contextStyle = tester.widget<Text>(find.text('Line 1')).style!;
+    final focused = tester
+        .widget<BalancedLyricText>(find
+            .descendant(of: _row(0), matching: find.byType(BalancedLyricText))
+            .first)
+        .style;
+    final contextStyle = tester
+        .widget<BalancedLyricText>(find
+            .descendant(of: _row(1), matching: find.byType(BalancedLyricText))
+            .first)
+        .style;
     expect(focused.fontWeight, FontWeight.w800);
     // The source paragraph uses its displayed font size directly; context
     // emphasis remains a paint-only transform outside that paragraph.
@@ -571,7 +582,10 @@ void main() {
     expect(painter.position, const Duration(seconds: 6));
     expect(painter.progressForWord(0), .5);
     expect(painter.progressForWord(1), 0);
-    expect(find.text('译文'), findsOneWidget);
+    expect(
+        find.byWidgetPredicate(
+            (widget) => widget is BalancedLyricText && widget.text == '译文'),
+        findsOneWidget);
     expect(_controller(tester).offset, greaterThan(0));
   });
 
@@ -692,6 +706,569 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('small font spreads blur across both visible viewport sides',
+      (tester) async {
+    final harness = _Harness(lyric: _plainLyric(20), position: 10);
+    await _mount(tester, harness);
+    final centerBefore = tester.getCenter(_row(2)).dy;
+    harness.settings.setFontSize(14);
+    await tester.pumpAndSettle();
+    expect(tester.getCenter(_row(2)).dy, closeTo(centerBefore, .5));
+    final viewport = tester.getRect(_scroll());
+    final visible = [
+      for (var index = 0; index < 20; index++)
+        if (tester.getRect(_row(index)).overlaps(viewport)) index,
+    ];
+    double blur(int index) => tester
+        .widget<LyricFollowEffects>(find.ancestor(
+            of: _row(index), matching: find.byType(LyricFollowEffects)))
+        .blur;
+    expect(visible, containsAll([0, 1, 2, 3, 4, 5]));
+    expect(blur(0), greaterThan(blur(1)));
+    expect(blur(1), greaterThan(0));
+    for (final index in [2, 3, 4]) {
+      expect(blur(index), 0, reason: 'current and next two rows stay clear');
+    }
+    final fading = visible.where((index) => index > 4).toList();
+    expect(fading, isNotEmpty);
+    var last = 0.0;
+    for (final index in fading) {
+      final sigma = blur(index);
+      expect(sigma, greaterThan(last));
+      expect(sigma, lessThanOrEqualTo(LyricMotion.blurForDistance(4)));
+      last = sigma;
+    }
+  });
+
+  testWidgets('timestamp shares the blurred lyric row filter', (tester) async {
+    final harness = _Harness(lyric: _plainLyric(20), position: 25);
+    harness.settings.setShowTimestamps(true);
+    await _mount(tester, harness);
+    final timestamp = find.descendant(
+        of: _row(3),
+        matching: find.byKey(const ValueKey('lyric-line-timestamp')));
+    expect(timestamp, findsOneWidget);
+    final filter = find.ancestor(
+        of: timestamp, matching: find.byType(LyricFractionalFilter));
+    expect(filter, findsOneWidget);
+    expect(tester.widget<LyricFractionalFilter>(filter).sigma, greaterThan(0));
+  });
+
+  testWidgets('slider size updates keep one paragraph and zero-blur sampling',
+      (tester) async {
+    final harness = _Harness();
+    await _mount(tester, harness);
+    final viewport =
+        tester.renderObject<RenderProxyBox>(find.byType(LyricViewportFade));
+    final mask = viewport.debugLayer;
+    harness.settings.setFontSizeAdjusting(true);
+    harness.settings.setFontSize(24.25);
+    await tester.pump();
+
+    double displayedSize() => tester
+        .widget<BalancedLyricText>(find.byWidgetPredicate(
+          (widget) => widget is BalancedLyricText && widget.text == 'Line 0',
+        ))
+        .style
+        .fontSize!;
+    final startSize = displayedSize();
+    expect(startSize, closeTo(24.25 * 1.5, .001));
+    await tester.pump(const Duration(milliseconds: 40));
+    final middleSize = displayedSize();
+    expect(middleSize, closeTo(startSize, .001),
+        reason: 'The target glyph layout stays fixed during painted scaling');
+    harness.settings.setFontSize(23);
+    await tester.pump();
+    expect(displayedSize(), closeTo(23 * 1.5, .001),
+        reason: 'A new target replaces the paragraph before it fades in');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(displayedSize(), closeTo(23 * 1.5, .001));
+
+    final morphs =
+        find.descendant(of: _row(0), matching: find.byType(LyricFontMorph));
+    expect(morphs, findsWidgets);
+    for (final morph in tester.widgetList<LyricFontMorph>(morphs)) {
+      expect(morph.children, hasLength(1));
+    }
+    final filters = tester.widgetList<LyricFractionalFilter>(find.descendant(
+        of: _row(0), matching: find.byType(LyricFractionalFilter)));
+    expect(filters, isNotEmpty);
+    for (final filter in filters) {
+      expect(filter.enabled, isTrue);
+      expect(filter.sigma, 0);
+      expect(filter.samplingScale, 1.5);
+    }
+    expect(viewport.debugLayer, same(mask));
+    harness.settings.setFontSizeAdjusting(false);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('current lyric holds its screen position during A± sizing',
+      (tester) async {
+    final harness = _Harness(
+        lyric: _Lyric([
+      for (var index = 0; index < 4; index++)
+        LrcLine(Duration(seconds: index * 5), 'Line $index┃Translation $index',
+            isBlank: false, length: const Duration(seconds: 5)),
+    ]));
+    harness.settings.lyricFontSize = 14;
+    harness.settings.translationFontSize = 14;
+    harness.settings.showTranslation = true;
+    await _mount(tester, harness);
+    double rowCenter() => tester.getCenter(_row(0)).dy;
+    double inkTop(int row, String text) {
+      final paragraph = find.descendant(
+        of: _row(row),
+        matching: find.byWidgetPredicate(
+            (widget) => widget is BalancedLyricText && widget.text == text),
+      );
+      final paint =
+          find.descendant(of: paragraph, matching: find.byType(CustomPaint));
+      return tester.getTopLeft(paint.first).dy;
+    }
+
+    List<double> inkPositions() => [
+          inkTop(0, 'Line 0'),
+          inkTop(0, 'Translation 0'),
+          inkTop(1, 'Line 1'),
+          inkTop(1, 'Translation 1'),
+        ];
+    void expectUnmoved(List<double> before) {
+      final after = inkPositions();
+      for (var index = 0; index < before.length; index++) {
+        expect(after[index], closeTo(before[index], .1),
+            reason: 'Paragraph $index moved on the first font frame');
+      }
+    }
+
+    final beforeCenter = rowCenter();
+    final before = inkPositions();
+    harness.settings.setFontSize(25);
+    await tester.pump();
+    expect(rowCenter(), closeTo(beforeCenter, .1));
+    expectUnmoved(before);
+    await tester.pumpAndSettle();
+
+    final enlarged = inkPositions();
+    harness.settings.setFontSize(14);
+    await tester.pump();
+    expect(rowCenter(), closeTo(beforeCenter, .1));
+    expectUnmoved(enlarged);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('click focus filters only moving glyphs and retains leaf sampling',
+      (tester) async {
+    final harness = _Harness();
+    await _mount(tester, harness);
+    drawing.FilterQuality? quality(int index) => tester
+        .widget<Transform>(find
+            .descendant(of: _motion(index), matching: find.byType(Transform))
+            .first)
+        .filterQuality;
+
+    void expectSamplingPath(drawing.FilterQuality? outerQuality) {
+      expect(quality(2), outerQuality);
+      final filters = tester.widgetList<LyricFractionalFilter>(find.descendant(
+          of: _row(2), matching: find.byType(LyricFractionalFilter)));
+      expect(filters, isNotEmpty);
+      expect(
+          filters
+              .every((filter) => filter.enabled && filter.samplingScale == 1.5),
+          isTrue);
+    }
+
+    expectSamplingPath(null);
+    await tester.tap(_row(2));
+    await tester.pump();
+    expect(_active(tester), 2);
+    expectSamplingPath(drawing.FilterQuality.low);
+    await tester.pump(const Duration(milliseconds: 160));
+    expectSamplingPath(drawing.FilterQuality.low);
+    await tester.pumpAndSettle();
+    expectSamplingPath(drawing.FilterQuality.low);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('lyric transition end keeps the current row anchor',
+      (tester) async {
+    final harness = _Harness(lyric: _plainLyric(30), position: 40);
+    await _mount(tester, harness);
+    double ink(int index) => tester
+        .getTopLeft(find
+            .descendant(of: _row(index), matching: find.byType(CustomPaint))
+            .first)
+        .dy;
+    harness.settings.setFontSize(34);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 476));
+    final fontInk = ink(8);
+    final fontScroll = _controller(tester).offset;
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(ink(8), closeTo(fontInk, .05));
+    expect(_controller(tester).offset, closeTo(fontScroll, .05));
+    harness.settings.setShowTimestamps(true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 476));
+    final timeInk = ink(8);
+    final timeScroll = _controller(tester).offset;
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(ink(8), closeTo(timeInk, .05));
+    expect(_controller(tester).offset, closeTo(timeScroll, .05));
+    await tester.pumpAndSettle();
+    await tester.tap(_row(10));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 460));
+    final clickInk = ink(10);
+    final clickScroll = _controller(tester).offset;
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(ink(10), closeTo(clickInk, .05));
+    expect(_controller(tester).offset, closeTo(clickScroll, .05));
+  });
+
+  for (final alignment in LyricTextAlign.values) {
+    testWidgets('click handoff keeps $alignment lyric ink at its viewport edge',
+        (tester) async {
+      final harness = _Harness(lyric: _plainLyric(30), position: 40);
+      harness.settings.lyricTextAlign = alignment;
+      await tester.pumpWidget(_app(harness, width: 620, height: 480));
+      await tester.pumpAndSettle();
+
+      await tester.tap(_row(10));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 460));
+      final ink = find
+          .descendant(of: _row(10), matching: find.byType(CustomPaint))
+          .first;
+      final before = tester.getRect(ink);
+      await tester.pump(const Duration(milliseconds: 8));
+      final after = tester.getRect(ink);
+      expect(after.left, closeTo(before.left, .05));
+      expect(after.right, closeTo(before.right, .05));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final alignment in LyricTextAlign.values) {
+    testWidgets('resizing keeps $alignment lyric ink anchored through reflow',
+        (tester) async {
+      final harness = _Harness(
+        position: 25,
+        lyric: _Lyric([
+          LrcLine(const Duration(seconds: 0),
+              'This feeling is all we know and we will keep following it through the night',
+              isBlank: false, length: const Duration(seconds: 5)),
+          for (var index = 1; index < 12; index++)
+            LrcLine(Duration(seconds: index * 5), 'Line $index',
+                isBlank: false, length: const Duration(seconds: 5)),
+        ]),
+      );
+      harness.settings.lyricTextAlign = alignment;
+      final fraction = switch (alignment) {
+        LyricTextAlign.left => 0.0,
+        LyricTextAlign.center => .5,
+        LyricTextAlign.right => 1.0,
+      };
+      Finder ink() => find
+          .descendant(of: _row(5), matching: find.byType(CustomPaint))
+          .first;
+      double x() {
+        final paint = tester.widget<CustomPaint>(ink()).painter!
+            as PlainLyricWordFollowPainter;
+        final first = paint.text.computeLineMetrics().first;
+        final box = tester.renderObject<RenderBox>(ink());
+        final local = Offset(
+            paint.inkOffset.dx +
+                first.left +
+                (paint.text.width - first.width) * fraction,
+            0);
+        return box.localToGlobal(local).dx - tester.getTopLeft(_scroll()).dx;
+      }
+
+      await tester.pumpWidget(_app(harness, width: 620));
+      await tester.pumpAndSettle();
+      final originalY = tester.getTopLeft(ink()).dy;
+      final originalX = x();
+      await tester.pumpWidget(_app(harness, width: 420));
+      expect(tester.getTopLeft(ink()).dy, closeTo(originalY, 1));
+      expect(x(), closeTo(originalX - 200 * fraction, 1));
+      await tester.pumpWidget(_app(harness, width: 590));
+      expect(tester.getTopLeft(ink()).dy, closeTo(originalY, 1));
+      expect(x(), closeTo(originalX - 30 * fraction, 1));
+      final beforeHeightChange =
+          tester.getTopLeft(ink()).dy - tester.getTopLeft(_scroll()).dy;
+      await tester.pumpWidget(_app(harness, width: 590, height: 600));
+      final afterHeightChange =
+          tester.getTopLeft(ink()).dy - tester.getTopLeft(_scroll()).dy;
+      expect(afterHeightChange - beforeHeightChange, closeTo(120 * .34, 1));
+      expect(x(), closeTo(originalX - 30 * fraction, 1));
+      await tester.pump();
+      expect(tester.getTopLeft(ink()).dy - tester.getTopLeft(_scroll()).dy,
+          closeTo(afterHeightChange, 1));
+    });
+  }
+
+  testWidgets(
+      'reversing through mixed one-line and wrapped lyrics stays anchored',
+      (tester) async {
+    final harness = _Harness(
+      position: 70,
+      lyric: _Lyric([
+        for (var index = 0; index < 28; index++)
+          LrcLine(
+              Duration(seconds: index * 5),
+              index == 14
+                  ? 'Current line'
+                  : 'Maybe we should let this go ${'through the night ' * (index % 4)}',
+              isBlank: false,
+              length: const Duration(seconds: 5)),
+      ]),
+    );
+    Finder currentInk() =>
+        find.descendant(of: _row(14), matching: find.byType(CustomPaint)).first;
+    double localTop() =>
+        tester.getTopLeft(currentInk()).dy - tester.getTopLeft(_scroll()).dy;
+    await tester.pumpWidget(_app(harness, width: 720));
+    await tester.pumpAndSettle();
+    final anchor = localTop();
+    for (final width in [
+      580.0,
+      500,
+      460,
+      435,
+      425,
+      420,
+      410,
+      390,
+      825,
+      800,
+      500,
+      425,
+      390,
+      410,
+      460,
+      580,
+      720
+    ]) {
+      await tester.pumpWidget(_app(harness, width: width.toDouble()));
+      expect(localTop(), closeTo(anchor, 1), reason: 'width $width');
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('mixed wraps keep the same anchor across animation handoffs',
+      (tester) async {
+    final harness = _Harness(
+      position: 70,
+      lyric: _Lyric([
+        for (var index = 0; index < 28; index++)
+          LrcLine(
+              Duration(seconds: index * 5),
+              index == 14
+                  ? 'Maybe we should let this go'
+                  : 'Maybe we should let this go ${'through the night ' * (index % 4)}',
+              isBlank: false,
+              length: const Duration(seconds: 5)),
+      ]),
+    );
+    await tester.pumpWidget(_app(harness, width: 620));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(_app(harness, width: 435));
+    await tester.pumpAndSettle();
+    double anchor({bool font = false}) =>
+        tester.getTopLeft(_row(14)).dy -
+        tester.getTopLeft(_scroll()).dy +
+        tester.getSize(_row(14)).height * (font ? .5 : .34);
+
+    harness.settings.setShowTimestamps(true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 476));
+    final timestampEnd = anchor();
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(anchor(), closeTo(timestampEnd, .1));
+
+    await tester.pumpAndSettle();
+    harness.settings.setFontSize(34);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 476));
+    final fontEnd = anchor(font: true);
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(anchor(font: true), closeTo(fontEnd, .1));
+
+    await tester.pumpAndSettle();
+    final next = tester.getRect(_row(15));
+    await tester.tapAt(Offset(next.left + 20, next.top + 20));
+    await tester.pump();
+    expect(harness.seekRequests.last, 75);
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 460));
+    double clickedAnchor() =>
+        tester.getTopLeft(_row(15)).dy -
+        tester.getTopLeft(_scroll()).dy +
+        tester.getSize(_row(15)).height * .34;
+    final clickEnd = clickedAnchor();
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(clickedAnchor(), closeTo(clickEnd, .1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a wrapped row does not leave a stale timestamp handoff position',
+      (tester) async {
+    final harness = _Harness(
+      position: 25,
+      lyric: _Lyric([
+        for (var index = 0; index < 12; index++)
+          LrcLine(
+              Duration(seconds: index * 5),
+              index == 5
+                  ? 'Maybe we should let this go'
+                  : 'Maybe we should let this go ${'through the night ' * (index % 3)}',
+              isBlank: false,
+              length: const Duration(seconds: 5)),
+      ]),
+    );
+    Finder ink() =>
+        find.descendant(of: _row(5), matching: find.byType(CustomPaint)).first;
+    double y() => tester.getTopLeft(ink()).dy - tester.getTopLeft(_scroll()).dy;
+    await tester.pumpWidget(_app(harness, width: 620));
+    await tester.pumpAndSettle();
+    final originalTop = y();
+    await tester.pumpWidget(_app(harness, width: 435));
+    expect(y(), closeTo(originalTop, 1));
+    harness.settings.setShowTimestamps(true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 476));
+    final shownEnd = y();
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(y(), closeTo(shownEnd, .1));
+    harness.settings.setShowTimestamps(false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 476));
+    final hiddenEnd = y();
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(y(), closeTo(hiddenEnd, .1));
+    await tester.pumpWidget(_app(harness, width: 620));
+    expect(y(), closeTo(originalTop, 1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('next lyric uses its own anchor after a wrap change',
+      (tester) async {
+    _Harness harness(double position) => _Harness(
+          position: position,
+          lyric: _Lyric([
+            for (var index = 0; index < 12; index++)
+              LrcLine(
+                Duration(seconds: index * 5),
+                index == 5
+                    ? 'Maybe we should let this go through the night and keep moving'
+                    : 'Line $index',
+                isBlank: false,
+                length: const Duration(seconds: 5),
+              ),
+          ]),
+        );
+    double nextTop() =>
+        tester.getTopLeft(_row(6)).dy - tester.getTopLeft(_scroll()).dy;
+
+    final baseline = harness(30);
+    await tester.pumpWidget(_app(baseline, width: 435));
+    await tester.pumpAndSettle();
+    final expected = nextTop();
+
+    await tester.pumpWidget(const SizedBox());
+    final resized = harness(25);
+    await tester.pumpWidget(_app(resized, width: 620));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(_app(resized, width: 435));
+    resized.emit(30);
+    await tester.pumpAndSettle();
+    expect(nextTop(), closeTo(expected, 1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('resizing during automatic follow does not displace lyric ink',
+      (tester) async {
+    Future<List<double>> followStep(double nextWidth) async {
+      final harness = _Harness(
+        position: 70,
+        lyric: _Lyric([
+          for (var index = 0; index < 28; index++)
+            LrcLine(
+                Duration(seconds: index * 5),
+                index == 14 || index == 15
+                    ? 'Current line'
+                    : 'Maybe we should let this go ${'through the night ' * (index % 4)}',
+                isBlank: false,
+                length: const Duration(seconds: 5)),
+        ]),
+      );
+      await tester.pumpWidget(_app(harness, width: 620));
+      await tester.pumpAndSettle();
+      harness.emit(75);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(_controller(tester).position.isScrollingNotifier.value, isTrue);
+      double localTop() =>
+          tester.getTopLeft(_row(15)).dy - tester.getTopLeft(_scroll()).dy;
+      final before = localTop();
+      await tester.pumpWidget(_app(harness, width: nextWidth));
+      final offsets = <double>[localTop() - before];
+      for (var step = 0; step < 6; step++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        offsets.add(localTop() - before);
+      }
+      return offsets;
+    }
+
+    final ordinaryStep = await followStep(620);
+    await tester.pumpWidget(const SizedBox());
+    final resizedStep = await followStep(420);
+    expect(resizedStep.first, closeTo(ordinaryStep.first, 1));
+    for (var frame = 1; frame < resizedStep.length; frame++) {
+      expect((resizedStep[frame] - resizedStep[frame - 1]).abs(), lessThan(8),
+          reason: 'Old pre-wrap scroll offsets cannot return on frame $frame');
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('font drag scales old glyphs before target paragraph handoff',
+      (tester) async {
+    final harness = _Harness(position: 25);
+    await _mount(tester, harness);
+    Finder paragraph() => find
+        .descendant(of: _row(5), matching: find.byType(BalancedLyricText))
+        .first;
+    Finder morph() => find
+        .descendant(of: _row(5), matching: find.byType(LyricFontMorph))
+        .first;
+    double paintedScale() => tester
+        .widget<Transform>(find
+            .descendant(of: morph(), matching: find.byType(Transform))
+            .first)
+        .transform
+        .storage[0];
+
+    expect(tester.widget<BalancedLyricText>(paragraph()).style.fontSize, 33);
+    harness.settings.setFontDragPreview(32);
+    await tester.pump();
+    expect(harness.settings.lyricFontSize, 22);
+    expect(tester.widget<BalancedLyricText>(paragraph()).style.fontSize, 33);
+    expect(paintedScale(), closeTo(32 / 22, .0001));
+
+    harness.settings.setFontDragPreview(null);
+    harness.settings.setFontSize(32);
+    await tester.pump();
+    expect(tester.widget<BalancedLyricText>(paragraph()).style.fontSize, 48);
+    expect(paintedScale(), closeTo(22 / 32, .0001));
+    await tester.pumpAndSettle();
+    expect(paintedScale(), closeTo(1, .0001));
+  });
+
   testWidgets('manual reading keeps the visible row when font size changes',
       (tester) async {
     final harness = _Harness(lyric: _plainLyric(100), position: 100);
@@ -718,6 +1295,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<LyricViewTile>(_row(99)).reducedMotion, isFalse);
     expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('manual reading retains lyric glyph sampling without stretch',
+      (tester) async {
+    final harness = _Harness();
+    await _mount(tester, harness);
+    List<bool> sampledRows() => [
+          for (var index = 0; index < 12; index++)
+            if (find
+                .descendant(
+                    of: _row(index),
+                    matching: find.byType(LyricFractionalFilter))
+                .evaluate()
+                .any((element) =>
+                    (element.widget as LyricFractionalFilter).enabled))
+              true
+            else
+              false,
+        ];
+
+    final before = sampledRows();
+    expect(before, contains(true));
+    final viewport =
+        tester.renderObject<RenderProxyBox>(find.byType(LyricViewportFade));
+    final mask = viewport.debugLayer;
+    expect(mask, isA<ShaderMaskLayer>());
+    expect(
+        find.ancestor(
+            of: _scroll(),
+            matching: find.byType(StretchingOverscrollIndicator)),
+        findsNothing);
+
+    harness.settings.setReadingMode(true);
+    await tester.pump();
+    expect(sampledRows(), before,
+        reason: 'Clear lyrics must keep their paragraph sampling path');
+    expect(
+        tester
+            .widget<LyricViewportFade>(find.byType(LyricViewportFade))
+            .enabled,
+        isFalse);
+    expect(viewport.debugLayer, same(mask),
+        reason: 'Reading must not replace the viewport compositing layer');
+
+    harness.settings.setReadingMode(false);
+    await tester.pump();
+    expect(sampledRows(), before);
+    expect(viewport.debugLayer, same(mask));
     expect(tester.takeException(), isNull);
   });
 
@@ -824,7 +1450,7 @@ void main() {
     final harness = _Harness();
     await _mount(tester, harness);
     await _wheel(tester, 60);
-    await tester.tap(find.text('Line 3'));
+    await tester.tap(_row(3));
     await tester.pumpAndSettle();
     expect(harness.seekRequests, [15]);
     expect(_active(tester), 3);
@@ -834,7 +1460,7 @@ void main() {
       (tester) async {
     final harness = _Harness()..failSeek = true;
     await _mount(tester, harness);
-    await tester.tap(find.text('Line 2'));
+    await tester.tap(_row(2));
     await tester.pump();
     expect(_active(tester), 0);
     expect(find.textContaining('无法跳转到该歌词'), findsOneWidget);
@@ -979,10 +1605,23 @@ void main() {
             .widgetList<CustomPaint>(find.byType(CustomPaint))
             .where((widget) => widget.painter is LyricWordHighlightPainter),
         isEmpty);
-    final color = tester.widget<Text>(find.text('Line 0')).style!.color;
+    final color = tester
+        .widget<BalancedLyricText>(find
+            .descendant(of: _row(0), matching: find.byType(BalancedLyricText))
+            .first)
+        .style
+        .color;
     harness.emit(2.5);
     await tester.pump();
-    expect(tester.widget<Text>(find.text('Line 0')).style!.color, color);
+    expect(
+        tester
+            .widget<BalancedLyricText>(find
+                .descendant(
+                    of: _row(0), matching: find.byType(BalancedLyricText))
+                .first)
+            .style
+            .color,
+        color);
   });
 
   testWidgets(
@@ -1168,7 +1807,7 @@ void main() {
       final harness = _Harness(lyric: lyric, position: adjustedSecond + .01);
       await _mount(tester, harness, reduced: true);
       expect(_active(tester), 1);
-      await tester.tap(find.text('First'));
+      await tester.tap(_row(0));
       await tester.pumpAndSettle();
       expect(harness.seekRequests, [5 - offset / 1000]);
       expect(_active(tester), 0);

@@ -5,11 +5,12 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-/// Shared by the queue and playback area; the marker belongs to the service,
-/// so closing either surface cannot lose the target or change playback mode.
+/// The stop target can appear in playback controls; sleep timer details and
+/// actions stay in the queue when [showSleepTimer] is false.
 class QueueStopStatus extends StatelessWidget {
-  const QueueStopStatus({super.key, this.playbackService});
+  const QueueStopStatus({super.key, this.playbackService, this.showSleepTimer = true});
   final PlaybackService? playbackService;
+  final bool showSleepTimer;
 
   @override
   Widget build(BuildContext context) {
@@ -29,7 +30,7 @@ class QueueStopStatus extends StatelessWidget {
         final label = service.queueStopTargetLabel;
         final remaining = service.sleepTimerRemaining.value;
         if (label == null &&
-            remaining == null &&
+            (!showSleepTimer || remaining == null) &&
             !service.stopAfterCurrent.value) {
           return const SizedBox.shrink();
         }
@@ -39,7 +40,7 @@ class QueueStopStatus extends StatelessWidget {
             label == null ? ui('播完当前歌曲后停止') : ui('播放完此曲后停止：{0}', [label]);
         final paused = service.sleepTimerPaused.value;
         return Column(mainAxisSize: MainAxisSize.min, children: [
-          if (remaining != null)
+          if (showSleepTimer && remaining != null)
             Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 2),

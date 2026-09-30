@@ -57,6 +57,8 @@ const catalogPractical2606 = <String, List<String>>{
   '手动阅读歌词': ['Read lyrics manually', '歌詞を手動で読む', '가사 수동 읽기'],
   '回到当前歌词': ['Return to current line', '現在の歌詞に戻る', '현재 가사로 돌아가기'],
   '恢复歌词字号': ['Reset lyric text size', '歌詞の文字サイズを戻す', '가사 글자 크기 초기화'],
+  '精确歌词字号': ['Set exact lyric text size', '歌詞の文字サイズを数値で指定', '정확한 가사 글자 크기 설정'],
+  '字号设为 {0}': ['Set text size to {0}', '文字サイズを{0}に設定', '글자 크기를 {0}(으)로 설정'],
   '复制完整显示歌词': ['Copy all visible lyric text', '表示中の歌詞全文をコピー', '표시 중인 가사 전체 복사'],
   '歌词阅读工具': ['Lyric reading tools', '歌詞の読み方', '가사 읽기 도구'],
   '复制这一句歌词': ['Copy this lyric line', 'この歌詞をコピー', '이 가사 줄 복사'],

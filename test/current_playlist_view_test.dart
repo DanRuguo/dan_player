@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/component/app_shell.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/page/audio_detail_page.dart';
@@ -294,6 +295,45 @@ void main() {
   });
   setUp(() => uiLanguage.value = UiLanguage.zh);
   tearDown(() => uiLanguage.value = UiLanguage.zh);
+
+  testWidgets('immersive queue scrolls without stretching either viewport',
+      (tester) async {
+    final playback = _QueuePlayback(
+        List.generate(40, (index) => CategoryTestAudio('Track $index')));
+    addTearDown(playback.dispose);
+
+    Future<void> mount({required bool immersive}) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.windows),
+        scrollBehavior: const DanPlayerScrollBehavior(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            height: 440,
+            child: CurrentPlaylistView(
+                key: ValueKey(immersive),
+                immersive: immersive,
+                playbackService: playback),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    await mount(immersive: true);
+    expect(find.byKey(const ValueKey('current-playlist-list')), findsOneWidget);
+    expect(find.byKey(const ValueKey('queue-toolbar-scroll')), findsOneWidget);
+    expect(find.byType(StretchingOverscrollIndicator), findsNothing);
+    final list = tester
+        .widget<ListView>(find.byKey(const ValueKey('current-playlist-list')));
+    await tester.drag(find.byKey(const ValueKey('current-playlist-list')),
+        const Offset(0, -160));
+    await tester.pump();
+    expect(list.controller!.offset, greaterThan(0));
+
+    await mount(immersive: false);
+    expect(find.byType(StretchingOverscrollIndicator), findsNWidgets(2));
+  });
 
   testWidgets(
       '666-song compact toolbar scrolls by wheel, touch and keyboard while list scroll stays vertical',

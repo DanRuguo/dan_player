@@ -1,6 +1,23 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+/// Align a standard vertical submenu's bottom with its trigger. Material's
+/// overflow fallback otherwise places its bottom at the trigger's top.
+/// Desktop visual density shrinks the default 48 px menu rows to 40 px; use
+/// the effective theme density for both panels instead of assuming 48 px.
+Offset appSubmenuBottomOffset(BuildContext context, int itemCount,
+    {int dividerCount = 0}) {
+  final itemHeight =
+      48.0 + Theme.of(context).visualDensity.baseSizeAdjustment.dy;
+  final triggerHeight = itemHeight;
+  const dividerHeight = 16.0;
+  const panelPadding = 8.0;
+  final panelHeight =
+      itemCount * itemHeight + dividerCount * dividerHeight + panelPadding * 2;
+  // SubmenuButton also subtracts its top padding from alignmentOffset.
+  return Offset(0, triggerHeight + panelPadding - panelHeight);
+}
+
 /// Serialize reopen requests through the existing closing animation. Starting
 /// forward while reverse().whenComplete(hideOverlay) is pending strands the
 /// framework menu in an open-but-invisible state after rapid context clicks.
@@ -14,13 +31,15 @@ class AppMenuAnchor extends StatefulWidget {
       this.crossAxisUnconstrained = true,
       this.alignmentOffset = Offset.zero,
       this.reservedPadding = EdgeInsets.zero,
-      this.style});
+      this.style,
+      this.onClose});
   final List<Widget> menuChildren;
   final MenuAnchorChildBuilder builder;
   final bool useRootOverlay, consumeOutsideTap, crossAxisUnconstrained;
   final Offset alignmentOffset;
   final EdgeInsetsGeometry reservedPadding;
   final MenuStyle? style;
+  final VoidCallback? onClose;
   @override
   State<AppMenuAnchor> createState() => _AppMenuAnchorState();
 }
@@ -46,7 +65,10 @@ class _AppMenuAnchorState extends State<AppMenuAnchor> {
       builder: widget.builder,
       onAnimationStatusChanged: (status) =>
           _controller.closing = status == AnimationStatus.reverse,
-      onClose: _controller.closed);
+      onClose: () {
+        _controller.closed();
+        widget.onClose?.call();
+      });
 }
 
 class _SerialMenuController extends MenuController {

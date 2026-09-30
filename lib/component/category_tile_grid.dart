@@ -485,6 +485,8 @@ class _CategoryTileState extends State<_CategoryTile> {
           menuChildren: [
             if (!circle)
               SubmenuButton(
+                  alignmentOffset: appSubmenuBottomOffset(
+                      context, CategoryTileSize.values.length),
                   leadingIcon: const Icon(Icons.photo_size_select_large),
                   menuChildren: [
                     for (final size in CategoryTileSize.values)

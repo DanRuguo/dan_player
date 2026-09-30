@@ -56,6 +56,9 @@ void main() {
   });
   tearDown(() => uiLanguage.value = UiLanguage.zh);
 
+  Finder paragraph(String text) => find.byWidgetPredicate(
+      (widget) => widget is BalancedLyricText && widget.text.contains(text));
+
   test(
       'legacy preferences preserve lyrics, clamp unsafe text sizes and round trip display settings',
       () {
@@ -306,17 +309,17 @@ void main() {
       'display toggles affect rendered auxiliary rows and timestamps immediately',
       (tester) async {
     final h = await mount(tester);
-    expect(find.textContaining('Translation line 0'), findsOneWidget);
+    expect(paragraph('Translation line 0'), findsOneWidget);
     h.settings.setShowTranslation(false);
     h.settings.setShowRomanization(false);
     h.settings.setShowTimestamps(true);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Translation line 0'), findsNothing);
-    expect(find.textContaining('Dì 0'), findsNothing);
+    expect(paragraph('Translation line 0'), findsNothing);
+    expect(paragraph('Dì 0'), findsNothing);
     expect(find.text('00:00.000'), findsOneWidget);
     h.settings.setShowTranslation(true);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Translation line 0'), findsOneWidget);
+    expect(paragraph('Translation line 0'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -365,14 +368,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 40));
       await tester.pump();
-      if (reduced) {
-        expect(font(), closeTo(h.settings.lyricFontSize * 1.5, .01),
-            reason: 'Reduced motion applies the final font size immediately');
-      } else {
-        expect(
-            font(), inExclusiveRange(22 * 1.5, h.settings.lyricFontSize * 1.5),
-            reason: 'Font settings animate through an intermediate size');
-      }
+      expect(font(), closeTo(h.settings.lyricFontSize * 1.5, .01),
+          reason: 'The target paragraph is laid out once at its final size');
       expect(find.text('00:25.000'), findsOneWidget);
       final viewport =
           tester.getRect(find.byKey(const ValueKey('vertical-lyric-scroll')));
@@ -381,16 +378,16 @@ void main() {
           closeTo(viewport.top + viewport.height * .34, 2));
       await capture('during');
       await tester.pumpAndSettle();
-      expect(find.textContaining('Translation line 5'), findsNothing);
-      expect(find.textContaining('Dì 5'), findsNothing);
+      expect(paragraph('Translation line 5'), findsNothing);
+      expect(paragraph('Dì 5'), findsNothing);
       // A second choice applies from the current displayed settings.
       h.settings.setShowTranslation(true);
       h.settings.switchLyricTextAlign();
       h.settings.decreaseFontSize();
       await tester.pumpAndSettle();
       expect(font(), closeTo(h.settings.lyricFontSize * 1.5, .01));
-      expect(find.textContaining('Translation line 5'), findsOneWidget);
-      expect(find.textContaining('Dì 5'), findsNothing);
+      expect(paragraph('Translation line 5'), findsOneWidget);
+      expect(paragraph('Dì 5'), findsNothing);
       expect(find.text('00:25.000'), findsOneWidget);
       await capture('after');
       expect(tester.binding.transientCallbackCount, 0);
@@ -420,7 +417,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(writes.single, contains('Translation line 15'));
     expect(writes.single, isNot(contains('Dì')));
-    final line = find.textContaining('第 0 行歌词').first;
+    final line = find.byWidgetPredicate((widget) =>
+        widget is LyricViewTile && widget.line.start == Duration.zero);
     final pointer = await tester.startGesture(tester.getCenter(line),
         kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
     await pointer.up();

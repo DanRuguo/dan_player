@@ -427,6 +427,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: _QueueToolbarRail(
                         controller: _toolbarScroll,
+                        suppressStretch: widget.immersive,
                         child: Row(spacing: 4, children: [
                           _organizeMenu(queue, currentIndex),
                           IconButton(
@@ -575,6 +576,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                         textAlign: TextAlign.center)))
                             : _QueueScrollbar(
                                 controller: scrollController,
+                                suppressStretch: widget.immersive,
                                 child: ListView.builder(
                                   shrinkWrap: widget.shrinkWrap,
                                   key: const ValueKey('current-playlist-list'),
@@ -622,8 +624,12 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
 /// Wheel input is redirected only while the pointer is over this independent
 /// toolbar. The song list keeps its vertical scrolling and touch gestures.
 class _QueueToolbarRail extends StatelessWidget {
-  const _QueueToolbarRail({required this.controller, required this.child});
+  const _QueueToolbarRail(
+      {required this.controller,
+      required this.suppressStretch,
+      required this.child});
   final ScrollController controller;
+  final bool suppressStretch;
   final Widget child;
 
   @override
@@ -631,7 +637,9 @@ class _QueueToolbarRail extends StatelessWidget {
       child: AppHorizontalWheelRegion(
           controller: controller,
           child: ScrollConfiguration(
-              behavior: const DanPlayerScrollBehavior(),
+              behavior: suppressStretch
+                  ? const DanPlayerScrollBehavior().copyWith(overscroll: false)
+                  : const DanPlayerScrollBehavior(),
               child: AppScrollbar(
                   controller: controller,
                   child: SingleChildScrollView(
@@ -656,17 +664,22 @@ String _queueDurationTooltip(List<Audio> queue, int current) {
 /// Queue rows already leave a small symmetric edge inset. Paint the thumb in
 /// that space without reducing the available content width.
 class _QueueScrollbar extends StatelessWidget {
-  const _QueueScrollbar({required this.controller, required this.child});
+  const _QueueScrollbar(
+      {required this.controller,
+      required this.suppressStretch,
+      required this.child});
 
   static const edgeInset = 6.0;
   final ScrollController controller;
+  final bool suppressStretch;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      behavior: ScrollConfiguration.of(context)
+          .copyWith(scrollbars: false, overscroll: !suppressStretch),
       child: ScrollbarTheme(
         data: ScrollbarTheme.of(context).copyWith(
           crossAxisMargin: 0,

@@ -8,6 +8,15 @@ import 'lyric_follow_words.dart';
 /// Keep that ink inside the same paragraph canvas used by the row filter.
 const double lyricVerticalInkGuard = 4;
 
+/// The same horizontal anchor is used by the widget alignment, line painter,
+/// font handoff, and geometry probes. Keep intermediate alignments continuous.
+double lyricAlignmentFraction(double alignmentX) =>
+    ((alignmentX + 1) / 2).clamp(0.0, 1.0);
+
+double lyricAlignedOffset(
+        double availableWidth, double contentWidth, double alignmentX) =>
+    (availableWidth - contentWidth) * lyricAlignmentFraction(alignmentX);
+
 double lyricHorizontalInkGuard(
     TextStyle style, TextScaler scaler, double availableWidth) {
   // Keep the source origin on an integral logical pixel. Fractional inset
@@ -34,16 +43,20 @@ double layoutBalancedLyric(TextPainter painter, double maxWidth) {
   }
   final original = painter.computeLineMetrics();
   if (original.length < 2 || original.length > 6) return maxWidth;
-  final widest = original.fold<double>(0, (v, row) => math.max(v, row.width));
-  if (original.last.width >= widest * .65) return maxWidth;
-  var lower =
-      original.fold<double>(0, (v, row) => v + row.width) / original.length;
+  // A spread-based accept/reject threshold can turn on at a *wider* window
+  // and move a word back to the following line. That produces a visible
+  // rewrap even while the window is dragged steadily in one direction.
+  // Instead, both the preferred width and the minimum feasible width must
+  // move monotonically with the available width.
+  var lower = 0.0;
   final intactPhrases = <TextSelection>[];
   for (final phrase in _phrases.allMatches(text)) {
     final selection =
         TextSelection(baseOffset: phrase.start, extentOffset: phrase.end);
-    if (painter.getBoxesForSelection(selection).length == 1) {
+    final boxes = painter.getBoxesForSelection(selection);
+    if (boxes.length == 1) {
       intactPhrases.add(selection);
+      lower = math.max(lower, boxes.single.right - boxes.single.left);
     }
   }
   // Never create a new split inside a Latin word that currently fits intact.
@@ -59,27 +72,23 @@ double layoutBalancedLyric(TextPainter painter, double maxWidth) {
   for (var step = 0; step < 7 && upper - lower > .5; step++) {
     final width = (lower + upper) / 2;
     painter.layout(maxWidth: width);
-    if (painter.computeLineMetrics().length <= original.length) {
+    if (painter.computeLineMetrics().length <= original.length &&
+        intactPhrases.every(
+            (phrase) => painter.getBoxesForSelection(phrase).length == 1)) {
       upper = width;
     } else {
       lower = width;
     }
   }
-  painter.layout(maxWidth: upper);
-  final balanced = painter.computeLineMetrics();
-  double spread(List<LineMetrics> rows) {
-    final widths = rows.map((row) => row.width);
-    return widths.reduce(math.max) - widths.reduce(math.min);
-  }
-
-  if (balanced.length != original.length ||
-      spread(balanced) >= spread(original) ||
+  final preferred = math.max(upper, maxWidth * .72);
+  painter.layout(maxWidth: preferred);
+  if (painter.computeLineMetrics().length != original.length ||
       intactPhrases
           .any((phrase) => painter.getBoxesForSelection(phrase).length > 1)) {
     painter.layout(maxWidth: maxWidth);
     return maxWidth;
   }
-  return upper;
+  return preferred;
 }
 
 final _latinWords =
@@ -212,6 +221,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText> {
   double? _width;
   TextPainter? _painter;
   List<LyricFollowWordSlot> _slots = const [];
+  bool? _slotsFollow;
   Color? _color;
   Object? _wrapIdentity;
   ({
@@ -243,7 +253,6 @@ class _BalancedLyricTextState extends State<BalancedLyricText> {
         widget.text,
         style,
         paintAlign,
-        widget.wordFollow,
         direction,
         scaler,
         locale,
@@ -269,8 +278,16 @@ class _BalancedLyricTextState extends State<BalancedLyricText> {
         _slots = widget.wordFollow
             ? lyricFollowWordSlots(painter, widget.text)
             : const [];
+        _slotsFollow = widget.wordFollow;
         _color = widget.style.color;
         _identity = identity;
+      } else if (_slotsFollow != widget.wordFollow) {
+        // Promoting a context row to the current line changes word-follow
+        // metadata, not its glyph layout. Retain the same shaped paragraph.
+        _slots = widget.wordFollow
+            ? lyricFollowWordSlots(_painter!, widget.text)
+            : const [];
+        _slotsFollow = widget.wordFollow;
       }
       if (_painter != null && _color != widget.style.color) {
         _painter!
@@ -354,6 +371,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText> {
         _painter?.dispose();
         _painter = null;
         _slots = const [];
+        _slotsFollow = null;
         return Align(
             alignment: alignment,
             child: SizedBox(
@@ -481,7 +499,6 @@ void paintLyricAlignment(
     return;
   }
   final lines = text.computeLineMetrics();
-  final fraction = ((alignmentX + 1) / 2).clamp(0.0, 1.0);
   for (var index = 0; index < lines.length; index++) {
     final line = lines[index];
     final top = index == 0 ? -100.0 : line.baseline - line.ascent;
@@ -491,7 +508,7 @@ void paintLyricAlignment(
     canvas.save();
     canvas.clipRect(Rect.fromLTRB(-100, top, text.width + 100, bottom),
         doAntiAlias: false);
-    canvas.translate((text.width - line.width) * fraction, 0);
+    canvas.translate(lyricAlignedOffset(text.width, line.width, alignmentX), 0);
     paint();
     canvas.restore();
   }
@@ -630,11 +647,10 @@ class _RenderLyricFontMorph extends RenderBox
     }
     size = constraints
         .constrain(_interpolatedSize(firstChild!.size, lastChild!.size));
-    final fraction = ((_alignmentX + 1) / 2).clamp(0.0, 1.0);
     child = firstChild;
     while (child != null) {
-      (child.parentData! as _LyricFontMorphParentData).offset =
-          Offset((size.width - child.size.width) * fraction, 0);
+      (child.parentData! as _LyricFontMorphParentData).offset = Offset(
+          lyricAlignedOffset(size.width, child.size.width, _alignmentX), 0);
       child = childAfter(child);
     }
   }

@@ -892,6 +892,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
         ),
         if (bookmarks.isNotEmpty)
           SubmenuButton(
+            alignmentOffset: appSubmenuBottomOffset(context, bookmarks.length),
             menuStyle: menuStyle,
             leadingIcon: const Icon(Icons.bookmarks_outlined),
             menuChildren: [

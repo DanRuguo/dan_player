@@ -5,6 +5,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filt
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
@@ -173,8 +174,17 @@ void main() {
       Future<({double x, double localX, double mass})> capture(
           String name) async {
         final origin = tester.getTopLeft(find.byKey(key));
-        final paragraph = tester.getTopLeft(find.text(ink));
-        final paragraphLeft = paragraph.dx - origin.dx;
+        // The retained LRC paragraph is now painted by CustomPaint. Measure
+        // its actual paint box, not a Text widget that no longer exists.
+        final paragraphFinder = find.byWidgetPredicate((widget) =>
+            widget is CustomPaint &&
+            widget.painter is PlainLyricWordFollowPainter);
+        final paragraph = tester.getTopLeft(paragraphFinder);
+        final painter = tester.widget<CustomPaint>(paragraphFinder).painter!
+            as PlainLyricWordFollowPainter;
+        // Old Text sat inside this horizontal ink guard. Subtracting only the
+        // CustomPaint origin would add a font-dependent guard to local ink.
+        final paragraphLeft = paragraph.dx + painter.inkOffset.dx - origin.dx;
         return (await tester.runAsync(() async {
           final image = await (key.currentContext!.findRenderObject()!
                   as RenderRepaintBoundary)

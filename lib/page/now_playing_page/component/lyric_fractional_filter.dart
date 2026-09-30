@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
+
 /// Per-row paint parameters. Only the leaf filter depends on this scope, so a
 /// follow tick does not rebuild or relayout the cached paragraph subtree.
 class LyricFractionalFilterScope extends InheritedWidget {
@@ -56,21 +57,27 @@ class LyricFractionalFilter extends SingleChildRenderObjectWidget {
     required this.sigma,
     required this.dpr,
     this.enabled = true,
+    this.samplingScale = 1.5,
     this.repaintToken,
     this.repaint,
     super.child,
   })  : assert(sigma >= 0 && sigma < double.infinity),
+        assert(samplingScale >= 1 && samplingScale < double.infinity),
         assert(dpr > 0 && dpr < double.infinity);
 
   final double sigma;
   final double dpr;
   final bool enabled;
+
+  /// Kept constant across font dragging and hover so neither transition
+  /// changes the paragraph's raster sampling path.
+  final double samplingScale;
   final Object? repaintToken;
   final Listenable? repaint;
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderLyricFractionalFilter(sigma, dpr, enabled, repaint);
+      _RenderLyricFractionalFilter(sigma, dpr, enabled, samplingScale, repaint);
 
   @override
   void updateRenderObject(BuildContext context, RenderObject renderObject) {
@@ -78,6 +85,7 @@ class LyricFractionalFilter extends SingleChildRenderObjectWidget {
       ..sigma = sigma
       ..dpr = dpr
       ..enabled = enabled
+      ..samplingScale = samplingScale
       ..repaintToken = repaintToken
       ..repaint = repaint;
   }
@@ -115,11 +123,12 @@ Offset lyricFilterRemainder(Matrix4 logicalToGlobal, double dpr) {
 }
 
 class _RenderLyricFractionalFilter extends RenderProxyBox {
-  _RenderLyricFractionalFilter(
-      this._sigma, this._dpr, this._enabled, this._repaint);
+  _RenderLyricFractionalFilter(this._sigma, this._dpr, this._enabled,
+      this._samplingScale, this._repaint);
   double _sigma;
   double _dpr;
   bool _enabled;
+  double _samplingScale;
   Object? _repaintToken;
   Listenable? _repaint;
 
@@ -156,6 +165,12 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   set dpr(double value) {
     if (_dpr == value) return;
     _dpr = value;
+    markNeedsPaint();
+  }
+
+  set samplingScale(double value) {
+    if (_samplingScale == value) return;
+    _samplingScale = value;
     markNeedsPaint();
   }
 
@@ -196,9 +211,16 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
       return;
     }
     _fallbackFilter.layer = null;
-    final remainder = lyricFilterRemainder(getTransformTo(null), _dpr);
+    // Vertical subpixel correction keeps optional-track reveals on their
+    // established raster baseline. Horizontal nearest-pixel snapping can
+    // jump by a full source pixel as the two-pane lyric origin crosses a
+    // half-pixel while a focus transform finishes.
+    final remainder = Offset(
+      0,
+      lyricFilterRemainder(getTransformTo(null), _dpr).dy,
+    );
     final anchor = offset - remainder;
-    const samplingScale = 1.5;
+    final samplingScale = _samplingScale;
     final sampling = ui.ImageFilter.matrix(
         (Matrix4.translationValues(remainder.dx, remainder.dy, 0)
               ..scaleByDouble(1 / samplingScale, 1 / samplingScale, 1, 1))
@@ -206,11 +228,14 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
         filterQuality: ui.FilterQuality.medium);
     // The matrix keeps the same supersampled glyph geometry at the last frame.
     // A clear row needs no Gaussian convolution over that retained layer.
+    // The downsampling matrix runs before this outer blur. Keep the original
+    // 1.5x blur radius even when glyph source sampling is raised; otherwise
+    // changing sampling density also changes the visible blur strength.
     final filter = _sigma == 0
         ? sampling
         : ui.ImageFilter.compose(
-            outer: ui.ImageFilter.blur(
-                sigmaX: sigma * samplingScale, sigmaY: sigma * samplingScale),
+            outer:
+                ui.ImageFilter.blur(sigmaX: sigma * 1.5, sigmaY: sigma * 1.5),
             inner: sampling);
     final canvas = context.canvas;
     canvas.save();

@@ -257,7 +257,9 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
               label: ui('歌单回收站'),
               icon: Icons.restore_from_trash,
               onSelected: widget.onTrash),
-        if (widget.onToggleCountChildren != null)
+        if (widget.onToggleCountChildren != null &&
+            widget.view != PlaylistViewMode.tree &&
+            widget.view != PlaylistViewMode.grid)
           _ToolbarMenuItem(
               value: _PlaylistToolbarAction.countChildren,
               key: const ValueKey('playlist-count-children'),

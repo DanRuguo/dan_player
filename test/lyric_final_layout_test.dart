@@ -24,6 +24,15 @@ class _TimedLine extends SyncLyricLine {
             translation);
 }
 
+Finder _balanced(String text) => find.byWidgetPredicate(
+    (widget) => widget is BalancedLyricText && widget.text == text);
+
+Finder _plainPaint(String text) => find.byWidgetPredicate((widget) =>
+    widget is CustomPaint &&
+    widget.painter is PlainLyricWordFollowPainter &&
+    (widget.painter as PlainLyricWordFollowPainter).text.text?.toPlainText() ==
+        text);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -38,6 +47,72 @@ void main() {
   const romaji = 'o to mo na i se ka i、 na ni wo mi te ru no ?';
   const western =
       'and I’m home beyond the horizon, still waiting for tomorrow?';
+
+  testWidgets('A± scales and fades only the final-size lyric glyphs',
+      (tester) async {
+    const text = '音もない世界、何を見てるの？';
+    final settings = LyricViewController()
+      ..lyricFontSize = 14
+      ..translationFontSize = 14;
+    final clock = AnimationController(vsync: tester);
+    final position = ValueNotifier(Duration.zero);
+    addTearDown(() {
+      settings.dispose();
+      clock.dispose();
+      position.dispose();
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(fontFamily: danEmbeddedFontFamily),
+      home: Scaffold(
+        body: SizedBox(
+          width: 440,
+          child: ChangeNotifierProvider.value(
+            value: settings,
+            child: LyricWordFollowScope(
+              follow: LyricWordFollow(clock, LyricMotion.scrollCurve, 0),
+              child: LyricViewTile(
+                line: LrcLine(Duration.zero, text,
+                    length: const Duration(seconds: 5), isBlank: false),
+                position: position,
+                opacity: 1,
+                reducedMotion: false,
+                distance: 1,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final paragraph = _balanced(text);
+    final direct = find.byKey(const ValueKey('lyric-direct-paragraph'));
+    (double, double) pose() {
+      final fade = tester.widget<KeyedSubtree>(direct).child as Opacity;
+      final scale = fade.child! as Transform;
+      return (fade.opacity, scale.transform.storage[0]);
+    }
+
+    settings.setFontSize(25);
+    await tester.pump();
+    expect(paragraph, findsOneWidget);
+    expect(tester.widget<BalancedLyricText>(paragraph).style.fontSize,
+        25 * LyricMotion.focusedFontScale);
+    expect(pose().$1, 0);
+    expect(pose().$2, closeTo(14 / 25, .001));
+
+    await tester.pump(const Duration(milliseconds: 160));
+    expect(paragraph, findsOneWidget);
+    expect(tester.widget<BalancedLyricText>(paragraph).style.fontSize,
+        25 * LyricMotion.focusedFontScale);
+    expect(pose().$1, inExclusiveRange(0, 1));
+    expect(pose().$2, inExclusiveRange(14 / 25, 1));
+
+    await tester.pumpAndSettle();
+    expect(paragraph, findsOneWidget);
+    expect(pose(), (1.0, 1.0));
+    expect(tester.takeException(), isNull);
+  });
 
   for (final timed in [false, true]) {
     for (final width in [592.0, 270.0]) {
@@ -122,24 +197,27 @@ void main() {
           expect(bounds.length, width < 300 ? greaterThan(1) : 1);
         }
 
-        final translation = find.text(chinese);
+        final translation = _balanced(chinese);
         expect(translation, findsOneWidget);
-        final paragraphs =
-            find.descendant(of: translation, matching: find.byType(RichText));
+        final translationPaint = _plainPaint(chinese);
+        final translationPainter = tester
+            .widget<CustomPaint>(translationPaint)
+            .painter! as PlainLyricWordFollowPainter;
+        expect(translationPainter.text.didExceedMaxLines, isFalse);
         final translationRender =
-            tester.renderObject<RenderParagraph>(paragraphs);
-        expect(translationRender.didExceedMaxLines, isFalse);
+            tester.renderObject<RenderBox>(translationPaint);
         expect(
             MatrixUtils.transformRect(translationRender.getTransformTo(null),
                     Offset.zero & translationRender.size)
                 .width,
             lessThanOrEqualTo(width - 24 + .1));
         if (timed) {
-          final romanization = find.text(romaji);
+          final romanization = _balanced(romaji);
           expect(romanization, findsOneWidget);
-          final romanRender = tester.renderObject<RenderParagraph>(find
-              .descendant(of: romanization, matching: find.byType(RichText)));
-          expect(romanRender.didExceedMaxLines, isFalse);
+          final romanPainter = tester
+              .widget<CustomPaint>(_plainPaint(romaji))
+              .painter! as PlainLyricWordFollowPainter;
+          expect(romanPainter.text.didExceedMaxLines, isFalse);
         }
 
         final secondaryPainters = tester
@@ -169,7 +247,7 @@ void main() {
         }
 
         final beforeSize = tester.getSize(primary);
-        final phoneticSize = timed ? tester.getSize(find.text(romaji)) : null;
+        final phoneticSize = timed ? tester.getSize(_balanced(romaji)) : null;
         for (final phase in [.25, .55, .82, 1.0]) {
           clock.value = phase;
           await tester.pump();
@@ -177,7 +255,7 @@ void main() {
               reason: 'Follow motion cannot change the paragraph wrap width');
           expect(lastGlyph.right, lessThanOrEqualTo(paintSize.width - 3));
           if (timed) {
-            expect(tester.getSize(find.text(romaji)), phoneticSize,
+            expect(tester.getSize(_balanced(romaji)), phoneticSize,
                 reason:
                     'Phonetic text must not reflow as the follow clock moves');
           }
@@ -427,18 +505,20 @@ void main() {
     final text =
         tester.widget<BalancedLyricText>(find.byType(BalancedLyricText));
     expect(text.style.fontSize, 24 * LyricMotion.focusedFontScale);
-    final rich = tester.renderObject<RenderParagraph>(find.descendant(
-        of: find.text(western), matching: find.byType(RichText)));
+    final paint = _plainPaint(western);
+    final painter = tester.widget<CustomPaint>(paint).painter!
+        as PlainLyricWordFollowPainter;
     expect(
-        rich
+        painter.text
             .getBoxesForSelection(const TextSelection(
                 baseOffset: 0, extentOffset: western.length))
             .length,
         greaterThan(1));
-    expect(rich.didExceedMaxLines, isFalse);
+    expect(painter.text.didExceedMaxLines, isFalse);
+    final render = tester.renderObject<RenderBox>(paint);
     expect(
         MatrixUtils.transformRect(
-                rich.getTransformTo(null), Offset.zero & rich.size)
+                render.getTransformTo(null), Offset.zero & render.size)
             .width,
         lessThanOrEqualTo(276.1));
     settings.dispose();
@@ -485,8 +565,8 @@ void main() {
               .whereType<PlainLyricWordFollowPainter>()
               .map((painter) => painter.follow),
           everyElement(isNull));
-      expect(find.text(chinese), findsOneWidget);
-      expect(find.text(romaji), findsOneWidget);
+      expect(_balanced(chinese), findsOneWidget);
+      expect(_balanced(romaji), findsOneWidget);
       expect(tester.takeException(), isNull);
     }
 

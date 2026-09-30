@@ -50,47 +50,83 @@ class _WelcomingPageState extends State<WelcomingPage> {
       ),
       body: !_tutorialCompleted
           ? FeatureOnboarding(onComplete: _completeTutorial)
-          : SingleChildScrollView(
-              child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    AppEntrance(
-                      identity: 'welcome-heading',
-                      child: Column(
-                        children: [
-                          Text(
-                            ui("你的音乐放在哪些文件夹呢？"),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: scheme.onSurface,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 22,
+          : LayoutBuilder(builder: (context, viewport) {
+              final compact = viewport.maxWidth < 480;
+              return SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: viewport.maxHeight),
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                          horizontal: compact ? 16 : 24, vertical: 24),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 560),
+                        child: DecoratedBox(
+                          key: const ValueKey('welcome-library-card'),
+                          decoration: BoxDecoration(
+                            color: scheme.surfaceContainerLow,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: scheme.outlineVariant),
+                          ),
+                          child: Padding(
+                            padding: EdgeInsets.all(compact ? 20 : 32),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircleAvatar(
+                                  radius: 32,
+                                  backgroundColor: scheme.primaryContainer,
+                                  child: Icon(Icons.library_music_outlined,
+                                      size: 32,
+                                      color: scheme.onPrimaryContainer),
+                                ),
+                                const SizedBox(height: 20),
+                                AppEntrance(
+                                  identity: 'welcome-heading',
+                                  child: Column(children: [
+                                    Text(ui("你的音乐放在哪些文件夹呢？"),
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .headlineSmall
+                                            ?.copyWith(
+                                                color: scheme.onSurface,
+                                                fontWeight: FontWeight.w700)),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      ui("软件会扫描这些文件夹（包括所有子文件夹）下的音乐并建立索引。"),
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                              color: scheme.onSurfaceVariant),
+                                    ),
+                                  ]),
+                                ),
+                                const SizedBox(height: 24),
+                                const FolderSelectorView(),
+                                const SizedBox(height: 20),
+                                Divider(color: scheme.outlineVariant),
+                                const SizedBox(height: 8),
+                                TextButton.icon(
+                                  onPressed: () => showOnboardingRestore(
+                                      context,
+                                      onRestored: _completeTutorial),
+                                  icon:
+                                      const Icon(Icons.settings_backup_restore),
+                                  label: Text(ui('从备份恢复')),
+                                ),
+                              ],
                             ),
                           ),
-                          Text(
-                            ui("软件会扫描这些文件夹（包括所有子文件夹）下的音乐并建立索引。"),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: scheme.onSurface),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    OutlinedButton.icon(
-                      onPressed: () => showOnboardingRestore(context,
-                          onRestored: _completeTutorial),
-                      icon: const Icon(Icons.settings_backup_restore),
-                      label: Text(ui('从备份恢复')),
-                    ),
-                    const FolderSelectorView(),
-                  ],
+                  ),
                 ),
-              ),
-            )),
+              );
+            }),
     );
   }
 }
@@ -112,61 +148,112 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
 
-    return SizedBox(
-      width: 400,
-      height: 400,
-      child: AnimatedSwitcher(
+    return AnimatedSwitcher(
         duration: AppMotion.duration(
             context, MotionKind.transitions, AppMotion.standard),
         child: selecting
             ? folderSelector(scheme)
-            : FutureBuilder(
-                future: applicationSupportDirectory,
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Center(child: Text(ui('无法打开播放器数据目录，请检查文件夹权限后重试。')));
-                  }
-                  if (snapshot.data == null) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-
-                  return BuildIndexStateView(
-                    indexPath: snapshot.data!,
-                    folders: folders,
-                    whenIndexFailed: (error, _) {
-                      if (!mounted) return;
-                      setState(() => selecting = true);
-                      showAppNotice(ui('扫描未完成，可以调整文件夹后重试。'), context: context);
-                    },
-                    whenIndexBuilt: () async {
-                      await Future.wait([
-                        AppSettings.instance.saveSettings(),
-                        AudioLibrary.initFromIndex(),
-                      ]);
-                      await OnlineLibrary.instance.initialize();
-                      await Future.wait([
-                        readCustomAudioOrder(),
-                        readPlaylists(),
-                      ]);
-                      // Do not rely on MiniNowPlaying's first build to create
-                      // BASS. A persisted exclusive-output preference must be
-                      // prewarmed before the first song tile can be tapped.
-                      PlayService.instance.ensurePlaybackInitialized();
-                      LibraryAutoRefresh.instance.start();
-                      if (context.mounted) {
-                        context.go(app_paths.AUDIOS_PAGE);
+            : ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: SizedBox(
+                  height: 320,
+                  child: FutureBuilder(
+                    future: applicationSupportDirectory,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Center(
+                            child: Text(ui('无法打开播放器数据目录，请检查文件夹权限后重试。')));
                       }
+                      if (snapshot.data == null) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+
+                      return BuildIndexStateView(
+                        indexPath: snapshot.data!,
+                        folders: folders,
+                        whenIndexFailed: (error, _) {
+                          if (!mounted) return;
+                          setState(() => selecting = true);
+                          showAppNotice(ui('扫描未完成，可以调整文件夹后重试。'),
+                              context: context);
+                        },
+                        whenIndexBuilt: () async {
+                          await Future.wait([
+                            AppSettings.instance.saveSettings(),
+                            AudioLibrary.initFromIndex(),
+                          ]);
+                          await OnlineLibrary.instance.initialize();
+                          await Future.wait([
+                            readCustomAudioOrder(),
+                            readPlaylists(),
+                          ]);
+                          // Do not rely on MiniNowPlaying's first build to create
+                          // BASS. A persisted exclusive-output preference must be
+                          // prewarmed before the first song tile can be tapped.
+                          PlayService.instance.ensurePlaybackInitialized();
+                          LibraryAutoRefresh.instance.start();
+                          if (context.mounted) {
+                            context.go(app_paths.AUDIOS_PAGE);
+                          }
+                        },
+                      );
                     },
-                  );
-                },
-              ),
-      ),
-    );
+                  ),
+                ),
+              ));
   }
 
+  Future<void> _addFolder() async {
+    final dirPicker = DirectoryPicker()..title = ui("选择文件夹");
+    final dir = dirPicker.getDirectory();
+    if (dir == null || !mounted) return;
+    if (!folders.any((path) => path.toLowerCase() == dir.path.toLowerCase())) {
+      setState(() => folders.add(dir.path));
+    }
+  }
+
+  void _startScan() => setState(() => selecting = false);
+
   Widget folderSelector(ColorScheme scheme) {
-    return Column(
-      children: [
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 440),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (folders.isNotEmpty) ...[
+          Container(
+            height: (folders.length * 56.0).clamp(56.0, 224.0),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: ListView.builder(
+                itemCount: folders.length,
+                itemBuilder: (context, i) => AppEntrance(
+                  key: ValueKey((folders[i], i)),
+                  identity: ('welcome-folder', folders[i]),
+                  order: i,
+                  child: ListTile(
+                    leading: Icon(Icons.folder_outlined, color: scheme.primary),
+                    title: Tooltip(
+                      message: folders[i],
+                      child: Text(folders[i],
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    trailing: IconButton(
+                      tooltip: ui("移除"),
+                      onPressed: () => setState(() => folders.removeAt(i)),
+                      color: scheme.error,
+                      icon: const Icon(Symbols.delete),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
         AppEntrance(
           identity: 'welcome-folder-actions',
           order: 1,
@@ -175,60 +262,30 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
             spacing: 12,
             runSpacing: 8,
             children: [
-              FilledButton(
-                onPressed: () async {
-                  // final path = await pickSingleFolder();
-                  // if (path == null) return;
-                  final dirPicker = DirectoryPicker();
-                  dirPicker.title = ui("选择文件夹");
-
-                  final dir = dirPicker.getDirectory();
-                  if (dir == null) return;
-
-                  if (!mounted) return;
-                  if (!folders.any(
-                      (path) => path.toLowerCase() == dir.path.toLowerCase())) {
-                    setState(() => folders.add(dir.path));
-                  }
-                },
-                child: Text(ui("添加文件夹")),
-              ),
-              FilledButton(
-                onPressed: () {
-                  setState(() {
-                    selecting = false;
-                  });
-                },
-                child: Text(ui(folders.isEmpty ? '暂不添加' : '扫描')),
-              ),
+              if (folders.isEmpty)
+                FilledButton.icon(
+                  onPressed: _addFolder,
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  label: Text(ui("添加文件夹")),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: _addFolder,
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  label: Text(ui("添加文件夹")),
+                ),
+              if (folders.isEmpty)
+                TextButton(onPressed: _startScan, child: Text(ui('暂不添加')))
+              else
+                FilledButton.icon(
+                  onPressed: _startScan,
+                  icon: const Icon(Icons.travel_explore_outlined),
+                  label: Text(ui('扫描')),
+                ),
             ],
           ),
         ),
-        const SizedBox(height: 16.0),
-        Expanded(
-          child: ListView.builder(
-            itemCount: folders.length,
-            itemBuilder: (context, i) => AppEntrance(
-              key: ValueKey((folders[i], i)),
-              identity: ('welcome-folder', folders[i]),
-              order: i,
-              child: ListTile(
-                title: Text(folders[i]),
-                trailing: IconButton(
-                  tooltip: ui("移除"),
-                  onPressed: () {
-                    setState(() {
-                      folders.removeAt(i);
-                    });
-                  },
-                  color: scheme.error,
-                  icon: const Icon(Symbols.delete),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
+      ]),
     );
   }
 }
@@ -240,33 +297,36 @@ class _TitleBar extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    return DragToMoveArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8.0),
-                    child: PlayerLogo(),
-                  ),
-                  Text(
-                    "Dan Player",
-                    style: TextStyle(color: scheme.onSurface, fontSize: 16),
-                  ),
-                ],
+    return LayoutBuilder(builder: (context, constraints) {
+      return DragToMoveArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8.0),
+                      child: PlayerLogo(),
+                    ),
+                    if (constraints.maxWidth >= 400)
+                      Text(
+                        "Dan Player",
+                        style: TextStyle(color: scheme.onSurface, fontSize: 16),
+                      ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8.0),
-            const _WindowControlls(),
-          ],
+              const SizedBox(width: 8.0),
+              const _WindowControlls(),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 }
 

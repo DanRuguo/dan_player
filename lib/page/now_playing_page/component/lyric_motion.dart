@@ -203,6 +203,7 @@ class LyricFollowEffects extends StatelessWidget {
     required this.transition,
     required this.blur,
     this.blurEnabled = true,
+    this.samplingEnabled,
     this.blurAnimation,
     this.reading,
     required this.child,
@@ -212,6 +213,9 @@ class LyricFollowEffects extends StatelessWidget {
   final LyricFollowTransition? transition;
   final double blur;
   final bool blurEnabled;
+
+  /// Keep the paragraph's glyph sampling when reading turns blur off.
+  final bool? samplingEnabled;
   final Animation<double>? blurAnimation;
   final Animation<double>? reading;
   final Widget child;
@@ -256,7 +260,7 @@ class LyricFollowEffects extends StatelessWidget {
                   reading?.value,
                   offset
                 ),
-                enabled: blurEnabled,
+                enabled: samplingEnabled ?? blurEnabled,
                 dpr: View.of(context).devicePixelRatio,
                 sigma: sigma,
                 child: child!,
@@ -273,24 +277,31 @@ class LyricViewportFade extends SingleChildRenderObjectWidget {
   const LyricViewportFade({
     super.key,
     required this.enabled,
+    this.retainLayer = false,
     required super.child,
   });
 
   final bool enabled;
+
+  /// An opaque mask preserves the same compositing path while fading is off.
+  final bool retainLayer;
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderLyricViewportFade(enabled);
+      _RenderLyricViewportFade(enabled, retainLayer);
 
   @override
   void updateRenderObject(
           BuildContext context, covariant RenderProxyBox renderObject) =>
-      (renderObject as _RenderLyricViewportFade).enabled = enabled;
+      (renderObject as _RenderLyricViewportFade)
+        ..enabled = enabled
+        ..retainLayer = retainLayer;
 }
 
 class _RenderLyricViewportFade extends RenderProxyBox {
-  _RenderLyricViewportFade(this._enabled);
+  _RenderLyricViewportFade(this._enabled, this._retainLayer);
 
   bool _enabled;
+  bool _retainLayer;
   set enabled(bool value) {
     if (_enabled == value) return;
     _enabled = value;
@@ -298,12 +309,20 @@ class _RenderLyricViewportFade extends RenderProxyBox {
     markNeedsCompositingBitsUpdate();
   }
 
+  set retainLayer(bool value) {
+    if (_retainLayer == value) return;
+    _retainLayer = value;
+    markNeedsPaint();
+    markNeedsCompositingBitsUpdate();
+  }
+
   @override
-  bool get alwaysNeedsCompositing => child != null && _enabled;
+  bool get alwaysNeedsCompositing =>
+      child != null && (_enabled || _retainLayer);
 
   @override
   void paint(PaintingContext context, Offset offset) {
-    if (!_enabled || child == null) {
+    if ((!_enabled && !_retainLayer) || child == null) {
       layer = null;
       super.paint(context, offset);
       return;
@@ -316,12 +335,14 @@ class _RenderLyricViewportFade extends RenderProxyBox {
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: const [
-          Colors.transparent,
-          Colors.white,
-          Colors.white,
-          Colors.transparent
-        ],
+        colors: _enabled
+            ? const [
+                Colors.transparent,
+                Colors.white,
+                Colors.white,
+                Colors.transparent
+              ]
+            : const [Colors.white, Colors.white, Colors.white, Colors.white],
         stops: [0, edge, 1 - edge, 1],
       ).createShader(Offset.zero & size)
       ..maskRect = offset & size
@@ -372,6 +393,7 @@ typedef LyricFontTransition = ({
   double fromTranslationFontSize,
   double toTranslationFontSize,
   double progress,
+  double visualProgress,
 });
 
 class LyricLineMotion extends ImplicitlyAnimatedWidget {
@@ -383,6 +405,7 @@ class LyricLineMotion extends ImplicitlyAnimatedWidget {
     required this.activation,
     required this.alignment,
     required this.presentation,
+    this.directFontSize = false,
     required this.builder,
     required bool reducedMotion,
   }) : super(
@@ -395,6 +418,7 @@ class LyricLineMotion extends ImplicitlyAnimatedWidget {
   final double activation;
   final Alignment alignment;
   final LyricTextPresentation presentation;
+  final bool directFontSize;
   final Widget Function(
       BuildContext context,
       double activation,
@@ -404,6 +428,25 @@ class LyricLineMotion extends ImplicitlyAnimatedWidget {
   @override
   AnimatedWidgetBaseState<LyricLineMotion> createState() =>
       _LyricLineMotionState();
+}
+
+// The visible geometry and the value used by ImplicitlyAnimatedWidget when a
+// transition is interrupted must use the same interpolation. Settling before
+// the final tick keeps the retained image filter from shifting its last pixel.
+double _settledGeometryProgress(double t) => (t / .995).clamp(0.0, 1.0);
+
+class _SettledScaleTween extends Tween<double> {
+  _SettledScaleTween({super.begin});
+
+  @override
+  double lerp(double t) => super.lerp(_settledGeometryProgress(t));
+}
+
+class _SettledAlignmentTween extends AlignmentTween {
+  _SettledAlignmentTween({super.begin});
+
+  @override
+  Alignment lerp(double t) => super.lerp(_settledGeometryProgress(t));
 }
 
 class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
@@ -428,7 +471,7 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
     _opacity = visitor(_opacity, widget.opacity,
         (value) => Tween<double>(begin: value as double)) as Tween<double>?;
     _scale = visitor(_scale, widget.scale,
-        (value) => Tween<double>(begin: value as double)) as Tween<double>?;
+        (value) => _SettledScaleTween(begin: value as double)) as Tween<double>?;
     _activation = visitor(_activation, widget.activation,
         (value) => Tween<double>(begin: value as double)) as Tween<double>?;
     _fontSize = visitor(_fontSize, widget.presentation.fontSize,
@@ -438,39 +481,50 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
         widget.presentation.translationFontSize,
         (value) => Tween<double>(begin: value as double)) as Tween<double>?;
     _alignment = visitor(_alignment, widget.alignment,
-            (value) => AlignmentTween(begin: value as Alignment))
+            (value) => _SettledAlignmentTween(begin: value as Alignment))
         as AlignmentTween?;
   }
 
   @override
-  Widget build(BuildContext context) => Opacity(
-        opacity: _opacity!.evaluate(animation).clamp(0.0, 1.0),
-        alwaysIncludeSemantics: true,
-        child: Transform.scale(
-          scale: _scale!.evaluate(animation),
-          alignment: _alignment!.evaluate(animation),
-          // An extra matrix image filter resamples context-row glyphs at a
-          // changing fractional origin. Direct scale painting keeps the next
-          // line's ink continuous through a content reveal's final frame.
-          child: RepaintBoundary(
-              child: widget.builder(
-            context,
-            _activation!.evaluate(animation),
-            (
-              fontSize: _fontSize!.evaluate(animation),
-              translationFontSize: _translationFontSize!.evaluate(animation),
-              alignment: _alignment!.evaluate(animation),
-            ),
-            (
-              fromFontSize: _fontSize!.begin!,
-              toFontSize: _fontSize!.end!,
-              fromTranslationFontSize: _translationFontSize!.begin!,
-              toTranslationFontSize: _translationFontSize!.end!,
-              progress: animation.value,
-            ),
-          )),
-        ),
-      );
+  Widget build(BuildContext context) {
+    // The size menu lays out its target paragraph immediately. Its separate
+    // visual progress only scales/fades those already shaped target glyphs.
+    final fontProgress = widget.directFontSize ? 1.0 : animation.value;
+    final fontSize = _fontSize!.transform(fontProgress);
+    final translationFontSize = _translationFontSize!.transform(fontProgress);
+    final alignment = _alignment!.evaluate(animation);
+    final hasGeometryMotion = _scale!.begin != _scale!.end ||
+        _alignment!.begin != _alignment!.end;
+    return Opacity(
+      opacity: _opacity!.evaluate(animation).clamp(0.0, 1.0),
+      alwaysIncludeSemantics: true,
+      child: Transform.scale(
+        scale: _scale!.evaluate(animation),
+        alignment: alignment,
+        filterQuality: widget.duration == Duration.zero || !hasGeometryMotion
+            ? null
+            : FilterQuality.low,
+        child: RepaintBoundary(
+            child: widget.builder(
+          context,
+          _activation!.evaluate(animation),
+          (
+            fontSize: fontSize,
+            translationFontSize: translationFontSize,
+            alignment: alignment,
+          ),
+          (
+            fromFontSize: _fontSize!.begin!,
+            toFontSize: _fontSize!.end!,
+            fromTranslationFontSize: _translationFontSize!.begin!,
+            toTranslationFontSize: _translationFontSize!.end!,
+            progress: fontProgress,
+            visualProgress: animation.value,
+          ),
+        )),
+      ),
+    );
+  }
 }
 
 /// Reveals optional lyric tracks without changing the timed paragraph's

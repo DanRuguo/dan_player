@@ -144,7 +144,11 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                                             blur: widget.blur,
                                             phase: phase))
                                     : null,
-                                child: widget.fluid
+                                // The frozen texture is only needed while
+                                // the layered background actually moves.
+                                // Static artwork can keep the same blur and
+                                // overlays without re-snapshotting on resize.
+                                child: widget.fluid && widget.motion
                                     ? CachedArtworkBlur(
                                         image: provider, blur: widget.blur)
                                     : ImageFiltered(

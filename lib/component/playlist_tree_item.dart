@@ -1,124 +1,78 @@
 import 'package:flutter/material.dart';
+
 import 'app_item_ink_well.dart';
 import 'app_shape.dart';
 
-/// Compact song cards and right-aligned folder summaries share the same cover.
+const playlistTreeFolderArtworkGrowth = 4.0;
+
+/// Cover-only tree tile. The title remains available on hover and to screen
+/// readers without consuming the horizontal space reserved for direct songs.
 class PlaylistTreeItem extends StatelessWidget {
-  const PlaylistTreeItem(
-      {super.key,
-      required this.title,
-      required this.metadata,
-      required this.cover,
-      required this.onTap,
-      required this.onSecondaryTapDown,
-      required this.onLongPress,
-      this.time,
-      this.shortMetadata,
-      this.identityWrapper});
-  final String title, metadata;
-  final String? time;
-  final String? shortMetadata;
+  const PlaylistTreeItem({
+    super.key,
+    required this.title,
+    required this.cover,
+    required this.coverSize,
+    required this.playlist,
+    required this.onTap,
+    required this.onSecondaryTapDown,
+    required this.onLongPress,
+    this.selected = false,
+    this.identityWrapper,
+  });
+
+  final String title;
   final Widget cover;
+  final double coverSize;
+  final bool playlist;
+  final bool selected;
   final VoidCallback onTap, onLongPress;
   final GestureTapDownCallback onSecondaryTapDown;
   final Widget Function(Widget)? identityWrapper;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = theme.colorScheme.primary;
-    if (time != null) {
-      return AppItemInkWell(
-          borderRadius: AppShape.controlRadius,
-          onTap: onTap,
-          onSecondaryTapDown: onSecondaryTapDown,
-          onLongPress: onLongPress,
-          child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: Row(children: [
-                cover,
-                const SizedBox(width: 10),
-                Expanded(
-                    child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Tooltip(
-                          message: title,
-                          child: Text(title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleSmall
-                                  ?.copyWith(color: color))),
-                      const SizedBox(height: 4),
-                      Tooltip(
-                          message: metadata,
-                          child: Text(metadata,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall
-                                  ?.copyWith(color: color))),
-                    ])),
-                const SizedBox(width: 8),
-                Text(time!,
-                    style: theme.textTheme.bodySmall?.copyWith(color: color)),
-              ])));
-    }
-    return AppItemInkWell(
-        borderRadius: AppShape.controlRadius,
-        onTap: onTap,
-        onSecondaryTapDown: onSecondaryTapDown,
-        onLongPress: onLongPress,
-        child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: Row(children: [
-              Expanded(child: Builder(builder: (context) {
-                final identity = Row(children: [
-                  cover,
-                  const SizedBox(width: 12),
-                  Expanded(child: LayoutBuilder(builder: (context, bounds) {
-                    final wide = bounds.maxWidth >=
-                        MediaQuery.textScalerOf(context).scale(420);
-                    final titleWidget = Tooltip(
-                        message: title,
-                        child: Text(title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium
-                                ?.copyWith(color: color)));
-                    final details = Tooltip(
-                        message:
-                            [metadata, if (time != null) time!].join(' · '),
-                        child: Text(wide ? metadata : shortMetadata ?? metadata,
-                            maxLines: wide ? 1 : 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.right,
-                            style: theme.textTheme.bodySmall
-                                ?.copyWith(color: color)));
-                    return wide
-                        ? Row(children: [
-                            Expanded(child: titleWidget),
-                            const SizedBox(width: 16),
-                            SizedBox(
-                                width: bounds.maxWidth * .42, child: details),
-                          ])
-                        : Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                                titleWidget,
-                                const SizedBox(height: 4),
-                                details,
-                                if (time != null)
-                                  Text(time!,
-                                      textAlign: TextAlign.right,
-                                      style: theme.textTheme.bodySmall
-                                          ?.copyWith(color: color)),
-                              ]);
-                  }))
-                ]);
-                return identityWrapper?.call(identity) ?? identity;
-              })),
-            ])));
+    final scheme = Theme.of(context).colorScheme;
+    final inset = playlist ? 4.0 : 3.0;
+    final radius = playlist ? AppShape.controlRadius : AppShape.smallRadius;
+    final identity = SizedBox.square(
+      dimension: coverSize + (playlist ? playlistTreeFolderArtworkGrowth : 0),
+      child: cover,
+    );
+    return SizedBox.square(
+      dimension: coverSize + (playlist ? 12 : inset * 2),
+      child: Semantics(
+        label: title,
+        button: true,
+        selected: selected,
+        child: Tooltip(
+          message: title,
+          child: Material(
+            color: playlist
+                ? Color.lerp(
+                    scheme.surfaceContainerHigh, scheme.primaryContainer, .3)
+                : scheme.primaryContainer,
+            shape: RoundedRectangleBorder(
+              borderRadius: radius,
+              side: BorderSide(
+                color: selected ? scheme.primary : Colors.transparent,
+                width: selected ? 2 : 0,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: AppItemInkWell(
+              borderRadius: radius,
+              onTap: onTap,
+              onSecondaryTapDown: onSecondaryTapDown,
+              onLongPress: onLongPress,
+              child: Padding(
+                padding: EdgeInsets.all(inset),
+                child: identityWrapper?.call(identity) ?? identity,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -11,11 +11,17 @@ import 'package:flutter/rendering.dart';
 /// Tree song cards share a lazy row; map occurrence IDs to those visual rows.
 class PlaylistCoverLayoutIndices extends InheritedWidget {
   const PlaylistCoverLayoutIndices(
-      {super.key, required this.indices, required super.child});
+      {super.key,
+      required this.indices,
+      this.seekTreeSong,
+      required super.child});
   final Map<Object, int> indices;
+
+  /// Returns null for a non-song, otherwise whether the lazy tree rail moved.
+  final bool? Function(Object id, bool atStart)? seekTreeSong;
   @override
   bool updateShouldNotify(PlaylistCoverLayoutIndices oldWidget) =>
-      oldWidget.indices != indices;
+      oldWidget.indices != indices || oldWidget.seekTreeSong != seekTreeSong;
 }
 
 /// A one-shot transition between lazy playlist layouts. No images or ticker
@@ -181,6 +187,22 @@ class _PlaylistCoverTransitionHostState
     }
     if (visibleOnly && !visible.overlaps(rect)) return null;
     return _CoverGeometry(rect, marker.widget.borderRadius, render);
+  }
+
+  _CoverGeometry? _movingTarget(Object id) {
+    final marker = _markers[id];
+    if (marker == null) return null;
+    // Tree root covers rise during their entrance. A target captured on the
+    // first tree frame is lower than the marker by the time its flight lands.
+    // Follow that marker through the handoff; settled destinations keep their
+    // one-time geometry and avoid a per-frame lookup.
+    if (!_instantHandoff &&
+        marker.context
+                .getInheritedWidgetOfExactType<PlaylistCoverLayoutIndices>() ==
+            null) {
+      return null;
+    }
+    return _geometry(marker);
   }
 
   Future<void> _transition(VoidCallback update,
@@ -375,6 +397,11 @@ class _PlaylistCoverTransitionHostState
   bool _seekAnchor(Object id, {required bool atStart}) {
     final targetIndex = widget.itemIds.indexOf(id);
     if (targetIndex < 0 || _markers.isEmpty) return false;
+    final treeLayout = _markers.values.first.context
+        .getInheritedWidgetOfExactType<PlaylistCoverLayoutIndices>();
+    if (treeLayout?.seekTreeSong?.call(id, atStart) case final bool moved) {
+      return moved;
+    }
     final marker = _markers[id] ?? _markers.values.first;
     final scroll = Scrollable.maybeOf(marker.context);
     final geometry = _geometry(marker, visibleOnly: false);
@@ -578,7 +605,9 @@ class _PlaylistCoverTransitionHostState
     if (host == null) return null;
     for (final marker in _markers.values) {
       final viewport =
-          Scrollable.maybeOf(marker.context)?.context.findRenderObject();
+          Scrollable.maybeOf(marker.context, axis: Axis.vertical)
+              ?.context
+              .findRenderObject();
       if (viewport is RenderBox && viewport.attached && viewport.hasSize) {
         return MatrixUtils.transformRect(
             viewport.getTransformTo(host), Offset.zero & viewport.size);
@@ -620,14 +649,7 @@ class _PlaylistCoverTransitionHostState
                       painter: _CoverFlightsPainter(
                           List.unmodifiable(_flights), _animation, _reveal,
                           clip: _visibleViewport,
-                          resolveTarget: _instantHandoff
-                              ? (id) {
-                                  final marker = _markers[id];
-                                  return marker == null
-                                      ? null
-                                      : _geometry(marker);
-                                }
-                              : null)),
+                          resolveTarget: _movingTarget)),
                 ))),
             ]),
           ),
@@ -860,7 +882,11 @@ class _CoverFlightsPainter extends CustomPainter {
       final rect = Rect.lerp(flight.source.rect, target.rect, progress)!;
       final radius =
           BorderRadius.lerp(flight.source.radius, target.radius, progress)!;
-      final opacity = destination == null ? 1 - progress : 1 - reveal.value;
+      // The destination is already revealed during the handoff. Cross-fading
+      // the same cover over it double-composites its pixels (and can dim solid
+      // colors by one channel value), so keep the flight opaque until the
+      // handoff clock finishes and the fully settled marker owns the pixels.
+      final opacity = destination == null ? 1 - progress : 1.0;
       if (opacity <= 0) continue;
       final imageSize =
           Size(flight.image.width.toDouble(), flight.image.height.toDouble());

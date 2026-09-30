@@ -5,6 +5,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_sort_button.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/touch_gestures.dart';
+import 'package:desktop_lyric/app_edge_stretch.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -334,6 +335,7 @@ void main() {
       await _open(tester);
       final route = ModalRoute.of(tester.element(_key('method-name')))!;
       expect(route.transitionDuration, Duration.zero);
+      expect(find.byType(AppStretchingOverscrollIndicator), findsNothing);
       await _choose(tester, 'method-artist');
       expect(tester.binding.transientCallbackCount, 0);
     });
@@ -344,9 +346,13 @@ void main() {
     await tester.pumpWidget(_app(_Fixture()));
     await _open(tester);
     final route = ModalRoute.of(tester.element(_key('method-name')))!;
+    expect(route, isA<PopupRoute>());
     expect(route.transitionDuration, AppMotion.quick);
+    expect(find.byType(AppStretchingOverscrollIndicator), findsOneWidget);
+    expect(find.byType(StretchingOverscrollIndicator), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
+    expect(find.byType(AppStretchingOverscrollIndicator), findsNothing);
   });
 
   testWidgets('disposing with an open overlay drops callback and all tickers',

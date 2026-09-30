@@ -37,6 +37,8 @@ void main() {
             body: Center(
                 child: PlaybackRateMenu(rate: 1, onSelected: selected.add)))));
     final initialPushes = routes.pushes;
+    expect(tester.getSize(find.byKey(const ValueKey('playback-rate-menu'))),
+        const Size.square(44));
     await tester.tap(find.byKey(const ValueKey('playback-rate-menu')));
     await tester.pumpAndSettle();
     expect(find.byType(MenuItemButton), findsNWidgets(7));

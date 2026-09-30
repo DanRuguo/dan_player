@@ -22,6 +22,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 
@@ -359,6 +360,9 @@ void main() {
       (tester) async {
     const target = String.fromEnvironment('DAN_LYRIC_CONTENT_MOTION_OUTPUT');
     const focusOnly = bool.fromEnvironment('DAN_LYRIC_MOTION_FOCUS_ONLY');
+    const clickOnly = bool.fromEnvironment('DAN_LYRIC_CLICK_ONLY');
+    const windowMode = String.fromEnvironment('DAN_LYRIC_WINDOW_MODE',
+        defaultValue: 'normal');
     final normalized = path.normalize(target).replaceAll('\\', '/');
     expect(path.isAbsolute(target), isTrue,
         reason: 'Supply an absolute QA output directory');
@@ -366,6 +370,11 @@ void main() {
         reason: 'Captures must stay under the workspace tool/qa-local');
     final output = Directory(target);
     await tester.runAsync(() => output.create(recursive: true));
+    if (clickOnly) {
+      await windowManager.ensureInitialized();
+      if (windowMode == 'maximized') await windowManager.maximize();
+      if (windowMode == 'fullscreen') await windowManager.setFullScreen(true);
+    }
     await (FontLoader(danEmbeddedFontFamily)
           ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
         .load();
@@ -374,7 +383,7 @@ void main() {
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: const Offset(-10, -10));
 
-    for (final blankBelow in [true, false]) {
+    for (final blankBelow in clickOnly ? [false] : [true, false]) {
       final lyric = _MotionLyrics(blankBelow: blankBelow);
       final settings = LyricViewController(
           preferences: NowPlayingPagePreference.fromMap({
@@ -425,7 +434,13 @@ void main() {
                             lyric: lyric,
                             positionStream: source.stream,
                             readPosition: () => position,
-                            onSeek: (_) {},
+                            onSeek: (seconds) {
+                              if (!clickOnly) return;
+                              position = seconds;
+                              activeIndex = lyric.lines.indexWhere((line) =>
+                                  line.start.inMilliseconds / 1000 == seconds);
+                              source.add(position);
+                            },
                             playing: true,
                             springLyrics: true,
                           ),
@@ -441,7 +456,7 @@ void main() {
       ));
       await tester.pump();
       expect(find.byType(VerticalLyricScrollView), findsOneWidget);
-      expect(find.byType(StretchingOverscrollIndicator), findsOneWidget);
+      expect(find.byType(StretchingOverscrollIndicator), findsNothing);
       if (focusOnly) await tester.pump(const Duration(milliseconds: 800));
 
       Future<void> trace(String label,
@@ -663,6 +678,25 @@ void main() {
         });
       }
 
+      if (clickOnly) {
+        await tester.pump(const Duration(milliseconds: 800));
+        final target = find.byWidgetPredicate(
+            (widget) => widget is LyricViewTile &&
+                identical(widget.line, lyric.lines[5]));
+        final point = tester.getCenter(target);
+        await mouse.moveTo(point);
+        await tester.pump(const Duration(milliseconds: 300));
+        await mouse.down(point);
+        await mouse.up();
+        await tester.pump();
+        expect(activeIndex, 5);
+        await trace('click-focus');
+        await tester.pumpWidget(const SizedBox.shrink());
+        await source.close();
+        settings.dispose();
+        rendering.dispose();
+        continue;
+      }
       if (!focusOnly) await trace('page-entry');
       for (final action in focusOnly
           ? ['timestamps']

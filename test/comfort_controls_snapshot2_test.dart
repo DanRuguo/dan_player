@@ -283,6 +283,66 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('playback status hides sleep controls but keeps stop target',
+      (tester) async {
+    final service = _Playback()..startSleepTimer(const Duration(minutes: 20));
+    addTearDown(service.dispose);
+    await tester.pumpWidget(_app(Column(children: [
+      QueueStopStatus(playbackService: service, showSleepTimer: false),
+      QueueStopStatus(playbackService: service),
+    ])));
+    expect(find.byKey(const ValueKey('sleep-timer-status')), findsOneWidget);
+    expect(find.byKey(const ValueKey('sleep-status-pause')), findsOneWidget);
+    service.setStopAfterCurrent(true);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('queue-stop-target')), findsNWidgets(2));
+  });
+
+  for (final active in [false, true]) {
+    for (final density in [VisualDensity.standard, VisualDensity.compact]) {
+      testWidgets(
+          'sleep submenu bottom follows its trigger active=$active density=$density',
+          (tester) async {
+        tester.view.physicalSize = const Size(900, 820);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final service = _Playback();
+        if (active) service.startSleepTimer(const Duration(minutes: 20));
+        addTearDown(service.dispose);
+        final menu = MenuController();
+        await tester.pumpWidget(_app(Builder(
+            builder: (context) => Theme(
+                data: Theme.of(context).copyWith(visualDensity: density),
+                child: Align(
+                    alignment: Alignment.bottomRight,
+                    child: Padding(
+                        padding: const EdgeInsets.only(right: 48, bottom: 32),
+                        child: MenuAnchor(
+                            controller: menu,
+                            menuChildren: [
+                              const MenuItemButton(child: Text('First')),
+                              const MenuItemButton(child: Text('Second')),
+                              SleepTimerSubmenu(playbackService: service),
+                            ],
+                            builder: (context, controller, child) =>
+                                const SizedBox(width: 48, height: 48))))))));
+        menu.open();
+        await tester.pumpAndSettle();
+        final trigger = find.byType(SubmenuButton);
+        await tester.tap(trigger);
+        await tester.pumpAndSettle();
+        final triggerBottom = tester.getRect(trigger).bottom;
+        final lastItemBottom = tester
+            .getRect(find.byKey(ValueKey(
+                active ? 'sleep-menu-cancel' : 'sleep-stop-after-queue')))
+            .bottom;
+        expect(lastItemBottom, closeTo(triggerBottom - 8, 2));
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
   for (final language in UiLanguage.values) {
     for (final narrow in [false, true]) {
       testWidgets('render comfort ${language.name} narrow=$narrow',

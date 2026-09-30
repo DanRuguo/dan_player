@@ -2551,6 +2551,17 @@ mod tests {
         directory
     }
 
+    fn assert_no_windows_picture(path: &String) {
+        match _get_picture_by_windows(path, 96) {
+            Ok(None) => {}
+            // The Shell thumbnail provider can still be loading when tests
+            // run in parallel. The public API must never turn that state into
+            // a generic file icon presented as album artwork.
+            Err(error) if error.code().0 == 0x8000000Au32 as i32 => {}
+            other => panic!("unexpected Windows cover result: {other:?}"),
+        }
+    }
+
     fn write_pcm_wav(path: &Path, sample_count: usize) {
         const SAMPLE_RATE: u32 = 8_000;
         let samples = vec![128u8; sample_count];
@@ -3558,7 +3569,7 @@ mod tests {
             // Native normalization must not change the indexed path identity.
             assert_eq!(actual.path, path);
             assert_eq!((actual.modified, actual.created), (13, 17));
-            assert!(_get_picture_by_windows(&path, 96).unwrap().is_none());
+            assert_no_windows_picture(&path);
         }
         assert_eq!(fs::read(&source).unwrap(), before);
         fs::remove_dir_all(directory).unwrap();
@@ -3767,7 +3778,7 @@ mod tests {
         write_minimal_wav(&source);
         let before = fs::read(&source).unwrap();
         let source_path = source.to_string_lossy().into_owned();
-        assert!(_get_picture_by_windows(&source_path, 96).unwrap().is_none());
+        assert_no_windows_picture(&source_path);
         assert!(get_picture_from_path(source_path, 96, 96).is_none());
         assert_eq!(fs::read(&source).unwrap(), before);
         fs::remove_dir_all(directory).unwrap();

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/player_number_dialog.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
@@ -67,7 +68,13 @@ class SleepTimerSubmenu extends StatelessWidget {
       builder: (context, _) {
         final remaining = service.sleepTimerRemaining.value;
         final stopAfter = service.stopAfterCurrent.value;
+        final rowCount = 9 +
+            (service.queueStopBoundary.active ? 1 : 0) +
+            (remaining != null ? 4 : 0);
+        final dividerCount = 1 + (remaining != null ? 1 : 0);
         return SubmenuButton(
+          alignmentOffset: appSubmenuBottomOffset(context, rowCount,
+              dividerCount: dividerCount),
           leadingIcon: Icon(
             remaining != null || stopAfter || service.queueStopBoundary.active
                 ? Symbols.bedtime
@@ -106,6 +113,7 @@ class SleepTimerSubmenu extends StatelessWidget {
               child: label(ui("播完当前歌曲后停止")),
             ),
             MenuItemButton(
+              key: const ValueKey('sleep-stop-after-queue'),
               onPressed: service.playlist.value.isEmpty ||
                       service.queueStopBlockedReason != null
                   ? null

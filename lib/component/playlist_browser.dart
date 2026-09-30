@@ -142,7 +142,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
       : CategoryPresentation.fromMap(parent.presentation['tiles']);
 
   bool _countChildren(Playlist? scope) =>
-      _tilePresentation(scope).countPlaylistChildren(_view.name);
+      _view == PlaylistViewMode.tree || _view == PlaylistViewMode.grid
+          ? true
+          : _tilePresentation(scope).countPlaylistChildren(_view.name);
 
   int _displaySongCount(Playlist playlist, Playlist? scope) =>
       _countChildren(scope)
@@ -787,7 +789,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
           final item = node.value;
           final line = _row(
               item.parent, item.row, item.index, item.count, queue, indices,
-              onOpenFolder: toggle);
+              onOpenFolder: toggle, treeDepth: node.depth);
           if (_sortMode(item.parent) != PlaylistSortMode.custom) {
             return line;
           }
@@ -795,18 +797,46 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
           // Replacing the bare row with a Column can dispose its DragSource
           // before onDragEnd clears _draggingId after a no-op drop.
           final siblings = _draggingId == null ? null : _rows(item.parent);
-          Widget gap(int slot, bool active) {
+          Widget gap(int slot, bool active, {bool horizontal = false}) {
             final child = active
-                ? _dropGap(item.parent, siblings!, slot)
-                : const SizedBox(height: 0, width: double.infinity);
+                ? horizontal
+                    ? SizedBox(
+                        width: 10,
+                        height: playlistTreeSongCoverSize(
+                                parentDepth: node.depth - 1) +
+                            6,
+                        child:
+                            _dropGap(item.parent, siblings!, slot, grid: true),
+                      )
+                    : _dropGap(item.parent, siblings!, slot)
+                : horizontal
+                    ? const SizedBox(width: 0)
+                    : const SizedBox(height: 0, width: double.infinity);
             if (appToolbarReduceMotion(context, kind: MotionKind.layout)) {
               return child;
             }
             return AnimatedSize(
               duration: AppMotion.quick,
               curve: AppMotion.standardCurve,
-              alignment: Alignment.topCenter,
+              alignment: horizontal
+                  ? AlignmentDirectional.centerStart
+                  : Alignment.topCenter,
               child: child,
+            );
+          }
+
+          if (!node.branch) {
+            final nextIsSong = siblings != null &&
+                item.index + 1 < siblings.length &&
+                siblings[item.index + 1].audio != null;
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                gap(item.index, siblings != null, horizontal: true),
+                line,
+                if (!nextIsSong)
+                  gap(item.index + 1, siblings != null, horizontal: true),
+              ],
             );
           }
 
@@ -858,6 +888,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     return [
       if (_view == PlaylistViewMode.grid)
         SubmenuButton(
+            alignmentOffset:
+                appSubmenuBottomOffset(context, CategoryTileSize.values.length),
             leadingIcon: const Icon(Icons.photo_size_select_large),
             menuChildren: [
               for (final size in CategoryTileSize.values)
@@ -1271,7 +1303,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
   Widget _row(Playlist? parent, _PlaylistRowData row, int index, int count,
       List<Audio> queue, Map<String, int> queueIndices,
-      {PlaylistCircleGeometry? circleGeometry, VoidCallback? onOpenFolder}) {
+      {PlaylistCircleGeometry? circleGeometry,
+      VoidCallback? onOpenFolder,
+      int? treeDepth}) {
     final scheme = Theme.of(context).colorScheme;
     final folder = row.playlist;
     final folderSongCount =
@@ -1279,7 +1313,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     final compact = UiLayoutScope.of(context).compactPlaylists;
     final menuItems = _menuItems(row, parent, index, count);
     final entry = TooltipVisibility(
-      visible: false,
+      visible: _view == PlaylistViewMode.tree,
       child: AppMenuAnchor(
         useRootOverlay: true,
         menuChildren: menuItems,
@@ -1318,6 +1352,12 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
           final Widget content;
           if (_view == PlaylistViewMode.tree) {
+            final coverSize = folder != null
+                ? playlistTreeCoverSize(nodeDepth: treeDepth ?? 0)
+                : playlistTreeSongCoverSize(parentDepth: (treeDepth ?? 1) - 1);
+            final artworkSize = folder != null
+                ? coverSize + playlistTreeFolderArtworkGrowth
+                : coverSize;
             Widget treeItem(VoidCallback activate,
                     GestureTapDownCallback secondary, VoidCallback longPress) =>
                 _treeDragSource(
@@ -1327,21 +1367,13 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                     PlaylistTreeItem(
                       key: ValueKey('playlist-open-${row.id}'),
                       title: row.label,
-                      shortMetadata: folder == null
-                          ? null
-                          : ui('{0} 项 · {1} 首',
-                              [folder.entries.length, folderSongCount]),
-                      metadata: folder != null
-                          ? ui('{0} 个直接项目 · {1} 首歌曲',
-                              [folder.entries.length, folderSongCount])
-                          : '${audio?.artist ?? ''} · ${audio?.album ?? ''}',
-                      time: audio == null
-                          ? null
-                          : Duration(seconds: audio.duration).toStringHMMSS(),
+                      coverSize: coverSize,
+                      playlist: folder != null,
+                      selected: _selecting && _isSelected(row),
                       cover: folder != null
                           ? PlaylistCover(
                               playlist: folder,
-                              size: 40,
+                              size: artworkSize,
                               loadSongArtwork: widget.trackBuilder == null,
                               artworkWrapper: (cover) =>
                                   PlaylistCoverTransitionMarker(
@@ -1355,7 +1387,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                   borderRadius: AppShape.smallRadius,
                                   child: AudioArtwork(
                                       audio: audio!,
-                                      size: 40,
+                                      size: coverSize,
                                       loadArtwork: widget.trackBuilder == null
                                           ? null
                                           : (_, __) async => null,
@@ -1942,7 +1974,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         onRemoveSelected: () => unawaited(_removeSelected(current)),
         onSortChanged: (mode) => _sort(current, mode),
         countChildren: _countChildren(current),
-        onToggleCountChildren: rows.any((row) => row.playlist != null)
+        onToggleCountChildren: _view != PlaylistViewMode.tree &&
+                _view != PlaylistViewMode.grid &&
+                rows.any((row) => row.playlist != null)
             ? () => _setTilePresentation(
                 current,
                 _tilePresentation(current).copyWith(playlistCountChildren: {
@@ -2200,8 +2234,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
           actions: const [],
           responsiveActions: current == null ? headerActions : null,
           headerPadding: current == null
-              ? EdgeInsets.all(
-                  UiLayoutScope.of(context).compactPlaylists ? 8 : 16)
+              ? const EdgeInsets.all(16)
               : EdgeInsets.fromLTRB(
                   8, 0, 8, UiLayoutScope.of(context).compactPlaylists ? 8 : 12),
           header: current == null

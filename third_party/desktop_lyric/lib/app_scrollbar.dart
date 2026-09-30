@@ -2,7 +2,26 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'app_edge_stretch.dart';
 import 'app_motion.dart';
+
+/// Opt a popup route's own scroll viewport into the same retained raster
+/// stretch used by dialogs. [showMenu] captures [InheritedTheme]s from its
+/// trigger, so this reaches only the menu opened from a wrapped trigger.
+class AppStableStretchScope extends InheritedTheme {
+  const AppStableStretchScope({super.key, required super.child});
+
+  static bool enabled(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<AppStableStretchScope>() !=
+      null;
+
+  @override
+  Widget wrap(BuildContext context, Widget child) =>
+      AppStableStretchScope(child: child);
+
+  @override
+  bool updateShouldNotify(AppStableStretchScope oldWidget) => false;
+}
 
 /// Shared desktop policy for the player, lyrics and independent palette window.
 class AppScrollBehavior extends MaterialScrollBehavior {
@@ -168,21 +187,27 @@ class _AppEdgeStretchState extends State<_AppEdgeStretch>
 
   @override
   Widget build(BuildContext context) {
-    return _motionEnabled
-        ? NotificationListener<ScrollNotification>(
-            // The adapter's visual-only notifications must not masquerade as
-            // movement in parent views, scrollbars or application listeners.
-            onNotification: (notification) =>
-                notification is _WheelEdgeOverscroll ||
-                notification is _WheelEdgeEnd,
-            child: StretchingOverscrollIndicator(
-                axisDirection: widget.direction,
-                child: Builder(
-                    builder: (nativeContext) => Listener(
-                        onPointerSignal: (event) =>
-                            _onSignal(event, nativeContext),
-                        child: widget.child))))
-        : widget.child;
+    if (!_motionEnabled) return widget.child;
+    final content = Builder(
+        builder: (nativeContext) => Listener(
+            onPointerSignal: (event) => _onSignal(event, nativeContext),
+            child: widget.child));
+    // The main lyrics view and other pages keep the native raster path.
+    // Dialogs and explicitly scoped popup menus retain one shader layer at
+    // zero stretch as well as during the spring.
+    final indicator = ModalRoute.of(context) is DialogRoute ||
+            AppStableStretchScope.enabled(context)
+        ? AppStretchingOverscrollIndicator(
+            axisDirection: widget.direction, child: content)
+        : StretchingOverscrollIndicator(
+            axisDirection: widget.direction, child: content);
+    return NotificationListener<ScrollNotification>(
+      // The adapter's visual-only notifications must not masquerade as
+      // movement in parent views, scrollbars or application listeners.
+      onNotification: (notification) =>
+          notification is _WheelEdgeOverscroll || notification is _WheelEdgeEnd,
+      child: indicator,
+    );
   }
 }
 

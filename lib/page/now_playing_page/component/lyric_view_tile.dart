@@ -130,6 +130,7 @@ class LyricViewTile extends StatelessWidget {
                     translationFontSize: controller.translationFontSize,
                     alignment: alignment,
                   ),
+                  directFontSize: controller.directFontSize,
                   reducedMotion: reducedMotion,
                   onEnd: isMainLine ? onPresentationEnd : null,
                   builder: (context, activation, presentation, fontTransition) {
@@ -147,6 +148,7 @@ class LyricViewTile extends StatelessWidget {
                       required double fromSize,
                       required double toSize,
                       required double currentSize,
+                      bool auxiliaryTrack = false,
                       bool moveWrappedSuffix = false,
                       String? flightText,
                       double paragraphFontScale = 1,
@@ -157,7 +159,9 @@ class LyricViewTile extends StatelessWidget {
                               LyricWrapFlightStatus? wrapStatus)
                           paragraph,
                     }) {
-                      final moving = !reducedMotion &&
+                      final direct = controller.directFontSize;
+                      final moving = !direct &&
+                          !reducedMotion &&
                           (toSize - fromSize).abs() > .00001 &&
                           fontTransition.progress < 1;
                       final scaler = MediaQuery.textScalerOf(context);
@@ -165,6 +169,26 @@ class LyricViewTile extends StatelessWidget {
                           scaler.scale(fromSize * paragraphFontScale);
                       final scaledTo =
                           scaler.scale(toSize * paragraphFontScale);
+                      final directChanging = direct &&
+                          !reducedMotion &&
+                          (toSize - fromSize).abs() > .00001 &&
+                          fontTransition.visualProgress < 1;
+                      final directProgress =
+                          fontTransition.visualProgress.clamp(0.0, 1.0);
+                      final directScale = scaledTo == 0
+                          ? 1.0
+                          : scaledFrom / scaledTo +
+                              (1 - scaledFrom / scaledTo) * directProgress;
+                      final previewSize = auxiliaryTrack
+                          ? controller.translationDragPreviewSize
+                          : controller.fontDragPreviewSize;
+                      final originalSize = auxiliaryTrack
+                          ? controller.translationFontSize
+                          : controller.lyricFontSize;
+                      final previewScale =
+                          previewSize == null || originalSize == 0
+                              ? 1.0
+                              : previewSize / originalSize;
                       final canFlySuffix = moveWrappedSuffix &&
                           flightText != null &&
                           flightText.length <= 256 &&
@@ -177,40 +201,66 @@ class LyricViewTile extends StatelessWidget {
                           ? LyricWrapFlightStatus()
                           : null;
                       Widget fixed(double size, {required bool outgoing}) {
-                        // Keep the target paragraph mounted as the outgoing
-                        // child leaves. Recreating its TextPainter at the last
-                        // frame would change its glyph sampling again.
+                        // The menu always keeps one target-size paragraph;
+                        // ordinary focus changes retain both fixed endpoints.
                         return KeyedSubtree(
-                          key: ValueKey(size),
-                          // At rest this is an identity transform, painted
-                          // directly without a TransformLayer. The paragraph
-                          // already owns its sampling RepaintBoundary.
-                          child: Transform.scale(
-                            scale: moving ? currentSize / size : 1,
-                            // Paragraph height grows below its first baseline;
-                            // scaling around the vertical centre moves that
-                            // baseline in the opposite direction at the first
-                            // frame and makes the ink appear to jump.
-                            alignment: Alignment(presentation.alignment.x, -1),
-                            filterQuality: moving ? FilterQuality.medium : null,
-                            child: paragraph(
-                                size,
-                                moving && outgoing && canFlySuffix
-                                    ? toSize * paragraphFontScale
-                                    : null,
-                                fontTransition.progress,
-                                outgoing ? wrapStatus : null),
+                          key: direct
+                              ? const ValueKey('lyric-direct-paragraph')
+                              : ValueKey(size),
+                          // At rest this is an identity transform. The
+                          // paragraph owns the retained sampling boundary.
+                          child: Opacity(
+                            // The previous glyphs disappear when the target
+                            // changes; only the final-size paragraph fades in.
+                            opacity: directChanging ? directProgress : 1,
+                            child: Transform.scale(
+                              scale: previewScale *
+                                  (direct
+                                      ? directChanging
+                                          ? directScale
+                                          : 1
+                                      : moving
+                                          ? currentSize / size
+                                          : 1),
+                              // Paragraph height grows below its first baseline;
+                              // scaling around the vertical centre moves that
+                              // baseline in the opposite direction at the first
+                              // frame and makes the ink appear to jump.
+                              alignment:
+                                  Alignment(presentation.alignment.x, -1),
+                              filterQuality:
+                                  previewSize != null || directChanging
+                                      ? FilterQuality.low
+                                      : moving
+                                          ? FilterQuality.medium
+                                          : null,
+                              child: paragraph(
+                                  size,
+                                  moving && outgoing && canFlySuffix
+                                      ? toSize * paragraphFontScale
+                                      : null,
+                                  fontTransition.progress,
+                                  outgoing ? wrapStatus : null),
+                            ),
                           ),
                         );
                       }
 
                       return LyricFontMorph(
-                        progress: moving ? fontTransition.progress : 1,
+                        // The target glyph is shaped once, but its occupied
+                        // height must grow with the painted scale. Otherwise
+                        // the viewport recenters a full-size row on frame 0
+                        // and visibly shifts every paragraph around it.
+                        progress: directChanging
+                            ? directProgress
+                            : moving
+                                ? fontTransition.progress
+                                : 1,
                         alignmentX: presentation.alignment.x,
                         wrapStatus: wrapStatus,
                         children: [
                           if (moving) fixed(fromSize, outgoing: true),
-                          fixed(toSize, outgoing: false),
+                          fixed(direct ? currentSize : toSize, outgoing: false),
                         ],
                       );
                     }
@@ -232,6 +282,7 @@ class LyricViewTile extends StatelessWidget {
                             fromSize: fontTransition.fromTranslationFontSize,
                             toSize: fontTransition.toTranslationFontSize,
                             currentSize: presentation.translationFontSize,
+                            auxiliaryTrack: true,
                             moveWrappedSuffix: true,
                             flightText: text,
                             paragraph: (size, wrapTargetFontSize, wrapProgress,
@@ -308,15 +359,17 @@ class LyricViewTile extends StatelessWidget {
                                         Padding(
                                           padding:
                                               const EdgeInsets.only(bottom: 4),
-                                          child: Text(
-                                            lyricReadingTimestamp(line.start),
-                                            key: const ValueKey(
-                                                'lyric-line-timestamp'),
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .labelMedium
-                                                ?.copyWith(
-                                                    color: scheme.primary),
+                                          child: _LyricParagraphSurface(
+                                            child: Text(
+                                              lyricReadingTimestamp(line.start),
+                                              key: const ValueKey(
+                                                  'lyric-line-timestamp'),
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelMedium
+                                                  ?.copyWith(
+                                                      color: scheme.primary),
+                                            ),
                                           ),
                                         ),
                                         alignment: presentation.alignment,
@@ -984,12 +1037,15 @@ class LyricWordHighlightPainter extends CustomPainter {
   Rect get paintedTextBounds {
     final lines = _layout.base.computeLineMetrics();
     if (lines.isEmpty) return Rect.zero;
-    final fraction =
-        alignmentX == null ? 0.0 : ((alignmentX! + 1) / 2).clamp(0.0, 1.0);
     Rect? bounds;
     for (final line in lines) {
       final row = Rect.fromLTWH(
-        inkOffset.dx + line.left + (_layout.base.width - line.width) * fraction,
+        inkOffset.dx +
+            line.left +
+            (alignmentX == null
+                ? 0
+                : lyricAlignedOffset(
+                    _layout.base.width, line.width, alignmentX!)),
         inkOffset.dy + line.baseline - line.ascent,
         line.width,
         line.height,

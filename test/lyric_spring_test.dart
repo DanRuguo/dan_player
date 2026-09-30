@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -294,8 +295,10 @@ void main() {
     await tester.pumpAndSettle();
     late.complete(_lines('Old'));
     await tester.pumpAndSettle();
-    expect(find.text('New 0'), findsOneWidget);
-    expect(find.text('Old 0'), findsNothing);
+    Finder paragraph(String value) => find.byWidgetPredicate(
+        (widget) => widget is BalancedLyricText && widget.text == value);
+    expect(paragraph('New 0'), findsOneWidget);
+    expect(paragraph('Old 0'), findsNothing);
     expect(_scroll(tester).offset, closeTo(_targetForLine(tester, 0), .001));
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

@@ -1,4 +1,3 @@
-import 'package:desktop_lyric/app_edge_stretch.dart';
 import 'dart:io';
 import 'dart:ui' as raster;
 
@@ -282,15 +281,15 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-      'native touch stretch deforms only grid at a fit-width edge and returns to rest',
+  testWidgets('page touch stretch uses Flutter raster and returns to rest',
       (tester) async {
     final harness = await setup(tester);
     final indicator = find.descendant(
-        of: getRail(), matching: find.byType(AppStretchingOverscrollIndicator));
+        of: getRail(), matching: find.byType(StretchingOverscrollIndicator));
     expect(indicator, findsOneWidget);
-    final native = tester.widget<AppStretchingOverscrollIndicator>(indicator);
-    expect(native.axis, Axis.horizontal);
+    expect(
+        tester.widget<StretchingOverscrollIndicator>(indicator).axisDirection,
+        AxisDirection.right);
     final before = tester.getRect(find.text('周一'));
     expect(controller(tester).position.maxScrollExtent, 0);
     final touch = await tester.startGesture(tester.getCenter(getRail()),
@@ -298,44 +297,31 @@ void main() {
     await touch.moveBy(const Offset(80, 0));
     await touch.moveBy(const Offset(90, 0));
     await tester.pump();
-    final effect = tester.widget<AppStretchEffect>(find.descendant(
-        of: indicator, matching: find.byType(AppStretchEffect)));
-    expect(effect.stretchStrength.abs(), greaterThan(0));
+    expect(indicator, findsOneWidget);
+    expect(controller(tester).offset, 0);
     expect(tester.getRect(find.text('周一')), before);
     await _capture(harness.boundary, tester, 'touch-stretch-held');
     await touch.up();
     await tester.pumpAndSettle();
-    expect(
-        tester
-            .widget<AppStretchEffect>(find.descendant(
-                of: indicator, matching: find.byType(AppStretchEffect)))
-            .stretchStrength,
-        0);
+    expect(controller(tester).offset, 0);
     await _capture(harness.boundary, tester, 'touch-stretch-rest');
     expect(tester.binding.hasScheduledFrame, isFalse);
     expect(tester.takeException(), isNull);
   });
 
   for (final gate in ['feedback', 'reduced', 'hidden']) {
-    testWidgets(
-        'native heatmap stretch stops immediately when $gate disables motion',
+    testWidgets('page stretch stops immediately when $gate disables motion',
         (tester) async {
       final harness = await setup(tester);
       final indicator = find.descendant(
-          of: getRail(),
-          matching: find.byType(AppStretchingOverscrollIndicator));
+          of: getRail(), matching: find.byType(StretchingOverscrollIndicator));
+      expect(indicator, findsOneWidget);
       final touch = await tester.startGesture(tester.getCenter(getRail()),
           kind: PointerDeviceKind.touch);
       await touch.moveBy(const Offset(80, 0));
       await touch.moveBy(const Offset(90, 0));
       await tester.pump();
-      expect(
-          tester
-              .widget<AppStretchEffect>(find.descendant(
-                  of: indicator, matching: find.byType(AppStretchEffect)))
-              .stretchStrength
-              .abs(),
-          greaterThan(0));
+      expect(indicator, findsOneWidget);
       switch (gate) {
         case 'feedback':
           harness.preferences.value =
@@ -383,7 +369,7 @@ void main() {
     expect(
         find.descendant(
             of: getRail(),
-            matching: find.byType(AppStretchingOverscrollIndicator)),
+            matching: find.byType(StretchingOverscrollIndicator)),
         findsNothing);
     for (var tick = 0; tick < 3; tick++) {
       await tester.pump(const Duration(seconds: 1));

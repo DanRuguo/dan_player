@@ -360,6 +360,7 @@ class _NowPlayingVolDspSlider extends StatelessWidget {
   Widget build(BuildContext context) {
     final playback = PlayService.instance.playbackService;
     return DetailVolumeButton(
+      compact: true,
       readVolume: () => playback.volumeDsp,
       onChanged: playback.setVolumeDsp,
       changes: playback.diagnosticsRevision,
@@ -459,7 +460,7 @@ class _NowPlayingSlider extends StatelessWidget {
             onSeek: playback.seek,
             hidden: DesktopIntegration.instance.isHidden,
           ),
-          QueueStopStatus(playbackService: playback),
+          QueueStopStatus(playbackService: playback, showSleepTimer: false),
         ]),
       ),
     );

@@ -289,7 +289,22 @@ void main() {
         final midpoint = Rect.lerp(startRects.last, targets.last, .5)!.center;
         expect(middle.at(midpoint), expected.last.toARGB32(),
             reason: 'moving cover center must contain real artwork');
-        await tester.pump(const Duration(milliseconds: 100));
+        if (to == PlaylistViewMode.tree) {
+          // The root tree cards rise during their entrance. At the flight's
+          // geometry endpoint the image must cover the marker's *current*
+          // top edge, not the lower position captured on the first tree frame.
+          await tester.pump(const Duration(milliseconds: 77));
+          final moving = tester.getRect(_marker(ids.first));
+          final tracking = await _capture(
+              tester, boundary, '${from.name}-to-${to.name}-moving-target');
+          expect(
+              tracking.at(Offset(moving.center.dx, moving.top + 3)),
+              expected.first.toARGB32(),
+              reason: 'flight must follow the rising tree cover before handoff');
+          await tester.pump(const Duration(milliseconds: 23));
+        } else {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
         await tester.pump(const Duration(milliseconds: 20));
         final handoff = await _capture(
             tester, boundary, '${from.name}-to-${to.name}-handoff');

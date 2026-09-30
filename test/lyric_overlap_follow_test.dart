@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/gestures.dart';
@@ -90,6 +91,15 @@ LyricFollowEffects _effect(WidgetTester tester, int index) => tester
     .widgetList<LyricFollowEffects>(find.byType(LyricFollowEffects))
     .elementAt(index);
 
+double _previousVoiceBlur(WidgetTester tester) {
+  final viewport = tester.getRect(_scroll);
+  final previous = tester.getRect(find.byType(LyricViewTile).at(0));
+  final current = tester.getRect(find.byType(LyricViewTile).at(1));
+  final span = (current.center.dy - viewport.top).clamp(1.0, double.infinity);
+  return LyricMotion.blurForDistance(4) *
+      ((current.center.dy - previous.center.dy) / span).clamp(0.0, 1.0);
+}
+
 void main() {
   testWidgets('an ending overlapping voice does not restart the same scroll',
       (tester) async {
@@ -102,6 +112,8 @@ void main() {
     expect(controller.position.isScrollingNotifier.value, isTrue);
     final phase = _effect(tester, 1).clock.value;
     await fixture.emit(tester, 5.6);
+    final targetBlur = _effect(tester, 0).blur;
+    expect(targetBlur, greaterThan(0));
     expect(_effect(tester, 1).clock.value, phase,
         reason: 'The same anchor must retain its original lag trajectory');
     expect(_effect(tester, 0).blurAnimation!.value, 0);
@@ -110,10 +122,11 @@ void main() {
     expect(controller.position.isScrollingNotifier.value, isFalse,
         reason: 'The original scroll must finish on its original clock');
     expect(_effect(tester, 0).blurAnimation!.value,
-        inExclusiveRange(0, LyricMotion.blurForDistance(1)));
+        inExclusiveRange(0, targetBlur));
     await tester.pumpAndSettle();
     expect(_effect(tester, 0).blurAnimation, isNull);
-    expect(_effect(tester, 0).blur, LyricMotion.blurForDistance(1));
+    expect(_effect(tester, 0).blur, closeTo(targetBlur, 1e-9),
+        reason: 'The original voice fade must hand off to its chosen target');
     expect(tester.binding.transientCallbackCount, 0);
   });
 
@@ -124,13 +137,14 @@ void main() {
     await tester.pumpAndSettle();
     final controller = _controller(tester);
     final offset = controller.offset;
+    final previousBlur = _effect(tester, 0).blur;
+    expect(previousBlur, closeTo(_previousVoiceBlur(tester), .01));
     await fixture.emit(tester, 5.5);
-    expect(_effect(tester, 0).blurAnimation!.value,
-        LyricMotion.blurForDistance(1));
+    expect(_effect(tester, 0).blurAnimation!.value, previousBlur);
     expect(controller.position.isScrollingNotifier.value, isFalse);
     await tester.pump(const Duration(milliseconds: 120));
     final blur = _effect(tester, 0).blurAnimation!.value;
-    expect(blur, inExclusiveRange(0, LyricMotion.blurForDistance(1)));
+    expect(blur, inExclusiveRange(0, previousBlur));
     await fixture.emit(tester, 5.8);
     expect(_effect(tester, 0).blurAnimation!.value, closeTo(blur, 1e-9),
         reason: 'Rapid voice changes start at the currently painted blur');
@@ -170,7 +184,7 @@ void main() {
     fixture.preferences.value =
         fixture.preferences.value.copyWith(surfaceBlur: true);
     await tester.pumpAndSettle();
-    expect(_effect(tester, 0).blur, LyricMotion.blurForDistance(1));
+    expect(_effect(tester, 0).blur, closeTo(_previousVoiceBlur(tester), .01));
     expect(tester.binding.transientCallbackCount, 0);
   });
 
@@ -186,7 +200,7 @@ void main() {
     fixture.preferences.value =
         fixture.preferences.value.copyWith(surfaceBlur: true);
     await tester.pumpAndSettle();
-    expect(_effect(tester, 0).blur, LyricMotion.blurForDistance(1));
+    expect(_effect(tester, 0).blur, closeTo(_previousVoiceBlur(tester), .01));
     expect(_controller(tester).offset, offset);
     expect(tester.binding.transientCallbackCount, 0);
   });
