@@ -29,8 +29,8 @@ void EnsureGraphics() {
   }
 }
 void DrawPlayer(Gdiplus::Graphics& graphics, Gdiplus::Image* image,
-               const RECT& bounds, double opacity) {
-  if (!image || image->GetLastStatus() != Gdiplus::Ok || opacity <= 0) return;
+               const RECT& bounds, const LogoFrame& frame) {
+  if (!image || image->GetLastStatus() != Gdiplus::Ok || frame.player <= 0) return;
   const float width = static_cast<float>(bounds.right - bounds.left);
   const float height = static_cast<float>(bounds.bottom - bounds.top);
   const float dpi_scale = static_cast<float>(GetDpiForWindow(logo_window)) / 96.0f;
@@ -41,16 +41,22 @@ void DrawPlayer(Gdiplus::Graphics& graphics, Gdiplus::Image* image,
   const float total_height = dh + gap + font_size * 1.6f;
   const float top = (height - total_height) / 2;
   Gdiplus::ColorMatrix matrix = {{{1,0,0,0,0},{0,1,0,0,0},{0,0,1,0,0},
-                                 {0,0,0,static_cast<float>(opacity),0},{0,0,0,0,1}}};
+                                 {0,0,0,static_cast<float>(frame.player),0},{0,0,0,0,1}}};
   Gdiplus::ImageAttributes attributes;
   attributes.SetColorMatrix(&matrix);
-  graphics.DrawImage(image, Gdiplus::RectF((width-dw)/2, top, dw, dh),
+  const Gdiplus::GraphicsState stable = graphics.Save();
+  graphics.TranslateTransform(width / 2, top + dh / 2 +
+      static_cast<float>(frame.lift) * dpi_scale);
+  graphics.RotateTransform(static_cast<float>(frame.tilt));
+  graphics.ScaleTransform(static_cast<float>(frame.scale), static_cast<float>(frame.scale));
+  graphics.DrawImage(image, Gdiplus::RectF(-dw / 2, -dh / 2, dw, dh),
                       0, 0, static_cast<float>(image->GetWidth()),
                       static_cast<float>(image->GetHeight()), Gdiplus::UnitPixel,
                       &attributes);
+  graphics.Restore(stable);
   const bool dark = (GetRValue(background_color) * 299 +
       GetGValue(background_color) * 587 + GetBValue(background_color) * 114) < 128000;
-  const auto alpha = static_cast<BYTE>(opacity * 255.0);
+  const auto alpha = static_cast<BYTE>(frame.player * 255.0);
   Gdiplus::SolidBrush text(Gdiplus::Color(alpha, dark ? 240 : 30,
       dark ? 240 : 30, dark ? 240 : 30));
   Gdiplus::Font font(L"Segoe UI", font_size, Gdiplus::FontStyleRegular,
@@ -75,7 +81,7 @@ void PaintLogo(HWND window, HDC dc) {
     graphics.ReleaseHDC(background);
     graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
     const auto frame = EvaluateLogoFrame(GetTickCount64() - started, reduce_motion);
-    DrawPlayer(graphics, player_icon.get(), bounds, frame.player);
+    DrawPlayer(graphics, player_icon.get(), bounds, frame);
   }
   // Finish writing the buffer before another GDI+ Graphics reads it.
   Gdiplus::Graphics destination(dc);

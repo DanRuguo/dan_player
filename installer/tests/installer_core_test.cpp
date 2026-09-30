@@ -155,6 +155,14 @@ int wmain(int argc, wchar_t** argv) {
     Check(!EvaluateLogoFrame(749, false).finished && EvaluateLogoFrame(750, false).finished, "0.75 second boundary");
     Check(EvaluateLogoFrame(350, false).player == 1, "player signature fully visible");
     Check(EvaluateLogoFrame(749, true).player == 1 && EvaluateLogoFrame(750, true).finished, "reduced motion boundary");
+    Check(EvaluateLogoFrame(170, false).tilt > 0 && EvaluateLogoFrame(280, false).tilt < 0,
+          "player icon should sway once during the intro");
+    Check(EvaluateLogoFrame(350, false).lift < 0 && EvaluateLogoFrame(350, false).scale > 1,
+          "player icon should lift while the caption stays anchored");
+    Check(EvaluateLogoFrame(600, false).lift == 0 && EvaluateLogoFrame(600, false).tilt == 0 &&
+          EvaluateLogoFrame(600, false).scale == 1, "intro should settle before completion");
+    Check(EvaluateLogoFrame(350, true).lift == 0 && EvaluateLogoFrame(350, true).tilt == 0 &&
+          EvaluateLogoFrame(350, true).scale == 1, "reduced motion should not move the icon");
   });
   run("new installation commits verified payload", [&] {
     Fixture f(base / L"new");

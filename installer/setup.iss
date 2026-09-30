@@ -92,11 +92,11 @@ DialogFontSize={#ProductionDialogFontSize}
 #endif
 
 [Messages]
-SelectDirLabel3=请选择安装位置。检测到旧版时将在原位置升级，并保留用户数据。
-SelectDirBrowseLabel=可直接编辑下面的最终路径。手动编辑后，安装器不会再自动改变它。
+SelectDirLabel3=识别到旧版 Dan Player 时，可在原目录升级并保留用户数据。
+SelectDirBrowseLabel=可直接编辑最终路径，或选择父目录。手动填写的路径不会被自动替换。
 ButtonNext=安装(&I)
 FinishedHeadingLabel=安装完成
-FinishedLabel=Dan Player 已安装。您可以打开播放器，或明确选择删除本安装器。关闭窗口不会删除安装器。
+FinishedLabel=Dan Player 已安装完成。可以立即打开播放器；安装器仅在您明确选择删除时移除。
 
 [Files]
 Source: "{#NativeLibrary}"; DestName: "dan_installer_native.dll"; Flags: dontcopy
@@ -129,6 +129,7 @@ var
   ParentButton, OpenButton, DeleteButton: TNewButton;
   DesktopCheck, StartCheck: TNewCheckBox;
   DataNote: TNewStaticText;
+  InstallNote: TNewStaticText;
   FinishedSignature: TBitmapImage;
   BrandRcePath, BrandDanPath: String;
   AutomaticEdit, BrandFinished, BrandStarted, TransactionStarted, InstallSucceeded: Boolean;
@@ -195,6 +196,12 @@ function DP_ShowBrand(Parent: HWND; Width, Height: Integer; Background: LongWord
   external 'DP_ShowBrand@files:dan_installer_native.dll stdcall';
 procedure DP_CloseBrand();
   external 'DP_CloseBrand@files:dan_installer_native.dll stdcall';
+function DP_ProgressCreate(Gauge: HWND; Surface, Accent: LongWord): Integer;
+  external 'DP_ProgressCreate@files:dan_installer_native.dll stdcall';
+procedure DP_ProgressSet(Current, Maximum: Integer);
+  external 'DP_ProgressSet@files:dan_installer_native.dll stdcall';
+procedure DP_ProgressClose();
+  external 'DP_ProgressClose@files:dan_installer_native.dll stdcall';
 function DP_AccentColor(): LongWord;
   external 'DP_AccentColor@files:dan_installer_native.dll stdcall';
 function DP_StyleButton(Window: HWND; Surface, Accent: LongWord; Primary: Boolean; Radius: Integer): Integer;
@@ -306,9 +313,9 @@ procedure ChooseParent(Sender: TObject);
 var Parent: String;
 begin
   Parent := ExtractFileDir(WizardDirValue);
-  if BrowseForFolder('选择父目录（最终路径手动编辑后不会自动变化）', Parent, False) then begin
+  if BrowseForFolder('选择安装位置的父目录', Parent, False) then begin
     if DP_SelectionParent(Parent) = 0 then
-      MsgBox(NativeError(), mbError, MB_OK)
+      MsgBox('无法使用所选目录：' + #13#10 + NativeError(), mbError, MB_OK)
     else RefreshSelection();
   end;
 end;
@@ -454,6 +461,14 @@ begin
   WizardForm.NextButton.Left := NewLeft;
 end;
 
+procedure AlignFinishedHeading();
+begin
+  { The heading, action buttons and Finish button all use the actual content
+    column, rather than three slightly different built-in page rectangles. }
+  WizardForm.FinishedHeadingLabel.Left := WizardForm.FinishedLabel.Left;
+  WizardForm.FinishedHeadingLabel.Width := WizardForm.FinishedLabel.Width;
+end;
+
 procedure FitBrandImage(Image: TBitmapImage; Left, Top, Width: Integer);
 var Height: Integer;
 begin
@@ -497,11 +512,12 @@ end;
 
 procedure QaRenderFrame();
 var Name, Root: String; Corners: Boolean;
+    HeadingBounds, FinishBounds: TInstallerRect;
 begin
   Root := ExpandConstant('{param:QARENDERROOT|}');
   if Root = '' then Exit;
   if QaRenderPhase = 0 then Name := 'player'
-  else if QaRenderPhase = 1 then Name := 'player-fade'
+  else if QaRenderPhase = 1 then Name := 'player-motion'
   else if QaRenderPhase = 2 then Name := 'directory'
   else Name := 'finished';
   if DP_QA_Capture(WizardForm.Handle, AddBackslash(Root) + Name + '.png') = 1 then
@@ -510,7 +526,7 @@ begin
   QaAuditFooter(Name);
   if QaRenderPhase = 0 then begin
     QaRenderPhase := 1;
-    DP_QA_ScheduleFrame(WizardForm.Handle, 360, CreateCallback(@QaRenderFrame));
+    DP_QA_ScheduleFrame(WizardForm.Handle, 200, CreateCallback(@QaRenderFrame));
   end else if QaRenderPhase = 2 then begin
     if (DP_QA_ButtonFont(ParentButton.Handle, WizardForm.DirEdit.Handle) <> 1) or
        (DP_QA_ButtonFont(OpenButton.Handle, WizardForm.DirEdit.Handle) <> 1) or
@@ -558,6 +574,12 @@ begin
     if DP_QA_FinishedGeometry(WizardForm.FinishedLabel.Handle, OpenButton.Handle,
         DeleteButton.Handle, WizardForm.NextButton.Handle, ScaleX(240)) = 1 then Log('QA UI finished actions and native Finish share content center without overlap')
     else Log('QA UI FINISHED ACTIONS MISPLACED');
+    if InstallerGetWindowRect(WizardForm.FinishedHeadingLabel.Handle, HeadingBounds) and
+       InstallerGetWindowRect(WizardForm.NextButton.Handle, FinishBounds) and
+       (Abs((HeadingBounds.Left + HeadingBounds.Right) -
+         (FinishBounds.Left + FinishBounds.Right)) <= 2) then
+      Log('QA UI finished heading and Finish share content center')
+    else Log('QA UI FINISHED HEADING MISPLACED');
     QaAuditGraphic(WizardForm.FinishedPage.Handle, WizardForm.WizardBitmapImage2, 'finished-rce');
     QaAuditGraphic(WizardForm.FinishedPage.Handle, FinishedSignature, 'finished-signature');
     if (WizardForm.WizardBitmapImage2.Left + WizardForm.WizardBitmapImage2.Width >= WizardForm.FinishedLabel.Left) or
@@ -599,13 +621,19 @@ begin
   FinishedSignature := TBitmapImage.Create(WizardForm);
   FinishedSignature.Parent := WizardForm.FinishedPage;
   FinishedSignature.PngImage.LoadFromFile(BrandDanPath);
+  WizardForm.FinishedHeadingLabel.Top := WizardForm.FinishedHeadingLabel.Top + ScaleY(30);
+  WizardForm.FinishedLabel.Top := WizardForm.FinishedLabel.Top + ScaleY(30);
   LayoutFinishedBranding();
-  BrandPage := CreateCustomPage(wpWelcome, 'Dan Player', '{#DisplayVersion}');
+  { The animated icon and caption already identify the product. Do not repeat
+    the product name/version in Inno's page header above the opening scene. }
+  BrandPage := CreateCustomPage(wpWelcome, '', '');
   UpdatePage := CreateCustomPage(BrandPage.ID, '正在更新 Dan Player', '保留原安装位置和现有快捷方式');
   UpdateNote := TNewStaticText.Create(WizardForm);
   UpdateNote.Parent := UpdatePage.Surface;
-  UpdateNote.SetBounds(ScaleX(0), ScaleY(12), UpdatePage.SurfaceWidth, UpdatePage.SurfaceHeight - ScaleY(24));
+  UpdateNote.SetBounds(ScaleX(28), UpdatePage.SurfaceHeight div 3,
+    UpdatePage.SurfaceWidth - ScaleX(56), ScaleY(110));
   UpdateNote.AutoSize := False; UpdateNote.WordWrap := True;
+  UpdateNote.Alignment := taCenter;
   UpdateNote.Caption := '等待播放器正常退出。可以随时取消，安装器不会强制结束进程。';
   UpdateFlag := ExpandConstant('{param:DANUPDATE|}');
   UpdateMode := (UpdateFlag <> '') or (ExpandConstant('{param:DANPARENTPID|}') <> '') or
@@ -643,6 +671,10 @@ begin
   { Keep both native controls' text metrics and align their centers. }
   WizardForm.DirEdit.Top := ParentButton.Top +
     (ParentButton.Height - WizardForm.DirEdit.Height) div 2;
+  WizardForm.SelectDirBitmapImage.Visible := False;
+  WizardForm.SelectDirLabel.Left := WizardForm.DirEdit.Left;
+  WizardForm.SelectDirLabel.Width := WizardForm.SelectDirPage.Width - WizardForm.DirEdit.Left;
+  WizardForm.SelectDirLabel.Font.Style := WizardForm.SelectDirLabel.Font.Style + [fsBold];
   DesktopCheck := TNewCheckBox.Create(WizardForm);
   DesktopCheck.Parent := WizardForm.SelectDirPage;
   DesktopCheck.SetBounds(ScaleX(0), ParentButton.Top + ParentButton.Height + ScaleY(12),
@@ -667,9 +699,21 @@ begin
     WizardForm.SelectDirPage.Width, ScaleY(66));
   DataNote.AutoSize := False;
   DataNote.WordWrap := True;
-  DataNote.Caption := '仅为当前用户安装，不会自动提权。受保护的位置请改选可写文件夹。' + #13#10 +
-    '升级保留用户数据；失败备份保存在安装目录旁，供恢复使用。';
+  DataNote.Caption := '安装到当前用户可写目录，无需管理员权限。' + #13#10 +
+    '升级保留用户数据；如安装失败，备份保存在安装目录旁。';
   DataNote.AdjustHeight;
+  WizardForm.ProgressGauge.Height := ScaleY(8);
+  WizardForm.StatusLabel.Font.Style := WizardForm.StatusLabel.Font.Style + [fsBold];
+  InstallNote := TNewStaticText.Create(WizardForm);
+  InstallNote.Parent := WizardForm.InstallingPage;
+  InstallNote.SetBounds(WizardForm.ProgressGauge.Left,
+    WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(54),
+    WizardForm.ProgressGauge.Width, ScaleY(48));
+  InstallNote.AutoSize := False;
+  InstallNote.WordWrap := True;
+  InstallNote.Alignment := taCenter;
+  InstallNote.Caption := '正在验证并写入播放器文件。' + #13#10 +
+    '升级时会保留现有的音乐、歌单和设置。';
   OpenButton := TNewButton.Create(WizardForm);
   OpenButton.Parent := WizardForm.FinishedPage;
   OpenButton.Caption := '打开播放器';
@@ -739,7 +783,10 @@ begin
     WizardForm.NextButton.Enabled := False;
     StartUpdateTimer();
   end;
+  if CurPageID = wpInstalling then
+    DP_ProgressCreate(WizardForm.ProgressGauge.Handle, Background, Accent);
   if CurPageID = wpFinished then begin
+    AlignFinishedHeading();
     LayoutFinishedActions();
     LayoutFinishedBranding();
     CenterFinishedFooter();
@@ -767,10 +814,21 @@ begin
         AddBackslash(ExpandConstant('{param:QARENDERROOT|}')) + 'installing.png') = 1 then
       Log('QA UI rendered nonblank real Inno tree: installing')
     else Log('QA UI RENDER FAILED: installing');
+    DP_ProgressSet(35, 100);
+    if DP_QA_Capture(WizardForm.Handle,
+        AddBackslash(ExpandConstant('{param:QARENDERROOT|}')) + 'installing-progress.png') = 1 then
+      Log('QA UI rendered accented progress at 35 percent')
+    else Log('QA UI RENDER FAILED: installing-progress');
+    DP_ProgressSet(0, 100);
     QaAuditFooter('installing');
     QaAuditGraphic(WizardForm.MainPanel.Handle, WizardForm.WizardSmallBitmapImage, 'installing-rce');
   end;
 #endif
+end;
+
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+begin
+  DP_ProgressSet(CurProgress, MaxProgress);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -790,17 +848,17 @@ begin
       QaCancelRequested := True; PostMessage(WizardForm.Handle, $0010, 0, 0);
     end;
 #endif
-    Result := NativeError(); Exit;
+    Result := '无法使用此安装位置。请检查路径或选择可写目录：' + #13#10 + NativeError(); Exit;
   end;
   Recovery := DP_HasRecovery();
-  if Recovery < 0 then begin Result := NativeError(); Exit; end;
+  if Recovery < 0 then begin Result := '无法检查上次安装的恢复状态：' + #13#10 + NativeError(); Exit; end;
   if Recovery = 1 then begin
     if not WizardSilent and (MsgBox('上次安装未完成。是否先恢复已验证的备份？', mbConfirmation, MB_YESNO) <> IDYES) then begin
       Result := '请先恢复上次安装。备份保留在：' + BackupPath(); Exit;
     end;
-    if DP_Rollback() = 0 then begin Result := NativeError(); Exit; end;
+    if DP_Rollback() = 0 then begin Result := '恢复原有安装失败：' + #13#10 + NativeError(); Exit; end;
   end;
-  if DP_Begin() = 0 then begin Result := NativeError(); Exit; end;
+  if DP_Begin() = 0 then begin Result := '无法开始安装：' + #13#10 + NativeError(); Exit; end;
   TransactionStarted := True;
 #ifdef QaBuild
   if ExpandConstant('{param:QAHOLDAFTERBEGIN|0}') = '1' then Sleep(5000);
@@ -910,6 +968,7 @@ begin
     end else Log('Original product files and installer metadata restored. Backup retained: ' + BackupPath());
   end;
   DP_CloseControls();
+  DP_ProgressClose();
   DP_UpdateClose();
   { Release inherited VCL font selections before removing the private in-memory
     font resource. GDI owns its copied font data, never a temp-file mapping. }

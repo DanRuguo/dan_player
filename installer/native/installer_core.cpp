@@ -464,7 +464,15 @@ LogoFrame EvaluateLogoFrame(uint64_t elapsed_ms, bool reduce_motion) {
   if (reduce_motion) return {1, false};
   const double fade_in = std::clamp(static_cast<double>(elapsed_ms) / 100.0, 0.0, 1.0);
   const double fade_out = std::clamp((750.0 - static_cast<double>(elapsed_ms)) / 100.0, 0.0, 1.0);
-  return {fade_in * fade_out, false};
+  // A single damped bell-like bounce. Keep the caption and layout fixed; only
+  // the already rasterized icon moves, and all transforms settle before fade.
+  const double phase = std::clamp((static_cast<double>(elapsed_ms) - 100.0) / 500.0, 0.0, 1.0);
+  const double envelope = 1.0 - phase;
+  const double pi = 3.14159265358979323846;
+  return {fade_in * fade_out, false,
+          -15.0 * std::sin(pi * phase) * envelope,
+          16.0 * std::sin(4.0 * pi * phase) * envelope,
+          1.0 + 0.08 * std::sin(pi * phase) * envelope};
 }
 
 Transaction::Transaction(Context context, RegistryStore& registry, FaultInjector inject)

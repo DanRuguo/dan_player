@@ -39,12 +39,19 @@ foreach ($theme in @('light','dark')) {
     if ($text -match 'QA UI (RENDER FAILED|CORNER MISMATCH|GEOMETRY FAILED|BRAND FAILED|BUTTON FONT FAILED)' -or $text -notmatch 'QA UI all six button corners match actual VCL parent' -or $text -notmatch 'QA UI real HWND centers, bounds and spacing pass') { throw "Rendering, font, corners or geometry evidence failed: $log" }
     $fontEvidence = Get-Content -LiteralPath (Join-Path $frames 'button-fonts.tsv')
     if ($fontEvidence.Count -ne 20 -or ($fontEvidence -match 'FAIL').Count -ne 0) { throw "Missing/failed actual bold font evidence: $log" }
-    $hasLayoutFailure = $text -match 'QA UI (FOOTER CLIPPED|FINISHED ACTIONS MISPLACED)'
+    $hasLayoutFailure = $text -match 'QA UI (FOOTER CLIPPED|FINISHED ACTIONS MISPLACED|FINISHED HEADING MISPLACED)'
     if ($ExpectLayoutFailure -and -not $hasLayoutFailure) { throw 'Negative regression did not reproduce a layout failure.' }
     if (-not $ExpectLayoutFailure -and $hasLayoutFailure) { throw "Actual page layout/painter regression: $log" }
-    foreach ($name in @('player','player-fade','directory','installing','finished')) {
+    foreach ($name in @('player','player-motion','directory','installing','finished')) {
         if (-not (Test-Path -LiteralPath (Join-Path $frames ($name + '.png')) -PathType Leaf)) { throw "Missing $theme/$name render" }
         if (-not $ExpectLayoutFailure -and $text -notmatch ('QA UI footer fully visible: ' + $name)) { throw "Missing $theme/$name paint-region evidence" }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $frames 'installing-progress.png') -PathType Leaf) -or
+        $text -notmatch 'QA UI rendered accented progress at 35 percent') {
+        throw "Missing styled mid-install progress render: $log"
+    }
+    if (-not $ExpectLayoutFailure -and $text -notmatch 'QA UI finished heading and Finish share content center') {
+        throw "Finished heading and button centers differ: $log"
     }
     if (-not (Test-Path -LiteralPath (Join-Path $target 'Dan Player.exe')) -or $text -notmatch 'Verified installation committed') { throw 'Did not reach real installation completion.' }
     Write-Output "PASS actual Inno ${theme}/font${fontSize}: 5 real page renders; negative-layout=$([bool]$ExpectLayoutFailure); fictional sandbox installation only. $frames"

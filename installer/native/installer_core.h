@@ -100,6 +100,9 @@ class DestinationSelection {
 struct LogoFrame {
   double player = 0;
   bool finished = false;
+  double lift = 0;
+  double tilt = 0;
+  double scale = 1;
 };
 LogoFrame EvaluateLogoFrame(uint64_t elapsed_ms, bool reduce_motion);
 

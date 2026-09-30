@@ -94,14 +94,16 @@ Assert-True ((Get-FileHash -LiteralPath (Join-Path $fresh 'Dan Player.exe') -Alg
 Assert-True ((Get-FileHash -LiteralPath (Join-Path $fresh '.dan-player-install\unins000.dat') -Algorithm SHA256).Hash -eq $uninstallHash) 'Late failure did not restore original uninstall metadata'
 Write-Output 'PASS Inno late failure preserves recovery through final success boundary'
 
-$cancelled = Invoke-QaInstaller $fresh 'user-cancelled' 0 1 1 0 2
+$cancelOriginalHash = (Get-FileHash -LiteralPath (Join-Path $unicode 'Dan Player.exe') -Algorithm SHA256).Hash
+$cancelUninstallHash = (Get-FileHash -LiteralPath (Join-Path $unicode '.dan-player-install\unins000.dat') -Algorithm SHA256).Hash
+$cancelled = Invoke-QaInstaller $unicode 'user-cancelled' 0 1 1 0 2
 Assert-True ($cancelled.ExitCode -eq 5) 'Ordinary cancellation did not take the engine cancellation exit path'
 $cancelLog = Get-Content -LiteralPath $cancelled.Log -Raw
 Assert-True ($cancelLog -match '(?i)user cancel(?:l)?ed') 'No native user-cancelled event in Inno log'
 Assert-True ($cancelLog -match '(?i)rolling back') 'No native Inno rollback in cancellation log'
 Assert-True ($cancelLog -notmatch 'Verified installation committed') 'Cancelled install committed'
-Assert-True ((Get-FileHash -LiteralPath (Join-Path $fresh 'Dan Player.exe') -Algorithm SHA256).Hash -eq $originalHash) 'User cancellation did not restore original executable'
-Assert-True ((Get-FileHash -LiteralPath (Join-Path $fresh '.dan-player-install\unins000.dat') -Algorithm SHA256).Hash -eq $uninstallHash) 'User cancellation did not restore original uninstall metadata'
+Assert-True ((Get-FileHash -LiteralPath (Join-Path $unicode 'Dan Player.exe') -Algorithm SHA256).Hash -eq $cancelOriginalHash) 'User cancellation did not restore original executable'
+Assert-True ((Get-FileHash -LiteralPath (Join-Path $unicode '.dan-player-install\unins000.dat') -Algorithm SHA256).Hash -eq $cancelUninstallHash) 'User cancellation did not restore original uninstall metadata'
 Write-Output 'PASS real Inno user cancellation and engine rollback restore the original installation'
 
 $freshFailed = Join-Path $testRoot 'new-failure\install'
@@ -138,6 +140,8 @@ Assert-True ((Get-FileHash -LiteralPath $journal -Algorithm SHA256).Hash -eq $jo
 if (-not $first.WaitForExit(30000)) { throw 'First installer timeout; process left intact' }
 $first.Refresh()
 Assert-True ($first.ExitCode -eq 0) 'Second Setup disrupted the first installation'
-Assert-True ([IO.File]::ReadAllText($state) -eq 'committed') 'First transaction did not commit normally'
+Assert-True (-not (Test-Path -LiteralPath $state)) 'Completed upgrade retained a recovery state file'
+Assert-True ((Get-Content -LiteralPath $firstLog -Raw) -match 'Verified installation committed') 'First transaction did not commit normally'
+Assert-Text (Join-Path $concurrent 'Dan Player.exe') 'FICTIONAL FIXTURE. Not an executable. New version.'
 Write-Output 'PASS concurrent second Setup refuses the live transaction without modifying its journal'
 Write-Output ('RESULT 11 Inno sandbox scenarios passed. Logs: ' + $testRoot)
