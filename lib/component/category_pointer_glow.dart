@@ -141,8 +141,12 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
         ?.position;
     if (next == _shared) return;
     _shared?.removeListener(_move);
+    _position.clear();
     _shared = next;
     _shared?.addListener(_move);
+    // A cover can mount under a stationary pointer before its first layout.
+    // Remember that live sample so a later scope clear repaints its cached light.
+    _geometryChanged();
   }
 
   void _move() {
@@ -191,7 +195,10 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
   @override
   void didUpdateWidget(CategoryPointerGlow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.circle != widget.circle) _position.clear();
+    if (oldWidget.circle != widget.circle) {
+      _position.clear();
+      _geometryChanged();
+    }
   }
 
   @override

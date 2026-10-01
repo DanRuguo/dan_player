@@ -576,6 +576,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   bool _readingMode = false;
   int _returnRequest = 0;
   bool _dragging = false;
+  final _scrollPointers = <int>{};
   Object? _geometryIdentity;
   Object? _presentationIdentity;
   Object? _displayIdentity;
@@ -772,6 +773,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _manualScrollTimer = null;
       _manualScrollActive = false;
       _dragging = false;
+      _scrollPointers.clear();
       if (_scrollController.hasClients &&
           _scrollController.position.isScrollingNotifier.value) {
         _scrollController.jumpTo(_scrollController.offset);
@@ -789,6 +791,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _manualScrollTimer?.cancel();
     _manualScrollActive = false;
     _dragging = false;
+    _scrollPointers.clear();
     _followGeneration++;
     _lineKeys = List.generate(
       widget.lyric.lines.length,
@@ -1165,6 +1168,20 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     });
   }
 
+  void _releaseScrollPointer(int pointer) {
+    // A palm/second finger can be cancelled while the accepted drag remains
+    // held. Resume following only after every direct pointer has left.
+    if (!_scrollPointers.remove(pointer) || _scrollPointers.isNotEmpty) return;
+    if (_scrollController.hasClients &&
+        _scrollController.position.isScrollingNotifier.value) {
+      // Preserve the existing grace period after ballistic scrolling ends.
+      // ScrollEndNotification will release the drag once no pointers remain.
+      return;
+    }
+    _dragging = false;
+    if (_manualScrollActive) _resumeAfterGrace();
+  }
+
   void _cancelFollowEffects() {
     _mediaTicker.stop();
     _followClock.stop();
@@ -1374,7 +1391,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         notification is OverscrollNotification &&
             notification.dragDetails != null;
     if (directDrag) _markManualInteraction(dragging: true);
-    if (notification is ScrollEndNotification && _dragging) {
+    if (notification is ScrollEndNotification &&
+        _dragging &&
+        _scrollPointers.isEmpty) {
       _dragging = false;
       _resumeAfterGrace();
     }
@@ -1651,19 +1670,25 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
             onEnter: (_) => _setPointerReading(true),
             onExit: (_) => _setPointerReading(false),
             child: Listener(
+              onPointerDown: (event) {
+                if (const DanPlayerScrollBehavior()
+                        .dragDevices
+                        .contains(event.kind) &&
+                    event.buttons == kPrimaryButton) {
+                  _scrollPointers.add(event.pointer);
+                }
+              },
+              onPointerUp: (event) => _releaseScrollPointer(event.pointer),
               onPointerSignal: (event) {
                 if (event is PointerScrollEvent) _markManualInteraction();
               },
-              onPointerPanZoomStart: (_) =>
-                  _markManualInteraction(dragging: true),
-              onPointerPanZoomEnd: (_) {
-                _dragging = false;
-                if (_manualScrollActive) _resumeAfterGrace();
+              onPointerPanZoomStart: (event) {
+                _scrollPointers.add(event.pointer);
+                _markManualInteraction(dragging: true);
               },
-              onPointerCancel: (_) {
-                _dragging = false;
-                if (_manualScrollActive) _resumeAfterGrace();
-              },
+              onPointerPanZoomEnd: (event) =>
+                  _releaseScrollPointer(event.pointer),
+              onPointerCancel: (event) => _releaseScrollPointer(event.pointer),
               child: NotificationListener<ScrollNotification>(
                 onNotification: _onScrollNotification,
                 child: ScrollConfiguration(

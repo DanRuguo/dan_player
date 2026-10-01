@@ -52,3 +52,20 @@ double prepareBassSegment(bass.Bass api, int handle, AudioSegment segment) {
   }
   return length;
 }
+
+/// Convert a public seek position to the decoder's absolute byte coordinate.
+/// BASS rejects the physical EOF as a seek target. One byte before it rounds
+/// down to the final sample frame, preserving pause and normal EOF handling.
+/// Interior CUE boundaries and invalid/out-of-range requests stay unchanged.
+int bassSeekPositionBytes(bass.Bass api, int handle, double sourcePosition) {
+  final bytes = api.BASS_ChannelSeconds2Bytes(handle, sourcePosition);
+  final length = api.BASS_ChannelGetLength(handle, bass.BASS_POS_BYTE);
+  if (length > 0 &&
+      bytes == length &&
+      sourcePosition.isFinite &&
+      sourcePosition >= 0 &&
+      sourcePosition <= api.BASS_ChannelBytes2Seconds(handle, length)) {
+    return bytes - 1;
+  }
+  return bytes;
+}

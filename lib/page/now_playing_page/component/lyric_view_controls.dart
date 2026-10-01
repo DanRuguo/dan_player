@@ -13,6 +13,7 @@ import 'package:dan_player/component/lyric_workbench_dialog.dart';
 import 'package:dan_player/component/player_number_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_source_view.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -382,22 +383,37 @@ class _LyricFontSizePanel extends StatefulWidget {
 
 class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
   double? _draftSize;
+  int? _sizingPointer;
   Offset? _pointerDown;
   bool _dragged = false;
+  bool _cancelled = false;
 
   void _finishSizeChange(double value) {
+    // Material Slider also sends onChangeEnd after a pointer cancellation.
+    // The Listener has already discarded that draft, so do not persist it.
+    if (_cancelled ||
+        (_sizingPointer != null && !widget.controller.fontSizeAdjusting)) {
+      // The menu's onClose also discards a drag, while its Slider can remain
+      // mounted throughout the exit fade and receive a late pointer release.
+      _cancelSizeChange();
+      _cancelled = false;
+      return;
+    }
     widget.controller.setFontDragPreview(null);
     setState(() => _draftSize = null);
     widget.controller.setFontSize(value.roundToDouble());
     widget.controller.setFontSizeAdjusting(false);
+    _sizingPointer = null;
     _pointerDown = null;
     _dragged = false;
   }
 
   void _cancelSizeChange() {
+    _cancelled = true;
     widget.controller.setFontDragPreview(null);
     widget.controller.setFontSizeAdjusting(false);
     if (mounted) setState(() => _draftSize = null);
+    _sizingPointer = null;
     _pointerDown = null;
     _dragged = false;
   }
@@ -464,20 +480,44 @@ class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
           ]),
           Listener(
             onPointerDown: (event) {
+              if (_sizingPointer != null || event.buttons != kPrimaryButton) {
+                return;
+              }
+              _sizingPointer = event.pointer;
+              _cancelled = false;
               _pointerDown = event.localPosition;
               _dragged = false;
             },
             onPointerMove: (event) {
-              if (_pointerDown == null ||
+              if (_sizingPointer != event.pointer ||
+                  _pointerDown == null ||
                   (event.localPosition - _pointerDown!).distanceSquared <= 16) {
                 return;
               }
               _dragged = true;
               if (_draftSize != null) {
+                if (!widget.controller.fontSizeAdjusting) {
+                  _cancelSizeChange();
+                  return;
+                }
                 widget.controller.setFontDragPreview(_draftSize);
               }
             },
-            onPointerCancel: (_) => _cancelSizeChange(),
+            onPointerCancel: (event) {
+              if (_sizingPointer == event.pointer) _cancelSizeChange();
+            },
+            onPointerUp: (event) {
+              if (_sizingPointer != event.pointer) return;
+              // Pointer up can precede Slider's onChangeEnd, or no slider
+              // recognizer may have accepted this hit at all.
+              if (!widget.controller.fontSizeAdjusting) {
+                _cancelSizeChange();
+              } else {
+                _sizingPointer = null;
+                _pointerDown = null;
+                _dragged = false;
+              }
+            },
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 showValueIndicator: ShowValueIndicator.never,
@@ -491,9 +531,17 @@ class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
                 divisions: 50,
                 allowedInteraction: SliderInteraction.tapAndSlide,
                 semanticFormatterCallback: (value) => '${value.round()}',
-                onChangeStart: (_) =>
-                    widget.controller.setFontSizeAdjusting(true),
+                onChangeStart: (_) {
+                  // Keyboard/semantics adjustments do not deliver pointer down.
+                  _cancelled = false;
+                  widget.controller.setFontSizeAdjusting(true);
+                },
                 onChanged: (value) {
+                  if (_cancelled ||
+                      (_sizingPointer != null &&
+                          !widget.controller.fontSizeAdjusting)) {
+                    return;
+                  }
                   final draft = value.roundToDouble();
                   setState(() => _draftSize = draft);
                   if (_dragged) widget.controller.setFontDragPreview(draft);

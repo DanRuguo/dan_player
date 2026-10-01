@@ -2010,7 +2010,7 @@ class BassPlayer {
     final stream = _fstream!;
     final sourcePosition =
         _segment?.sourcePosition(position, length) ?? position;
-    final bytes = _bass.BASS_ChannelSeconds2Bytes(stream, sourcePosition);
+    final bytes = bassSeekPositionBytes(_bass, stream, sourcePosition);
     final moved = wasapiExclusive && _exclusiveMixer != null
         ? _mix!.setChannelPosition(
             stream,

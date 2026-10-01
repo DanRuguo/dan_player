@@ -93,13 +93,18 @@ class _CommentScrollController extends ScrollController {
       );
 }
 
-class _SongCommentsDialogState extends State<SongCommentsDialog> {
+class _SongCommentsDialogState extends State<SongCommentsDialog>
+    with WidgetsBindingObserver {
   late Map<SongCommentSort, _CommentTab> _tabs;
   late List<SongCommentSort> _availableSorts;
   SongCommentSort _sort = SongCommentSort.hot;
   SongCommentsTarget? _target;
   String? _unavailable;
   SongCommentsCancellation? _request;
+  bool _requestIsAutomatic = false;
+  bool _automaticVisible = false;
+  AppLifecycleState? _lifecycle;
+  final _hidden = DesktopIntegration.instance.isHidden;
   int _generation = 0;
   bool _closed = false;
   bool _associationBusy = false;
@@ -112,7 +117,51 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
   @override
   void initState() {
     super.initState();
+    _lifecycle = WidgetsBinding.instance.lifecycleState;
+    WidgetsBinding.instance.addObserver(this);
+    _hidden.addListener(_syncAutomaticRequest);
+    AppSettings.instance.automaticOnlineLyrics
+        .addListener(_syncAutomaticRequest);
     _configure();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _automaticVisible = TickerMode.valuesOf(context).enabled &&
+        ModalRoute.of(context)?.isCurrent != false;
+    _syncAutomaticRequest();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
+    _syncAutomaticRequest();
+  }
+
+  bool get _automaticNetworkAllowed =>
+      _automaticVisible &&
+      !_hidden.value &&
+      AppSettings.instance.automaticOnlineLyrics.value &&
+      _lifecycle != AppLifecycleState.hidden &&
+      _lifecycle != AppLifecycleState.paused &&
+      _lifecycle != AppLifecycleState.detached;
+
+  void _syncAutomaticRequest() {
+    if (!mounted ||
+        _closed ||
+        !_requestIsAutomatic ||
+        _automaticNetworkAllowed) {
+      return;
+    }
+    final tab = _tab;
+    // Revoke only the automatic owner. Its transport/cache share this token;
+    // explicit refreshes remain allowed independently of the opt-in preference.
+    _cancel();
+    setState(() {
+      tab.loading = false;
+      tab.refreshing = false;
+    });
   }
 
   void _configure() {
@@ -132,12 +181,10 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
             _closed ||
             _target != target ||
             generation != _generation ||
-            !TickerMode.valuesOf(context).enabled ||
-            ModalRoute.of(context)?.isCurrent == false ||
-            !AppSettings.instance.automaticOnlineLyrics.value) {
+            !_automaticNetworkAllowed) {
           return;
         }
-        await _load(refresh: true);
+        await _load(refresh: true, automatic: true);
       });
     }
   }
@@ -220,6 +267,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     _generation++;
     _request?.cancel();
     _request = null;
+    _requestIsAutomatic = false;
   }
 
   void _close() {
@@ -246,11 +294,15 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     if (!_tab.loaded) unawaited(_load());
   }
 
-  Future<void> _load({bool refresh = false, bool cacheOnly = false}) async {
+  Future<void> _load(
+      {bool refresh = false,
+      bool cacheOnly = false,
+      bool automatic = false}) async {
     final target = _target;
     final tab = _tab;
     if (_closed ||
         target == null ||
+        (automatic && !_automaticNetworkAllowed) ||
         tab.loading ||
         (!refresh && !tab.hasMore)) {
       return;
@@ -260,6 +312,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     final generation = _generation;
     final cancellation = SongCommentsCancellation();
     _request = cancellation;
+    _requestIsAutomatic = automatic;
     setState(() {
       tab.loading = true;
       tab.refreshing = refresh;
@@ -268,6 +321,8 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
     bool current() =>
         mounted &&
         !_closed &&
+        !cancellation.isCancelled &&
+        (!automatic || _automaticNetworkAllowed) &&
         generation == _generation &&
         target == _target &&
         sort == _sort;
@@ -339,12 +394,17 @@ class _SongCommentsDialogState extends State<SongCommentsDialog> {
           tab.refreshing = false;
         });
         _request = null;
+        _requestIsAutomatic = false;
       }
     }
   }
 
   @override
   void dispose() {
+    AppSettings.instance.automaticOnlineLyrics
+        .removeListener(_syncAutomaticRequest);
+    _hidden.removeListener(_syncAutomaticRequest);
+    WidgetsBinding.instance.removeObserver(this);
     _close();
     _disposeTabs();
     super.dispose();
