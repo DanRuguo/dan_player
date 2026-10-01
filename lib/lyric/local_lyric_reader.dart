@@ -16,7 +16,7 @@ import 'package:dan_player/utils.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter/foundation.dart';
 
-const _sidecarExtensions = ['.qrc', '.yrc', '.krc', '.elrc', '.lrc'];
+const _sidecarExtensions = ['.qrc', '.yrc', '.krc', '.ttml', '.elrc', '.lrc'];
 const _memoryBudget = 8 * 1024 * 1024;
 final _memory = <String, _LocalLyricMemoryEntry>{};
 int _memoryBytes = 0;

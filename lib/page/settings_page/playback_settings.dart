@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/playback_pitch_control.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
@@ -57,11 +58,24 @@ class _PlaybackSettingsState extends State<PlaybackSettings> {
     }
   }
 
+  void _pitch(double value) {
+    if (PlayService.playbackReady.value) {
+      if (!PlayService.instance.playbackService.setPlaybackPitch(value)) return;
+    } else {
+      AppSettings.instance.experience.value =
+          AppSettings.instance.experience.value.copyWith(playbackPitch: value);
+    }
+    unawaited(_save());
+  }
+
   Widget _panel({required PlayerExperiencePreferences preferences}) {
     final ready = PlayService.playbackReady.value;
     final playback = ready ? PlayService.instance.playbackService : null;
     return PlaybackSettingsPanel(
       playbackRate: playback?.playbackRate.value ?? preferences.playbackRate,
+      playbackPitch: playback?.playbackPitch.value ?? preferences.playbackPitch,
+      pitchAvailable: playback?.supportsPlaybackPitch ?? true,
+      onPitchChanged: _pitch,
       exclusive: playback?.wasapiExclusive.value ?? preferences.exclusiveOutput,
       changingOutput: playback?.isChangingOutput.value ?? false,
       rateAvailable: playback?.supportsPlaybackRate ?? true,
@@ -87,6 +101,7 @@ class _PlaybackSettingsState extends State<PlaybackSettings> {
             listenable: Listenable.merge([
               playback,
               playback.playbackRate,
+              playback.playbackPitch,
               playback.wasapiExclusive,
               playback.isChangingOutput,
             ]),
@@ -112,6 +127,9 @@ class PlaybackSettingsPanel extends StatelessWidget {
     this.unavailableReason,
     this.error,
     this.onRetrySave,
+    this.playbackPitch = 0,
+    this.pitchAvailable = true,
+    this.onPitchChanged,
   });
 
   final double playbackRate;
@@ -124,6 +142,9 @@ class PlaybackSettingsPanel extends StatelessWidget {
   final String? unavailableReason;
   final String? error;
   final VoidCallback? onRetrySave;
+  final double playbackPitch;
+  final bool pitchAvailable;
+  final ValueChanged<double>? onPitchChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -154,6 +175,20 @@ class PlaybackSettingsPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
+          if (onPitchChanged != null) ...[
+            SettingsHeader(
+                title: ui('升降调'),
+                icon: Icons.music_note_outlined,
+                subtitle: ui(pitchAvailable
+                    ? '独立调整音高，速度和歌词时间不变；选择原调可恢复。'
+                    : '当前安装缺少升降调组件，仍可正常播放。')),
+            const SizedBox(height: 12),
+            PlaybackPitchControl(
+                pitch: playbackPitch,
+                enabled: pitchAvailable && !changingOutput,
+                onChanged: onPitchChanged!),
+            const SizedBox(height: 16),
+          ],
           SettingsSwitchTile(
             surface: false,
             icon: Icons.speaker_outlined,
@@ -181,7 +216,7 @@ class PlaybackSettingsPanel extends StatelessWidget {
 }
 
 /// Compact shared control for the full player. Settings remain the place for
-/// output-mode choices; this control exposes the current playback rate.
+/// output-mode choices; this control exposes speed and independent pitch.
 class PlaybackRateButton extends StatelessWidget {
   const PlaybackRateButton({super.key});
 
@@ -189,10 +224,27 @@ class PlaybackRateButton extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final playback = PlayService.instance.playbackService;
-    return ValueListenableBuilder<double>(
-      valueListenable: playback.playbackRate,
-      builder: (context, rate, _) => PlaybackRateMenu(
-        rate: rate,
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        playback.playbackRate,
+        playback.playbackPitch,
+        playback.isChangingOutput,
+      ]),
+      builder: (context, _) => PlaybackRateMenu(
+        rate: playback.playbackRate.value,
+        pitch: playback.playbackPitch.value,
+        pitchEnabled:
+            playback.supportsPlaybackPitch && !playback.isChangingOutput.value,
+        onPitchSelected: (value) async {
+          if (!playback.setPlaybackPitch(value)) return;
+          try {
+            await AppSettings.instance
+                .saveSettings(throwOnError: true, captureWindowSize: false);
+          } catch (error) {
+            showAppNotice(ui('音高已应用，但设置保存失败：{0}', [error]),
+                kind: AppNoticeKind.error);
+          }
+        },
         enabled: playback.supportsPlaybackRate,
         onSelected: (value) async {
           if (!playback.setPlaybackRate(value)) return;
@@ -209,17 +261,23 @@ class PlaybackRateButton extends StatelessWidget {
   }
 }
 
-/// A local overlay keeps speed selection off the navigator's route transition
+/// A local overlay keeps playback adjustments off the navigator's transition
 /// path. The menu has a stable check column and no per-item check animations.
 class PlaybackRateMenu extends StatelessWidget {
   const PlaybackRateMenu(
       {super.key,
       required this.rate,
       required this.onSelected,
+      this.pitch = 0,
+      this.pitchEnabled = true,
+      this.onPitchSelected,
       this.enabled = true});
   final double rate;
   final ValueChanged<double> onSelected;
   final bool enabled;
+  final double pitch;
+  final bool pitchEnabled;
+  final ValueChanged<double>? onPitchSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -240,9 +298,25 @@ class PlaybackRateMenu extends StatelessWidget {
                 selected: value == rate,
                 child: Text(PlaybackRate.label(value))),
           ),
+        if (onPitchSelected != null) ...[
+          const Divider(),
+          SubmenuButton(
+            key: const ValueKey('playback-pitch-submenu'),
+            leadingIcon: const Icon(Icons.music_note_outlined),
+            menuChildren: pitchEnabled
+                ? playbackPitchMenuItems(
+                    context: context,
+                    pitch: pitch,
+                    onSelected: onPitchSelected!)
+                : const [],
+            child: Text('${ui('升降调')} · ${playbackPitchLabel(pitch)}'),
+          ),
+        ],
       ],
       builder: (context, controller, _) => Tooltip(
-        message: ui("播放速度（保音高）"),
+        message: onPitchSelected == null
+            ? ui("播放速度（保音高）")
+            : '${ui('播放速度与升降调')} · ${playbackPitchLabel(pitch)}',
         child: SizedBox(
           width: 44,
           height: 44,

@@ -1,7 +1,7 @@
 name: dan_player
 description: Dan Player.
 publish_to: 'none'
-version: 26.0.6-snapshot.2
+version: 26.0.6
 
 environment:
   sdk: '>=3.1.4 <4.0.0'
@@ -26,6 +26,7 @@ dependencies:
   crypto: ^3.0.7
   pointycastle: ^3.9.1
   archive: ^3.6.1
+  xml: ^6.6.1
   flutter_markdown: ^0.7.1
   flex_color_picker: ^3.5.0
   filepicker_windows: ^2.1.4

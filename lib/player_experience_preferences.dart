@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
+import 'package:dan_player/play_service/playback_pitch.dart';
 
 /// Additive preferences for the desktop/player experience. Missing or damaged
 /// fields use defaults without migrating the library or changing playlist data.
@@ -14,6 +15,7 @@ class PlayerExperiencePreferences {
     this.springLyrics = true,
     this.desktopLyricVertical = false,
     this.playbackRate = 1.0,
+    this.playbackPitch = 0.0,
     this.exclusiveOutput = false,
     this.sidebarWidth = defaultSidebarWidth,
     this.sidebarLocked = false,
@@ -34,6 +36,7 @@ class PlayerExperiencePreferences {
   final bool springLyrics;
   final bool desktopLyricVertical;
   final double playbackRate;
+  final double playbackPitch;
   final bool exclusiveOutput;
   final double sidebarWidth;
   final bool sidebarLocked;
@@ -76,6 +79,9 @@ class PlayerExperiencePreferences {
   static double safePlaybackRate(Object? value, {double fallback = 1.0}) =>
       PlaybackRate.sanitize(value, fallback: fallback);
 
+  static double safePlaybackPitch(Object? value, {double fallback = 0.0}) =>
+      PlaybackPitch.sanitize(value, fallback: fallback);
+
   static double safeWindowAspectRatio(Object? value, {double fallback = 0}) {
     final number = value is num ? value.toDouble() : fallback;
     if (number == 0) return 0;
@@ -92,6 +98,7 @@ class PlayerExperiencePreferences {
     bool? springLyrics,
     bool? desktopLyricVertical,
     double? playbackRate,
+    double? playbackPitch,
     bool? exclusiveOutput,
     double? sidebarWidth,
     bool? sidebarLocked,
@@ -125,6 +132,8 @@ class PlayerExperiencePreferences {
       springLyrics: springLyrics ?? this.springLyrics,
       desktopLyricVertical: desktopLyricVertical ?? this.desktopLyricVertical,
       playbackRate: safePlaybackRate(playbackRate, fallback: this.playbackRate),
+      playbackPitch:
+          safePlaybackPitch(playbackPitch, fallback: this.playbackPitch),
       exclusiveOutput: exclusiveOutput ?? this.exclusiveOutput,
       sidebarWidth: safeSidebarWidth(sidebarWidth, fallback: this.sidebarWidth),
       sidebarLocked: sidebarLocked ?? this.sidebarLocked,
@@ -149,6 +158,7 @@ class PlayerExperiencePreferences {
         'springLyrics': springLyrics,
         'desktopLyricVertical': desktopLyricVertical,
         'playbackRate': safePlaybackRate(playbackRate),
+        'playbackPitch': safePlaybackPitch(playbackPitch),
         'exclusiveOutput': exclusiveOutput,
         'sidebarWidth': safeSidebarWidth(sidebarWidth),
         'sidebarLocked': sidebarLocked,
@@ -182,6 +192,7 @@ class PlayerExperiencePreferences {
       desktopLyricVertical:
           flag('desktopLyricVertical', defaults.desktopLyricVertical),
       playbackRate: safePlaybackRate(value['playbackRate']),
+      playbackPitch: safePlaybackPitch(value['playbackPitch']),
       exclusiveOutput: flag('exclusiveOutput', defaults.exclusiveOutput),
       sidebarWidth: safeSidebarWidth(value['sidebarWidth']),
       sidebarLocked: flag('sidebarLocked', defaults.sidebarLocked),
@@ -205,6 +216,7 @@ class PlayerExperiencePreferences {
       springLyrics == other.springLyrics &&
       desktopLyricVertical == other.desktopLyricVertical &&
       playbackRate == other.playbackRate &&
+      playbackPitch == other.playbackPitch &&
       exclusiveOutput == other.exclusiveOutput &&
       sidebarWidth == other.sidebarWidth &&
       sidebarLocked == other.sidebarLocked &&
@@ -224,6 +236,7 @@ class PlayerExperiencePreferences {
       springLyrics,
       desktopLyricVertical,
       playbackRate,
+      playbackPitch,
       exclusiveOutput,
       sidebarWidth,
       sidebarLocked,

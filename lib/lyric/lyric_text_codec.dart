@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+const maxLyricTextBytes = 2 * 1024 * 1024;
+
 /// Decodes the Unicode encodings supported by the local lyric reader without
 /// silently replacing invalid bytes that could later overwrite the original.
 String decodeLyricText(List<int> bytes) {

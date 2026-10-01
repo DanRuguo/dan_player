@@ -25,6 +25,7 @@ class BassTempoLibrary {
   bool _closed = false;
 
   static const tempoAttribute = 0x10000;
+  static const pitchAttribute = 0x10001;
   static const preventClickAttribute = 0x10016;
   static const _freeSource = 0x10000;
   static const _float = 0x100;

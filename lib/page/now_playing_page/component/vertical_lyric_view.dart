@@ -15,6 +15,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/lyric_line_practice.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/gestures.dart';
@@ -36,6 +37,9 @@ class VerticalLyricView extends StatefulWidget {
 
 class _VerticalLyricViewState extends State<VerticalLyricView> {
   final lyricViewController = LyricViewController();
+  Future<Lyric?>? _practiceFuture;
+  int? _practiceSession;
+  ValueChanged<LyricLine>? _practiceCallback;
 
   @override
   Widget build(BuildContext context) {
@@ -53,15 +57,50 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
             builder: (context, _) => StreamBuilder<PlayerState>(
               stream: playback.playerStateStream,
               initialData: playback.playerState,
-              builder: (context, state) => VerticalLyricContent(
-                lyricFuture: lyrics.currLyricFuture,
-                positionStream: playback.positionStream,
-                readPosition: () => playback.position,
-                onSeek: playback.seek,
-                springLyrics: experience.springLyrics,
-                hidden: DesktopIntegration.instance.isHidden,
-                playing: state.data == PlayerState.playing,
-              ),
+              builder: (context, state) {
+                final future = lyrics.currLyricFuture;
+                final session = playback.playbackSessionToken;
+                if (!identical(_practiceFuture, future) ||
+                    _practiceSession != session) {
+                  _practiceFuture = future;
+                  _practiceSession = session;
+                  _practiceCallback = (line) async {
+                    bool current() =>
+                        identical(future, lyrics.currLyricFuture) &&
+                        session == playback.playbackSessionToken;
+                    if (!current()) return;
+                    final lyric = await future;
+                    if (!context.mounted || !current() || lyric == null) {
+                      return;
+                    }
+                    final result = practiceLyricLine(
+                        playback: playback,
+                        lyric: lyric,
+                        line: line,
+                        playbackSession: session,
+                        isCurrentLyric: current);
+                    final message = switch (result) {
+                      LyricPracticeResult.unavailable => '请先加载一首本地歌曲，再设置片段循环。',
+                      LyricPracticeResult.invalidRange => '这句歌词没有至少 1 秒的有效时间范围',
+                      LyricPracticeResult.applied => '已将这一句设为 A-B 练习范围',
+                      LyricPracticeResult.stale => null,
+                    };
+                    if (message != null && context.mounted && current()) {
+                      showAppNotice(ui(message), context: context);
+                    }
+                  };
+                }
+                return VerticalLyricContent(
+                  lyricFuture: future,
+                  positionStream: playback.positionStream,
+                  readPosition: () => playback.position,
+                  onSeek: playback.seek,
+                  onPractice: _practiceCallback,
+                  springLyrics: experience.springLyrics,
+                  hidden: DesktopIntegration.instance.isHidden,
+                  playing: state.data == PlayerState.playing,
+                );
+              },
             ),
           ),
         ),
@@ -161,6 +200,7 @@ class VerticalLyricContent extends StatefulWidget {
     required this.positionStream,
     required this.readPosition,
     required this.onSeek,
+    this.onPractice,
     this.springLyrics = false,
     this.hidden,
     this.playing = false,
@@ -170,6 +210,7 @@ class VerticalLyricContent extends StatefulWidget {
   final Stream<double> positionStream;
   final double Function() readPosition;
   final ValueChanged<double> onSeek;
+  final ValueChanged<LyricLine>? onPractice;
   final bool springLyrics;
   final ValueListenable<bool>? hidden;
   final bool playing;
@@ -271,6 +312,7 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
               positionStream: widget.positionStream,
               readPosition: widget.readPosition,
               onSeek: widget.onSeek,
+              onPractice: widget.onPractice,
               springLyrics: widget.springLyrics,
               hidden: widget.hidden,
               playing: widget.playing,
@@ -454,6 +496,7 @@ class VerticalLyricScrollView extends StatefulWidget {
     required this.positionStream,
     required this.readPosition,
     required this.onSeek,
+    this.onPractice,
     this.springLyrics = false,
     this.hidden,
     this.playing = false,
@@ -464,6 +507,7 @@ class VerticalLyricScrollView extends StatefulWidget {
   final Stream<double> positionStream;
   final double Function() readPosition;
   final ValueChanged<double> onSeek;
+  final ValueChanged<LyricLine>? onPractice;
   final bool springLyrics;
   final ValueListenable<bool>? hidden;
   final bool playing;
@@ -588,6 +632,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   bool _viewportBlurUpdateScheduled = false;
   double? _fontAnchorCenter;
   Object? _tileCacheIdentity;
+  ValueChanged<LyricLine>? _tileCachePractice;
   List<LyricViewTile> _tileCache = [];
   bool get _motionHidden =>
       widget.hidden?.value == true ||
@@ -919,6 +964,12 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _voiceBlurClock.stop();
     setState(() => _voiceBlurs = next);
     if (next.isNotEmpty) _voiceBlurClock.forward(from: 0);
+  }
+
+  VoidCallback? _practiceLine(int index, ValueChanged<LyricLine>? callback) {
+    if (callback == null || widget.lyric is PlainLyric) return null;
+    final line = widget.lyric.lines[index];
+    return () => callback(line);
   }
 
   void _seekToLine(int index) {
@@ -1410,16 +1461,23 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _singingRevision,
       reduced,
       fontBand,
+      widget.onPractice,
       _snapFontOnLineChange
     );
     if (_tileCacheIdentity != tileIdentity) {
       final previous = _tileCache;
+      final practice = widget.onPractice;
+      final practiceChanged = _tileCachePractice != practice;
+      _tileCachePractice = practice;
       _tileCacheIdentity = tileIdentity;
       _tileCache = [
         for (var index = 0; index < widget.lyric.lines.length; index++)
           if (index < previous.length &&
+              !practiceChanged &&
               identical(previous[index].line, widget.lyric.lines[index]) &&
               previous[index].distance == _visualDistance(index) &&
+              (previous[index].onPractice != null) ==
+                  (widget.onPractice != null && widget.lyric is! PlainLyric) &&
               previous[index].reducedMotion == reducedAt(index))
             previous[index]
           else
@@ -1434,6 +1492,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               onPresentationEnd: _finishPresentationSetting,
               onTap:
                   widget.lyric is PlainLyric ? null : () => _seekToLine(index),
+              onPractice: _practiceLine(index, practice),
             ),
       ];
     }

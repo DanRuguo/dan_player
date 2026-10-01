@@ -5,6 +5,7 @@ import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_edit_codec.dart';
 import 'package:dan_player/lyric/local_lyric_preferences.dart';
 import 'package:dan_player/lyric/qrc.dart';
+import 'package:dan_player/lyric/ttml.dart';
 export 'package:dan_player/lyric/local_lyric_preferences.dart';
 
 Lyric? parseLocalLyricText(String text,
@@ -14,6 +15,11 @@ Lyric? parseLocalLyricText(String text,
     throw const FormatException('歌词文件过大');
   }
   extension = extension.toLowerCase();
+  if (extension == '.ttml') {
+    final lyric = parseTtmlLyric(text);
+    validateLyricForEditing(lyric);
+    return lyric;
+  }
   if (extension == '.qrc' && text.trimLeft().startsWith('<')) {
     final content = RegExp(r'''LyricContent\s*=\s*(["'])(.*?)\1''',
             dotAll: true, caseSensitive: false)

@@ -12,8 +12,10 @@ class PlayerNumberDialog extends StatefulWidget {
       required this.label,
       required this.value,
       required this.minimum,
-      required this.maximum});
+      required this.maximum,
+      this.description});
   final String title, label;
+  final String? description;
   final int value, minimum, maximum;
 
   @override
@@ -43,32 +45,47 @@ class _PlayerNumberDialogState extends State<PlayerNumberDialog> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final input = Focus(
+      onFocusChange: HotkeysHelper.onFocusChanges,
+      child: TextField(
+        key: const ValueKey('player-number-input'),
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        autocorrect: false,
+        maxLength: 8,
+        decoration: InputDecoration(
+            labelText: widget.description == null ? widget.label : null,
+            helperText: '${widget.minimum} – ${widget.maximum}',
+            errorText: _error,
+            errorMaxLines: 3,
+            counterText: ''),
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
+        onSubmitted: (_) => _submit(),
+      ),
+    );
     return AlertDialog(
       scrollable: true,
       title: AppDialogTitle(widget.title),
       content: SizedBox(
           width: 360,
-          child: Focus(
-            onFocusChange: HotkeysHelper.onFocusChanges,
-            child: TextField(
-              key: const ValueKey('player-number-input'),
-              controller: _controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              autocorrect: false,
-              maxLength: 8,
-              decoration: InputDecoration(
-                  labelText: widget.label,
-                  helperText: '${widget.minimum} – ${widget.maximum}',
-                  errorText: _error,
-                  errorMaxLines: 3,
-                  counterText: ''),
-              onChanged: (_) {
-                if (_error != null) setState(() => _error = null);
-              },
-              onSubmitted: (_) => _submit(),
-            ),
-          )),
+          child: widget.description == null
+              ? input
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                      Text(widget.description!),
+                      const SizedBox(height: 16),
+                      ExcludeSemantics(child: Text(widget.label)),
+                      const SizedBox(height: 8),
+                      MergeSemantics(
+                          key:
+                              const ValueKey('player-number-description-input'),
+                          child: Semantics(label: widget.label, child: input)),
+                    ])),
       actions: [
         AppDialogActions(children: [
           TextButton(

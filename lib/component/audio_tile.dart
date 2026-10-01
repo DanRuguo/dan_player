@@ -29,6 +29,7 @@ import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/playback_service.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:flutter/services.dart';
@@ -73,6 +74,7 @@ class AudioTile extends StatefulWidget {
     this.selection,
     this.columns = false,
     this.showSourceLabel = false,
+    this.playbackService,
   });
 
   final int audioIndex;
@@ -104,12 +106,19 @@ class AudioTile extends StatefulWidget {
   /// library views keep their existing compact metadata line.
   final bool showSourceLabel;
 
+  /// Hosts may use their existing playback session; ordinary library tiles
+  /// continue to use the application's shared player.
+  final PlaybackService? playbackService;
+
   @override
   State<AudioTile> createState() => _AudioTileState();
 }
 
 class _AudioTileState extends State<AudioTile> {
   BuildContext? _artworkContext;
+
+  PlaybackService get _playback =>
+      widget.playbackService ?? PlayService.instance.playbackService;
 
   Widget _artwork(Audio audio, Widget placeholder) => Builder(
         builder: (context) {
@@ -218,7 +227,7 @@ class _AudioTileState extends State<AudioTile> {
       ),
       MenuItemButton(
         onPressed: () {
-          PlayService.instance.playbackService.addToNext(audio);
+          _playback.addToNext(audio);
           NextPlayAnimation.fly(
             context: context,
             sourceContext: _artworkContext ?? context,
@@ -227,6 +236,17 @@ class _AudioTileState extends State<AudioTile> {
         },
         leadingIcon: const Icon(Symbols.plus_one),
         child: Text(ui("下一首播放")),
+      ),
+      MenuItemButton(
+        key: ValueKey('audio-append-queue-${audio.path}'),
+        onPressed: () {
+          final added = _playback.enqueueAudios([audio], next: false);
+          showAppNotice(added ? ui('已加入播放队列：{0} 首', [1]) : ui('歌曲正在加载，请稍后重试'),
+              context: context,
+              kind: added ? AppNoticeKind.success : AppNoticeKind.warning);
+        },
+        leadingIcon: const Icon(Symbols.queue_music),
+        child: Text(ui('加入播放队尾')),
       ),
       MenuItemButton(
         onPressed: () => showAddAudiosToPlaylistDialog(context, [audio]),
@@ -436,15 +456,14 @@ class _AudioTileState extends State<AudioTile> {
           );
           final sourceStatus = !audio.isOnline
               ? null
-              : !PlayService.isInitialized
+              : widget.playbackService == null && !PlayService.isInitialized
                   ? Tooltip(
                       message: ui("联网音乐 · {0}", [sourceLabel]),
                       child:
                           Icon(Symbols.cloud, size: 18.0, color: metadataColor),
                     )
                   : ValueListenableBuilder<String?>(
-                      valueListenable: PlayService
-                          .instance.playbackService.resolvingAudioPath,
+                      valueListenable: _playback.resolvingAudioPath,
                       builder: (context, resolvingPath, _) => Tooltip(
                         message: resolvingPath == audio.path
                             ? ui("正在获取播放地址")
@@ -467,13 +486,10 @@ class _AudioTileState extends State<AudioTile> {
             }
 
             if (!selecting) {
-              if (PlayService
-                      .instance.playbackService.resolvingAudioPath.value ==
-                  audio.path) {
+              if (_playback.resolvingAudioPath.value == audio.path) {
                 return;
               }
-              PlayService.instance.playbackService
-                  .play(widget.audioIndex, widget.playlist);
+              _playback.play(widget.audioIndex, widget.playlist);
             } else {
               if (widget.selection != null) {
                 widget.selection!.onToggle();

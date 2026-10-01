@@ -94,8 +94,8 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
                 child: SettingsTile(
                   surface: false,
                   description: ui('本地歌词多轨顺序'),
-                  subtitle: ui(
-                      'LDDC 可自定义导出顺序。默认保留首行原文及其他译文；选择明确顺序后，下次加载分离注音。已编辑或锁定的歌词不变。'),
+                  subtitle:
+                      '${ui('LDDC 可自定义导出顺序。默认保留首行原文及其他译文；选择明确顺序后，下次加载分离注音。已编辑或锁定的歌词不变。')}\n\n${ui('支持本地 TTML 行与逐字歌词；译文和注音按文件中的明确角色读取。')}',
                   icon: Icons.sort_outlined,
                   action: AppSegmentedControl<LocalLyricLineOrder>(
                     key: const ValueKey('local-lyric-line-order'),

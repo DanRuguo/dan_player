@@ -5,6 +5,7 @@ import 'package:dan_player/component/player_number_dialog.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/play_service/sleep_timer.dart';
+import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -35,25 +36,41 @@ class SleepTimerSubmenu extends StatelessWidget {
     }
   }
 
+  Future<void> _queueCount(
+      NavigatorState navigator, PlaybackService service) async {
+    if (!navigator.mounted) return;
+    final selection = service.captureQueueStopCountSelection();
+    if (selection == null) {
+      showAppNotice(
+          ui(service.queueStopBlockedReason ?? '当前队列或歌曲已改变，请重新设置停止目标'),
+          context: navigator.context,
+          kind: AppNoticeKind.warning);
+      return;
+    }
+    final count = await showAppDialog<int>(
+        context: navigator.context,
+        builder: (_) => PlayerNumberDialog(
+            title: ui('按当前队列设置停止目标'),
+            label: ui('首数（包含当前歌曲）'),
+            description: ui('确认后固定目标歌曲；重排或插入歌曲后仍在该曲结束时停止。'),
+            value: math.min(3, selection.remainingCount),
+            minimum: 1,
+            maximum: selection.remainingCount));
+    if (count != null && navigator.mounted) {
+      service.stopAfterQueueCount(count, selection: selection);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final service = playbackService ?? PlayService.instance.playbackService;
     final navigator = Navigator.of(context, rootNavigator: true);
-    Widget label(String text, {bool time = false, bool enabled = true}) =>
-        ConstrainedBox(
-            constraints: BoxConstraints(
-                maxWidth: math.max(
-                    72, math.min(360, MediaQuery.sizeOf(context).width - 136))),
-            child: Text(text,
-                softWrap: true,
-                style: time
-                    ? TextStyle(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: enabled ? 1 : .38))
-                    : null));
+    Widget label(String text) => ConstrainedBox(
+        constraints: BoxConstraints(
+            maxWidth: math.max(
+                72, math.min(360, MediaQuery.sizeOf(context).width - 136))),
+        child: Text(text, softWrap: true));
     return ListenableBuilder(
       listenable: Listenable.merge([
         service.sleepTimerRemaining,
@@ -68,112 +85,131 @@ class SleepTimerSubmenu extends StatelessWidget {
       builder: (context, _) {
         final remaining = service.sleepTimerRemaining.value;
         final stopAfter = service.stopAfterCurrent.value;
-        final rowCount = 9 +
+        final rowCount = 10 +
             (service.queueStopBoundary.active ? 1 : 0) +
             (remaining != null ? 4 : 0);
         final dividerCount = 1 + (remaining != null ? 1 : 0);
-        return SubmenuButton(
-          alignmentOffset: appSubmenuBottomOffset(context, rowCount,
-              dividerCount: dividerCount),
-          leadingIcon: Icon(
-            remaining != null || stopAfter || service.queueStopBoundary.active
-                ? Symbols.bedtime
-                : Symbols.bedtime_off,
+        final theme = Theme.of(context);
+        return MenuButtonTheme(
+          data: MenuButtonThemeData(
+            style:
+                (theme.menuButtonTheme.style ?? const ButtonStyle()).copyWith(
+              foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                  states.contains(WidgetState.disabled)
+                      ? theme.colorScheme.onSurface.withValues(alpha: .38)
+                      : theme.colorScheme.primary),
+            ),
           ),
-          menuChildren: [
-            for (final minutes in presets)
-              MenuItemButton(
-                onPressed: () => service.startSleepTimer(
-                  Duration(minutes: minutes),
+          child: SubmenuButton(
+            alignmentOffset: appSubmenuBottomOffset(context, rowCount,
+                dividerCount: dividerCount),
+            leadingIcon: Icon(
+              remaining != null || stopAfter || service.queueStopBoundary.active
+                  ? Symbols.bedtime
+                  : Symbols.bedtime_off,
+            ),
+            menuChildren: [
+              for (final minutes in presets)
+                MenuItemButton(
+                  onPressed: () => service.startSleepTimer(
+                    Duration(minutes: minutes),
+                  ),
+                  leadingIcon: SleepPresetIcon(minutes: minutes),
+                  child: label(ui("{0} 分钟后", [minutes])),
                 ),
-                leadingIcon: SleepPresetIcon(minutes: minutes),
-                child: label(ui("{0} 分钟后", [minutes]), time: true),
-              ),
-            MenuItemButton(
-              key: const ValueKey('sleep-custom'),
-              onPressed: () => _custom(navigator, service),
-              leadingIcon: const Icon(Symbols.edit),
-              child: label(ui('自定义睡眠定时')),
-            ),
-            MenuItemButton(
-              key: const ValueKey('sleep-finish-current'),
-              onPressed: () => service.setSleepTimerFinishCurrent(
-                  !service.sleepTimerFinishCurrent.value),
-              leadingIcon: const Icon(Symbols.nights_stay),
-              trailingIcon: service.sleepTimerFinishCurrent.value
-                  ? const Icon(Symbols.check)
-                  : null,
-              child: label(ui('倒计时结束后播完本曲')),
-            ),
-            const Divider(),
-            MenuItemButton(
-              onPressed: () => service.setStopAfterCurrent(!stopAfter),
-              leadingIcon: const Icon(Symbols.music_note),
-              trailingIcon: stopAfter ? const Icon(Symbols.check) : null,
-              child: label(ui("播完当前歌曲后停止")),
-            ),
-            MenuItemButton(
-              key: const ValueKey('sleep-stop-after-queue'),
-              onPressed: service.playlist.value.isEmpty ||
-                      service.queueStopBlockedReason != null
-                  ? null
-                  : service.stopAfterQueueRound,
-              leadingIcon: const Icon(Symbols.stop_circle),
-              child: label(ui('播完当前队列后停止')),
-            ),
-            if (service.queueStopBoundary.active)
               MenuItemButton(
-                  onPressed: service.cancelQueueStop,
-                  leadingIcon: const Icon(Symbols.close),
-                  child: label(ui('取消停止目标'))),
-            if (remaining != null) const Divider(),
-            if (remaining != null) ...[
-              MenuItemButton(
-                key: const ValueKey('sleep-adjust-more'),
-                onPressed: () =>
-                    service.adjustSleepTimer(const Duration(minutes: 5)),
-                leadingIcon: const Icon(Symbols.add),
-                child: label(ui('延长 5 分钟'), time: true),
+                key: const ValueKey('sleep-custom'),
+                onPressed: () => _custom(navigator, service),
+                leadingIcon: const Icon(Symbols.edit),
+                child: label(ui('自定义睡眠定时')),
               ),
               MenuItemButton(
-                key: const ValueKey('sleep-adjust-less'),
-                onPressed: remaining > const Duration(minutes: 5)
-                    ? () =>
-                        service.adjustSleepTimer(const Duration(minutes: -5))
+                key: const ValueKey('sleep-finish-current'),
+                onPressed: () => service.setSleepTimerFinishCurrent(
+                    !service.sleepTimerFinishCurrent.value),
+                leadingIcon: const Icon(Symbols.nights_stay),
+                trailingIcon: service.sleepTimerFinishCurrent.value
+                    ? const Icon(Symbols.check)
                     : null,
-                leadingIcon: const Icon(Symbols.remove),
-                child: label(ui('缩短 5 分钟'),
-                    time: true,
-                    enabled: remaining > const Duration(minutes: 5)),
+                child: label(ui('倒计时结束后播完本曲')),
+              ),
+              const Divider(),
+              MenuItemButton(
+                onPressed: () => service.setStopAfterCurrent(!stopAfter),
+                leadingIcon: const Icon(Symbols.music_note),
+                trailingIcon: stopAfter ? const Icon(Symbols.check) : null,
+                child: label(ui("播完当前歌曲后停止")),
               ),
               MenuItemButton(
-                key: const ValueKey('sleep-toggle-paused'),
-                onPressed: service.toggleSleepTimerPaused,
-                leadingIcon: Icon(service.sleepTimerPaused.value
-                    ? Symbols.play_arrow
-                    : Symbols.pause),
-                child: label(
-                    ui(service.sleepTimerPaused.value ? '继续倒计时' : '暂停倒计时')),
+                key: const ValueKey('sleep-stop-after-queue'),
+                onPressed: service.playlist.value.isEmpty ||
+                        service.queueStopBlockedReason != null
+                    ? null
+                    : service.stopAfterQueueRound,
+                leadingIcon: const Icon(Symbols.stop_circle),
+                child: label(ui('播完当前队列后停止')),
+              ),
+              if (service.queueStopBoundary.active)
+                MenuItemButton(
+                    onPressed: service.cancelQueueStop,
+                    leadingIcon: const Icon(Symbols.close),
+                    child: label(ui('取消停止目标'))),
+              if (remaining != null) const Divider(),
+              if (remaining != null) ...[
+                MenuItemButton(
+                  key: const ValueKey('sleep-adjust-more'),
+                  onPressed: () =>
+                      service.adjustSleepTimer(const Duration(minutes: 5)),
+                  leadingIcon: const Icon(Symbols.add),
+                  child: label(ui('延长 5 分钟')),
+                ),
+                MenuItemButton(
+                  key: const ValueKey('sleep-adjust-less'),
+                  onPressed: remaining > const Duration(minutes: 5)
+                      ? () =>
+                          service.adjustSleepTimer(const Duration(minutes: -5))
+                      : null,
+                  leadingIcon: const Icon(Symbols.remove),
+                  child: label(ui('缩短 5 分钟')),
+                ),
+                MenuItemButton(
+                  key: const ValueKey('sleep-toggle-paused'),
+                  onPressed: service.toggleSleepTimerPaused,
+                  leadingIcon: Icon(service.sleepTimerPaused.value
+                      ? Symbols.play_arrow
+                      : Symbols.pause),
+                  child: label(
+                      ui(service.sleepTimerPaused.value ? '继续倒计时' : '暂停倒计时')),
+                ),
+              ],
+              if (remaining != null)
+                MenuItemButton(
+                  key: const ValueKey('sleep-menu-cancel'),
+                  onPressed: service.cancelSleepTimer,
+                  leadingIcon: const Icon(Symbols.timer_off),
+                  child: label(
+                      ui("取消倒计时（{0}）", [formatSleepRemaining(remaining)])),
+                ),
+              MenuItemButton(
+                key: const ValueKey('sleep-stop-after-count'),
+                onPressed: service.playlist.value.isEmpty ||
+                        service.queueStopBlockedReason != null ||
+                        service.remainingQueueStopCount == 0
+                    ? null
+                    : () => _queueCount(navigator, service),
+                leadingIcon: const Icon(Symbols.format_list_numbered),
+                child: label(ui('按当前播放数量停止')),
               ),
             ],
-            if (remaining != null)
-              MenuItemButton(
-                key: const ValueKey('sleep-menu-cancel'),
-                onPressed: service.cancelSleepTimer,
-                leadingIcon: const Icon(Symbols.timer_off),
-                child: label(
-                    ui("取消倒计时（{0}）", [formatSleepRemaining(remaining)]),
-                    time: true),
-              ),
-          ],
-          child: Text(
-            style: remaining == null
-                ? null
-                : TextStyle(color: Theme.of(context).colorScheme.primary),
-            remaining == null
-                ? ui("睡眠定时")
-                : ui(service.sleepTimerPaused.value ? '倒计时已暂停 {0}' : "睡眠定时 {0}",
-                    [formatSleepRemaining(remaining)]),
+            child: Text(
+              remaining == null
+                  ? ui("睡眠定时")
+                  : ui(
+                      service.sleepTimerPaused.value
+                          ? '倒计时已暂停 {0}'
+                          : "睡眠定时 {0}",
+                      [formatSleepRemaining(remaining)]),
+            ),
           ),
         );
       },

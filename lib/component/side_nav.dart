@@ -2,6 +2,7 @@ import 'package:dan_player/component/app_motion.dart';
 // ignore_for_file: camel_case_types
 
 import 'dart:async';
+import 'dart:ui' show lerpDouble;
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
@@ -9,6 +10,7 @@ import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/frosted_surface.dart';
 import 'package:dan_player/component/responsive_builder.dart';
+import 'package:dan_player/component/side_nav_layout.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/player_experience_preferences.dart';
@@ -44,12 +46,13 @@ final destinations = <DestinationDesc>[
 ];
 
 class SideNav extends StatelessWidget {
-  const SideNav({super.key, this.desktopWidth});
+  const SideNav({super.key, this.desktopWidth, this.resizing = false});
 
   /// When provided, renders the persistent continuously-sized desktop
   /// navigation. A null value preserves the overlay drawer/legacy rail used by
   /// direct and narrow-window callers.
   final double? desktopWidth;
+  final bool resizing;
 
   @override
   Widget build(BuildContext context) {
@@ -87,6 +90,7 @@ class SideNav extends StatelessWidget {
     if (continuousWidth != null) {
       return _ContinuousNavigation(
         width: continuousWidth,
+        resizing: resizing,
         selectedIndex: selected,
         onDestinationSelected: onDestinationSelected,
       );
@@ -224,6 +228,7 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
   bool _hovering = false;
   double _dragStartX = 0;
   double _dragStartWidth = 0;
+  int? _resizePointer;
 
   @override
   void initState() {
@@ -264,14 +269,19 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
   }
 
   void _pointerDown(PointerDownEvent event) {
-    if (_preferences.value.sidebarLocked) return;
+    if (_preferences.value.sidebarLocked || _resizePointer != null) return;
+    _resizePointer = event.pointer;
     _dragStartX = event.position.dx;
     _dragStartWidth = _width;
     setState(() => _dragging = true);
   }
 
   void _pointerMove(PointerMoveEvent event) {
-    if (!_dragging || _preferences.value.sidebarLocked) return;
+    if (!_dragging ||
+        event.pointer != _resizePointer ||
+        _preferences.value.sidebarLocked) {
+      return;
+    }
     final next = (_dragStartWidth + event.position.dx - _dragStartX)
         .clamp(
             PlayerExperiencePreferences.minSidebarWidth, _effectiveMax(context))
@@ -279,16 +289,17 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
     if (next != _width) setState(() => _width = next);
   }
 
-  void _pointerEnd() {
-    if (!_dragging) return;
+  void _pointerEnd(int pointer) {
+    if (!_dragging || pointer != _resizePointer) return;
+    _resizePointer = null;
     setState(() => _dragging = false);
     final current = _preferences.value;
     final next = current.copyWith(sidebarWidth: _width);
     if (next == current) return;
     _preferences.value = next;
     unawaited((widget.persist ??
-            () => AppSettings.instance.saveSettings(
-                throwOnError: true, captureWindowSize: false))()
+            () => AppSettings.instance
+                .saveSettings(throwOnError: true, captureWindowSize: false))()
         .catchError((Object error, StackTrace trace) {
       LOGGER.e('[sidebar] failed to save width: $error', stackTrace: trace);
       showAppNotice(ui("侧栏宽度保存失败；本次会话仍保留当前宽度"), kind: AppNoticeKind.error);
@@ -316,7 +327,7 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          SideNav(desktopWidth: effectiveWidth),
+          SideNav(desktopWidth: effectiveWidth, resizing: _dragging),
           PositionedDirectional(
             top: 0,
             bottom: 0,
@@ -335,8 +346,8 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
                   behavior: HitTestBehavior.translucent,
                   onPointerDown: _pointerDown,
                   onPointerMove: _pointerMove,
-                  onPointerUp: (_) => _pointerEnd(),
-                  onPointerCancel: (_) => _pointerEnd(),
+                  onPointerUp: (event) => _pointerEnd(event.pointer),
+                  onPointerCancel: (event) => _pointerEnd(event.pointer),
                   child: Center(
                     child: AnimatedContainer(
                       duration: AppMotion.duration(
@@ -366,26 +377,97 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
   }
 }
 
-class _ContinuousNavigation extends StatelessWidget {
+class _ContinuousNavigation extends StatefulWidget {
   const _ContinuousNavigation({
     required this.width,
+    required this.resizing,
     required this.selectedIndex,
     required this.onDestinationSelected,
   });
-
   final double width;
+  final bool resizing;
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
+  @override
+  State<_ContinuousNavigation> createState() => _ContinuousNavigationState();
+}
+
+class _ContinuousNavigationState extends State<_ContinuousNavigation>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
+  late final _mode = AnimationController(vsync: this);
+  late final _label = AnimationController(vsync: this, value: 1);
+  late final _visual = Listenable.merge([_mode, _label]);
+  bool? _compact;
+  double _threshold = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (mounted && _compact != null) setState(_updateTargets);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    UiLanguageScope.watch(context);
+    _threshold = sideNavCompactThreshold(
+        context, destinations.map((destination) => destination.label));
+    _updateTargets();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ContinuousNavigation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateTargets();
+  }
+
+  void _updateTargets() {
+    final compact = widget.width <= _threshold;
+    final features =
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    final animate = AppMotion.enabled(context, MotionKind.layout) &&
+        !features.disableAnimations &&
+        !features.reduceMotion &&
+        TickerMode.valuesOf(context).enabled;
+    if (_compact == null || !animate) {
+      _mode.value = compact ? 1 : 0;
+    } else if (_compact != compact) {
+      _mode.animateTo(compact ? 1 : 0,
+          duration: AppMotion.emphasized, curve: AppMotion.standardCurve);
+    }
+    _compact = compact;
+    final opacity = widget.resizing && !compact
+        ? ((widget.width - _threshold) / 48).clamp(0.0, 1.0)
+        : 1.0;
+    // Width changes follow the pointer directly; only releasing it starts the
+    // recovery clock. The same two finite clocks drive all seven destinations.
+    if (widget.resizing || !animate) {
+      _label.value = opacity;
+    } else if (_label.value != opacity) {
+      _label.animateTo(opacity,
+          duration: AppMotion.standard, curve: AppMotion.standardCurve);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _mode.dispose();
+    _label.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = WindowChromeTheme.colorSchemeOf(context);
     final foreground = WindowChromeTheme.foregroundOf(context);
-    final labelProgress =
-        ((width - PlayerExperiencePreferences.compactSidebarThreshold) / 72.0)
-            .clamp(0.0, 1.0);
-    final compact = labelProgress == 0;
+    final compact = _compact!;
     return LayoutBuilder(builder: (context, constraints) {
       final availableHeight = constraints.maxHeight.isFinite
           ? constraints.maxHeight
@@ -395,128 +477,118 @@ class _ContinuousNavigation extends StatelessWidget {
           ((availableHeight - blockHeight) / 2 - _navVisualTopBias)
               .clamp(24.0, 240.0)
               .toDouble();
-      return ListView.builder(
-        key: const ValueKey('continuous-side-nav-list'),
-        padding: EdgeInsets.fromLTRB(
-          compact ? 8 : 14,
-          topPadding,
-          compact ? 8 : 18,
-          24,
-        ),
-        itemCount: destinations.length,
-        itemExtent: _drawerDestinationHeight,
-        itemBuilder: (context, index) {
-          final destination = destinations[index];
-          final selected = index == selectedIndex;
-          final destinationSurface = Material(
-            color: selected
-                ? scheme.primaryContainer.withValues(
-                    alpha: Theme.of(context).brightness == Brightness.dark
-                        ? 0.68
-                        : 0.78)
-                : Colors.transparent,
-            shape: compact ? const CircleBorder() : const StadiumBorder(),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              key: ValueKey('continuous-nav-${destination.desPath}'),
-              onTap: () => onDestinationSelected(index),
-              customBorder:
-                  compact ? const CircleBorder() : const StadiumBorder(),
-              child: compact
-                  ? Center(
-                      child: AppEntrance(
-                        identity: ('nav-icon', destination.desPath),
-                        order: index,
-                        translate: false,
-                        child: Icon(
-                          destination.icon,
-                          size: 28,
-                          color:
-                              selected ? scheme.onPrimaryContainer : foreground,
-                        ),
-                      ),
-                    )
-                  : Row(children: [
-                      SizedBox(
-                        width: 52,
-                        child: Center(
-                          child: AppEntrance(
-                            identity: ('nav-icon', destination.desPath),
-                            order: index,
-                            child: Icon(
-                              destination.icon,
-                              size: 28,
-                              color: selected
-                                  ? scheme.onPrimaryContainer
-                                  : foreground,
+      return AnimatedBuilder(
+        animation: _visual,
+        builder: (context, _) => ListView.builder(
+          key: const ValueKey('continuous-side-nav-list'),
+          padding: EdgeInsets.only(top: topPadding, bottom: 24),
+          itemCount: destinations.length,
+          itemExtent: _drawerDestinationHeight,
+          itemBuilder: (context, index) {
+            final destination = destinations[index];
+            final selected = index == widget.selectedIndex;
+            final mode = _mode.value;
+            final surfaceWidth = lerpDouble(widget.width - 32, 44, mode)!;
+            final surfaceHeight = lerpDouble(56, 44, mode)!;
+            final left = lerpDouble(14, (widget.width - 44) / 2, mode)!;
+            final radius = surfaceHeight / 2;
+            final iconRight = left + lerpDouble(12, 8, mode)! + 28;
+            // Lay out the full label at its final width. Fade it in as the
+            // moving icon clears its text area; never squeeze partial glyphs.
+            final labelReveal = ((66 - iconRight) / 12).clamp(0.0, 1.0);
+            final labelOpacity = _label.value * labelReveal;
+            return Tooltip(
+              message: compact ? destination.label : '',
+              excludeFromSemantics: true,
+              waitDuration: const Duration(milliseconds: 350),
+              child: Semantics(
+                selected: selected,
+                button: true,
+                label: destination.label,
+                child: Stack(children: [
+                  PositionedDirectional(
+                    start: left,
+                    top: (_drawerDestinationHeight - surfaceHeight) / 2,
+                    width: surfaceWidth,
+                    height: surfaceHeight,
+                    child: Material(
+                      // Geometry already follows _mode. A second implicit
+                      // ShapeBorder tween would leave a circular clip behind
+                      // while the icon and label are moving into a wider pill.
+                      animationDuration: Duration.zero,
+                      color: selected
+                          ? scheme.primaryContainer.withValues(
+                              alpha: Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? 0.68
+                                  : 0.78)
+                          : Colors.transparent,
+                      shape: mode == 1
+                          ? const CircleBorder()
+                          : RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(radius)),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        key: ValueKey('continuous-nav-${destination.desPath}'),
+                        onTap: () => widget.onDestinationSelected(index),
+                        customBorder: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(radius)),
+                        child: Stack(alignment: Alignment.center, children: [
+                          PositionedDirectional(
+                            start: lerpDouble(12, 8, mode)!,
+                            width: 28,
+                            top: 0,
+                            bottom: 0,
+                            child: AppEntrance(
+                              identity: ('nav-icon', destination.desPath),
+                              order: index,
+                              translate: false,
+                              child: Icon(destination.icon,
+                                  size: 28,
+                                  color: selected
+                                      ? scheme.onPrimaryContainer
+                                      : foreground),
                             ),
                           ),
-                        ),
+                        ]),
                       ),
-                      if (labelProgress > 0)
-                        Expanded(
-                          child: ClipRect(
-                            child: Opacity(
-                              opacity: labelProgress,
-                              child: Align(
-                                alignment: AlignmentDirectional.centerStart,
-                                child: AppEntrance(
-                                  identity: ('nav-label', destination.desPath),
-                                  order: index,
-                                  child: Text(
-                                    destination.label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.fade,
-                                    softWrap: false,
-                                    style: danCjkTextStyle(
-                                      color: selected
-                                          ? scheme.onPrimaryContainer
-                                          : foreground,
-                                      fontSize: 16,
-                                      fontWeight: selected
-                                          ? FontWeight.w700
-                                          : FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
+                    ),
+                  ),
+                  if (!compact)
+                    PositionedDirectional(
+                      start: 66,
+                      end: 26,
+                      top: 4,
+                      bottom: 4,
+                      child: IgnorePointer(
+                        child: ExcludeSemantics(
+                          child: Opacity(
+                            key: ValueKey(
+                                'nav-label-opacity-${destination.desPath}'),
+                            opacity: labelOpacity,
+                            child: Align(
+                              alignment: AlignmentDirectional.centerStart,
+                              child: Text(
+                                destination.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.fade,
+                                softWrap: false,
+                                style: sideNavLabelStyle(context,
+                                    color: selected
+                                        ? scheme.onPrimaryContainer
+                                        : foreground,
+                                    selected: selected),
                               ),
                             ),
                           ),
                         ),
-                    ]),
-            ),
-          );
-          final destinationButton = Semantics(
-            selected: selected,
-            button: true,
-            label: destination.label,
-            child: compact
-                ? Center(
-                    child: SizedBox.square(
-                      dimension: 44,
-                      child: destinationSurface,
+                      ),
                     ),
-                  )
-                : Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: destinationSurface,
-                  ),
-          );
-          // Expanded and transitioning layouts already have an inline label.
-          // Tooltip help is reserved for the true icon-only endpoint.
-          return compact
-              ? Tooltip(
-                  message: destination.label,
-                  waitDuration: const Duration(milliseconds: 350),
-                  child: Center(
-                    child: SizedBox.square(
-                      dimension: 52,
-                      child: destinationButton,
-                    ),
-                  ),
-                )
-              : destinationButton;
-        },
+                ]),
+              ),
+            );
+          },
+        ),
       );
     });
   }

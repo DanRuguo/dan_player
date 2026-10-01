@@ -779,7 +779,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
     final picker = OpenFilePicker()
       ..title = ui('导入歌词')
       ..filterSpecification = {
-        ui('歌词文件'): '*.lrc;*.elrc;*.qrc;*.krc;*.yrc;*.txt;*.json'
+        ui('歌词文件'): '*.lrc;*.elrc;*.qrc;*.krc;*.yrc;*.ttml;*.txt;*.json'
       };
     final file = picker.getFile();
     if (file == null) return;
@@ -795,6 +795,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog> {
         loadError = null;
         onlineError = null;
       });
+      if (file.path.toLowerCase().endsWith('.ttml')) {
+        showAppNotice(ui('TTML 已导入为{0}，原文件未修改。', [ui(imported.format.label)]),
+            context: context);
+      }
     } catch (error) {
       if (mounted) setState(() => onlineError = _errorText(error));
     } finally {

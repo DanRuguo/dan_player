@@ -10,6 +10,7 @@ class PlaylistHeader extends StatelessWidget {
     required this.coverBuilder,
     required this.breadcrumbs,
     required this.actions,
+    this.details,
     this.compact = false,
   });
 
@@ -18,6 +19,7 @@ class PlaylistHeader extends StatelessWidget {
   final Widget Function(double size) coverBuilder;
   final Widget breadcrumbs;
   final Widget actions;
+  final Widget? details;
   final bool compact;
 
   @override
@@ -62,6 +64,10 @@ class PlaylistHeader extends StatelessWidget {
                       color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
+              if (details != null) ...[
+                const SizedBox(height: 4),
+                details!,
+              ],
               if (wide) ...[
                 const SizedBox(height: 12),
                 Align(
@@ -145,6 +151,10 @@ class PlaylistHeader extends StatelessWidget {
                               .textTheme
                               .bodySmall
                               ?.copyWith(color: scheme.onSurfaceVariant))),
+                  if (details != null) ...[
+                    const SizedBox(height: 4),
+                    details!,
+                  ],
                 ])),
             if (inlineActions) ...[
               const SizedBox(width: 16),

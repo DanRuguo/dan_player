@@ -68,9 +68,13 @@ Future<void> copyLyricReadingText(BuildContext context, String text) async {
 
 class LyricReadingMenu extends StatelessWidget {
   const LyricReadingMenu(
-      {super.key, required this.controller, required this.readLyric});
+      {super.key,
+      required this.controller,
+      required this.readLyric,
+      this.onCreateCard});
   final LyricViewController controller;
   final Future<Lyric?>? Function() readLyric;
+  final Future<void> Function(NavigatorState navigator)? onCreateCard;
 
   Future<void> _copyAll(BuildContext context) async {
     final future = readLyric();
@@ -101,6 +105,9 @@ class LyricReadingMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final navigator = onCreateCard == null
+        ? null
+        : Navigator.of(context, rootNavigator: true);
     return ListenableBuilder(
         listenable: controller,
         builder: (context, _) => AppMenuAnchor(
@@ -139,6 +146,12 @@ class LyricReadingMenu extends StatelessWidget {
                         readLyric() == null ? null : () => _copyAll(context),
                     leadingIcon: const Icon(Symbols.copy_all),
                     child: _readingMenuLabel(context, '复制完整显示歌词')),
+                if (onCreateCard != null)
+                  MenuItemButton(
+                      key: const ValueKey('lyric-create-share-card'),
+                      onPressed: () => onCreateCard!(navigator!),
+                      leadingIcon: const Icon(Symbols.image),
+                      child: _readingMenuLabel(context, '制作歌词卡片')),
               ],
               builder: (context, menu, _) => IconButton(
                 key: const ValueKey('lyric-reading-tools'),
@@ -159,10 +172,12 @@ class LyricLineReadingActions extends StatelessWidget {
       required this.line,
       required this.controller,
       required this.timed,
+      this.onPractice,
       required this.child});
   final LyricLine line;
   final LyricViewController controller;
   final bool timed;
+  final VoidCallback? onPractice;
   final Widget child;
 
   @override
@@ -186,6 +201,11 @@ class LyricLineReadingActions extends StatelessWidget {
                         timestamp: true)),
                 leadingIcon: const Icon(Symbols.schedule),
                 child: _readingMenuLabel(context, '复制歌词与时间')),
+          if (timed && onPractice != null)
+            MenuItemButton(
+                onPressed: onPractice,
+                leadingIcon: const Icon(Symbols.repeat),
+                child: _readingMenuLabel(context, '练习这一句')),
         ],
         builder: (context, menu, _) => CallbackShortcuts(
           bindings: {

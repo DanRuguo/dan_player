@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/settings_tile.dart';
+import 'package:dan_player/component/side_nav.dart';
+import 'package:dan_player/component/side_nav_layout.dart';
 import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/window_layout_controller.dart';
 import 'package:flutter/material.dart';
@@ -98,7 +100,10 @@ class _SidebarLayoutSettingsState extends State<SidebarLayoutSettings> {
                   description: ui("侧栏宽度"),
                   icon: Symbols.left_panel_open,
                   subtitle: preferences.sidebarWidth <=
-                          PlayerExperiencePreferences.compactSidebarThreshold
+                          sideNavCompactThreshold(
+                              context,
+                              destinations
+                                  .map((destination) => destination.label))
                       ? ui("图标模式 · {0} px", [preferences.sidebarWidth.round()])
                       : ui("展开模式 · {0} px", [preferences.sidebarWidth.round()]),
                   action: IconButton(

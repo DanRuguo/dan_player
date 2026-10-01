@@ -1,4 +1,6 @@
 import 'catalog_tap_lyric_editor.dart';
+import 'catalog_listening_tools.dart';
+import 'catalog_offline_tools.dart';
 import 'catalog_practical_2606.dart';
 import 'catalog_local_lyrics_2606.dart';
 import 'catalog_network_proxy.dart';
@@ -67,6 +69,8 @@ import 'catalog_search_history.dart';
 import 'catalog_comments_feedback_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
+  ...catalogListeningTools,
+  ...catalogOfflineTools,
   ...catalogPractical2606,
   ...catalogLocalLyrics2606,
   ...catalogSnapshot2Expansion2606,

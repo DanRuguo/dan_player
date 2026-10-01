@@ -27,6 +27,7 @@ class LyricViewTile extends StatelessWidget {
     required this.reducedMotion,
     this.distance = 1,
     this.onTap,
+    this.onPractice,
     this.onContentRevealEnd,
     this.onPresentationEnd,
   });
@@ -37,6 +38,7 @@ class LyricViewTile extends StatelessWidget {
   final int distance;
   final bool reducedMotion;
   final VoidCallback? onTap;
+  final VoidCallback? onPractice;
   final VoidCallback? onContentRevealEnd;
   final VoidCallback? onPresentationEnd;
 
@@ -98,6 +100,8 @@ class LyricViewTile extends StatelessWidget {
       button: onTap != null,
       onTap: onTap,
       customSemanticsActions: {
+        if (!blank && onPractice != null)
+          CustomSemanticsAction(label: ui('练习这一句')): onPractice!,
         CustomSemanticsAction(label: ui('复制这一句歌词')): () => copyLyricReadingText(
             context,
             lyricReadingText(line,
@@ -108,6 +112,7 @@ class LyricViewTile extends StatelessWidget {
         line: line,
         controller: controller,
         timed: onTap != null,
+        onPractice: blank ? null : onPractice,
         child: ExcludeSemantics(
           child: RepaintBoundary(
             child: InkWell(

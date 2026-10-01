@@ -9,6 +9,7 @@ import 'package:dan_player/lyric/lyric_text_codec.dart';
 import 'package:dan_player/lyric/online_lyric_parser.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/qrc.dart';
+import 'package:dan_player/lyric/ttml.dart';
 
 enum LyricEditFormat {
   lrc('LRC · 逐句', 'lrc'),
@@ -52,7 +53,7 @@ class LyricEditDraft {
       {this.translation = '', this.romanization = ''});
   final LyricEditFormat format;
   final String original, translation, romanization;
-  static const maxBytes = 2 * 1024 * 1024;
+  static const maxBytes = maxLyricTextBytes;
 
   factory LyricEditDraft.fromLyric(Lyric lyric, LyricEditFormat format) {
     if (format == LyricEditFormat.lossless) {
@@ -197,6 +198,12 @@ class LyricEditDraft {
         ? decodeKrcContainer(base64Encode(bytes))
         : decodeLyricText(bytes);
     final lower = name.toLowerCase();
+    if (lower.endsWith('.ttml')) {
+      final lyric = parseTtmlLyric(text);
+      validateLyricForEditing(lyric);
+      return LyricEditDraft.fromLyric(
+          lyric, preferredLyricEditingFormat(lyric));
+    }
     final format = lower.endsWith('.json')
         ? LyricEditFormat.lossless
         : lower.endsWith('.txt')
@@ -326,7 +333,8 @@ Qrc _parseEnhanced(String text) {
   return Qrc(lines);
 }
 
-void _applyAux(Lyric lyric, String text, bool romanization) {
+void _applyAux(Lyric lyric, String text, bool romanization,
+    {bool overwrite = true}) {
   if (text.trim().isEmpty) return;
   _validateRows(text, LyricEditFormat.lrc);
   final available = {for (final line in lyric.lines) line.start};
@@ -342,9 +350,9 @@ void _applyAux(Lyric lyric, String text, bool romanization) {
     final value = values[line.start]?.join('┃');
     if (value == null) continue;
     if (romanization) {
-      line.romanization = value;
+      if (overwrite || line.romanization == null) line.romanization = value;
     } else if (line is SyncLyricLine) {
-      line.translation = value;
+      if (overwrite || line.translation == null) line.translation = value;
     } else if (line is UnsyncLyricLine) {
       line.content = '${line.content.split('┃').first}┃$value';
     }
@@ -532,6 +540,15 @@ Future<LyricEditDraft> readLyricEditFile(File file) async {
   Future<String> aux(String suffix) async {
     final item = File('${file.path}.$suffix.lrc');
     return await item.exists() ? decodeLyricText(await bounded(item)) : '';
+  }
+
+  if (file.path.toLowerCase().endsWith('.ttml')) {
+    // Embedded TTML roles are authoritative. Explicit companions may fill
+    // missing tracks but must not replace them or vanish during conversion.
+    final lyric = draft.parse();
+    _applyAux(lyric, await aux('translation'), false, overwrite: false);
+    _applyAux(lyric, await aux('romanization'), true, overwrite: false);
+    return LyricEditDraft.fromLyric(lyric, preferredLyricEditingFormat(lyric));
   }
 
   final result = LyricEditDraft(draft.format, draft.original,

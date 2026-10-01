@@ -28,9 +28,7 @@ import 'package:dan_player/page/now_playing_page/component/current_playlist_view
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/playback_bookmarks_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/detail_transport_button.dart';
-import 'package:dan_player/page/now_playing_page/component/waveform_progress.dart';
-import 'package:dan_player/page/now_playing_page/component/playback_timeline_bookmarks.dart';
-import 'package:dan_player/page/now_playing_page/component/queue_stop_status.dart';
+import 'package:dan_player/page/now_playing_page/component/now_playing_progress.dart';
 import 'package:dan_player/page/now_playing_page/component/detail_playback_layout.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/desktop_integration.dart';
@@ -434,34 +432,12 @@ class _NowPlayingSlider extends StatelessWidget {
         AppSettings.instance.nowPlayingProgressStyle,
         AppSettings.instance.waveformBarDensity,
       ]),
-      builder: (context, _) => PlaybackTimelineBookmarks(
-        audio: playback.nowPlaying,
+      builder: (context, _) => NowPlayingProgress(
+        playbackService: playback,
+        waveformDensity: AppSettings.instance.waveformBarDensity.value,
+        waveformEnabled: AppSettings.instance.nowPlayingProgressStyle.value ==
+            NowPlayingProgressStyle.waveform,
         hidden: DesktopIntegration.instance.isHidden,
-        builder: (bookmarks) =>
-            Column(mainAxisSize: MainAxisSize.min, children: [
-          WaveformProgress(
-            audio: playback.nowPlaying,
-            bookmarks: bookmarks,
-            loopStart: playback.segmentLoop.start,
-            loopEnd: playback.segmentLoop.end,
-            loopEnabled: playback.segmentLoop.enabled,
-            waveformDensity: AppSettings.instance.waveformBarDensity.value,
-            waveformEnabled:
-                AppSettings.instance.nowPlayingProgressStyle.value ==
-                    NowPlayingProgressStyle.waveform,
-            positions: playback.positionStream,
-            readPosition: () => playback.position,
-            duration: playback.length,
-            trackIdentity: (
-              playback.nowPlaying?.path,
-              playback.playbackSessionToken
-            ),
-            enabled: playback.nowPlaying != null && playback.canEditQueue,
-            onSeek: playback.seek,
-            hidden: DesktopIntegration.instance.isHidden,
-          ),
-          QueueStopStatus(playbackService: playback, showSleepTimer: false),
-        ]),
       ),
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
@@ -7,6 +9,7 @@ import 'package:dan_player/component/listening_tools_dialog.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/playlist_name_dialog.dart';
+import 'package:dan_player/component/playlist_exchange_dialog.dart';
 import 'package:dan_player/component/playlist_ui_actions.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/page/now_playing_page/component/segment_loop_dialog.dart';
@@ -34,7 +37,8 @@ class CurrentPlaylistView extends StatefulWidget {
       this.immersive = false,
       this.shrinkWrap = false,
       this.onOpenDetails,
-      this.playbackService});
+      this.playbackService,
+      this.pickM3uFile});
 
   final bool showTitle;
   final bool immersive;
@@ -45,6 +49,9 @@ class CurrentPlaylistView extends StatefulWidget {
   /// presentation to be exercised without creating a native audio device.
   @visibleForTesting
   final PlaybackService? playbackService;
+
+  @visibleForTesting
+  final FutureOr<String?> Function(String suggestedName)? pickM3uFile;
 
   @override
   State<CurrentPlaylistView> createState() => _CurrentPlaylistViewState();
@@ -58,6 +65,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   double _rowHeight = 0;
   bool _alignQueued = false;
   bool _savingQueue = false;
+  bool _exportingQueue = false;
   final _searchController = TextEditingController();
   String _query = '';
   List<Audio>? _filteredQueue;
@@ -145,12 +153,13 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         kind: changed ? AppNoticeKind.success : AppNoticeKind.info);
   }
 
+  Widget _menuLabel(String text) => SizedBox(
+      width: (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0),
+      child: Text(ui(text), softWrap: true));
+
   Widget _organizeMenu(List<Audio> queue, int current) {
     final editable = playbackService.canEditQueue && current >= 0;
     final hasUpcoming = editable && queue.length - current - 1 > 1;
-    Widget label(String text) => SizedBox(
-        width: (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0),
-        child: Text(ui(text), softWrap: true));
     return AppMenuAnchor(
         menuChildren: [
           MenuItemButton(
@@ -158,14 +167,14 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
               onPressed:
                   editable && current > 0 ? () => _trimQueue(true) : null,
               leadingIcon: const Icon(Symbols.playlist_remove),
-              child: label('移除当前歌曲之前的队列项')),
+              child: _menuLabel('移除当前歌曲之前的队列项')),
           MenuItemButton(
               key: const ValueKey('queue-trim-after'),
               onPressed: editable && current < queue.length - 1
                   ? () => _trimQueue(false)
                   : null,
               leadingIcon: const Icon(Symbols.playlist_remove),
-              child: label('移除当前歌曲之后的队列项')),
+              child: _menuLabel('移除当前歌曲之后的队列项')),
           const Divider(),
           for (final arrangement in [false, true])
             SubmenuButton(
@@ -185,7 +194,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                             ? () => _orderUpcoming(field: option.$1)
                             : null,
                         leadingIcon: const Icon(Symbols.sort),
-                        child: label(option.$2)),
+                        child: _menuLabel(option.$2)),
                   const Divider(),
                 ],
                 for (final order in UpcomingQueueOrder.values
@@ -200,7 +209,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                       message: ui(order == UpcomingQueueOrder.added
                           ? '本地使用文件创建时间；联网使用加入乐库时间。'
                           : audioSortMissingValueNote),
-                      child: label(order.label),
+                      child: _menuLabel(order.label),
                     ),
                   ),
                 if (!arrangement) ...[
@@ -211,10 +220,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                           ? () => _orderUpcoming(reverse: true)
                           : null,
                       leadingIcon: const Icon(Symbols.swap_vert),
-                      child: label('反转待播歌曲顺序')),
+                      child: _menuLabel('反转待播歌曲顺序')),
                 ],
               ],
-              child: label(arrangement ? '待播洗牌与编排' : '待播排序'),
+              child: _menuLabel(arrangement ? '待播洗牌与编排' : '待播排序'),
             ),
         ],
         builder: (context, controller, child) => IconButton(
@@ -258,17 +267,25 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     return KeyEventResult.handled;
   }
 
-  Future<void> _saveQueue() async {
+  Future<void> _saveQueue({bool searchResults = false}) async {
     if (_savingQueue || playbackService.playlist.value.isEmpty) return;
-    final snapshot = List<Audio>.from(playbackService.playlist.value);
+    final queue = playbackService.playlist.value;
+    // Capture occurrences before opening the name form. A queue replacement or
+    // filter change while the form is open must not change what this click saves.
+    final snapshot = searchResults
+        ? [for (final index in _visibleIndices(queue)) queue[index]]
+        : List<Audio>.from(queue);
+    if (snapshot.isEmpty) return;
+    final initialName = searchResults
+        ? ui('搜索结果 {0}', [_query.characters.take(80).toString()])
+        : ui('播放队列 {0}', [DateTime.now().toIso8601String().substring(0, 10)]);
     setState(() => _savingQueue = true);
     var created = false;
     try {
       final name = await showPlaylistNameDialog(context,
-          title: ui('将队列保存为歌单'),
+          title: ui(searchResults ? '将搜索结果保存为歌单' : '将队列保存为歌单'),
           confirmLabel: ui('保存'),
-          initialName: ui(
-              '播放队列 {0}', [DateTime.now().toIso8601String().substring(0, 10)]));
+          initialName: initialName);
       if (name == null || !mounted) return;
       playlistTree.createPlaylistFromAudios(name, snapshot);
       created = true;
@@ -289,6 +306,57 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
       if (mounted) setState(() => _savingQueue = false);
     }
   }
+
+  Future<void> _exportQueue({bool searchResults = false}) async {
+    if (_exportingQueue) return;
+    final queue = playbackService.playlist.value;
+    final snapshot = searchResults
+        ? [for (final index in _visibleIndices(queue)) queue[index]]
+        : List<Audio>.from(queue);
+    if (snapshot.isEmpty) return;
+    final name = searchResults
+        ? ui('搜索结果 {0}', [_query.characters.take(80).toString()])
+        : ui('播放队列 {0}', [DateTime.now().toIso8601String().substring(0, 10)]);
+    setState(() => _exportingQueue = true);
+    try {
+      // The shared exporter captures metadata and paths synchronously before
+      // its first dialog/await; the clicked projection and repeats stay fixed.
+      await exportM3uPlaylist(context, snapshot,
+          name: name, pickFile: widget.pickM3uFile);
+    } finally {
+      if (mounted) setState(() => _exportingQueue = false);
+    }
+  }
+
+  Widget _exportMenu(List<Audio> queue, List<int> visibleIndices) =>
+      AppMenuAnchor(
+        menuChildren: [
+          MenuItemButton(
+            key: const ValueKey('queue-export-m3u-all'),
+            onPressed: queue.isEmpty || _exportingQueue ? null : _exportQueue,
+            leadingIcon: const Icon(Symbols.save_alt),
+            child: _menuLabel('导出队列为 M3U8'),
+          ),
+          if (_query.isNotEmpty)
+            MenuItemButton(
+              key: const ValueKey('queue-export-m3u-search'),
+              onPressed: visibleIndices.isEmpty || _exportingQueue
+                  ? null
+                  : () => _exportQueue(searchResults: true),
+              leadingIcon: const Icon(Symbols.filter_alt),
+              child: _menuLabel('导出搜索结果为 M3U8'),
+            ),
+        ],
+        builder: (context, controller, _) => IconButton(
+          key: const ValueKey('queue-export-m3u'),
+          tooltip: ui('导出队列或搜索结果'),
+          onPressed: queue.isEmpty || _exportingQueue
+              ? null
+              : () =>
+                  controller.isOpen ? controller.close() : controller.open(),
+          icon: const Icon(Symbols.save_alt),
+        ),
+      );
 
   PlaybackService _resolvePlaybackService() =>
       widget.playbackService ?? PlayService.instance.playbackService;
@@ -448,6 +516,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                   ? null
                                   : _saveQueue,
                               icon: const Icon(Symbols.playlist_add)),
+                          _exportMenu(queue, visibleIndices),
                           IconButton(
                               key: const ValueKey('queue-keep-current'),
                               tooltip: ui('仅保留当前歌曲'),
@@ -540,14 +609,22 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                 ),
                 if (_query.isNotEmpty)
                   Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                          ui('找到 {0} / {1} 首 · 搜索不改变队列',
-                              [visibleIndices.length, queue.length]),
-                          key: const ValueKey('queue-search-count'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall)),
+                      padding: const EdgeInsets.only(left: 16, right: 8),
+                      child: Row(children: [
+                        Expanded(
+                            child: Text(
+                                ui('找到 {0} / {1} 首 · 搜索不改变队列',
+                                    [visibleIndices.length, queue.length]),
+                                key: const ValueKey('queue-search-count'),
+                                style: Theme.of(context).textTheme.bodySmall)),
+                        IconButton(
+                            key: const ValueKey('queue-save-search-playlist'),
+                            tooltip: ui('将搜索结果保存为歌单'),
+                            onPressed: visibleIndices.isEmpty || _savingQueue
+                                ? null
+                                : () => _saveQueue(searchResults: true),
+                            icon: const Icon(Symbols.playlist_add)),
+                      ])),
                 Flexible(
                   fit: widget.shrinkWrap ? FlexFit.loose : FlexFit.tight,
                   child: Container(

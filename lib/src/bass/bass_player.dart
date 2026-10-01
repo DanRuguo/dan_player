@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
 import 'package:dan_player/play_service/playback_rate.dart';
+import 'package:dan_player/play_service/playback_pitch.dart';
 import 'package:dan_player/play_service/playback_diagnostics.dart';
 import 'package:dan_player/src/bass/bass_diagnostics.dart';
 import 'package:dan_player/play_service/replay_gain.dart';
@@ -489,11 +490,14 @@ class BassPlayer {
   String? exclusiveOutputUnavailableReason;
   String? tempoUnavailableReason;
   double _playbackRate = 1.0;
+  double _playbackPitch = 0.0;
   bool _wasapiInitialized = false;
   int? _exclusiveMixer;
 
   double get playbackRate => _playbackRate;
   bool get supportsPlaybackRate => !_freed && _tempo != null;
+  double get playbackPitch => _playbackPitch;
+  bool get supportsPlaybackPitch => !_freed && _tempo != null;
 
   String? _fPath;
   bool _sourceIsUrl = false;
@@ -566,6 +570,8 @@ class BassPlayer {
             List.generate(_eqGains.length, (index) => index)
                 .every((index) => _eqAppliedGains[index] == _eqGains[index]),
         'playbackRate': _playbackRate,
+        'playbackPitch': _playbackPitch,
+        'pitchAvailable': supportsPlaybackPitch,
         'tempoAvailable': supportsPlaybackRate,
         'physicalOutputDrained': null,
         'bitPerfectVerified': false,
@@ -1540,6 +1546,7 @@ class BassPlayer {
         // The wrapper owns the original decoder from this point onwards.
         uncommittedHandle = wrapped;
         _setNativeTempo(uncommittedHandle, _playbackRate);
+        _setNativePitch(uncommittedHandle, _playbackPitch);
         _bass.BASS_ChannelSetAttribute(
             uncommittedHandle, BassTempoLibrary.preventClickAttribute, 1);
       }
@@ -1716,6 +1723,29 @@ class BassPlayer {
     if (_fstream != null) _setNativeTempo(_fstream!, rate);
     _playbackRate = rate;
     if (_fstream != null) _publishPosition();
+    return true;
+  }
+
+  void _setNativePitch(int stream, double pitch) {
+    if (_bass.BASS_ChannelSetAttribute(
+            stream, BassTempoLibrary.pitchAttribute, pitch) ==
+        BASS.FALSE) {
+      throw FormatException(
+          ui('调整音高失败（BASS 错误码 {0}）', [_bass.BASS_ErrorGetCode()]));
+    }
+  }
+
+  /// Changes only pitch on the existing tempo stream. Source position, tempo,
+  /// playback state and lyric timing remain unchanged.
+  bool setPlaybackPitch(double pitch) {
+    PlaybackPitch.validate(pitch);
+    if (_freed) return false;
+    if (pitch == _playbackPitch) return true;
+    if (_tempo == null) {
+      throw StateError(ui('音高组件不可用，请使用包含 BASS/bass_fx.dll 的完整安装包'));
+    }
+    if (_fstream != null) _setNativePitch(_fstream!, pitch);
+    _playbackPitch = pitch;
     return true;
   }
 

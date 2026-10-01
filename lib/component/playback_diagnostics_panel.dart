@@ -5,6 +5,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:dan_player/component/playback_pitch_control.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -56,6 +57,7 @@ class _PlaybackDiagnosticsPanelState extends State<PlaybackDiagnosticsPanel> {
               playback.isChangingOutput,
               playback.eqEnabled,
               playback.playbackRate,
+              playback.playbackPitch,
               playback.wasapiExclusive,
             ]),
             builder: (context, _) {
@@ -167,6 +169,8 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
           '${eqBands == 0 ? ui('未应用') : ui('{0} 个频段', [eqBands])}'
           '${output['eqRequested'] == true && output['eqSettingsApplied'] == false ? ' · ${ui('部分设置未应用')}' : ''}',
       '播放速度': '${output['playbackRate'] ?? '—'}×',
+      if (output['playbackPitch'] is num)
+        '升降调': playbackPitchLabel((output['playbackPitch'] as num).toDouble()),
       if (output['endReason'] != null) '最近结束原因': '${output['endReason']}',
       if (error is Map)
         '最近错误 / 原生代码': '${error['category']} / ${error['nativeCode'] ?? '—'}',
@@ -203,7 +207,8 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
                         '实际响度增益',
                         '实际 DSP 音量倍数',
                         'EQ 请求 / 生效',
-                        '播放速度'
+                        '播放速度',
+                        '升降调'
                       ].contains(row.key)))),
             ];
             return columns == 2

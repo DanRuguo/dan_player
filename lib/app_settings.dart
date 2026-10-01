@@ -139,7 +139,7 @@ Future<void> scheduleAppDataDirectorySwitch(
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.6-snapshot.2";
+  static const String version = "26.0.6";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";

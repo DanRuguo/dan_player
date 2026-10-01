@@ -24,6 +24,7 @@ import 'package:dan_player/play_service/queue_edits.dart';
 import 'package:dan_player/play_service/queue_order.dart' as queue_order;
 import 'package:dan_player/play_service/queue_track_identity.dart';
 import 'package:dan_player/play_service/queue_stop_boundary.dart';
+import 'package:dan_player/play_service/queue_stop_count_selection.dart';
 import 'package:dan_player/play_service/guarded_playback_seek.dart';
 import 'package:dan_player/play_service/segment_loop.dart';
 import 'package:dan_player/play_service/sleep_timer.dart';
@@ -210,6 +211,9 @@ class PlaybackService extends ChangeNotifier {
     if (player.supportsPlaybackRate) {
       player.setPlaybackRate(features.playbackRate);
     }
+    if (player.supportsPlaybackPitch) {
+      player.setPlaybackPitch(features.playbackPitch);
+    }
     return player;
   }
 
@@ -224,6 +228,25 @@ class PlaybackService extends ChangeNotifier {
   ValueNotifier<double> get playbackRate => _playbackRate;
   bool get supportsPlaybackRate => _player.supportsPlaybackRate;
   String? get tempoUnavailableReason => _player.tempoUnavailableReason;
+  late final _playbackPitch = ValueNotifier(_player.playbackPitch);
+  ValueNotifier<double> get playbackPitch => _playbackPitch;
+  bool get supportsPlaybackPitch => _player.supportsPlaybackPitch;
+
+  bool setPlaybackPitch(double pitch) {
+    if (_closed) return false;
+    try {
+      if (!_player.setPlaybackPitch(pitch)) return false;
+      _playbackPitch.value = _player.playbackPitch;
+      AppSettings.instance.experience.value = AppSettings
+          .instance.experience.value
+          .copyWith(playbackPitch: _player.playbackPitch);
+      return true;
+    } catch (error, trace) {
+      LOGGER.w('[playback pitch] $error', stackTrace: trace);
+      showAppNotice(ui('调整音高失败：{0}', [error]), kind: AppNoticeKind.error);
+      return false;
+    }
+  }
 
   /// Apply immediately; the calling settings/menu surface persists the choice
   /// and can report a write failure without hiding a successful audio change.
@@ -487,6 +510,42 @@ class PlaybackService extends ChangeNotifier {
   }
 
   bool stopAfterQueueRound() => stopAfterQueueItem(playlist.value.length - 1);
+
+  int get remainingQueueStopCount {
+    if (queueStopBlockedReason != null) return 0;
+    final current = _currentQueueIndex;
+    return current < 0 ? 0 : playlist.value.length - current;
+  }
+
+  QueueStopCountSelection? captureQueueStopCountSelection() {
+    if (remainingQueueStopCount == 0) return null;
+    return QueueStopCountSelection.capture(
+        queueIdentity: playlist.value,
+        sourceSession: _sourceRequestToken,
+        currentIndex: _currentQueueIndex,
+        queueLength: playlist.value.length);
+  }
+
+  bool stopAfterQueueCount(int count,
+      {required QueueStopCountSelection selection}) {
+    if (_closed) return false;
+    if (!selection.isCurrent(
+        queueIdentity: playlist.value,
+        sourceSession: _sourceRequestToken,
+        currentIndex: _currentQueueIndex,
+        queueLength: playlist.value.length)) {
+      showAppNotice(ui('当前队列或歌曲已改变，请重新设置停止目标'), kind: AppNoticeKind.warning);
+      return false;
+    }
+    final index = selection.targetIndex(count);
+    if (index == null) {
+      showAppNotice(ui('请输入 {0} 到 {1} 之间的整数', [1, selection.remainingCount]),
+          kind: AppNoticeKind.warning);
+      return false;
+    }
+    return stopAfterQueueItem(index);
+  }
+
   void cancelQueueStop() =>
       queueStopBoundary.cancel(QueueStopCancelReason.userCancelled);
 
@@ -2232,6 +2291,7 @@ class PlaybackService extends ChangeNotifier {
     _wasapiExclusive.dispose();
     isChangingOutput.dispose();
     _playbackRate.dispose();
+    _playbackPitch.dispose();
     _eqEnabled.dispose();
     _playMode.dispose();
     _shuffle.dispose();

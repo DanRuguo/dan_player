@@ -25,7 +25,8 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("library", "folders", "文件夹管理", ["本地音乐文件夹"]),
   SettingsSearchEntry("library", "refresh", "刷新音乐库", ["增量刷新", "完整刷新"]),
   SettingsSearchEntry("library", "session", "恢复上次播放会话", []),
-  SettingsSearchEntry("library", "playback", "播放速度", ["WASAPI 独占输出"]),
+  SettingsSearchEntry(
+      "library", "playback", "播放速度", ["WASAPI 独占输出", "升降调", "原调"]),
   SettingsSearchEntry(
       "library", "resume", "按曲记忆播放位置", ["仅长音频", "长音频最短时长", "清除自动记忆位置"]),
   SettingsSearchEntry("library", "gain", "ReplayGain 音量均衡", ["依据标签峰值限制增益"]),

@@ -283,19 +283,18 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('playback status hides sleep controls but keeps stop target',
+  testWidgets('queue status keeps both sleep controls and its stop target',
       (tester) async {
     final service = _Playback()..startSleepTimer(const Duration(minutes: 20));
     addTearDown(service.dispose);
     await tester.pumpWidget(_app(Column(children: [
-      QueueStopStatus(playbackService: service, showSleepTimer: false),
       QueueStopStatus(playbackService: service),
     ])));
     expect(find.byKey(const ValueKey('sleep-timer-status')), findsOneWidget);
     expect(find.byKey(const ValueKey('sleep-status-pause')), findsOneWidget);
     service.setStopAfterCurrent(true);
     await tester.pump();
-    expect(find.byKey(const ValueKey('queue-stop-target')), findsNWidgets(2));
+    expect(find.byKey(const ValueKey('queue-stop-target')), findsOneWidget);
   });
 
   for (final active in [false, true]) {
@@ -333,9 +332,9 @@ void main() {
         await tester.tap(trigger);
         await tester.pumpAndSettle();
         final triggerBottom = tester.getRect(trigger).bottom;
+        // The quantity action is now required below all dynamic timer rows.
         final lastItemBottom = tester
-            .getRect(find.byKey(ValueKey(
-                active ? 'sleep-menu-cancel' : 'sleep-stop-after-queue')))
+            .getRect(find.byKey(const ValueKey('sleep-stop-after-count')))
             .bottom;
         expect(lastItemBottom, closeTo(triggerBottom - 8, 2));
         expect(tester.takeException(), isNull);

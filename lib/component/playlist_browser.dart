@@ -52,6 +52,7 @@ import 'package:dan_player/playlist_view.dart';
 import 'package:dan_player/page/page_scaffold.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/queue_duration_summary.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:flutter/material.dart';
@@ -181,6 +182,35 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   final _reorderController = PlaylistReorderController();
   final _coverTransition = PlaylistCoverTransitionController();
   final _warningScrollController = ScrollController();
+  final _dataChanges = Listenable.merge([
+    playlistUiRevision,
+    playlistChanges,
+    AudioLibrary.changes,
+  ]);
+  (Object, String?, int, int, int)? _durationCacheKey;
+  QueueDurationSummary? _durationCache;
+
+  QueueDurationSummary _durationSummary(Playlist? current, List<Audio> queue) {
+    final key = (
+      _tree.roots,
+      current?.id,
+      playlistUiRevision.value,
+      playlistChanges.value,
+      AudioLibrary.changes.value,
+    );
+    if (_durationCacheKey != key) {
+      _durationCacheKey = key;
+      _durationCache = QueueDurationSummary.of(queue);
+    }
+    return _durationCache!;
+  }
+
+  String _durationLabel(QueueDurationSummary summary) {
+    final total = ui('总时长 {0}（含子歌单）', [summary.clock]);
+    return summary.unknownCount == 0
+        ? total
+        : '$total\n${ui('另有 {0} 首时长未知', [summary.unknownCount])}';
+  }
 
   void _cancelCoverTransition() {
     _requestedView = null;
@@ -226,6 +256,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   @override
   void didUpdateWidget(covariant PlaylistBrowser oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // An injected tree can be updated by its owner without publishing globals.
+    _durationCacheKey = null;
     if (oldWidget.initialPlaylist?.id != widget.initialPlaylist?.id) {
       _requestedView = null;
       _coverTransition.cancel();
@@ -2190,9 +2222,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return ValueListenableBuilder<int>(
-      valueListenable: playlistUiRevision,
-      builder: (context, _, __) {
+    return ListenableBuilder(
+      listenable: _dataChanges,
+      builder: (context, _) {
         final current =
             _current == null ? null : _tree.findPlaylist(_current!.id);
         final rows = _rows(current);
@@ -2226,11 +2258,12 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         final subtitle = current == null
             ? ui("{0} 个顶层歌单 · {1} 首歌曲引用", [rows.length, displayedSongCount])
             : ui("{0} 个直接项目 · {1} 首歌曲", [rows.length, displayedSongCount]);
+        final durationLabel = _durationLabel(_durationSummary(current, queue));
         final headerActions =
             _headerActions(current, selectionRows, selectedCount, queue);
         return PageScaffold(
           title: current?.name ?? ui("歌单"),
-          subtitle: subtitle,
+          subtitle: current == null ? '$subtitle\n$durationLabel' : subtitle,
           actions: const [],
           responsiveActions: current == null ? headerActions : null,
           headerPadding: current == null
@@ -2246,6 +2279,13 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                     key: ValueKey(('playlist-header', current.id)),
                     title: current.name,
                     subtitle: subtitle,
+                    details: Text(
+                      durationLabel,
+                      key: const ValueKey('playlist-duration-summary'),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
                     coverBuilder: (size) => PlaylistCover(
                       playlist: current,
                       size: size,

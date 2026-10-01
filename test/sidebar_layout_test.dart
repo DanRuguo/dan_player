@@ -54,6 +54,10 @@ void main() {
         reason: 'compact mode keeps icons and accessible tooltips only');
     expect(find.byTooltip('音乐'), findsOneWidget,
         reason: 'the true icon-only endpoint remains discoverable');
+    // The icon now moves into the compact circle. Inspect its final geometry
+    // while the pointer is still held, before persistence is allowed.
+    await tester.pumpAndSettle();
+    expect(saves, 0);
     final selectedButton =
         find.byKey(const ValueKey('continuous-nav-${app_paths.AUDIOS_PAGE}'));
     final selectedCircle = find.ancestor(

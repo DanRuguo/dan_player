@@ -4,6 +4,10 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/lyric_share_dialog.dart';
+import 'package:dan_player/lyric/lyric_share_projection.dart';
+import 'package:dan_player/lyric/plain_lyric.dart';
+import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/component/lyric_workbench_dialog.dart';
 import 'package:dan_player/component/player_number_dialog.dart';
@@ -190,10 +194,80 @@ class LyricViewControls extends StatelessWidget {
 
 class _LyricReadingMenu extends StatelessWidget {
   const _LyricReadingMenu();
+
+  Future<void> _createCard(
+      NavigatorState navigator, LyricViewController controller) async {
+    if (!navigator.mounted) return;
+    final playback = PlayService.instance.playbackService;
+    final lyricService = PlayService.instance.lyricService;
+    final future = lyricService.currLyricFuture;
+    final audio = playback.nowPlaying;
+    if (audio == null) {
+      showAppNotice(ui('没有可制作卡片的歌词'), context: navigator.context);
+      return;
+    }
+    final session = playback.playbackSessionToken;
+    final position = Duration(milliseconds: (playback.position * 1000).round());
+    final title = audio.displayTitle;
+    final artist = audio.artist;
+    final album = audio.album;
+    final translation = controller.showTranslation;
+    final romanization = controller.showRomanization;
+    final timestamp = controller.showTimestamps;
+    try {
+      final lyric = await future;
+      if (!navigator.mounted) return;
+      if (!identical(future, lyricService.currLyricFuture) ||
+          session != playback.playbackSessionToken) {
+        showAppNotice(ui('歌曲或歌词已改变，请重新制作卡片'), context: navigator.context);
+        return;
+      }
+      final selection = lyric == null
+          ? (lines: <String>[], initialIndex: 0)
+          : lyricShareProjection(lyric,
+              position: position,
+              project: (line) => lyricReadingText(line,
+                  translation: translation,
+                  romanization: romanization,
+                  timestamp: timestamp && lyric is! PlainLyric));
+      if (selection.lines.isEmpty) {
+        showAppNotice(ui('没有可制作卡片的歌词'), context: navigator.context);
+        return;
+      }
+      ImageProvider? artwork;
+      if (audio.isLocal) {
+        try {
+          artwork = await audio.largeCover;
+        } catch (_) {}
+      }
+      if (!navigator.mounted) return;
+      // Lyrics and metadata already belong to this captured song. A later
+      // switch leaves an open card as a stable snapshot of the chosen content.
+      await showLyricShareDialog(navigator.context,
+          title: title,
+          artist: artist,
+          album: album,
+          lines: selection.lines,
+          initialIndex: selection.initialIndex,
+          artwork: artwork);
+    } catch (error) {
+      if (navigator.mounted &&
+          identical(future, lyricService.currLyricFuture) &&
+          session == playback.playbackSessionToken) {
+        showAppNotice(ui('制作歌词卡片失败：{0}', [error]),
+            context: navigator.context, kind: AppNoticeKind.error);
+      }
+    }
+  }
+
   @override
-  Widget build(BuildContext context) => LyricReadingMenu(
-      controller: context.watch<LyricViewController>(),
-      readLyric: () => PlayService.instance.lyricService.currLyricFuture);
+  Widget build(BuildContext context) {
+    final controller = context.watch<LyricViewController>();
+    return LyricReadingMenu(
+        controller: controller,
+        readLyric: () => PlayService.instance.lyricService.currLyricFuture,
+        onCreateCard: (navigator) => _createCard(navigator, controller));
+  }
 }
 
 class _LyricWorkbenchBtn extends StatelessWidget {
