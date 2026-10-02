@@ -6,6 +6,8 @@ import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/lyric_share_dialog.dart';
 import 'package:dan_player/lyric/lyric_share_projection.dart';
+import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_text_search.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
@@ -19,6 +21,8 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'lyric_reading_tools.dart';
+import 'lyric_segment_practice_dialog.dart';
+import 'lyric_find_dialog.dart';
 
 enum LyricTextAlign {
   left,
@@ -53,6 +57,32 @@ class LyricViewController extends ChangeNotifier {
   late bool showTimestamps = nowPlayingPagePref.showLyricTimestamps;
   bool readingMode = false;
   int returnRequest = 0;
+  int readingRequest = 0;
+  LyricReadingTarget? readingTarget;
+  bool _finding = false;
+  bool _disposed = false;
+
+  void revealForReading(LyricReadingTarget target) {
+    if (_disposed || !target.belongsTo(target.lyric)) return;
+    readingTarget = target;
+    readingMode = true;
+    readingRequest++;
+    notifyListeners();
+  }
+
+  void discardReadingTarget() {
+    if (_disposed || readingTarget == null) return;
+    readingTarget = null;
+    readingRequest++;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    readingTarget = null;
+    super.dispose();
+  }
 
   void setShowTranslation(bool value) {
     if (showTranslation == value) return;
@@ -75,12 +105,16 @@ class LyricViewController extends ChangeNotifier {
   void setReadingMode(bool value) {
     if (readingMode == value) return;
     readingMode = value;
-    if (!value) returnRequest++;
+    if (!value) {
+      readingTarget = null;
+      returnRequest++;
+    }
     notifyListeners();
   }
 
   void returnToCurrent() {
     readingMode = false;
+    readingTarget = null;
     returnRequest++;
     notifyListeners();
   }
@@ -196,6 +230,50 @@ class LyricViewControls extends StatelessWidget {
 class _LyricReadingMenu extends StatelessWidget {
   const _LyricReadingMenu();
 
+  Future<void> _practiceSegment(NavigatorState navigator) async {
+    if (!navigator.mounted) return;
+    final playback = PlayService.instance.playbackService;
+    final lyricService = PlayService.instance.lyricService;
+    final future = lyricService.currLyricFuture;
+    final audio = playback.nowPlaying;
+    final session = playback.playbackSessionToken;
+    bool current() =>
+        identical(future, lyricService.currLyricFuture) &&
+        session == playback.playbackSessionToken;
+    if (audio == null || !playback.canUseSegmentLoop) {
+      showAppNotice(ui('请先加载一首本地歌曲，再设置片段循环。'), context: navigator.context);
+      return;
+    }
+    try {
+      final lyric = await future;
+      if (!navigator.mounted) return;
+      if (!current()) {
+        showAppNotice(ui('歌曲或歌词已改变，请重新选择练习片段'), context: navigator.context);
+        return;
+      }
+      if (lyric == null || lyric is PlainLyric) {
+        showAppNotice(ui('没有可选择的带时间歌词'), context: navigator.context);
+        return;
+      }
+      final position = playback.position;
+      await showLyricSegmentPracticeDialog(navigator.context,
+          playback: playback,
+          lyric: lyric,
+          playbackSession: session,
+          isCurrentLyric: current,
+          songTitle: audio.displayTitle,
+          lyricChanges: lyricService,
+          initialPosition: position.isFinite
+              ? Duration(milliseconds: (position * 1000).round())
+              : Duration.zero);
+    } catch (_) {
+      if (navigator.mounted && current()) {
+        showAppNotice(ui('无法打开歌词片段练习，请重新加载歌词后重试。'),
+            context: navigator.context, kind: AppNoticeKind.error);
+      }
+    }
+  }
+
   Future<void> _createCard(
       NavigatorState navigator, LyricViewController controller) async {
     if (!navigator.mounted) return;
@@ -267,7 +345,71 @@ class _LyricReadingMenu extends StatelessWidget {
     return LyricReadingMenu(
         controller: controller,
         readLyric: () => PlayService.instance.lyricService.currLyricFuture,
-        onCreateCard: (navigator) => _createCard(navigator, controller));
+        onFind: (navigator) => findCurrentLyrics(navigator, controller),
+        onCreateCard: (navigator) => _createCard(navigator, controller),
+        onPracticeSegment: _practiceSegment);
+  }
+}
+
+/// The entry captures one loaded document/session. Closing a stale dialog can
+/// never move the replacement song's viewport or its transport.
+Future<void> findCurrentLyrics(
+    NavigatorState navigator, LyricViewController controller) async {
+  if (!navigator.mounted) return;
+  final playback = PlayService.instance.playbackService;
+  final lyrics = PlayService.instance.lyricService;
+  final future = lyrics.currLyricFuture;
+  final session = playback.playbackSessionToken;
+  final title = playback.nowPlaying?.displayTitle ?? '';
+  bool current() =>
+      identical(future, lyrics.currLyricFuture) &&
+      session == playback.playbackSessionToken;
+  await findLyricsForReading(navigator, controller,
+      lyricFuture: future,
+      isCurrentLyric: current,
+      songTitle: title,
+      lyricChanges: Listenable.merge([lyrics, playback]));
+}
+
+Future<void> findLyricsForReading(
+    NavigatorState navigator, LyricViewController controller,
+    {required Future<Lyric?>? lyricFuture,
+    required bool Function() isCurrentLyric,
+    required String songTitle,
+    Listenable? lyricChanges}) async {
+  if (!navigator.mounted ||
+      controller._disposed ||
+      controller._finding ||
+      !isCurrentLyric()) {
+    return;
+  }
+  controller._finding = true;
+  try {
+    final lyric = await lyricFuture;
+    if (!navigator.mounted || controller._disposed || !isCurrentLyric()) return;
+    if (lyric == null || lyric.lines.isEmpty) {
+      showAppNotice(ui('没有可查找的歌词'), context: navigator.context);
+      return;
+    }
+    final target = await showLyricFindDialog(navigator.context,
+        lyric: lyric,
+        isCurrentLyric: isCurrentLyric,
+        songTitle: songTitle,
+        lyricChanges: lyricChanges);
+    if (navigator.mounted &&
+        !controller._disposed &&
+        isCurrentLyric() &&
+        target != null &&
+        target.belongsTo(lyric)) {
+      controller.revealForReading(target);
+    }
+  } catch (_) {
+    if (navigator.mounted && isCurrentLyric()) {
+      showAppNotice(ui('无法查找歌词，请重新加载歌词后重试。'),
+          context: navigator.context, kind: AppNoticeKind.error);
+    }
+  } finally {
+    controller._finding = false;
   }
 }
 

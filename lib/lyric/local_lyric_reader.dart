@@ -6,6 +6,7 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/krc_decoder.dart';
 import 'package:dan_player/lyric/local_lyric_parser.dart';
 import 'package:dan_player/lyric/local_lyric_origin.dart';
+import 'package:dan_player/lyric/local_lyric_variants.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 export 'package:dan_player/lyric/local_lyric_origin.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -16,7 +17,7 @@ import 'package:dan_player/utils.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter/foundation.dart';
 
-const _sidecarExtensions = ['.qrc', '.yrc', '.krc', '.ttml', '.elrc', '.lrc'];
+const _sidecarExtensions = localLyricSidecarExtensions;
 const _memoryBudget = 8 * 1024 * 1024;
 final _memory = <String, _LocalLyricMemoryEntry>{};
 int _memoryBytes = 0;
@@ -49,15 +50,18 @@ void _removeMemory(String key) {
 /// Stat every source on every read: the memory cache never validates itself
 /// against stale library metadata or the persistent lyric fallback cache.
 Future<String?> _sourceFingerprint(
-    String audioPath, LocalLyricLineOrder order, bool Function() active) async {
+    String audioPath, LocalLyricLineOrder order, bool Function() active,
+    {LocalLyricVariant? variant}) async {
   if (!active()) return null;
   try {
     final names = [
       audioPath,
-      for (final extension in _sidecarExtensions) ...[
-        path.setExtension(audioPath, extension),
-        '${path.setExtension(audioPath, extension)}.translation.lrc',
-        '${path.setExtension(audioPath, extension)}.romanization.lrc',
+      for (final main in variant == null
+          ? _sidecarExtensions.map((ext) => path.setExtension(audioPath, ext))
+          : [variant.path]) ...[
+        main,
+        '$main.translation.lrc',
+        '$main.romanization.lrc',
       ],
     ];
     final stats = await Future.wait(names.map(FileStat.stat));
@@ -80,8 +84,10 @@ Future<String?> _sourceFingerprint(
 
 /// All automatic local consumers share the same bounded, offline priority.
 /// Whole-file lyrics must never be attached to a virtual CUE segment.
+/// An explicit [variant] reads only that version and its own companions.
 Future<Lyric?> readLocalLyric(Audio audio,
     {LocalLyricLineOrder? lineOrder,
+    LocalLyricVariant? variant,
     bool Function()? stillCurrent,
     Future<String?> Function(String)? readEmbedded,
     void Function(String)? onWarning}) async {
@@ -93,9 +99,20 @@ Future<Lyric?> readLocalLyric(Audio audio,
   }
 
   final order = lineOrder ?? AppSettings.instance.localLyricLineOrder;
-  final key = jsonEncode([audio.localFilePath, order.name]);
-  final fingerprint =
-      await _sourceFingerprint(audio.localFilePath, order, active);
+  if (variant != null &&
+      LocalLyricVariant.fromPath(audio, variant.path) == null) {
+    return null;
+  }
+  final key = jsonEncode([audio.localFilePath, order.name, variant?.path]);
+  if (variant != null &&
+      await FileSystemEntity.type(variant.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+    _removeMemory(key);
+    return null;
+  }
+  final fingerprint = await _sourceFingerprint(
+      audio.localFilePath, order, active,
+      variant: variant);
   if (!active()) return null;
   if (fingerprint == null) {
     _removeMemory(key);
@@ -117,7 +134,8 @@ Future<Lyric?> readLocalLyric(Audio audio,
   }
   Future<Lyric?> complete(Lyric lyric, String origin) async {
     if (!active()) return null;
-    final latest = await _sourceFingerprint(audio.localFilePath, order, active);
+    final latest = await _sourceFingerprint(audio.localFilePath, order, active,
+        variant: variant);
     if (!active() || latest != fingerprint) return null;
     markDiscoveredLocalLyric(lyric, origin);
     if (useMemory) {
@@ -137,10 +155,17 @@ Future<Lyric?> readLocalLyric(Audio audio,
     return active() ? lyric : null;
   }
 
-  for (final extension in _sidecarExtensions) {
+  for (final extension
+      in variant == null ? _sidecarExtensions : [variant.extension]) {
     if (!active()) return null;
-    final file = File(path.setExtension(audio.localFilePath, extension));
+    final file = File(
+        variant?.path ?? path.setExtension(audio.localFilePath, extension));
     try {
+      if (variant != null &&
+          await FileSystemEntity.type(file.path, followLinks: false) !=
+              FileSystemEntityType.file) {
+        return null;
+      }
       if (!await file.exists()) continue;
       if (!active()) return null;
       final bytes = await _readBounded(file);
@@ -156,7 +181,8 @@ Future<Lyric?> readLocalLyric(Audio audio,
         warning('本地歌词没有有效内容，继续尝试其他来源：${file.path}');
         continue;
       }
-      await _readCompanions(file, lyric, order, active, warning);
+      await _readCompanions(file, lyric, order, active, warning,
+          explicitOnly: variant != null);
       if (!active()) return null;
       return await complete(lyric, file.path);
     } catch (error) {
@@ -166,6 +192,9 @@ Future<Lyric?> readLocalLyric(Audio audio,
           : '本地歌词读取失败，继续尝试其他来源：$error');
     }
   }
+  // A failed explicit choice must preserve the old document, not silently use
+  // another language, a default sidecar or embedded lyrics.
+  if (variant != null) return null;
   if (!active()) return null;
   try {
     final text = await (readEmbedded ??
@@ -195,12 +224,13 @@ Future<List<int>> _readBounded(File file) async {
 }
 
 Future<void> _readCompanions(File main, Lyric lyric, LocalLyricLineOrder order,
-    bool Function() active, void Function(String) warning) async {
+    bool Function() active, void Function(String) warning,
+    {bool explicitOnly = false}) async {
   // Explicit companion suffixes are also used by Dan's editor. A same-name
   // LRC is a translation for word formats, as documented by ZeroBit.
   final translation = [
     '${main.path}.translation.lrc',
-    if (!main.path.toLowerCase().endsWith('.lrc'))
+    if (!explicitOnly && !main.path.toLowerCase().endsWith('.lrc'))
       path.setExtension(main.path, '.lrc'),
   ];
   for (final kind in [false, true]) {

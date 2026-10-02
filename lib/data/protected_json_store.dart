@@ -60,6 +60,16 @@ class ProtectedJsonStore {
         await _load();
         return _copy(_value!);
       });
+
+  /// A serialized, detached single-record read for latency-sensitive paths.
+  /// It observes earlier queued writes without copying the whole document.
+  Future<Map<String, dynamic>?> readEntry(String collection, String key) =>
+      _serial(() async {
+        await _load();
+        final values = _value![collection];
+        final entry = values is Map ? values[key] : null;
+        return entry is Map ? _copy(Map<String, dynamic>.from(entry)) : null;
+      });
   Future<void> update(void Function(Map<String, dynamic>) edit) =>
       _serial(() => withSnapshot(() async {
             await _load();

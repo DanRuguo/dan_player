@@ -76,7 +76,7 @@ class _NowPlayingPage_Large extends StatelessWidget {
                         spacer,
                         _NowPlayingCommentsAction(),
                         spacer,
-                        _NowPlayingMoreAction(),
+                        NowPlayingMoreAction(),
                       ],
                     ),
                   )

@@ -216,7 +216,58 @@ class BalancedLyricText extends StatefulWidget {
   State<BalancedLyricText> createState() => _BalancedLyricTextState();
 }
 
-class _BalancedLyricTextState extends State<BalancedLyricText> {
+/// Read an already-shaped glyph location only when revealing a text search.
+/// No layout, keys or observers are added to ordinary lyric rendering.
+abstract interface class LyricTextReadingGeometry {
+  String get readingText;
+  double? readingGlobalY(int offset);
+}
+
+class _BalancedLyricTextState extends State<BalancedLyricText>
+    implements LyricTextReadingGeometry {
+  @override
+  String get readingText => widget.text;
+
+  @override
+  double? readingGlobalY(int offset) {
+    if (offset < 0 || offset >= widget.text.length) return null;
+    double? result;
+    final end = offset +
+        (widget.text.codeUnitAt(offset) >= 0xd800 &&
+                widget.text.codeUnitAt(offset) <= 0xdbff
+            ? 2
+            : 1);
+    final selection = TextSelection(
+        baseOffset: offset, extentOffset: end.clamp(0, widget.text.length));
+    void visit(RenderObject object) {
+      if (result != null || !object.attached) return;
+      if (object is RenderParagraph && object.hasSize) {
+        final boxes = object.getBoxesForSelection(selection);
+        if (boxes.isNotEmpty) {
+          result = object.localToGlobal(Offset(0, boxes.first.top)).dy;
+        }
+      } else if (object is RenderCustomPaint &&
+          object.hasSize &&
+          object.painter is PlainLyricWordFollowPainter) {
+        final painter = object.painter! as PlainLyricWordFollowPainter;
+        if (identical(painter.text, _painter)) {
+          final boxes = painter.text.getBoxesForSelection(selection);
+          if (boxes.isNotEmpty) {
+            result = object
+                .localToGlobal(
+                    Offset(0, boxes.first.top + painter.inkOffset.dy))
+                .dy;
+          }
+        }
+      }
+      if (result == null) object.visitChildren(visit);
+    }
+
+    final root = context.findRenderObject();
+    if (root != null) visit(root);
+    return result;
+  }
+
   Object? _identity;
   double? _width;
   TextPainter? _painter;

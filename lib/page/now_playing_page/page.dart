@@ -15,7 +15,7 @@ import 'package:dan_player/component/title_bar.dart';
 import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
 import 'package:dan_player/component/lyric_cover_spectrum.dart';
-import 'package:dan_player/component/overflow_marquee_text.dart';
+import 'component/now_playing_metadata_header.dart';
 import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -26,6 +26,8 @@ import 'package:dan_player/online/song_comments.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/page/now_playing_page/component/current_playlist_view.dart';
 import 'package:dan_player/page/now_playing_page/component/equalizer_dialog.dart';
+import 'package:dan_player/component/loudness_analysis_dialog.dart';
+import 'package:dan_player/component/audio_integrity_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/playback_bookmarks_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/detail_transport_button.dart';
 import 'package:dan_player/page/now_playing_page/component/now_playing_progress.dart';
@@ -40,6 +42,7 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:flutter/material.dart';
+import 'package:dan_player/component/track_playback_settings_dialog.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
@@ -122,8 +125,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   }
 }
 
-class _NowPlayingMoreAction extends StatelessWidget {
-  const _NowPlayingMoreAction();
+class NowPlayingMoreAction extends StatelessWidget {
+  const NowPlayingMoreAction({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -144,6 +147,12 @@ class _NowPlayingMoreAction extends StatelessWidget {
       listenable: OnlineLibrary.instance,
       builder: (context, _) => MenuAnchor(
           menuChildren: [
+            if (nowPlaying != null)
+              MenuItemButton(
+                  onPressed: () =>
+                      showTrackPlaybackSettings(context, nowPlaying),
+                  leadingIcon: const Icon(Symbols.tune),
+                  child: Text(ui('本曲播放设置'))),
             MenuItemButton(
                 onPressed: () => showPreciseSeek(context, playbackService),
                 leadingIcon: const Icon(Symbols.schedule),
@@ -153,7 +162,19 @@ class _NowPlayingMoreAction extends StatelessWidget {
               leadingIcon: const Icon(Symbols.equalizer),
               child: Text(ui("均衡器")),
             ),
-            const SleepTimerSubmenu(),
+            SleepTimerSubmenu(playbackService: playbackService),
+            if (localPlaying != null)
+              MenuItemButton(
+                onPressed: () => showLoudnessAnalysis(context, localPlaying),
+                leadingIcon: const Icon(Symbols.graphic_eq),
+                child: Text(ui('响度与峰值分析')),
+              ),
+            if (localPlaying != null)
+              MenuItemButton(
+                onPressed: () => showAudioIntegrity(context, localPlaying),
+                leadingIcon: const Icon(Icons.fact_check_outlined),
+                child: Text(ui('音频文件校验')),
+              ),
             if (localPlaying != null)
               MenuItemButton(
                 onPressed: () =>
@@ -167,12 +188,6 @@ class _NowPlayingMoreAction extends StatelessWidget {
                 onPressed: null,
                 leadingIcon: const Icon(Symbols.cloud),
                 child: Text(ui("来源：{0}", [onlineSourceLabel])),
-              ),
-            if (nowPlaying != null)
-              MenuItemButton(
-                onPressed: () => showSongCommentsDialog(context, nowPlaying),
-                leadingIcon: const Icon(Symbols.chat_bubble_outline),
-                child: Text(ui("歌曲评论")),
               ),
             if (onlinePlaying != null)
               MenuItemButton(
@@ -501,30 +516,15 @@ class __NowPlayingInfoState extends State<_NowPlayingInfo> {
         Center(
             child: SizedBox(
                 width: 400,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    OverflowMarqueeText(
-                      nowPlaying == null
-                          ? "Dan Player"
-                          : nowPlaying.displayTitle,
-                      hidden: DesktopIntegration.instance.isHidden,
-                      style: TextStyle(
-                        color: scheme.onSecondaryContainer,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    ),
-                    OverflowMarqueeText(
-                      nowPlaying == null
-                          ? "Enjoy Music"
-                          : "${nowPlaying.artist} - ${nowPlaying.album}",
-                      hidden: DesktopIntegration.instance.isHidden,
-                      style: TextStyle(color: scheme.onSecondaryContainer),
-                    ),
-                  ],
-                ))),
-        const SizedBox(height: 16),
+                child: NowPlayingMetadataHeader(
+                    title: nowPlaying?.displayTitle ?? 'Dan Player',
+                    artist: nowPlaying?.artist ?? 'Enjoy Music',
+                    album: nowPlaying?.album ?? '',
+                    hidden: DesktopIntegration.instance.isHidden))),
+        // The larger title and its separation share the original 16px gap.
+        SizedBox(
+            height: nowPlayingMetadataCoverGap(
+                context, nowPlaying?.displayTitle ?? 'Dan Player')),
         Expanded(
           child: Center(
             child: TouchTrackSwipe(

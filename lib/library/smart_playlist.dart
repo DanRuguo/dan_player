@@ -4,6 +4,7 @@ import 'package:dan_player/library/playlist.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -20,6 +21,7 @@ enum SmartPlaylistSort {
   mostPlayed,
   leastPlayed,
   albumTrack,
+  random,
 }
 
 enum SmartPlaylistHistory { any, played, unplayed, recent, notRecent }
@@ -144,10 +146,13 @@ class SmartPlaylist {
     return value;
   }
 
+  /// Random rules generate a new batch on each independent evaluation. A UI
+  /// can retain [randomSeed] while editing one batch; it is not persisted.
   Future<List<Audio>> evaluate(Iterable<Audio> library,
       {bool Function()? shouldCancel,
       PlaybackStatistics? statistics,
-      DateTime? now}) async {
+      DateTime? now,
+      int? randomSeed}) async {
     final failure = validate();
     if (failure != null) throw FormatException(failure);
     if (shouldCancel?.call() == true) return const [];
@@ -192,6 +197,7 @@ class SmartPlaylist {
         .where((s) => s.isNotEmpty)
         .toSet();
     final output = <Audio>[];
+    final randomIdentities = <String>{};
     // Validate the whole tree first, then prepare once; a short-circuited branch
     // can never hide invalid serialized fields or out-of-range input.
     final preparedCondition = condition?.prepare();
@@ -273,7 +279,19 @@ class SmartPlaylist {
                 .toLowerCase();
         if (!words.every(haystack.contains)) continue;
       }
+      // Random sampling is without replacement by track identity. Physical
+      // versions and CUE slices retain their individual identities.
+      if (sort == SmartPlaylistSort.random &&
+          !randomIdentities.add(audio.stableTrackId)) {
+        continue;
+      }
       output.add(audio);
+    }
+    if (sort == SmartPlaylistSort.random) {
+      final order = await _sampleSmartIndexesInBackground(
+          output.length, maxResults, randomSeed);
+      if (shouldCancel?.call() == true) return const [];
+      return List.unmodifiable([for (final index in order) output[index]]);
     }
     final keys = <_SmartSortKey>[];
     for (var index = 0; index < output.length; index++) {
@@ -325,6 +343,27 @@ class SmartPlaylist {
 
 typedef _SmartSortKey = ({int index, String text, int number, String tie});
 typedef _SmartPlayback = ({int count, int last});
+
+// Keep the worker closure outside evaluate: only scalar arguments cross the
+// isolate boundary, never Audio caches, UI callbacks or cancellation owners.
+Future<List<int>> _sampleSmartIndexesInBackground(
+        int length, int? limit, int? seed) =>
+    Isolate.run(() => _sampleSmartIndexes(length, limit, seed));
+
+List<int> _sampleSmartIndexes(int length, int? limit, int? seed) {
+  final indexes = List<int>.generate(length, (index) => index);
+  final count = min(length, limit ?? length);
+  final random = Random(seed);
+  // A partial Fisher–Yates shuffle gives each eligible track equal probability
+  // and bounds work to O(n), without sorting or retrying duplicate draws.
+  for (var index = 0; index < count; index++) {
+    final selected = index + random.nextInt(length - index);
+    final original = indexes[index];
+    indexes[index] = indexes[selected];
+    indexes[selected] = original;
+  }
+  return indexes.sublist(0, count);
+}
 
 Future<List<int>> _sortSmartKeysInBackground(
         List<_SmartSortKey> keys, bool numeric,
@@ -380,6 +419,42 @@ class SmartPlaylistStore {
     return result;
   }
 
+  /// Shared strict contract for stores, startup validation and backup restore.
+  /// Schema 5 is recognized only with this precise extension marker; arbitrary
+  /// future documents must never fall back to an older backup.
+  static List<SmartPlaylist> validateSnapshot(Object? raw) {
+    final randomFormat = raw is Map &&
+        raw['version'] is int &&
+        raw['version'] == 5 &&
+        raw['randomSampling'] is int &&
+        raw['randomSampling'] == 1;
+    if (raw is Map && raw.containsKey('randomSampling') && !randomFormat) {
+      throw UnsupportedError('Unsupported smart playlist random format');
+    }
+    if (raw is Map &&
+        raw['version'] is int &&
+        raw['version'] > 4 &&
+        !randomFormat) {
+      throw UnsupportedError('Smart playlists were created by a newer version');
+    }
+    if (raw is! Map ||
+        (![1, 2, 3, 4].contains(raw['version']) && !randomFormat) ||
+        raw['playlists'] is! List ||
+        (raw['playlists'] as List).length > maxPlaylists) {
+      throw const FormatException('Invalid smart playlist file');
+    }
+    final next =
+        (raw['playlists'] as List).map(SmartPlaylist.fromJson).toList();
+    if (!randomFormat &&
+        next.any((rule) => rule.sort == SmartPlaylistSort.random)) {
+      throw UnsupportedError('Random playlists require the random format');
+    }
+    if (next.map((item) => item.id).toSet().length != next.length) {
+      throw const FormatException('Duplicate smart playlist IDs');
+    }
+    return List.unmodifiable(next);
+  }
+
   Future<void> _load() async {
     if (_items != null) return;
     Object? failure;
@@ -393,21 +468,7 @@ class SmartPlaylistStore {
           throw const FormatException('Smart playlist file too large');
         }
         final json = jsonDecode(utf8.decode(bytes));
-        if (json is Map && json['version'] is int && json['version'] > 4) {
-          throw UnsupportedError(
-              'Smart playlists were created by a newer version');
-        }
-        if (json is! Map ||
-            ![1, 2, 3, 4].contains(json['version']) ||
-            json['playlists'] is! List ||
-            (json['playlists'] as List).length > maxPlaylists) {
-          throw const FormatException('Invalid smart playlist file');
-        }
-        final next =
-            (json['playlists'] as List).map(SmartPlaylist.fromJson).toList();
-        if (next.map((item) => item.id).toSet().length != next.length) {
-          throw const FormatException('Duplicate smart playlist IDs');
-        }
+        final next = validateSnapshot(json);
         _items = next;
         _recovered = candidate.path != file.path;
         return;
@@ -449,10 +510,13 @@ class SmartPlaylistStore {
       });
 
   Future<void> _save(List<SmartPlaylist> next) async {
+    final randomFormat =
+        next.any((rule) => rule.sort == SmartPlaylistSort.random);
     final bytes = utf8.encode(jsonEncode({
       // Older readers must refuse these new fields rather than recover an old
       // backup and overwrite rules they cannot understand.
-      'version': 4,
+      'version': randomFormat ? 5 : 4,
+      if (randomFormat) 'randomSampling': 1,
       'playlists': next.map((item) => item.toJson()).toList()
     }));
     if (bytes.length > maxBytes) {

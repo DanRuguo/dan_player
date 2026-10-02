@@ -71,10 +71,14 @@ class LyricReadingMenu extends StatelessWidget {
       {super.key,
       required this.controller,
       required this.readLyric,
-      this.onCreateCard});
+      this.onCreateCard,
+      this.onFind,
+      this.onPracticeSegment});
   final LyricViewController controller;
   final Future<Lyric?>? Function() readLyric;
   final Future<void> Function(NavigatorState navigator)? onCreateCard;
+  final Future<void> Function(NavigatorState navigator)? onPracticeSegment;
+  final Future<void> Function(NavigatorState navigator)? onFind;
 
   Future<void> _copyAll(BuildContext context) async {
     final future = readLyric();
@@ -105,9 +109,10 @@ class LyricReadingMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final navigator = onCreateCard == null
-        ? null
-        : Navigator.of(context, rootNavigator: true);
+    final navigator =
+        onCreateCard == null && onPracticeSegment == null && onFind == null
+            ? null
+            : Navigator.of(context, rootNavigator: true);
     return ListenableBuilder(
         listenable: controller,
         builder: (context, _) => AppMenuAnchor(
@@ -141,6 +146,22 @@ class LyricReadingMenu extends StatelessWidget {
                     onPressed: controller.resetFontSize,
                     leadingIcon: const Icon(Symbols.text_fields),
                     child: _readingMenuLabel(context, '恢复歌词字号')),
+                if (onFind != null)
+                  MenuItemButton(
+                      key: const ValueKey('lyric-find-open'),
+                      onPressed: readLyric() == null
+                          ? null
+                          : () => onFind!(navigator!),
+                      leadingIcon: const Icon(Symbols.manage_search),
+                      child: _readingMenuLabel(context, '查找当前歌词')),
+                if (onPracticeSegment != null)
+                  MenuItemButton(
+                      key: const ValueKey('lyric-practice-segment-open'),
+                      onPressed: readLyric() == null
+                          ? null
+                          : () => onPracticeSegment!(navigator!),
+                      leadingIcon: const Icon(Symbols.repeat),
+                      child: _readingMenuLabel(context, '歌词片段练习')),
                 MenuItemButton(
                     onPressed:
                         readLyric() == null ? null : () => _copyAll(context),
@@ -162,6 +183,18 @@ class LyricReadingMenu extends StatelessWidget {
               ),
             ));
   }
+}
+
+/// Shares the menu action with the focused lyric surface, including its rows.
+class LyricFindShortcut extends StatelessWidget {
+  const LyricFindShortcut(
+      {super.key, required this.onFind, required this.child});
+  final VoidCallback onFind;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true): onFind,
+      }, child: Focus(autofocus: true, skipTraversal: true, child: child));
 }
 
 /// Secondary click and touch long press expose copying without changing the

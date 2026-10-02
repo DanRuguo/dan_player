@@ -215,11 +215,11 @@ const catalogSnapshot22605 = <String, List<String>>{
     '排他モードはビットパーフェクトの検証を意味しません。終了位置はバックエンドのメディア境界に基づき、ハードウェアバッファの排出は検出していません。',
     '독점 모드가 비트 퍼펙트 재생의 검증을 뜻하지는 않습니다. 종료 위치는 백엔드 미디어 경계를 기준으로 하며 하드웨어 버퍼 소진은 감지하지 않습니다.'
   ],
-  '独占不代表 Bit-perfect 已验证。结束位置来自后端媒体边界，未检测硬件缓冲排空。削波保护只约束已有 ReplayGain 标签，后续 EQ 和变速仍可能改变样本；未提供 R128 或全链路削波测量。':
+  '独占不代表 Bit-perfect 已验证。结束位置来自后端媒体边界，未检测硬件缓冲排空。削波保护只约束已有 ReplayGain 标签，后续 EQ 和变速仍可能改变样本；源文件响度可从歌曲菜单单独分析，不能代替全链路削波测量。':
       [
-    'Exclusive mode does not verify bit-perfect playback. End positions come from backend media boundaries; hardware buffer drain is not detected. Clipping protection only uses existing ReplayGain tags; subsequent EQ and speed changes can still alter samples. R128 and end-to-end clipping measurements are not provided.',
-    '排他モードはビットパーフェクトの検証を意味しません。終了位置はバックエンドのメディア境界に基づき、ハードウェアバッファの排出は検出していません。クリッピング防止は既存の ReplayGain タグだけに基づき、その後の EQ や速度変更でサンプルが変わる可能性があります。R128 や全経路のクリッピング測定は提供していません。',
-    '독점 모드가 비트 퍼펙트 재생의 검증을 뜻하지는 않습니다. 종료 위치는 백엔드 미디어 경계를 기준으로 하며 하드웨어 버퍼 소진은 감지하지 않습니다. 클리핑 방지는 기존 ReplayGain 태그만 사용하며 이후 EQ와 속도 변경으로 샘플이 달라질 수 있습니다. R128 및 전체 경로의 클리핑 측정은 제공하지 않습니다.'
+    'Exclusive mode does not verify bit-perfect playback. End positions come from backend media boundaries; hardware buffer drain is not detected. Clipping protection only uses existing ReplayGain tags; subsequent EQ and speed changes can still alter samples. Source loudness can be analyzed separately from the song menu; it does not measure clipping throughout the output chain.',
+    '排他モードはビットパーフェクトの検証を意味しません。終了位置はバックエンドのメディア境界に基づき、ハードウェアバッファの排出は検出していません。クリッピング防止は既存の ReplayGain タグだけに基づき、その後の EQ や速度変更でサンプルが変わる可能性があります。曲メニューで音源のラウドネスを個別に解析できますが、出力経路全体のクリッピング測定とは異なります。',
+    '독점 모드가 비트 퍼펙트 재생의 검증을 뜻하지는 않습니다. 종료 위치는 백엔드 미디어 경계를 기준으로 하며 하드웨어 버퍼 소진은 감지하지 않습니다. 클리핑 방지는 기존 ReplayGain 태그만 사용하며 이후 EQ와 속도 변경으로 샘플이 달라질 수 있습니다. 곡 메뉴에서 원본 음량을 별도로 분석할 수 있지만 출력 경로 전체의 클리핑 측정을 대신하지는 않습니다.'
   ],
   '导出仅包含版本、状态、错误分类和输出参数，不包含歌曲名称、私人路径、凭据或音乐文件。': [
     'Exports contain only the version, state, error category and output parameters, without track names, private paths, credentials or music files.',

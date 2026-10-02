@@ -40,6 +40,7 @@ import 'package:dan_player/component/playlist_tree_pane.dart';
 import 'package:dan_player/component/playlist_tree_item.dart';
 import 'package:dan_player/component/audio_selection_toolbar.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
+import 'package:dan_player/component/playlist_folder_export_dialog.dart';
 import 'package:dan_player/component/smart_playlist_dialog.dart';
 import 'package:dan_player/component/cue_import_dialog.dart';
 import 'package:dan_player/component/playlist_ui_actions.dart';
@@ -79,6 +80,7 @@ class PlaylistBrowser extends StatefulWidget {
     this.trackBuilder,
     this.library,
     this.pickImage,
+    this.pickFolderDirectory,
     this.initialContentView = ContentView.list,
     this.onContentViewChanged,
     this.initialView,
@@ -98,6 +100,8 @@ class PlaylistBrowser extends StatefulWidget {
   final PlaylistTrackBuilder? trackBuilder;
   final List<Audio>? library;
   final PlaylistImagePicker? pickImage;
+  @visibleForTesting
+  final FutureOr<String?> Function()? pickFolderDirectory;
   final ContentView initialContentView;
   final ValueChanged<ContentView>? onContentViewChanged;
   final PlaylistViewMode? initialView;
@@ -1979,6 +1983,10 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             ? null
             : () => unawaited(
                 exportM3uPlaylist(context, List.of(queue), name: current.name)),
+        onExportFolder: current == null
+            ? null
+            : () => unawaited(exportMusicFolder(context, List.of(queue),
+                name: current.name, pickDirectory: widget.pickFolderDirectory)),
         selectionTools: Wrap(
             spacing: 8,
             runSpacing: 8,

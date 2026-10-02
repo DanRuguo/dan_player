@@ -560,6 +560,13 @@ class BassPlayer {
         'replayGainApplied': _fstream == null
             ? null
             : _replayGainTags.appliedMode(_replayGain)?.name,
+        'replayGainSource': _fstream == null
+            ? null
+            : _replayGainTags.appliedSource(_replayGain),
+        'replayGainPreampDb':
+            ReplayGainPreferences.sanitizeGain(_replayGain.preampDb),
+        'replayGainFallbackDb':
+            ReplayGainPreferences.sanitizeGain(_replayGain.fallbackGainDb),
         'replayGainEffectiveDb': _effectiveReplayGainDb,
         'peakProtection': _replayGain.preventClipping,
         'eqRequested': _eqEnabled,
@@ -590,7 +597,7 @@ class BassPlayer {
 
   double? get _effectiveReplayGainDb {
     if (_userVolumeDsp <= 0 ||
-        _replayGainTags.appliedMode(_replayGain) == null) {
+        _replayGainTags.requestedGainDb(_replayGain) == null) {
       return null;
     }
     final native = _readEffectiveVolume();

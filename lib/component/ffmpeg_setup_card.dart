@@ -2,23 +2,43 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/library/ffmpeg_runtime.dart';
 import 'package:dan_player/library/ffmpeg_module_install.dart';
 import 'package:path/path.dart' as p;
 
 class FfmpegSetupCard extends StatefulWidget {
   const FfmpegSetupCard(
-      {super.key, required this.onReady, this.lyricPreview = false});
+      {super.key,
+      required this.onReady,
+      this.lyricPreview = false,
+      this.title,
+      this.description,
+      this.ensureTools});
+  final String? title, description;
+  final Future<bool> Function()? ensureTools;
   final bool lyricPreview;
   final VoidCallback onReady;
   @override
   State<FfmpegSetupCard> createState() => _FfmpegSetupCardState();
 }
 
-class _FfmpegSetupCardState extends State<FfmpegSetupCard> {
+class _FfmpegSetupCardState extends State<FfmpegSetupCard>
+    with WidgetsBindingObserver {
   FfmpegModuleInstaller? _installer;
   bool _busy = false, _failed = false;
   double? _progress;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _run(bool download) async {
     setState(() {
       _busy = true;
@@ -31,7 +51,8 @@ class _FfmpegSetupCardState extends State<FfmpegSetupCard> {
         await _installer!.install(progress: (value) {
           if (mounted) setState(() => _progress = value);
         });
-      } else if (!await FfmpegRuntime.shared.ensure(force: true)) {
+      } else if (!await (widget.ensureTools ??
+          () => FfmpegRuntime.shared.ensure(force: true))()) {
         throw const FfmpegUnavailable();
       }
       if (mounted) widget.onReady();
@@ -46,12 +67,14 @@ class _FfmpegSetupCardState extends State<FfmpegSetupCard> {
   @override
   void dispose() {
     _installer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final reduceMotion = appToolbarReduceMotion(context);
     final manual =
         p.join(p.dirname(Platform.resolvedExecutable), 'tool', 'ffmpeg');
     return Container(
@@ -62,12 +85,13 @@ class _FfmpegSetupCardState extends State<FfmpegSetupCard> {
             border: Border.all(color: scheme.outlineVariant)),
         child:
             Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(ui(widget.lyricPreview ? '安装试听组件' : '安装裁剪组件'),
+          Text(widget.title ?? ui(widget.lyricPreview ? '安装试听组件' : '安装裁剪组件'),
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 10),
-          Text(ui(widget.lyricPreview
-              ? '试听复用 FFmpeg 组件，不会改写歌曲。可以手动安装，或从 GitHub 下载约 70 MB 的组件。'
-              : '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用播放器的网络代理设置。')),
+          Text(widget.description ??
+              ui(widget.lyricPreview
+                  ? '试听复用 FFmpeg 组件，不会改写歌曲。可以手动安装，或从 GitHub 下载约 70 MB 的组件。'
+                  : '裁剪需要 FFmpeg、FFprobe 和 FFplay。未找到可用的完整工具。可从 GitHub 下载约 70 MB 的组件，将使用播放器的网络代理设置。')),
           const SizedBox(height: 10),
           Text(ui(
               '也可以从官网下载 Windows 完整编译包，将 bin 目录中的程序及 DLL 放到以下目录，然后点击“我已安装好”。')),
@@ -77,7 +101,15 @@ class _FfmpegSetupCardState extends State<FfmpegSetupCard> {
           SelectableText(manual, style: Theme.of(context).textTheme.bodySmall),
           if (_busy) ...[
             const SizedBox(height: 14),
-            LinearProgressIndicator(value: _progress),
+            Semantics(
+                label: ui(_progress == null ? '正在检查并安装组件…' : '正在下载…'),
+                liveRegion: true,
+                child: TickerMode(
+                    enabled: !reduceMotion,
+                    child: ExcludeSemantics(
+                        excluding: _progress == null,
+                        child: LinearProgressIndicator(
+                            value: _progress ?? (reduceMotion ? 0 : null))))),
             const SizedBox(height: 6),
             Text(_progress == null
                 ? ui('正在检查并安装组件…')

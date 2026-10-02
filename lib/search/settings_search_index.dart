@@ -29,7 +29,8 @@ const settingsSearchEntries = <SettingsSearchEntry>[
       "library", "playback", "播放速度", ["WASAPI 独占输出", "升降调", "原调"]),
   SettingsSearchEntry(
       "library", "resume", "按曲记忆播放位置", ["仅长音频", "长音频最短时长", "清除自动记忆位置"]),
-  SettingsSearchEntry("library", "gain", "ReplayGain 音量均衡", ["依据标签峰值限制增益"]),
+  SettingsSearchEntry("library", "gain", "ReplayGain 音量均衡",
+      ["依据标签峰值限制增益", "ReplayGain 预增益", "无标签补偿"]),
   SettingsSearchEntry("library", "sleep", "播放时防止自动休眠", []),
   SettingsSearchEntry("library", "watch", "自动更新音乐库", []),
   SettingsSearchEntry("library", "artists", "自定义艺术家分隔符", []),

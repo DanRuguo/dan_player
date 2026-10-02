@@ -8,10 +8,30 @@ class ReplayGainPreferences {
   const ReplayGainPreferences({
     this.mode = ReplayGainMode.off,
     this.preventClipping = true,
+    this.preampDb = 0,
+    this.fallbackGainDb = 0,
   });
 
   final ReplayGainMode mode;
   final bool preventClipping;
+  final double preampDb;
+  final double fallbackGainDb;
+
+  static const minimumGainDb = -24.0;
+  static const maximumGainDb = 24.0;
+  static const gainPresets = [-12.0, -6.0, -3.0, 0.0, 3.0, 6.0, 12.0];
+
+  static double sanitizeGain(Object? value) => value is num && value.isFinite
+      ? value.toDouble().clamp(minimumGainDb, maximumGainDb)
+      : 0;
+
+  static String gainLabel(double value) {
+    final gain = sanitizeGain(value);
+    final number = gain == gain.roundToDouble()
+        ? gain.toStringAsFixed(0)
+        : gain.toString();
+    return '${gain > 0 ? '+' : ''}$number dB';
+  }
 
   factory ReplayGainPreferences.fromJson(Object? value) {
     if (value is! Map) return const ReplayGainPreferences();
@@ -21,31 +41,42 @@ class ReplayGainPreferences {
         orElse: () => ReplayGainMode.off,
       ),
       preventClipping: value['preventClipping'] != false,
+      preampDb: sanitizeGain(value['preampDb']),
+      fallbackGainDb: sanitizeGain(value['fallbackGainDb']),
     );
   }
 
   Map<String, Object> toJson() => {
         'mode': mode.name,
         'preventClipping': preventClipping,
+        'preampDb': sanitizeGain(preampDb),
+        'fallbackGainDb': sanitizeGain(fallbackGainDb),
       };
 
   ReplayGainPreferences copyWith({
     ReplayGainMode? mode,
     bool? preventClipping,
+    double? preampDb,
+    double? fallbackGainDb,
   }) =>
       ReplayGainPreferences(
         mode: mode ?? this.mode,
         preventClipping: preventClipping ?? this.preventClipping,
+        preampDb: sanitizeGain(preampDb ?? this.preampDb),
+        fallbackGainDb: sanitizeGain(fallbackGainDb ?? this.fallbackGainDb),
       );
 
   @override
   bool operator ==(Object other) =>
       other is ReplayGainPreferences &&
       mode == other.mode &&
-      preventClipping == other.preventClipping;
+      preventClipping == other.preventClipping &&
+      preampDb == other.preampDb &&
+      fallbackGainDb == other.fallbackGainDb;
 
   @override
-  int get hashCode => Object.hash(mode, preventClipping);
+  int get hashCode =>
+      Object.hash(mode, preventClipping, preampDb, fallbackGainDb);
 }
 
 /// Existing file tags only: no loudness analysis, index migration or tag writes.
@@ -76,9 +107,28 @@ class ReplayGainTags {
     return null;
   }
 
+  /// The preamp is global within ReplayGain, including missing-tag fallback.
+  /// Missing tags with the original zero defaults remain honestly unapplied.
+  double? requestedGainDb(ReplayGainPreferences preferences) {
+    if (preferences.mode == ReplayGainMode.off) return null;
+    final preamp = ReplayGainPreferences.sanitizeGain(preferences.preampDb);
+    final fallback =
+        ReplayGainPreferences.sanitizeGain(preferences.fallbackGainDb);
+    final mode = appliedMode(preferences);
+    if (mode == null) {
+      return preamp == 0 && fallback == 0 ? null : preamp + fallback;
+    }
+    final gain = mode == ReplayGainMode.album ? albumGainDb! : trackGainDb!;
+    return gain.clamp(-60.0, 30.0) + preamp;
+  }
+
+  String? appliedSource(ReplayGainPreferences preferences) =>
+      appliedMode(preferences)?.name ??
+      (requestedGainDb(preferences) == null ? null : 'fallback');
+
   double? effectiveGainDb(
       double userVolume, ReplayGainPreferences preferences) {
-    if (appliedMode(preferences) == null || userVolume <= 0) return null;
+    if (requestedGainDb(preferences) == null || userVolume <= 0) return null;
     final appliedVolume = volume(userVolume, preferences);
     if (appliedVolume <= 0 || !appliedVolume.isFinite) return null;
     return 20 * math.log(appliedVolume / userVolume) / math.ln10;
@@ -89,11 +139,17 @@ class ReplayGainTags {
   /// ReplayGain boost while protection is enabled.
   double volume(double userVolume, ReplayGainPreferences preferences) {
     if (preferences.mode == ReplayGainMode.off) return userVolume;
-    final useAlbum = appliedMode(preferences) == ReplayGainMode.album;
-    final gain = useAlbum ? albumGainDb : trackGainDb;
-    final peak = useAlbum ? albumPeak : trackPeak;
-    if (gain == null || !gain.isFinite) return userVolume;
-    final factor = math.pow(10, gain.clamp(-60.0, 30.0) / 20).toDouble();
+    final mode = appliedMode(preferences);
+    final gain = requestedGainDb(preferences);
+    if (gain == null) return userVolume;
+    final peak = mode == ReplayGainMode.album
+        ? albumPeak
+        : mode == ReplayGainMode.track
+            ? trackPeak
+            : preferences.mode == ReplayGainMode.album
+                ? albumPeak ?? trackPeak
+                : trackPeak;
+    final factor = math.pow(10, gain / 20).toDouble();
     final requested = userVolume * factor;
     if (!preferences.preventClipping) return requested;
     if (peak == null || !peak.isFinite || peak <= 0) {

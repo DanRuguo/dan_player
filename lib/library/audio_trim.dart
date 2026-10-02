@@ -114,6 +114,26 @@ Future<String> audioToolPath(String executable) async {
   return FfmpegRuntime.shared.path(executable);
 }
 
+/// Windows preserves FFmpeg's negative AVERROR values instead of truncating
+/// them to eight bits. They describe data/codec failures, not missing runtime
+/// DLLs. FFERRTAG values encode four ASCII bytes (or a leading 0xf8).
+bool isAudioToolRuntimeFailure(int exit) {
+  if (exit >= 0 && exit <= 255) return false;
+  final unsigned = exit & 0xffffffff;
+  final signed = unsigned >= 0x80000000 ? unsigned - 0x100000000 : unsigned;
+  if (signed >= 0) return true;
+  if (signed >= -4095 ||
+      const {-0x2bb2afa8, -0x636e6701, -0x636e6702, -0x636e6703}
+          .contains(signed)) return false;
+  final tag = -signed;
+  for (var byte = 0; byte < 4; byte++) {
+    final character = (tag >> (byte * 8)) & 0xff;
+    if (byte == 0 && character == 0xf8) continue;
+    if (character < 0x20 || character > 0x7e) return true;
+  }
+  return false;
+}
+
 /// Bounded output, explicit argv, no shell and no interactive console. The
 /// child is always reaped before its temporary files may be deleted.
 Future<String> runAudioTool(
@@ -163,7 +183,7 @@ Future<String> runAudioTool(
       throw const AudioTrimException('timeout', '音频处理超时，原文件未被修改');
     }
     if (exit != 0) {
-      if (exit < 0 || exit > 255) {
+      if (isAudioToolRuntimeFailure(exit)) {
         FfmpegRuntime.shared.invalidate();
         throw const AudioTrimException('tools', '请先安装或修复裁剪组件');
       }

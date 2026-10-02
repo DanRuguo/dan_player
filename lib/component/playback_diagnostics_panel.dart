@@ -129,6 +129,7 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
         'album' => ui('专辑'),
         'track' => ui('单曲'),
         'off' => ui('关闭'),
+        'fallback' => ui('无标签补偿'),
         _ => ui('未应用'),
       };
 
@@ -160,7 +161,13 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
       if (output['mixerFormat'] != null)
         '混音 / 处理格式': _format(output['mixerFormat']),
       'ReplayGain 请求 / 生效':
-          '${_mode(output['replayGainRequested'])} / ${_mode(output['replayGainApplied'])}',
+          '${_mode(output['replayGainRequested'])} / ${_mode(output['replayGainSource'] ?? output['replayGainApplied'])}',
+      if (output['replayGainPreampDb'] is num)
+        'ReplayGain 预增益':
+            '${(output['replayGainPreampDb'] as num).toStringAsFixed(2)} dB',
+      if (output['replayGainFallbackDb'] is num)
+        '无标签补偿':
+            '${(output['replayGainFallbackDb'] as num).toStringAsFixed(2)} dB',
       '实际响度增益':
           gain is num ? '${gain.toStringAsFixed(2)} dB' : ui('未应用、静音或无法检测'),
       '实际 DSP 音量倍数':
@@ -204,6 +211,8 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
                   icon: Symbols.tune,
                   rows: Map.fromEntries(rows.entries.where((row) => [
                         'ReplayGain 请求 / 生效',
+                        'ReplayGain 预增益',
+                        '无标签补偿',
                         '实际响度增益',
                         '实际 DSP 音量倍数',
                         'EQ 请求 / 生效',
@@ -247,7 +256,7 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
               children: [
                 Text(
                     ui('独占不代表 Bit-perfect 已验证。结束位置来自后端媒体边界，未检测硬件缓冲排空。'
-                        '削波保护只约束已有 ReplayGain 标签，后续 EQ 和变速仍可能改变样本；未提供 R128 或全链路削波测量。'),
+                        '削波保护只约束组合后的 ReplayGain 增益，后续 EQ 和变速仍可能改变样本；源文件响度可从歌曲菜单单独分析，不能代替全链路削波测量。'),
                     style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 8),
                 Text(ui('导出仅包含版本、状态、错误分类和输出参数，不包含歌曲名称、私人路径、凭据或音乐文件。'),

@@ -41,6 +41,10 @@ class Snapshot3Upgrade {
       return;
     }
     if (raw is! Map) throw FormatException('Invalid data document: $name');
+    if (name == 'smart_playlists.json') {
+      SmartPlaylistStore.validateSnapshot(raw);
+      return;
+    }
     final version = raw['version'];
     if (version is int && version > maxVersion) {
       throw UnsupportedError('Newer data format: $name');
@@ -56,12 +60,6 @@ class Snapshot3Upgrade {
         PlaybackStatistics.validateSnapshot(raw);
       case 'playlists.json':
         decodePlaylists(raw);
-      case 'smart_playlists.json':
-        if (![1, 2, 3, 4].contains(version) || raw['playlists'] is! List)
-          throw const FormatException('Invalid smart playlists');
-        for (final value in raw['playlists'] as List) {
-          SmartPlaylist.fromJson(value);
-        }
     }
   }
 

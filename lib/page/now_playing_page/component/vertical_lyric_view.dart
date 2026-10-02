@@ -11,6 +11,9 @@ import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/lyric_timeline.dart';
 import 'package:dan_player/lyric/lyric_presentation_timeline.dart';
+import 'package:dan_player/lyric/lyric_text_search.dart';
+import 'lyric_reading_tools.dart';
+import 'lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
@@ -49,6 +52,12 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
     return ChangeNotifierProvider.value(
       value: lyricViewController,
       child: LyricControlsSurface(
+        onFind: () {
+          if (!DesktopIntegration.instance.isHidden.value) {
+            findCurrentLyrics(Navigator.of(context, rootNavigator: true),
+                lyricViewController);
+          }
+        },
         controls: const LyricViewControls(),
         child: ValueListenableBuilder(
           valueListenable: AppSettings.instance.experience,
@@ -62,6 +71,15 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
                 final session = playback.playbackSessionToken;
                 if (!identical(_practiceFuture, future) ||
                     _practiceSession != session) {
+                  if (lyricViewController.readingTarget != null) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted &&
+                          identical(future, _practiceFuture) &&
+                          session == _practiceSession) {
+                        lyricViewController.discardReadingTarget();
+                      }
+                    });
+                  }
                   _practiceFuture = future;
                   _practiceSession = session;
                   _practiceCallback = (line) async {
@@ -119,10 +137,11 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
 /// when the pointer enters or leaves it. Controls remain mounted across states.
 class LyricControlsSurface extends StatefulWidget {
   const LyricControlsSurface(
-      {super.key, required this.child, required this.controls});
+      {super.key, required this.child, required this.controls, this.onFind});
 
   final Widget child;
   final Widget controls;
+  final VoidCallback? onFind;
 
   @override
   State<LyricControlsSurface> createState() => _LyricControlsSurfaceState();
@@ -146,7 +165,7 @@ class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
         _controlsFocused ||
         _directControls ||
         ALWAYS_SHOW_LYRIC_VIEW_CONTROLS;
-    return MouseRegion(
+    final surface = MouseRegion(
       onEnter: (event) => _hoverChanged(event, true),
       onExit: (event) => _hoverChanged(event, false),
       onHover: (event) {
@@ -187,6 +206,9 @@ class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
         ),
       ),
     );
+    return widget.onFind == null
+        ? surface
+        : LyricFindShortcut(onFind: widget.onFind!, child: surface);
   }
 }
 
@@ -575,6 +597,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   bool _manualScrollActive = false;
   bool _readingMode = false;
   int _returnRequest = 0;
+  int _readingRequest = 0;
+  int _readRevealGeneration = 0;
+  LyricReadingTarget? _readDestination;
   bool _dragging = false;
   final _scrollPointers = <int>{};
   Object? _geometryIdentity;
@@ -759,6 +784,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       // or a stale manual-scroll grace period when this surface returns.
       _receivePosition(widget.readPosition(),
           forceFollow: true, immediate: true);
+      _scheduleReadingReveal(immediate: true);
     } else {
       _settingsAnchor = false;
       _fontSettingActive = false;
@@ -782,6 +808,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _resetLyric() {
+    _readDestination = null;
+    _readRevealGeneration++;
     _settingsAnchor = false;
     _followTopInset = null;
     _fontSettingActive = false;
@@ -847,6 +875,69 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   @override
   void didChangeAccessibilityFeatures() {
     if (mounted) setState(() {});
+  }
+
+  void _scheduleReadingReveal({bool immediate = false}) {
+    final target = _readDestination;
+    if (!_active ||
+        !_readingMode ||
+        target == null ||
+        !target.belongsTo(widget.lyric)) {
+      return;
+    }
+    final generation = ++_readRevealGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_active ||
+          !_readingMode ||
+          generation != _readRevealGeneration ||
+          !target.belongsTo(widget.lyric) ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      final rowContext = _lineKeys[target.index].currentContext;
+      final row = rowContext?.findRenderObject();
+      if (row is! RenderBox || !row.attached || !row.hasSize) return;
+      final position = _scrollController.position;
+      var offset =
+          RenderAbstractViewport.of(row).getOffsetToReveal(row, .2).offset;
+      final textOffset = target.textOffset;
+      if (textOffset != null &&
+          rowContext is Element &&
+          target.line is UnsyncLyricLine) {
+        final text = (target.line as UnsyncLyricLine).content.split('┃').first;
+        double? glyphY;
+        void visit(Element element) {
+          if (glyphY != null) return;
+          if (element is StatefulElement &&
+              element.state is LyricTextReadingGeometry) {
+            final geometry = element.state as LyricTextReadingGeometry;
+            if (geometry.readingText == text) {
+              glyphY = geometry.readingGlobalY(textOffset);
+            }
+          }
+          if (glyphY == null) element.visitChildren(visit);
+        }
+
+        visit(rowContext);
+        if (glyphY != null) {
+          offset =
+              RenderAbstractViewport.of(row).getOffsetToReveal(row, 0).offset +
+                  glyphY! -
+                  row.localToGlobal(Offset.zero).dy -
+                  position.viewportDimension * .2;
+        }
+      }
+      offset = offset.clamp(position.minScrollExtent, position.maxScrollExtent);
+      final reduced = _motionHidden || LyricMotion.reducedOf(context);
+      if (immediate || reduced) {
+        _scrollController.jumpTo(offset);
+      } else {
+        unawaited(_scrollController.animateTo(offset,
+            duration: LyricMotion.seekScrollDuration,
+            curve: LyricMotion.scrollCurve));
+      }
+    });
   }
 
   void _receivePosition(double seconds,
@@ -1432,7 +1523,19 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _manualScrollTimer?.cancel();
       _manualScrollActive = false;
       _dragging = false;
+      _readDestination = null;
+      _readRevealGeneration++;
       _scheduleFollow(seek: true);
+    }
+    if (_readingRequest != settings.readingRequest) {
+      _readingRequest = settings.readingRequest;
+      _readRevealGeneration++;
+      _readDestination = settings.readingTarget;
+      _manualScrollTimer?.cancel();
+      _manualScrollActive = false;
+      _settingsAnchor = false;
+      _cancelFollowEffects();
+      _scheduleReadingReveal();
     }
     final followEnabled = !reduced && !_manualScrollActive && !_readingMode;
     final blurEnabled = followEnabled &&
@@ -1446,6 +1549,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     if (_wasReduced != null && reduced != _wasReduced && reduced) {
       _cancelFollowEffects();
       _scheduleFollow(immediate: true);
+      _scheduleReadingReveal(immediate: true);
     }
     _wasReduced = reduced;
     _syncPresentationTicker();

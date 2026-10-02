@@ -10,6 +10,7 @@ import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/playlist_name_dialog.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
+import 'package:dan_player/component/playlist_folder_export_dialog.dart';
 import 'package:dan_player/component/playlist_ui_actions.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/page/now_playing_page/component/segment_loop_dialog.dart';
@@ -38,7 +39,8 @@ class CurrentPlaylistView extends StatefulWidget {
       this.shrinkWrap = false,
       this.onOpenDetails,
       this.playbackService,
-      this.pickM3uFile});
+      this.pickM3uFile,
+      this.pickFolderDirectory});
 
   final bool showTitle;
   final bool immersive;
@@ -52,6 +54,9 @@ class CurrentPlaylistView extends StatefulWidget {
 
   @visibleForTesting
   final FutureOr<String?> Function(String suggestedName)? pickM3uFile;
+
+  @visibleForTesting
+  final FutureOr<String?> Function()? pickFolderDirectory;
 
   @override
   State<CurrentPlaylistView> createState() => _CurrentPlaylistViewState();
@@ -307,7 +312,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     }
   }
 
-  Future<void> _exportQueue({bool searchResults = false}) async {
+  Future<void> _exportQueue(
+      {bool searchResults = false, bool musicFolder = false}) async {
     if (_exportingQueue) return;
     final queue = playbackService.playlist.value;
     final snapshot = searchResults
@@ -321,8 +327,13 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     try {
       // The shared exporter captures metadata and paths synchronously before
       // its first dialog/await; the clicked projection and repeats stay fixed.
-      await exportM3uPlaylist(context, snapshot,
-          name: name, pickFile: widget.pickM3uFile);
+      if (musicFolder) {
+        await exportMusicFolder(context, snapshot,
+            name: name, pickDirectory: widget.pickFolderDirectory);
+      } else {
+        await exportM3uPlaylist(context, snapshot,
+            name: name, pickFile: widget.pickM3uFile);
+      }
     } finally {
       if (mounted) setState(() => _exportingQueue = false);
     }
@@ -345,6 +356,23 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                   : () => _exportQueue(searchResults: true),
               leadingIcon: const Icon(Symbols.filter_alt),
               child: _menuLabel('导出搜索结果为 M3U8'),
+            ),
+          MenuItemButton(
+            key: const ValueKey('queue-export-folder-all'),
+            onPressed: queue.isEmpty || _exportingQueue
+                ? null
+                : () => _exportQueue(musicFolder: true),
+            leadingIcon: const Icon(Symbols.folder_copy),
+            child: _menuLabel('导出队列音乐文件夹'),
+          ),
+          if (_query.isNotEmpty)
+            MenuItemButton(
+              key: const ValueKey('queue-export-folder-search'),
+              onPressed: visibleIndices.isEmpty || _exportingQueue
+                  ? null
+                  : () => _exportQueue(searchResults: true, musicFolder: true),
+              leadingIcon: const Icon(Symbols.folder_copy),
+              child: _menuLabel('导出搜索结果音乐文件夹'),
             ),
         ],
         builder: (context, controller, _) => IconButton(

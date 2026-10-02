@@ -3,6 +3,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/data/protected_json_store.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/track_identity.dart';
+import 'package:dan_player/play_service/track_playback_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
@@ -12,14 +13,17 @@ class PersonalTrack {
       this.tags = const [],
       this.firstAddedAtUtc,
       this.modifiedAtUtc,
+      this.playback,
       this.addedFromCreation = false});
   final int? rating;
   final List<String> tags;
   final DateTime? firstAddedAtUtc;
   final DateTime? modifiedAtUtc;
   final bool addedFromCreation;
+  final TrackPlaybackSettings? playback;
   factory PersonalTrack.decode(Map value) => PersonalTrack(
       rating: value['rating'] as int?,
+      playback: TrackPlaybackSettings.decode(value['playback']),
       modifiedAtUtc: value['modified'] == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(value['modified'] as int,
@@ -55,6 +59,16 @@ class PersonalLibrary {
           entry.value is! Map)
         throw const FormatException('Invalid personal track');
       final item = entry.value as Map;
+      // Canonicalize only this optional extension. A JSON exponent may have
+      // decoded to Infinity, which must never reach ProtectedJsonStore's copy.
+      if (item.containsKey('playback')) {
+        final playback = TrackPlaybackSettings.decode(item['playback']);
+        if (playback == null) {
+          item.remove('playback');
+        } else {
+          item['playback'] = playback.toMap();
+        }
+      }
       final rating = item['rating'], tags = item['tags'], added = item['added'];
       final modified = item['modified'];
       if (modified != null &&
@@ -81,6 +95,10 @@ class PersonalLibrary {
         e.key as String: PersonalTrack.decode(e.value as Map)
     });
   }
+
+  Future<TrackPlaybackSettings?> playbackFor(String track) async =>
+      TrackPlaybackSettings.decode(
+          (await store.readEntry('tracks', track))?['playback']);
 
   /// Existing songs use file creation time, explicitly marked as a fallback.
   /// New committed identities
@@ -144,6 +162,26 @@ class PersonalLibrary {
           item['modified'] = DateTime.now().toUtc().millisecondsSinceEpoch;
         tracks[id] = item;
       }
+    });
+    await snapshot();
+    changes.value++;
+  }
+
+  Future<void> setPlayback(Audio audio, TrackPlaybackSettings? settings) async {
+    settings?.validate();
+    final id = audio.stableTrackId;
+    await TrackIdentityRegistry.instance.flush();
+    await store.update((root) {
+      final tracks =
+          root.putIfAbsent('tracks', () => <String, dynamic>{}) as Map;
+      final item = Map<String, dynamic>.from(tracks[id] as Map? ?? {});
+      if (settings == null) {
+        item.remove('playback');
+      } else {
+        item['playback'] = settings.toMap();
+      }
+      item['modified'] = DateTime.now().toUtc().millisecondsSinceEpoch;
+      tracks[id] = item;
     });
     await snapshot();
     changes.value++;

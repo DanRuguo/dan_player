@@ -1,8 +1,13 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as raster;
 
 import 'package:dan_player/component/app_dialog_title.dart';
+import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_dialog_content.dart';
+import 'package:dan_player/component/app_dialog_resize.dart';
+import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/lyric_share_card.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -67,6 +72,8 @@ class _LyricShareDialogState extends State<LyricShareDialog> {
   late final _artwork = widget.artwork;
   final _selected = <int>{};
   final _boundary = GlobalKey();
+  final _contentScroll = ScrollController();
+  final _selectionScroll = ScrollController();
   bool _showSongInfo = true, _saving = false;
   String? _error;
   bool _saved = false;
@@ -182,44 +189,45 @@ class _LyricShareDialogState extends State<LyricShareDialog> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    UiLanguageScope.watch(context);
-    final card = _card;
-    final cardHeight = card.measuredHeight(Directionality.of(context));
-    final empty = _lines.every((line) => line.trim().isEmpty);
-    return AlertDialog(
-      scrollable: true,
-      insetPadding: const EdgeInsets.all(12),
-      title: AppDialogTitle(ui('导出歌词卡片')),
-      content: SizedBox(
-        width: 740,
-        child:
-            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+  Widget _selectionPanel(bool empty, double listHeight) => Column(
+        key: const ValueKey('lyric-share-settings'),
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           Text(ui('选择最多 4 句歌词；卡片保留所选文字与换行。')),
           const SizedBox(height: 8),
           if (empty) Text(ui('没有可导出的歌词')),
           if (!empty)
-            SizedBox(
-              height: (MediaQuery.sizeOf(context).height * .25).clamp(120, 240),
-              child: ListView.builder(
-                key: const ValueKey('lyric-share-selection-list'),
-                itemCount: _lines.length,
-                itemBuilder: (context, i) => _lines[i].trim().isEmpty
-                    ? const SizedBox.shrink()
-                    : CheckboxListTile(
-                        key: ValueKey('lyric-share-select-$i'),
-                        value: _selected.contains(i),
-                        controlAffinity: ListTileControlAffinity.leading,
-                        contentPadding: EdgeInsets.zero,
-                        onChanged: _saving ||
-                                (!_selected.contains(i) &&
-                                    _selected.length >= 4)
-                            ? null
-                            : (_) => _toggle(i),
-                        title: Text(_lines[i],
-                            maxLines: 3, overflow: TextOverflow.ellipsis),
-                      ),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: listHeight),
+              child: AppContentScrollbar(
+                controller: _selectionScroll,
+                builder: (_, controller) => Material(
+                  type: MaterialType.transparency,
+                  clipBehavior: Clip.hardEdge,
+                  child: ListView.builder(
+                    key: const ValueKey('lyric-share-selection-list'),
+                    controller: controller,
+                    primary: false,
+                    shrinkWrap: true,
+                    itemCount: _lines.length,
+                    itemBuilder: (context, i) => _lines[i].trim().isEmpty
+                        ? const SizedBox.shrink()
+                        : CheckboxListTile(
+                            key: ValueKey('lyric-share-select-$i'),
+                            value: _selected.contains(i),
+                            controlAffinity: ListTileControlAffinity.leading,
+                            contentPadding: EdgeInsets.zero,
+                            onChanged: _saving ||
+                                    (!_selected.contains(i) &&
+                                        _selected.length >= 4)
+                                ? null
+                                : (_) => _toggle(i),
+                            title: Text(_lines[i],
+                                maxLines: 3, overflow: TextOverflow.ellipsis),
+                          ),
+                  ),
+                ),
               ),
             ),
           SwitchListTile(
@@ -235,50 +243,143 @@ class _LyricShareDialogState extends State<LyricShareDialog> {
                       _error = null;
                     }),
           ),
-          const SizedBox(height: 12),
-          if (_selected.isEmpty && !empty) Text(ui('请至少选择一句歌词')),
-          if (_selected.isNotEmpty && cardHeight == null)
-            Text(ui('所选内容过长，无法完整放入卡片。请减少句数或隐藏歌曲信息。'),
-                key: const ValueKey('lyric-share-too-long')),
-          if (cardHeight != null)
-            Center(
-              child: SizedBox(
-                width: LyricShareCard.width,
-                child: AspectRatio(
-                  aspectRatio: LyricShareCard.width / cardHeight,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.topCenter,
-                    child: RepaintBoundary(key: _boundary, child: card),
-                  ),
-                ),
-              ),
-            ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(_error!,
-                  key: const ValueKey('lyric-share-error'),
-                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ),
-          if (_saved)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child:
-                  Text(ui('歌词卡片已保存'), key: const ValueKey('lyric-share-saved')),
-            ),
-        ]),
-      ),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(ui('关闭'))),
-        FilledButton(
-          key: const ValueKey('lyric-share-export'),
-          onPressed: _saving || cardHeight == null ? null : _export,
-          child: Text(ui(_saving ? '正在保存…' : '保存 PNG')),
+        ],
+      );
+
+  Widget _previewPanel(LyricShareCard card, double? cardHeight, bool empty,
+      {double? maximumHeight}) {
+    if (_selected.isEmpty && !empty) {
+      return Text(ui('请至少选择一句歌词'));
+    }
+    if (_selected.isNotEmpty && cardHeight == null) {
+      return Text(ui('所选内容过长，无法完整放入卡片。请减少句数或隐藏歌曲信息。'),
+          key: const ValueKey('lyric-share-too-long'));
+    }
+    if (cardHeight == null) return const SizedBox.shrink();
+    return LayoutBuilder(builder: (context, constraints) {
+      var width = math.min(LyricShareCard.width, constraints.maxWidth);
+      if (maximumHeight != null) {
+        width =
+            math.min(width, maximumHeight * LyricShareCard.width / cardHeight);
+      }
+      return Align(
+        alignment: Alignment.topCenter,
+        heightFactor: 1,
+        child: SizedBox(
+          key: const ValueKey('lyric-share-preview-viewport'),
+          width: width,
+          height: width * cardHeight / LyricShareCard.width,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.topCenter,
+            child: RepaintBoundary(key: _boundary, child: card),
+          ),
         ),
-      ],
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final card = _card;
+    final cardHeight = card.measuredHeight(Directionality.of(context));
+    final empty = _lines.every((line) => line.trim().isEmpty);
+    return Dialog(
+      insetPadding: const EdgeInsets.all(12),
+      child: AppDialogResize(
+          child: AppDialogContent(
+        width: 960,
+        maxHeight: MediaQuery.sizeOf(context).height * .9,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            AppDialogTitle(ui('导出歌词卡片')),
+            const SizedBox(height: 16),
+            Flexible(
+              child: LayoutBuilder(builder: (context, constraints) {
+                final fontScale =
+                    MediaQuery.textScalerOf(context).scale(14) / 14;
+                final minimumColumn = 300 * fontScale.clamp(1, 1.5);
+                final parallel = constraints.maxWidth >= minimumColumn * 2 + 20;
+                final listHeight = parallel
+                    ? math.min(
+                        320.0, math.max(80.0, constraints.maxHeight * .58))
+                    : (MediaQuery.sizeOf(context).height * .25)
+                        .clamp(120.0, 240.0);
+                final selection = _selectionPanel(empty, listHeight);
+                final preview = _previewPanel(card, cardHeight, empty,
+                    maximumHeight: parallel ? constraints.maxHeight : null);
+                return AppContentScrollbar(
+                  controller: _contentScroll,
+                  builder: (_, controller) => SingleChildScrollView(
+                    controller: controller,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        parallel
+                            ? Row(
+                                key: const ValueKey('lyric-share-parallel'),
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(child: selection),
+                                  const SizedBox(width: 20),
+                                  Expanded(child: preview),
+                                ],
+                              )
+                            : Column(
+                                key: const ValueKey('lyric-share-stacked'),
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  selection,
+                                  const SizedBox(height: 12),
+                                  preview
+                                ],
+                              ),
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(_error!,
+                                key: const ValueKey('lyric-share-error'),
+                                style: TextStyle(
+                                    color:
+                                        Theme.of(context).colorScheme.error)),
+                          ),
+                        if (_saved)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(ui('歌词卡片已保存'),
+                                key: const ValueKey('lyric-share-saved')),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 16),
+            AppDialogActions(children: [
+              TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(ui('关闭'))),
+              FilledButton(
+                key: const ValueKey('lyric-share-export'),
+                onPressed: _saving || cardHeight == null ? null : _export,
+                child: Text(ui(_saving ? '正在保存…' : '保存 PNG')),
+              ),
+            ]),
+          ]),
+        ),
+      )),
     );
+  }
+
+  @override
+  void dispose() {
+    _contentScroll.dispose();
+    _selectionScroll.dispose();
+    super.dispose();
   }
 }

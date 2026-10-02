@@ -104,6 +104,7 @@ enum _PlaylistToolbarAction {
   help,
   importM3u,
   exportM3u,
+  exportFolder,
   importCue,
   smartPlaylists,
   trash,
@@ -151,6 +152,7 @@ class PlaylistToolbar extends StatefulWidget {
     this.onHelp,
     this.onImportM3u,
     this.onExportM3u,
+    this.onExportFolder,
     this.onImportCue,
     this.onOpenSmartPlaylists,
     this.onTrash,
@@ -196,6 +198,7 @@ class PlaylistToolbar extends StatefulWidget {
   final VoidCallback? onHelp;
   final VoidCallback? onImportM3u;
   final VoidCallback? onExportM3u;
+  final VoidCallback? onExportFolder;
   final VoidCallback? onImportCue;
   final VoidCallback? onOpenSmartPlaylists;
   final VoidCallback? onTrash, onPresentation;
@@ -337,6 +340,13 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
               label: ui('导出 M3U8 歌单'),
               icon: Icons.file_download_outlined,
               onSelected: widget.canPlay ? widget.onExportM3u : null),
+        if (widget.onExportFolder != null)
+          _ToolbarMenuItem(
+              value: _PlaylistToolbarAction.exportFolder,
+              key: const ValueKey('playlist-export-folder'),
+              label: ui('导出音乐文件夹'),
+              icon: Icons.folder_copy_outlined,
+              onSelected: widget.canPlay ? widget.onExportFolder : null),
         _ToolbarMenuItem(
           value: _PlaylistToolbarAction.select,
           key: const ValueKey('playlist-start-selection'),

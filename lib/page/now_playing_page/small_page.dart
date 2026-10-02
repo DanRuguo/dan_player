@@ -136,7 +136,7 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
                 _NowPlayingVolDspSlider(),
                 PlaybackRateButton(),
                 _DesktopLyricSwitch(),
-                _NowPlayingMoreAction(),
+                NowPlayingMoreAction(),
               ],
             ),
           ),

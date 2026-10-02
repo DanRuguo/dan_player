@@ -8,6 +8,7 @@ import 'package:dan_player/library/personal_library.dart';
 import 'package:dan_player/component/smart_condition_editor.dart';
 import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -49,6 +50,7 @@ class SmartPlaylistsDialog extends StatefulWidget {
       this.libraryChanges,
       this.statistics,
       this.clock,
+      this.randomSeedFactory,
       this.evaluate,
       this.onPlay,
       this.onAddToPlaylist,
@@ -59,6 +61,9 @@ class SmartPlaylistsDialog extends StatefulWidget {
   final Listenable? libraryChanges;
   final PlaybackStatistics? statistics;
   final DateTime Function()? clock;
+
+  /// An ephemeral batch seed, never stored in a saved rule.
+  final int Function()? randomSeedFactory;
   final Future<List<Audio>> Function(SmartPlaylist, List<Audio>)? evaluate;
   final SelectedAudioAction? onPlay;
   final SelectedAudioAction? onAddToPlaylist;
@@ -90,6 +95,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
   bool _newRule = false;
   SmartCondition? _condition;
   int _editorEpoch = 0;
+  int? _randomSeed;
   SmartPlaylistSort _sort = SmartPlaylistSort.name;
   SmartPlaylistHistory _history = SmartPlaylistHistory.any;
   List<Audio> _audios = [];
@@ -155,6 +161,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
       _editingId = rule?.id ?? 'smart-${DateTime.now().microsecondsSinceEpoch}';
       _newRule = rule == null || asNew;
       _sort = rule?.sort ?? SmartPlaylistSort.name;
+      _randomSeed = _sort == SmartPlaylistSort.random ? _newRandomSeed() : null;
       _history = rule?.history ?? SmartPlaylistHistory.any;
       _storageError = null;
       _previewError = null;
@@ -336,6 +343,14 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
     }
   }
 
+  int _newRandomSeed() =>
+      widget.randomSeedFactory?.call() ?? math.Random().nextInt(0x7fffffff);
+
+  void _nextRandomBatch() {
+    _randomSeed = _newRandomSeed();
+    _queuePreview(immediate: true);
+  }
+
   Future<void> _preview(int generation) async {
     if (_editingId == null) return;
     final draft = _draft(forPreview: true);
@@ -355,6 +370,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
       _observedHistory = draft.usesPlaybackHistory ? _readHistory() : null;
       final results = await (widget.evaluate?.call(draft, library) ??
           draft.evaluate(library,
+              randomSeed: _randomSeed,
               statistics: _statistics,
               now: widget.clock?.call(),
               shouldCancel: () => !mounted || generation != _generation));
@@ -567,10 +583,22 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                           DropdownMenuItem(
                               value: sort, child: Text(ui(_sortLabel(sort))))
                       ],
+                      selectedItemBuilder: (_) => [
+                        for (final sort in SmartPlaylistSort.values)
+                          Tooltip(
+                            message: ui(_sortLabel(sort)),
+                            child: Text(ui(_sortLabel(sort)),
+                                maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ),
+                      ],
                       onChanged: _saving
                           ? null
                           : (value) {
                               if (value != null) {
+                                if (value == SmartPlaylistSort.random &&
+                                    _sort != SmartPlaylistSort.random) {
+                                  _randomSeed = _newRandomSeed();
+                                }
                                 _sort = value;
                                 _queuePreview();
                               }
@@ -579,7 +607,10 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                     _field('minimum', '最短时长（秒）', _minimum, number: true),
                     _field('maximum', '最长时长（秒）', _maximum, number: true),
                     _field('result-limit', '结果上限（首）', _resultLimit,
-                        number: true, hint: '排序后取前 N 首；留空不限'),
+                        number: true,
+                        hint: _sort == SmartPlaylistSort.random
+                            ? '随机抽取 N 首；留空打乱全部结果'
+                            : '排序后取前 N 首；留空不限'),
                   ])
                     SizedBox(width: width, child: field),
                   SizedBox(
@@ -642,12 +673,19 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
               Wrap(spacing: 8, runSpacing: 8, children: [
                 OutlinedButton.icon(
                     style: appToolbarControlStyle(context),
-                    key: const ValueKey('smart-refresh'),
-                    label: Text(ui('刷新')),
+                    key: ValueKey(_sort == SmartPlaylistSort.random
+                        ? 'smart-next-batch'
+                        : 'smart-refresh'),
+                    label: Text(
+                        ui(_sort == SmartPlaylistSort.random ? '换一批' : '刷新')),
                     onPressed: _previewing
                         ? null
-                        : () => _queuePreview(immediate: true),
-                    icon: const Icon(Symbols.refresh)),
+                        : _sort == SmartPlaylistSort.random
+                            ? _nextRandomBatch
+                            : () => _queuePreview(immediate: true),
+                    icon: Icon(_sort == SmartPlaylistSort.random
+                        ? Symbols.shuffle
+                        : Symbols.refresh)),
                 OutlinedButton.icon(
                     style: appToolbarControlStyle(context),
                     label: Text(ui('匹配详情')),
@@ -689,6 +727,13 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
               ]),
             if (_selecting) ...[
               const SizedBox(height: 8),
+              if (_sort == SmartPlaylistSort.random)
+                OutlinedButton.icon(
+                    style: appToolbarControlStyle(context),
+                    key: const ValueKey('smart-next-batch'),
+                    onPressed: _previewing ? null : _nextRandomBatch,
+                    icon: const Icon(Symbols.shuffle),
+                    label: Text(ui('换一批'))),
               OutlinedButton.icon(
                   style: appToolbarControlStyle(context),
                   key: const ValueKey('smart-ordinary'),
@@ -696,6 +741,11 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                       selected.isEmpty ? null : () => unawaited(_action(_add)),
                   icon: const Icon(Symbols.playlist_add),
                   label: Text(ui('加入或新建普通歌单…'))),
+            ],
+            if (_sort == SmartPlaylistSort.random) ...[
+              const SizedBox(height: 8),
+              Text(ui('每批按歌曲身份不重复抽取；不同批次可能重合。保存智能规则后，下次打开会重新抽样；加入普通歌单保留当前批次。'),
+                  key: const ValueKey('smart-random-help')),
             ],
           ]),
     );
@@ -1005,6 +1055,7 @@ String _sortLabel(SmartPlaylistSort sort) => switch (sort) {
       SmartPlaylistSort.mostPlayed => '播放次数从多到少',
       SmartPlaylistSort.leastPlayed => '播放次数从少到多',
       SmartPlaylistSort.albumTrack => '专辑与音轨顺序',
+      SmartPlaylistSort.random => '随机抽取',
     };
 
 String _historyLabel(SmartPlaylistHistory value) => switch (value) {

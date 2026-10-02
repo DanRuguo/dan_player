@@ -10,12 +10,14 @@ import 'package:dan_player/library/audio_duration_correction.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/library/personal_library.dart';
 import 'package:dan_player/library/track_resume_store.dart';
 import 'package:dan_player/src/bass/audio_segment.dart';
 import 'package:dan_player/online/online_music_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_state_store.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
+import 'package:dan_player/play_service/track_playback_settings.dart';
 import 'package:dan_player/play_service/playback_diagnostics.dart';
 import 'package:dan_player/play_service/playback_modes.dart';
 import 'package:dan_player/play_service/replay_gain.dart';
@@ -231,11 +233,116 @@ class PlaybackService extends ChangeNotifier {
   late final _playbackPitch = ValueNotifier(_player.playbackPitch);
   ValueNotifier<double> get playbackPitch => _playbackPitch;
   bool get supportsPlaybackPitch => _player.supportsPlaybackPitch;
+  final _trackPlaybackOwnership = TrackPlaybackOwnership();
+
+  TrackPlaybackSettings get defaultTrackPlaybackSettings =>
+      TrackPlaybackSettings(
+          rate: AppSettings.instance.experience.value.playbackRate,
+          pitch: AppSettings.instance.experience.value.playbackPitch);
+
+  TrackPlaybackCapture captureTrackPlaybackSettings() => (
+        track: nowPlaying?.stableTrackId,
+        session: _sourceRequestToken,
+        revision: _trackPlaybackOwnership.revision
+      );
+
+  /// Persistence is owned by PersonalLibrary. A late save can retain the
+  /// intended track's profile but cannot change a newer live session/command.
+  bool applySavedTrackPlaybackSettings(String track,
+      TrackPlaybackSettings? settings, TrackPlaybackCapture captured) {
+    if (_closed ||
+        !canEditQueue ||
+        isBuffering.value ||
+        !_trackPlaybackOwnership.accepts(captured,
+            track: track,
+            currentTrack: nowPlaying?.stableTrackId,
+            session: _sourceRequestToken)) {
+      return false;
+    }
+    _trackPlaybackOwnership.changedTrackSettings();
+    final applying = captureTrackPlaybackSettings();
+    _applyEffectiveTrackPlaybackSettings(
+        settings ?? defaultTrackPlaybackSettings);
+    return !_closed &&
+        _trackPlaybackOwnership.accepts(applying,
+            track: track,
+            currentTrack: nowPlaying?.stableTrackId,
+            session: _sourceRequestToken);
+  }
+
+  void _applyEffectiveTrackPlaybackSettings(TrackPlaybackSettings settings) {
+    settings.validate();
+    final previousPitch = _player.playbackPitch;
+    PlaybackStatistics.instance
+        .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
+    try {
+      if (!_player.setPlaybackPitch(settings.pitch)) {
+        throw StateError('Playback closed');
+      }
+      try {
+        if (!_player.setPlaybackRate(settings.rate)) {
+          throw StateError('Playback closed');
+        }
+      } catch (_) {
+        _player.setPlaybackPitch(previousPitch);
+        rethrow;
+      }
+    } finally {
+      _playbackRate.value = _player.playbackRate;
+      _playbackPitch.value = _player.playbackPitch;
+      PlaybackStatistics.instance
+          .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
+      playService.desktopLyricService.sendPlaybackTimelineMessage();
+    }
+  }
+
+  Future<TrackPlaybackSettings?> _readTrackPlaybackSettings(
+      Audio target) async {
+    try {
+      return await (await PersonalLibrary.instance)
+          .playbackFor(target.stableTrackId);
+    } catch (error, trace) {
+      LOGGER.w('[read track playback settings] $error', stackTrace: trace);
+      return null;
+    }
+  }
+
+  bool _applyOpenedTrackPlaybackSettings(
+      int token, TrackPlaybackRevision opening, TrackPlaybackSettings? saved) {
+    final settings = _trackPlaybackOwnership.resolve(
+        opening: opening, defaults: defaultTrackPlaybackSettings, saved: saved);
+    try {
+      _applyEffectiveTrackPlaybackSettings(settings);
+    } catch (error, trace) {
+      if (!_isCurrentSourceRequest(token)) return false;
+      try {
+        _applyEffectiveTrackPlaybackSettings(defaultTrackPlaybackSettings);
+      } catch (fallbackError, fallbackTrace) {
+        if (!_isCurrentSourceRequest(token)) return false;
+        try {
+          _applyEffectiveTrackPlaybackSettings(
+              const TrackPlaybackSettings(rate: 1, pitch: 0));
+        } catch (neutralError, neutralTrace) {
+          // Optional effects must not turn a successfully opened decoder
+          // into a source failure, even when the output disappeared meanwhile.
+          LOGGER.w('[neutral track playback settings] $neutralError',
+              stackTrace: neutralTrace);
+        }
+        LOGGER.w('[default track playback settings] $fallbackError',
+            stackTrace: fallbackTrace);
+      }
+      if (!_isCurrentSourceRequest(token)) return false;
+      LOGGER.w('[track playback settings] $error', stackTrace: trace);
+      showAppNotice(ui('本曲设置暂时无法应用：{0}', [error]), kind: AppNoticeKind.warning);
+    }
+    return _isCurrentSourceRequest(token);
+  }
 
   bool setPlaybackPitch(double pitch) {
     if (_closed) return false;
     try {
       if (!_player.setPlaybackPitch(pitch)) return false;
+      _trackPlaybackOwnership.changedPitch();
       _playbackPitch.value = _player.playbackPitch;
       AppSettings.instance.experience.value = AppSettings
           .instance.experience.value
@@ -257,6 +364,7 @@ class PlaybackService extends ChangeNotifier {
       PlaybackStatistics.instance
           .tick(nowPlaying, playerState, playbackRate: _player.playbackRate);
       if (!_player.setPlaybackRate(rate)) return false;
+      _trackPlaybackOwnership.changedRate();
       _playbackRate.value = _player.playbackRate;
       AppSettings.instance.experience.value = AppSettings
           .instance.experience.value
@@ -653,11 +761,13 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _applyQueueSnapshot(QueueSnapshot<QueueOccurrence<Audio>> snapshot) {
+    final sourceToken = _sourceRequestToken;
     _playlistIndex = snapshot.currentIndex < 0 ? null : snapshot.currentIndex;
     _backupOccurrences = snapshot.backup;
     _queueOccurrences = snapshot.items;
     _shuffleCycle = null;
     _publishQueue();
+    if (!_isCurrentSourceRequest(sourceToken)) return;
     _schedulePlaybackStateSave();
     notifyListeners();
   }
@@ -1279,6 +1389,7 @@ class PlaybackService extends ChangeNotifier {
     return _loadAndPlayResolved(token, audioIndex, playlist,
         allowTrackResume: allowTrackResume,
         seekRevision: _manualSeekRevision,
+        soundRevision: _trackPlaybackOwnership.revision,
         initialPosition: initialPosition,
         stillCurrent: stillCurrent);
   }
@@ -1289,6 +1400,7 @@ class PlaybackService extends ChangeNotifier {
     List<Audio> playlist, {
     required bool allowTrackResume,
     required int seekRevision,
+    required TrackPlaybackRevision soundRevision,
     double? initialPosition,
     bool Function()? stillCurrent,
   }) async {
@@ -1300,6 +1412,8 @@ class PlaybackService extends ChangeNotifier {
       _loadingPlaylistIndex = audioIndex;
       isBuffering.value = target.isOnline;
       resolvingAudioPath.value = target.path;
+      final savedSound = await _readTrackPlaybackSettings(target);
+      if (!_isCurrentSourceRequest(token)) return false;
       final source = target.isOnline
           ? (await OnlineMusicService.instance.resolveStreamUrl(target))
               .toString()
@@ -1345,6 +1459,10 @@ class PlaybackService extends ChangeNotifier {
       _playlistIndex = queueIndexForTrack(this.playlist.value, target.path,
           preferredIndex: _loadingPlaylistIndex);
       nowPlaying = target;
+      if (!_applyOpenedTrackPlaybackSettings(
+          token, soundRevision, savedSound)) {
+        return false;
+      }
       _lastProblem = null;
       // BASS has successfully opened the real byte stream at this point. Its
       // duration is authoritative when a misleading extension or damaged tag
@@ -1705,6 +1823,7 @@ class PlaybackService extends ChangeNotifier {
       audioIndex,
       playlist,
       savedPosition,
+      _trackPlaybackOwnership.revision,
     );
   }
 
@@ -1713,6 +1832,7 @@ class PlaybackService extends ChangeNotifier {
     int audioIndex,
     List<Audio> playlist,
     double savedPosition,
+    TrackPlaybackRevision soundRevision,
   ) async {
     try {
       if (audioIndex < 0 || audioIndex >= playlist.length) {
@@ -1722,6 +1842,8 @@ class PlaybackService extends ChangeNotifier {
       _loadingPlaylistIndex = audioIndex;
       isBuffering.value = target.isOnline;
       resolvingAudioPath.value = target.path;
+      final savedSound = await _readTrackPlaybackSettings(target);
+      if (!_isCurrentSourceRequest(token)) return;
       final source = target.isOnline
           ? (await OnlineMusicService.instance.resolveStreamUrl(target))
               .toString()
@@ -1737,6 +1859,10 @@ class PlaybackService extends ChangeNotifier {
       _playlistIndex = queueIndexForTrack(this.playlist.value, target.path,
           preferredIndex: _loadingPlaylistIndex);
       nowPlaying = target;
+      if (!_applyOpenedTrackPlaybackSettings(
+          token, soundRevision, savedSound)) {
+        return;
+      }
       _lastProblem = null;
       _observeNativeDuration(target);
       setVolumeDsp(AppPreference.instance.playbackPref.volumeDsp);

@@ -1,4 +1,13 @@
 import 'catalog_tap_lyric_editor.dart';
+import 'catalog_local_variants.dart';
+import 'catalog_playlist_folder.dart';
+import 'catalog_track_playback.dart';
+import 'catalog_loudness_analysis.dart';
+import 'catalog_audio_integrity.dart';
+import 'catalog_smart_random.dart';
+import 'catalog_lyric_find.dart';
+import 'catalog_replaygain_gain.dart';
+import 'catalog_lyric_segment_practice.dart';
 import 'catalog_listening_tools.dart';
 import 'catalog_offline_tools.dart';
 import 'catalog_practical_2606.dart';
@@ -69,6 +78,15 @@ import 'catalog_search_history.dart';
 import 'catalog_comments_feedback_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
+  ...catalogLocalVariants,
+  ...catalogPlaylistFolder,
+  ...catalogTrackPlayback,
+  ...catalogLoudnessAnalysis,
+  ...catalogAudioIntegrity,
+  ...catalogSmartRandom,
+  ...catalogLyricFind,
+  ...catalogReplaygainGain,
+  ...catalogLyricSegmentPractice,
   ...catalogListeningTools,
   ...catalogOfflineTools,
   ...catalogPractical2606,

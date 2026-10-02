@@ -9,8 +9,10 @@ import 'dart:io';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/local_lyric_reader.dart';
+import 'package:dan_player/lyric/local_lyric_variants.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
@@ -203,6 +205,7 @@ class LyricSourceDialog extends StatefulWidget {
     this.playbackListenable,
     this.positionStream,
     this.readPosition,
+    this.documentStore,
   });
 
   final Audio audio;
@@ -216,12 +219,16 @@ class LyricSourceDialog extends StatefulWidget {
   final Listenable? playbackListenable;
   final Stream<double>? positionStream;
   final double Function()? readPosition;
+  final LyricDocumentStore? documentStore;
 
   @override
   State<LyricSourceDialog> createState() => _LyricSourceDialogState();
 }
 
-class _LyricSourceDialogState extends State<LyricSourceDialog> {
+class _LyricSourceDialogState extends State<LyricSourceDialog>
+    with WidgetsBindingObserver {
+  LyricDocumentStore get _documents =>
+      widget.documentStore ?? LyricDocumentStore.instance;
   LyricSearchResponse? _response;
   String? _responseTrackId;
   bool _searching = true;
@@ -245,6 +252,10 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
   LyricSearchCancellation? _searchCancellation;
   bool _searchStopped = false;
   bool _previewQueueStopped = false;
+  LocalLyricVariants _localVariants = const LocalLyricVariants([]);
+  int _localVariantsGeneration = 0;
+  bool _localVariantsLoading = false;
+  bool _localVariantsFailed = false;
 
   Stream<double> get _positionStream =>
       widget.positionStream ??
@@ -392,7 +403,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
   }
 
   bool get _usingSavedDraft {
-    final document = LyricDocumentStore.instance.forAudio(widget.audio);
+    final document = _documents.forAudio(widget.audio);
     return document?.edited != null &&
         document?.draft != null &&
         jsonEncode(document!.edited!.toJson()) ==
@@ -406,17 +417,24 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _playbackListenable = widget.playbackListenable ??
         (widget.currentTrackPath == null
             ? PlayService.instance.playbackService
             : null);
     _playbackListenable?.addListener(_handlePlaybackChange);
     _trackChanged = _currentTrackPath() != widget.audio.path;
+    unawaited(_loadLocalVariants());
     if (_trackChanged) {
       _searching = false;
     } else {
       unawaited(_search());
     }
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (mounted && !_closed) setState(() {});
   }
 
   @override
@@ -436,6 +454,9 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
         oldWidget.searchWithProgress != widget.searchWithProgress) {
       _selectionGeneration++;
       unawaited(_search());
+    }
+    if (oldWidget.audio.path != widget.audio.path) {
+      unawaited(_loadLocalVariants());
     }
     _handlePlaybackChange();
   }
@@ -557,11 +578,87 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
   bool _isSelectionCurrent(int generation) =>
       mounted && !_closed && generation == _selectionGeneration;
 
+  Future<void> _loadLocalVariants() async {
+    if (!widget.audio.isLocal || widget.audio.isCueTrack) return;
+    final generation = ++_localVariantsGeneration;
+    final audio = widget.audio;
+    bool active() =>
+        mounted &&
+        !_closed &&
+        generation == _localVariantsGeneration &&
+        widget.audio.path == audio.path;
+    setState(() {
+      _localVariantsLoading = true;
+      _localVariantsFailed = false;
+      _localVariants = const LocalLyricVariants([]);
+    });
+    try {
+      final result = await findLocalLyricVariants(audio, stillCurrent: active);
+      if (active()) setState(() => _localVariants = result);
+    } catch (_) {
+      if (active()) setState(() => _localVariantsFailed = true);
+    } finally {
+      if (active()) setState(() => _localVariantsLoading = false);
+    }
+  }
+
+  Future<void> _selectLocalVariant(LocalLyricVariant variant) async {
+    if (_trackChanged || _loadingCandidate != null) return;
+    final generation = ++_selectionGeneration;
+    final audio = widget.audio;
+    final store = _documents;
+    final revision = store.revisionFor(audio);
+    final session = widget.currentTrackPath == null
+        ? PlayService.instance.lyricService.resolutionGeneration
+        : null;
+    bool active() =>
+        _isSelectionCurrent(generation) &&
+        !_trackChanged &&
+        _currentTrackPath() == audio.path &&
+        (session == null ||
+            PlayService.instance.lyricService.resolutionGeneration == session);
+    _stopSearchForSelection();
+    setState(() {
+      _loadingCandidate = variant.path;
+      _operationError = null;
+    });
+    try {
+      final lyric =
+          await readLocalLyric(audio, variant: variant, stillCurrent: active);
+      if (!active()) return;
+      if (lyric == null || lyric.lines.isEmpty) {
+        setState(() => _operationError = () => ui('该本地版本无法读取，已保留之前保存的歌词。'));
+        return;
+      }
+      await store.select(audio, lyric,
+          source: LyricSource(LyricSourceType.local),
+          expectedRevision: revision,
+          stillCurrent: active);
+      // The successful document write itself advances lyric resolution. That
+      // is not a stale selection; only dialog/track ownership matters now.
+      if (mounted &&
+          _isSelectionCurrent(generation) &&
+          _currentTrackPath() == audio.path) {
+        Navigator.of(context).pop();
+      }
+    } catch (error) {
+      if (active()) {
+        setState(() => _operationError = error is StaleLyricRevision
+            ? () => ui('歌词已被另一操作修改，旧结果未覆盖当前版本，请重新打开后重试。')
+            : () => ui('保存本地歌词来源失败，旧设置已保留，请重试。'));
+      }
+    } finally {
+      if (_isSelectionCurrent(generation)) {
+        setState(() => _loadingCandidate = null);
+      }
+    }
+  }
+
   Future<void> _selectDraft() async {
     if (_trackChanged || _loadingCandidate != null) return;
     final generation = ++_selectionGeneration;
     _stopSearchForSelection();
-    final store = LyricDocumentStore.instance;
+    final store = _documents;
     final revision = store.revisionFor(widget.audio);
     setState(() {
       _loadingCandidate = 'draft';
@@ -597,7 +694,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
     });
     try {
       if (widget.persistSource == null) {
-        final store = LyricDocumentStore.instance;
+        final store = _documents;
         final revision = store.revisionFor(widget.audio);
         final service = PlayService.instance.lyricService;
         final session = service.resolutionGeneration;
@@ -666,7 +763,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
     var stage =
         0; // Fetch, persist, then apply have different recovery actions.
     final documentRevision = widget.persistSource == null
-        ? LyricDocumentStore.instance.revisionFor(widget.audio)
+        ? _documents.revisionFor(widget.audio)
         : null;
     final session =
         widget.persistSource == null && widget.currentTrackPath == null
@@ -693,7 +790,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
       if (widget.persistSource != null && source != null) {
         await widget.persistSource!(widget.audio.path, source);
       } else {
-        await LyricDocumentStore.instance.select(widget.audio, lyric,
+        await _documents.select(widget.audio, lyric,
             source: source,
             expectedRevision: documentRevision,
             stillCurrent: stillCurrent);
@@ -780,9 +877,8 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
             };
 
   bool _isCurrentCandidate(SongSearchResult candidate) {
-    final configured =
-        LyricDocumentStore.instance.forAudio(widget.audio)?.source ??
-            LYRIC_SOURCES[widget.audio.path];
+    final configured = _documents.forAudio(widget.audio)?.source ??
+        LYRIC_SOURCES[widget.audio.path];
     if (configured != null) {
       return configured.matches(
         candidateSource: switch (candidate.source) {
@@ -814,9 +910,11 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
   @override
   void dispose() {
     _closed = true;
+    WidgetsBinding.instance.removeObserver(this);
     _searchCancellation?.cancel();
     _searchGeneration++;
     _selectionGeneration++;
+    _localVariantsGeneration++;
     _clearPreviews();
     _scrollController.dispose();
     _playbackListenable?.removeListener(_handlePlaybackChange);
@@ -915,9 +1013,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                                   ),
                                 ),
                               if (widget.audio.isLocal &&
-                                  LyricDocumentStore.instance
-                                          .forAudio(widget.audio)
-                                          ?.draft !=
+                                  _documents.forAudio(widget.audio)?.draft !=
                                       null)
                                 ListTile(
                                     key: const ValueKey('lyric-source-draft'),
@@ -960,7 +1056,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                                                   ? null
                                                   : .7),
                                         )
-                                      : (LyricDocumentStore.instance
+                                      : (_documents
                                                               .forAudio(
                                                                   widget.audio)
                                                               ?.source ??
@@ -974,6 +1070,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                                   shape: AppShape.control,
                                   onTap: _selectLocal,
                                 ),
+                                ..._buildLocalVariants(),
                                 const Divider(),
                               ],
                             ],
@@ -982,6 +1079,77 @@ class _LyricSourceDialogState extends State<LyricSourceDialog> {
                         ],
                       ))),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildLocalVariants() => [
+        Row(children: [
+          Expanded(
+              child: Text(ui('本地语言版本'),
+                  style: Theme.of(context).textTheme.titleSmall)),
+          IconButton(
+            key: const ValueKey('lyric-local-variants-refresh'),
+            tooltip: ui('刷新本地语言版本'),
+            onPressed: _localVariantsLoading ||
+                    _loadingCandidate != null ||
+                    _trackChanged
+                ? null
+                : _loadLocalVariants,
+            icon: const Icon(Symbols.refresh),
+          ),
+        ]),
+        Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+                ui('识别同目录的“歌名.ja.lrc”等语言标记文件；明确选择后保存该版本，不按界面语言自动选择或混合。'),
+                style: Theme.of(context).textTheme.bodySmall)),
+        if (_localVariantsLoading)
+          Padding(
+              padding: const EdgeInsets.all(8), child: Text(ui('正在查找本地语言版本…'))),
+        if (_localVariantsFailed)
+          _MessagePanel(
+              message: ui('无法读取本地语言版本，请检查文件夹权限后刷新。'),
+              color: Theme.of(context).colorScheme.errorContainer)
+        else if (!_localVariantsLoading && _localVariants.candidates.isEmpty)
+          Text(ui('没有找到带语言标记的本地歌词。')),
+        for (final variant in _localVariants.candidates)
+          ListTile(
+            key: ValueKey('lyric-local-variant-${variant.filename}'),
+            shape: AppShape.control,
+            enabled: !_trackChanged && _loadingCandidate == null,
+            leading: const Icon(Symbols.translate),
+            title: Text(ui('使用本地版本 · {0}', [variant.languageTag])),
+            subtitle: Text(variant.filename),
+            trailing: _loadingCandidate == variant.path
+                ? _localVariantProgress()
+                : const Icon(Symbols.chevron_right),
+            onTap: () => _selectLocalVariant(variant),
+          ),
+        if (_localVariants.truncated)
+          Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(ui('文件夹过大，仅列出部分语言版本；可将歌曲和所需歌词放入较小文件夹。'))),
+      ];
+
+  Widget _localVariantProgress() {
+    final reduceMotion = appToolbarReduceMotion(context);
+    return SizedBox.square(
+      dimension: 20,
+      child: Semantics(
+        key: const ValueKey('lyric-local-variant-loading'),
+        container: true,
+        label: ui('正在加载歌词…'),
+        child: ExcludeSemantics(
+          child: TickerMode(
+            enabled: !reduceMotion,
+            child: CircularProgressIndicator(
+              key: const ValueKey('lyric-local-variant-progress'),
+              strokeWidth: 2,
+              value: reduceMotion ? 0 : null,
+            ),
           ),
         ),
       ),
