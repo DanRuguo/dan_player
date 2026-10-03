@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
 import 'package:dan_player/play_service/playback_pitch.dart';
+import 'package:dan_player/taskbar_lyrics_preferences.dart';
 
 /// Additive preferences for the desktop/player experience. Missing or damaged
 /// fields use defaults without migrating the library or changing playlist data.
@@ -9,6 +10,8 @@ class PlayerExperiencePreferences {
   const PlayerExperiencePreferences({
     this.closeToTray = false,
     this.taskbarControls = true,
+    this.taskbarLyrics = false,
+    this.taskbarAppearance = const TaskbarLyricsPreferences(),
     this.taskbarSongPreview = true,
     this.taskbarPlaybackProgress = true,
     this.trayMenuBlurRadius = 0,
@@ -28,6 +31,8 @@ class PlayerExperiencePreferences {
 
   final bool closeToTray;
   final bool taskbarControls;
+  final bool taskbarLyrics;
+  final TaskbarLyricsPreferences taskbarAppearance;
   final bool taskbarSongPreview;
   final bool taskbarPlaybackProgress;
 
@@ -92,6 +97,8 @@ class PlayerExperiencePreferences {
   PlayerExperiencePreferences copyWith({
     bool? closeToTray,
     bool? taskbarControls,
+    bool? taskbarLyrics,
+    TaskbarLyricsPreferences? taskbarAppearance,
     bool? taskbarSongPreview,
     bool? taskbarPlaybackProgress,
     double? trayMenuBlurRadius,
@@ -124,6 +131,8 @@ class PlayerExperiencePreferences {
     return PlayerExperiencePreferences(
       closeToTray: closeToTray ?? this.closeToTray,
       taskbarControls: taskbarControls ?? this.taskbarControls,
+      taskbarLyrics: taskbarLyrics ?? this.taskbarLyrics,
+      taskbarAppearance: taskbarAppearance ?? this.taskbarAppearance,
       taskbarSongPreview: taskbarSongPreview ?? this.taskbarSongPreview,
       taskbarPlaybackProgress:
           taskbarPlaybackProgress ?? this.taskbarPlaybackProgress,
@@ -152,6 +161,8 @@ class PlayerExperiencePreferences {
   Map<String, Object> toMap() => {
         'closeToTray': closeToTray,
         'taskbarControls': taskbarControls,
+        'taskbarLyrics': taskbarLyrics,
+        'taskbarAppearance': taskbarAppearance.toMap(),
         'taskbarSongPreview': taskbarSongPreview,
         'taskbarPlaybackProgress': taskbarPlaybackProgress,
         'trayMenuBlurRadius': safeTrayMenuBlurRadius(trayMenuBlurRadius),
@@ -183,6 +194,9 @@ class PlayerExperiencePreferences {
     return PlayerExperiencePreferences(
       closeToTray: flag('closeToTray', defaults.closeToTray),
       taskbarControls: flag('taskbarControls', defaults.taskbarControls),
+      taskbarLyrics: flag('taskbarLyrics', defaults.taskbarLyrics),
+      taskbarAppearance:
+          TaskbarLyricsPreferences.fromMap(value['taskbarAppearance']),
       taskbarSongPreview:
           flag('taskbarSongPreview', defaults.taskbarSongPreview),
       taskbarPlaybackProgress:
@@ -210,6 +224,8 @@ class PlayerExperiencePreferences {
       other is PlayerExperiencePreferences &&
       closeToTray == other.closeToTray &&
       taskbarControls == other.taskbarControls &&
+      taskbarLyrics == other.taskbarLyrics &&
+      taskbarAppearance == other.taskbarAppearance &&
       taskbarSongPreview == other.taskbarSongPreview &&
       taskbarPlaybackProgress == other.taskbarPlaybackProgress &&
       trayMenuBlurRadius == other.trayMenuBlurRadius &&
@@ -230,6 +246,8 @@ class PlayerExperiencePreferences {
   int get hashCode => Object.hash(
       closeToTray,
       taskbarControls,
+      taskbarLyrics,
+      taskbarAppearance,
       taskbarSongPreview,
       taskbarPlaybackProgress,
       trayMenuBlurRadius,

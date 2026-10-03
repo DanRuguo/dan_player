@@ -409,8 +409,8 @@ class _PlaylistTreePaneState<T> extends State<PlaylistTreePane<T>>
     await _enqueueExpansionCommit();
   }
 
-  // Only mounted rows own layout. Walk by viewport when a target is virtualized,
-  // then use its actual geometry; never assume song and folder heights match.
+  // Resolve boundary groups from scroll extents, so Home/End are not limited by
+  // the viewport walk budget. Interior targets still use their actual geometry.
   Future<void> _focusRow(String id) async {
     final epoch = ++_navigationEpoch;
     await WidgetsBinding.instance.endOfFrame;
@@ -433,10 +433,14 @@ class _PlaylistTreePaneState<T> extends State<PlaylistTreePane<T>>
         final direction =
             mountedIndex < 0 || targetGroup >= mountedIndex ? 1 : -1;
         final position = _scroll.position;
-        final next =
-            (_scroll.offset + direction * position.viewportDimension * .8)
-                .clamp(position.minScrollExtent, position.maxScrollExtent)
-                .toDouble();
+        final next = (targetGroup == 0
+                ? position.minScrollExtent
+                : targetGroup == groups.length - 1
+                    ? position.maxScrollExtent
+                    : _scroll.offset +
+                        direction * position.viewportDimension * .8)
+            .clamp(position.minScrollExtent, position.maxScrollExtent)
+            .toDouble();
         if (next == _scroll.offset) return;
         _scroll.jumpTo(next);
         await WidgetsBinding.instance.endOfFrame;

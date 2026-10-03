@@ -600,6 +600,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   int _readingRequest = 0;
   int _readRevealGeneration = 0;
   LyricReadingTarget? _readDestination;
+  ({LyricReadingTarget target, double screenY})? _readingReflowAnchor;
+  double? _readingReflowTop;
+  int _readingReflowGeneration = 0;
   bool _dragging = false;
   final _scrollPointers = <int>{};
   Object? _geometryIdentity;
@@ -731,6 +734,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
 
   void _syncActivity() {
     if (_exiting) {
+      _clearReadingReflowAnchor();
       _settingsAnchor = false;
       _fontSettingActive = false;
       _snapFontOnLineChange = false;
@@ -786,6 +790,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
           forceFollow: true, immediate: true);
       _scheduleReadingReveal(immediate: true);
     } else {
+      _clearReadingReflowAnchor();
       _settingsAnchor = false;
       _fontSettingActive = false;
       _snapFontOnLineChange = false;
@@ -810,6 +815,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   void _resetLyric() {
     _readDestination = null;
     _readRevealGeneration++;
+    _clearReadingReflowAnchor();
     _settingsAnchor = false;
     _followTopInset = null;
     _fontSettingActive = false;
@@ -901,32 +907,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       final position = _scrollController.position;
       var offset =
           RenderAbstractViewport.of(row).getOffsetToReveal(row, .2).offset;
-      final textOffset = target.textOffset;
-      if (textOffset != null &&
-          rowContext is Element &&
-          target.line is UnsyncLyricLine) {
-        final text = (target.line as UnsyncLyricLine).content.split('┃').first;
-        double? glyphY;
-        void visit(Element element) {
-          if (glyphY != null) return;
-          if (element is StatefulElement &&
-              element.state is LyricTextReadingGeometry) {
-            final geometry = element.state as LyricTextReadingGeometry;
-            if (geometry.readingText == text) {
-              glyphY = geometry.readingGlobalY(textOffset);
-            }
-          }
-          if (glyphY == null) element.visitChildren(visit);
-        }
-
-        visit(rowContext);
-        if (glyphY != null) {
-          offset =
-              RenderAbstractViewport.of(row).getOffsetToReveal(row, 0).offset +
-                  glyphY! -
-                  row.localToGlobal(Offset.zero).dy -
-                  position.viewportDimension * .2;
-        }
+      final glyphY = _readingGlyphY(target);
+      if (glyphY != null) {
+        offset =
+            RenderAbstractViewport.of(row).getOffsetToReveal(row, 0).offset +
+                glyphY -
+                row.localToGlobal(Offset.zero).dy -
+                position.viewportDimension * .2;
       }
       offset = offset.clamp(position.minScrollExtent, position.maxScrollExtent);
       final reduced = _motionHidden || LyricMotion.reducedOf(context);
@@ -936,6 +923,72 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         unawaited(_scrollController.animateTo(offset,
             duration: LyricMotion.seekScrollDuration,
             curve: LyricMotion.scrollCurve));
+      }
+    });
+  }
+
+  double? _readingGlyphY(LyricReadingTarget target,
+      {RenderBox? layoutAncestor}) {
+    final rowContext = _lineKeys[target.index].currentContext;
+    if (target.textOffset == null ||
+        rowContext is! Element ||
+        target.line is! UnsyncLyricLine) {
+      return null;
+    }
+    final text = (target.line as UnsyncLyricLine).content.split('┃').first;
+    double? result;
+    void visit(Element element) {
+      if (result != null) return;
+      if (element is StatefulElement &&
+          element.state is LyricTextReadingGeometry) {
+        final geometry = element.state as LyricTextReadingGeometry;
+        if (geometry.readingText == text) {
+          result = layoutAncestor == null
+              ? geometry.readingGlobalY(target.textOffset!)
+              : geometry.readingLayoutY(target.textOffset!, layoutAncestor);
+        }
+      }
+      if (result == null) element.visitChildren(visit);
+    }
+
+    visit(rowContext);
+    return result;
+  }
+
+  void _clearReadingReflowAnchor() {
+    _readingReflowAnchor = null;
+    _readingReflowTop = null;
+    _readingReflowGeneration++;
+  }
+
+  void _captureReadingReflowAnchor() {
+    final target = _readDestination;
+    if (!_active ||
+        !_readingMode ||
+        _manualScrollActive ||
+        target == null ||
+        !target.belongsTo(widget.lyric) ||
+        !_scrollController.hasClients) {
+      return;
+    }
+    final row = _lineKeys[target.index].currentContext?.findRenderObject();
+    if (row is! RenderBox || !row.attached || !row.hasSize) return;
+    final localY =
+        (_readingGlyphY(target) ?? row.localToGlobal(Offset.zero).dy) -
+            row.localToGlobal(Offset.zero).dy;
+    final top = RenderAbstractViewport.of(row).getOffsetToReveal(row, 0).offset;
+    _readingReflowAnchor = (
+      target: target,
+      screenY: top + localY - _scrollController.offset,
+    );
+    _readingReflowTop = null;
+    // The target glyph is already shaped. The anchor column publishes its
+    // new local position after child layout, before viewport dimensions paint.
+    final generation = ++_readingReflowGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && generation == _readingReflowGeneration) {
+        _readingReflowAnchor = null;
+        _readingReflowTop = null;
       }
     });
   }
@@ -1118,6 +1171,16 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   double? _layoutAnchorOffset(ScrollMetrics dimensions) {
+    final reading = _readingReflowAnchor;
+    if (_active &&
+        _readingMode &&
+        !_manualScrollActive &&
+        reading != null &&
+        reading.target.belongsTo(widget.lyric) &&
+        _readingReflowTop != null) {
+      return (_anchorLeading + _readingReflowTop! - reading.screenY)
+          .clamp(dimensions.minScrollExtent, dimensions.maxScrollExtent);
+    }
     final setting = _settingsAnchor && _settingsAnchorLine == _currentLine;
     final resizing = _resizeAnchor && _resizeAnchorLine == _currentLine;
     if ((!setting && !resizing) ||
@@ -1226,6 +1289,11 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
 
   void _markManualInteraction({bool dragging = false}) {
     if (!_active) return;
+    // A pointer/wheel now owns the reading location. A previously found word
+    // must not pull the viewport back after a resize or hidden-window return.
+    _readDestination = null;
+    _readRevealGeneration++;
+    _clearReadingReflowAnchor();
     _settingsAnchor = false;
     _followGeneration++;
     final enteringManual = !_manualScrollActive;
@@ -1503,6 +1571,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     final settings = context.watch<LyricViewController>();
     if (_readingMode != settings.readingMode) {
       _readingMode = settings.readingMode;
+      _clearReadingReflowAnchor();
       _settingsAnchor = false;
       _manualScrollTimer?.cancel();
       _followGeneration++;
@@ -1525,12 +1594,14 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _dragging = false;
       _readDestination = null;
       _readRevealGeneration++;
+      _clearReadingReflowAnchor();
       _scheduleFollow(seek: true);
     }
     if (_readingRequest != settings.readingRequest) {
       _readingRequest = settings.readingRequest;
       _readRevealGeneration++;
       _readDestination = settings.readingTarget;
+      _clearReadingReflowAnchor();
       _manualScrollTimer?.cancel();
       _manualScrollActive = false;
       _settingsAnchor = false;
@@ -1555,7 +1626,14 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _syncPresentationTicker();
     final fontIdentity = (settings.lyricFontSize, settings.translationFontSize);
     if (_fontIdentity != null && _fontIdentity != fontIdentity) {
-      _snapFontOnLineChange = false;
+      // A found word deep inside one plain paragraph is the reading anchor.
+      // Commit its font endpoint before reflow: scaling a whole long paragraph
+      // around its first baseline would pull that distant word out of view.
+      _snapFontOnLineChange = _readingMode &&
+          !_manualScrollActive &&
+          widget.lyric is PlainLyric &&
+          _readDestination?.textOffset != null &&
+          _readDestination!.belongsTo(widget.lyric);
       _fontSettingActive = !reduced &&
           !settings.directFontSize &&
           !_manualScrollActive &&
@@ -1648,6 +1726,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         );
         final geometryChanged =
             _geometryIdentity != null && _geometryIdentity != geometryIdentity;
+        if (geometryChanged) _captureReadingReflowAnchor();
         final presentationChanged = _presentationIdentity != null &&
             _presentationIdentity != presentationIdentity;
         final previousPresentation =
@@ -1813,9 +1892,24 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                           sliver: SliverToBoxAdapter(
                             child: _LyricAnchorColumn(
-                              index: _currentLine,
-                              onGeometry: (geometry) =>
-                                  _anchorGeometry = geometry,
+                              index: _readingReflowAnchor?.target.index ??
+                                  _currentLine,
+                              onGeometry: (geometry) {
+                                final reading = _readingReflowAnchor;
+                                if (reading == null) {
+                                  _anchorGeometry = geometry;
+                                  return;
+                                }
+                                final row = _lineKeys[reading.target.index]
+                                    .currentContext
+                                    ?.findRenderObject();
+                                if (row is RenderBox && row.hasSize) {
+                                  _readingReflowTop = geometry.top +
+                                      (_readingGlyphY(reading.target,
+                                              layoutAncestor: row) ??
+                                          0);
+                                }
+                              },
                               children: [
                                 for (var index = 0;
                                     index < widget.lyric.lines.length;

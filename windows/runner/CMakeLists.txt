@@ -12,6 +12,7 @@ set(DESKTOP_LYRIC_RUNNER "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/desktop_
 # Any new source files that you add to the application should be added here.
 add_executable(${BINARY_NAME} WIN32
   "desktop_integration.cpp"
+  "taskbar_lyrics.cpp"
   "flutter_window.cpp"
   "installer_launch_core.cpp"
   "installer_launcher.cpp"
@@ -57,6 +58,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib" "comctl32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib" "uuid.lib"
   "gdi32.lib" "advapi32.lib" "bcrypt.lib" "crypt32.lib" "wintrust.lib" "version.lib" "propsys.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "uiautomationcore.lib" "gdiplus.lib" "usp10.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
@@ -152,6 +154,61 @@ set_target_properties(desktop_integration_fonts_test PROPERTIES
 add_executable(taskbar_thumbnail_policy_test EXCLUDE_FROM_ALL
   "tests/taskbar_thumbnail_policy_test.cpp"
 )
+add_executable(taskbar_lyrics_policy_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyrics_policy_test.cpp" "taskbar_lyrics.cpp")
+target_compile_definitions(taskbar_lyrics_policy_test PRIVATE NOMINMAX UNICODE _UNICODE)
+target_link_libraries(taskbar_lyrics_policy_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyrics_policy_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyrics_policy_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+add_executable(taskbar_lyrics_surface_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyrics_surface_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_lyrics_surface_test PRIVATE NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_lyrics_surface_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyrics_surface_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyrics_surface_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+add_executable(taskbar_lyrics_adaptation_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyrics_adaptation_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_lyrics_adaptation_test PRIVATE NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_lyrics_adaptation_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyrics_adaptation_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyrics_adaptation_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+add_executable(taskbar_lyrics_interaction_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyrics_interaction_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_lyrics_interaction_test PRIVATE NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_lyrics_interaction_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyrics_interaction_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyrics_interaction_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+add_executable(taskbar_lyrics_shell_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyrics_shell_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_lyrics_shell_test PRIVATE NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_lyrics_shell_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyrics_shell_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyrics_shell_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
 target_compile_definitions(taskbar_thumbnail_policy_test PRIVATE "NOMINMAX")
 set_target_properties(taskbar_thumbnail_policy_test PROPERTIES
   CXX_STANDARD 17

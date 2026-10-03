@@ -42,7 +42,7 @@ void main() {
     expect(rig.playback.starts, 0);
     expect(find.text('关闭窗口后在后台继续播放'), findsNothing,
         reason: 'close behavior now shares the backup settings section');
-    expect(find.textContaining('不在任务栏显示歌词'), findsOneWidget);
+    expect(find.text('悬停任务栏图标时显示上一首、播放/暂停和下一首。'), findsOneWidget);
     await tester.pumpWidget(
         const MaterialApp(home: DesktopVisibilityHost(child: Text('cold'))));
     expect(PlayService.isInitialized, isFalse);

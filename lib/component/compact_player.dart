@@ -6,6 +6,7 @@ import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/compact_lyric_view.dart';
+import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -736,7 +737,8 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
           Expanded(
             child: Semantics(
               label: ui("播放进度"),
-              child: Listener(
+              child: PrimaryPointerInput(
+                  child: Listener(
                 onPointerDown: (event) => _seekPointer ??= event.pointer,
                 onPointerUp: (event) {
                   if (_seekPointer == event.pointer) _seekPointer = null;
@@ -773,7 +775,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
                     onChangeEnd: _canSeek ? _finishSeek : null,
                   ),
                 ),
-              ),
+              )),
             ),
           ),
           SizedBox(

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:desktop_lyric/appearance_controller.dart';
 import 'package:desktop_lyric/appearance_palette_bridge.dart';
 import 'package:desktop_lyric/app_presentation.dart';
+import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
 import 'package:desktop_lyric/desktop_lyric_window_layout.dart';
 import 'package:desktop_lyric/message.dart';
@@ -116,9 +117,31 @@ class DesktopLyricAppearanceButton extends StatefulWidget {
 }
 
 class _DesktopLyricAppearanceButtonState
-    extends State<DesktopLyricAppearanceButton> {
+    extends State<DesktopLyricAppearanceButton> with WidgetsBindingObserver {
   bool _opening = false;
   bool _starting = false;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   Future<void> _open() async {
     if (_opening) return;
     final host = widget.paletteHost ??
@@ -152,6 +175,17 @@ class _DesktopLyricAppearanceButtonState
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final features =
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    final visible = lifecycle == null ||
+        lifecycle == AppLifecycleState.resumed ||
+        lifecycle == AppLifecycleState.inactive;
+    final feedback = AppMotion.enabled(context, MotionKind.feedback) &&
+        !features.disableAnimations &&
+        !features.reduceMotion &&
+        TickerMode.valuesOf(context).enabled &&
+        visible;
     return ValueListenableBuilder(
       valueListenable: widget.controller.theme,
       builder: (context, theme, _) => ValueListenableBuilder(
@@ -167,18 +201,31 @@ class _DesktopLyricAppearanceButtonState
               visualDensity: VisualDensity.standard,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap),
           icon: _starting
-              ? SizedBox.square(
-                  dimension: widget.iconSize - 4,
-                  child: CircularProgressIndicator(
-                      key: const ValueKey('desktop-appearance-starting'),
-                      value:
-                          MediaQuery.maybeDisableAnimationsOf(context) == true
-                              ? .75
-                              : null,
-                      strokeWidth: 2,
-                      color: Color(
-                          context.watch<ThemeChangedMessage?>()?.primary ??
-                              theme.primary)))
+              ? Semantics(
+                  key: const ValueKey('desktop-appearance-busy'),
+                  label: ui('正在打开歌词外观…'),
+                  liveRegion: true,
+                  child: ExcludeSemantics(
+                    key:
+                        const ValueKey('desktop-appearance-progress-semantics'),
+                    child: SizedBox.square(
+                      dimension: widget.iconSize - 4,
+                      child: CircularProgressIndicator(
+                        key: const ValueKey('desktop-appearance-starting'),
+                        value: feedback ? null : 0,
+                        strokeWidth: 2,
+                        backgroundColor: Color(context
+                                    .watch<ThemeChangedMessage?>()
+                                    ?.primary ??
+                                theme.primary)
+                            .withValues(alpha: .2),
+                        color: Color(
+                            context.watch<ThemeChangedMessage?>()?.primary ??
+                                theme.primary),
+                      ),
+                    ),
+                  ),
+                )
               : Icon(Symbols.palette, size: widget.iconSize),
         ),
       ),

@@ -2,6 +2,7 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/library/playback_bookmarks.dart';
 import 'package:dan_player/utils.dart' show showAppNotice;
 import 'package:dan_player/rendering_preferences.dart';
@@ -635,7 +636,8 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                       _hoverPosition.value = null;
                       setState(() => _hovered = false);
                     },
-                    child: Listener(
+                    child: PrimaryPointerInput(
+                        child: Listener(
                       onPointerDown: (event) => _pointer ??= event.pointer,
                       onPointerUp: (event) {
                         if (_pointer == event.pointer) _pointer = null;
@@ -701,7 +703,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                           ),
                         ),
                       ),
-                    ),
+                    )),
                   ),
                 ))),
         DetailTimelineScale(duration: _length),

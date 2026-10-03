@@ -56,6 +56,7 @@ const _$ControlEventEnumMap = {
   ControlEvent.nextAudio: 3,
   ControlEvent.lock: 4,
   ControlEvent.close: 5,
+  ControlEvent.taskbarLyrics: 6,
 };
 
 PreferenceChangedMessage _$PreferenceChangedMessageFromJson(

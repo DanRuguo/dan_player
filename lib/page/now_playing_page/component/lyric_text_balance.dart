@@ -221,6 +221,7 @@ class BalancedLyricText extends StatefulWidget {
 abstract interface class LyricTextReadingGeometry {
   String get readingText;
   double? readingGlobalY(int offset);
+  double? readingLayoutY(int offset, RenderBox ancestor);
 }
 
 class _BalancedLyricTextState extends State<BalancedLyricText>
@@ -229,7 +230,27 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
   String get readingText => widget.text;
 
   @override
-  double? readingGlobalY(int offset) {
+  double? readingGlobalY(int offset) =>
+      _readingY(offset, (box, point) => box.localToGlobal(point).dy);
+
+  @override
+  double? readingLayoutY(int offset, RenderBox ancestor) =>
+      _readingY(offset, (box, point) {
+        // The viewport needs layout coordinates before paint. Walking layout
+        // offsets avoids reading an ancestor Transform's size while a more
+        // distant parent is laying out; paint-only emphasis stays separate.
+        RenderObject? current = box;
+        var local = point;
+        while (current != null && !identical(current, ancestor)) {
+          final data = current.parentData;
+          if (data is BoxParentData) local += data.offset;
+          current = current.parent;
+        }
+        return identical(current, ancestor) ? local.dy : null;
+      });
+
+  double? _readingY(
+      int offset, double? Function(RenderBox box, Offset point) map) {
     if (offset < 0 || offset >= widget.text.length) return null;
     double? result;
     final end = offset +
@@ -244,7 +265,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
       if (object is RenderParagraph && object.hasSize) {
         final boxes = object.getBoxesForSelection(selection);
         if (boxes.isNotEmpty) {
-          result = object.localToGlobal(Offset(0, boxes.first.top)).dy;
+          result = map(object, Offset(0, boxes.first.top));
         }
       } else if (object is RenderCustomPaint &&
           object.hasSize &&
@@ -253,10 +274,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
         if (identical(painter.text, _painter)) {
           final boxes = painter.text.getBoxesForSelection(selection);
           if (boxes.isNotEmpty) {
-            result = object
-                .localToGlobal(
-                    Offset(0, boxes.first.top + painter.inkOffset.dy))
-                .dy;
+            result =
+                map(object, Offset(0, boxes.first.top + painter.inkOffset.dy));
           }
         }
       }
@@ -269,6 +288,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
   }
 
   Object? _identity;
+  Object? _shapeIdentity;
   double? _width;
   TextPainter? _painter;
   List<LyricFollowWordSlot> _slots = const [];
@@ -300,25 +320,31 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
       final paintAlign =
           widget.alignmentX == null ? widget.textAlign : TextAlign.left;
       final needsPainter = widget.wordFollow || widget.alignmentX != null;
-      final identity = (
+      final shapeIdentity = (
         widget.text,
         style,
         paintAlign,
         direction,
         scaler,
         locale,
-        textHeightBehavior,
-        textMaxWidth
+        textHeightBehavior
       );
+      final identity = (shapeIdentity, textMaxWidth);
       if (_identity != identity || (needsPainter && _painter == null)) {
-        _painter?.dispose();
-        final painter = _painter = TextPainter(
-            text: TextSpan(text: widget.text, style: widget.style),
-            textAlign: paintAlign,
-            textDirection: direction,
-            textScaler: scaler,
-            locale: locale,
-            textHeightBehavior: textHeightBehavior);
+        // Window resizing changes wrapping, not the glyph run. Keep the
+        // native paragraph so its shaping cache survives the width sweep.
+        if (_painter == null || _shapeIdentity != shapeIdentity) {
+          _painter?.dispose();
+          _painter = TextPainter(
+              text: TextSpan(text: widget.text, style: widget.style),
+              textAlign: paintAlign,
+              textDirection: direction,
+              textScaler: scaler,
+              locale: locale,
+              textHeightBehavior: textHeightBehavior);
+          _shapeIdentity = shapeIdentity;
+        }
+        final painter = _painter!;
         _width = layoutBalancedLyric(painter, textMaxWidth);
         // The retained painter and its transparent Text child must use the
         // same paragraph width, otherwise short centered/right-aligned ink
@@ -443,7 +469,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
                     _painter!, _slots, follow, _color,
                     inkOffset: Offset(horizontalGuard, lyricVerticalInkGuard),
                     alignmentX: widget.alignmentX,
-                    wrapFlight: wrapFlight),
+                    wrapFlight: wrapFlight,
+                    layoutIdentity: identity),
                 isComplex: true,
                 // LyricFollowEffects detaches the clock at the end of its
                 // finite animation. Only moving words bypass the raster cache;
@@ -474,7 +501,10 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
 
 class PlainLyricWordFollowPainter extends CustomPainter {
   PlainLyricWordFollowPainter(this.text, this.slots, this.follow, this.color,
-      {this.inkOffset = Offset.zero, this.alignmentX, this.wrapFlight})
+      {this.inkOffset = Offset.zero,
+      this.alignmentX,
+      this.wrapFlight,
+      this.layoutIdentity})
       : super(repaint: follow?.clock);
   final TextPainter text;
   final List<LyricFollowWordSlot> slots;
@@ -483,6 +513,8 @@ class PlainLyricWordFollowPainter extends CustomPainter {
   final Offset inkOffset;
   final double? alignmentX;
   final LyricWrapFlight? wrapFlight;
+  // Capture geometry independently of the mutable retained TextPainter.
+  final Object? layoutIdentity;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -531,6 +563,7 @@ class PlainLyricWordFollowPainter extends CustomPainter {
   @override
   bool shouldRepaint(PlainLyricWordFollowPainter oldDelegate) =>
       !identical(text, oldDelegate.text) ||
+      layoutIdentity != oldDelegate.layoutIdentity ||
       !identical(slots, oldDelegate.slots) ||
       follow?.clock != oldDelegate.follow?.clock ||
       follow?.curve != oldDelegate.follow?.curve ||

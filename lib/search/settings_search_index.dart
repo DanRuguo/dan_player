@@ -75,8 +75,24 @@ const settingsSearchEntries = <SettingsSearchEntry>[
     "滚动边缘拉伸"
   ]),
   SettingsSearchEntry("desktop", "desktop-lyrics", "桌面歌词显示", []),
-  SettingsSearchEntry("desktop", "integration", "桌面与快捷键",
-      ["托盘菜单高斯模糊", "任务栏缩略图播放控制", "任务栏歌曲预览", "任务栏播放进度"]),
+  SettingsSearchEntry("desktop", "integration", "桌面与快捷键", [
+    "托盘菜单高斯模糊",
+    "任务栏缩略图播放控制",
+    "任务栏歌词",
+    "任务栏歌词位置",
+    "任务栏歌词配色",
+    "播放器配色",
+    "跟随 Windows 任务栏",
+    "任务栏歌词描边",
+    "下一首按钮",
+    "显示下一句歌词",
+    "切换空区",
+    "下一首歌曲信息",
+    "暂停状态提示",
+    "播放/暂停按钮",
+    "任务栏歌曲预览",
+    "任务栏播放进度"
+  ]),
   SettingsSearchEntry("desktop", "shortcuts", "应用内快捷键", []),
   SettingsSearchEntry(
       "backup", "backup", "播放器备份与恢复", ["创建播放器备份", "从备份恢复", "密码加密"]),

@@ -141,6 +141,8 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
     final gain = output['replayGainEffectiveDb'];
     final eqBands = output['eqAppliedBands'] as int? ?? 0;
     final multiplier = output['effectiveDspMultiplier'];
+    final unavailableEq =
+        output['eqUnavailableFrequencies'] as List? ?? const [];
     final error = snapshot['error'] ?? output['error'];
     final phase = switch (snapshot['phase']) {
       'paused' => ui('已暂停'),
@@ -175,6 +177,12 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
       'EQ 请求 / 生效': '${ui(output['eqRequested'] == true ? '开启' : '关闭')} / '
           '${eqBands == 0 ? ui('未应用') : ui('{0} 个频段', [eqBands])}'
           '${output['eqRequested'] == true && output['eqSettingsApplied'] == false ? ' · ${ui('部分设置未应用')}' : ''}',
+      if (unavailableEq.isNotEmpty)
+        'EQ 暂未应用频段': '${unavailableEq.map((value) => '$value').join(', ')} Hz',
+      if (output['eqImplementation'] != null)
+        'EQ 滤波器': output['eqImplementation'] == 'peaking'
+            ? 'BASS_FX PEAKEQ'
+            : 'BASS DX8 PARAMEQ',
       '播放速度': '${output['playbackRate'] ?? '—'}×',
       if (output['playbackPitch'] is num)
         '升降调': playbackPitchLabel((output['playbackPitch'] as num).toDouble()),
@@ -216,6 +224,8 @@ class PlaybackDiagnosticsContent extends StatelessWidget {
                         '实际响度增益',
                         '实际 DSP 音量倍数',
                         'EQ 请求 / 生效',
+                        'EQ 暂未应用频段',
+                        'EQ 滤波器',
                         '播放速度',
                         '升降调'
                       ].contains(row.key)))),

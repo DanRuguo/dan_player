@@ -18,6 +18,7 @@ import 'package:dan_player/src/bass/bass_replay_gain.dart';
 import 'package:dan_player/src/bass/bass_mix.dart';
 import 'package:dan_player/src/bass/bass_tempo.dart';
 import 'package:dan_player/src/bass/bass_volume.dart';
+import 'package:dan_player/src/bass/bass_equalizer.dart';
 import 'package:dan_player/src/bass/audio_segment.dart';
 import 'package:dan_player/src/bass/wasapi_output_policy.dart';
 import 'package:dan_player/src/bass/bass_wasapi.dart' as BASS;
@@ -103,19 +104,6 @@ const BASS_PLUGINS = [
   "BASS\\bassopus.dll",
   "BASS\\basswv.dll"
 ];
-
-const int BASS_FX_DX8_PARAMEQ = 7;
-
-final class BassDx8ParamEq extends ffi.Struct {
-  @ffi.Float()
-  external double fCenter;
-
-  @ffi.Float()
-  external double fBandwidth;
-
-  @ffi.Float()
-  external double fGain;
-}
 
 typedef _BassOpenResult = ({
   int handle,
@@ -538,52 +526,61 @@ class BassPlayer {
 
   /// Explicit refresh only (not a 33 ms diagnostics poll). No private path,
   /// URL, native filename pointer or device name enters the export.
-  Map<String, Object?> outputDiagnostics() => {
-        'session': sessionId,
-        'state': playerState.name,
-        'endReason': _lastEvent?.reason?.name,
-        'error': _lastEvent?.problem?.toSafeJson(),
-        'source': _sourceFormat?.toJson(),
-        'requestedOutput': _outputMode.preferred ? 'exclusive' : 'shared',
-        'streamOutput': wasapiExclusive ? 'exclusive' : 'shared',
-        'exclusiveInitialized': _wasapiInitialized,
-        'deviceNumber': _diagnosticDeviceNumber,
-        'deviceFormat': wasapiExclusive && _wasapiInitialized
-            ? readBassWasapiFormat(_bassWasapiLib)?.toJson()
-            : null,
-        'mixerFormat': wasapiExclusive && _exclusiveMixer != null
-            ? readBassChannelFormat(_bassLib, _exclusiveMixer!)?.toJson()
-            : null,
-        'userVolume': _userVolumeDsp,
-        'effectiveDspMultiplier': _readEffectiveVolume(),
-        'replayGainRequested': _replayGain.mode.name,
-        'replayGainApplied': _fstream == null
-            ? null
-            : _replayGainTags.appliedMode(_replayGain)?.name,
-        'replayGainSource': _fstream == null
-            ? null
-            : _replayGainTags.appliedSource(_replayGain),
-        'replayGainPreampDb':
-            ReplayGainPreferences.sanitizeGain(_replayGain.preampDb),
-        'replayGainFallbackDb':
-            ReplayGainPreferences.sanitizeGain(_replayGain.fallbackGainDb),
-        'replayGainEffectiveDb': _effectiveReplayGainDb,
-        'peakProtection': _replayGain.preventClipping,
-        'eqRequested': _eqEnabled,
-        'eqAppliedBands': _eqAppliedGains.whereType<double>().length,
-        'eqRequestedGainsDb': _eqEnabled ? eqGains : null,
-        'eqGainsDb': _eqFxHandles.isEmpty ? null : List.of(_eqAppliedGains),
-        'eqSettingsApplied': !_eqEnabled ||
-            List.generate(_eqGains.length, (index) => index)
-                .every((index) => _eqAppliedGains[index] == _eqGains[index]),
-        'playbackRate': _playbackRate,
-        'playbackPitch': _playbackPitch,
-        'pitchAvailable': supportsPlaybackPitch,
-        'tempoAvailable': supportsPlaybackRate,
-        'physicalOutputDrained': null,
-        'bitPerfectVerified': false,
-        'gaplessOutputVerified': false,
-      };
+  Map<String, Object?> outputDiagnostics() {
+    final appliedEq = _equalizer.appliedGains;
+    return {
+      'session': sessionId,
+      'state': playerState.name,
+      'endReason': _lastEvent?.reason?.name,
+      'error': _lastEvent?.problem?.toSafeJson(),
+      'source': _sourceFormat?.toJson(),
+      'requestedOutput': _outputMode.preferred ? 'exclusive' : 'shared',
+      'streamOutput': wasapiExclusive ? 'exclusive' : 'shared',
+      'exclusiveInitialized': _wasapiInitialized,
+      'deviceNumber': _diagnosticDeviceNumber,
+      'deviceFormat': wasapiExclusive && _wasapiInitialized
+          ? readBassWasapiFormat(_bassWasapiLib)?.toJson()
+          : null,
+      'mixerFormat': wasapiExclusive && _exclusiveMixer != null
+          ? readBassChannelFormat(_bassLib, _exclusiveMixer!)?.toJson()
+          : null,
+      'userVolume': _userVolumeDsp,
+      'effectiveDspMultiplier': _readEffectiveVolume(),
+      'replayGainRequested': _replayGain.mode.name,
+      'replayGainApplied': _fstream == null
+          ? null
+          : _replayGainTags.appliedMode(_replayGain)?.name,
+      'replayGainSource':
+          _fstream == null ? null : _replayGainTags.appliedSource(_replayGain),
+      'replayGainPreampDb':
+          ReplayGainPreferences.sanitizeGain(_replayGain.preampDb),
+      'replayGainFallbackDb':
+          ReplayGainPreferences.sanitizeGain(_replayGain.fallbackGainDb),
+      'replayGainEffectiveDb': _effectiveReplayGainDb,
+      'peakProtection': _replayGain.preventClipping,
+      'eqRequested': _eqEnabled,
+      'eqAppliedBands': appliedEq.whereType<double>().length,
+      'eqAvailableBands': eqAvailableBands,
+      'eqUnavailableFrequencies': [
+        for (var band = 0; band < eqBandCenters.length; band++)
+          if (!eqAvailableBands[band]) eqBandCenters[band],
+      ],
+      'eqImplementation': _equalizer.implementation,
+      'eqRequestedGainsDb': _eqEnabled ? eqGains : null,
+      'eqGainsDb': !_equalizer.active ? null : appliedEq,
+      'eqSettingsApplied': !_eqEnabled ||
+          List.generate(_eqGains.length, (index) => index).every((index) =>
+              appliedEq[index] == _eqGains[index] ||
+              (!eqAvailableBands[index] && _eqGains[index] == 0)),
+      'playbackRate': _playbackRate,
+      'playbackPitch': _playbackPitch,
+      'pitchAvailable': supportsPlaybackPitch,
+      'tempoAvailable': supportsPlaybackRate,
+      'physicalOutputDrained': null,
+      'bitPerfectVerified': false,
+      'gaplessOutputVerified': false,
+    };
+  }
 
   int? get _diagnosticDeviceNumber {
     final value = wasapiExclusive && _wasapiInitialized
@@ -901,20 +898,6 @@ class BassPlayer {
   /// bass.h: BASS_CONFIG_DEV_DEFAULT
   static const int _bassConfigDevDefault = 36;
 
-  late final int Function(int handle, int type, int priority)
-      _bassChannelSetFX = _bassLib.lookupFunction<
-          ffi.Uint32 Function(ffi.Uint32, ffi.Uint32, ffi.Int32),
-          int Function(int, int, int)>('BASS_ChannelSetFX');
-
-  late final int Function(int handle, int fx) _bassChannelRemoveFX =
-      _bassLib.lookupFunction<ffi.Int32 Function(ffi.Uint32, ffi.Uint32),
-          int Function(int, int)>('BASS_ChannelRemoveFX');
-
-  late final int Function(int fx, ffi.Pointer<ffi.Void> params)
-      _bassFXSetParameters = _bassLib.lookupFunction<
-          ffi.Int32 Function(ffi.Uint32, ffi.Pointer<ffi.Void>),
-          int Function(int, ffi.Pointer<ffi.Void>)>('BASS_FXSetParameters');
-
   late final int Function(
     int handle,
     ffi.Pointer<ffi.Void> buffer,
@@ -1034,20 +1017,8 @@ class BassPlayer {
     }
   }
 
-  static const List<double> eqBandCenters = [
-    80,
-    125,
-    250,
-    500,
-    1000,
-    2000,
-    4000,
-    8000,
-    12000,
-    16000,
-  ];
-  static const double eqMaxGainDb = 15.0;
-  static const double _eqBandwidthSemitones = 12.0;
+  static const List<double> eqBandCenters = BassEqualizer.centers;
+  static const double eqMaxGainDb = BassEqualizer.maxGainDb;
 
   bool _eqEnabled = false;
   bool get eqEnabled => _eqEnabled;
@@ -1055,59 +1026,22 @@ class BassPlayer {
   final List<double> _eqGains = List.filled(eqBandCenters.length, 0.0);
   List<double> get eqGains => List.unmodifiable(_eqGains);
 
-  final List<int> _eqFxHandles = [];
-  final List<double?> _eqAppliedGains = List.filled(eqBandCenters.length, null);
-  bool get eqActive => _eqFxHandles.isNotEmpty;
-
-  bool _setEqFxParams(int fx, int band) {
-    final parameters =
-        ffi.malloc.allocate<BassDx8ParamEq>(ffi.sizeOf<BassDx8ParamEq>());
-    try {
-      parameters.ref.fCenter = eqBandCenters[band];
-      parameters.ref.fBandwidth = _eqBandwidthSemitones;
-      parameters.ref.fGain = _eqGains[band];
-      if (_bassFXSetParameters(fx, parameters.cast()) == BASS.FALSE) {
-        LOGGER.w(
-          "[eq] set parameters failed for band $band: "
-          "${_bass.BASS_ErrorGetCode()}",
-        );
-        return false;
-      }
-      _eqAppliedGains[band] = _eqGains[band];
-      return true;
-    } finally {
-      ffi.malloc.free(parameters);
-    }
-  }
+  late final _equalizer =
+      BassEqualizer.native(_bassLib, peakingAvailable: _tempo != null);
+  bool get eqActive => _equalizer.active;
+  List<bool> get eqAvailableBands => _equalizer.availableBands;
 
   bool _applyEqToStream() {
-    _eqFxHandles.clear();
     if (!_eqEnabled || _fstream == null) return true;
-
-    for (var band = 0; band < eqBandCenters.length; band++) {
-      final fx = _bassChannelSetFX(_fstream!, BASS_FX_DX8_PARAMEQ, 0);
-      if (fx == 0) {
-        LOGGER.w("[eq] attach failed: ${_bass.BASS_ErrorGetCode()}");
-        _removeEqFromStream();
-        return false;
-      }
-      _eqFxHandles.add(fx);
-      if (!_setEqFxParams(fx, band)) {
-        _removeEqFromStream();
-        return false;
-      }
+    final applied = _equalizer.apply(_fstream!, _eqGains);
+    if (!applied) {
+      LOGGER.w("[eq] apply failed: ${_bass.BASS_ErrorGetCode()}");
     }
-    return true;
+    return applied;
   }
 
   void _removeEqFromStream() {
-    if (_fstream != null) {
-      for (final fx in _eqFxHandles) {
-        _bassChannelRemoveFX(_fstream!, fx);
-      }
-    }
-    _eqFxHandles.clear();
-    _eqAppliedGains.fillRange(0, _eqAppliedGains.length, null);
+    _equalizer.remove();
   }
 
   bool setEqEnabled(bool enabled) {
@@ -1128,24 +1062,22 @@ class BassPlayer {
 
   void setEqBandGain(int band, double gain) {
     if (band < 0 || band >= eqBandCenters.length) return;
-    _eqGains[band] = gain.clamp(-eqMaxGainDb, eqMaxGainDb).toDouble();
-    if (_eqEnabled && band < _eqFxHandles.length) {
-      _setEqFxParams(_eqFxHandles[band], band);
-    }
+    _eqGains[band] =
+        gain.isFinite ? gain.clamp(-eqMaxGainDb, eqMaxGainDb).toDouble() : 0.0;
+    if (_eqEnabled) _equalizer.setBandGain(band, _eqGains[band]);
   }
 
   void setEqGains(List<double> gains) {
     for (var band = 0; band < eqBandCenters.length; band++) {
       final gain = band < gains.length ? gains[band] : 0.0;
-      _eqGains[band] = gain.clamp(-eqMaxGainDb, eqMaxGainDb).toDouble();
+      _eqGains[band] = gain.isFinite
+          ? gain.clamp(-eqMaxGainDb, eqMaxGainDb).toDouble()
+          : 0.0;
     }
     if (!_eqEnabled) return;
 
-    final count = _eqFxHandles.length < eqBandCenters.length
-        ? _eqFxHandles.length
-        : eqBandCenters.length;
-    for (var band = 0; band < count; band++) {
-      _setEqFxParams(_eqFxHandles[band], band);
+    for (var band = 0; band < eqBandCenters.length; band++) {
+      _equalizer.setBandGain(band, _eqGains[band]);
     }
   }
 
@@ -1596,6 +1528,7 @@ class BassPlayer {
       _replayGainTags = openedReplayGain;
       _volumeDspBase = openedDspBase;
       _sourceFormat = openedFormat;
+      _equalizer.sourceFormat(openedFormat?.sampleRate);
       _eventBoundary.replace();
       _lastEvent = null;
       _deviceInterrupted = false;
@@ -2063,8 +1996,7 @@ class BassPlayer {
     _positionUpdater?.cancel();
     _positionUpdater = null;
 
-    _eqFxHandles.clear();
-    _eqAppliedGains.fillRange(0, _eqAppliedGains.length, null);
+    _equalizer.forgetSource();
     final handle = _fstream!;
     if (wasapiExclusive && _exclusiveMixer != null) {
       // Detach only the decoder. The silent NONSTOP mixer and WASAPI device

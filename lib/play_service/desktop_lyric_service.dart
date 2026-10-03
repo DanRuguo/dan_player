@@ -7,7 +7,10 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric_display_coordinator.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/lyric_service.dart'
+    show withDesktopLyricSyncOwner;
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/theme_provider.dart';
@@ -34,6 +37,7 @@ class DesktopLyricService extends ChangeNotifier {
     ColorScheme Function()? readTheme,
     ValueListenable<bool>? playbackReady,
     Duration Function()? elapsed,
+    LyricDisplayCoordinator? displayCoordinator,
   })  : _startProcess = startProcess ??
             ((executable, arguments) => Process.start(executable, arguments)),
         _executableExists =
@@ -41,6 +45,8 @@ class DesktopLyricService extends ChangeNotifier {
         _readTheme = readTheme ?? (() => ThemeProvider.instance.currScheme),
         _playbackReady = playbackReady ?? PlayService.playbackReady,
         _elapsed = elapsed,
+        _displayCoordinator =
+            displayCoordinator ?? LyricDisplayCoordinator.shared,
         _saveAppearance = saveAppearance ??
             (() => AppSettings.instance
                 .saveSettings(throwOnError: true, captureWindowSize: false)) {
@@ -49,6 +55,8 @@ class DesktopLyricService extends ChangeNotifier {
     AppSettings.instance.desktopLyricAppearance.addListener(_syncAppearance);
     uiLanguage.addListener(_syncLanguage);
     _playbackReady.addListener(_handlePlaybackReady);
+    _displayCoordinator.register(LyricDisplayMode.desktop, _closeDisplay,
+        cancelPending: _cancelPendingLaunch);
   }
 
   final PlayService playService;
@@ -58,6 +66,8 @@ class DesktopLyricService extends ChangeNotifier {
   final ColorScheme Function() _readTheme;
   final ValueListenable<bool> _playbackReady;
   final Duration Function()? _elapsed;
+  final LyricDisplayCoordinator _displayCoordinator;
+  late final Future<void> Function() _closeDisplay = stopDesktopLyric;
   final Stopwatch _syncClock = Stopwatch()..start();
 
   PlaybackService get _playbackService => playService.playbackService;
@@ -105,12 +115,32 @@ class DesktopLyricService extends ChangeNotifier {
       state == DesktopLyricState.recovering;
 
   Future<void> startDesktopLyric() async {
+    if (_disposed) return;
+    // Without the optional taskbar actor, preserve the existing helper-only
+    // launch/reopen lifecycle (including cancellation of a pending old spawn).
+    if (!_displayCoordinator.coordinatesTaskbar) {
+      await _startDesktopLyric();
+      return;
+    }
+    await _displayCoordinator.show(
+        LyricDisplayMode.desktop, _startDesktopLyric);
+  }
+
+  Future<void> _startDesktopLyric() async {
     if (_disposed || isRunning || isStarting) return;
 
     _desiredActive = true;
     _recoveryAttempts = 0;
     _recoveryTimer?.cancel();
     await _launch(recovering: false);
+  }
+
+  void _cancelPendingLaunch() {
+    if (!isStarting && state != DesktopLyricState.recovering) return;
+    _desiredActive = false;
+    _launchGeneration++;
+    _recoveryTimer?.cancel();
+    _recoveryTimer = null;
   }
 
   Future<void> _launch({required bool recovering}) async {
@@ -164,6 +194,7 @@ class DesktopLyricService extends ChangeNotifier {
       final process = await processFuture;
       if (!_desiredActive || generation != _launchGeneration) {
         process.kill();
+        await process.exitCode.timeout(const Duration(seconds: 2));
         return;
       }
 
@@ -271,6 +302,17 @@ class DesktopLyricService extends ChangeNotifier {
           case msg.ControlEvent.close:
             killDesktopLyric();
             break;
+          case msg.ControlEvent.taskbarLyrics:
+            final request = _displayCoordinator.requestTaskbar;
+            if (request != null) {
+              unawaited(request().catchError((Object error, StackTrace trace) {
+                LOGGER.w('[desktop taskbar lyric request] $error',
+                    stackTrace: trace);
+                showAppNotice(ui('任务栏歌词切换失败，请重试。'), kind: AppNoticeKind.error);
+                return false;
+              }));
+            }
+            break;
         }
       } else if (messageType ==
           msg.getMessageTypeName<msg.DesktopLyricAppearanceChangedMessage>()) {
@@ -335,7 +377,21 @@ class DesktopLyricService extends ChangeNotifier {
     if (nowPlaying != null) {
       _sendNowPlayingMessage(nowPlaying, syncLyric: false);
     }
-    await playService.lyricService.syncDesktopLyric();
+    // A lyric provider may still be resolving. It owns source/generation guards;
+    // waiting here would also block closing/switching the external surface.
+    final process = _desktopLyricProcess;
+    final generation = _launchGeneration;
+    unawaited(withDesktopLyricSyncOwner(
+            () =>
+                !_disposed &&
+                _desiredActive &&
+                isRunning &&
+                generation == _launchGeneration &&
+                identical(process, _desktopLyricProcess),
+            playService.lyricService.syncDesktopLyric)
+        .catchError((Object error, StackTrace trace) {
+      LOGGER.w('[desktop lyric initial sync] $error', stackTrace: trace);
+    }));
   }
 
   void _syncFrameRate() {
@@ -531,6 +587,24 @@ class DesktopLyricService extends ChangeNotifier {
   }
 
   void killDesktopLyric() {
+    _displayCoordinator.cancel(LyricDisplayMode.desktop);
+    _killDesktopLyric();
+  }
+
+  /// Switching external lyric modes must await exit, including a pending spawn.
+  Future<void> stopDesktopLyric() async {
+    final pending = desktopLyric;
+    final current = _desktopLyricProcess;
+    _killDesktopLyric();
+    final process =
+        current ?? await pending.timeout(const Duration(seconds: 2));
+    if (process != null) {
+      process.kill();
+      await process.exitCode.timeout(const Duration(seconds: 2));
+    }
+  }
+
+  void _killDesktopLyric() {
     // Settings update synchronously on receipt. Flush the debounce before
     // releasing the helper, including application shutdown/dispose.
     unawaited(flushAppearance());
@@ -723,6 +797,7 @@ class DesktopLyricService extends ChangeNotifier {
     uiLanguage.removeListener(_syncLanguage);
     _playbackReady.removeListener(_handlePlaybackReady);
     killDesktopLyric();
+    _displayCoordinator.unregister(LyricDisplayMode.desktop, _closeDisplay);
     super.dispose();
   }
 }

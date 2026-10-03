@@ -27,6 +27,8 @@
 #include "taskbar_peek_geometry.h"
 #include "taskbar_progress_policy.h"
 #include "taskbar_thumbnail_policy.h"
+#include "taskbar_lyrics.h"
+#include "taskbar_lyrics_policy.h"
 
 namespace {
 using flutter::EncodableMap;
@@ -87,6 +89,26 @@ bool ReadInt(const EncodableMap& map, const char* key, int* output) {
     return true;
   }
   return false;
+}
+
+bool ReadLyricNumber(const EncodableMap& map, const char* key, double* output) {
+  const auto found = map.find(EncodableValue(key));
+  if (found == map.end()) return false;
+  if (const auto* floating = std::get_if<double>(&found->second)) *output = *floating;
+  else if (const auto* integer32 = std::get_if<int32_t>(&found->second)) *output = *integer32;
+  else if (const auto* integer64 = std::get_if<int64_t>(&found->second)) *output = static_cast<double>(*integer64);
+  else return false;
+  return std::isfinite(*output) && std::abs(*output) <= (1LL << 53);
+}
+
+bool ReadLyricInteger(const EncodableMap& map, const char* key, std::int64_t* output,
+                      bool signed_time = false) {
+  const auto found = map.find(EncodableValue(key));
+  if (found == map.end()) return false;
+  if (const auto* integer32 = std::get_if<int32_t>(&found->second)) *output = *integer32;
+  else if (const auto* integer64 = std::get_if<int64_t>(&found->second)) *output = *integer64;
+  else return false;
+  return *output >= (signed_time ? -(1LL << 53) : 0) && *output <= (1LL << 53);
 }
 
 bool ReadWideString(const EncodableMap& map, const char* key,
@@ -263,6 +285,8 @@ struct DesktopIntegrationController::Impl
   bool progress_pending = false;
   bool progress_available = false;
   policy::Playback playback;
+  TaskbarLyrics taskbar_lyric_surface;
+  std::optional<TaskbarLyricsLayout> last_taskbar_lyric_layout;
   std::wstring tooltip = L"Dan Player";
   std::array<std::wstring, 8> labels{
       L"\u663e\u793a\u4e3b\u7a97\u53e3", L"\u8ff7\u4f60\u64ad\u653e\u5668",
@@ -344,6 +368,32 @@ struct DesktopIntegrationController::Impl
           }
           self->HandleMethod(call, std::move(result));
         });
+    last_taskbar_lyric_layout = taskbar_lyric_surface.GetLayout();
+    taskbar_lyric_surface.SetLayoutCallback([weak](const TaskbarLyricsLayout&) {
+      if (auto self = weak.lock(); self && !self->disposed) self->NotifyTaskbarLyricsLayout();
+    });
+    taskbar_lyric_surface.SetNextTrackCallback([weak] {
+      if (auto self=weak.lock(); self && !self->disposed) self->Emit(policy::Action::kNext,"taskbarNext");
+    });
+    taskbar_lyric_surface.SetPlaybackCallback([weak] {
+      if(auto self=weak.lock(); self && !self->disposed) self->Emit(policy::Action::kToggle,"taskbarPlayPause");
+    });
+    taskbar_lyric_surface.SetNextButtonLabel(labels[5]);
+    taskbar_lyric_surface.SetPlaybackButtonLabels(labels[3],labels[4]);
+  }
+  EncodableMap TaskbarLyricLayoutMap() const {
+    const auto value = taskbar_lyric_surface.GetLayout();
+    return EncodableMap{{EncodableValue("vertical"), EncodableValue(value.vertical)},
+        {EncodableValue("areaCount"), EncodableValue(value.area_count)},
+        {EncodableValue("areaIndex"), EncodableValue(value.area_index)}};
+  }
+  void NotifyTaskbarLyricsLayout() {
+    const auto value = taskbar_lyric_surface.GetLayout();
+    if (last_taskbar_lyric_layout && last_taskbar_lyric_layout->vertical == value.vertical &&
+        last_taskbar_lyric_layout->area_count == value.area_count && last_taskbar_lyric_layout->area_index == value.area_index) return;
+    last_taskbar_lyric_layout = value;
+    if (!disposed && channel) channel->InvokeMethod("taskbarLyricsLayoutChanged",
+        std::make_unique<EncodableValue>(TaskbarLyricLayoutMap()));
   }
 
   void HandleMethod(const flutter::MethodCall<EncodableValue>& call,
@@ -361,6 +411,82 @@ struct DesktopIntegrationController::Impl
     const auto* args = call.arguments()
                            ? std::get_if<EncodableMap>(call.arguments())
                            : nullptr;
+    if (method == "getTaskbarLyricsLayout") {
+      last_taskbar_lyric_layout = taskbar_lyric_surface.GetLayout();
+      result->Success(EncodableValue(TaskbarLyricLayoutMap())); return;
+    }
+    if (method == "setTaskbarLyrics") {
+      bool enabled = false, animate = false, playing = false;
+      if (!args || !ReadBool(*args, "enabled", &enabled)) {
+        result->Error("INVALID_ARGUMENT", "enabled must be bool"); return;
+      }
+      if (!enabled) { taskbar_lyric_surface.Close(); result->Success(); return; }
+      int lyric_accent = 0;
+      std::wstring text, family, path, next_text, source, line;
+      double position = 0, rate = 1, line_start = 0, line_end = 0;
+      std::int64_t timeline_revision = 0;
+      std::vector<TaskbarLyricWord> words;
+      if (!ReadWideString(*args, "text", 2 * 1024 * 1024, &text) ||
+          !ReadInt(*args, "accent", &lyric_accent) ||
+          !ReadWideString(*args, "fontFamily", 1024, &family) ||
+          !ReadWideString(*args, "fontPath", 32768, &path) ||
+          !ReadBool(*args, "animate", &animate) || !ReadBool(*args, "playing", &playing) ||
+          !ReadWideString(*args, "nextText", 2 * 1024 * 1024, &next_text) ||
+          !ReadWideString(*args, "sourceIdentity", 4096, &source) ||
+          !ReadWideString(*args, "lineIdentity", 4096, &line) ||
+          !ReadLyricNumber(*args, "positionMilliseconds", &position) || position < 0 ||
+          !ReadLyricNumber(*args, "playbackRate", &rate) || rate <= 0 || rate > 8 ||
+          !ReadLyricNumber(*args, "lineStartMilliseconds", &line_start) ||
+          !ReadLyricNumber(*args, "lineEndMilliseconds", &line_end) ||
+          !ReadLyricInteger(*args, "timelineRevision", &timeline_revision)) {
+        result->Error("INVALID_ARGUMENT", "Invalid taskbar lyric snapshot"); return;
+      }
+      const auto word_arg = args->find(EncodableValue("words"));
+      const auto* list = word_arg == args->end() ? nullptr :
+          std::get_if<flutter::EncodableList>(&word_arg->second);
+      if (!list || list->size() > 4096) {
+        result->Error("INVALID_ARGUMENT", "Invalid taskbar lyric words"); return;
+      }
+      for (const auto& value : *list) {
+        const auto* word_map = std::get_if<EncodableMap>(&value);
+        TaskbarLyricWord word;
+        if (!word_map || !ReadLyricInteger(*word_map, "startMilliseconds", &word.start, true) ||
+            !ReadLyricInteger(*word_map, "lengthMilliseconds", &word.length) ||
+            !ReadWideString(*word_map, "content", 2 * 1024 * 1024, &word.content)) {
+          result->Error("INVALID_ARGUMENT", "Invalid taskbar lyric word"); return;
+        }
+        words.push_back(std::move(word));
+      }
+      if (!taskbar_lyrics::ValidWords(text, words)) words.clear();
+      std::wstring placement = L"auto", next_track;
+      std::wstring color_scheme=L"player";
+      bool show_pause_indicator = false, stroke_enabled = false, paused = !playing;
+      bool show_next_button=false,next_button_enabled=false,animate_layout=false,show_next_lyric=true,playback_button_enabled=false;
+      std::int64_t area_selection = 0;
+      const auto present = [&](const char* key) { return args->find(EncodableValue(key)) != args->end(); };
+      if ((present("placement") && (!ReadWideString(*args, "placement", 16, &placement) || !taskbar_lyrics::ParsePlacement(placement))) ||
+          (present("nextTrackText") && !ReadWideString(*args, "nextTrackText", 2 * 1024 * 1024, &next_track)) ||
+          (present("showPauseIndicator") && !ReadBool(*args, "showPauseIndicator", &show_pause_indicator)) ||
+          (present("strokeEnabled") && !ReadBool(*args, "strokeEnabled", &stroke_enabled)) ||
+          (present("paused") && !ReadBool(*args, "paused", &paused)) ||
+          (present("colorScheme") && (!ReadWideString(*args,"colorScheme",16,&color_scheme) || !taskbar_lyrics::ParseColorScheme(color_scheme))) ||
+          (present("showNextButton") && !ReadBool(*args,"showNextButton",&show_next_button)) ||
+          (present("nextButtonEnabled") && !ReadBool(*args,"nextButtonEnabled",&next_button_enabled)) ||
+          (present("playbackButtonEnabled") && !ReadBool(*args,"playbackButtonEnabled",&playback_button_enabled)) ||
+          (present("animateLayout") && !ReadBool(*args,"animateLayout",&animate_layout)) ||
+          (present("showNextLyric") && !ReadBool(*args,"showNextLyric",&show_next_lyric)) ||
+          (present("areaSelection") && (!ReadLyricInteger(*args, "areaSelection", &area_selection) || area_selection > 65535))) {
+        result->Error("INVALID_ARGUMENT", "Invalid taskbar lyric appearance"); return;
+      }
+      if (!taskbar_lyric_surface.Set(enabled, std::move(text), static_cast<unsigned>(lyric_accent),
+          std::move(family), std::move(path), animate, playing, std::move(words),
+          std::move(next_text), position, rate, std::move(source), std::move(line),
+          timeline_revision, line_start, line_end, std::move(placement), std::move(next_track),
+          show_pause_indicator, stroke_enabled, static_cast<unsigned>(area_selection), paused,std::move(color_scheme),show_next_button,next_button_enabled,animate_layout,show_next_lyric,playback_button_enabled))
+        result->Error("TASKBAR_LYRICS_FAILED", "Could not create taskbar lyric surface");
+      else result->Success();
+      return;
+    }
     if (method == "setPowerRequest") {
       bool enabled = false;
       if (!args || !ReadBool(*args, "enabled", &enabled)) { result->Error("INVALID_ARGUMENT", "enabled must be bool"); return; }
@@ -425,6 +551,10 @@ struct DesktopIntegrationController::Impl
         }
       }
       const auto next_color = static_cast<COLORREF>(next_accent & 0x00ffffff);
+      if(labels_changed) {
+        taskbar_lyric_surface.SetNextButtonLabel(labels[5]);
+        taskbar_lyric_surface.SetPlaybackButtonLabels(labels[3],labels[4]);
+      }
       const bool theme_changed = policy::NativeThemeChanged(
           accent, dark_mode, next_color, next_dark);
       dark_mode = next_dark;
@@ -943,12 +1073,12 @@ struct DesktopIntegrationController::Impl
     }
   }
 
-  void Emit(policy::Action action) {
+  void Emit(policy::Action action,const char* wire_name=nullptr) {
     if (disposed || !active || !channel || !policy::Allows(action, playback)) {
       return;
     }
     channel->InvokeMethod("action", std::make_unique<EncodableValue>(
-                                         policy::ActionName(action)));
+                                         wire_name ? wire_name : policy::ActionName(action)));
   }
 
   struct PopupItem {
@@ -1462,6 +1592,8 @@ struct DesktopIntegrationController::Impl
       return 0;
     }
     if (message == taskbar_created && taskbar_created != 0) {
+      taskbar_lyric_surface.EnvironmentChanged();
+      NotifyTaskbarLyricsLayout();
       shell.ExplorerRestarted();
       progress_state.InvalidateShell();
       progress_available = false;
@@ -1529,6 +1661,11 @@ struct DesktopIntegrationController::Impl
       UpdateButtons();
       RefreshMenuAppearance();
     }
+    if (message == WM_DISPLAYCHANGE || message == WM_SETTINGCHANGE ||
+        message == WM_THEMECHANGED || message == WM_DPICHANGED || message == WM_SYSCOLORCHANGE) {
+      taskbar_lyric_surface.EnvironmentChanged();
+      NotifyTaskbarLyricsLayout();
+    }
     if (message == WM_ENDSESSION && wparam != FALSE) {
       Emit(policy::Action::kExit);
       Dispose();
@@ -1543,6 +1680,10 @@ struct DesktopIntegrationController::Impl
     // Make the terminal state visible before any API which can pump messages.
     // Reentrant destroy/Explorer callbacks must not resurrect Shell resources.
     disposed = true;
+    taskbar_lyric_surface.SetLayoutCallback(nullptr);
+    taskbar_lyric_surface.SetNextTrackCallback(nullptr);
+    taskbar_lyric_surface.SetPlaybackCallback(nullptr);
+    taskbar_lyric_surface.Close();
     SetPlaybackPower(false);
     active = false;
     ClearThumbnail();

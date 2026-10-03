@@ -8,8 +8,10 @@ import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/listening_calendar_card.dart';
 import 'package:dan_player/component/statistics_bar_row.dart';
+import 'package:dan_player/component/statistics_listening_trends.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
+import 'package:dan_player/statistics/listening_trends.dart';
 import 'package:dan_player/statistics/statistics_display_service.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -38,6 +40,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   late final bool _ownsDisplay;
   late PlaybackStatistics _displayStats;
   StatisticsDisplaySnapshot? _displaySnapshot;
+  ListeningTrendsSnapshot? _listeningTrends;
   String _rankingGroup = 'tracks';
 
   @override
@@ -66,6 +69,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
     _displayStats = PlaybackStatistics.displayCopy(next?.playbackData,
         storageWarning: next?.storageWarning);
     _displaySnapshot = next;
+    _listeningTrends = next == null
+        ? null
+        : ListeningTrendsSnapshot.fromDaily(
+            dailyMilliseconds: _displayStats.dailyMilliseconds,
+            capturedAt: next.capturedAt);
     previous.dispose();
   }
 
@@ -182,6 +190,17 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     ),
                   ),
                 ),
+                if (_listeningTrends != null)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                    sliver: SliverToBoxAdapter(
+                      child: AppEntrance(
+                          identity: 'statistics-listening-trends',
+                          order: 2,
+                          child: StatisticsListeningTrends(
+                              snapshot: _listeningTrends!)),
+                    ),
+                  ),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
                   sliver: SliverToBoxAdapter(

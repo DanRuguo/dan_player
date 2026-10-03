@@ -18,11 +18,15 @@ Future<void> showEqualizerDialog(BuildContext context) {
 }
 
 class EqualizerDialog extends StatefulWidget {
-  const EqualizerDialog({super.key, this.playbackService});
+  const EqualizerDialog({super.key, this.playbackService, this.availableBands});
 
   /// The normal app uses its existing playback service. Injection keeps layout
   /// and interaction tests independent of native audio/device initialization.
   final PlaybackService? playbackService;
+
+  /// An injected layout host may supply its own source-capability snapshot.
+  /// The normal player watches the live service's cached native capabilities.
+  final List<bool>? availableBands;
 
   @override
   State<EqualizerDialog> createState() => _EqualizerDialogState();
@@ -151,7 +155,29 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    if (widget.playbackService != null) return _dialog(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        playbackService,
+        playbackService.eqEnabled,
+        playbackService.diagnosticsRevision,
+        playbackService.resolvingAudioPath,
+        playbackService.isChangingOutput,
+      ]),
+      builder: (context, _) => _dialog(context),
+    );
+  }
+
+  Widget _dialog(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final available = widget.availableBands ??
+        (widget.playbackService == null
+            ? playbackService.eqAvailableBands
+            : List<bool>.filled(BassPlayer.eqBandCenters.length, true));
+    final unavailableLabels = [
+      for (var band = 0; band < BassPlayer.eqBandCenters.length; band++)
+        if (!available[band]) _bandLabel(BassPlayer.eqBandCenters[band]),
+    ];
     return AlertDialog(
       // Title and controls scroll together; the completion action stays above
       // any notification even in the smallest supported window at 200% text.
@@ -244,7 +270,8 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
                     _BandSlider(
                       label: _bandLabel(BassPlayer.eqBandCenters[band]),
                       value: gains[band],
-                      enabled: enabled,
+                      enabled: enabled && available[band],
+                      available: available[band],
                       onChanged: (value) {
                         if (!_ownsEq()) return;
                         playbackService.setEqBandGain(band, value);
@@ -259,6 +286,15 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
               ),
             )),
             const SizedBox(height: 4),
+            if (unavailableLabels.isNotEmpty) ...[
+              Text(
+                ui('当前音源不应用 {0} Hz 频段；保存的设置保持不变。',
+                    [unavailableLabels.join(', ')]),
+                key: const ValueKey('equalizer-unavailable-bands'),
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
+            ],
             Text(
               ui("调节范围 ±15 dB，换歌后继续保持。"),
               style: TextStyle(
@@ -284,55 +320,61 @@ class _BandSlider extends StatelessWidget {
     required this.label,
     required this.value,
     required this.enabled,
+    required this.available,
     required this.onChanged,
   });
 
   final String label;
   final double value;
   final bool enabled;
+  final bool available;
   final ValueChanged<double> onChanged;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 48,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            "${value >= 0 ? "+" : ""}${value.toStringAsFixed(0)}",
-            style: TextStyle(
-              fontSize: 12,
-              color: enabled ? scheme.onSurface : scheme.outline,
-            ),
-          ),
-          SizedBox(
-            height: 160,
-            child: RotatedBox(
-              quarterTurns: 3,
-              child: Slider(
-                min: -BassPlayer.eqMaxGainDb,
-                max: BassPlayer.eqMaxGainDb,
-                value: value
-                    .clamp(
-                      -BassPlayer.eqMaxGainDb,
-                      BassPlayer.eqMaxGainDb,
-                    )
-                    .toDouble(),
-                onChanged: enabled ? onChanged : null,
+    return Tooltip(
+      message:
+          available ? '$label Hz' : ui('此音源不应用 {0} Hz；设置会在支持的音源上恢复。', [label]),
+      child: SizedBox(
+        width: 48,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "${value >= 0 ? "+" : ""}${value.toStringAsFixed(0)}",
+              style: TextStyle(
+                fontSize: 12,
+                color: enabled ? scheme.onSurface : scheme.outline,
               ),
             ),
-          ),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: enabled ? scheme.onSurfaceVariant : scheme.outline,
+            SizedBox(
+              height: 160,
+              child: RotatedBox(
+                quarterTurns: 3,
+                child: Slider(
+                  min: -BassPlayer.eqMaxGainDb,
+                  max: BassPlayer.eqMaxGainDb,
+                  value: value
+                      .clamp(
+                        -BassPlayer.eqMaxGainDb,
+                        BassPlayer.eqMaxGainDb,
+                      )
+                      .toDouble(),
+                  onChanged: enabled ? onChanged : null,
+                ),
+              ),
             ),
-          ),
-        ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: enabled ? scheme.onSurfaceVariant : scheme.outline,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

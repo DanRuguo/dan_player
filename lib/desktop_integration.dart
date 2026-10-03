@@ -16,6 +16,8 @@ import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:dan_player/taskbar_song_preview.dart';
 import 'package:dan_player/taskbar_progress.dart';
+import 'package:dan_player/taskbar_lyric_service.dart';
+import 'package:dan_player/taskbar_lyrics_publisher.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/window_mode_controller.dart';
 import 'package:flutter/foundation.dart';
@@ -302,7 +304,8 @@ class DesktopIntegration implements Listenable {
         _progressOperations = TaskbarProgress.instance,
         _themeOverride = null,
         _syncAppearance = true,
-        _onError = HotkeysHelper.showError;
+        _onError = HotkeysHelper.showError,
+        _taskbarLyrics = TaskbarLyricService.instance;
 
   @visibleForTesting
   DesktopIntegration.forTesting({
@@ -316,6 +319,7 @@ class DesktopIntegration implements Listenable {
     TaskbarPreviewRenderer previewRenderer = renderTaskbarSongPreview,
     ThemeProvider? themeProvider,
     ValueListenable<TaskbarProgressValue?>? progressOperations,
+    TaskbarLyricService? taskbarLyrics,
   })  : _native = native,
         _window = window,
         _playback = playback,
@@ -325,7 +329,8 @@ class DesktopIntegration implements Listenable {
         _progressOperations = progressOperations ?? TaskbarProgress(),
         _themeOverride = themeProvider,
         _syncAppearance = syncAppearance,
-        _onError = onError;
+        _onError = onError,
+        _taskbarLyrics = taskbarLyrics;
 
   static final instance = DesktopIntegration._();
   final powerRequestStatus = ValueNotifier<String>('未请求');
@@ -344,6 +349,56 @@ class DesktopIntegration implements Listenable {
   TaskbarPreviewPublisher? _preview;
   String? _previewError;
   final void Function(String)? _onError;
+  final TaskbarLyricService? _taskbarLyrics;
+  bool _taskbarLyricsVertical = false;
+  bool get taskbarLyricsVertical => _taskbarLyricsVertical;
+  int _taskbarLyricsAreaCount = 0;
+  int _taskbarLyricsAreaIndex = 0;
+  int _taskbarLyricsLayoutRevision = 0;
+  int get taskbarLyricsAreaCount => _taskbarLyricsAreaCount;
+  int get taskbarLyricsAreaIndex => _taskbarLyricsAreaIndex;
+
+  Future<void> refreshTaskbarLyricsLayout() async {
+    if (_closed || !_supported) return;
+    final revision = _taskbarLyricsLayoutRevision;
+    final layout = await _invoke('getTaskbarLyricsLayout');
+    if (!_closed && revision == _taskbarLyricsLayoutRevision) {
+      _applyTaskbarLyricsLayout(layout);
+    }
+  }
+
+  void _applyTaskbarLyricsLayout(Object? raw) {
+    if (raw is! Map || raw['vertical'] is! bool) return;
+    final vertical = raw['vertical'] as bool;
+    final count = raw['areaCount'];
+    final index = raw['areaIndex'];
+    if ((raw.containsKey('areaCount') && (count is! int || count < 0)) ||
+        (raw.containsKey('areaIndex') && (index is! int || index < 0))) {
+      return;
+    }
+    final areaCount = count is int ? count : _taskbarLyricsAreaCount;
+    if (index is int && (areaCount == 0 ? index != 0 : index >= areaCount)) {
+      return;
+    }
+    final areaIndex = index is int
+        ? index
+        : areaCount == 0
+            ? 0
+            : _taskbarLyricsAreaIndex.clamp(0, areaCount - 1);
+    // A late readback cannot replace a newer environment event, even if that
+    // event repeats the current layout and does not notify visual consumers.
+    _taskbarLyricsLayoutRevision++;
+    if (_taskbarLyricsVertical == vertical &&
+        _taskbarLyricsAreaCount == areaCount &&
+        _taskbarLyricsAreaIndex == areaIndex) {
+      return;
+    }
+    _taskbarLyricsVertical = vertical;
+    _taskbarLyricsAreaCount = areaCount;
+    _taskbarLyricsAreaIndex = areaIndex;
+    _notify();
+  }
+
   final _changes = ValueNotifier<int>(0);
   final _hidden = ValueNotifier<bool>(false);
   Future<void>? _initialization;
@@ -458,6 +513,35 @@ class DesktopIntegration implements Listenable {
       if (_syncAppearance) _theme.addListener(_scheduleSync);
       _playback.addListener(_scheduleSync);
       _playback.startObserving();
+      _taskbarLyrics?.attach(
+        send: (arguments) async {
+          await _invoke('setTaskbarLyrics', arguments);
+        },
+        appearance: () {
+          final appearance = _appearance();
+          final taskbar = _preferences.value.taskbarAppearance;
+          return TaskbarLyricAppearance(
+            // Tray icons use COLORREF; the lyric frame expects full ARGB.
+            accent: _theme.currScheme.primary.toARGB32(),
+            fontFamily: appearance.$3,
+            fontPath: appearance.$4,
+            placement: taskbar.position.name,
+            areaSelection: taskbar.areaSelection,
+            showNextTrack: taskbar.showNextTrack,
+            showNextLyric: taskbar.showNextLyric,
+            showPauseIndicator: taskbar.showPauseIndicator,
+            strokeEnabled: taskbar.strokeEnabled,
+            colorScheme: taskbar.colorScheme.name,
+            showNextButton: taskbar.showNextButton,
+          );
+        },
+        onError: (error, trace) {
+          LOGGER.w('Taskbar lyrics: $error', stackTrace: trace);
+          _onError?.call(ui(error is TaskbarLyricPreferenceSaveError
+              ? '任务栏歌词设置保存失败；当前会话仍生效。'
+              : '任务栏歌词切换失败，请重试。'));
+        },
+      );
       _scheduleSync();
     } catch (error, trace) {
       if (_closed) return;
@@ -531,6 +615,7 @@ class DesktopIntegration implements Listenable {
   }
 
   void _scheduleSync() {
+    _taskbarLyrics?.refreshAppearance();
     if (!_started || _closed || _syncScheduled) return;
     _updateTaskbarProgress();
     _syncScheduled = true;
@@ -632,6 +717,8 @@ class DesktopIntegration implements Listenable {
     if (_closed) return;
     if (call.method == 'stateChanged') {
       _applyState(call.arguments);
+    } else if (call.method == 'taskbarLyricsLayoutChanged') {
+      _applyTaskbarLyricsLayout(call.arguments);
     } else if (call.method == 'action' && call.arguments is String) {
       await dispatchAction(call.arguments as String);
     }
@@ -651,6 +738,18 @@ class DesktopIntegration implements Listenable {
         case 'exit':
           _exitRequested = true;
           await _onExit?.call();
+        case 'taskbarNext':
+          // Only the optional lyric button has the stricter in-flight guard.
+          // Tray/Jump List Next still permit interrupting a local source open.
+          if (_taskbarLyrics?.runtimeCanNext == true &&
+              _playback.value.allows('next')) {
+            await _playback.runAction('next');
+          }
+        case 'taskbarPlayPause':
+          if (_taskbarLyrics?.runtimeCanPlayPause == true &&
+              _playback.value.allows('toggle')) {
+            await _playback.runAction('toggle');
+          }
         default:
           // A stale Shell menu must not bypass current queue/buffering checks.
           if (_playback.value.allows(action)) {
@@ -758,6 +857,7 @@ class DesktopIntegration implements Listenable {
       }
     }
     try {
+      await _taskbarLyrics?.dispose();
       await _progressPublisher?.dispose();
       await _preview?.dispose();
       if (_supported) await _invoke('dispose');

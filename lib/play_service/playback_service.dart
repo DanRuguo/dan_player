@@ -22,6 +22,7 @@ import 'package:dan_player/play_service/playback_diagnostics.dart';
 import 'package:dan_player/play_service/playback_modes.dart';
 import 'package:dan_player/play_service/replay_gain.dart';
 import 'package:dan_player/play_service/queue_navigation.dart';
+import 'package:dan_player/play_service/taskbar_queue_preview.dart';
 import 'package:dan_player/play_service/queue_edits.dart';
 import 'package:dan_player/play_service/queue_order.dart' as queue_order;
 import 'package:dan_player/play_service/queue_track_identity.dart';
@@ -445,6 +446,7 @@ class PlaybackService extends ChangeNotifier {
 
   int eqEditRevision = 0;
   List<double> get eqGains => _player.eqGains;
+  List<bool> get eqAvailableBands => _player.eqAvailableBands;
 
   bool setEqEnabled(bool enabled) {
     eqEditRevision++;
@@ -529,6 +531,24 @@ class PlaybackService extends ChangeNotifier {
   /// Explicit commands have an identity even when paused state/position does
   /// not change. Position samples and native output recovery do not publish it.
   ValueListenable<Object> get playbackIntent => _playbackIntent;
+
+  /// The already-determined natural next item, without generating a shuffle
+  /// cycle or changing queue, transport, stop markers or decoder state.
+  Audio? get nextAutomaticQueueAudio {
+    if (_closed || resolvingAudioPath.value != null) return null;
+    final current = _currentQueueIndex;
+    final index = knownNextQueueIndex(
+        length: playlist.value.length,
+        currentIndex: current,
+        playMode: playMode.value,
+        shuffle: shuffle.value,
+        canAdvance: queueStopBoundary.canAdvanceAutomatically,
+        stopAtCurrent: stopAfterCurrent.value ||
+            (queueStopBoundary.active &&
+                queueStopBoundary.target == _currentOccurrence?.id),
+        repeatingSegment: segmentLoop.enabled);
+    return index == null ? null : playlist.value[index];
+  }
 
   void _publishPlaybackIntent({bool transportCommand = false}) {
     if (transportCommand) _transportCommandRevision++;

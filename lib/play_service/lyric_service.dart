@@ -16,6 +16,16 @@ import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/foundation.dart';
 
+final _desktopLyricSyncOwnerKey = Object();
+
+/// Scope one helper's async initial sync without changing the public sender
+/// contract. The owner is local to this async request, never global state:
+/// late callbacks cannot cross a closed/reopened helper. Ordinary lyric updates
+/// retain their existing source ownership.
+Future<void> withDesktopLyricSyncOwner(
+        bool Function() stillCurrent, Future<void> Function() sync) =>
+    runZoned(sync, zoneValues: {_desktopLyricSyncOwnerKey: stillCurrent});
+
 /// A cached online result can win over local lyrics when the user selected
 /// online-first. This stage only reads saved sources; network fallback is gated
 /// separately by the opt-in preference after both saved sources miss.
@@ -271,18 +281,20 @@ class LyricService extends ChangeNotifier {
   /// Pushes an immediate, position-correct snapshot to a newly opened or
   /// recovered desktop lyric process.
   Future<void> syncDesktopLyric() async {
-    if (_disposed) return;
+    final stillCurrent =
+        Zone.current[_desktopLyricSyncOwnerKey] as bool Function()?;
+    if (_disposed || stillCurrent?.call() == false) return;
     final token = _lyricToken;
     Lyric? lyric;
     try {
       lyric = await currLyricFuture;
     } catch (_) {
-      if (_isCurrent(token)) {
+      if (_isCurrent(token) && stillCurrent?.call() != false) {
         playService.desktopLyricService.sendNoLyricMessage();
       }
       return;
     }
-    if (!_isCurrent(token)) return;
+    if (!_isCurrent(token) || stillCurrent?.call() == false) return;
     if (lyric == null || lyric.lines.isEmpty) {
       playService.desktopLyricService.sendNoLyricMessage();
       return;

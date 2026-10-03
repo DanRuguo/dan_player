@@ -184,13 +184,55 @@ class DesktopLyricAppearancePanel extends StatelessWidget {
               ValueListenableBuilder(
                   valueListenable: controller.appearance,
                   builder: (context, appearance, _) => Column(children: [
-                        DesktopLyricTaskbarOptions(
+                        SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.tonalIcon(
+                                key: const ValueKey(
+                                    'desktop-switch-taskbar-lyrics'),
+                                style: FilledButton.styleFrom(
+                                    foregroundColor: primary,
+                                    backgroundColor:
+                                        primary.withValues(alpha: .12),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 12),
+                                    shape: desktopLyricAppearanceControlShape),
+                                onPressed: controller.switchingTaskbar ||
+                                        !controller.active
+                                    ? null
+                                    : controller.switchToTaskbarLyrics,
+                                icon: const Icon(Symbols.subtitles),
+                                label: Text(ui('切换到任务栏歌词'),
+                                    textAlign: TextAlign.center))),
+                        const SizedBox(height: 8),
+                        DesktopLyricAppearanceOptions(
+                            section: DesktopLyricOptionSection.choices,
                             appearance: appearance,
                             onChanged: controller.appearance.update,
                             primaryColor: primary,
                             foregroundColor: foreground),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 16),
+                        DesktopLyricTaskbarOptions(
+                            section: DesktopLyricOptionSection.toggles,
+                            appearance: appearance,
+                            onChanged: controller.appearance.update,
+                            primaryColor: primary,
+                            foregroundColor: foreground),
                         DesktopLyricAppearanceOptions(
+                            section: DesktopLyricOptionSection.toggles,
+                            appearance: appearance,
+                            onChanged: controller.appearance.update,
+                            primaryColor: primary,
+                            foregroundColor: foreground),
+                        const SizedBox(height: 16),
+                        DesktopLyricAppearanceOptions(
+                            section: DesktopLyricOptionSection.sliders,
+                            appearance: appearance,
+                            onChanged: controller.appearance.update,
+                            primaryColor: primary,
+                            foregroundColor: foreground),
+                        if (appearance.taskbarMode) const SizedBox(height: 8),
+                        DesktopLyricTaskbarOptions(
+                            section: DesktopLyricOptionSection.sliders,
                             appearance: appearance,
                             onChanged: controller.appearance.update,
                             primaryColor: primary,

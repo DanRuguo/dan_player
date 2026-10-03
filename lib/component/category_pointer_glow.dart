@@ -53,9 +53,27 @@ class CoverPointerScope extends StatefulWidget {
   State<CoverPointerScope> createState() => _CoverPointerScopeState();
 }
 
-class _CoverPointerScopeState extends State<CoverPointerScope> {
+class _CoverPointerScopeState extends State<CoverPointerScope>
+    with WidgetsBindingObserver {
   final position = _FramePointer();
   bool _enabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    // Native reduceMotion is not a MediaQuery field. Retire the shared sample
+    // even when no inherited dependency changes or new pointer input arrives.
+    final enabled = !appToolbarReduceMotion(context);
+    if (_enabled == enabled) return;
+    _enabled = enabled;
+    if (!enabled) position.clear();
+    setState(() {});
+  }
 
   @override
   void didChangeDependencies() {
@@ -66,6 +84,7 @@ class _CoverPointerScopeState extends State<CoverPointerScope> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     position.dispose();
     super.dispose();
   }
@@ -118,11 +137,27 @@ class CategoryPointerGlow extends StatefulWidget {
   State<CategoryPointerGlow> createState() => _CategoryPointerGlowState();
 }
 
-class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
+class _CategoryPointerGlowState extends State<CategoryPointerGlow>
+    with WidgetsBindingObserver {
   final _position = _FramePointer();
   ValueNotifier<Offset?>? _shared;
   Listenable? _motion;
   bool _enabled = true;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    final enabled = !appToolbarReduceMotion(context);
+    if (_enabled == enabled) return;
+    _enabled = enabled;
+    if (!enabled) _position.clear();
+    setState(() {});
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -203,6 +238,7 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _shared?.removeListener(_move);
     _motion?.removeListener(_geometryChanged);
     _position.dispose();

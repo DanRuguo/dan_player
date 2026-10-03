@@ -499,7 +499,8 @@ void PaletteWindowManager::HandleChild(const flutter::MethodCall<Value>& call,
     PostMessage(owner_, kPaletteCloseMessage, static_cast<WPARAM>(session_), 0);
     return;
   }
-  if (call.method_name() != "edit" && call.method_name() != "retry") {
+  if (call.method_name() != "edit" && call.method_name() != "retry" &&
+      call.method_name() != "taskbarLyrics") {
     result->NotImplemented(); return;
   }
   // The child reply must never access a messenger belonging to a dead engine.

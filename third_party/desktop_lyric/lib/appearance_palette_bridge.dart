@@ -1,6 +1,7 @@
 import 'frame_pacing.dart';
 import 'app_motion.dart';
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,7 @@ class DesktopLyricPaletteHost {
     required this.layout,
     MethodChannel? channel,
     this.timeout = const Duration(seconds: 12),
+    this.activateTaskbarLyrics,
   }) : channel =
             channel ?? const MethodChannel('dan_player/desktop_lyric_palette') {
     this.channel.setMethodCallHandler(_handle);
@@ -36,6 +38,7 @@ class DesktopLyricPaletteHost {
   final DesktopLyricWindowLayout layout;
   final MethodChannel channel;
   final Duration timeout;
+  final VoidCallback? activateTaskbarLyrics;
   final isOpen = ValueNotifier(false);
   final isStarting = ValueNotifier(false);
   int _session = 0;
@@ -45,6 +48,7 @@ class DesktopLyricPaletteHost {
   bool _scheduled = false;
   bool _sending = false;
   bool _dirty = false;
+  bool _taskbarRequested = false;
   Future<void>? _opening;
   Completer<void>? _closed;
   Future<void>? _warming;
@@ -110,6 +114,7 @@ class DesktopLyricPaletteHost {
     if (_warming != null) await _warming;
     if (_disposed) return;
     final session = ++_session;
+    _taskbarRequested = false;
     _editAck = 0;
     final closed = _closed = Completer<void>();
     isOpen.value = true;
@@ -159,6 +164,16 @@ class DesktopLyricPaletteHost {
     if (call.method == 'retry') {
       controller.retryAppearanceSave();
       return _snapshot();
+    }
+    if (call.method == 'taskbarLyrics') {
+      if (!_taskbarRequested) {
+        _taskbarRequested = true;
+        (activateTaskbarLyrics ??
+            () => stdout.write(
+                const ControlEventMessage(ControlEvent.taskbarLyrics)
+                    .buildMessageJson()))();
+      }
+      return null;
     }
     if (call.method == 'edit') {
       final sequence = args['sequence'];
@@ -307,6 +322,8 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
   Future<void>? _flushFuture;
   bool _disposed = false;
   bool _closing = false;
+  bool _switchingTaskbar = false;
+  bool get switchingTaskbar => _switchingTaskbar;
   bool _active = true;
   bool get active => _active;
   int _presentationEpoch = 0;
@@ -381,6 +398,7 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
       _sequence = 0;
       _inflightSequence = 0;
       _closing = false;
+      _switchingTaskbar = false;
       _active = true;
     }
     _session = session;
@@ -473,6 +491,34 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
     } catch (_) {
       if (!_disposed && session == _session && _active) {
         saveError.value = ui('保存桌面歌词外观失败，请重试');
+      }
+    }
+  }
+
+  Future<void> switchToTaskbarLyrics() async {
+    if (_disposed || !_active || _closing || _switchingTaskbar) return;
+    final session = _session;
+    _switchingTaskbar = true;
+    _closing = true;
+    notifyListeners();
+    try {
+      await flush();
+      if (_disposed || !_active || session != _session || _pending.isNotEmpty) {
+        return;
+      }
+      await channel.invokeMethod<void>(
+          'taskbarLyrics', {'session': session}).timeout(timeout);
+      // The main process owns mutually exclusive shutdown/start. Do not close
+      // this helper independently before its coordinator receives the command.
+    } catch (_) {
+      if (!_disposed && _active && session == _session) {
+        layoutError.value = ui('任务栏歌词切换失败，请重试。');
+      }
+    } finally {
+      if (!_disposed && _active && session == _session) {
+        _switchingTaskbar = false;
+        _closing = false;
+        notifyListeners();
       }
     }
   }

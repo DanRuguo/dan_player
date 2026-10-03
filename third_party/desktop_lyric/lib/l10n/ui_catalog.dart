@@ -1,3 +1,7 @@
+import 'catalog_statistics_trends.dart';
+import 'catalog_taskbar_lyrics.dart';
+import 'catalog_desktop_lyric_loading.dart';
+import 'catalog_equalizer_source.dart';
 import 'catalog_tap_lyric_editor.dart';
 import 'catalog_local_variants.dart';
 import 'catalog_playlist_folder.dart';
@@ -78,6 +82,10 @@ import 'catalog_search_history.dart';
 import 'catalog_comments_feedback_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
+  ...catalogStatisticsTrends,
+  ...catalogTaskbarLyrics,
+  ...desktopLyricLoadingUiCatalog,
+  ...catalogEqualizerSource,
   ...catalogLocalVariants,
   ...catalogPlaylistFolder,
   ...catalogTrackPlayback,

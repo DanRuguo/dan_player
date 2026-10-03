@@ -27,7 +27,8 @@ enum ControlEvent {
   previousAudio(2),
   nextAudio(3),
   lock(4),
-  close(5);
+  close(5),
+  taskbarLyrics(6);
 
   const ControlEvent(this.code);
   final int code;

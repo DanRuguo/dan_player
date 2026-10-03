@@ -4,6 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
+enum DesktopLyricOptionSection { all, choices, toggles, sliders }
+
+const desktopLyricAppearanceControlShape =
+    RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12)));
+
 /// Shared appearance editor for the player settings and the desktop palette.
 /// Its owner handles persistence and supplies a scrollable parent when needed.
 class DesktopLyricAppearanceOptions extends StatelessWidget {
@@ -12,12 +17,14 @@ class DesktopLyricAppearanceOptions extends StatelessWidget {
       required this.appearance,
       required this.onChanged,
       this.primaryColor,
-      this.foregroundColor});
+      this.foregroundColor,
+      this.section = DesktopLyricOptionSection.all});
 
   final DesktopLyricAppearance appearance;
   final ValueChanged<DesktopLyricAppearance> onChanged;
   final Color? primaryColor;
   final Color? foregroundColor;
+  final DesktopLyricOptionSection section;
 
   void _change(DesktopLyricAppearance next) {
     if (next != appearance) onChanged(next);
@@ -58,96 +65,105 @@ class DesktopLyricAppearanceOptions extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        slider(
-            id: 'desktop-lyric-font-size',
-            label: ui("原文字号"),
-            value: appearance.lyricFontSize,
-            min: 18,
-            max: 64,
-            divisions: 46,
+        if (section == DesktopLyricOptionSection.all ||
+            section == DesktopLyricOptionSection.sliders) ...[
+          slider(
+              id: 'desktop-lyric-font-size',
+              label: ui("原文字号"),
+              value: appearance.lyricFontSize,
+              min: 18,
+              max: 64,
+              divisions: 46,
+              onChanged: (value) =>
+                  _change(appearance.copyWith(lyricFontSize: value))),
+          const SizedBox(height: 8),
+          slider(
+              id: 'desktop-translation-font-size',
+              label: ui("译文字号"),
+              value: appearance.translationFontSize,
+              min: 14,
+              max: 60,
+              divisions: 46,
+              onChanged: (value) =>
+                  _change(appearance.copyWith(translationFontSize: value))),
+          const SizedBox(height: 8),
+          slider(
+              id: 'desktop-text-opacity',
+              label: ui("文字不透明度"),
+              value: appearance.textOpacity,
+              min: .2,
+              max: 1,
+              percentage: true,
+              onChanged: (value) =>
+                  _change(appearance.copyWith(textOpacity: value))),
+          const SizedBox(height: 8),
+          slider(
+              id: 'desktop-background-opacity',
+              label: ui("背景不透明度"),
+              value: appearance.backgroundOpacity,
+              min: 0,
+              max: 1,
+              percentage: true,
+              onChanged: (value) =>
+                  _change(appearance.copyWith(backgroundOpacity: value))),
+        ],
+        if (section == DesktopLyricOptionSection.all ||
+            section == DesktopLyricOptionSection.toggles)
+          SwitchListTile.adaptive(
+            key: const ValueKey('desktop-lyric-stroke'),
+            contentPadding: EdgeInsets.zero,
+            title: Text(ui("文字描边"), style: TextStyle(color: foreground)),
+            subtitle: Text(ui("在复杂背景上增加字形对比"),
+                style: TextStyle(color: foreground.withValues(alpha: .72))),
+            activeThumbColor: primary,
+            activeTrackColor: primary.withValues(alpha: .35),
+            inactiveThumbColor: foreground.withValues(alpha: .6),
+            inactiveTrackColor: foreground.withValues(alpha: .12),
+            value: appearance.strokeEnabled,
             onChanged: (value) =>
-                _change(appearance.copyWith(lyricFontSize: value))),
-        const SizedBox(height: 8),
-        slider(
-            id: 'desktop-translation-font-size',
-            label: ui("译文字号"),
-            value: appearance.translationFontSize,
-            min: 14,
-            max: 60,
-            divisions: 46,
-            onChanged: (value) =>
-                _change(appearance.copyWith(translationFontSize: value))),
-        const SizedBox(height: 8),
-        slider(
-            id: 'desktop-text-opacity',
-            label: ui("文字不透明度"),
-            value: appearance.textOpacity,
-            min: .2,
-            max: 1,
-            percentage: true,
-            onChanged: (value) =>
-                _change(appearance.copyWith(textOpacity: value))),
-        const SizedBox(height: 8),
-        slider(
-            id: 'desktop-background-opacity',
-            label: ui("背景不透明度"),
-            value: appearance.backgroundOpacity,
-            min: 0,
-            max: 1,
-            percentage: true,
-            onChanged: (value) =>
-                _change(appearance.copyWith(backgroundOpacity: value))),
-        SwitchListTile.adaptive(
-          key: const ValueKey('desktop-lyric-stroke'),
-          contentPadding: EdgeInsets.zero,
-          title: Text(ui("文字描边"), style: TextStyle(color: foreground)),
-          subtitle: Text(ui("在复杂背景上增加字形对比"),
-              style: TextStyle(color: foreground.withValues(alpha: .72))),
-          activeThumbColor: primary,
-          activeTrackColor: primary.withValues(alpha: .35),
-          inactiveThumbColor: foreground.withValues(alpha: .6),
-          inactiveTrackColor: foreground.withValues(alpha: .12),
-          value: appearance.strokeEnabled,
-          onChanged: (value) =>
-              _change(appearance.copyWith(strokeEnabled: value)),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.tonalIcon(
-            key: const ValueKey('desktop-color-follow-theme'),
-            onPressed: () => _change(appearance.copyWith(followTheme: true)),
-            style: FilledButton.styleFrom(
-              backgroundColor: primary.withValues(alpha: .13),
-              foregroundColor: primary,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            icon: Icon(followingTheme ? Symbols.check : Symbols.palette),
-            label: Text(followingTheme ? ui("正在跟随播放器主题") : ui("跟随播放器主题"),
-                textAlign: TextAlign.center),
+                _change(appearance.copyWith(strokeEnabled: value)),
           ),
-        ),
-        const SizedBox(height: 12),
-        Text(ui("文字颜色"),
-            style: TextStyle(color: foreground, fontWeight: FontWeight.w600)),
-        if (!followingTheme)
-          Text(_colorLabel(appearance.customColor!),
-              key: const ValueKey('desktop-custom-color-value'),
-              style: TextStyle(color: foreground.withValues(alpha: .72))),
-        const SizedBox(height: 4),
-        Wrap(spacing: 4, runSpacing: 4, children: [
-          for (final color in Colors.primaries)
-            _ColorChoice(
-              color: color,
-              selected: appearance.customColor == color.toARGB32(),
-              primary: primary,
-              foreground: foreground,
-              onTap: () =>
-                  _change(appearance.copyWith(customColor: color.toARGB32())),
+        if (section == DesktopLyricOptionSection.all ||
+            section == DesktopLyricOptionSection.choices) ...[
+          if (section == DesktopLyricOptionSection.all)
+            const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.tonalIcon(
+              key: const ValueKey('desktop-color-follow-theme'),
+              onPressed: () => _change(appearance.copyWith(followTheme: true)),
+              style: FilledButton.styleFrom(
+                backgroundColor: primary.withValues(alpha: .13),
+                foregroundColor: primary,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                shape: desktopLyricAppearanceControlShape,
+              ),
+              icon: Icon(followingTheme ? Symbols.check : Symbols.palette),
+              label: Text(followingTheme ? ui("正在跟随播放器主题") : ui("跟随播放器主题"),
+                  textAlign: TextAlign.center),
             ),
-        ]),
+          ),
+          const SizedBox(height: 12),
+          Text(ui("文字颜色"),
+              style: TextStyle(color: foreground, fontWeight: FontWeight.w600)),
+          if (!followingTheme)
+            Text(_colorLabel(appearance.customColor!),
+                key: const ValueKey('desktop-custom-color-value'),
+                style: TextStyle(color: foreground.withValues(alpha: .72))),
+          const SizedBox(height: 4),
+          Wrap(spacing: 4, runSpacing: 4, children: [
+            for (final color in Colors.primaries)
+              _ColorChoice(
+                color: color,
+                selected: appearance.customColor == color.toARGB32(),
+                primary: primary,
+                foreground: foreground,
+                onTap: () =>
+                    _change(appearance.copyWith(customColor: color.toARGB32())),
+              ),
+          ]),
+        ],
       ],
     );
   }
