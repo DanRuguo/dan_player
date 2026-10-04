@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/process_resource_chart.dart';
+import 'package:dan_player/component/sidebar_motion.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/process_resource_coordinator.dart';
@@ -229,11 +230,7 @@ class _CompactProcessResourceMonitorState
                     ]));
               }
               return Padding(
-                  padding: EdgeInsetsDirectional.fromSTEB(
-                      widget.compactSidebar ? 0 : 26,
-                      4,
-                      widget.compactSidebar ? 0 : 26,
-                      12),
+                  padding: const EdgeInsets.only(top: 4, bottom: 12),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     for (var index = 0; index < metrics.length; index++) ...[
                       metric(metrics[index]),
@@ -274,6 +271,10 @@ class _CompactMetric extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Inline lyrics keep their own fixed title-bar geometry. The sidebar uses
+    // the navigation's clocks, so sampling never creates animation controllers.
+    final motion = inline ? null : SidebarMotionScope.maybeOf(context);
+    final compact = motion?.compact ?? compactSidebar;
     final value = data.value;
     final percent = value == null
         ? ui(data.unavailable ? '不可用' : '等待采样')
@@ -310,9 +311,6 @@ class _CompactMetric extends StatelessWidget {
                     height: mode == ProcessResourceDisplay.line ? 12 : 4));
     final content =
         ExcludeSemantics(child: LayoutBuilder(builder: (context, constraints) {
-      if (compactSidebar && !inline) {
-        return SizedBox(height: 34, child: Center(child: icon));
-      }
       if (inline) {
         return Column(mainAxisSize: MainAxisSize.min, children: [
           icon,
@@ -325,19 +323,40 @@ class _CompactMetric extends StatelessWidget {
         ]);
       }
       return SizedBox(
-          height: 32,
-          child: Row(children: [
-            icon,
-            const SizedBox(width: 12),
-            if (mode == ProcessResourceDisplay.numbers || value == null)
-              Flexible(child: indicator)
-            else
-              Expanded(child: indicator)
+          height: compact ? 34 : 32,
+          child: Stack(children: [
+            // Keep the same icon Element across both modes. The compact
+            // tooltip is a separate overlay, never a changing parent wrapper.
+            PositionedDirectional(
+                start: motion?.iconStart ??
+                    (compact ? (constraints.maxWidth - 28) / 2 : 26),
+                top: 0,
+                bottom: 0,
+                width: 28,
+                child: icon),
+            if (!compact)
+              PositionedDirectional(
+                  start: 66,
+                  end: 26,
+                  top: 0,
+                  bottom: 0,
+                  child: Opacity(
+                      key: ValueKey('sidebar-resource-opacity-${data.name}'),
+                      opacity: motion?.labelOpacity ?? 1,
+                      child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: indicator))),
+            if (compact)
+              Positioned.fill(
+                  child: Tooltip(
+                      message: label,
+                      excludeFromSemantics: true,
+                      child: const SizedBox.expand())),
           ]));
     }));
     return Semantics(
         label: label,
-        child: inline || compactSidebar
+        child: inline
             ? Tooltip(
                 message: label, excludeFromSemantics: true, child: content)
             : content);

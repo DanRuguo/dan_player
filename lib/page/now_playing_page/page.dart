@@ -156,13 +156,17 @@ class NowPlayingResourceTitleBar extends StatelessWidget {
                                         preferences.showInLyrics
                                     ? SizedBox(
                                         width: resourcesWidth,
-                                        child: CompactProcessResourceMonitor(
-                                            key: const ValueKey(
-                                                'lyrics-process-resources'),
-                                            surface:
-                                                ProcessResourceSurface.lyrics,
-                                            coordinator: resourceCoordinator,
-                                            columnSpacing: spacing))
+                                        child: AppEntrance(
+                                            identity: 'lyric-title-resources',
+                                            order: 1,
+                                            child: CompactProcessResourceMonitor(
+                                                key: const ValueKey(
+                                                    'lyrics-process-resources'),
+                                                surface: ProcessResourceSurface
+                                                    .lyrics,
+                                                coordinator:
+                                                    resourceCoordinator,
+                                                columnSpacing: spacing)))
                                     : const SizedBox.shrink()),
                           const Expanded(
                               child: DragToMoveArea(
