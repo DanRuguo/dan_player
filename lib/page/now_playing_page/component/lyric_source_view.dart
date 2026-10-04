@@ -283,6 +283,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
 
   Future<Lyric?> _candidateLyric(SongSearchResult candidate,
       {bool priority = false, bool retryFailed = false}) {
+    if (_closed) return Future.value(null);
     if (_previewQueueStopped && !priority) return Future.value(null);
     final identity = candidate.identity;
     var job = _previews[identity];
@@ -462,6 +463,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
   }
 
   void _handlePlaybackChange() {
+    if (_closed) return;
     final changed = _currentTrackPath() != widget.audio.path;
     if (_trackChanged == changed) return;
     _selectionGeneration++;
@@ -483,7 +485,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
   }
 
   Future<void> _search() async {
-    if (_trackChanged) return;
+    if (_closed || _trackChanged) return;
     _searchCancellation?.cancel();
     final cancellation = LyricSearchCancellation();
     _searchCancellation = cancellation;
@@ -579,7 +581,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
       mounted && !_closed && generation == _selectionGeneration;
 
   Future<void> _loadLocalVariants() async {
-    if (!widget.audio.isLocal || widget.audio.isCueTrack) return;
+    if (_closed || !widget.audio.isLocal || widget.audio.isCueTrack) return;
     final generation = ++_localVariantsGeneration;
     final audio = widget.audio;
     bool active() =>
@@ -603,7 +605,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
   }
 
   Future<void> _selectLocalVariant(LocalLyricVariant variant) async {
-    if (_trackChanged || _loadingCandidate != null) return;
+    if (_closed || _trackChanged || _loadingCandidate != null) return;
     final generation = ++_selectionGeneration;
     final audio = widget.audio;
     final store = _documents;
@@ -639,7 +641,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
       if (mounted &&
           _isSelectionCurrent(generation) &&
           _currentTrackPath() == audio.path) {
-        Navigator.of(context).pop();
+        _dismiss();
       }
     } catch (error) {
       if (active()) {
@@ -655,7 +657,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
   }
 
   Future<void> _selectDraft() async {
-    if (_trackChanged || _loadingCandidate != null) return;
+    if (_closed || _trackChanged || _loadingCandidate != null) return;
     final generation = ++_selectionGeneration;
     _stopSearchForSelection();
     final store = _documents;
@@ -671,7 +673,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
               _isSelectionCurrent(generation) &&
               !_trackChanged &&
               _currentTrackPath() == widget.audio.path);
-      if (mounted && _isSelectionCurrent(generation)) Navigator.pop(context);
+      if (mounted && _isSelectionCurrent(generation)) _dismiss();
     } catch (_) {
       if (_isSelectionCurrent(generation)) {
         setState(() =>
@@ -685,7 +687,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
   }
 
   Future<void> _selectLocal() async {
-    if (_trackChanged || _loadingCandidate != null) return;
+    if (_closed || _trackChanged || _loadingCandidate != null) return;
     final generation = ++_selectionGeneration;
     _stopSearchForSelection();
     setState(() {
@@ -715,7 +717,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
             expectedRevision: revision,
             stillCurrent: stillCurrent);
         if (!_isSelectionCurrent(generation)) return;
-        if (mounted) Navigator.of(context).pop();
+        if (mounted) _dismiss();
         return;
       }
       await (widget.persistSource ?? persistLyricSource)(
@@ -732,7 +734,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
         return;
       }
       if (!mounted) return;
-      Navigator.of(context).pop();
+      _dismiss();
     } catch (_) {
       if (_isSelectionCurrent(generation)) {
         setState(() => _operationError = () => ui("保存本地歌词来源失败，旧设置已保留，请重试。"));
@@ -745,7 +747,9 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
   }
 
   Future<void> _selectCandidate(SongSearchResult candidate) async {
-    if (_trackChanged || _loadingCandidate == candidate.identity) return;
+    if (_closed || _trackChanged || _loadingCandidate == candidate.identity) {
+      return;
+    }
     final generation = ++_selectionGeneration;
     final wasFailed = _previews[candidate.identity]?.failed == true;
     final request =
@@ -809,7 +813,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
         return;
       }
       if (!mounted) return;
-      Navigator.of(context).pop();
+      _dismiss();
     } catch (error) {
       if (_isSelectionCurrent(generation)) {
         final message = error is InstrumentalLyric
@@ -907,15 +911,28 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
     };
   }
 
-  @override
-  void dispose() {
+  void _close() {
+    if (_closed) return;
+    // The route stays mounted throughout its exit animation. Revoke requests
+    // now so a late candidate cannot save, apply or pop the page underneath.
     _closed = true;
-    WidgetsBinding.instance.removeObserver(this);
     _searchCancellation?.cancel();
     _searchGeneration++;
     _selectionGeneration++;
     _localVariantsGeneration++;
     _clearPreviews();
+  }
+
+  void _dismiss() {
+    if (_closed) return;
+    _close();
+    Navigator.of(context).pop();
+  }
+
+  @override
+  void dispose() {
+    _close();
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     _playbackListenable?.removeListener(_handlePlaybackChange);
     super.dispose();
@@ -932,7 +949,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
       widget.audio.artist.trim(),
       widget.audio.album.trim(),
     ].where((value) => value.isNotEmpty).join(' · ');
-    return Dialog(
+    final dialog = Dialog(
       child: AppDialogContent(
         width: 620,
         maxHeight: height,
@@ -949,7 +966,7 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
                 trailing: IconButton(
                   key: const ValueKey('lyric-source-close'),
                   tooltip: ui("关闭"),
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: _dismiss,
                   icon: const Icon(Symbols.close),
                 ),
               ),
@@ -1082,6 +1099,12 @@ class _LyricSourceDialogState extends State<LyricSourceDialog>
           ),
         ),
       ),
+    );
+    return PopScope<void>(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) _close();
+      },
+      child: dialog,
     );
   }
 

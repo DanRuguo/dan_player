@@ -45,6 +45,8 @@ import 'package:flutter/material.dart';
 import 'package:dan_player/component/track_playback_settings_dialog.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/compact_process_resource_monitor.dart';
+import 'package:dan_player/process_resource_coordinator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -92,18 +94,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
           backgroundColor: Colors.transparent,
           appBar: const PreferredSize(
             preferredSize: Size.fromHeight(56.0),
-            child: TitleBarSurface(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8.0),
-                child: Row(
-                  children: [
-                    NavBackBtn(),
-                    Expanded(child: DragToMoveArea(child: SizedBox.expand())),
-                    WindowControlls(),
-                  ],
-                ),
-              ),
-            ),
+            child: NowPlayingResourceTitleBar(),
           ),
           body: ChangeNotifierProvider.value(
             value: PlayService.instance.playbackService,
@@ -123,6 +114,65 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       ],
     );
   }
+}
+
+/// Resource information lives in existing title-bar space, without taking
+/// height from song metadata or lyrics. Each metric uses the same icon size
+/// and column spacing as the independently clickable window controls.
+class NowPlayingResourceTitleBar extends StatelessWidget {
+  const NowPlayingResourceTitleBar({super.key, this.resourceCoordinator});
+  final ProcessResourceCoordinator? resourceCoordinator;
+  @override
+  Widget build(BuildContext context) =>
+      LayoutBuilder(builder: (context, bounds) {
+        final spacing = bounds.maxWidth < 520 ? 0.0 : 8.0;
+        const cell = 40.0;
+        final resourcesWidth = cell * 3 + spacing * 2;
+        final style = (IconButtonTheme.of(context).style ?? const ButtonStyle())
+            .copyWith(
+                minimumSize: const WidgetStatePropertyAll(Size.square(cell)),
+                maximumSize: const WidgetStatePropertyAll(Size.square(cell)),
+                padding: const WidgetStatePropertyAll(
+                    EdgeInsets.all((cell - 24) / 2)),
+                iconSize: const WidgetStatePropertyAll(24),
+                visualDensity: VisualDensity.standard,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap);
+        return IconButtonTheme(
+            data: IconButtonThemeData(style: style),
+            child: TitleBarSurface(
+                child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(children: [
+                      const NavBackBtn(),
+                      Expanded(
+                          child: LayoutBuilder(builder: (context, constraints) {
+                        return Row(children: [
+                          if (constraints.maxWidth >= resourcesWidth + 24)
+                            ValueListenableBuilder(
+                                valueListenable:
+                                    AppSettings.instance.processResources,
+                                builder: (context, preferences, _) => preferences
+                                            .enabled &&
+                                        preferences.showInLyrics
+                                    ? SizedBox(
+                                        width: resourcesWidth,
+                                        child: CompactProcessResourceMonitor(
+                                            key: const ValueKey(
+                                                'lyrics-process-resources'),
+                                            surface:
+                                                ProcessResourceSurface.lyrics,
+                                            coordinator: resourceCoordinator,
+                                            columnSpacing: spacing))
+                                    : const SizedBox.shrink()),
+                          const Expanded(
+                              child: DragToMoveArea(
+                                  key: ValueKey('lyrics-title-drag-region'),
+                                  child: SizedBox.expand())),
+                        ]);
+                      })),
+                      WindowControlls(spacing: spacing),
+                    ]))));
+      });
 }
 
 class NowPlayingMoreAction extends StatelessWidget {

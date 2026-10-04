@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/build_index_state_view.dart';
 import 'package:dan_player/component/feature_onboarding.dart';
+import 'package:dan_player/component/onboarding_guide_prompt.dart';
 import 'package:dan_player/component/player_logo.dart';
 import 'package:dan_player/page/settings_page/cache_backup_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -31,10 +32,27 @@ class WelcomingPage extends StatefulWidget {
 class _WelcomingPageState extends State<WelcomingPage> {
   late bool _tutorialCompleted = AppSettings.instance.onboardingCompleted;
 
-  void _completeTutorial() {
+  void _completeTutorial({bool offerGuide = false}) {
+    if (!mounted || _tutorialCompleted) return;
+    final firstUse = !AppSettings.instance.onboardingCompleted;
+    final route = ModalRoute.of(context);
     AppSettings.instance.onboardingCompleted = true;
-    unawaited(AppSettings.instance.saveSettings(captureWindowSize: false));
+    final saved = AppSettings.instance.saveSettings(captureWindowSize: false);
     setState(() => _tutorialCompleted = true);
+    if (firstUse && offerGuide) {
+      unawaited(_offerGuideAfterSave(saved, route));
+    }
+  }
+
+  Future<void> _offerGuideAfterSave(
+      Future<void> saved, ModalRoute<dynamic>? route) async {
+    await saved;
+    if (!mounted || route?.isCurrent == false) return;
+    // Let the import page mount before opening a dialog. endOfFrame schedules
+    // that one frame even when saving finishes after entrance motion settled.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || route?.isCurrent == false) return;
+    await showOnboardingGuidePrompt(context);
   }
 
   @override
@@ -49,7 +67,9 @@ class _WelcomingPageState extends State<WelcomingPage> {
         child: _TitleBar(),
       ),
       body: !_tutorialCompleted
-          ? FeatureOnboarding(onComplete: _completeTutorial)
+          ? FeatureOnboarding(
+              onComplete: () => _completeTutorial(offerGuide: true),
+              onRestored: _completeTutorial)
           : LayoutBuilder(builder: (context, viewport) {
               final compact = viewport.maxWidth < 480;
               return SingleChildScrollView(

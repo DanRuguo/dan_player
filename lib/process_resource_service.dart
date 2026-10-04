@@ -10,12 +10,27 @@ class ProcessResourceSample {
       this.cpuPercent,
       this.gpuPercent,
       this.workingSetBytes,
+      this.totalPhysicalMemoryBytes,
       this.gpuStatus = 'unavailable',
       this.cpuStatus = 'unavailable'});
   final DateTime time;
   final double? cpuPercent, gpuPercent;
-  final int? workingSetBytes;
+  final int? workingSetBytes, totalPhysicalMemoryBytes;
   final String gpuStatus, cpuStatus;
+
+  /// Current process working set as a share of physical system memory.
+  /// A missing denominator cannot be replaced with the observed history peak.
+  double? get ramPercent {
+    final used = workingSetBytes, total = totalPhysicalMemoryBytes;
+    if (used == null ||
+        used < 0 ||
+        total == null ||
+        total <= 0 ||
+        used > total) {
+      return null;
+    }
+    return used / total * 100;
+  }
 
   factory ProcessResourceSample.fromMap(
       Map<dynamic, dynamic> map, DateTime time) {
@@ -24,6 +39,7 @@ class ProcessResourceSample {
             ? value.toDouble()
             : null;
     final memory = map['workingSetBytes'];
+    final totalMemory = map['totalPhysicalMemoryBytes'];
     final gpu = percent(map['gpuPercent']);
     final cpu = percent(map['cpuPercent']);
     return ProcessResourceSample(
@@ -36,6 +52,8 @@ class ProcessResourceSample {
                 : 'unavailable',
         gpuPercent: gpu,
         workingSetBytes: memory is int && memory >= 0 ? memory : null,
+        totalPhysicalMemoryBytes:
+            totalMemory is int && totalMemory > 0 ? totalMemory : null,
         gpuStatus: gpu != null
             ? 'ready'
             : map['gpuStatus'] == 'warming'

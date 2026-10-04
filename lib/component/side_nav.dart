@@ -8,12 +8,15 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/component/compact_process_resource_monitor.dart';
 import 'package:dan_player/component/frosted_surface.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/component/side_nav_layout.dart';
+import 'package:dan_player/component/sidebar_resource_placement.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/player_experience_preferences.dart';
+import 'package:dan_player/process_resource_coordinator.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -46,7 +49,12 @@ final destinations = <DestinationDesc>[
 ];
 
 class SideNav extends StatelessWidget {
-  const SideNav({super.key, this.desktopWidth, this.resizing = false});
+  const SideNav(
+      {super.key,
+      this.desktopWidth,
+      this.resizing = false,
+      this.resourceCoordinator});
+  final ProcessResourceCoordinator? resourceCoordinator;
 
   /// When provided, renders the persistent continuously-sized desktop
   /// navigation. A null value preserves the overlay drawer/legacy rail used by
@@ -88,12 +96,14 @@ class SideNav extends StatelessWidget {
 
     final continuousWidth = desktopWidth;
     if (continuousWidth != null) {
-      return _ContinuousNavigation(
-        width: continuousWidth,
-        resizing: resizing,
-        selectedIndex: selected,
-        onDestinationSelected: onDestinationSelected,
-      );
+      return _SideNavResourceLayout(
+          coordinator: resourceCoordinator,
+          child: _ContinuousNavigation(
+            width: continuousWidth,
+            resizing: resizing,
+            selectedIndex: selected,
+            onDestinationSelected: onDestinationSelected,
+          ));
     }
 
     return ResponsiveBuilder(
@@ -136,10 +146,13 @@ class SideNav extends StatelessWidget {
           case ScreenType.large:
             final navigation = NavigationDrawerTheme(
               data: labelTheme,
-              child: _CenteredNavigationDrawer(
-                selectedIndex: selected,
-                onDestinationSelected: onDestinationSelected,
-              ),
+              child: _SideNavResourceLayout(
+                  coordinator: resourceCoordinator,
+                  width: DrawerTheme.of(context).width ?? 304,
+                  child: _CenteredNavigationDrawer(
+                    selectedIndex: selected,
+                    onDestinationSelected: onDestinationSelected,
+                  )),
             );
             // Desktop navigation and the exposed bottom/right margins share
             // the Windows compositor's desktop backdrop. A separate
@@ -176,35 +189,87 @@ class SideNav extends StatelessWidget {
                       : 0.78,
                 ),
               ),
-              child: NavigationRail(
-                groupAlignment: -0.14,
-                // All destinations must remain reachable at the normal
-                // window's minimum height and with large accessibility text.
-                scrollable: true,
-                backgroundColor: Colors.transparent,
-                selectedIndex: selected < 0 ? null : selected,
-                onDestinationSelected: onDestinationSelected,
-                destinations: List.generate(
-                  destinations.length,
-                  (i) => NavigationRailDestination(
-                    icon: AppEntrance(
-                      identity: ('nav-icon', destinations[i].desPath),
-                      order: i,
-                      child: Icon(destinations[i].icon, size: 27.0),
+              child: _SideNavResourceLayout(
+                  coordinator: resourceCoordinator,
+                  width: 80,
+                  child: NavigationRail(
+                    groupAlignment: -0.14,
+                    // All destinations must remain reachable at the normal
+                    // window's minimum height and with large accessibility text.
+                    scrollable: true,
+                    backgroundColor: Colors.transparent,
+                    selectedIndex: selected < 0 ? null : selected,
+                    onDestinationSelected: onDestinationSelected,
+                    destinations: List.generate(
+                      destinations.length,
+                      (i) => NavigationRailDestination(
+                        icon: AppEntrance(
+                          identity: ('nav-icon', destinations[i].desPath),
+                          order: i,
+                          child: Icon(destinations[i].icon, size: 27.0),
+                        ),
+                        label: AppEntrance(
+                          identity: ('nav-label', destinations[i].desPath),
+                          order: i,
+                          child: Text(destinations[i].label),
+                        ),
+                      ),
                     ),
-                    label: AppEntrance(
-                      identity: ('nav-label', destinations[i].desPath),
-                      order: i,
-                      child: Text(destinations[i].label),
-                    ),
-                  ),
-                ),
-              ),
+                  )),
             );
         }
       },
     );
   }
+}
+
+/// Resource display uses the unused space without recentering navigation.
+class _SideNavResourceLayout extends StatelessWidget {
+  const _SideNavResourceLayout(
+      {required this.child, this.width, this.coordinator});
+  final Widget child;
+  final double? width;
+  final ProcessResourceCoordinator? coordinator;
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder(
+      valueListenable: AppSettings.instance.processResources,
+      child: child,
+      builder: (context, preferences, child) {
+        return LayoutBuilder(builder: (context, constraints) {
+          final show = preferences.enabled &&
+              preferences.showInSidebar &&
+              constraints.maxHeight >= 180;
+          final compact = show &&
+              (child is NavigationRail ||
+                  child is _ContinuousNavigation &&
+                      (width ?? constraints.maxWidth) <=
+                          sideNavCompactThreshold(
+                              context,
+                              destinations
+                                  .map((destination) => destination.label)));
+          return SizedBox(
+              width: width ??
+                  (child is _ContinuousNavigation ? child.width : null),
+              child: SidebarResourcePlacement(
+                  measurementIdentity: (
+                    width,
+                    MediaQuery.textScalerOf(context),
+                    MediaQuery.paddingOf(context),
+                    uiLanguage.value,
+                    Theme.of(context).textTheme,
+                  ),
+                  bottomInset:
+                      ((constraints.maxHeight - 320) / 4).clamp(0.0, 48.0),
+                  navigation: child!,
+                  monitor: show
+                      ? CompactProcessResourceMonitor(
+                          key: const ValueKey('sidebar-process-resources'),
+                          surface: ProcessResourceSurface.sidebar,
+                          coordinator: coordinator,
+                          compactSidebar: compact)
+                      : const SizedBox.shrink()));
+        });
+      });
 }
 
 class ResizableSideNav extends StatefulWidget {

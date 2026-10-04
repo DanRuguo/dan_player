@@ -67,12 +67,12 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 | Release | Best for | Download |
 | --- | --- | --- |
-| **26.0.6 snapshot1 · Preview** | Try the lyric editing and playback refinements | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6-snapshot.1) |
-| **26.0.5 · Stable** | Everyday listening with an official stable release | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
+| **26.0.6 · Stable** | Current release with taskbar lyrics and a player manual | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
+| **26.0.5 · Previous** | Previous release and the separate FFmpeg component | [Previous release assets](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
 **Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. In the 26.0.5 release, desktop lyrics run in a separate process launched from the same executable.
 
-FFmpeg for lyric previews and trimming is optional. When you choose to download it, the player reuses the [separate 26.0.5 component package](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) and verifies its pinned size and SHA-256. The 26.0.6 snapshot1 installer and portable ZIP do not bundle another copy.
+FFmpeg for lyric previews and trimming is optional. When you choose to download it, the player reuses the [separate 26.0.5 component package](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) and verifies its pinned size and SHA-256. The 26.0.6 installer and portable ZIP do not bundle another copy.
 
 > **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through the app's backup and restore settings before upgrading.
 
@@ -110,7 +110,12 @@ These features are included in the 26.0.5 stable release; see the corresponding 
 
 Online music and custom sources complement local listening. Custom services provide capabilities such as search and lyrics according to what they explicitly declare. See the [custom music source API](docs/custom-music-source-api.md) for integration details.
 
-### 26.0.6 snapshot1
+### 26.0.6
+
+- Taskbar lyrics offer one or two lines, word highlighting, available-area switching, system colors and optional capsule playback buttons. Opening them closes desktop lyrics, and vice versa.
+- Music and cache folders support display notes, browsing, recoverable moves and storage statistics. Cache categories share the statistics page's refresh action.
+- The feature guide now explains common operations and both lyric editing workflows, with interactive progress and lyric animation examples. First-use onboarding points to the manual.
+- Optional CPU/GPU/memory monitoring shares its display mode and interval across backup settings, the sidebar and lyrics. It samples only while a selected surface is visible and keeps navigation in place when space permits.
 
 - Plain-text saving in tap-to-time lyrics now explains that translations and pronunciation cannot go into the plain-text copy, and saves only the main text. Line and word timing can still retain those tracks.
 - The text editor avoids repeated parsing and temporary JSON allocations while rebuilding long lossless lyrics. New wide and narrow renders show both editing methods.
@@ -130,6 +135,18 @@ Playlist view controls, the volume panel, menus, native blur switching and windo
 <a id="screenshots"></a>
 
 ## Interface gallery
+
+### Manual and on-demand monitoring
+
+These real component renders use the Chinese interface, fictional resource samples and example paths.
+
+| Everyday operations | Playback queue and interactive example |
+| --- | --- |
+| ![Instructions for music, categories and playlists](docs/images/manual-common-library.png) | ![Progress seeking example and queue instructions](docs/images/manual-playback-demo.png) |
+
+| Resource monitoring across surfaces | Cache storage categories |
+| --- | --- |
+| ![Shared resource monitoring in the sidebar and backup settings](docs/images/process-resource-locations.png) | ![Cache and player data storage categories in statistics](docs/images/cache-storage-statistics.png) |
 
 ### Two ways to edit lyrics
 

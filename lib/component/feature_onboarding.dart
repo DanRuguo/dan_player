@@ -8,8 +8,10 @@ import 'package:flutter/material.dart';
 /// A self-contained, interactive introduction. Preview actions deliberately do
 /// not create library entries, initialize audio or overwrite user preferences.
 class FeatureOnboarding extends StatefulWidget {
-  const FeatureOnboarding({super.key, required this.onComplete});
+  const FeatureOnboarding(
+      {super.key, required this.onComplete, this.onRestored});
   final VoidCallback onComplete;
+  final VoidCallback? onRestored;
 
   @override
   State<FeatureOnboarding> createState() => _FeatureOnboardingState();
@@ -147,7 +149,7 @@ class _FeatureOnboardingState extends State<FeatureOnboarding> {
                   OutlinedButton.icon(
                     key: const ValueKey('onboarding-restore'),
                     onPressed: () => showOnboardingRestore(context,
-                        onRestored: widget.onComplete),
+                        onRestored: widget.onRestored ?? widget.onComplete),
                     icon: const Icon(Icons.settings_backup_restore),
                     label: Text(ui('从备份恢复')),
                   ),

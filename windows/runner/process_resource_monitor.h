@@ -18,6 +18,7 @@ struct Sample {
   std::optional<double> cpu_percent;
   std::optional<double> gpu_percent;
   std::optional<int64_t> working_set_bytes;
+  std::optional<int64_t> total_physical_memory_bytes;
   std::string cpu_status = "unavailable";
   std::string gpu_status = "unavailable";
 };

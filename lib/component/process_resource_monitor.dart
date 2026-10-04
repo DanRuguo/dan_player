@@ -5,10 +5,12 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_dialog_resize.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/process_resource_chart.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/component/settings_section_visibility.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/process_resource_preferences.dart';
+import 'package:dan_player/process_resource_coordinator.dart';
 import 'package:dan_player/process_resource_service.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
@@ -23,10 +25,12 @@ class ProcessResourceMonitor extends StatefulWidget {
       this.preferences,
       this.onPreferencesChanged,
       this.controller,
+      this.coordinator,
       this.isHidden});
   final ValueListenable<ProcessResourcePreferences>? preferences;
   final Future<void> Function(ProcessResourcePreferences)? onPreferencesChanged;
   final ProcessResourceService? controller;
+  final ProcessResourceCoordinator? coordinator;
   final ValueListenable<bool>? isHidden;
   @override
   State<ProcessResourceMonitor> createState() => _ProcessResourceMonitorState();
@@ -36,6 +40,7 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
     with WidgetsBindingObserver {
   final _surface = GlobalKey();
   late ProcessResourceService _controller;
+  ProcessResourceLease? _lease;
   late ValueListenable<ProcessResourcePreferences> _preferences;
   late ValueListenable<bool> _hidden;
   ScrollPosition? _scroll;
@@ -50,8 +55,18 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
   @override
   void initState() {
     super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _lifecycleVisible = lifecycle == null ||
+        lifecycle == AppLifecycleState.resumed ||
+        lifecycle == AppLifecycleState.inactive;
     WidgetsBinding.instance.addObserver(this);
-    _controller = widget.controller ?? ProcessResourceService();
+    if (widget.controller != null) {
+      _controller = widget.controller!;
+    } else {
+      _lease =
+          (widget.coordinator ?? ProcessResourceCoordinator.instance).acquire();
+      _controller = _lease!.service;
+    }
     _preferences = widget.preferences ?? AppSettings.instance.processResources;
     _hidden = widget.isHidden ?? DesktopIntegration.instance.isHidden;
     _preferences.addListener(_changed);
@@ -95,8 +110,11 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
     }
     // Sampling ownership changes immediately; the finite surface resize is
     // purely visual and never keeps the worker alive while closing.
-    unawaited(_controller.setActive(_preferences.value.enabled && visible,
-        intervalSeconds: _preferences.value.intervalSeconds));
+    final active = _preferences.value.enabled && visible;
+    unawaited(_lease?.setActive(active,
+            intervalSeconds: _preferences.value.intervalSeconds) ??
+        _controller.setActive(active,
+            intervalSeconds: _preferences.value.intervalSeconds));
   }
 
   void _scheduleVisibility() {
@@ -149,8 +167,8 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
     _preferences.removeListener(_changed);
     _hidden.removeListener(_visibilityChanged);
     _scroll?.removeListener(_scheduleVisibility);
-    if (widget.controller == null) {
-      _controller.dispose();
+    if (_lease != null) {
+      _lease!.dispose();
     } else {
       unawaited(_controller.setActive(false));
     }
@@ -175,7 +193,8 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
                           SettingsHeader(
                               title: ui('播放器资源监控'),
                               icon: Icons.monitor_heart_outlined,
-                              subtitle: ui('仅统计当前播放器进程；离开此区域或隐藏窗口时停止采样。')),
+                              subtitle:
+                                  ui('仅统计当前播放器进程；只在已开启的显示位置可见时采样，隐藏窗口后停止。')),
                           SettingsSwitchTile(
                               surface: false,
                               controlKey: const ValueKey('resource-enabled'),
@@ -188,6 +207,32 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
                                   _preferences.value
                                       .copyWith(enabled: value)))),
                           if (_preferences.value.enabled) ...[
+                            SettingsSwitchTile(
+                                surface: false,
+                                controlKey: const ValueKey('resource-sidebar'),
+                                contentPadding:
+                                    SettingsSurface.embeddedRowPadding,
+                                icon: Icons.view_sidebar_outlined,
+                                title: Text(ui('在侧栏下方显示')),
+                                value: _preferences.value.showInSidebar,
+                                onChanged: (value) => unawaited(_change(
+                                    _preferences.value
+                                        .copyWith(showInSidebar: value)))),
+                            SettingsSwitchTile(
+                                surface: false,
+                                controlKey: const ValueKey('resource-lyrics'),
+                                contentPadding:
+                                    SettingsSurface.embeddedRowPadding,
+                                icon: Icons.lyrics_outlined,
+                                title: Text(ui('在歌词页左上角显示')),
+                                value: _preferences.value.showInLyrics,
+                                onChanged: (value) => unawaited(_change(
+                                    _preferences.value
+                                        .copyWith(showInLyrics: value)))),
+                            const SizedBox(height: 4),
+                            Text(
+                                ui('各处共用显示方式与刷新间隔；侧栏和歌词页的 RAM 百分比为播放器工作集占物理内存的比例。'),
+                                style: Theme.of(context).textTheme.bodySmall),
                             const SizedBox(height: 16),
                             LayoutBuilder(builder: (context, constraints) {
                               final controls = [
@@ -239,7 +284,12 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
                             }),
                             const SizedBox(height: 16),
                             ListenableBuilder(
-                                listenable: _controller,
+                                // A peer view can keep the shared worker alive;
+                                // this hidden surface must release its rebuild
+                                // listener independently of sampling ownership.
+                                listenable: _layoutVisible
+                                    ? _controller
+                                    : const AlwaysStoppedAnimation<double>(0),
                                 builder: (context, _) {
                                   final samples = _controller.history;
                                   final latest = _controller.latest;
@@ -486,90 +536,18 @@ class _ResourceMetric extends StatelessWidget {
                                           : scheme.primary)),
                           if (mode != ProcessResourceDisplay.numbers) ...[
                             const SizedBox(height: 10),
-                            SizedBox(
+                            ProcessResourceChart(
                                 height: mode == ProcessResourceDisplay.line
                                     ? 72
                                     : 20,
-                                child: CustomPaint(
-                                    painter: _ResourceGraph(
-                                        history: history,
-                                        value: value,
-                                        maximum: maximum,
-                                        mode: mode,
-                                        color: scheme.primary,
-                                        track: scheme.outlineVariant
-                                            .withValues(alpha: .35))))
+                                history: history,
+                                value: value,
+                                maximum: maximum,
+                                mode: mode,
+                                color: scheme.primary,
+                                track: scheme.outlineVariant
+                                    .withValues(alpha: .35))
                           ],
                         ])))));
   }
-}
-
-class _ResourceGraph extends CustomPainter {
-  const _ResourceGraph(
-      {required this.history,
-      required this.value,
-      required this.maximum,
-      required this.mode,
-      required this.color,
-      required this.track});
-  final List<double?> history;
-  final double? value;
-  final double maximum;
-  final ProcessResourceDisplay mode;
-  final Color color, track;
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.isEmpty) return;
-    if (mode == ProcessResourceDisplay.bar) {
-      final bounds = Offset.zero & size;
-      canvas.drawRRect(
-          RRect.fromRectAndRadius(bounds, const Radius.circular(10)),
-          Paint()..color = track);
-      if (value != null) {
-        canvas.drawRRect(
-            RRect.fromRectAndRadius(
-                Rect.fromLTWH(0, 0, size.width * (value! / maximum).clamp(0, 1),
-                    size.height),
-                const Radius.circular(10)),
-            Paint()..color = color);
-      }
-      return;
-    }
-    canvas.drawLine(Offset(0, size.height - 1),
-        Offset(size.width, size.height - 1), Paint()..color = track);
-    final path = Path();
-    bool connected = false;
-    for (var index = 0; index < history.length; index++) {
-      final value = history[index];
-      if (value == null) {
-        connected = false;
-        continue;
-      }
-      final x =
-          history.length < 2 ? 0.0 : index * size.width / (history.length - 1);
-      final y = (size.height - 4) * (1 - (value / maximum).clamp(0, 1)) + 2;
-      if (connected) {
-        path.lineTo(x, y);
-      } else {
-        path.moveTo(x, y);
-      }
-      canvas.drawCircle(Offset(x, y), 2, Paint()..color = color);
-      connected = true;
-    }
-    canvas.drawPath(
-        path,
-        Paint()
-          ..color = color
-          ..strokeWidth = 2
-          ..style = PaintingStyle.stroke);
-  }
-
-  @override
-  bool shouldRepaint(covariant _ResourceGraph old) =>
-      old.value != value ||
-      old.maximum != maximum ||
-      old.mode != mode ||
-      old.color != color ||
-      old.track != track ||
-      !listEquals(old.history, history);
 }

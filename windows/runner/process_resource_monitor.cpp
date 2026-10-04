@@ -51,6 +51,12 @@ Sample Sampler::Read() {
   if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory))) {
     sample.working_set_bytes = static_cast<int64_t>(memory.WorkingSetSize);
   }
+  MEMORYSTATUSEX physical{};
+  physical.dwLength = sizeof(physical);
+  if (GlobalMemoryStatusEx(&physical) && physical.ullTotalPhys > 0 &&
+      physical.ullTotalPhys <= static_cast<ULONGLONG>(std::numeric_limits<int64_t>::max())) {
+    sample.total_physical_memory_bytes = static_cast<int64_t>(physical.ullTotalPhys);
+  }
   if (!gpu_attempted_) {
     gpu_attempted_ = true;
     if (PdhOpenQueryW(nullptr, 0, &query_) != ERROR_SUCCESS ||
@@ -151,6 +157,7 @@ struct ProcessResourceMonitorController::Impl {
       {Value("cpuStatus"), Value(value.cpu_status)},
       {Value("gpuPercent"), value.gpu_percent ? Value(*value.gpu_percent) : Value()},
       {Value("workingSetBytes"), value.working_set_bytes ? Value(*value.working_set_bytes) : Value()},
+      {Value("totalPhysicalMemoryBytes"), value.total_physical_memory_bytes ? Value(*value.total_physical_memory_bytes) : Value()},
       {Value("gpuStatus"), Value(value.gpu_status)}};
     channel->InvokeMethod("sample", std::make_unique<Value>(map));
   }

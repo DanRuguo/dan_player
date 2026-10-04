@@ -244,9 +244,12 @@ class LyricAudioPreview extends ChangeNotifier {
   }
 
   Future<void> seekPaused(double value) async {
-    if (_disposed || !value.isFinite) return;
-    await pause();
-    if (_disposed) return;
+    if (_disposed || _closing != null || !value.isFinite) return;
+    final token = ++_generation;
+    await _decoder.stop();
+    // Reaping a previous process can outlive another play/seek or the window.
+    // Only this still-current paused seek may replace its clock and range.
+    if (_disposed || _closing != null || token != _generation) return;
     _position = value.clamp(0.0, duration);
     _rangeStart = _position;
     _rangeEnd = duration;

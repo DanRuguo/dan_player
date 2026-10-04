@@ -220,6 +220,14 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
     _cancelPreview();
   }
 
+  void _dismiss([Audio? result]) {
+    // Repeated input may reach this callback before the exit frame disables
+    // hit testing. Close this owner once without popping the caller's route.
+    if (_closed) return;
+    _close();
+    Navigator.pop(context, result);
+  }
+
   @override
   void dispose() {
     _close();
@@ -407,14 +415,14 @@ class _SongCommentMatchDialogState extends State<SongCommentMatchDialog> {
                     overflowSpacing: 4,
                     children: [
                       TextButton(
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: _dismiss,
                         child: Text(ui("取消")),
                       ),
                       FilledButton.icon(
                         key: const ValueKey('song-comment-match-confirm'),
                         onPressed: _selected == null
                             ? null
-                            : () => Navigator.pop(context, _selected),
+                            : () => _dismiss(_selected),
                         icon: const Icon(Symbols.link),
                         label: Text(ui("关联所选歌曲")),
                       ),

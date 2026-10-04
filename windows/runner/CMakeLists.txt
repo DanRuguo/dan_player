@@ -97,6 +97,12 @@ apply_standard_settings(process_resource_monitor_test)
 target_compile_definitions(process_resource_monitor_test PRIVATE DAN_PLAYER_RESOURCE_SAMPLER_ONLY NOMINMAX)
 target_link_libraries(process_resource_monitor_test PRIVATE pdh psapi user32)
 
+add_executable(process_resource_memory_share_test EXCLUDE_FROM_ALL
+  "desktop_tests/process_resource_memory_share_test.cpp" "process_resource_monitor.cpp")
+apply_standard_settings(process_resource_memory_share_test)
+target_compile_definitions(process_resource_memory_share_test PRIVATE DAN_PLAYER_RESOURCE_SAMPLER_ONLY NOMINMAX)
+target_link_libraries(process_resource_memory_share_test PRIVATE pdh psapi user32)
+
 # Pure argument/pipe policy regression; never creates HWNDs or a Dart engine.
 add_executable(desktop_entry_policy_test EXCLUDE_FROM_ALL
   "tests/desktop_entry_policy_test.cpp")

@@ -69,12 +69,12 @@
 
 | 版本 | 适用场景 | 下载 |
 | --- | --- | --- |
-| **26.0.6 snapshot1 · 预览版** | 体验歌词编辑与播放细节优化 | [安装器、便携 ZIP 与校验文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6-snapshot.1) |
-| **26.0.5 · 稳定版** | 日常收听，优先选择正式发行版本 | [安装器、便携 ZIP 与校验文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
+| **26.0.6 · 稳定版** | 当前正式版，包含任务栏歌词与操作说明书 | [安装器、便携 ZIP 与校验文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
+| **26.0.5 · 旧版** | 查看上一正式版及独立 FFmpeg 组件 | [历史发行文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
 **安装版**运行安装器，支持原位升级；**便携版**完整解压 ZIP 后运行 `Dan Player.exe`，不要只复制一个 EXE。26.0.5 的桌面歌词由同一程序启动独立进程。
 
-试听与裁剪所需的 FFmpeg 是可选组件；手动点击下载时，播放器沿用 [26.0.5 发布的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，并校验固定大小和 SHA-256。26.0.6 snapshot1 的安装器与便携包不重复附带该组件。
+试听与裁剪所需的 FFmpeg 是可选组件；手动点击下载时，播放器沿用 [26.0.5 发布的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，并校验固定大小和 SHA-256。26.0.6 的安装器与便携包不重复附带该组件。
 
 > **下载与签名说明**：自有程序使用 RCEIT.Inc 自签名证书，Windows 仍可能显示信任提示；安装器不会自动安装信任证书。旧签名版本请手动下载新安装器升级。预览版不替换稳定版 Latest；升级前建议通过播放器的“备份与恢复”保存个人资料。
 
@@ -113,7 +113,12 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 联网音乐与自定义歌源可作为本地曲库的补充。自定义服务按实际声明的能力提供检索、歌词等功能，接入方式见 [自定义歌源 API](docs/custom-music-source-api.md)。
 
-### 26.0.6 snapshot1
+### 26.0.6
+
+- 任务栏歌词支持单/双行、逐词高亮、空区切换、系统配色与可选胶囊播放按钮；与桌面歌词互斥。
+- 音乐与缓存文件夹支持显示备注、浏览、可恢复剪切和占用统计；缓存分类与统计页共用刷新。
+- 特色操作指南按完整使用流程讲解常用功能及两种歌词编辑，附进度与歌词动效互动演示；首次引导结束提示入口。
+- 按需 CPU/GPU/内存监控可在备份与恢复、侧栏和歌词页显示，共用显示方式及刷新间隔，仅可见时采样；侧栏空位充足时保持导航位置。
 
 - 快捷点按歌词的纯文本保存会说明翻译与注音不会写入纯文本副本，并只保存正文；逐句和逐字流程仍可保留辅助内容。
 - 传统歌词编辑器减少长篇无损歌词在界面重建时的重复解析与临时内存分配；新增两种编辑方式的宽窄窗渲染示例。
@@ -133,6 +138,18 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 <a id="screenshots"></a>
 
 ## 界面一览
+
+### 说明书与按需监控
+
+以下是实际组件的中文界面渲染，资源数值及目录为示例数据。
+
+| 常用操作说明 | 播放队列与互动演示 |
+| --- | --- |
+| ![音乐、分类与歌单的操作说明](docs/images/manual-common-library.png) | ![进度定位演示与队列操作说明](docs/images/manual-playback-demo.png) |
+
+| 多处资源监控 | 缓存分类占用 |
+| --- | --- |
+| ![侧栏与备份恢复共用资源监控](docs/images/process-resource-locations.png) | ![统计页缓存和播放器资料分类占用](docs/images/cache-storage-statistics.png) |
 
 ### 两种歌词编辑方式
 

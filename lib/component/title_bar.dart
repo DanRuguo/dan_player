@@ -319,7 +319,8 @@ class NavBackBtn extends StatelessWidget {
 }
 
 class WindowControlls extends StatefulWidget {
-  const WindowControlls({super.key});
+  const WindowControlls({super.key, this.spacing = 8.0});
+  final double spacing;
 
   @override
   State<WindowControlls> createState() => _WindowControllsState();
@@ -475,7 +476,7 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
         final sizeLocked =
             AppSettings.instance.experience.value.windowSizeLocked;
         return Wrap(
-          spacing: 8.0,
+          spacing: widget.spacing,
           children: [
             IconButton(
               tooltip: ui("最小化"),
