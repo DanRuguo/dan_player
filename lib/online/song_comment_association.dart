@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart';
@@ -149,7 +150,14 @@ class SongCommentAssociationStore extends ChangeNotifier {
 
   CommentSourceIdentity? lyricIdentityFor(Audio audio) {
     if (!audio.isLocal) return null;
-    final source = LYRIC_SOURCES[audio.path];
+    final document = LyricDocumentStore.instance.forAudio(audio);
+    // A selected document is authoritative. A provenance-free manual version
+    // cannot inherit an obsolete platform identity from the legacy index;
+    // draft-only and absent/unloaded documents retain the old fallback.
+    final source = document?.source ??
+        (document?.effective != null || document?.noLyrics == true
+            ? null
+            : LYRIC_SOURCES[audio.path]);
     if (source == null) return null;
     return switch (source.source) {
       LyricSourceType.qq =>

@@ -9,6 +9,8 @@ import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/entry.dart';
 import 'package:dan_player/library/library_data_migration.dart';
+import 'package:dan_player/library/music_folder_move.dart';
+import 'package:dan_player/page/folder_move_recovery.dart';
 import 'package:dan_player/library/audio_metadata_journal.dart';
 import 'package:dan_player/page/library_migration_recovery.dart';
 import 'package:dan_player/desktop_integration.dart';
@@ -153,10 +155,27 @@ Future<void> _startMainPlayer() async {
   await HotkeysHelper.unregisterAll();
 
   await migrateAppData();
+  await _prepareDataAndStart();
+}
 
-  final dataDirectory = await getAppDataDir();
+Future<void> _prepareDataAndStart() async {
+  final Directory dataDirectory;
+  try {
+    dataDirectory = await getAppDataDir();
+  } catch (error) {
+    await windowManager.ensureInitialized();
+    await windowManager.waitUntilReadyToShow(const WindowOptions(
+        size: Size(760, 520), center: true, title: 'Dan Player'));
+    runApp(MaterialApp(
+        theme: Entry(welcome: false).fromSchemeAndFontFamily(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
+        home: FolderMoveRecovery(error: error, retry: _prepareDataAndStart)));
+    await showPreparedWindow();
+    return;
+  }
   final migration = LibraryDataMigration(dataDirectory);
   try {
+    await MusicFolderMove(dataDirectory).recover();
     await migration.recover();
     await AudioMetadataJournal(dataDirectory).recover();
     await Snapshot3Upgrade.prepare(dataDirectory);
@@ -170,7 +189,10 @@ Future<void> _startMainPlayer() async {
         home: LibraryMigrationRecovery(
             migration: migration,
             error: error,
-            allowRestore: !await AudioMetadataJournal(dataDirectory).hasPending,
+            allowRestore:
+                !await AudioMetadataJournal(dataDirectory).hasPending &&
+                    !await MusicFolderMove(dataDirectory).pending,
+            beforeRetry: () => MusicFolderMove(dataDirectory).recover(),
             resume: () async {
               await AudioMetadataJournal(dataDirectory).recover();
               await Snapshot3Upgrade.prepare(dataDirectory);

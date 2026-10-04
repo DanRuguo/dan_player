@@ -99,7 +99,25 @@ class PlaybackService extends ChangeNotifier {
   final TrackResumeCaptureCadence _resumeCaptureCadence =
       TrackResumeCaptureCadence();
 
-  PlaybackService(this.playService) {
+  PlaybackService(PlayService owner) : this._(owner);
+
+  /// Exercises the real source/output/event lifecycle without initializing
+  /// an endpoint or Rust SMTC in deterministic transport regressions.
+  @visibleForTesting
+  PlaybackService.forTesting(PlayService owner,
+      {required BassPlayer player,
+      required SmtcFlutter smtc,
+      required void Function(Audio) applyAudioTheme})
+      : this._(owner,
+            player: player, smtc: smtc, applyAudioTheme: applyAudioTheme);
+
+  PlaybackService._(this.playService,
+      {BassPlayer? player,
+      SmtcFlutter? smtc,
+      void Function(Audio)? applyAudioTheme})
+      : _injectedPlayer = player,
+        _applyAudioTheme = applyAudioTheme,
+        _smtc = smtc ?? SmtcFlutter() {
     queueStopBoundary.addListener(_onQueueStopChanged);
     segmentLoop.addListener(_practiceChanged);
     _playerStateStreamSub = _player.playbackEvents.listen((event) {
@@ -107,7 +125,17 @@ class PlaybackService extends ChangeNotifier {
       // The native source remains playable while the next one resolves.
       // Late events from that old instance cannot settle the newly selected
       // request, update its statistics, or advance over it (including A-B-A).
-      if (resolvingAudioPath.value != null || isChangingOutput.value) {
+      if (isChangingOutput.value) {
+        // Output rebuilding retains this occurrence. Its proven end may arrive
+        // while the replacement opens or the output preference is being saved.
+        final owner = _outputCompletionOwner;
+        if (event.completed && owner != null && _ownsOutputCompletion(owner)) {
+          _outputCompletion ??= event;
+        }
+        diagnosticsRevision.value++;
+        return;
+      }
+      if (resolvingAudioPath.value != null) {
         diagnosticsRevision.value++;
         return;
       }
@@ -130,25 +158,7 @@ class PlaybackService extends ChangeNotifier {
         _syncPausedToSystem();
       }
       if (event.completed) {
-        if (segmentLoop.enabled && canUseSegmentLoop) {
-          if (segmentLoop.targetForPosition(length) != null)
-            _finishPracticeRound();
-          return;
-        }
-        PlaybackStatistics.instance.finish(markCompleted: true);
-        unawaited(_captureTrackResume(force: true, completed: true));
-        final occurrence = _currentOccurrence;
-        if (occurrence != null &&
-            queueStopBoundary.complete(occurrence.id, _sourceRequestToken)) {
-          stopAfterCurrent.value = false;
-          _syncPausedToSystem();
-          _schedulePlaybackStateSave();
-          showAppNotice(ui('已播完停止目标，本次停止已完成'), kind: AppNoticeKind.success);
-          return;
-        }
-        // An old track may finish while a user-selected source is still
-        // opening. Do not let auto-next replace that newer explicit request.
-        if (resolvingAudioPath.value == null) _autoNextAudio();
+        _handlePlaybackCompletion();
       }
     });
 
@@ -202,7 +212,9 @@ class PlaybackService extends ChangeNotifier {
     });
   }
 
-  late final BassPlayer _player = _createPlayer();
+  final BassPlayer? _injectedPlayer;
+  final void Function(Audio)? _applyAudioTheme;
+  late final BassPlayer _player = _injectedPlayer ?? _createPlayer();
 
   BassPlayer _createPlayer() {
     final features = AppSettings.instance.experience.value;
@@ -220,13 +232,20 @@ class PlaybackService extends ChangeNotifier {
     return player;
   }
 
-  final _smtc = SmtcFlutter();
+  final SmtcFlutter _smtc;
   final _pref = AppPreference.instance.playbackPref;
 
   late final _wasapiExclusive = ValueNotifier(_player.wasapiExclusive);
   ValueNotifier<bool> get wasapiExclusive => _wasapiExclusive;
   final isChangingOutput = ValueNotifier(false);
   int? _outputSourceToken;
+  ({
+    int source,
+    int? occurrence,
+    int command,
+    int seek
+  })? _outputCompletionOwner;
+  BassPlaybackEvent? _outputCompletion;
   late final _playbackRate = ValueNotifier(_player.playbackRate);
   ValueNotifier<double> get playbackRate => _playbackRate;
   bool get supportsPlaybackRate => _player.supportsPlaybackRate;
@@ -394,8 +413,15 @@ class PlaybackService extends ChangeNotifier {
     _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
     final occurrence = _currentOccurrence;
     if (occurrence != null) queueStopBoundary.loading(occurrence.id, token);
-    isChangingOutput.value = true;
+    _outputCompletion = null;
+    _outputCompletionOwner = (
+      source: token,
+      occurrence: occurrence?.id,
+      command: _transportCommandRevision,
+      seek: _manualSeekRevision,
+    );
     _outputSourceToken = token;
+    isChangingOutput.value = true;
     eqEditRevision++;
     _player.cancelPendingSource();
     final current = nowPlaying;
@@ -438,7 +464,70 @@ class PlaybackService extends ChangeNotifier {
         resolvingAudioPath.value = null;
         _loadingPlaylistIndex = null;
       }
+      _settleOutputCompletion(token);
     }
+  }
+
+  bool _ownsOutputCompletion(
+          ({int source, int? occurrence, int command, int seek}) owner) =>
+      _isCurrentSourceRequest(owner.source) &&
+      _currentOccurrence?.id == owner.occurrence &&
+      _transportCommandRevision == owner.command &&
+      _manualSeekRevision == owner.seek;
+
+  void _settleOutputCompletion(int token) {
+    final owner = _outputCompletionOwner;
+    if (owner == null || owner.source != token) return;
+    final event = _outputCompletion;
+    _outputCompletionOwner = null;
+    _outputCompletion = null;
+    // Readiness listeners may have selected another occurrence, paused, sought
+    // or closed synchronously. Revalidate after those notifications, including
+    // a failed mode switch that left the completed original source intact.
+    if (event?.completed != true ||
+        !_ownsOutputCompletion(owner) ||
+        resolvingAudioPath.value != null ||
+        isChangingOutput.value ||
+        !_player.hasSource ||
+        playerState == PlayerState.playing ||
+        playerState == PlayerState.stalled ||
+        playerState == PlayerState.pausedDevice) {
+      return;
+    }
+    // Reopening clears the decoder's completed stamp. A failed restore seek
+    // can leave its valid replacement paused at zero; the retained proven EOF
+    // belongs to the occurrence above, not the replacement's new position.
+    _handlePlaybackCompletion();
+  }
+
+  void _handlePlaybackCompletion() {
+    final token = _sourceRequestToken;
+    final occurrence = _currentOccurrence;
+    final command = _transportCommandRevision;
+    final seek = _manualSeekRevision;
+    bool stillCurrent() =>
+        _isCurrentSourceRequest(token) &&
+        _currentOccurrence?.id == occurrence?.id &&
+        command == _transportCommandRevision &&
+        seek == _manualSeekRevision;
+    if (segmentLoop.enabled && canUseSegmentLoop) {
+      if (segmentLoop.targetForPosition(length) != null) _finishPracticeRound();
+      return;
+    }
+    PlaybackStatistics.instance.finish(markCompleted: true);
+    if (!stillCurrent()) return;
+    unawaited(_captureTrackResume(force: true, completed: true));
+    if (occurrence != null &&
+        queueStopBoundary.complete(occurrence.id, token)) {
+      if (!stillCurrent()) return;
+      stopAfterCurrent.value = false;
+      if (!stillCurrent()) return;
+      _syncPausedToSystem();
+      _schedulePlaybackStateSave();
+      showAppNotice(ui('已播完停止目标，本次停止已完成'), kind: AppNoticeKind.success);
+      return;
+    }
+    if (stillCurrent() && resolvingAudioPath.value == null) _autoNextAudio();
   }
 
   late final _eqEnabled = ValueNotifier(_player.eqEnabled);
@@ -1524,7 +1613,8 @@ class PlaybackService extends ChangeNotifier {
             .start(nowPlaying!, playbackRate: _player.playbackRate);
       }
       notifyListeners();
-      ThemeProvider.instance.applyThemeFromAudio(nowPlaying!);
+      (_applyAudioTheme ??
+          ThemeProvider.instance.applyThemeFromAudio)(nowPlaying!);
 
       _lastSmtcProgressMs = -1000;
       _smtc.updateState(state: started ? SMTCState.playing : SMTCState.paused);
@@ -2378,6 +2468,8 @@ class PlaybackService extends ChangeNotifier {
   Future<void> _close() async {
     final resumeWrite = _captureTrackResume(force: true);
     _closed = true;
+    _outputCompletionOwner = null;
+    _outputCompletion = null;
     _publishPlaybackIntent();
     final waveformShutdown = WaveformService.shared.close();
     _queueEditHistory.clear(QueueHistoryInvalidation.closed);

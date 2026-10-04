@@ -51,13 +51,16 @@ inline POINT ContentOffset(int width, int height, int natural_width, int natural
   const int distance = placement == Placement::kCenter ? spare / 2 : placement == Placement::kEnd ? spare : 0;
   return vertical ? POINT{0, distance} : POINT{distance, 0};
 }
-inline ContentLayout LayoutContent(int width, int height, UINT dpi, bool vertical, bool pause, bool next_track, bool next_button = false) {
+inline ContentLayout LayoutContent(int width, int height, UINT dpi, bool vertical, bool pause, bool next_track, bool next_button = false,
+                                   int metadata_extent = -1) {
   ContentLayout result; result.vertical = vertical;
   const int status = pause ? std::min(vertical ? width : height,MulDiv(44,dpi,96)) : 0;
   const int button_size = next_button ? std::min(vertical ? width : height, MulDiv(44,dpi,96)) : 0;
   const int available_width = width - (vertical ? 0 : button_size);
   const int available_height = height - (vertical ? button_size : 0);
-  const int next_width = !vertical && next_track && available_width >= MulDiv(480, dpi, 96) ? std::min(available_width / 3, MulDiv(280, dpi, 96)) : 0;
+  const int next_width = !vertical && next_track ? (metadata_extent >= 0 ?
+      std::clamp(metadata_extent, 0, std::max(0, available_width - status - 1)) :
+      available_width >= MulDiv(480, dpi, 96) ? std::min(available_width / 3, MulDiv(280, dpi, 96)) : 0) : 0;
   const int next_height = vertical && next_track && available_height >= MulDiv(320, dpi, 96) ? MulDiv(64, dpi, 96) : 0;
   result.lyrics = RECT{vertical ? 0 : status, vertical ? status : 0, available_width - next_width, available_height - next_height};
   result.metadata = vertical ? RECT{0, available_height - next_height, width, available_height} : RECT{available_width - next_width, 0, available_width, height};
@@ -200,6 +203,17 @@ inline RECT PlaceArea(RECT chosen, bool vertical, UINT dpi, Placement placement)
   if (vertical) { chosen.top = start; chosen.bottom = start + extent; }
   else { chosen.left = start; chosen.right = start + extent; }
   return chosen;
+}
+// The selected gap remains the safety boundary. Short horizontal lyrics use
+// only their shaped width plus the fixed controls/metadata budget inside it.
+inline RECT FitHorizontalArea(RECT available, int width, Placement placement) {
+  const LONG extent = std::clamp(static_cast<LONG>(width), 1L, available.right - available.left);
+  if (placement == Placement::kEnd) available.left = available.right - extent;
+  else {
+    if (placement == Placement::kCenter) available.left += (available.right - available.left - extent) / 2;
+    available.right = available.left + extent;
+  }
+  return available;
 }
 inline std::optional<RECT> FreeArea(RECT bar, RECT monitor,
                                    const std::vector<RECT>& occupied, UINT dpi,

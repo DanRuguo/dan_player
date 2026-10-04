@@ -234,6 +234,9 @@ struct TaskbarLyrics::Impl {
   double stroke_opacity = .9;
   Geometry geometry;
   RECT area{};
+  RECT available_area{};
+  bool area_layout_allowed=false;
+  bool layout_reset_pending=false;
   std::vector<HWINEVENTHOOK> hooks;
   std::shared_ptr<Worker> worker;
   std::thread worker_thread;
@@ -544,22 +547,13 @@ struct TaskbarLyrics::Impl {
     const int previous_area_index=layout.area_index;
     UpdateLayout({vertical, static_cast<int>(areas.size()), static_cast<int>(selected)});
     const auto free = taskbar_lyrics::PlaceArea(areas[selected], vertical, dpi, placement);
-    if (!EqualRect(&area, &free)) {
-      RECT intersection{};
-      const bool can_animate=animate_layout && IsWindowVisible(surface) && !orientation_changed && !dpi_changed &&
-          previous_area_index==static_cast<int>(selected) && pixels && static_cast<size_t>(width)*height<=1024*1024 &&
-          static_cast<size_t>(free.right-free.left)*(free.bottom-free.top)<=1024*1024 && IntersectRect(&intersection,&area,&free);
-      if (can_animate) {
-        BeginLayout();
-      } else FinishLayout();
-      const bool resized = area.right - area.left != free.right - free.left || area.bottom - area.top != free.bottom - free.top;
-      area = free;
-      if (resized) {
-        invalid = metadata_invalid = true; reuse_next = false;
-        if (!layout_animating) { entering = entrance_pending = false; old_mask = {}; }
-      }
-    }
+    area_layout_allowed=!orientation_changed && !dpi_changed && previous_area_index==static_cast<int>(selected);
+    const bool budget_changed=available_area.right-available_area.left!=free.right-free.left ||
+        available_area.bottom-available_area.top!=free.bottom-free.top;
+    available_area=free;
+    if (budget_changed) { invalid=metadata_invalid=true; reuse_next=false; }
     if (invalid && !Raster()) { Hide(); return; }
+    if (!invalid) SetArea(vertical ? free : taskbar_lyrics::FitHorizontalArea(free,width,placement));
     if (layout_animating) {
       const auto alignment=taskbar_lyrics::ContentOffset(lyric_width,row_height,current_mask.natural_width,
           taskbar_lyrics::VisibleTextHeight(current_mask),vertical,placement);
@@ -635,14 +629,54 @@ struct TaskbarLyrics::Impl {
     return anchor_position + (playing ? elapsed * playback_rate : 0) +
         correction * (1 - std::clamp(elapsed / 90.0, 0.0, 1.0));
   }
+  void SetArea(RECT target) {
+    if (EqualRect(&area,&target)) return;
+    RECT intersection{};
+    if (animate_layout && area_layout_allowed && !layout_reset_pending && IsWindowVisible(surface) && pixels &&
+        static_cast<size_t>(width)*height<=1024*1024 &&
+        static_cast<size_t>(target.right-target.left)*(target.bottom-target.top)<=1024*1024 &&
+        IntersectRect(&intersection,&area,&target)) BeginLayout();
+    else FinishLayout();
+    area=target;
+  }
   bool Raster() {
 #ifdef DAN_TASKBAR_LYRICS_NATIVE_QA
     ++raster_count;
 #endif
-    const int previous_lyric_width = lyric_width, previous_lyric_height = lyric_height;
+    const int previous_lyric_height = lyric_height;
+    const int available_width=available_area.right-available_area.left;
+    const int available_height=available_area.bottom-available_area.top;
+    if (available_width <= 0 || available_height <= 0 || available_width > 7680 || available_height > 960) return false;
+    const auto maximum=taskbar_lyrics::LayoutContent(available_width,available_height,dpi,vertical,
+        show_pause_indicator,!next_track_text.empty(),show_next_button);
+    const int measuring_width=maximum.lyrics.right-maximum.lyrics.left;
+    const int measuring_height=maximum.lyrics.bottom-maximum.lyrics.top;
+    const int target_row_height=show_next_lyric ? maximum.row_height : measuring_height;
+    const HDC measuring=CreateCompatibleDC(nullptr);
+    if (!measuring) return false;
+    taskbar_lyrics::TextMask current;
+    if (reuse_next && next_mask.height==target_row_height && next_mask.shaping && !vertical && next_mask.dpi==dpi) {
+      current=next_mask;
+      taskbar_lyrics::MapWords(current,text,words);
+    } else current=vertical ? taskbar_lyrics::RasterWrappedText(measuring,fonts,text,measuring_width,target_row_height,
+        dpi,words,Position(),line_start,line_end) : taskbar_lyrics::RasterText(measuring,fonts,text,measuring_width,target_row_height,
+        dpi,target_row_height<measuring_height || animate,words,16,false);
+    auto next=target_row_height<measuring_height ? (vertical ?
+        taskbar_lyrics::RasterWrappedText(measuring,fonts,next_text,measuring_width,target_row_height,dpi,{},0,0,0) :
+        taskbar_lyrics::RasterText(measuring,fonts,next_text,measuring_width,target_row_height,dpi,true,{},16,false)) : taskbar_lyrics::TextMask{};
+    DeleteDC(measuring);
+    if (!current.shaping && current.pixels.empty()) return false;
+    const int natural_width=current.long_text || next.long_text ? measuring_width :
+        std::min(measuring_width,std::max(current.natural_width,next.natural_width));
+    const int fitted_width=vertical ? available_width : available_width-measuring_width+natural_width;
+    SetArea(vertical ? available_area : taskbar_lyrics::FitHorizontalArea(available_area,fitted_width,placement));
+    const auto content=taskbar_lyrics::LayoutContent(fitted_width,available_height,dpi,vertical,
+        show_pause_indicator,!next_track_text.empty(),show_next_button,
+        maximum.metadata.right-maximum.metadata.left);
+    if (!vertical && (!taskbar_lyrics::SetTextViewport(current,content.lyrics.right-content.lyrics.left) ||
+        !taskbar_lyrics::SetTextViewport(next,content.lyrics.right-content.lyrics.left))) return false;
     ClearBitmap();
-    width = area.right - area.left; height = area.bottom - area.top;
-    if (width <= 0 || height <= 0 || width > 7680 || height > 960) return false;
+    width=fitted_width; height=available_height;
     BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth = width; info.bmiHeader.biHeight = -height;
     info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
@@ -652,7 +686,6 @@ struct TaskbarLyrics::Impl {
     dc = CreateCompatibleDC(nullptr);
     if (!bitmap || !dc || !storage) { ClearBitmap(); return false; }
     original = SelectObject(dc, bitmap); pixels = static_cast<std::uint32_t*>(storage);
-    const auto content = taskbar_lyrics::LayoutContent(width, height, dpi, vertical, show_pause_indicator, !next_track_text.empty(),show_next_button);
     button_area=content.button;
     playback_button_area=content.pause;
     lyric_left = content.lyrics.left; lyric_top = content.lyrics.top;
@@ -660,26 +693,23 @@ struct TaskbarLyrics::Impl {
     metadata_left = content.metadata.left; metadata_top = content.metadata.top;
     metadata_width = content.metadata.right - content.metadata.left; metadata_height = content.metadata.bottom - content.metadata.top;
     row_height = show_next_lyric ? content.row_height : lyric_height;
-    if ((previous_lyric_width && previous_lyric_width != lyric_width) ||
-        (previous_lyric_height && previous_lyric_height != lyric_height)) {
+    // A natural-width change keeps the existing line/word clocks. Only a
+    // different row height needs to interrupt that old vertical presentation.
+    if (previous_lyric_height && previous_lyric_height != lyric_height) {
       if (!layout_animating) { entering = entrance_pending = false; old_mask = {}; }
       reuse_next = false;
     }
-    if (reuse_next && next_mask.height == row_height && next_mask.shaping &&
-        !vertical && next_mask.viewport_width == lyric_width && next_mask.dpi == dpi) {
-      current_mask = next_mask;
-      taskbar_lyrics::MapWords(current_mask, text, words);
-    } else current_mask = vertical ? taskbar_lyrics::RasterWrappedText(dc, fonts, text, lyric_width, row_height,
-        dpi, words, Position(), line_start, line_end) : taskbar_lyrics::RasterText(dc, fonts, text, lyric_width, row_height, dpi,
-        row_height < lyric_height || animate, words);
+    current_mask=std::move(current);
     reuse_next = false;
-    next_mask = row_height < lyric_height ? (vertical ?
-        taskbar_lyrics::RasterWrappedText(dc, fonts, next_text, lyric_width, row_height, dpi, {}, 0, 0, 0) :
-        taskbar_lyrics::RasterText(dc, fonts, next_text, lyric_width, row_height, dpi, true)) : taskbar_lyrics::TextMask{};
+    next_mask=std::move(next);
     if (current_mask.pixels.empty()) return false;
     text_width = current_mask.natural_width;
     UpdateForeground();
-    invalid = false; metadata_invalid = true; scrolling = false; scroll_start = scroll_elapsed = 0; return true;
+    // Reflow changes glyph budgets, not the media/read identity. Freeze the
+    // existing fallback clock here and resume it after presenting the new
+    // viewport; Set owns the reset for a seek, source or line replacement.
+    if (scrolling && scroll_start) scroll_elapsed += GetTickCount64() - scroll_start;
+    invalid = false; metadata_invalid = true; scrolling = false; scroll_start = 0; return true;
   }
   void RasterMetadata() {
     const int icon=MulDiv(20,dpi,96);
@@ -875,6 +905,7 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
   const bool row_mode_changed=self.show_next_lyric!=show_next_lyric;
   if((discontinuity && !transport_switch) || line_changed) {
     self.fallback_read_offset=0; self.scroll_elapsed=0;
+    self.scrolling=false; self.scroll_start=0;
   }
   if (row_mode_changed && animate_layout && !discontinuity && !family_changed && self.enabled && self.pixels &&
       IsWindowVisible(self.surface) && static_cast<size_t>(self.width)*self.height<=1024*1024) self.BeginLayout();
@@ -922,7 +953,9 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
       std::clamp(previous_position - position, -100.0, 100.0) : 0;
   self.anchor_position = position; self.playback_rate = rate; self.anchor_tick = GetTickCount64();
   self.timeline_revision = timeline_revision; self.line_start = line_start; self.line_end = line_end;
+  self.layout_reset_pending=starting || discontinuity || family_changed;
   self.Refresh(starting);
+  self.layout_reset_pending=false;
   return true;
 }
 void TaskbarLyrics::EnvironmentChanged() {
@@ -988,6 +1021,22 @@ int TaskbarLyrics::ReadOffsetForTesting() const { return impl_ ? impl_->last_rea
 int TaskbarLyrics::MetadataOffsetForTesting() const { return impl_ ? impl_->metadata_read_offset : 0; }
 unsigned TaskbarLyrics::MotionFramesForTesting() const { return impl_ ? impl_->motion_frames : 0; }
 int TaskbarLyrics::CurrentChunkForTesting() const { return impl_ ? impl_->current_mask.chunk : 0; }
+taskbar_lyrics::ContentLayout TaskbarLyrics::ContentForTesting() const {
+  taskbar_lyrics::ContentLayout result;
+  if(impl_) {
+    result.vertical=impl_->vertical;
+    result.lyrics=RECT{impl_->lyric_left,impl_->lyric_top,impl_->lyric_left+impl_->lyric_width,impl_->lyric_top+impl_->lyric_height};
+    result.metadata=RECT{impl_->metadata_left,impl_->metadata_top,impl_->metadata_left+impl_->metadata_width,impl_->metadata_top+impl_->metadata_height};
+    result.pause=impl_->playback_button_area; result.button=impl_->button_area; result.row_height=impl_->row_height;
+  }
+  return result;
+}
+int TaskbarLyrics::NaturalWidthForTesting(bool next) const {
+  return impl_ ? (next ? impl_->next_mask : impl_->current_mask).natural_width : 0;
+}
+const void* TaskbarLyrics::ShapingForTesting(bool next) const {
+  return impl_ ? (next ? impl_->next_mask : impl_->current_mask).shaping.get() : nullptr;
+}
 void TaskbarLyrics::SetPositionForTesting(double position){if(impl_){impl_->position_for_testing=position;impl_->Present();}}
 void TaskbarLyrics::UseBarForTesting(HWND bar,std::vector<RECT> occupied) {
   if(!impl_) return;

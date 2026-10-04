@@ -5,9 +5,259 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:dan_player/component/app_toolbar_style.dart';
+import 'category_cover_flight.dart';
 import 'category_tile_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+
+/// Route navigation is separate from the bounded, in-page layout tracker.
+/// Reuse the decoded source artwork while the card lands in the detail header.
+class PlaylistCoverRouteFlight extends StatefulWidget {
+  const PlaylistCoverRouteFlight({
+    super.key,
+    required this.playlistId,
+    required this.borderRadius,
+    required this.child,
+  });
+
+  final String playlistId;
+  final BorderRadius borderRadius;
+  final Widget child;
+
+  @override
+  State<PlaylistCoverRouteFlight> createState() =>
+      _PlaylistCoverRouteFlightState();
+}
+
+class _PlaylistCoverRouteFlightState extends State<PlaylistCoverRouteFlight>
+    with WidgetsBindingObserver {
+  final _contentKey = GlobalKey();
+  final _artKey = GlobalKey();
+  ui.Image? _landingImage;
+  Timer? _landingTimeout;
+  int _landingGeneration = 0;
+  bool _readinessScheduled = false;
+
+  bool get _allowsFlight => coverFlightMotionAllowed(context);
+
+  void _acceptSource(ui.Image? image) {
+    if (image == null || !mounted || !_allowsFlight) return;
+    final render = _artKey.currentContext?.findRenderObject();
+    if (render is RenderBox && _coverImage(render) != null) return;
+    final retained = image.clone();
+    final generation = ++_landingGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _landingGeneration || !_allowsFlight) {
+        retained.dispose();
+        return;
+      }
+      _clearLanding();
+      setState(() => _landingImage = retained);
+      // Match the existing bounded artwork handoff. Loading never drives a
+      // frame loop, and a failed codec cannot leave an old texture forever.
+      _landingTimeout = Timer(const Duration(seconds: 10), _clearLanding);
+      _imageMayBeReady();
+    });
+  }
+
+  void _imageMayBeReady() {
+    if (_landingImage == null || _readinessScheduled) return;
+    _readinessScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _readinessScheduled = false;
+      if (!mounted || _landingImage == null) return;
+      final render = _artKey.currentContext?.findRenderObject();
+      if (render is RenderBox && _coverImage(render) != null) {
+        _clearLanding();
+      }
+    });
+  }
+
+  void _clearLanding({bool notify = true}) {
+    ++_landingGeneration;
+    _landingTimeout?.cancel();
+    _landingTimeout = null;
+    final image = _landingImage;
+    _landingImage = null;
+    if (image == null) return;
+    if (notify && mounted) {
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) => image.dispose());
+    } else {
+      image.dispose();
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (!mounted) return;
+    if (!_allowsFlight) _clearLanding(notify: false);
+    setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
+    if (!_allowsFlight) _clearLanding(notify: false);
+    setState(() {});
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_allowsFlight) _clearLanding(notify: false);
+  }
+
+  @override
+  void dispose() {
+    _clearLanding(notify: false);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final content = _PlaylistRouteContent(
+        key: _contentKey,
+        owner: this,
+        borderRadius: widget.borderRadius,
+        // The artwork owns its natural square in centered circle tiles. Only
+        // the temporary landing image fills that already established geometry.
+        child: Stack(fit: StackFit.loose, children: [
+          _CoverReadinessObserver(
+              key: _artKey,
+              onChanged: _imageMayBeReady,
+              hidePlaceholder: false,
+              child: widget.child),
+          if (_landingImage != null)
+            Positioned.fill(
+                child: ExcludeSemantics(
+                    child: RawImage(
+                        key: const ValueKey('playlist-route-landing-image'),
+                        image: _landingImage,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.medium))),
+        ]));
+    if (!_allowsFlight) {
+      return content;
+    }
+    return Hero(
+      tag: ('playlist-route-cover', widget.playlistId),
+      // Keep the destination's image future and decoded image mounted. Hero's
+      // default empty placeholder would restart artwork on arrival/pop.
+      placeholderBuilder: (_, size, child) => SizedBox.fromSize(
+          size: size,
+          child: Offstage(child: TickerMode(enabled: false, child: child))),
+      flightShuttleBuilder: (context, animation, direction, from, to) {
+        final source = (from.widget as Hero).child as _PlaylistRouteContent;
+        final destination = (to.widget as Hero).child as _PlaylistRouteContent;
+        ui.Image? image;
+        void findImage(RenderObject render) {
+          if (image != null) return;
+          if (render is RenderImage &&
+              render.image != null &&
+              render.color == null &&
+              render.fit == BoxFit.cover) {
+            image = render.image;
+          } else {
+            render.visitChildren(findImage);
+          }
+        }
+
+        final render = from.findRenderObject();
+        if (render != null) findImage(render);
+        destination.owner._acceptSource(image);
+        return CoverFlightMotionGate(
+            child: _PlaylistRouteShuttle(
+                animation: animation,
+                direction: direction,
+                from: source.borderRadius,
+                to: destination.borderRadius,
+                image: image,
+                placeholderColor:
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
+                placeholderIconColor: Theme.of(context).colorScheme.primary));
+      },
+      child: content,
+    );
+  }
+}
+
+class _PlaylistRouteContent extends StatelessWidget {
+  const _PlaylistRouteContent(
+      {super.key,
+      required this.owner,
+      required this.borderRadius,
+      required this.child});
+  final _PlaylistCoverRouteFlightState owner;
+  final BorderRadius borderRadius;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => child;
+}
+
+class _PlaylistRouteShuttle extends StatefulWidget {
+  const _PlaylistRouteShuttle({
+    required this.animation,
+    required this.direction,
+    required this.from,
+    required this.to,
+    required this.image,
+    required this.placeholderColor,
+    required this.placeholderIconColor,
+  });
+  final Animation<double> animation;
+  final HeroFlightDirection direction;
+  final BorderRadius from, to;
+  final ui.Image? image;
+  final Color placeholderColor, placeholderIconColor;
+  @override
+  State<_PlaylistRouteShuttle> createState() => _PlaylistRouteShuttleState();
+}
+
+class _PlaylistRouteShuttleState extends State<_PlaylistRouteShuttle> {
+  ui.Image? _image;
+  @override
+  void initState() {
+    super.initState();
+    _image = widget.image?.clone();
+  }
+
+  @override
+  void dispose() {
+    _image?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+      animation: widget.animation,
+      child: _image == null
+          ? ColoredBox(
+              color: widget.placeholderColor,
+              child: Center(
+                  child: Icon(Icons.queue_music,
+                      color: widget.placeholderIconColor)))
+          : RawImage(
+              key: const ValueKey('playlist-route-flight-image'),
+              image: _image,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.medium),
+      builder: (context, child) => ClipRRect(
+          borderRadius: BorderRadius.lerp(
+              widget.from,
+              widget.to,
+              widget.direction == HeroFlightDirection.push
+                  ? widget.animation.value
+                  : 1 - widget.animation.value)!,
+          child: child));
+}
 
 /// Tree song cards share a lazy row; map occurrence IDs to those visual rows.
 class PlaylistCoverLayoutIndices extends InheritedWidget {
@@ -96,7 +346,8 @@ class PlaylistCoverTransitionHost extends StatefulWidget {
 }
 
 class _PlaylistCoverTransitionHostState
-    extends State<PlaylistCoverTransitionHost> with TickerProviderStateMixin {
+    extends State<PlaylistCoverTransitionHost>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   final _boxKey = GlobalKey();
   final _markers = <Object, _PlaylistCoverTransitionMarkerState>{};
   final _flights = <_CoverFlight>[];
@@ -138,6 +389,7 @@ class _PlaylistCoverTransitionHostState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     assert(widget.controller._host == null);
     widget.controller._host = this;
   }
@@ -158,7 +410,26 @@ class _PlaylistCoverTransitionHostState
     super.didChangeDependencies();
     if (_busy && appToolbarReduceMotion(context, kind: MotionKind.tracking)) {
       // Dependency changes run during build; clear this frame without setState.
-      _cancel(notify: false);
+      _retireForMotionPolicy(notify: false);
+    }
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (_busy && appToolbarReduceMotion(context, kind: MotionKind.tracking)) {
+      _retireForMotionPolicy();
+    }
+  }
+
+  void _retireForMotionPolicy({bool notify = true}) {
+    _burstCooldown?.cancel();
+    _burstCooldown = null;
+    if (_capture case final capture?) {
+      // Retire pixels, preserving the user's pending view change. The bounded
+      // capture completion applies it without a flight, just as scrolling does.
+      capture.dispose();
+    } else {
+      _cancel(notify: notify);
     }
   }
 
@@ -591,6 +862,7 @@ class _PlaylistCoverTransitionHostState
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _cancel(notify: false);
     if (identical(widget.controller._host, this)) {
       widget.controller._host = null;
@@ -949,7 +1221,7 @@ class _CoverFlightsPainter extends CustomPainter {
       reveal != oldDelegate.reveal;
 }
 
-ui.Image? _coverImage(RenderRepaintBoundary boundary) {
+ui.Image? _coverImage(RenderBox boundary) {
   RenderImage? found;
   var usable = true;
   void visit(RenderObject render) {
@@ -1000,7 +1272,8 @@ bool _hasImage(RenderObject render) {
 /// target is fully transparent. Observe those events instead of polling frames.
 class _CoverReadinessObserver extends SingleChildRenderObjectWidget {
   const _CoverReadinessObserver(
-      {required this.onChanged,
+      {super.key,
+      required this.onChanged,
       required this.hidePlaceholder,
       required super.child});
   final VoidCallback onChanged;

@@ -100,6 +100,10 @@ const settingsSearchEntries = <SettingsSearchEntry>[
       ["关闭窗口后在后台继续播放", "关闭窗口", "直接退出程序", "缩小到任务栏托盘", "Alt+F4"]),
   SettingsSearchEntry(
       "backup", "performance", "性能快捷设置", ["一键省电", "一键高性能", "恢复原设置"]),
+  SettingsSearchEntry("backup", "feature-guide", "特色操作指南",
+      ["歌单整理", "高级搜索", "歌词阅读、练习与分享", "快捷键", "智能歌单"]),
+  SettingsSearchEntry("backup", "process-resources", "播放器资源监控",
+      ["CPU", "GPU", "内存", "启用资源监控", "刷新间隔", "数字", "折线", "条形"]),
   SettingsSearchEntry(
       "about", "updates", "检查更新", ["自动检查更新（每天最多一次）", "接收预览版更新"]),
   SettingsSearchEntry("about", "network-proxy", "网络代理",

@@ -1337,6 +1337,16 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             child: child));
   }
 
+  Widget _coverMarker(_PlaylistRowData row, BorderRadius radius, Widget cover) {
+    final marker = PlaylistCoverTransitionMarker(
+        entryId: row.id, borderRadius: radius, child: cover);
+    final folder = row.playlist;
+    return folder == null
+        ? marker
+        : PlaylistCoverRouteFlight(
+            playlistId: folder.id, borderRadius: radius, child: marker);
+  }
+
   Widget _row(Playlist? parent, _PlaylistRowData row, int index, int count,
       List<Audio> queue, Map<String, int> queueIndices,
       {PlaylistCircleGeometry? circleGeometry,
@@ -1411,11 +1421,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                               playlist: folder,
                               size: artworkSize,
                               loadSongArtwork: widget.trackBuilder == null,
-                              artworkWrapper: (cover) =>
-                                  PlaylistCoverTransitionMarker(
-                                      entryId: row.id,
-                                      borderRadius: AppShape.smallRadius,
-                                      child: cover))
+                              artworkWrapper: (cover) => _coverMarker(
+                                  row, AppShape.smallRadius, cover))
                           : ClipRRect(
                               borderRadius: AppShape.smallRadius,
                               child: PlaylistCoverTransitionMarker(
@@ -1485,11 +1492,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                   onSecondaryTapDown: secondary,
                   onLongPress: longPress,
                   contentWrapper: wrapGridIdentity,
-                  artworkWrapper: (cover) => PlaylistCoverTransitionMarker(
-                    entryId: row.id,
-                    borderRadius: BorderRadius.zero,
-                    child: cover,
-                  ),
+                  artworkWrapper: (cover) =>
+                      _coverMarker(row, BorderRadius.zero, cover),
                 );
             if (audio != null &&
                 queueIndex >= 0 &&
@@ -1572,10 +1576,10 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                     title: row.label,
                     details: details,
                     geometry: circleGeometry!,
-                    artworkBuilder: (size) => PlaylistCoverTransitionMarker(
-                        entryId: row.id,
-                        borderRadius: BorderRadius.circular(size / 2),
-                        child: folder != null
+                    artworkBuilder: (size) => _coverMarker(
+                        row,
+                        BorderRadius.circular(size / 2),
+                        folder != null
                             ? PlaylistCover(
                                 playlist: folder,
                                 size: size,
@@ -1717,11 +1721,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                         PlaylistCover(
                                           playlist: folder,
                                           artworkWrapper: (cover) =>
-                                              PlaylistCoverTransitionMarker(
-                                            entryId: row.id,
-                                            borderRadius: AppShape.smallRadius,
-                                            child: cover,
-                                          ),
+                                              _coverMarker(row,
+                                                  AppShape.smallRadius, cover),
                                           loadSongArtwork:
                                               widget.trackBuilder == null,
                                         ),
@@ -2087,30 +2088,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             : () => unawaited(_edit(() => _tree.setImagePath(current!, null))),
         onOpenAlbums: current == null ? widget.onOpenAlbums : null,
         albumCount: widget.albumCount,
-        onHelp: _showHelp,
       );
-
-  void _showHelp() {
-    showAppDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: AppDialogTitle(ui("歌单操作")),
-        content: SingleChildScrollView(
-          child: Text(
-            ui(_view == PlaylistViewMode.tree
-                ? '点击歌单或箭头展开、折叠；单击歌曲播放。同一歌单的歌曲按窗口宽度紧凑排列。\n\n右键、长按或 Shift + F10 打开项目菜单；自定义排序下按住卡片拖动，可调整顺序或移入歌单。\n\n方向键浏览层级，Home / End 跳到首尾；搜索保留所属歌单，清除搜索恢复展开状态。'
-                : "自定义排序：拖动歌曲或子歌单右侧的三个点，其他行会连续让位；点按三个点、右键或长按行可打开菜单。\n\n拖到子歌单的封面/名称区域并稍作停留，高亮后松开即可移入；也可通过菜单“移动到…”选择目标。\n\n名称等排序仅改变显示和播放次序，不覆盖自定义顺序；切回“自定义”即可继续拖动。\n\n顺序播放会按各层次序进入子歌单，播完再返回父歌单。Alt + ↑ / ↓ 可在自定义模式调序，Shift + F10 打开菜单。"),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(ui("知道了")),
-          ),
-        ],
-      ),
-    );
-  }
 
   Future<void> _retryStorageRead() async {
     if (_busy) return;
@@ -2298,6 +2276,10 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                       playlist: current,
                       size: size,
                       loadSongArtwork: widget.trackBuilder == null,
+                      artworkWrapper: (cover) => PlaylistCoverRouteFlight(
+                          playlistId: current.id,
+                          borderRadius: AppShape.smallRadius,
+                          child: cover),
                     ),
                     breadcrumbs: _breadcrumbs(current),
                     actions:

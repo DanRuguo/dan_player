@@ -3,6 +3,7 @@ import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/settings_section_visibility.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -171,13 +172,16 @@ class _GroupedSettingsState extends State<GroupedSettings> {
                             enabled: _selected == section.id ||
                                 !RenderingPreferencesScope.of(context)
                                     .pauseWhenHidden,
-                            child: ExcludeFocus(
-                              excluding: _selected != section.id,
-                              child: _SectionContent(
-                                  section: section,
-                                  target: section.id == widget.initialSection
-                                      ? widget.initialSetting
-                                      : null),
+                            child: SettingsSectionVisibility(
+                              visible: _selected == section.id,
+                              child: ExcludeFocus(
+                                excluding: _selected != section.id,
+                                child: _SectionContent(
+                                    section: section,
+                                    target: section.id == widget.initialSection
+                                        ? widget.initialSetting
+                                        : null),
+                              ),
                             ),
                           )
                         else

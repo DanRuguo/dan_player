@@ -15,10 +15,12 @@ import 'support/fake_desktop_integration.dart';
 const _track = TaskbarPreviewTrack(
     identity: 'same-song', title: 'TRACK', artist: 'ARTIST', album: 'ALBUM');
 const _textRegions = <String, Rect>{
-  'title': Rect.fromLTRB(232, 51, 448, 108),
-  'artist': Rect.fromLTRB(232, 115, 448, 138),
-  'album': Rect.fromLTRB(232, 144, 448, 166),
-  'brand': Rect.fromLTRB(232, 24, 448, 43),
+  // The compact card now places short-title metadata after its actual line
+  // height. Keep separate strict glyph checks at those new row positions.
+  'title': Rect.fromLTRB(240, 50, 456, 87),
+  'artist': Rect.fromLTRB(240, 92, 456, 117),
+  'album': Rect.fromLTRB(240, 120, 456, 143),
+  'brand': Rect.fromLTRB(240, 24, 456, 43),
 };
 
 int _argb(TaskbarThumbnail card, int x, int y) {

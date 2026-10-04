@@ -165,6 +165,8 @@ class CacheBackupService {
       'metadata_committed.json.tmp',
       'library_migration.json',
       'library_migration.json.migration-tmp',
+      'music_folder_move.json',
+      'music_folder_move.json.tmp',
     ]) {
       if (await File(path.join(source.path, name)).exists()) {
         throw const CacheBackupException(
@@ -342,6 +344,11 @@ class CacheBackupService {
       _trackBackupProgress((taskbar) async {
         Map<String, Object?> transaction;
         try {
+          if (await File(path.join(currentData.path, 'music_folder_move.json'))
+              .exists()) {
+            throw const CacheBackupException(
+                'Complete the pending music move before restoring data');
+          }
           final backupPath = backup.absolute.path;
           final destinationPath = destination.absolute.path;
           final currentPath = currentData.absolute.path;
@@ -443,7 +450,7 @@ class CacheBackupService {
 
       final catalog = await _CurrentLibraryCatalog.read(currentData);
       final dependencies = <String>{};
-      void collectDependencies(Object? value) {
+      void collectDependencies(Object? value, {bool folderNotes = false}) {
         if (value is String && value.startsWith('${_tokenPrefix}cache/')) {
           final relative = Uri.decodeComponent(
               value.substring('${_tokenPrefix}cache/'.length));
@@ -452,12 +459,18 @@ class CacheBackupService {
         } else if (value is Map) {
           final background = _backgroundAssetReference(value);
           if (background != null) dependencies.add(background);
-          for (final item in value.values) {
-            collectDependencies(item);
+          for (final entry in value.entries) {
+            // Notes point to directories and contain user-authored text;
+            // neither field is a cache asset to relocate into restored-assets.
+            if (folderNotes && (entry.key == 'path' || entry.key == 'text')) {
+              continue;
+            }
+            collectDependencies(entry.value,
+                folderNotes: folderNotes || entry.key == 'FolderNotes');
           }
         } else if (value is List) {
           for (final item in value) {
-            collectDependencies(item);
+            collectDependencies(item, folderNotes: folderNotes);
           }
         }
       }
@@ -824,21 +837,25 @@ class _PortablePathEncoder {
     }
   }
 
-  Future<Object?> convert(Object? value, {bool aliasOnly = false}) async {
+  Future<Object?> convert(Object? value,
+      {bool aliasOnly = false, bool folderNotes = false}) async {
     if (value is String) return _convertString(value, aliasOnly: aliasOnly);
     if (value is List) {
-      return Future.wait<Object?>(
-          [for (final item in value) convert(item, aliasOnly: aliasOnly)]);
+      return Future.wait<Object?>([
+        for (final item in value)
+          convert(item, aliasOnly: aliasOnly, folderNotes: folderNotes)
+      ]);
     }
     if (value is Map) {
       final result = <String, Object?>{};
       final field = _smartLeafField(value);
       for (final entry in value.entries) {
         final convertedKey = await _convertString(entry.key.toString());
-        if (entry.key == 'value' && _isLiteralSmartField(field)) {
+        if ((entry.key == 'value' && _isLiteralSmartField(field)) ||
+            (folderNotes && entry.key == 'text' && entry.value is String)) {
           final text = entry.value as String;
           // Escape token-looking text so generic asset/dependency collectors
-          // cannot treat a search phrase as a request to include a cache file.
+          // cannot treat user text as a request to include a cache file.
           result[convertedKey] = text.startsWith(_tokenPrefix)
               ? '$_smartLiteralPrefix${Uri.encodeComponent(text)}'
               : text;
@@ -854,7 +871,8 @@ class _PortablePathEncoder {
           continue;
         }
         result[convertedKey] = await convert(entry.value,
-            aliasOnly: aliasOnly || entry.key == 'aliases');
+            aliasOnly: aliasOnly || entry.key == 'aliases',
+            folderNotes: folderNotes || entry.key == 'FolderNotes');
       }
       return result;
     }
@@ -890,7 +908,7 @@ class _PortablePathEncoder {
     if (_isInsideOrSame(sourceRoot.path, normalized)) {
       final relative =
           _portableRelative(path.relative(normalized, from: sourceRoot.path));
-      return '$_tokenPrefix${relative.isEmpty ? 'cache' : 'cache/${Uri.encodeComponent(relative)}'}';
+      return '$_tokenPrefix${relative.isEmpty || relative == '.' ? 'cache' : 'cache/${Uri.encodeComponent(relative)}'}';
     }
     final root = _rootFor(normalized);
     if (root != null) {
@@ -1044,14 +1062,16 @@ class _PortablePathDecoder {
   int get restoredSongs => _resolved.length;
   int get missingSongs => _missing.length;
 
-  Object? convert(Object? value, {bool preserveMissing = false}) {
+  Object? convert(Object? value,
+      {bool preserveMissing = false, bool folderNotes = false}) {
     if (value is String) {
       return _convertString(value, preserveMissing: preserveMissing);
     }
     if (value is List) {
       final result = <Object?>[];
       for (final item in value) {
-        final converted = convert(item, preserveMissing: preserveMissing);
+        final converted = convert(item,
+            preserveMissing: preserveMissing, folderNotes: folderNotes);
         if (!identical(converted, _dropValue)) result.add(converted);
       }
       return result;
@@ -1064,7 +1084,8 @@ class _PortablePathDecoder {
             preserveMissing: preserveMissing);
         if (identical(convertedKey, _dropValue)) continue;
         final Object? converted;
-        if (entry.key == 'value' && _isLiteralSmartField(field)) {
+        if ((entry.key == 'value' && _isLiteralSmartField(field)) ||
+            (folderNotes && entry.key == 'text' && entry.value is String)) {
           final text = entry.value as String;
           converted = text.startsWith(_smartLiteralPrefix)
               ? Uri.decodeComponent(text.substring(_smartLiteralPrefix.length))
@@ -1089,7 +1110,9 @@ class _PortablePathDecoder {
             'ArtistSeparator'
           }.contains(entry.key)
               ? entry.value
-              : convert(entry.value, preserveMissing: preserveMissing);
+              : convert(entry.value,
+                  preserveMissing: preserveMissing,
+                  folderNotes: folderNotes || entry.key == 'FolderNotes');
         }
         if (identical(converted, _dropValue)) {
           if (entry.key == 'path' || entry.key == 'audio') return _dropValue;
@@ -1464,6 +1487,7 @@ bool _shouldIncludeCacheEntry(String relative) {
   if (const {
     'library_migration.json',
     'library_migration_last.json',
+    'music_folder_move.json',
     'metadata_committed.json'
   }.contains(lower)) {
     return false;
@@ -1580,9 +1604,12 @@ bool _isInsideOrSame(String parent, String candidate) =>
     path.equals(path.normalize(parent), path.normalize(candidate)) ||
     path.isWithin(path.normalize(parent), path.normalize(candidate));
 
-bool _containsAbsolutePath(Object? value) {
+bool _containsAbsolutePath(Object? value, {bool folderNotes = false}) {
   if (value is String) return path.isAbsolute(value);
-  if (value is List) return value.any(_containsAbsolutePath);
+  if (value is List) {
+    return value
+        .any((item) => _containsAbsolutePath(item, folderNotes: folderNotes));
+  }
   if (value is Map) {
     final literalRule = _isLiteralSmartField(_smartLeafField(value));
     return value.entries.any((entry) =>
@@ -1590,7 +1617,9 @@ bool _containsAbsolutePath(Object? value) {
         (!const {'tags', 'label', 'name', 'backup', 'ArtistSeparator'}
                 .contains(entry.key) &&
             !(literalRule && entry.key == 'value') &&
-            _containsAbsolutePath(entry.value)));
+            !(folderNotes && entry.key == 'text') &&
+            _containsAbsolutePath(entry.value,
+                folderNotes: folderNotes || entry.key == 'FolderNotes')));
   }
   return false;
 }

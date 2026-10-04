@@ -4,6 +4,8 @@ import 'package:dan_player/page/settings_page/about_brand.dart';
 import 'package:dan_player/page/settings_page/artist_separator_editor.dart';
 import 'package:dan_player/page/settings_page/check_update.dart';
 import 'package:dan_player/page/settings_page/cache_backup_settings.dart';
+import 'package:dan_player/component/player_feature_guide.dart';
+import 'package:dan_player/component/process_resource_monitor.dart';
 import 'package:dan_player/page/settings_page/close_behavior_settings.dart';
 import 'package:dan_player/page/settings_page/performance_preset_settings.dart';
 import 'package:dan_player/page/settings_page/create_issue.dart';
@@ -173,6 +175,12 @@ class SettingsPage extends StatelessWidget {
                 ),
                 PerformancePresetSettings(
                   key: ValueKey('setting-performance'),
+                ),
+                PlayerFeatureGuideSettings(
+                  key: ValueKey('setting-feature-guide'),
+                ),
+                ProcessResourceMonitor(
+                  key: ValueKey('setting-process-resources'),
                 ),
               ],
             ),

@@ -23,6 +23,8 @@ import 'package:desktop_lyric/desktop_lyric_appearance.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:dan_player/ui_layout_preferences.dart';
 import 'package:dan_player/rendering_preferences.dart';
+import 'package:dan_player/process_resource_preferences.dart';
+import 'package:dan_player/folder_note_preferences.dart';
 import 'package:dan_player/theme_mode_preference.dart';
 import 'package:dan_player/update/update_channel_preference.dart';
 import 'package:flutter/material.dart';
@@ -137,6 +139,22 @@ Future<void> scheduleAppDataDirectorySwitch(
   );
 }
 
+Future<void> scheduleAppDataDirectoryMove(Directory destination) async {
+  if (Platform.environment['DAN_PLAYER_DATA_DIR']?.trim().isNotEmpty == true) {
+    throw StateError('An environment-pinned data directory cannot be moved');
+  }
+  final source = await getAppDataDir();
+  await AppDataLocationStore(await _appDataLocationFile())
+      .scheduleMove(source, destination);
+}
+
+Future<bool> hasPendingAppDataDirectoryChange() async {
+  if (Platform.environment['DAN_PLAYER_DATA_DIR']?.trim().isNotEmpty == true) {
+    return false;
+  }
+  return AppDataLocationStore(await _appDataLocationFile()).hasPendingChange;
+}
+
 class AppSettings {
   static final github = GitHub();
   static const String version = "26.0.6";
@@ -160,6 +178,8 @@ class AppSettings {
 
   /// Independent, live appearance preferences; old settings use safe defaults.
   final backgrounds = ValueNotifier(const BackgroundPreferences());
+  final processResources = ValueNotifier(const ProcessResourcePreferences());
+  final folderNotes = ValueNotifier(const FolderNotePreferences());
 
   /// Controls new search requests only; saved online tracks remain usable.
   final onlineSources = ValueNotifier(const OnlineSourcePreferences());
@@ -371,6 +391,10 @@ class AppSettings {
   }
 
   static void _readUpdatePreferences(Map settingsMap) {
+    _instance.folderNotes.value =
+        FolderNotePreferences.fromJson(settingsMap['FolderNotes']);
+    _instance.processResources.value =
+        ProcessResourcePreferences.fromMap(settingsMap['ProcessResources']);
     _instance.libraryAutoRefresh.value =
         settingsMap['LibraryAutoRefresh'] == true;
     _instance.replayGain.value =
@@ -558,6 +582,8 @@ class AppSettings {
         ...ThemeModePreference.encode(themeMode),
         "DynamicTheme": dynamicTheme,
         "Backgrounds": backgrounds.value.toMap(),
+        "ProcessResources": processResources.value.toMap(),
+        "FolderNotes": folderNotes.value.toJson(),
         "PlayerExperience": experience.value.toMap(),
         "DesktopLyricAppearance": desktopLyricAppearance.value.toJson(),
         "UiLanguage": uiLanguage.value.code,

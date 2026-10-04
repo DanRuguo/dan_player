@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/data/backup_restore_preservation.dart';
+import 'package:dan_player/data/folder_move_transaction.dart';
+import 'package:dan_player/library/library_data_migration.dart';
 
 import 'package:path/path.dart' as path;
 
@@ -16,12 +18,58 @@ class AppDataLocationStore {
 
   final File file;
 
+  FolderMoveTransaction get _move =>
+      FolderMoveTransaction(File('${file.path}.folder-move.json'));
+  Future<bool> get hasPendingChange async =>
+      await _move.pending || (await _read())['pendingPath'] != null;
+
+  Future<void> scheduleMove(Directory source, Directory destination) async {
+    if (await File(path.join(source.path, 'music_folder_move.json')).exists()) {
+      throw StateError('A music folder move is pending');
+    }
+    final current = await _read();
+    if (current['pendingPath'] != null) {
+      throw StateError('Complete the pending data restore first');
+    }
+    await _move.schedule(source, destination);
+    // Startup reads the durable cut journal before the active pointer. There
+    // is no second scheduling write that can report failure after the move
+    // has already been accepted; promote the pointer only after delivery.
+  }
+
   Future<String?> activatePendingOrReadActive() async {
+    if (await _move.pending) {
+      final moved = await _move.recover(
+          commit: (from, to) => LibraryDataMigration(Directory(to))
+              .remapVerifiedDataDirectory(LibraryPathMapping(from, to)),
+          commitMayChange: (relative) {
+            final name = relative.replaceAll('\\', '/');
+            final withoutTemporary = name.endsWith('.migration-tmp')
+                ? name.substring(0, name.length - '.migration-tmp'.length)
+                : name;
+            final primary = withoutTemporary.endsWith('.bak')
+                ? withoutTemporary.substring(0, withoutTemporary.length - 4)
+                : withoutTemporary;
+            return LibraryDataMigration.names.contains(primary) ||
+                name == 'library_migrations' ||
+                name.startsWith('library_migrations/') ||
+                name.startsWith('library_migration.json') ||
+                name == 'library_migration_last.json';
+          });
+      await _write({'version': 1, 'activePath': moved});
+      await _move.finish();
+      return moved;
+    }
     final state = await _read();
     final pending = _validAbsolute(state['pendingPath']);
     final staged = _validAbsolute(state['pendingStagedPath']);
     final active = _validAbsolute(state['activePath']);
     if (pending == null) return active;
+    if (active != null &&
+        await File(path.join(active, 'music_folder_move.json')).exists()) {
+      throw StateError(
+          'Complete the music folder move before activating a restore');
+    }
     final candidate = Directory(staged ?? pending);
     final marker = File(path.join(candidate.path, appDataReadyMarkerName));
     // Never activate a stale pointer after the restored directory was moved or
@@ -58,6 +106,11 @@ class AppDataLocationStore {
     required Directory target,
     required Directory staged,
   }) async {
+    if (active != null &&
+        await File(path.join(active, 'music_folder_move.json')).exists()) {
+      throw StateError(
+          'Complete the music folder move before activating a restore');
+    }
     await target.parent.create(recursive: true);
     final nonce = '${pid}_${DateTime.now().microsecondsSinceEpoch}';
     final previous = Directory(
@@ -159,11 +212,15 @@ class AppDataLocationStore {
     required String currentPath,
     required String stagedPath,
   }) async {
+    if (await _move.pending) throw StateError('A data folder move is pending');
     final next = _validAbsolute(nextPath);
     final current = _validAbsolute(currentPath);
     final staged = _validAbsolute(stagedPath);
     if (next == null || current == null || staged == null) {
       throw const FormatException('App data paths must be absolute');
+    }
+    if (await File(path.join(current, 'music_folder_move.json')).exists()) {
+      throw StateError('A music folder move is pending');
     }
     if (!await Directory(staged).exists() ||
         !await File(path.join(staged, appDataReadyMarkerName)).exists()) {

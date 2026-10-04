@@ -298,7 +298,8 @@ inline bool PaintPage(TextMask& output, int wanted_origin) {
 // per text/layout. Every highlight frame reuses these exact full glyphs.
 inline TextMask RasterText(HDC measuring, desktop_integration::PopupFonts& fonts,
                           const std::wstring& text, int viewport_width, int height,
-                          UINT dpi, bool animate, const std::vector<TaskbarLyricWord>& words = {}, int font_size = 16) {
+                          UINT dpi, bool animate, const std::vector<TaskbarLyricWord>& words = {}, int font_size = 16,
+                          bool paint = true) {
   TextMask output;
   if (!measuring || text.empty() || text.size() > 2 * 1024 * 1024 || viewport_width <= 0 ||
       viewport_width > 7680 || height <= 0 || height > 960) return output;
@@ -306,7 +307,7 @@ inline TextMask RasterText(HDC measuring, desktop_integration::PopupFonts& fonts
     auto source = DivideLongText(text, words);
     const auto range = source->chunks.front();
     output = RasterText(measuring, fonts, text.substr(range.first, range.second - range.first),
-        viewport_width, height, dpi, animate, ChunkWords(*source, 0), font_size);
+        viewport_width, height, dpi, animate, ChunkWords(*source, 0), font_size, paint);
     output.long_text = std::move(source); output.paged = true;
     return output;
   }
@@ -355,8 +356,22 @@ inline TextMask RasterText(HDC measuring, desktop_integration::PopupFonts& fonts
       offset = end;
     }
   }
-  if (!PaintPage(output, 0)) return {};
+  if (paint && !PaintPage(output, 0)) return {};
   return output;
+}
+// A different viewport does not change horizontal shaping or word coverage.
+// Keep the same paragraph and only resize its bounded glyph page if needed.
+inline bool SetTextViewport(TextMask& mask, int width) {
+  if (!mask.shaping) return mask.pixels.empty();
+  if (width <= 0 || mask.wrapped) return false;
+  mask.viewport_width = width;
+  mask.overflow = mask.natural_width > width;
+  mask.paged = mask.long_text || mask.natural_width > width * 2;
+  const int page_width = mask.paged ? width * 2 : std::max(width, mask.natural_width);
+  if (mask.width == page_width && !mask.pixels.empty()) return true;
+  mask.width = page_width;
+  mask.pixels.clear(); mask.outline.clear();
+  return PaintPage(mask, mask.origin);
 }
 inline void MapWords(TextMask& output, const std::wstring& text,
                      const std::vector<TaskbarLyricWord>& words) {

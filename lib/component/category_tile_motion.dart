@@ -21,7 +21,7 @@ class CategoryTileMotion extends StatefulWidget {
 }
 
 class _CategoryTileMotionState extends State<CategoryTileMotion>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _controller =
       AnimationController(vsync: this, duration: AppMotion.standard, value: 1);
   late Rect _from = widget.rect;
@@ -32,6 +32,19 @@ class _CategoryTileMotionState extends State<CategoryTileMotion>
       ? _controller.value
       : AppMotion.standardCurve.transform(_controller.value);
   Rect get _current => Rect.lerp(_from, widget.rect, _progress)!;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (appToolbarReduceMotion(context, kind: MotionKind.layout)) {
+      _controller.value = 1;
+    }
+  }
+
   @override
   void didUpdateWidget(CategoryTileMotion old) {
     super.didUpdateWidget(old);
@@ -58,6 +71,7 @@ class _CategoryTileMotionState extends State<CategoryTileMotion>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }

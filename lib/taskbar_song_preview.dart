@@ -499,16 +499,21 @@ class _SongPreviewPainter {
   }
 
   void _small(Canvas canvas) {
-    _cover(canvas, const Rect.fromLTWH(16, 24, 192, 192), 22);
-    _surface(canvas, const Rect.fromLTWH(216, 12, 252, 216), 24);
-    _text(canvas, 'Dan Player', const Offset(232, 24), 216, 12, 1,
+    // DWM scales this card down again. Spend pixels on artwork and the song,
+    // not on nested margins or a large fixed empty title slot.
+    _cover(canvas, const Rect.fromLTWH(12, 16, 208, 208), 22);
+    _surface(canvas, const Rect.fromLTWH(228, 12, 240, 216), 24);
+    _text(canvas, 'Dan Player', const Offset(240, 24), 216, 13, 1,
         weight: FontWeight.w600);
-    _text(canvas, track.title, const Offset(232, 51), 216, 22, 2,
-        weight: FontWeight.w600);
-    _text(canvas, track.artist, const Offset(232, 115), 216, 16, 1);
-    _text(canvas, track.album, const Offset(232, 144), 216, 14, 1);
-    _state(canvas, const Rect.fromLTWH(232, 181, 135, 31), large: false);
-    _text(canvas, _duration, const Offset(384, 189), 68, 13, 1,
+    final title = _paragraph(track.title, 216, 28, 2, weight: FontWeight.w600);
+    title.paint(canvas, const Offset(240, 50));
+    final artistTop = 50 + title.height + 9;
+    final artist = _paragraph(track.artist, 216, 18, 1);
+    artist.paint(canvas, Offset(240, artistTop));
+    _text(canvas, track.album, Offset(240, artistTop + artist.height + 6), 216,
+        16, 1);
+    _state(canvas, const Rect.fromLTWH(240, 186, 132, 31), large: false);
+    _text(canvas, _duration, const Offset(384, 193), 68, 14, 1,
         weight: FontWeight.w500, color: scheme.primary);
   }
 

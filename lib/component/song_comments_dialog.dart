@@ -10,6 +10,7 @@ import 'package:dan_player/component/online_source_display.dart';
 import 'package:dan_player/component/song_comment_match_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/desktop_integration.dart';
+import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/online/song_comment_association.dart';
 import 'package:dan_player/online/song_comments.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
@@ -105,6 +106,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
   bool _automaticVisible = false;
   AppLifecycleState? _lifecycle;
   final _hidden = DesktopIntegration.instance.isHidden;
+  final _documents = LyricDocumentStore.instance;
   int _generation = 0;
   bool _closed = false;
   bool _associationBusy = false;
@@ -122,6 +124,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
     _hidden.addListener(_syncAutomaticRequest);
     AppSettings.instance.automaticOnlineLyrics
         .addListener(_syncAutomaticRequest);
+    _documents.changes.addListener(_syncLyricOwner);
     _configure();
   }
 
@@ -172,8 +175,14 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
     _tabs = {for (final sort in SongCommentSort.values) sort: _CommentTab()};
     if (_target != null) {
       final target = _target;
+      final configuredGeneration = _generation;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted || _closed || _target != target) return;
+        if (!mounted ||
+            _closed ||
+            _target != target ||
+            configuredGeneration != _generation) {
+          return;
+        }
         final cached = _load(cacheOnly: true);
         final generation = _generation;
         await cached;
@@ -187,6 +196,30 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
         await _load(refresh: true, automatic: true);
       });
     }
+  }
+
+  void _syncLyricOwner() {
+    if (!mounted ||
+        _closed ||
+        !_documents.changes.value.contains(widget.audio.stableTrackId) ||
+        SongCommentAssociationStore.instance
+                .associationFor(widget.audio)
+                ?.mode !=
+            SongCommentAssociationMode.followLyric) {
+      return;
+    }
+    if (_target == SongCommentsService.targetFor(widget.audio) &&
+        _unavailable == SongCommentsService.unavailableReason(widget.audio)) {
+      return;
+    }
+    // A durable lyric selection revokes the old platform owner. Read the new
+    // local snapshot first; only the existing automatic opt-in can fetch it.
+    _cancel();
+    _disposeTabs();
+    setState(() {
+      _associationError = null;
+      _configure();
+    });
   }
 
   void _disposeTabs() {
@@ -401,6 +434,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
 
   @override
   void dispose() {
+    _documents.changes.removeListener(_syncLyricOwner);
     AppSettings.instance.automaticOnlineLyrics
         .removeListener(_syncAutomaticRequest);
     _hidden.removeListener(_syncAutomaticRequest);
@@ -645,8 +679,8 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
             children: [
               const SizedBox.square(
                   dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
-              Text(ui("正在加载评论…"))
+                  child: _CommentRefreshIcon(active: true, loading: true)),
+              ExcludeSemantics(child: Text(ui("正在加载评论…")))
             ]),
       );
     }
@@ -697,8 +731,9 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
 /// Only the refresh glyph repaints while the request runs. Stop its ticker when
 /// the window/route is hidden or feedback motion is disabled.
 class _CommentRefreshIcon extends StatefulWidget {
-  const _CommentRefreshIcon({required this.active});
+  const _CommentRefreshIcon({required this.active, this.loading = false});
   final bool active;
+  final bool loading;
 
   @override
   State<_CommentRefreshIcon> createState() => _CommentRefreshIconState();
@@ -712,6 +747,7 @@ class _CommentRefreshIconState extends State<_CommentRefreshIcon>
   AppLifecycleState? _lifecycle;
   bool _motionAllowed = false;
   bool _visible = false;
+  bool _loadingAnimate = false;
 
   @override
   void initState() {
@@ -756,9 +792,12 @@ class _CommentRefreshIconState extends State<_CommentRefreshIcon>
         _lifecycle != AppLifecycleState.hidden &&
         _lifecycle != AppLifecycleState.paused &&
         _lifecycle != AppLifecycleState.detached;
-    if (animate && !_turns.isAnimating) {
+    if (widget.loading && _loadingAnimate != animate) {
+      setState(() => _loadingAnimate = animate);
+    }
+    if (animate && !widget.loading && !_turns.isAnimating) {
       _turns.repeat();
-    } else if (!animate) {
+    } else if (!animate || widget.loading) {
       _turns.stop();
       if (!widget.active) _turns.value = 0;
     }
@@ -767,17 +806,22 @@ class _CommentRefreshIconState extends State<_CommentRefreshIcon>
   @override
   Widget build(BuildContext context) => Semantics(
         liveRegion: widget.active,
-        label: widget.active ? ui('正在更新评论…') : null,
+        label:
+            widget.active ? ui(widget.loading ? '正在加载评论…' : '正在更新评论…') : null,
         child: RepaintBoundary(
-          child: RotationTransition(
-            key: const ValueKey('song-comments-refresh-motion'),
-            turns: _turns,
-            child: RepaintBoundary(
-                child: Icon(Symbols.refresh,
-                    color: widget.active
-                        ? Theme.of(context).colorScheme.primary
-                        : null)),
-          ),
+          child: widget.loading
+              ? ExcludeSemantics(
+                  child: CircularProgressIndicator(
+                      value: _loadingAnimate ? null : 0, strokeWidth: 2))
+              : RotationTransition(
+                  key: const ValueKey('song-comments-refresh-motion'),
+                  turns: _turns,
+                  child: RepaintBoundary(
+                      child: Icon(Symbols.refresh,
+                          color: widget.active
+                              ? Theme.of(context).colorScheme.primary
+                              : null)),
+                ),
         ),
       );
 

@@ -192,7 +192,8 @@ Map<String, String> _selectedMusicPaths(Map<String, Object?> manifest,
 }
 
 Future<void> _copyReferencedCacheAssets(Object? value, Directory source,
-    Directory payload, _BackupWorkerControl control) async {
+    Directory payload, _BackupWorkerControl control,
+    {bool folderNotes = false}) async {
   if (value is String && value.startsWith('${_tokenPrefix}cache/')) {
     final relative =
         Uri.decodeComponent(value.substring('${_tokenPrefix}cache/'.length));
@@ -219,12 +220,17 @@ Future<void> _copyReferencedCacheAssets(Object? value, Directory source,
           payload,
           control);
     }
-    for (final child in value.values) {
-      await _copyReferencedCacheAssets(child, source, payload, control);
+    for (final entry in value.entries) {
+      if (folderNotes && (entry.key == 'path' || entry.key == 'text')) {
+        continue;
+      }
+      await _copyReferencedCacheAssets(entry.value, source, payload, control,
+          folderNotes: folderNotes || entry.key == 'FolderNotes');
     }
   } else if (value is List) {
     for (final child in value) {
-      await _copyReferencedCacheAssets(child, source, payload, control);
+      await _copyReferencedCacheAssets(child, source, payload, control,
+          folderNotes: folderNotes);
     }
   }
 }
@@ -276,18 +282,25 @@ Future<void> _mergeUnselectedCurrent(
           await _tryReadJson(entity), current.path));
     }
   }
-  Object? remap(Object? value) {
+  Object? remap(Object? value, {bool folderNotes = false}) {
     if (value is String &&
         path.isAbsolute(value) &&
         _isInsideOrSame(current.path, value)) {
       return path.join(target.path, path.relative(value, from: current.path));
     }
-    if (value is List) return value.map(remap).toList();
-    if (value is Map)
+    if (value is List) {
+      return [for (final item in value) remap(item, folderNotes: folderNotes)];
+    }
+    if (value is Map) {
       return {
         for (final entry in value.entries)
-          remap(entry.key.toString()) as String: remap(entry.value)
+          remap(entry.key.toString()) as String:
+              folderNotes && entry.key == 'text'
+                  ? entry.value
+                  : remap(entry.value,
+                      folderNotes: folderNotes || entry.key == 'FolderNotes')
       };
+    }
     return value;
   }
 

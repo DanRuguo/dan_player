@@ -1,5 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:path/path.dart' as path;
+import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_data_storage_card.dart';
+import 'package:dan_player/statistics/app_data_storage.dart';
 
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
@@ -23,13 +27,18 @@ class StatisticsPage extends StatefulWidget {
       this.scanner,
       this.statistics,
       this.now,
-      this.displayService});
+      this.displayService,
+      this.storageScanner = const AppDataStorageScanner(),
+      this.initialStorageSection,
+      this.initialStorageFolder});
+  final String? initialStorageSection, initialStorageFolder;
 
   /// Allows filesystem-free previews and deterministic widget tests.
   final LibraryStatisticsScanner? scanner;
   final PlaybackStatistics? statistics;
   final DateTime? now;
   final StatisticsDisplayService? displayService;
+  final AppDataStorageScanner storageScanner;
 
   @override
   State<StatisticsPage> createState() => _StatisticsPageState();
@@ -42,6 +51,56 @@ class _StatisticsPageState extends State<StatisticsPage> {
   StatisticsDisplaySnapshot? _displaySnapshot;
   ListeningTrendsSnapshot? _listeningTrends;
   String _rankingGroup = 'tracks';
+  final _storageKey = GlobalKey();
+  final _cacheKey = GlobalKey();
+  bool _storageLocated = false;
+  late Future<AppDataStorageSnapshot> _cacheReading;
+  bool _refreshingAll = false;
+
+  Future<AppDataStorageSnapshot> _readCache(
+      {Future<AppDataStorageSnapshot>? after}) async {
+    if (after != null) {
+      try {
+        await after;
+      } catch (_) {
+        // A failed prior scan does not prevent an explicit retry.
+      }
+    }
+    if (!mounted) throw StateError('Statistics page closed');
+    final directory = await getAppDataDir();
+    if (!mounted) throw StateError('Statistics page closed');
+    return widget.storageScanner.scan(directory);
+  }
+
+  Future<void> _refreshAll() async {
+    if (_refreshingAll || _display.refreshing) return;
+    final reading = _readCache(after: _cacheReading);
+    setState(() {
+      _refreshingAll = true;
+      _cacheReading = reading;
+    });
+    try {
+      await Future.wait<void>([_display.refresh(), reading.then<void>((_) {})]);
+    } catch (_) {
+      // Each card displays its own failure. The shared action stays retryable.
+    } finally {
+      if (mounted) setState(() => _refreshingAll = false);
+    }
+  }
+
+  void _locateStorage() {
+    if (_storageLocated || widget.initialStorageSection == null) return;
+    if (_displaySnapshot == null && _display.failure == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _storageLocated) return;
+      final target =
+          (widget.initialStorageSection == 'cache' ? _cacheKey : _storageKey)
+              .currentContext;
+      if (target == null) return;
+      _storageLocated = true;
+      Scrollable.ensureVisible(target, alignment: 0, duration: Duration.zero);
+    });
+  }
 
   @override
   void initState() {
@@ -56,6 +115,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 clock: widget.now == null ? null : () => widget.now!)
             : StatisticsDisplayService.instance);
     _displayStats = PlaybackStatistics.displayCopy(null);
+    _cacheReading = _readCache();
     _syncSnapshot();
     // Standalone previews have no application startup. The real application
     // warms its session cache once from startup, never from this page.
@@ -93,6 +153,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
         _syncSnapshot();
         final stats = _displayStats;
         final library = _displaySnapshot?.library;
+        _locateStorage();
         return ColoredBox(
           color: Theme.of(context).colorScheme.surface,
           child: AppEntranceScope(
@@ -124,9 +185,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                         .onSecondaryContainer),
                                 key: const ValueKey('statistics-refresh'),
                                 tooltip: ui("刷新统计展示"),
-                                onPressed: _display.refreshing
+                                onPressed: _refreshingAll || _display.refreshing
                                     ? null
-                                    : _display.refresh,
+                                    : _refreshAll,
                                 icon: const Icon(Icons.refresh_rounded),
                               ),
                             ],
@@ -260,7 +321,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 0.0),
                   sliver: SliverToBoxAdapter(
-                    child: _LibraryDistributions(snapshot: library),
+                    child: _LibraryDistributions(
+                        folderKey: _storageKey,
+                        snapshot: library,
+                        initialFolder: widget.initialStorageFolder,
+                        initialBytes:
+                            widget.initialStorageSection == 'folders'),
                   ),
                 ),
                 if (library != null && library.largestFiles.isNotEmpty)
@@ -290,6 +356,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       ),
                     ),
                   ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                  sliver: SliverToBoxAdapter(
+                      child: AppDataStorageCard(
+                          key: _cacheKey, reading: _cacheReading)),
+                ),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
                   sliver: SliverToBoxAdapter(
@@ -966,7 +1038,14 @@ class _LibraryOverview extends StatelessWidget {
 }
 
 class _LibraryDistributions extends StatefulWidget {
-  const _LibraryDistributions({required this.snapshot});
+  const _LibraryDistributions(
+      {required this.snapshot,
+      this.initialFolder,
+      this.initialBytes = false,
+      this.folderKey});
+  final Key? folderKey;
+  final String? initialFolder;
+  final bool initialBytes;
   final LibraryStatisticsSnapshot? snapshot;
 
   @override
@@ -980,6 +1059,7 @@ class _LibraryDistributionsState extends State<_LibraryDistributions> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialBytes) _metric = FolderDistributionMetric.storageBytes;
     _folders = widget.snapshot?.folderDistribution(_metric);
   }
 
@@ -1025,17 +1105,20 @@ class _LibraryDistributionsState extends State<_LibraryDistributions> {
               child: _StorageFormatCard(
                   snapshot: widget.snapshot, contentWidth: contentWidth),
             ),
-            AppEntrance(
-              identity: 'statistics-folders',
-              order: 5,
-              child: _FolderStorageCard(
-                snapshot: widget.snapshot,
-                distribution: _folders,
-                metric: _metric,
-                contentWidth: contentWidth,
-                onMetricChanged: _selectMetric,
-              ),
-            ),
+            KeyedSubtree(
+                key: widget.folderKey,
+                child: AppEntrance(
+                  identity: 'statistics-folders',
+                  order: 5,
+                  child: _FolderStorageCard(
+                    focusPath: widget.initialFolder,
+                    snapshot: widget.snapshot,
+                    distribution: _folders,
+                    metric: _metric,
+                    contentWidth: contentWidth,
+                    onMetricChanged: _selectMetric,
+                  ),
+                )),
           ],
         );
       },
@@ -1192,7 +1275,9 @@ class _FolderStorageCard extends StatelessWidget {
     required this.metric,
     required this.contentWidth,
     required this.onMetricChanged,
+    this.focusPath,
   });
+  final String? focusPath;
 
   final LibraryStatisticsSnapshot? snapshot;
   final FolderDistribution? distribution;
@@ -1216,6 +1301,22 @@ class _FolderStorageCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (focusPath != null) ...[
+            SelectableText(focusPath!,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(color: Theme.of(context).colorScheme.primary)),
+            for (final folder in stats?.folders ?? <FolderStorageUsage>[])
+              if (path.equals(folder.path, focusPath!))
+                Text(ui('{0} 首 · 已核实 {1} · 缺失 {2} · 不可读 {3}', [
+                  folder.fileCount,
+                  formatLibraryBytes(folder.bytes),
+                  folder.missingFileCount,
+                  folder.inaccessibleFileCount
+                ])),
+            const SizedBox(height: 12),
+          ],
           Text(
             stats == null
                 ? ui("正在只读检查本地源文件…")

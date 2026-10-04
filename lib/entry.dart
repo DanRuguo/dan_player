@@ -503,7 +503,8 @@ class Entry extends StatelessWidget {
             path: app_paths.STATISTICS_PAGE,
             pageBuilder: (context, state) => SlideTransitionPage(
               key: state.pageKey,
-              child: const StatisticsPage(),
+              child: StatisticsPage(initialStorageSection: state.uri.queryParameters['section'],
+                initialStorageFolder: state.uri.queryParameters['folder']),
             ),
           ),
 

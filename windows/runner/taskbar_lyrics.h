@@ -52,6 +52,9 @@ class TaskbarLyrics {
   void UseBarForTesting(HWND bar,std::vector<RECT> occupied);
   unsigned MotionFramesForTesting() const;
   int CurrentChunkForTesting() const;
+  taskbar_lyrics::ContentLayout ContentForTesting() const;
+  int NaturalWidthForTesting(bool next = false) const;
+  const void* ShapingForTesting(bool next = false) const;
 #endif
   void EnvironmentChanged();
   void Close();

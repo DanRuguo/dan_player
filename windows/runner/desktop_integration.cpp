@@ -28,6 +28,7 @@
 #include "taskbar_progress_policy.h"
 #include "taskbar_thumbnail_policy.h"
 #include "taskbar_lyrics.h"
+#include "process_resource_monitor.h"
 #include "taskbar_lyrics_policy.h"
 
 namespace {
@@ -273,6 +274,7 @@ struct DesktopIntegrationController::Impl
 
   HWND window;
   std::unique_ptr<flutter::MethodChannel<EncodableValue>> channel;
+  std::unique_ptr<ProcessResourceMonitorController> process_resources;
   ITaskbarList3* taskbar = nullptr;
   std::array<HICON, 4> icons{};
   HICON tray_icon = nullptr;
@@ -356,6 +358,7 @@ struct DesktopIntegrationController::Impl
   ~Impl() { Dispose(); }
 
   void Connect(flutter::FlutterEngine* engine, std::weak_ptr<Impl> weak) {
+    process_resources = std::make_unique<ProcessResourceMonitorController>(engine);
     channel = std::make_unique<flutter::MethodChannel<EncodableValue>>(
         engine->messenger(), "dan_player/desktop_integration",
         &flutter::StandardMethodCodec::GetInstance());
@@ -1680,6 +1683,7 @@ struct DesktopIntegrationController::Impl
     // Make the terminal state visible before any API which can pump messages.
     // Reentrant destroy/Explorer callbacks must not resurrect Shell resources.
     disposed = true;
+    if (process_resources) process_resources->Dispose();
     taskbar_lyric_surface.SetLayoutCallback(nullptr);
     taskbar_lyric_surface.SetNextTrackCallback(nullptr);
     taskbar_lyric_surface.SetPlaybackCallback(nullptr);

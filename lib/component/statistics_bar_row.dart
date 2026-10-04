@@ -22,7 +22,9 @@ class StatisticsBarRow extends StatelessWidget {
       required this.value,
       required this.maximum,
       this.rank,
+      this.wrapLabel = false,
       this.valueColumnWidth});
+  final bool wrapLabel;
   final String label, detail, valueLabel;
   final double value, maximum;
   final int? rank;
@@ -58,7 +60,10 @@ class StatisticsBarRow extends StatelessWidget {
         valueColumnWidth ?? measureValues(context, [valueLabel]);
     final title = Tooltip(
         message: '$label\n$detail',
-        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis));
+        child: Text(label,
+            maxLines: wrapLabel ? null : 1,
+            overflow:
+                wrapLabel ? TextOverflow.visible : TextOverflow.ellipsis));
     final amount = Text(valueLabel,
         textAlign: TextAlign.right,
         style: Theme.of(context)
@@ -85,7 +90,8 @@ class StatisticsBarRow extends StatelessWidget {
           final rankWidth = rank == null ? 0.0 : 28 * scale;
           final width = constraints.maxWidth - rankWidth;
           final labelWidth = (width * .24).clamp(90 * scale, 240 * scale);
-          final inline = width - labelWidth - numberWidth - 24 >= 90 * scale;
+          final inline = width - labelWidth - numberWidth - 24 >= 90 * scale &&
+              (!wrapLabel || width / scale >= 600);
           return Row(children: [
             if (rank != null)
               SizedBox(

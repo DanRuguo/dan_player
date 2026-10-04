@@ -107,7 +107,7 @@ class BackupRestorePreservation {
       if (_excluded(relative) || !preserve(relative)) continue;
       await entity.delete();
     }
-    Object? remap(Object? value) {
+    Object? remap(Object? value, {bool folderNotes = false}) {
       if (value is String &&
           path.isAbsolute(value) &&
           (path.equals(path.normalize(sourcePath), path.normalize(value)) ||
@@ -115,12 +115,21 @@ class BackupRestorePreservation {
         return path.join(
             destinationPath, path.relative(value, from: sourcePath));
       }
-      if (value is List) return value.map(remap).toList();
-      if (value is Map)
+      if (value is List) {
+        return [
+          for (final item in value) remap(item, folderNotes: folderNotes)
+        ];
+      }
+      if (value is Map) {
         return {
           for (final entry in value.entries)
-            remap(entry.key.toString()) as String: remap(entry.value)
+            remap(entry.key.toString()) as String:
+                folderNotes && entry.key == 'text'
+                    ? entry.value
+                    : remap(entry.value,
+                        folderNotes: folderNotes || entry.key == 'FolderNotes')
         };
+      }
       return value;
     }
 
@@ -171,6 +180,7 @@ class BackupRestorePreservation {
         relative.endsWith('.exe') ||
         relative.endsWith('.msi') ||
         relative.startsWith('library_migration') ||
-        relative.startsWith('metadata_committed');
+        relative.startsWith('metadata_committed') ||
+        relative.startsWith('music_folder_move');
   }
 }

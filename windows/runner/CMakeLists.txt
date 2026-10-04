@@ -13,6 +13,7 @@ set(DESKTOP_LYRIC_RUNNER "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/desktop_
 add_executable(${BINARY_NAME} WIN32
   "desktop_integration.cpp"
   "taskbar_lyrics.cpp"
+  "process_resource_monitor.cpp"
   "flutter_window.cpp"
   "installer_launch_core.cpp"
   "installer_launcher.cpp"
@@ -58,11 +59,43 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib" "comctl32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib" "uuid.lib"
   "gdi32.lib" "advapi32.lib" "bcrypt.lib" "crypt32.lib" "wintrust.lib" "version.lib" "propsys.lib")
-target_link_libraries(${BINARY_NAME} PRIVATE "uiautomationcore.lib" "gdiplus.lib" "usp10.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "uiautomationcore.lib" "gdiplus.lib" "usp10.lib" "pdh.lib" "psapi.lib")
+
+add_executable(taskbar_lyrics_adaptive_width_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyrics_adaptive_width_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_lyrics_adaptive_width_test PRIVATE
+  NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_lyrics_adaptive_width_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyrics_adaptive_width_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyrics_adaptive_width_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+
+add_executable(taskbar_lyrics_reading_reflow_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyrics_reading_reflow_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_lyrics_reading_reflow_test PRIVATE
+  NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_lyrics_reading_reflow_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyrics_reading_reflow_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyrics_reading_reflow_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+add_executable(process_resource_monitor_test EXCLUDE_FROM_ALL
+  "desktop_tests/process_resource_monitor_test.cpp" "process_resource_monitor.cpp")
+apply_standard_settings(process_resource_monitor_test)
+target_compile_definitions(process_resource_monitor_test PRIVATE DAN_PLAYER_RESOURCE_SAMPLER_ONLY NOMINMAX)
+target_link_libraries(process_resource_monitor_test PRIVATE pdh psapi user32)
 
 # Pure argument/pipe policy regression; never creates HWNDs or a Dart engine.
 add_executable(desktop_entry_policy_test EXCLUDE_FROM_ALL

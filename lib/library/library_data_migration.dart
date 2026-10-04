@@ -325,6 +325,7 @@ class LibraryDataMigration {
 
   Future<void> schedule(LibraryPathMapping mapping) async {
     await _requireMetadataSyncComplete();
+    await _requireNoPendingMusicMove();
     if (await hasPending) throw const FormatException('已有待重启应用的迁移，请先完成或取消。');
     final checked = await preview(mapping);
     if (!checked.canApply) throw const FormatException('映射包含缺失文件或冲突，请重新预览。');
@@ -334,6 +335,57 @@ class LibraryDataMigration {
       'phase': 'pending',
       'mapping': mapping.toJson()
     });
+  }
+
+  /// A verified physical cut can include an empty selected scan root. Ordinary
+  /// relocation still requires matching tracks; this entry additionally checks
+  /// that the index actually owns the source root before preparing the batch.
+  Future<void> scheduleFolderMove(LibraryPathMapping mapping) async {
+    await _requireMetadataSyncComplete();
+    if (await hasPending) throw const FormatException('A migration is pending');
+    final index = await _read(File(p.join(directory.path, 'index.json')));
+    final hasSource = (index['roots'] is List &&
+            (index['roots'] as List)
+                .whereType<String>()
+                .any((v) => mapping.apply(v) != v)) ||
+        (index['folders'] is List &&
+            (index['folders'] as List).whereType<Map>().any((v) =>
+                v['path'] is String && mapping.apply(v['path']) != v['path']));
+    if (!hasSource) return; // Idempotent recovery after documents committed.
+    final checked = await preview(mapping);
+    if (checked.missing != 0 || checked.conflicts.isNotEmpty) {
+      throw const FormatException('Moved music does not match the library');
+    }
+    await _json(_pending, {
+      'version': 1,
+      'id': '${DateTime.now().microsecondsSinceEpoch}-$pid',
+      'phase': 'pending',
+      'mapping': mapping.toJson(),
+      'verifiedFolderMove': true,
+    });
+  }
+
+  /// Rebase managed artwork and other absolute references after the data tree
+  /// itself has been verified at its new location, before any stores open it.
+  Future<void> remapVerifiedDataDirectory(LibraryPathMapping mapping) async {
+    if (await hasPending) await recover();
+    final replacements = <String, Object?>{};
+    for (final name in [
+      for (final item in names) ...[item, '$item.bak']
+    ]) {
+      final file = File(p.join(directory.path, name));
+      if (!await file.exists()) continue;
+      try {
+        final original = jsonDecode(utf8.decode(await _readBytes(file)));
+        final mapped = remapLibraryDocument(original, mapping);
+        if (jsonEncode(original) != jsonEncode(mapped)) {
+          replacements[name] = mapped;
+        }
+      } on FormatException {
+        if (!name.endsWith('.bak')) rethrow;
+      }
+    }
+    if (replacements.isNotEmpty) await commitDocuments(replacements);
   }
 
   Future<void> cancelPending() async {
@@ -346,6 +398,7 @@ class LibraryDataMigration {
 
   Future<void> scheduleRestore() async {
     await _requireMetadataSyncComplete();
+    await _requireNoPendingMusicMove();
     if (await hasPending) throw const FormatException('请先处理当前迁移。');
     final latest = await _read(_latest);
     final batch = _batch(latest['id'] as String);
@@ -368,6 +421,12 @@ class LibraryDataMigration {
       if (await File(p.join(directory.path, name)).exists()) {
         throw const FormatException('歌曲标签已保存但关系同步尚未完成，请先重启播放器完成同步。');
       }
+    }
+  }
+
+  Future<void> _requireNoPendingMusicMove() async {
+    if (await File(p.join(directory.path, 'music_folder_move.json')).exists()) {
+      throw const FormatException('已有待重启应用的迁移，请先完成或取消。');
     }
   }
 
@@ -423,7 +482,12 @@ class LibraryDataMigration {
       final raw = intent['mapping'] as Map;
       final mapping =
           LibraryPathMapping(raw['from'] as String, raw['to'] as String);
-      if (!(await preview(mapping)).canApply) {
+      final checked = await preview(mapping);
+      if (!checked.canApply &&
+          !(intent['verifiedFolderMove'] == true &&
+              checked.matches == 0 &&
+              checked.missing == 0 &&
+              checked.conflicts.isEmpty)) {
         throw const FormatException('新目录的文件已变化或不可访问，迁移尚未开始，原数据保留。');
       }
       final records = <Map<String, Object>>[];
@@ -454,8 +518,27 @@ class LibraryDataMigration {
           }
           throw FormatException('$name 无法读取，迁移已停止，原数据未修改。');
         }
-        final after =
-            utf8.encode(jsonEncode(remapLibraryDocument(decoded, mapping)));
+        final mapped = remapLibraryDocument(decoded, mapping);
+        if (intent['verifiedFolderMove'] == true &&
+            (name == 'index.json' || name == 'index.json.bak') &&
+            mapped is Map) {
+          final roots =
+              (mapped['roots'] as List?)?.whereType<String>().toList() ??
+                  (mapped['folders'] as List? ?? [])
+                      .whereType<Map>()
+                      .map((folder) => folder['path'])
+                      .whereType<String>()
+                      .toList();
+          // Moving a directly containing folder out of a larger selected root
+          // must enroll its destination too, or the next refresh loses it.
+          if (!roots.any((root) =>
+              p.windows.equals(root, mapping.to) ||
+              p.windows.isWithin(root, mapping.to))) {
+            roots.add(mapping.to);
+          }
+          mapped['roots'] = roots;
+        }
+        final after = utf8.encode(jsonEncode(mapped));
         await _atomic(File(p.join(batch.path, 'before', name)), bytes);
         await _atomic(File(p.join(batch.path, 'after', name)), after);
         records.add({
