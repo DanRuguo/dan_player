@@ -11,7 +11,8 @@ class SidebarResourcePlacement extends MultiChildRenderObjectWidget {
       required Widget navigation,
       required Widget monitor,
       required this.measurementIdentity,
-      required this.bottomInset})
+      required this.bottomInset,
+      this.widthAffectsNavigationExtent = true})
       : super(children: [
           _NavigationExtent(child: RepaintBoundary(child: navigation)),
           monitor,
@@ -19,10 +20,13 @@ class SidebarResourcePlacement extends MultiChildRenderObjectWidget {
 
   final double bottomInset;
   final Object measurementIdentity;
+  // Fixed-height navigation rows keep their confirmed vertical footprint while
+  // the sidebar is resized. Text-wrapping navigation must still remeasure.
+  final bool widthAffectsNavigationExtent;
 
   @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _ResourcePlacement(bottomInset, measurementIdentity);
+  RenderObject createRenderObject(BuildContext context) => _ResourcePlacement(
+      bottomInset, measurementIdentity, widthAffectsNavigationExtent);
 
   @override
   void updateRenderObject(
@@ -30,6 +34,7 @@ class SidebarResourcePlacement extends MultiChildRenderObjectWidget {
     final placement = renderObject as _ResourcePlacement;
     placement.bottomInset = bottomInset;
     placement.measurementIdentity = measurementIdentity;
+    placement.widthAffectsNavigationExtent = widthAffectsNavigationExtent;
   }
 }
 
@@ -95,11 +100,23 @@ class _ResourcePlacement extends RenderBox
     with
         ContainerRenderObjectMixin<RenderBox, _PlacementData>,
         RenderBoxContainerDefaultsMixin<RenderBox, _PlacementData> {
-  _ResourcePlacement(this._bottomInset, this._measurementIdentity);
+  _ResourcePlacement(this._bottomInset, this._measurementIdentity,
+      this._widthAffectsNavigationExtent);
+  bool _widthAffectsNavigationExtent;
+  set widthAffectsNavigationExtent(bool value) {
+    if (_widthAffectsNavigationExtent == value) return;
+    _widthAffectsNavigationExtent = value;
+    _invalidateMeasurement();
+  }
+
   Object _measurementIdentity;
   set measurementIdentity(Object value) {
     if (_measurementIdentity == value) return;
     _measurementIdentity = value;
+    _invalidateMeasurement();
+  }
+
+  void _invalidateMeasurement() {
     final navigation = firstChild! as _NavigationExtentBox;
     navigation.occupiedBottom = null;
     navigation._measureNeeded = true;
@@ -126,11 +143,11 @@ class _ResourcePlacement extends RenderBox
     final navigation = firstChild! as _NavigationExtentBox;
     final monitor = lastChild!;
     if (navigation.fullHeight != size.height ||
-        navigation.fullWidth != size.width) {
-      navigation.fullHeight = size.height;
-      navigation.fullWidth = size.width;
+        _widthAffectsNavigationExtent && navigation.fullWidth != size.width) {
       navigation.occupiedBottom = null;
     }
+    navigation.fullHeight = size.height;
+    navigation.fullWidth = size.width;
     monitor.layout(
         BoxConstraints.tightFor(width: size.width)
             .copyWith(maxHeight: size.height),

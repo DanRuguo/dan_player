@@ -720,4 +720,138 @@ const Map<String, List<String>> catalogPlayerFeatureGuide = {
   "演示逐词强调": ["Show word emphasis", "単語の強調を実演", "단어 강조 시연"],
   "演示换句": ["Show line transition", "行の切替を実演", "구절 전환 시연"],
   '演示进度定位': ['Demo seek position', '実演の再生位置', '시연 재생 위치'],
+  '给喜欢的歌曲评分，再按标签找回': [
+    'Rate favorite tracks and find them by tag',
+    '好きな曲を評価し、タグから見つける',
+    '좋아하는 곡을 평가하고 태그로 다시 찾기'
+  ],
+  '从歌曲菜单打开“个人评分与标签”，选择星级、添加或编辑标签后保存；多选也可一起修改，未修改的评分各自保留。在“分类 → 个人整理 → 评分和标签”按评分或标签筛选，再播放或整理结果。这里的个人标签与音频文件内的标签是两套资料；要改歌名、歌手等原始信息，请用“编辑歌曲信息”。':
+      [
+    'Open Personal rating and tags from a track menu, choose stars, add or edit tags, then save. Multiselect lets you edit several tracks together; ratings you leave unchanged are retained individually. In Categories → Personal organization → Ratings and tags, filter by rating or tag, then play or organize the results. Personal tags and audio-file tags are separate data. Use Edit track information to change the original title, artist and similar fields.',
+    '曲のメニューから個人評価とタグを開き、星の数やタグを変更して保存します。複数選択でもまとめて編集でき、変更しない評価は曲ごとに保持します。分類 → 個人整理 → 評価とタグで絞り込み、結果を再生・整理できます。個人タグと音楽ファイル内のタグは別の資料です。曲名や歌手などの元の情報を変えるときは曲情報の編集を使います。',
+    '곡 메뉴에서 개인 별점과 태그를 열어 별점을 고르고 태그를 추가·편집한 뒤 저장합니다. 다중 선택으로 함께 수정할 수도 있으며 바꾸지 않은 별점은 각 곡에 유지됩니다. 분류 → 개인 정리 → 별점과 태그에서 필터링한 뒤 결과를 재생하거나 정리합니다. 개인 태그와 음원 파일 태그는 별도 자료입니다. 원래 곡명이나 아티스트 등을 바꾸려면 곡 정보 편집을 사용하세요.'
+  ],
+  '1. 打开统计与更新展示': [
+    '1. Open statistics and refresh the display',
+    '1. 統計を開いて表示を更新する',
+    '1. 통계 열기와 표시 갱신'
+  ],
+  '从侧栏进入“统计”，先看页头“展示截至”的时间。听歌记录持续保存，图表使用固定展示快照；继续听歌或曲库变化后，点右上角“刷新统计展示”更新听歌、曲库与缓存占用。切换范围只改变对应图表，不重新扫描文件，也不会清除记录。':
+      [
+    'Open Statistics from the sidebar and check the display capture time at the top. Listening records keep being saved, while charts use a fixed snapshot. After listening further or changing the library, select Refresh statistics display at the top right to update listening, library and cache storage. A range selector changes its own chart, without rescanning files or clearing records.',
+    'サイドバーの統計を開き、上部の表示時点を確認します。聴取記録は継続保存されますが、グラフは固定のスナップショットを使います。その後の再生や曲庫の変更を反映するには右上の統計表示を更新で聴取・曲庫・キャッシュ容量を更新します。期間の切替は対応するグラフだけを変更し、ファイルの再走査や記録の削除は行いません。',
+    '사이드바에서 통계를 열고 상단 표시 기준 시각을 확인합니다. 청취 기록은 계속 저장되지만 차트는 고정 스냅샷을 사용합니다. 더 듣거나 보관함을 바꾼 뒤에는 오른쪽 위 통계 표시 새로 고침으로 청취, 보관함과 캐시 용량을 갱신합니다. 범위 선택은 해당 차트만 바꾸며 파일을 다시 검색하거나 기록을 지우지 않습니다.'
+  ],
+  '刷新统计展示': ['Refresh statistics display', '統計表示を更新', '통계 표시 새로 고침'],
+  '选择时间范围': ['Choose a time range', '期間を選ぶ', '기간 선택'],
+  '查看图表详情': ['Inspect chart details', 'グラフの詳細を見る', '차트 상세 보기'],
+  '比较排行与占用': ['Compare rankings and storage', 'ランキングと容量を比較する', '순위와 용량 비교'],
+  '2. 最近一天：时长、次数与时段': [
+    '2. The last day: duration, plays and hours',
+    '2. 直近の一日：時間・回数・時間帯',
+    '2. 최근 하루: 시간, 횟수와 시간대'
+  ],
+  '“听歌行为 → 每天”查看截至展示时间的最近 24 小时，并非今天零点起的合计。“活跃时间”是有收听记录的小时数，不是听歌总时长。下方切“最近24小时”查看这段时间的每小时分布，切“历史时段分布”查看全部历史按一天 24 个时段累计的习惯，以及完整播放和提前跳过次数。':
+      [
+    'Listening activity → Daily covers the 24 hours ending at the capture time, rather than starting at midnight today. Active time counts hours containing listening records, rather than total listening duration. Below, Last 24 hours shows each hour of that interval. Historical hourly distribution aggregates all history into the 24 hours of a day and also shows completed and skipped plays.',
+    '聴取行動 → 毎日は表示時点までの直近24時間で、今日の午前0時からの合計ではありません。活動時間は記録のある時間帯の数で、聴取時間そのものではありません。下の直近24時間はその区間の各時間を、過去の時間帯分布は全履歴を一日の24時間帯に集計した習慣と、完了・途中スキップの回数を表示します。',
+    '청취 활동 → 매일은 오늘 자정부터가 아니라 표시 기준 시각까지 최근 24시간입니다. 활동 시간은 청취 기록이 있는 시간대 수이며 총 청취 시간이 아닙니다. 아래 최근 24시간은 그 구간의 시간별 분포를 보여 줍니다. 과거 시간대 분포는 전체 기록을 하루 24개 시간대로 합산하며 완주와 조기 건너뛰기 횟수도 표시합니다.'
+  ],
+  '点击、长按或悬停柱状条查看时长，也可用前后时段按钮；窄窗用滚轮或横向滑动查看全部柱条。恢复暂停不会重复计次；暂停、缓冲与拖进度不补算收听时长。休眠或采样间隔超过 2 秒时仅计最近 2 秒，未观测的间隔不补记。旧数据无法还原小时或每日次数时显示“—”或“≥”，不代表完整记录为零。':
+      [
+    'Select, long-press or hover a bar to inspect its duration, or use the previous/next hour buttons. In narrow windows, use the wheel or swipe horizontally to see every bar. Resuming a pause does not add another play. Pauses, buffering and seeking do not add listening time. After sleep or a sampling gap over two seconds, only the last two seconds count; unseen gaps are not filled in. If older data cannot reconstruct hourly activity or daily counts, — or ≥ indicates unavailable or partial coverage, rather than a complete zero.',
+    '棒をクリック・長押し・ホバーするか、前後の時間帯ボタンで時間を確認します。狭い画面ではホイールや横スワイプで全ての棒を見られます。一時停止からの再開は重複して数えません。停止・バッファリング・位置指定で聴取時間を補いません。休眠や2秒を超える観測間隔は最後の2秒だけを数え、未観測分は補いません。古い資料で時間帯や日別回数を再現できないときの「—」「≥」は、完全な記録のゼロを意味しません。',
+    '막대를 클릭하거나 길게 누르거나 가리켜 시간을 확인하고 이전·다음 시간대 버튼도 사용할 수 있습니다. 좁은 창에서는 휠이나 가로 스와이프로 모든 막대를 봅니다. 일시정지 후 재개는 횟수를 중복 집계하지 않습니다. 일시정지, 버퍼링과 위치 이동은 청취 시간을 보충하지 않습니다. 절전이나 2초를 넘는 표본 간격은 마지막 2초만 세고 미관측 구간은 채우지 않습니다. 옛 자료로 시간별 활동이나 일별 횟수를 복원할 수 없을 때의 —와 ≥는 완전한 기록이 0이라는 뜻이 아닙니다.'
+  ],
+  '3. 日历与听歌习惯洞察': [
+    '3. Calendar and listening insights',
+    '3. カレンダーと聴取習慣の洞察',
+    '3. 달력과 청취 습관 분석'
+  ],
+  '收听时长按实际经过的播放时间计算，倍速不会把听歌时长翻倍。播放次数在新播放开始时增加；完整播放按自然结束或有效播放量判定，提前跳过只统计较早退出的播放，中间状态可能两者都不计。因此“播放次数”不等于“完整＋提前跳过”，不能用拖过的进度估算听歌时长。':
+      [
+    'Listening duration measures elapsed playing time; double speed does not double it. A new play adds to play count. Completion is determined by natural ending or effective playback amount, while skips count early exits; intermediate outcomes may count as neither. Play count therefore does not equal completed plus skipped plays, and seeking across a track does not measure time spent listening.',
+    '聴取時間は実際に再生していた経過時間で、倍速でも倍にはなりません。新しい再生の開始で回数が増えます。完了は自然終了または有効な再生量で判定し、スキップは早い段階で終えた再生だけを数え、中間はどちらにも入らない場合があります。このため再生回数は完了とスキップの合計ではなく、移動した再生位置から聴取時間は推定できません。',
+    '청취 시간은 실제 재생한 경과 시간이며 배속이라고 두 배가 되지 않습니다. 새 재생을 시작하면 횟수가 늘어납니다. 완주는 자연 종료나 유효 재생량으로 판정하고 조기 종료만 건너뛰기로 집계하며 중간 상태는 둘 다 아닐 수 있습니다. 따라서 재생 횟수는 완주와 조기 건너뛰기의 합이 아니며 이동한 진행 위치로 청취 시간을 추정할 수 없습니다.'
+  ],
+  '切“近12周”或“近一年”查看日历热图；颜色越深代表当天已记录的收听时长越多。悬停或点击日期查看时长与次数，横向滚动查看较早日期，最近一周在右侧。播放次数、时长与活跃时间都按当前范围计算；近12周的活跃单位是天，近一年的活跃单位是周。':
+      [
+    'Choose Last 12 weeks or Last year for the calendar heatmap. Deeper color means more recorded listening that day. Hover or select a date for duration and play count; scroll horizontally for older dates, with the newest week at the right. Plays, duration and activity use the selected range. Activity is measured in days for 12 weeks and weeks for one year.',
+    '直近12週・直近一年でカレンダーのヒートマップを表示します。濃い色ほどその日の記録済み聴取時間が長いことを表します。日付をホバー・クリックして時間と回数を確認し、横スクロールで過去へ移動します。最新の週は右側です。回数・時間・活動時間は選んだ期間内の値で、活動の単位は12週では日、一年では週です。',
+    '최근 12주나 최근 1년을 고르면 달력 히트맵이 나옵니다. 진한 색일수록 그날 기록된 청취 시간이 많습니다. 날짜를 가리키거나 눌러 시간과 횟수를 확인하고 가로 스크롤로 과거 날짜를 봅니다. 가장 최근 주는 오른쪽에 있습니다. 횟수, 시간과 활동은 선택 범위로 계산하며 활동 단위는 12주에서 일, 1년에서 주입니다.'
+  ],
+  '“日均收听”以所选范围全部日历日为分母，包含没有记录的日期。“连续活跃”从今天或昨天向前计算，“最长连续”是范围内最长一段；今天还未收听时不打断昨天的连续天数。“最常听的星期”与“周末收听占比”按时长计算。点“最投入的一天”定位到该日期；这些洞察均以已保存记录为准。':
+      [
+    'Daily average divides by every calendar day in the selected range, including dates without records. Current streak works back from today or yesterday; Longest streak is the longest run in that range. A day with no listening yet does not break yesterday\'s streak. Favorite weekday and Weekend listening share use listening duration. Select Most dedicated day to locate that date. All insights depend on saved records.',
+    '一日平均は選択期間の全ての暦日で割り、記録のない日も含めます。連続活動は今日または昨日から遡り、最長連続は期間内で最長の区間です。今日まだ聴いていなくても昨日までの連続日数は途切れません。よく聴く曜日・週末の聴取割合は時間を基準にします。最も聴いた日を押すとその日へ移動します。洞察は全て保存済みの記録に基づきます。',
+    '일평균은 선택 범위의 모든 날짜로 나누므로 기록 없는 날도 포함됩니다. 현재 연속 활동은 오늘 또는 어제에서 거슬러 계산하며 최장 연속은 범위 안에서 가장 긴 구간입니다. 오늘 아직 듣지 않았다고 어제까지의 연속 기록이 끊기지는 않습니다. 가장 자주 듣는 요일과 주말 청취 비율은 시간 기준입니다. 가장 많이 들은 날을 누르면 해당 날짜로 이동합니다. 모두 저장된 기록을 기준으로 합니다.'
+  ],
+  '4. 趋势：比较两个完整区间': [
+    '4. Trends: compare two complete intervals',
+    '4. 傾向：終了済みの二期間を比較する',
+    '4. 추세: 완료된 두 구간 비교'
+  ],
+  '在“收听趋势对比”选择近 7、30 或 90 天，比较已经结束的本地日历日期，不含今天；前期是之前等长的一段。实线表示本期，虚线表示前期；下方给出本期收听、增减时长和活跃日期。悬停或点按曲线查看对应日期，图表获得焦点后可用左右键逐日查看、Home／End 到首尾。':
+      [
+    'In Listening trend comparison, choose 7, 30 or 90 days. It compares finished local calendar dates, excluding today, with the preceding interval of equal length. The solid line is the current interval and the dashed line the previous one. Metrics show current listening, duration change and active dates. Hover or select the plot for matching dates. With the chart focused, use Left/Right to inspect each day or Home/End for the endpoints.',
+    '聴取傾向の比較で7・30・90日を選びます。今日を除いた終了済みのローカル暦日と、その前の同じ長さの区間を比較します。実線が今期、破線が前期で、今期の聴取・時間差・活動日数を表示します。グラフをホバー・クリックして対応日を確認し、フォーカスがあるときは左右キーで日を選び、Home／Endで両端へ移動します。',
+    '청취 추세 비교에서 7일, 30일 또는 90일을 고릅니다. 오늘을 제외한 완료된 로컬 날짜를 바로 앞의 같은 길이 구간과 비교합니다. 실선은 이번 구간, 점선은 이전 구간이며 현재 청취, 시간 증감과 활동 날짜를 표시합니다. 그래프를 가리키거나 눌러 날짜를 확인합니다. 차트에 초점이 있으면 좌우 키로 하루씩, Home/End로 처음과 끝을 봅니다.'
+  ],
+  '缺失日期按 0 绘图，不保证此前已经完整记录；前期没有时长时只比较差额，不计算增长百分比。趋势范围独立于上方日历范围，也不会筛选下方排行。先看日期和记录覆盖，再判断听歌习惯是否变化。':
+      [
+    'Missing dates plot as zero, without guaranteeing complete earlier coverage. If the previous interval has no duration, only the difference is shown, without a growth percentage. The trend range is independent of the calendar above and does not filter rankings below. Check dates and record coverage before interpreting a change in habits.',
+    '欠けた日は0として描画し、過去の記録が完全だったとは限りません。前期の時間がないときは差だけを示し、増加率は計算しません。傾向の期間は上のカレンダーと独立し、下のランキングも絞り込みません。日付と記録の範囲を確認してから習慣の変化を判断します。',
+    '누락된 날짜는 0으로 그리지만 이전 기록이 완전했다는 뜻은 아닙니다. 이전 구간에 시간이 없으면 차이만 비교하고 증가율은 계산하지 않습니다. 추세 범위는 위 달력과 독립적이며 아래 순위도 필터링하지 않습니다. 날짜와 기록 범위를 먼저 확인한 뒤 습관 변화를 해석하세요.'
+  ],
+  '5. 排行：播放最多与收听最久': [
+    '5. Rankings: most plays and longest listening',
+    '5. ランキング：再生回数と聴取時間',
+    '5. 순위: 재생 횟수와 청취 시간'
+  ],
+  '在排行上方选择“歌曲”“艺术家”或“专辑”，两张排行分别显示累计播放次数与累计收听时长的前 10 项。听过几次与听了多久是不同指标；排行使用全部已保存历史，不随日历或趋势的范围改变。艺术家与专辑只汇总已明确归属的记录，同名专辑按艺术家区分；旧版未明确归属的总数仍保留并单独提示。排行用于查看，不会直接开始播放。':
+      [
+    'Choose Tracks, Artists or Albums above the rankings. The two lists show the top ten by cumulative plays and cumulative listening duration. How often and how long are different measures. Rankings use all saved history, independent of calendar and trend ranges. Artist and album totals include only clearly attributed records, with same-name albums separated by artist. Ambiguous legacy totals remain preserved and are indicated separately. Rankings are for inspection and do not start playback.',
+    'ランキング上の曲・アーティスト・アルバムを選ぶと、累計再生回数と累計聴取時間それぞれの上位10件を表示します。何回聴いたかと、どれだけ聴いたかは別の指標です。保存済み全履歴を使い、カレンダーや傾向の期間には連動しません。アーティストとアルバムは帰属が明確な記録だけを集計し、同名アルバムはアーティスト別に分けます。旧版の帰属不明な合計は保ち、別に案内します。ランキングは閲覧用で、直接再生を開始しません。',
+    '순위 위에서 곡, 아티스트 또는 앨범을 고릅니다. 두 목록은 누적 재생 횟수와 누적 청취 시간의 상위 10개를 각각 보여 줍니다. 몇 번 들었는지와 얼마나 들었는지는 다릅니다. 순위는 저장된 전체 기록이며 달력이나 추세 범위와 연동되지 않습니다. 아티스트와 앨범은 귀속이 명확한 기록만 합산하고 같은 이름의 앨범은 아티스트로 구분합니다. 귀속이 불명확한 옛 합계는 유지하고 별도로 알립니다. 순위는 조회용이며 바로 재생하지 않습니다.'
+  ],
+  '6. 曲库构成与语言判定': [
+    '6. Library composition and language evidence',
+    '6. 曲庫の構成と言語の判定',
+    '6. 보관함 구성과 언어 판정'
+  ],
+  '“曲库概览”区分本地与联网曲目，列出已核实文件、缺失或不可读文件以及直接父目录数量。“歌曲语言”用环图和各语言数量显示构成，并区分标签、歌词线索与文字推断。语言标签优先，其次本地内嵌或同名 LRC 的原文线索，最后按歌曲资料推断；证据不足保留未识别。歌词和文字推断不等于识别了音频中的实际演唱语言。':
+      [
+    'Library overview separates local and online tracks and reports verified, missing or unreadable files and direct parent folders. Track languages uses a ring chart and counts to show composition, distinguishing tags, lyric clues and text inference. Language tags take priority, followed by original text from embedded local lyrics or matching LRC files, then metadata inference. Insufficient evidence stays unidentified. Lyric and text inference does not identify the language actually sung in the audio.',
+    '曲庫の概要はローカルとオンラインを分け、確認済み・欠落・読み取り不可のファイルと直接の親フォルダー数を示します。曲の言語は環状グラフと件数で構成を示し、タグ・歌詞の手掛かり・文字推測を区別します。言語タグを優先し、次に埋め込みや同名LRCの原文、最後に曲の資料から推測します。根拠が不足すれば未識別のままです。歌詞や文字の推測は音声の実際の歌唱言語を認識したものではありません。',
+    '보관함 개요는 로컬과 온라인 곡을 나누고 확인된 파일, 누락·읽기 불가 파일과 직접 상위 폴더 수를 보여 줍니다. 곡 언어는 원형 차트와 개수로 구성 및 태그, 가사 단서와 문자 추론을 구분합니다. 언어 태그가 우선이고 로컬 내장 가사나 같은 이름 LRC의 원문, 그다음 곡 자료로 추론합니다. 근거가 부족하면 미식별로 둡니다. 가사와 문자 추론은 음원에서 실제 부른 언어를 인식했다는 뜻이 아닙니다.'
+  ],
+  '7. 音乐文件、文件夹与缓存空间': [
+    '7. Audio files, folders and cache storage',
+    '7. 音楽ファイル・フォルダー・キャッシュ容量',
+    '7. 음원 파일, 폴더와 캐시 용량'
+  ],
+  '“本地空间 · 文件格式”的环图和粗条按实际源文件字节数划分，细条对照文件数量；格式按扩展名分组。“本地分布 · 文件夹”可切“歌曲数量”与“占用空间”，显示当前指标的前 7 个文件夹，其余合并为“其他文件夹”。完整路径不同的同名目录分开，按直接父目录分组，不递归合并子目录。':
+      [
+    'Local storage · File formats uses actual source-file bytes for its ring and thick bars, with thin bars comparing file counts. Formats are grouped by extension. Local distribution · Folders switches between Track count and Storage, showing the top seven by that measure and combining the rest as Other folders. Same-name folders at different full paths remain separate. Grouping uses direct parent folders, without recursively merging subfolders.',
+    'ローカル容量・ファイル形式の環状グラフと太い棒は実際の元ファイルのバイト数、細い棒はファイル数です。形式は拡張子別です。ローカル分布・フォルダーは曲数と使用容量を切り替え、選択指標の上位7フォルダーと、残りをまとめたその他を表示します。完全なパスが違う同名フォルダーは別々に扱い、直接の親ごとに集計して子フォルダーは再帰的に合算しません。',
+    '로컬 공간 · 파일 형식의 원형 차트와 굵은 막대는 실제 원본 파일 바이트이며 가는 막대는 파일 수를 비교합니다. 형식은 확장자로 묶습니다. 로컬 분포 · 폴더는 곡 수와 사용 공간을 전환하고 해당 지표 상위 7개와 나머지를 기타 폴더로 합칩니다. 전체 경로가 다른 동명 폴더는 분리하며 직접 상위 폴더별로 묶고 하위 폴더를 재귀 합산하지 않습니다.'
+  ],
+  '空间只包含已核实的本地源文件，不计联网曲目、缺失或不可读文件、播放器缓存及磁盘分配开销；重复源记录会合并。“占用空间最多”列出最大的 6 个已核实文件及路径。文件夹页右键“查看占用统计”可直达对应目录；这些图表只读，不移动或删除文件。':
+      [
+    'Storage includes verified local source files only, excluding online tracks, missing or unreadable files, player caches and filesystem allocation overhead. Duplicate source records are merged. Largest storage usage lists the six largest verified files with their paths. Right-click View storage statistics on a folder to jump to its entry. These charts are read-only and do not move or delete files.',
+    '容量は確認済みローカル元ファイルだけで、オンライン曲・欠落や読み取り不可のファイル・プレイヤーのキャッシュ・ディスク割当の追加容量を含みません。重複元ファイルの記録はまとめます。容量の大きいファイルは最大6件とパスを示します。フォルダーページの右クリックから容量統計を見るで該当項目へ移動できます。グラフは読み取り専用で移動や削除を行いません。',
+    '용량에는 확인된 로컬 원본 파일만 포함하며 온라인 곡, 누락·읽기 불가 파일, 플레이어 캐시와 디스크 할당 오버헤드는 제외합니다. 중복 원본 기록은 합칩니다. 가장 큰 파일 6개와 경로도 표시합니다. 폴더 화면에서 오른쪽 클릭 후 사용량 통계 보기로 해당 항목에 바로 이동합니다. 차트는 읽기 전용이며 파일을 옮기거나 지우지 않습니다.'
+  ],
+  '“缓存与播放器数据占用”另外列出总字节与文件数，以及封面、联网歌词、评论、自选图片、曲库与用户资料、迁移快照等分类。名称便于阅读，悬停查看真实目录；评论只展示上级 song_comments 目录。播放器资料与可重建缓存分开统计，不能把这一整块都当作可随意删除的缓存；链接不跟随，无法读取或达到扫描上限会提示。缓存和整页共用右上角刷新按钮。':
+      [
+    'Cache and player data storage separately shows total bytes and files, categorized as artwork, online lyrics, comments, custom images, library and user data, migration snapshots and more. Readable names have real directories on hover; comments show the parent song_comments folder only. Player data and rebuildable caches are classified separately, so this whole block is not disposable cache. Links are not followed; unreadable items and scan limits are reported. Cache storage shares the page\'s top-right refresh button.',
+    'キャッシュとプレイヤーデータの容量には合計バイト数・ファイル数と、ジャケット、オンライン歌詞、コメント、自選画像、曲庫・ユーザー資料、移行スナップショットなどを表示します。分かりやすい名前を使い、ホバーで実際の場所を確認できます。コメントは上位のsong_commentsだけを示します。ユーザー資料と再作成できるキャッシュは別分類なので、全てを削除可能なキャッシュと考えないでください。リンクは辿らず、読めない項目や走査上限は案内します。右上の更新ボタンはページ全体と共通です。',
+    '캐시 및 플레이어 데이터 용량은 총 바이트와 파일 수 및 표지, 온라인 가사, 댓글, 사용자 이미지, 보관함·사용자 자료, 이전 스냅샷 등을 따로 보여 줍니다. 읽기 쉬운 이름을 쓰고 가리키면 실제 디렉터리가 나타나며 댓글은 상위 song_comments만 표시합니다. 사용자 자료와 다시 만들 수 있는 캐시는 별도 분류이므로 전체를 마음대로 지워도 되는 캐시로 보지 마세요. 링크를 따라가지 않고 읽기 실패나 검색 한도는 알립니다. 오른쪽 위 새로 고침은 전체 페이지와 공유합니다.'
+  ],
+  '8. 按需查看播放器资源': [
+    '8. Inspect player resources when needed',
+    '8. 必要なときにリソースを確認する',
+    '8. 필요할 때 플레이어 리소스 확인'
+  ],
+  '打开音乐统计': ['Open music statistics', '音楽統計を開く', '음악 통계 열기'],
 };

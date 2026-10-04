@@ -252,6 +252,7 @@ class _SideNavResourceLayout extends StatelessWidget {
                   (child is _ContinuousNavigation ? child.width : null),
               child: SidebarResourcePlacement(
                   measurementIdentity: (
+                    child.runtimeType,
                     width,
                     MediaQuery.textScalerOf(context),
                     MediaQuery.paddingOf(context),
@@ -260,6 +261,7 @@ class _SideNavResourceLayout extends StatelessWidget {
                   ),
                   bottomInset:
                       ((constraints.maxHeight - 320) / 4).clamp(0.0, 48.0),
+                  widthAffectsNavigationExtent: child is! _ContinuousNavigation,
                   navigation: child!,
                   monitor: show
                       ? CompactProcessResourceMonitor(
@@ -277,10 +279,12 @@ class ResizableSideNav extends StatefulWidget {
     super.key,
     this.preferences,
     this.persist,
+    this.resourceCoordinator,
   });
 
   final ValueNotifier<PlayerExperiencePreferences>? preferences;
   final Future<void> Function()? persist;
+  final ProcessResourceCoordinator? resourceCoordinator;
 
   @override
   State<ResizableSideNav> createState() => _ResizableSideNavState();
@@ -392,7 +396,10 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          SideNav(desktopWidth: effectiveWidth, resizing: _dragging),
+          SideNav(
+              desktopWidth: effectiveWidth,
+              resizing: _dragging,
+              resourceCoordinator: widget.resourceCoordinator),
           PositionedDirectional(
             top: 0,
             bottom: 0,
