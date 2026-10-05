@@ -119,7 +119,7 @@ void main() {
               brightness: brightness));
           expect(find.text('Albums'), findsOneWidget);
           expect(find.textContaining('1 首歌曲'), findsOneWidget);
-          expect(find.textContaining(' › '), findsOneWidget);
+          expect(find.text(path), findsOneWidget);
           expect(find.byTooltip(path), findsOneWidget);
           expect(
               tester

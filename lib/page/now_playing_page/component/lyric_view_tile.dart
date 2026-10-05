@@ -514,7 +514,9 @@ class _TimedLyricText extends StatefulWidget {
 }
 
 class _TimedLyricTextState extends State<_TimedLyricText> {
+  Object? _shapeIdentity;
   Object? _layoutIdentity;
+  _TimedLyricParagraph? _paragraph;
   _TimedLyricLayout? _layout;
 
   @override
@@ -545,7 +547,7 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
         // Keep shaping fixed while the paragraph's lines travel horizontally.
         final paintAlign =
             widget.alignmentX == null ? widget.textAlign : TextAlign.left;
-        final identity = (
+        final shapeIdentity = (
           widget.line,
           widget.line.content,
           widget.style,
@@ -553,16 +555,27 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
           direction,
           scaler,
           pixelRatio,
-          width,
         );
-        if (_layoutIdentity != identity) {
+        if (_shapeIdentity != shapeIdentity) {
           _layout?.dispose();
-          _layout = _TimedLyricLayout(
+          _layout = null;
+          _paragraph?.dispose();
+          _paragraph = _TimedLyricParagraph(
             line: widget.line,
             style: widget.style,
             textAlign: paintAlign,
             direction: direction,
             scaler: scaler,
+          );
+          _shapeIdentity = shapeIdentity;
+        }
+        final identity = (shapeIdentity, textMaxWidth);
+        if (_layoutIdentity != identity) {
+          _layout?.dispose();
+          _layout = _TimedLyricLayout(
+            line: widget.line,
+            style: widget.style,
+            paragraph: _paragraph!,
             pixelRatio: pixelRatio,
             maxWidth: textMaxWidth,
           );
@@ -598,20 +611,24 @@ class _TimedLyricTextState extends State<_TimedLyricText> {
   @override
   void dispose() {
     _layout?.dispose();
+    _paragraph?.dispose();
     super.dispose();
   }
 }
 
-class _TimedLyricLayout {
-  _TimedLyricLayout({
+/// Owns shaped paragraphs independently from the width-dependent word boxes.
+/// Resizing preserves their native shaping cache; every geometry snapshot still
+/// has a distinct identity so a changed wrap always invalidates its painter.
+class _TimedLyricParagraph {
+  _TimedLyricParagraph({
     required this.line,
     required this.style,
     required TextAlign textAlign,
     required TextDirection direction,
     required TextScaler scaler,
-    required this.pixelRatio,
-    required this.maxWidth,
   })  : base = TextPainter(
+          text: TextSpan(
+              text: line.content, style: style.copyWith(color: Colors.white)),
           textDirection: direction,
           textAlign: textAlign,
           textScaler: scaler,
@@ -619,12 +636,84 @@ class _TimedLyricLayout {
         fontSize = scaler.scale(style.fontSize ?? 14),
         _textAlign = textAlign,
         _direction = direction,
-        _scaler = scaler {
+        _scaler = scaler;
+
+  final SyncLyricLine line;
+  final TextStyle style;
+  final TextPainter base;
+  final double fontSize;
+  final TextAlign _textAlign;
+  final TextDirection _direction;
+  final TextScaler _scaler;
+  TextPainter? _baseInk;
+  TextPainter? _playedInk;
+  TextPainter? _gradientInk;
+  Color? _baseInkColor;
+  Color? _playedInkColor;
+
+  void layout(double maxWidth) {
+    layoutBalancedLyric(base, maxWidth);
+    _baseInk?.layout(maxWidth: base.width);
+    _playedInk?.layout(maxWidth: base.width);
+    _gradientInk?.layout(maxWidth: base.width);
+  }
+
+  TextPainter _newInkPainter(TextStyle inkStyle) => TextPainter(
+        text: TextSpan(text: line.content, style: inkStyle),
+        textDirection: _direction,
+        textAlign: _textAlign,
+        textScaler: _scaler,
+      )..layout(maxWidth: base.width);
+
+  TextPainter ink(Color color, {required bool played}) {
+    if (played) {
+      if (_playedInk == null || _playedInkColor != color) {
+        _playedInk?.dispose();
+        _playedInk = _newInkPainter(style.copyWith(color: color));
+        _playedInkColor = color;
+      }
+      return _playedInk!;
+    }
+    if (_baseInk == null || _baseInkColor != color) {
+      _baseInk?.dispose();
+      _baseInk = _newInkPainter(style.copyWith(color: color));
+      _baseInkColor = color;
+    }
+    return _baseInk!;
+  }
+
+  TextPainter gradientInk(drawing.Shader shader) {
+    final styleWithShader =
+        style.copyWith(foreground: Paint()..shader = shader);
+    if (_gradientInk == null) {
+      _gradientInk = _newInkPainter(styleWithShader);
+    } else {
+      _gradientInk!
+        ..text = TextSpan(text: line.content, style: styleWithShader)
+        ..layout(maxWidth: base.width);
+    }
+    return _gradientInk!;
+  }
+
+  void dispose() {
+    _baseInk?.dispose();
+    _playedInk?.dispose();
+    _gradientInk?.dispose();
+    base.dispose();
+  }
+}
+
+class _TimedLyricLayout {
+  _TimedLyricLayout({
+    required this.line,
+    required this.style,
+    required this.paragraph,
+    required this.pixelRatio,
+    required this.maxWidth,
+  }) {
     // White shapes are laid out once; theme/focus colors are paint operations.
     // Sampling playback never rebuilds paragraphs or changes line breaks.
-    base.text = TextSpan(
-        text: line.content, style: style.copyWith(color: Colors.white));
-    layoutBalancedLyric(base, maxWidth);
+    paragraph.layout(maxWidth);
 
     // Timing providers sometimes split a surrogate/ZWJ cluster into separate
     // words. Keep that grapheme in one mask with its actual combined interval.
@@ -756,56 +845,18 @@ class _TimedLyricLayout {
   final TextStyle style;
   final double maxWidth;
   final double pixelRatio;
-  final TextPainter base;
-  final double fontSize;
-  final TextAlign _textAlign;
-  final TextDirection _direction;
-  final TextScaler _scaler;
-  TextPainter? _baseInk;
-  TextPainter? _playedInk;
-  TextPainter? _gradientInk;
-  Color? _baseInkColor;
-  Color? _playedInkColor;
-
-  TextPainter _newInkPainter(TextStyle inkStyle) => TextPainter(
-        text: TextSpan(text: line.content, style: inkStyle),
-        textDirection: _direction,
-        textAlign: _textAlign,
-        textScaler: _scaler,
-      )..layout(maxWidth: base.width);
+  final _TimedLyricParagraph paragraph;
+  TextPainter get base => paragraph.base;
+  double get fontSize => paragraph.fontSize;
 
   /// Color is part of the paragraph's glyph draw, not an offscreen alpha mask.
   /// This keeps the shaped text in the same display list as the outer fractional
   /// filter, including when a timed line has independently moving characters.
-  TextPainter ink(Color color, {required bool played}) {
-    if (played) {
-      if (_playedInk == null || _playedInkColor != color) {
-        _playedInk?.dispose();
-        _playedInk = _newInkPainter(style.copyWith(color: color));
-        _playedInkColor = color;
-      }
-      return _playedInk!;
-    }
-    if (_baseInk == null || _baseInkColor != color) {
-      _baseInk?.dispose();
-      _baseInk = _newInkPainter(style.copyWith(color: color));
-      _baseInkColor = color;
-    }
-    return _baseInk!;
-  }
+  TextPainter ink(Color color, {required bool played}) =>
+      paragraph.ink(color, played: played);
 
-  TextPainter gradientInk(drawing.Shader shader) {
-    final styleWithShader =
-        style.copyWith(foreground: Paint()..shader = shader);
-    if (_gradientInk == null) {
-      _gradientInk = _newInkPainter(styleWithShader);
-    } else {
-      _gradientInk!
-        ..text = TextSpan(text: line.content, style: styleWithShader)
-        ..layout(maxWidth: base.width);
-    }
-    return _gradientInk!;
-  }
+  TextPainter gradientInk(drawing.Shader shader) =>
+      paragraph.gradientInk(shader);
 
   late final List<_TimedWordShape> words;
   late final bool completeWordInk;
@@ -933,10 +984,6 @@ class _TimedLyricLayout {
 
   void dispose() {
     releaseGlowMasks();
-    _baseInk?.dispose();
-    _playedInk?.dispose();
-    _gradientInk?.dispose();
-    base.dispose();
   }
 }
 
@@ -1028,6 +1075,9 @@ class LyricWordHighlightPainter extends CustomPainter {
 
   @visibleForTesting
   Object get layoutIdentity => _layout;
+
+  @visibleForTesting
+  TextPainter get text => _layout.base;
 
   @visibleForTesting
   int get shapedWordCount => _layout.words.length;

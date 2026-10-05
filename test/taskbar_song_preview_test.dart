@@ -506,7 +506,9 @@ void main() {
       for (var i = 3; i < card.pixels.length; i += 4) {
         if (card.pixels[i] != 255) fail('Transparent pixel at ${i ~/ 4}');
       }
-      final panel = (120 * card.width + 220) * 4;
+      // The metadata surface starts at x=228; sample its left padding, before
+      // text at x=240. x=220 belongs to the outer themed gradient.
+      final panel = (120 * card.width + 232) * 4;
       expect(card.pixels[panel], (colors.surface.toARGB32() >> 16) & 255,
           reason:
               'metadata keeps an opaque readable surface inside the gradient');

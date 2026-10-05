@@ -257,12 +257,16 @@ class _LyricCandidateTileState extends State<LyricCandidateTile>
               color: scheme.secondaryContainer,
               borderRadius: AppShape.controlRadius,
             ),
-            child: Text(_format,
-                maxLines: 1,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: scheme.onSecondaryContainer,
-                      fontSize: _format.length > 5 ? 10 : null,
-                    )),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(_format,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.onSecondaryContainer,
+                        fontSize: _format.length > 5 ? 10 : null,
+                      )),
+            ),
           ),
         ),
         title: Tooltip(

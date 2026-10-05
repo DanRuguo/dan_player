@@ -854,4 +854,36 @@ const Map<String, List<String>> catalogPlayerFeatureGuide = {
     '8. 필요할 때 플레이어 리소스 확인'
   ],
   '打开音乐统计': ['Open music statistics', '音楽統計を開く', '음악 통계 열기'],
+  '常用操作速查': ['Everyday controls at a glance', 'よく使う操作の早見表', '자주 쓰는 조작 빠른 안내'],
+  '先掌握日常听歌；点下面的条目展开完整步骤与演示，详细工具按章节查阅。': [
+    'Start with everyday listening. Tap an entry below for full steps and demos; use the chapters for detailed tools.',
+    'まずは日常の再生操作から。下の項目を押すと詳しい手順やデモを開けます。各種ツールは章ごとに確認できます。',
+    '일상적인 청취 조작부터 익혀 보세요. 아래 항목을 누르면 전체 단계와 시연이 열리며 자세한 도구는 장별로 확인할 수 있습니다.'
+  ],
+  '点歌曲开始播放，点播放条曲目信息进入歌词页；队列菜单可插入下一首或加入队尾。': [
+    'Select a track to play it and tap its info in the playback bar to open lyrics. The queue menu can insert a track next or add it to the end.',
+    '曲を押して再生し、再生バーの曲情報を押して歌詞ページへ。キューメニューで次に再生する曲や末尾の曲を追加できます。',
+    '곡을 눌러 재생하고 재생 막대의 곡 정보를 눌러 가사 화면을 여세요. 대기열 메뉴에서 다음 곡으로 넣거나 끝에 추가할 수 있습니다.'
+  ],
+  '拖进度定位，点有时间的歌词跳到该句；只想阅读时开启手动阅读，用 A± 调整字号。': [
+    'Drag the progress slider to seek or tap a timed lyric to jump to that line. Enable manual reading to browse lyrics, and use A± to resize text.',
+    '進捗バーをドラッグして位置を指定し、時刻付き歌詞を押してその行へ移動。読むだけなら手動閲覧を有効にし、A±で文字サイズを調整します。',
+    '진행 막대를 끌어 위치를 바꾸거나 시간이 있는 가사를 눌러 해당 구절로 이동하세요. 읽기만 하려면 수동 읽기를 켜고 A±로 글자 크기를 조절하세요.'
+  ],
+  '歌词页点喇叭打开音量面板；面板喇叭静音或恢复，点数值可精确输入。': [
+    'Tap the speaker on the lyrics page to open volume controls. The speaker inside mutes or restores volume; tap the number for an exact value.',
+    '歌詞ページのスピーカーで音量パネルを開きます。パネル内のスピーカーは消音・復元、数値を押すと正確に入力できます。',
+    '가사 화면의 스피커를 눌러 음량 패널을 여세요. 패널 안의 스피커는 음소거·복원이며 숫자를 누르면 정확한 값을 입력할 수 있습니다.'
+  ],
+  '加入歌单只保存歌曲引用；右键或长按打开菜单，自定义排序可拖动整理。': [
+    'Adding to a playlist saves a track reference. Right-click or long-press for the menu; drag to reorder in custom sorting.',
+    '歌単への追加は曲の参照を保存します。右クリックや長押しでメニューを開き、カスタム順ではドラッグして整理できます。',
+    '재생목록에 추가하면 곡 참조가 저장됩니다. 오른쪽 클릭이나 길게 눌러 메뉴를 열고 사용자 지정 정렬에서 끌어 순서를 바꿀 수 있습니다.'
+  ],
+  '时间范围菜单的“按严格一周”按本周周一至周日对照上一周；“近 7 天”是截至昨天的滚动区间。今天只计截至展示时间的记录，未来日期与缺失记录按 0 占位并提示；本周未结束时增减仍是暂时结果。曲线菜单可选择本期、前期或两期对比。':
+      [
+    'Choose Calendar week to compare Monday through Sunday of this week with last week. Last 7 days is the rolling window ending yesterday. Today uses records up to the display capture; future dates and missing records show 0 with a notice. Changes are provisional while this week is unfinished. The curve menu selects this period, the previous period or both.',
+    '期間メニューの暦週は今週の月曜から日曜を先週と比較し、過去7日間は昨日までの移動期間です。今日は表示時点までを集計し、未来の日付と記録のない日は0と案内を表示します。今週の終了前は増減も暫定値です。曲線メニューで今期・前期・両期間を選べます。',
+    '기간 메뉴의 달력 기준 주는 이번 주 월요일부터 일요일을 지난주와 비교하며 최근 7일은 어제까지의 이동 구간입니다. 오늘은 표시 시점까지 기록만 집계하고 미래 날짜와 누락 기록은 안내와 함께 0으로 표시합니다. 이번 주가 끝나기 전 증감은 잠정값입니다. 곡선 메뉴에서 이번 기간, 이전 기간 또는 두 기간을 고릅니다.'
+  ],
 };

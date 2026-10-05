@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dan_player/library/audio_folder_sort.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
@@ -79,11 +81,12 @@ void main() {
 
   testWidgets('folder page retains its three preference indexes',
       (tester) async {
-    late UniPage<AudioFolder> page;
-    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) {
-      page = const FoldersPage().build(context) as UniPage<AudioFolder>;
-      return const SizedBox.shrink();
-    })));
+    await tester.pumpWidget(
+        MaterialApp(home: FoldersPage(dataDirectory: Directory.systemTemp)));
+    // The first frame exposes music-folder sorting before the async player-data
+    // shortcut arrives; that separate pinned entry is covered by folder UI tests.
+    final page =
+        tester.widget<UniPage<AudioFolder>>(find.byType(UniPage<AudioFolder>));
     expect(
         page.sortMethods!.map((method) => method.name), ['路径', '修改日期', '歌曲数量']);
     final unknown = _folder('D:/Unknown');
@@ -92,6 +95,7 @@ void main() {
     page.sortMethods![1].method(result, SortOrder.decending);
     expect(result, [known, unknown]);
     expect(PlayService.isInitialized, isFalse);
+    await tester.pumpAndSettle();
   });
 
   testWidgets(

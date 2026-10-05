@@ -1484,10 +1484,14 @@ Future<Qrc?> _getQQSyncLyric(int songId) async {
   return null;
 }
 
-Future<Lyric?> _getKugouSyncLyric(String kugouSongHash) async {
+Future<Lyric?> _getKugouSyncLyric(String kugouSongHash,
+    {bool Function()? stillCurrent}) async {
   final profile = _configuredKugouLyricProfile();
   if (profile == null) return null;
-  final cancellation = CustomMusicSourceCancellation();
+  bool current() =>
+      (stillCurrent?.call() ?? true) && _isCurrentCustomLyricProfile(profile);
+  if (!current()) return null;
+  final cancellation = CustomMusicSourceCancellation(stillCurrent: current);
   final deadline = Timer(_customLyricSweepTimeout, cancellation.cancel);
   try {
     final audio = Audio.online(
@@ -1506,12 +1510,13 @@ Future<Lyric?> _getKugouSyncLyric(String kugouSongHash) async {
     final selected = profile.protocol == CustomMusicSourceProtocol.kugou
         ? await transport.metadata(audio, cancellation: cancellation)
         : audio;
+    if (!current()) return null;
     final response =
         await transport.lyrics(selected, cancellation: cancellation);
-    if (!_isCurrentCustomLyricProfile(profile)) return null;
+    if (!current()) return null;
     return _parseCustomLyricResponse(response.rawBody);
   } catch (err, trace) {
-    LOGGER.w('[lyric/kugou] 无法读取歌词', stackTrace: trace);
+    if (current()) LOGGER.w('[lyric/kugou] 无法读取歌词', stackTrace: trace);
   } finally {
     deadline.cancel();
   }
@@ -1528,7 +1533,10 @@ Future<Lyric?> getOnlineLyric({
   bool throwOnFailure = false,
   Future<Lyric?> Function(int)? qqWordLoader,
   QqLyricPayloadLoader? qqPayloadLoader,
+  bool Function()? stillCurrent,
 }) async {
+  bool current() => stillCurrent?.call() ?? true;
+  if (!current()) return null;
   try {
     Lyric? lyric;
     if (qqSongId != null || qqSongMid != null) {
@@ -1536,11 +1544,13 @@ Future<Lyric?> getOnlineLyric({
         try {
           lyric = await (qqWordLoader ?? _getQQSyncLyric)(qqSongId)
               .timeout(const Duration(seconds: 3));
+          if (!current()) return null;
           if (hasWordTiming(lyric)) return lyric;
         } catch (_) {
           /* A failed word endpoint must retain ordinary fallback. */
         }
       }
+      if (!current()) return null;
       Object? publicFailure;
       StackTrace? publicFailureTrace;
       try {
@@ -1555,6 +1565,7 @@ Future<Lyric?> getOnlineLyric({
         publicFailure = error;
         publicFailureTrace = trace;
       }
+      if (!current()) return null;
       if (lyric == null && qqSongMid != null && qqSongMid.trim().isNotEmpty) {
         try {
           lyric = await _getQQUnsyncLyric(qqSongMid.trim());
@@ -1569,22 +1580,26 @@ Future<Lyric?> getOnlineLyric({
         Error.throwWithStackTrace(publicFailure, publicFailureTrace!);
       }
     } else if (kugouSongHash != null) {
-      lyric = (await _getKugouSyncLyric(kugouSongHash));
+      lyric = await _getKugouSyncLyric(kugouSongHash, stillCurrent: current);
     } else if (neteaseSongId != null) {
       lyric = await getNeteaseLyric(neteaseSongId);
     } else if (lrclibId != null) {
       lyric = await getLrclibLyric(lrclibId);
     }
-    return lyric;
+    return current() ? lyric : null;
   } on InstrumentalLyric {
+    if (!current()) return null;
     rethrow;
   } catch (_) {
+    if (!current()) return null;
     if (throwOnFailure) rethrow;
     return null;
   }
 }
 
-Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) {
+Future<Lyric?> getLyricForCandidate(SongSearchResult candidate,
+    {bool Function()? stillCurrent}) {
+  if (stillCurrent?.call() == false) return Future.value(null);
   if (candidate._embeddedLrclibRecord case final record?) {
     if (record.instrumental) {
       return Future.error(const InstrumentalLyric());
@@ -1600,7 +1615,8 @@ Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) {
       return Future.value(candidate.previewLyric);
     }
     return getLyricForCustomSourceChoice(
-        audio, CustomLyricSourceChoice(profile));
+        audio, CustomLyricSourceChoice(profile),
+        stillCurrent: stillCurrent);
   }
   return getOnlineLyric(
     qqSongId: candidate.qqSongId,
@@ -1609,6 +1625,7 @@ Future<Lyric?> getLyricForCandidate(SongSearchResult candidate) {
     neteaseSongId: candidate.neteaseSongId,
     lrclibId: candidate.lrclibId,
     throwOnFailure: true,
+    stillCurrent: stillCurrent,
   );
 }
 
@@ -1622,14 +1639,17 @@ Future<Lyric?> getLyricForCustomSourceChoice(
   CustomLyricSourceChoice choice, {
   Duration timeout = _customLyricSweepTimeout,
   LyricSearchCancellation? cancellation,
+  bool Function()? stillCurrent,
 }) async {
   final profile = choice.profile;
-  if (!_customLyricProfileCanQuery(profile, audio) ||
-      !_isCurrentCustomLyricProfile(profile)) {
+  bool current() =>
+      (stillCurrent?.call() ?? true) && _isCurrentCustomLyricProfile(profile);
+  if (!_customLyricProfileCanQuery(profile, audio) || !current()) {
     return null;
   }
 
-  final requestCancellation = CustomMusicSourceCancellation();
+  final requestCancellation =
+      CustomMusicSourceCancellation(stillCurrent: current);
   final unlink = cancellation?.onCancel(requestCancellation.cancel);
   final deadlineTimer = Timer(timeout, requestCancellation.cancel);
   try {
@@ -1638,8 +1658,11 @@ Future<Lyric?> getLyricForCustomSourceChoice(
       requestTimeout: timeout,
     ).lyrics(audio, cancellation: requestCancellation).timeout(timeout);
     if (cancellation?.isCancelled == true) return null;
-    if (!_isCurrentCustomLyricProfile(profile)) return null;
+    if (!current()) return null;
     return _parseCustomLyricResponse(response.rawBody);
+  } on CustomMusicSourceCancelled {
+    if (!current()) return null;
+    rethrow;
   } on TimeoutException {
     requestCancellation.cancel();
     rethrow;
@@ -1760,7 +1783,6 @@ Future<Lyric?> getMostMatchedLyric(
     response = LyricSearchResponse(candidates: const [], failures: const {});
   }
   if (!current()) return null;
-  final load = candidateLyricLoader ?? getLyricForCandidate;
   final candidates = response.candidates
       .where((candidate) =>
           candidate.scoreVerified &&
@@ -1781,8 +1803,12 @@ Future<Lyric?> getMostMatchedLyric(
     // within this displayed percentage. Never let a lower match displace valid lyrics.
     for (final candidate in candidates.sublist(start, end)) {
       if (!current()) return null;
+      var loading = true;
       try {
-        final lyric = await load(candidate).timeout(_providerTimeout);
+        final lyric = await (candidateLyricLoader?.call(candidate) ??
+                getLyricForCandidate(candidate,
+                    stillCurrent: () => loading && current()))
+            .timeout(_providerTimeout);
         if (!current()) return null;
         if (lyric == null || !hasLyricContent(lyric)) continue;
         if (hasWordTiming(lyric)) return lyric;
@@ -1790,10 +1816,18 @@ Future<Lyric?> getMostMatchedLyric(
       } on InstrumentalLyric {
         instrumental = true;
       } catch (err, trace) {
+        if (!current()) return null;
         LOGGER.w('[lyric/${candidate.source.name}] 候选歌词读取失败',
             stackTrace: trace);
+      } finally {
+        // Timeout does not cancel a Future. Retire the pipeline so its late
+        // response cannot start another provider step after this candidate ends.
+        loading = false;
       }
     }
+    // A failed/instrumental last candidate crosses the same async boundary as
+    // a successful load. It cannot release a fallback owned by an old choice.
+    if (!current()) return null;
     if (fallback != null) return fallback;
     if (instrumental && current()) throw const InstrumentalLyric();
     start = end;

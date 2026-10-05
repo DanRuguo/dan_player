@@ -30,6 +30,9 @@ class PlaybackClock extends ChangeNotifier {
   double _playbackRate = 1.0;
   int _revision = 0;
   bool _samplingEnabled = true;
+  bool _disposed = false;
+  bool _visualDemandManaged = false;
+  final _visualSamplingDemand = <Object>{};
 
   int get positionMilliseconds =>
       _anchorPositionMilliseconds +
@@ -42,6 +45,22 @@ class PlaybackClock extends ChangeNotifier {
   bool get playing => _playing;
   double get playbackRate => _playbackRate;
   int get revision => _revision;
+
+  /// Mounted text and overflow views share this one sampler. Once they declare
+  /// their demand, static or completed content no longer wakes the engine;
+  /// the authoritative timeline and explicit corrections remain independent.
+  void setVisualSamplingDemand(Object owner, bool needed) {
+    if (_disposed) return;
+    final wasManaged = _visualDemandManaged;
+    final hadDemand = _visualSamplingDemand.contains(owner);
+    _visualDemandManaged = true;
+    if (needed) {
+      _visualSamplingDemand.add(owner);
+    } else {
+      _visualSamplingDemand.remove(owner);
+    }
+    if (!wasManaged || hadDemand != needed) _updateTicker();
+  }
 
   /// Stops visual sampling, never the monotonic playback timeline. Explicit
   /// seeks and playback changes still notify immediately while sampling is off.
@@ -75,7 +94,11 @@ class PlaybackClock extends ChangeNotifier {
   }
 
   void _updateTicker() {
-    if (!_playing || !automaticTicks || !_samplingEnabled) {
+    if (_disposed ||
+        !_playing ||
+        !automaticTicks ||
+        !_samplingEnabled ||
+        (_visualDemandManaged && _visualSamplingDemand.isEmpty)) {
       _ticker?.cancel();
       _ticker = null;
       return;
@@ -86,7 +109,10 @@ class PlaybackClock extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _ticker?.cancel();
+    _ticker = null;
+    _visualSamplingDemand.clear();
     _elapsed.stop();
     super.dispose();
   }

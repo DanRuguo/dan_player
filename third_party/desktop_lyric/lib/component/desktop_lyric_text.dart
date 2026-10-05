@@ -134,13 +134,50 @@ class DesktopLyricText extends StatefulWidget {
 class _DesktopLyricTextState extends State<DesktopLyricText> {
   Object? _identity;
   _DesktopLyricTextLayout? _layout;
+  bool _reduced = true;
+  int _wordEndMilliseconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _attachClock();
+  }
+
+  void _attachClock() {
+    if (widget.words.isNotEmpty) {
+      widget.clock.addListener(_syncSamplingDemand);
+    }
+  }
+
+  @override
+  void didUpdateWidget(DesktopLyricText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.clock, widget.clock) ||
+        !identical(oldWidget.words, widget.words)) {
+      if (oldWidget.words.isNotEmpty) {
+        oldWidget.clock.removeListener(_syncSamplingDemand);
+      }
+      oldWidget.clock.setVisualSamplingDemand(this, false);
+      _attachClock();
+    }
+  }
+
+  void _syncSamplingDemand() {
+    widget.clock.setVisualSamplingDemand(
+        this,
+        !_reduced &&
+            widget.words.isNotEmpty &&
+            widget.clock.positionMilliseconds < _wordEndMilliseconds);
+  }
 
   @override
   Widget build(BuildContext context) {
     final direction = Directionality.of(context);
     final scaler = MediaQuery.textScalerOf(context);
-    final reducedMotion =
-        widget.reducedMotion || !AppMotion.enabled(context, MotionKind.lyrics);
+    final reducedMotion = widget.reducedMotion ||
+        !AppMotion.enabled(context, MotionKind.lyrics) ||
+        !TickerMode.valuesOf(context).enabled;
+    _reduced = reducedMotion;
     // TextPainter does not inherit the app's font as Text does. Merge the real
     // desktop typography before caching so CJK/fallback fonts stay identical.
     final style = DefaultTextStyle.of(context).style.merge(widget.style);
@@ -172,7 +209,18 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
           direction: direction,
           scaler: scaler);
       _identity = identity;
+      // A bounded paragraph can omit trailing authored words entirely. Only
+      // words with visible shaped boxes can keep its sampler alive. Recompute
+      // after every width/font/direction/mode layout, including restored glyphs.
+      _wordEndMilliseconds = 0;
+      for (var index = 0; index < widget.words.length; index++) {
+        if (_layout!.wordExtents[index] <= 0) continue;
+        final word = widget.words[index];
+        _wordEndMilliseconds = math.max(_wordEndMilliseconds,
+            word.startMilliseconds + math.max(0, word.lengthMilliseconds));
+      }
     }
+    _syncSamplingDemand();
     return SizedBox.fromSize(
       size: _layout!.size,
       child: RepaintBoundary(
@@ -189,6 +237,10 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
 
   @override
   void dispose() {
+    widget.clock.setVisualSamplingDemand(this, false);
+    if (widget.words.isNotEmpty) {
+      widget.clock.removeListener(_syncSamplingDemand);
+    }
     _layout?.dispose();
     super.dispose();
   }

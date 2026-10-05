@@ -306,7 +306,20 @@ void main() {
     final state = tester.state(find.byType(LyricSourceDialog));
     for (final language in [UiLanguage.en, UiLanguage.ja, UiLanguage.ko]) {
       await _language(tester, language);
+      // Longer translated instructions can move the lazy candidate row out of
+      // the viewport cache. Reveal its cached error before inspecting it.
+      await tester.scrollUntilVisible(
+          find.text(ui('{0}未返回可用歌词，可选择其他候选或重试。', [ui('QQ音乐')])), 160,
+          scrollable: find
+              .descendant(
+                  of: find.byKey(const ValueKey('lyric-source-scroll')),
+                  matching: find.byType(Scrollable))
+              .first);
+      await tester.pumpAndSettle();
       expect(find.text(ui('{0}未返回可用歌词，可选择其他候选或重试。', [ui('QQ音乐')])),
+          findsOneWidget);
+      expect(
+          find.text(ui('{0}未返回可用歌词，可选择其他候选或重试。', [ui('QQ音乐')])).hitTestable(),
           findsOneWidget);
       expect(find.text('暂停 · 保存 · 取消'), findsOneWidget);
       expect(searches, 1);

@@ -51,6 +51,8 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
       _layoutVisible = false;
   bool _saveFailed = false;
   int _saveGeneration = 0;
+  final _chartScales =
+      List.generate(3, (_) => ProcessResourceChartScaleTracker());
 
   @override
   void initState() {
@@ -60,6 +62,13 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
         lifecycle == AppLifecycleState.resumed ||
         lifecycle == AppLifecycleState.inactive;
     WidgetsBinding.instance.addObserver(this);
+    _attach();
+  }
+
+  void _attach() {
+    for (final scale in _chartScales) {
+      scale.reset();
+    }
     if (widget.controller != null) {
       _controller = widget.controller!;
     } else {
@@ -71,6 +80,36 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
     _hidden = widget.isHidden ?? DesktopIntegration.instance.isHidden;
     _preferences.addListener(_changed);
     _hidden.addListener(_visibilityChanged);
+  }
+
+  void _detach() {
+    _preferences.removeListener(_changed);
+    _hidden.removeListener(_visibilityChanged);
+    if (_lease != null) {
+      _lease!.dispose();
+      _lease = null;
+    } else {
+      unawaited(_controller.setActive(false));
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ProcessResourceMonitor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.coordinator != widget.coordinator ||
+        oldWidget.preferences != widget.preferences ||
+        oldWidget.isHidden != widget.isHidden) {
+      _detach();
+      _attach();
+      _visibilityChanged();
+      _scheduleVisibility();
+    }
+    if (oldWidget.preferences != widget.preferences ||
+        oldWidget.onPreferencesChanged != widget.onPreferencesChanged) {
+      ++_saveGeneration;
+      _saveFailed = false;
+    }
   }
 
   @override
@@ -164,14 +203,8 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _preferences.removeListener(_changed);
-    _hidden.removeListener(_visibilityChanged);
+    _detach();
     _scroll?.removeListener(_scheduleVisibility);
-    if (_lease != null) {
-      _lease!.dispose();
-    } else {
-      unawaited(_controller.setActive(false));
-    }
     super.dispose();
   }
 
@@ -294,6 +327,42 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
                                   final samples = _controller.history;
                                   final latest = _controller.latest;
                                   final mode = _preferences.value.display;
+                                  final cpu =
+                                      samples.map((e) => e.cpuPercent).toList();
+                                  final gpu =
+                                      samples.map((e) => e.gpuPercent).toList();
+                                  final memory = samples
+                                      .map((e) => e.workingSetBytes?.toDouble())
+                                      .toList();
+                                  final memoryMaximum = math.max(
+                                      1.0,
+                                      memory
+                                          .whereType<double>()
+                                          .fold<double>(0, math.max));
+                                  // The bar refers to the actual history peak.
+                                  // Give the line range stable headroom instead
+                                  // of changing its cap for each byte gained.
+                                  const memoryBand = 16.0 * 1024 * 1024;
+                                  final memoryLineLimit =
+                                      (memoryMaximum / memoryBand).ceil() *
+                                          memoryBand;
+                                  const mib = 1024.0 * 1024;
+                                  final memoryDisplayScale =
+                                      mode == ProcessResourceDisplay.line
+                                          ? _chartScales[2].resolve(
+                                              memory
+                                                  .map((value) => value == null
+                                                      ? null
+                                                      : value / mib)
+                                                  .toList(),
+                                              maximum: memoryLineLimit / mib)
+                                          : null;
+                                  final memoryScale = memoryDisplayScale == null
+                                      ? null
+                                      : ProcessResourceChartScale(
+                                          memoryDisplayScale.minimum * mib,
+                                          memoryDisplayScale.maximum * mib,
+                                          memoryDisplayScale.division * mib);
                                   return Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
@@ -312,9 +381,14 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
                                                     _controller.unavailable ||
                                                         latest?.cpuStatus ==
                                                             'unavailable',
-                                                history: samples
-                                                    .map((e) => e.cpuPercent)
-                                                    .toList(),
+                                                history: cpu,
+                                                lineScale: mode ==
+                                                        ProcessResourceDisplay
+                                                            .line
+                                                    ? _chartScales[0].resolve(
+                                                        cpu,
+                                                        maximum: 100)
+                                                    : null,
                                                 maximum: 100,
                                                 mode: mode),
                                             _ResourceMetric(
@@ -324,9 +398,14 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
                                                     _controller.unavailable ||
                                                         latest?.gpuStatus ==
                                                             'unavailable',
-                                                history: samples
-                                                    .map((e) => e.gpuPercent)
-                                                    .toList(),
+                                                history: gpu,
+                                                lineScale: mode ==
+                                                        ProcessResourceDisplay
+                                                            .line
+                                                    ? _chartScales[1].resolve(
+                                                        gpu,
+                                                        maximum: 100)
+                                                    : null,
                                                 maximum: 100,
                                                 mode: mode),
                                             _ResourceMetric(
@@ -338,20 +417,9 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
                                                     latest != null &&
                                                         latest.workingSetBytes ==
                                                             null,
-                                                history: samples
-                                                    .map((e) => e
-                                                        .workingSetBytes
-                                                        ?.toDouble())
-                                                    .toList(),
-                                                maximum: math.max(
-                                                    1,
-                                                    samples.fold<double>(
-                                                        0,
-                                                        (v, e) => math.max(
-                                                            v,
-                                                            e.workingSetBytes
-                                                                    ?.toDouble() ??
-                                                                0))),
+                                                history: memory,
+                                                lineScale: memoryScale,
+                                                maximum: memoryMaximum,
                                                 memory: true,
                                                 mode: mode),
                                           ];
@@ -391,6 +459,12 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
                                             ProcessResourceDisplay.numbers)
                                           Text(ui(
                                               '近 {0} 次采样', [samples.length])),
+                                        if (mode ==
+                                            ProcessResourceDisplay.line) ...[
+                                          const SizedBox(height: 4),
+                                          Text(ui(
+                                              '折线图按最近采样自动调整量程，数值和条形仍表示实际用量。')),
+                                        ],
                                         if (mode ==
                                             ProcessResourceDisplay.bar) ...[
                                           const SizedBox(height: 4),
@@ -494,23 +568,42 @@ class _ResourceMetric extends StatelessWidget {
       required this.history,
       required this.maximum,
       required this.mode,
+      this.lineScale,
       this.memory = false});
   final String title;
   final double? value;
   final bool unavailable, memory;
   final List<double?> history;
   final double maximum;
+  final ProcessResourceChartScale? lineScale;
   final ProcessResourceDisplay mode;
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final scale = lineScale;
+    const mib = 1024 * 1024;
+    final displayScale = scale == null
+        ? null
+        : memory
+            ? ProcessResourceChartScale(
+                scale.minimum / mib, scale.maximum / mib, scale.division / mib)
+            : scale;
+    final unit = memory ? ' MiB' : '%';
+    final range = displayScale == null
+        ? ''
+        : ui('自动量程：{0}–{1}；分度：{2}', [
+            displayScale.format(displayScale.minimum, unit: unit),
+            displayScale.format(displayScale.maximum, unit: unit),
+            displayScale.format(displayScale.division, unit: unit),
+          ]);
     final text = value == null
         ? ui(unavailable ? '不可用' : '等待采样')
         : memory
             ? '${(value! / (1024 * 1024)).toStringAsFixed(1)} MiB'
             : '${value!.toStringAsFixed(1)}%';
     return Semantics(
-        label: '$title: $text',
+        label: '$title: $text'
+            '${mode == ProcessResourceDisplay.line ? '\n$range' : ''}',
         child: ExcludeSemantics(
             child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -543,10 +636,17 @@ class _ResourceMetric extends StatelessWidget {
                                 history: history,
                                 value: value,
                                 maximum: maximum,
+                                lineScale: scale,
                                 mode: mode,
                                 color: scheme.primary,
                                 track: scheme.outlineVariant
-                                    .withValues(alpha: .35))
+                                    .withValues(alpha: .35)),
+                            if (mode == ProcessResourceDisplay.line) ...[
+                              const SizedBox(height: 4),
+                              Text(range,
+                                  style:
+                                      Theme.of(context).textTheme.labelSmall),
+                            ]
                           ],
                         ])))));
   }

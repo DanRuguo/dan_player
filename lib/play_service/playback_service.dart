@@ -51,17 +51,21 @@ class PlaybackAudioDeletionTicket {
   PlaybackAudioDeletionTicket._({
     required this.path,
     required this.requestToken,
+    required this.transportRevision,
     required this.wasCurrent,
     required this.wasPending,
+    required bool retainedNewerRequest,
     required this.wasPlaying,
     required this.index,
     required this.position,
-  });
+  }) : _retainedNewerRequest = retainedNewerRequest;
 
   final String path;
   final int requestToken;
+  final int transportRevision;
   final bool wasCurrent;
   final bool wasPending;
+  final bool _retainedNewerRequest;
   final bool wasPlaying;
   final int index;
   final double position;
@@ -965,7 +969,9 @@ class PlaybackService extends ChangeNotifier {
       if (_closed ||
           _practiceToken != _sourceRequestToken ||
           !segmentLoop.enabled ||
-          segmentLoop.finished) return;
+          segmentLoop.finished) {
+        return;
+      }
       _repeatSegment(resume: true);
     });
   }
@@ -1158,6 +1164,8 @@ class PlaybackService extends ChangeNotifier {
     }
     final wasCurrent = _sameAudioPath(nowPlaying?.path, audioPath);
     final wasPending = _sameAudioPath(resolvingAudioPath.value, audioPath);
+    final retainedNewerRequest =
+        resolvingAudioPath.value != null && !wasPending;
     final index = _deletionQueueIndex(
       playlist.value,
       audioPath,
@@ -1168,23 +1176,30 @@ class PlaybackService extends ChangeNotifier {
         state == PlayerState.stalled ||
         state == PlayerState.pausedDevice;
     final savedPosition = wasCurrent ? position : 0.0;
+    final transportRevision = _transportCommandRevision;
     _deletingAudioPath = audioPath;
-    await WaveformService.shared.cancelForPath(audioPath);
     if (wasCurrent) segmentLoop.clear();
 
     if (wasCurrent || wasPending) {
-      _sourceRequestToken += 1;
-      OnlineMusicService.instance.cancelPendingStreamResolution();
-      _player.cancelPendingSource();
-      isBuffering.value = false;
-      resolvingAudioPath.value = null;
-      _loadingPlaylistIndex = null;
+      // A retained old decoder can coexist with a newer selected track. Its
+      // deletion owns only that decoder, never the unrelated pending request.
+      if (!retainedNewerRequest) {
+        _sourceRequestToken += 1;
+        OnlineMusicService.instance.cancelPendingStreamResolution();
+        _player.cancelPendingSource();
+        isBuffering.value = false;
+        resolvingAudioPath.value = null;
+        _loadingPlaylistIndex = null;
+      }
     }
     final deletionToken = _sourceRequestToken;
     if (wasCurrent) {
       PlaybackStatistics.instance.finish(markCompleted: false);
     }
     _player.freeSourceIfPath(audioPath);
+    // Capture/release playback before yielding to waveform teardown. A next
+    // command during that wait must keep its source and statistics ownership.
+    await WaveformService.shared.cancelForPath(audioPath);
     if (wasPending) {
       await _player.waitForPendingFileOpen(audioPath);
       _player.freeSourceIfPath(audioPath);
@@ -1193,8 +1208,10 @@ class PlaybackService extends ChangeNotifier {
     return PlaybackAudioDeletionTicket._(
       path: audioPath,
       requestToken: deletionToken,
+      transportRevision: transportRevision,
       wasCurrent: wasCurrent,
       wasPending: wasPending,
+      retainedNewerRequest: retainedNewerRequest,
       wasPlaying: wasPlaying,
       index: index,
       position: savedPosition,
@@ -1225,6 +1242,7 @@ class PlaybackService extends ChangeNotifier {
     final stillDisplaysDeletedSource =
         _sameAudioPath(nowPlaying?.path, ticket.path);
     final stillOwnsDetachedSource = ticket.wasCurrent &&
+        !ticket._retainedNewerRequest &&
         ticket.requestToken == _sourceRequestToken &&
         stillDisplaysDeletedSource;
     if (stillDisplaysDeletedSource) {
@@ -1233,7 +1251,7 @@ class PlaybackService extends ChangeNotifier {
       playService.lyricService.updateLyric();
       if (stillOwnsDetachedSource && filtered.isNotEmpty) {
         final nextIndex = ticket.index.clamp(0, filtered.length - 1);
-        if (ticket.wasPlaying) {
+        if (_deletionShouldResume(ticket)) {
           _loadAndPlay(nextIndex, filtered);
         } else {
           unawaited(_loadPaused(nextIndex, filtered, 0));
@@ -1255,6 +1273,11 @@ class PlaybackService extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _deletionShouldResume(PlaybackAudioDeletionTicket ticket) =>
+      ticket.transportRevision == _transportCommandRevision
+          ? ticket.wasPlaying
+          : _playWhenReady;
+
   /// Restore playback when the operating system refuses to delete the file.
   void cancelAudioDeletion(PlaybackAudioDeletionTicket ticket,
       {double? restoredPosition}) {
@@ -1264,13 +1287,15 @@ class PlaybackService extends ChangeNotifier {
       _deletingAudioPath = null;
     }
     if (!ticket.wasCurrent ||
+        ticket._retainedNewerRequest ||
         ticket.requestToken != _sourceRequestToken ||
         !_sameAudioPath(nowPlaying?.path, ticket.path) ||
         ticket.index < 0 ||
         ticket.index >= playlist.value.length) {
       if (ticket.wasCurrent &&
           _sameAudioPath(nowPlaying?.path, ticket.path) &&
-          ticket.requestToken != _sourceRequestToken) {
+          (ticket._retainedNewerRequest ||
+              ticket.requestToken != _sourceRequestToken)) {
         nowPlaying = null;
         _playlistIndex = null;
         playService.lyricService.updateLyric();
@@ -1282,7 +1307,7 @@ class PlaybackService extends ChangeNotifier {
       ticket.index,
       playlist.value,
       restoredPosition ?? ticket.position,
-      resumeAfterLoad: ticket.wasPlaying,
+      resumeAfterLoad: _deletionShouldResume(ticket),
     ));
   }
 
@@ -1353,6 +1378,7 @@ class PlaybackService extends ChangeNotifier {
       showAppNotice(ui('睡眠定时已到，将播完当前歌曲后停止'));
       return;
     }
+    _playWhenReady = false;
     // Invalidate an in-flight open before it can start after the timer.
     if (resolvingAudioPath.value != null) {
       _sourceRequestToken++;
@@ -1763,8 +1789,9 @@ class PlaybackService extends ChangeNotifier {
         resolved[entry.key as String] = known;
       } else if (slot['cue'] is Map) {
         final audio = Audio.fromMap(slot['cue'] as Map);
-        if (audio.stableTrackId == slot['track'])
+        if (audio.stableTrackId == slot['track']) {
           resolved[entry.key as String] = audio;
+        }
       }
     }
     return resolved;
@@ -1772,8 +1799,9 @@ class PlaybackService extends ChangeNotifier {
 
   Future<void> restoreNamedQueue(Map<String, dynamic> snapshot,
       {required int expectedSession}) async {
-    if (!canEditQueue || expectedSession != _sourceRequestToken)
+    if (!canEditQueue || expectedSession != _sourceRequestToken) {
       throw StateError('播放会话已改变，请重新预览');
+    }
     final resolved = resolveNamedQueue(snapshot);
     final queue = (snapshot['queue'] as List)
         .where(resolved.containsKey)
@@ -1811,7 +1839,9 @@ class PlaybackService extends ChangeNotifier {
         !length.isFinite ||
         !target.isFinite ||
         target < 0 ||
-        target >= length) throw StateError('歌曲已改变或当前无法定位');
+        target >= length) {
+      throw StateError('歌曲已改变或当前无法定位');
+    }
     _player.seek(target);
     _practiceTimer?.cancel();
     _practiceTimer = null;
@@ -1997,7 +2027,8 @@ class PlaybackService extends ChangeNotifier {
       }
 
       notifyListeners();
-      ThemeProvider.instance.applyThemeFromAudio(nowPlaying!);
+      (_applyAudioTheme ??
+          ThemeProvider.instance.applyThemeFromAudio)(nowPlaying!);
       _lastSmtcProgressMs = (restoredPosition * 1000).floor();
       _lastSessionProgressMs = _lastSmtcProgressMs;
       _smtc.updateState(

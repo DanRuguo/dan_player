@@ -52,6 +52,8 @@ class _CompactProcessResourceMonitorState
   bool _queued = false, _treeVisible = false, _inViewport = false;
   bool _lifecycleVisible = true;
   bool _surfaceActive = false;
+  final _chartScales =
+      List.generate(3, (_) => ProcessResourceChartScaleTracker());
 
   bool get _enabled =>
       _preferences.value.enabled &&
@@ -71,6 +73,9 @@ class _CompactProcessResourceMonitorState
   }
 
   void _attach() {
+    for (final scale in _chartScales) {
+      scale.reset();
+    }
     _lease =
         (widget.coordinator ?? ProcessResourceCoordinator.instance).acquire();
     _preferences = widget.preferences ?? AppSettings.instance.processResources;
@@ -195,17 +200,29 @@ class _CompactProcessResourceMonitorState
             builder: (context, _) {
               final service = _lease.service;
               final current = service.latest;
+              final history = service.history;
+              final cpu = history.map((s) => s.cpuPercent).toList();
+              final gpu = history.map((s) => s.gpuPercent).toList();
+              final ram = history.map((s) => s.ramPercent).toList();
+              final mode = _preferences.value.display;
               final metrics = [
-                _MetricData('CPU', Symbols.memory, current?.cpuPercent,
-                    service.history.map((s) => s.cpuPercent).toList(),
+                _MetricData('CPU', Symbols.memory, current?.cpuPercent, cpu,
+                    scale: mode == ProcessResourceDisplay.line
+                        ? _chartScales[0].resolve(cpu, maximum: 100)
+                        : null,
                     unavailable: service.unavailable ||
                         current?.cpuStatus == 'unavailable'),
-                _MetricData('GPU', Symbols.monitor, current?.gpuPercent,
-                    service.history.map((s) => s.gpuPercent).toList(),
+                _MetricData('GPU', Symbols.monitor, current?.gpuPercent, gpu,
+                    scale: mode == ProcessResourceDisplay.line
+                        ? _chartScales[1].resolve(gpu, maximum: 100)
+                        : null,
                     unavailable: service.unavailable ||
                         current?.gpuStatus == 'unavailable'),
-                _MetricData('RAM', Symbols.memory_alt, current?.ramPercent,
-                    service.history.map((s) => s.ramPercent).toList(),
+                _MetricData('RAM', Symbols.memory_alt, current?.ramPercent, ram,
+                    scale: mode == ProcessResourceDisplay.line
+                        ? _chartScales[2]
+                            .resolve(ram, maximum: 100, minimumSpan: .1)
+                        : null,
                     unavailable: service.unavailable ||
                         (current != null && current.ramPercent == null),
                     bytes: current?.workingSetBytes),
@@ -246,13 +263,14 @@ class _CompactProcessResourceMonitorState
 
 class _MetricData {
   const _MetricData(this.name, this.icon, this.value, this.history,
-      {required this.unavailable, this.bytes});
+      {required this.unavailable, this.bytes, this.scale});
   final String name;
   final IconData icon;
   final double? value;
   final List<double?> history;
   final bool unavailable;
   final int? bytes;
+  final ProcessResourceChartScale? scale;
 }
 
 class _CompactMetric extends StatelessWidget {
@@ -282,7 +300,16 @@ class _CompactMetric extends StatelessWidget {
     final details = data.bytes == null
         ? percent
         : '$percent · ${(data.bytes! / (1024 * 1024)).toStringAsFixed(1)} MiB';
-    final label = '${ui(data.name == 'RAM' ? '内存' : data.name)}: $details';
+    final scale = data.scale;
+    final range = scale == null
+        ? ''
+        : ui('自动量程：{0}–{1}；分度：{2}', [
+            scale.format(scale.minimum),
+            scale.format(scale.maximum),
+            scale.format(scale.division),
+          ]);
+    final label = '${ui(data.name == 'RAM' ? '内存' : data.name)}: $details'
+        '${mode == ProcessResourceDisplay.line ? '\n$range' : ''}';
     final number = value == null ? '—' : '${value.toStringAsFixed(1)}%';
     final icon = Icon(data.icon, size: inline ? 24 : 28, color: color);
     final indicator = value == null && !inline
@@ -305,6 +332,7 @@ class _CompactMetric extends StatelessWidget {
                     history: data.history,
                     value: value,
                     maximum: 100,
+                    lineScale: scale,
                     mode: mode,
                     color: color,
                     track: track,
@@ -346,7 +374,7 @@ class _CompactMetric extends StatelessWidget {
                       child: Align(
                           alignment: AlignmentDirectional.centerStart,
                           child: indicator))),
-            if (compact)
+            if (compact || mode == ProcessResourceDisplay.line)
               Positioned.fill(
                   child: Tooltip(
                       message: label,

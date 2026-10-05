@@ -48,6 +48,7 @@ class _LyricLineViewState extends State<LyricLineView>
     _controller.isPlaying.removeListener(_scheduleLineLayout);
     _controller.vertical.removeListener(_directionChanged);
     _controller.playbackClock.removeListener(_syncScroll);
+    _controller.playbackClock.setVisualSamplingDemand(this, false);
   }
 
   @override
@@ -79,7 +80,9 @@ class _LyricLineViewState extends State<LyricLineView>
     final detailed = _controller.detailedLyricLine.value;
     final legacy = _controller.lyricLine.value;
     double progress;
+    bool hasScrollTimeline;
     if (detailed != null) {
+      hasScrollTimeline = detailed.lengthMilliseconds > 0;
       progress = detailed.lengthMilliseconds <= 0
           ? 0
           : ((clock.positionMilliseconds - detailed.startMilliseconds) /
@@ -87,6 +90,7 @@ class _LyricLineViewState extends State<LyricLineView>
               .clamp(0.0, 1.0);
     } else {
       final duration = legacy.length.inMilliseconds - 600;
+      hasScrollTimeline = duration > 0;
       progress = duration <= 0
           ? 0
           : ((clock.positionMilliseconds - _legacyStartMilliseconds - 300) /
@@ -94,6 +98,8 @@ class _LyricLineViewState extends State<LyricLineView>
               .clamp(0.0, 1.0);
     }
     final maxExtent = scrollController.position.maxScrollExtent;
+    clock.setVisualSamplingDemand(
+        this, !_reduced && hasScrollTimeline && maxExtent > 0 && progress < 1);
     final target = maxExtent * progress;
     if ((scrollController.offset - target).abs() < .5) return;
     scrollController.jumpTo(target);

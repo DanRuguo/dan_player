@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
@@ -226,16 +227,17 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
   Widget _progress(BuildContext context) => Column(children: [
         Semantics(
             label: ui('演示进度定位'),
-            child: Slider(
-                key: const ValueKey('guide-demo-progress-slider'),
-                value: _animation.value,
-                label: _stamp(_animation.value),
-                semanticFormatterCallback: _stamp,
-                onChanged: (value) {
-                  _animation.stop();
-                  _target = value;
-                  _animation.value = value;
-                })),
+            child: PrimaryPointerInput(
+                child: Slider(
+                    key: const ValueKey('guide-demo-progress-slider'),
+                    value: _animation.value,
+                    label: _stamp(_animation.value),
+                    semanticFormatterCallback: _stamp,
+                    onChanged: (value) {
+                      _animation.stop();
+                      _target = value;
+                      _animation.value = value;
+                    }))),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text(_stamp(_animation.value),
               key: const ValueKey('guide-demo-progress-time')),

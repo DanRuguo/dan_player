@@ -272,8 +272,10 @@ void main() {
           expect(find.text(ui('文件夹')), findsOneWidget);
           expect(find.text('Collection {0}'), findsOneWidget);
           expect(find.byTooltip(_folderPath), findsOneWidget);
-          expect(find.textContaining(' › '), findsOneWidget);
-          final summary = ui('{0} 首歌曲 · 修改于 {1}', [1, ui('未知日期')]);
+          expect(find.text(r'D:\Music\音乐 \ アルバム\앨범\Collection {0}'),
+              findsOneWidget);
+          final summary =
+              '${ui('音乐文件夹')} · ${ui('{0} 首歌曲 · 修改于 {1}', [1, ui('未知日期')])}';
           expect(find.text(summary), findsOneWidget);
           final tile = find.byType(AudioFolderTile);
           final scheme = _scheme(tester, tile);

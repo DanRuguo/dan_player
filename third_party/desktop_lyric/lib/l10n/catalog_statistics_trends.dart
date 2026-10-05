@@ -1,4 +1,23 @@
 const Map<String, List<String>> catalogStatisticsTrends = {
+  '按严格一周': ['Calendar week', '暦週（月〜日）', '달력 기준 주'],
+  '前期收听': ['Previous period', '前期のリスニング', '이전 기간 청취'],
+  '两期对比': ['Compare both periods', '両期間を比較', '두 기간 비교'],
+  '周二': ['Tue', '火', '화'],
+  '周四': ['Thu', '木', '목'],
+  '周六': ['Sat', '土', '토'],
+  '周日': ['Sun', '日', '일'],
+  '未来日期，按 0 占位': ['Future date; shown as 0', '未来の日付：0で仮表示', '미래 날짜: 0으로 표시'],
+  '当天未结束，仅计截至展示时间的记录': [
+    'Day unfinished; records up to the display capture only',
+    '当日は未終了：表示時点までの記録のみ',
+    '오늘은 아직 진행 중: 표시 시점까지의 기록만 포함'
+  ],
+  '缺失记录，按 0 显示': ['Missing record; shown as 0', '記録なし：0と表示', '누락 기록: 0으로 표시'],
+  '按周一至周日与上一周对照；今天尚未结束，未来日期和缺失记录按 0 占位，增减为暂时结果。': [
+    'Compares Monday through Sunday with last week. Today is unfinished; future dates and missing records show 0. Changes are provisional.',
+    '月曜から日曜を先週と比較します。今日は未終了で、未来の日付と記録のない日は0で仮表示します。増減は暫定値です。',
+    '월요일부터 일요일을 지난주와 비교합니다. 오늘은 진행 중이며 미래 날짜와 누락 기록은 0으로 표시합니다. 증감은 잠정값입니다.'
+  ],
   '收听趋势对比': ['Listening trends', 'リスニング傾向の比較', '청취 추세 비교'],
   '近 {0} 天': ['Last {0} days', '過去 {0} 日間', '최근 {0}일'],
   '本期收听': ['Listening in this period', '今期のリスニング時間', '이번 기간 청취 시간'],

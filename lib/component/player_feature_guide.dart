@@ -79,6 +79,35 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
     for (final chapter in _guideChapters) chapter.$1: GlobalKey(),
   };
   final _demoExpanded = {'queue': false, 'lyrics': false};
+  final _quickControllers = {
+    for (final id in ['queue', 'lyrics', 'playlists', 'sound'])
+      id: ExpansibleController(),
+  };
+  final _quickAnchors = {
+    for (final id in ['queue', 'lyrics', 'playlists', 'sound']) id: GlobalKey(),
+  };
+
+  void _showCommonSection(String id) {
+    _quickControllers[id]!.expand();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final target = _quickAnchors[id]!.currentContext;
+      if (target == null) return;
+      Scrollable.ensureVisible(target,
+          alignment: 0,
+          duration: AppMotion.duration(
+              context, MotionKind.layout, AppMotion.standard),
+          curve: AppMotion.standardCurve);
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _quickControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
 
   void _setting(BuildContext context, String section, String setting) {
     final location = Uri(path: '/settings', queryParameters: {
@@ -126,6 +155,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                       children: [
                         _text(
                             '这是一份按操作顺序组织的播放器说明书。点目录跳到章节，展开条目查看步骤；末尾的工具入口直接定位现有页面，阅读指南不会开始播放或改动资料。'),
+                        const SizedBox(height: 8),
+                        _quickReference(context),
                         const SizedBox(height: 8),
                         _contents(context),
                         _chapter(context, 1,
@@ -490,6 +521,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '在“收听趋势对比”选择近 7、30 或 90 天，比较已经结束的本地日历日期，不含今天；前期是之前等长的一段。实线表示本期，虚线表示前期；下方给出本期收听、增减时长和活跃日期。悬停或点按曲线查看对应日期，图表获得焦点后可用左右键逐日查看、Home／End 到首尾。'),
                           _text(
                               '缺失日期按 0 绘图，不保证此前已经完整记录；前期没有时长时只比较差额，不计算增长百分比。趋势范围独立于上方日历范围，也不会筛选下方排行。先看日期和记录覆盖，再判断听歌习惯是否变化。'),
+                          _text(
+                              '时间范围菜单的“按严格一周”按本周周一至周日对照上一周；“近 7 天”是截至昨天的滚动区间。今天只计截至展示时间的记录，未来日期与缺失记录按 0 占位并提示；本周未结束时增减仍是暂时结果。曲线菜单可选择本期、前期或两期对比。'),
                           _paragraph(context, '5. 排行：播放最多与收听最久'),
                           _text(
                               '在排行上方选择“歌曲”“艺术家”或“专辑”，两张排行分别显示累计播放次数与累计收听时长的前 10 项。听过几次与听了多久是不同指标；排行使用全部已保存历史，不随日历或趋势的范围改变。艺术家与专辑只汇总已明确归属的记录，同名专辑按艺术家区分；旧版未明确归属的总数仍保留并单独提示。排行用于查看，不会直接开始播放。'),
@@ -617,24 +650,83 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
   Widget _section(BuildContext context, String id, String title, IconData icon,
           List<Widget> children,
           {bool expanded = false}) =>
-      ExpansionTile(
-        key: ValueKey('guide-section-$id'),
-        initiallyExpanded: expanded,
-        onExpansionChanged: _demoExpanded.containsKey(id)
-            ? (value) => setState(() => _demoExpanded[id] = value)
-            : null,
-        shape: AppShape.surface,
-        collapsedShape: AppShape.surface,
-        leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-        title: Text(ui(title)),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        expansionAnimationStyle:
-            appToolbarReduceMotion(context, kind: MotionKind.layout)
-                ? AnimationStyle.noAnimation
-                : const AnimationStyle(duration: AppMotion.standard),
-        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
-      );
+      KeyedSubtree(
+          key: _quickAnchors[id],
+          child: ExpansionTile(
+            key: ValueKey('guide-section-$id'),
+            controller: _quickControllers[id],
+            initiallyExpanded: expanded,
+            onExpansionChanged: _demoExpanded.containsKey(id)
+                ? (value) => setState(() => _demoExpanded[id] = value)
+                : null,
+            shape: AppShape.surface,
+            collapsedShape: AppShape.surface,
+            leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+            title: Text(ui(title)),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            expansionAnimationStyle:
+                appToolbarReduceMotion(context, kind: MotionKind.layout)
+                    ? AnimationStyle.noAnimation
+                    : const AnimationStyle(duration: AppMotion.standard),
+            expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          ));
+
+  Widget _quickReference(BuildContext context) => Material(
+      key: const ValueKey('guide-common-reference'),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      shape: AppShape.surface,
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+          padding: const EdgeInsets.all(12),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Semantics(
+                header: true,
+                child: Text(ui('常用操作速查'),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.primary))),
+            const SizedBox(height: 4),
+            Text(ui('先掌握日常听歌；点下面的条目展开完整步骤与演示，详细工具按章节查阅。')),
+            for (final item in [
+              (
+                'queue',
+                Icons.play_circle_outline,
+                '播放与队列',
+                '点歌曲开始播放，点播放条曲目信息进入歌词页；队列菜单可插入下一首或加入队尾。'
+              ),
+              (
+                'lyrics',
+                Icons.lyrics_outlined,
+                '歌词阅读工具',
+                '拖进度定位，点有时间的歌词跳到该句；只想阅读时开启手动阅读，用 A± 调整字号。'
+              ),
+              (
+                'sound',
+                Icons.volume_up_outlined,
+                '速度、音高与音量',
+                '歌词页点喇叭打开音量面板；面板喇叭静音或恢复，点数值可精确输入。'
+              ),
+              (
+                'playlists',
+                Icons.queue_music_outlined,
+                '歌单与队列整理',
+                '加入歌单只保存歌曲引用；右键或长按打开菜单，自定义排序可拖动整理。'
+              ),
+            ])
+              ListTile(
+                  key: ValueKey('guide-common-${item.$1}'),
+                  titleAlignment: ListTileTitleAlignment.top,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  shape: AppShape.control,
+                  leading: Icon(item.$2,
+                      color: Theme.of(context).colorScheme.primary),
+                  title: Text(ui(item.$3)),
+                  subtitle: Text(ui(item.$4)),
+                  trailing: const Icon(Icons.chevron_right, size: 20),
+                  onTap: () => _showCommonSection(item.$1)),
+          ])));
 
   Widget _demo(String section, PlayerGuideDemoKind kind) => TickerMode(
       enabled: _demoExpanded[section] ?? false,

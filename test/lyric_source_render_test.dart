@@ -10,6 +10,7 @@ import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/qrc.dart';
 import 'package:dan_player/music_matcher.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_candidate_tile.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_source_view.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -138,10 +139,25 @@ void main() {
         await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(find.text('QRC/YRC'), findsOneWidget);
-        expect(find.text('KRC'), findsOneWidget);
-        expect(find.text('LRC'), findsOneWidget);
-        expect(find.text('TXT'), findsOneWidget);
+        final scrollable = find
+            .descendant(
+                of: find.byKey(const ValueKey('lyric-source-scroll')),
+                matching: find.byType(Scrollable))
+            .first;
+        // Candidate previews are lazy: narrow translations can put the last
+        // rows outside the initial viewport and its cache. Inspect each row
+        // after scrolling it into view rather than requiring eager loading.
+        for (final format in ['QRC/YRC', 'KRC', 'LRC', 'TXT']) {
+          await tester.scrollUntilVisible(find.text(format), 160,
+              scrollable: scrollable);
+          await tester.pumpAndSettle();
+          expect(find.text(format), findsOneWidget);
+          expect(find.text(format).hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        }
+        tester.state<ScrollableState>(scrollable).position.jumpTo(0);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
         const output = String.fromEnvironment('DAN_LYRIC_SOURCE_RENDER');
         if (output.isNotEmpty) {
           await tester.runAsync(() async {
@@ -155,6 +171,92 @@ void main() {
             await file.writeAsBytes(bytes!.buffer.asUint8List());
             image.dispose();
           });
+        }
+      }
+    });
+
+    testWidgets('format badges preserve glyphs at large sizes ${language.name}',
+        (tester) async {
+      uiLanguage.value = language;
+      addTearDown(() => uiLanguage.value = UiLanguage.zh);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final audio = Audio('歌曲', 'Artist', 'Album', 0, 180, null, null,
+          r'C:\Music\badge.mp3', 0, 0, null);
+      final candidate = SongSearchResult(
+          ResultSource.qq, '歌曲', 'Artist', 'Album', 1,
+          qqSongId: 1);
+      final lyric = Qrc([
+        QrcLine(const Duration(seconds: 10), const Duration(seconds: 4), [
+          QrcWord(
+              const Duration(seconds: 10), const Duration(seconds: 4), '歌词'),
+        ]),
+      ]);
+      for (final width in [760.0, 440.0]) {
+        tester.view.physicalSize = Size(width, 760);
+        for (final scale in [1.0, 1.6, 2.0]) {
+          await tester.pumpWidget(MaterialApp(
+            theme: applyAppControlTheme(ThemeData(
+                fontFamily: danEmbeddedFontFamily,
+                fontFamilyFallback: danFontFamilyFallback,
+                colorScheme:
+                    ColorScheme.fromSeed(seedColor: const Color(0xffaa6475)))),
+            builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!),
+            home: UiLanguageScope(
+              child: Scaffold(
+                body: Center(
+                  child: SizedBox(
+                    width: width - 80,
+                    child: LyricCandidateTile(
+                      candidate: candidate,
+                      audio: audio,
+                      positionStream: const Stream<double>.empty(),
+                      readPosition: () => 11,
+                      load: (_) async => lyric,
+                      release: (_) {},
+                      retryRevision: 0,
+                      previewGeneration: 0,
+                      versionWarning: false,
+                      enabled: true,
+                      current: false,
+                      loading: false,
+                      error: null,
+                      onTap: () {},
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          final text = find.text('QRC/YRC');
+          expect(text, findsOneWidget);
+          final paragraph = tester.renderObject<RenderParagraph>(text);
+          expect(paragraph.didExceedMaxLines, isFalse,
+              reason: 'Complete format at width $width and scale $scale');
+          final badge = find.ancestor(
+              of: text,
+              matching: find.byWidgetPredicate((widget) =>
+                  widget is Container &&
+                  widget.constraints?.maxWidth == 56 &&
+                  widget.constraints?.maxHeight == 36));
+          expect(badge, findsOneWidget);
+          final badgeRect = tester.getRect(badge);
+          final visibleTextRect = MatrixUtils.transformRect(
+              paragraph.getTransformTo(null), Offset.zero & paragraph.size);
+          expect(
+              visibleTextRect.left, greaterThanOrEqualTo(badgeRect.left - .01));
+          expect(
+              visibleTextRect.top, greaterThanOrEqualTo(badgeRect.top - .01));
+          expect(
+              visibleTextRect.right, lessThanOrEqualTo(badgeRect.right + .01));
+          expect(visibleTextRect.bottom,
+              lessThanOrEqualTo(badgeRect.bottom + .01));
         }
       }
     });

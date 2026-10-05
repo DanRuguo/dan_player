@@ -16,6 +16,7 @@ import 'package:dan_player/component/statistics_listening_trends.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/statistics/listening_trends.dart';
+import 'package:dan_player/statistics/listening_calendar.dart';
 import 'package:dan_player/statistics/statistics_display_service.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -133,7 +134,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
         ? null
         : ListeningTrendsSnapshot.fromDaily(
             dailyMilliseconds: _displayStats.dailyMilliseconds,
-            capturedAt: next.capturedAt);
+            capturedAt: next.capturedAt,
+            currentDayMilliseconds: _displayStats.dailyMilliseconds[
+                listeningDayKey(localCalendarDate(next.capturedAt))]);
     previous.dispose();
   }
 

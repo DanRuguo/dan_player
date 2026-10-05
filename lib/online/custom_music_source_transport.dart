@@ -44,8 +44,12 @@ class CustomMusicSourceCancelled extends CustomMusicSourceException {
 
 /// Cancels one custom-source request without affecting another source or task.
 class CustomMusicSourceCancellation implements OnlineHttpCancellation {
+  CustomMusicSourceCancellation({bool Function()? stillCurrent})
+      : _stillCurrent = stillCurrent;
+
   final Completer<void> _cancelled = Completer<void>();
   final Set<void Function()> _listeners = <void Function()>{};
+  final bool Function()? _stillCurrent;
 
   bool get isCancelled => _cancelled.isCompleted;
 
@@ -60,6 +64,9 @@ class CustomMusicSourceCancellation implements OnlineHttpCancellation {
 
   @override
   void check() {
+    // Observe request ownership at the existing I/O boundaries. Revocation
+    // also closes this request's transport through the normal cancel listeners.
+    if (!isCancelled && _stillCurrent?.call() == false) cancel();
     if (isCancelled) throw const CustomMusicSourceCancelled();
   }
 

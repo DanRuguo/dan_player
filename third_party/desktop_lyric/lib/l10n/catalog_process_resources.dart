@@ -1,4 +1,14 @@
 const catalogProcessResources = <String, List<String>>{
+  '自动量程：{0}–{1}；分度：{2}': [
+    'Auto range: {0}–{1}; interval: {2}',
+    '自動範囲：{0}–{1}；目盛り：{2}',
+    '자동 범위: {0}–{1}; 눈금: {2}'
+  ],
+  '折线图按最近采样自动调整量程，数值和条形仍表示实际用量。': [
+    'Line charts adapt to recent samples; numbers and bars still show actual usage.',
+    '折れ線グラフは直近のサンプルに応じて範囲を自動調整します。数値とバーは実際の使用量を示します。',
+    '꺾은선 그래프는 최근 표본에 맞춰 범위를 자동 조정합니다. 숫자와 막대는 실제 사용량을 표시합니다.'
+  ],
   '播放器资源监控': ['Player resources', 'リソース監視', '플레이어 리소스'],
   '启用资源监控': ['Enable monitor', '監視を有効化', '모니터 사용'],
   '在侧栏下方显示': ['Show at the bottom of the sidebar', 'サイドバー下部に表示', '사이드바 하단에 표시'],

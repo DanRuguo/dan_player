@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
@@ -66,6 +67,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   late PlaybackService playbackService;
   late final ScrollController scrollController;
   final _toolbarScroll = ScrollController();
+  final _headerScroll = ScrollController();
+  final _searchSummaryKey = GlobalKey();
   int? _lastIndex;
   double _rowHeight = 0;
   bool _alignQueued = false;
@@ -98,7 +101,14 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
       _filteredQueue = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && scrollController.hasClients) scrollController.jumpTo(0);
+      if (!mounted) return;
+      if (scrollController.hasClients) scrollController.jumpTo(0);
+      final target = _searchSummaryKey.currentContext?.findRenderObject();
+      if (_query.isNotEmpty && _headerScroll.hasClients && target != null) {
+        unawaited(_headerScroll.position.ensureVisible(target,
+            alignment: 1,
+            alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd));
+      }
     });
   }
 
@@ -108,6 +118,24 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
       _updateQuery('');
     }
     _scheduleAlignment(force: true);
+  }
+
+  void _focusHeaderControl(FocusNode node,
+      {ScrollPositionAlignmentPolicy? alignmentPolicy,
+      double? alignment,
+      Duration? duration,
+      Curve? curve}) {
+    node.requestFocus();
+    final target = node.context;
+    if (target == null) return;
+    // Returning from the search field can move upward and rightward together.
+    // Check both edges so one traversal direction cannot hide the other axis.
+    for (final policy in [
+      ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+      ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+    ]) {
+      unawaited(Scrollable.ensureVisible(target, alignmentPolicy: policy));
+    }
   }
 
   void _deduplicateQueue() {
@@ -499,6 +527,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
           builder: (context, _) {
             final queue = playbackService.playlist.value;
             final visibleIndices = _visibleIndices(queue);
+            final searchSummary = ui('找到 {0} / {1} 首 · 搜索不改变队列',
+                [visibleIndices.length, queue.length]);
             final nowPlaying = playbackService.nowPlaying;
             final candidateIndex = playbackService.playlistIndex;
             final currentIndex = nowPlaying != null &&
@@ -507,9 +537,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                     queue[candidateIndex].path == nowPlaying.path
                 ? candidateIndex
                 : -1;
-            return Column(
-              mainAxisSize:
-                  widget.shrinkWrap ? MainAxisSize.min : MainAxisSize.max,
+            final header = Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (widget.showTitle)
@@ -612,6 +641,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                     onChanged: _updateQuery,
                     decoration: InputDecoration(
                       hintText: ui('搜索队列：歌曲、歌手或专辑'),
+                      hintMaxLines: 1,
                       counterText: '',
                       isDense: true,
                       filled: !widget.immersive,
@@ -640,11 +670,16 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                       padding: const EdgeInsets.only(left: 16, right: 8),
                       child: Row(children: [
                         Expanded(
-                            child: Text(
-                                ui('找到 {0} / {1} 首 · 搜索不改变队列',
-                                    [visibleIndices.length, queue.length]),
-                                key: const ValueKey('queue-search-count'),
-                                style: Theme.of(context).textTheme.bodySmall)),
+                            child: Tooltip(
+                                key: _searchSummaryKey,
+                                message: searchSummary,
+                                child: Text(searchSummary,
+                                    key: const ValueKey('queue-search-count'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall))),
                         IconButton(
                             key: const ValueKey('queue-save-search-playlist'),
                             tooltip: ui('将搜索结果保存为歌单'),
@@ -653,62 +688,92 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                 : () => _saveQueue(searchResults: true),
                             icon: const Icon(Symbols.playlist_add)),
                       ])),
-                Flexible(
-                  fit: widget.shrinkWrap ? FlexFit.loose : FlexFit.tight,
-                  child: Container(
-                    margin: EdgeInsets.fromLTRB(widget.showTitle ? 8 : 0, 4,
-                        widget.showTitle ? 8 : 0, 0),
-                    decoration: BoxDecoration(
-                      color: widget.immersive
-                          ? Colors.transparent
-                          : scheme.surfaceContainerLow.withValues(alpha: .78),
-                      borderRadius: AppShape.surfaceRadius,
-                      border: Border.all(
-                        color: widget.immersive
-                            ? Colors.transparent
-                            : scheme.outlineVariant.withValues(alpha: .52),
-                      ),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: queue.isEmpty
-                        ? const _EmptyPlaylistView()
-                        : visibleIndices.isEmpty
-                            ? Center(
-                                heightFactor: 1,
-                                child: Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Text(ui('队列中没有匹配的歌曲'),
-                                        textAlign: TextAlign.center)))
-                            : _QueueScrollbar(
-                                controller: scrollController,
-                                suppressStretch: widget.immersive,
-                                child: ListView.builder(
-                                  shrinkWrap: widget.shrinkWrap,
-                                  key: const ValueKey('current-playlist-list'),
-                                  controller: scrollController,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: _QueueScrollbar.edgeInset,
-                                      vertical: 6),
-                                  itemCount: visibleIndices.length,
-                                  itemExtent: _rowHeight,
-                                  itemBuilder: (context, index) =>
-                                      _PlaylistViewItem(
-                                    key: ValueKey(visibleIndices[index]),
-                                    queue: queue,
-                                    immersive: widget.immersive,
-                                    item: queue[visibleIndices[index]],
-                                    index: visibleIndices[index],
-                                    current:
-                                        visibleIndices[index] == currentIndex,
-                                    playbackService: playbackService,
-                                    onOpenDetails: widget.onOpenDetails,
-                                  ),
-                                ),
-                              ),
-                  ),
-                ),
               ],
             );
+            final songs = Container(
+              margin: EdgeInsets.fromLTRB(
+                  widget.showTitle ? 8 : 0, 4, widget.showTitle ? 8 : 0, 0),
+              decoration: BoxDecoration(
+                color: widget.immersive
+                    ? Colors.transparent
+                    : scheme.surfaceContainerLow.withValues(alpha: .78),
+                borderRadius: AppShape.surfaceRadius,
+                border: Border.all(
+                  color: widget.immersive
+                      ? Colors.transparent
+                      : scheme.outlineVariant.withValues(alpha: .52),
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: queue.isEmpty
+                  ? const _EmptyPlaylistView()
+                  : visibleIndices.isEmpty
+                      ? Center(
+                          heightFactor: 1,
+                          child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(ui('队列中没有匹配的歌曲'),
+                                  textAlign: TextAlign.center)))
+                      : _QueueScrollbar(
+                          controller: scrollController,
+                          suppressStretch: widget.immersive,
+                          child: ListView.builder(
+                            shrinkWrap: widget.shrinkWrap,
+                            key: const ValueKey('current-playlist-list'),
+                            controller: scrollController,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: _QueueScrollbar.edgeInset,
+                                vertical: 6),
+                            itemCount: visibleIndices.length,
+                            itemExtent: _rowHeight,
+                            itemBuilder: (context, index) => _PlaylistViewItem(
+                              key: ValueKey(visibleIndices[index]),
+                              queue: queue,
+                              immersive: widget.immersive,
+                              item: queue[visibleIndices[index]],
+                              index: visibleIndices[index],
+                              current: visibleIndices[index] == currentIndex,
+                              playbackService: playbackService,
+                              onOpenDetails: widget.onOpenDetails,
+                            ),
+                          ),
+                        ),
+            );
+            Widget body(Widget top) => Column(
+                  mainAxisSize:
+                      widget.shrinkWrap ? MainAxisSize.min : MainAxisSize.max,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FocusTraversalGroup(
+                        policy: ReadingOrderTraversalPolicy(
+                            requestFocusCallback: _focusHeaderControl),
+                        child: top),
+                    Flexible(
+                        fit: widget.shrinkWrap ? FlexFit.loose : FlexFit.tight,
+                        child: songs),
+                  ],
+                );
+            // AlertDialog measures the shrink-wrapped presentation intrinsically.
+            // Only the bounded player view needs a separate short-height rail.
+            if (widget.shrinkWrap) return body(header);
+            return LayoutBuilder(builder: (context, constraints) {
+              if (!constraints.hasBoundedHeight) return body(header);
+              final reserve = math.min(_rowHeight, constraints.maxHeight * .4);
+              return body(ConstrainedBox(
+                  constraints: BoxConstraints(
+                      maxHeight:
+                          math.max(0.0, constraints.maxHeight - reserve)),
+                  child: ScrollConfiguration(
+                      behavior: ScrollConfiguration.of(context)
+                          .copyWith(scrollbars: false, overscroll: false),
+                      child: AppScrollbar(
+                          controller: _headerScroll,
+                          child: SingleChildScrollView(
+                              key: const ValueKey('queue-header-scroll'),
+                              controller: _headerScroll,
+                              primary: false,
+                              child: header)))));
+            });
           },
         ),
       ),
@@ -720,6 +785,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     playbackService.removeListener(_toNowPlaying);
     playbackService.playlist.removeListener(_onQueueChanged);
     _searchController.dispose();
+    _headerScroll.dispose();
     _toolbarScroll.dispose();
     scrollController.dispose();
     super.dispose();

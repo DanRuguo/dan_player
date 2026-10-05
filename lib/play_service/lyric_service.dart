@@ -335,6 +335,7 @@ class LyricService extends ChangeNotifier {
           kugouSongHash: source.kugouSongHash,
           neteaseSongId: source.neteaseSongId,
           lrclibId: source.lrclibId,
+          stillCurrent: current,
         );
       }
       return getMostMatchedLyric(audio, stillCurrent: current);
