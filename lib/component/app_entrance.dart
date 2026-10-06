@@ -24,6 +24,12 @@ class AppEntranceScope extends StatefulWidget {
   final int maxRememberedIdentities;
   final int maxConcurrentAnimations;
 
+  /// Whether preloaded content is no longer covered by its startup overlay.
+  /// This stays independent of reduced-motion and entrance preferences.
+  static bool isReadyOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_EntranceScopeData>()?.ready ??
+      true;
+
   @override
   State<AppEntranceScope> createState() => _AppEntranceScopeState();
 }

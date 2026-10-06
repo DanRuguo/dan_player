@@ -58,7 +58,8 @@ class _VerticalLyricViewState extends State<VerticalLyricView> {
                 lyricViewController);
           }
         },
-        controls: const LyricViewControls(),
+        controls:
+            LyricViewControls(hidden: DesktopIntegration.instance.isHidden),
         child: ValueListenableBuilder(
           valueListenable: AppSettings.instance.experience,
           builder: (context, experience, _) => ListenableBuilder(

@@ -24,6 +24,8 @@ class RecentListeningActivity {
       final end = math.min(upper, interval[1]);
       if (end <= begin) continue;
       milliseconds += end - begin;
+      longestIntervalMilliseconds =
+          math.max(longestIntervalMilliseconds, end - begin);
       // Each bar is one elapsed hour in the rolling window, including DST days.
       var cursor = begin;
       while (cursor < end) {
@@ -43,6 +45,10 @@ class RecentListeningActivity {
   late final DateTime? recordedSince;
   late final int? playCount;
   int milliseconds = 0;
+
+  /// Longest observed continuous interval, clipped to this rolling window.
+  /// Gaps and unknown history are never joined or reconstructed.
+  int longestIntervalMilliseconds = 0;
   final List<int> hourlyMilliseconds = List.filled(24, 0);
   int get activeHours => hourlyMilliseconds.where((value) => value > 0).length;
   List<int> get peakHours {

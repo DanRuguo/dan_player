@@ -1,4 +1,13 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '试一试：歌单视图': ['Try it: playlist views', '試す：プレイリスト表示', '체험: 재생목록 보기'],
+  '晨光': ['Dawn', '朝', '아침'],
+  '午后': ['Noon', '午後', '정오'],
+  '夜色': ['Night', '夜', '밤'],
+  '“最长连续收听”只看最近 24 小时已记录的连续播放片段；暂停或缺失记录不会拼接，未观测时间不补算。': [
+    'Longest continuous listening uses only recorded uninterrupted playback segments in the last 24 hours. Pauses and gaps stay separate; unobserved time is not added.',
+    '最長の連続再生は直近24時間に記録された連続区間だけを集計します。一時停止や記録の空白をつなげず、未観測の時間は補いません。',
+    '최장 연속 청취는 최근 24시간에 기록된 연속 재생 구간만 계산합니다. 일시정지나 기록 누락은 이어 붙이지 않으며 관측하지 않은 시간은 더하지 않습니다.',
+  ],
   '特色操作指南': ['Feature guide', '便利な操作ガイド', '주요 기능 안내'],
   '歌单整理、歌词工具与高级搜索集中在这里；已有说明可直接打开。': [
     'Find playlist tools, lyric tools and advanced search here, with links to existing help.',

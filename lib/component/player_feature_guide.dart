@@ -78,7 +78,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
   final _chapterKeys = {
     for (final chapter in _guideChapters) chapter.$1: GlobalKey(),
   };
-  final _demoExpanded = {'queue': false, 'lyrics': false};
+  final _demoExpanded = {'queue': false, 'lyrics': false, 'playlists': true};
   final _quickControllers = {
     for (final id in ['queue', 'lyrics', 'playlists', 'sound'])
       id: ExpansibleController(),
@@ -269,6 +269,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               _paragraph(context, '歌单视图与导航'),
                               _text(
                                   '列表、圆形、矩形与树形共用同一份歌单。点击列表或封面进入歌单；树形点击展开，项目菜单可进入详情。视图与层级各自记住显示方式，封面追踪可在动画设置中关闭。'),
+                              _demo('playlists', PlayerGuideDemoKind.playlists),
                               _paragraph(context, '自定义顺序与拖动'),
                               _text(
                                   '自定义排序：拖动歌曲或子歌单右侧的三个点，其他行会连续让位；点按三个点、右键或长按行可打开菜单。\n\n拖到子歌单的封面/名称区域并稍作停留，高亮后松开即可移入；也可通过菜单“移动到…”选择目标。\n\n名称等排序仅改变显示和播放次序，不覆盖自定义顺序；切回“自定义”即可继续拖动。\n\n顺序播放会按各层次序进入子歌单，播完再返回父歌单。Alt + ↑ / ↓ 可在自定义模式调序，Shift + F10 打开菜单。'),
@@ -507,6 +508,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           _paragraph(context, '2. 最近一天：时长、次数与时段'),
                           _text(
                               '“听歌行为 → 每天”查看截至展示时间的最近 24 小时，并非今天零点起的合计。“活跃时间”是有收听记录的小时数，不是听歌总时长。下方切“最近24小时”查看这段时间的每小时分布，切“历史时段分布”查看全部历史按一天 24 个时段累计的习惯，以及完整播放和提前跳过次数。'),
+                          _text(
+                              '“最长连续收听”只看最近 24 小时已记录的连续播放片段；暂停或缺失记录不会拼接，未观测时间不补算。'),
                           _text(
                               '点击、长按或悬停柱状条查看时长，也可用前后时段按钮；窄窗用滚轮或横向滑动查看全部柱条。恢复暂停不会重复计次；暂停、缓冲与拖进度不补算收听时长。休眠或采样间隔超过 2 秒时仅计最近 2 秒，未观测的间隔不补记。旧数据无法还原小时或每日次数时显示“—”或“≥”，不代表完整记录为零。'),
                           _text(

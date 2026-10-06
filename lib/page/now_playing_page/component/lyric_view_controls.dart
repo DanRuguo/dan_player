@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dan_player/app_preference.dart';
@@ -16,6 +17,7 @@ import 'package:dan_player/component/player_number_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_source_view.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -61,6 +63,7 @@ class LyricViewController extends ChangeNotifier {
   LyricReadingTarget? readingTarget;
   bool _finding = false;
   bool _disposed = false;
+  bool _fontCancellationPending = false;
 
   void revealForReading(LyricReadingTarget target) {
     if (_disposed || !target.belongsTo(target.lyric)) return;
@@ -161,6 +164,23 @@ class LyricViewController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A hidden or removed menu no longer owns its unfinished pointer preview.
+  /// Dependencies and disposal can change during a build; clear the draft now
+  /// and notify from the next microtask rather than dirtying that build.
+  void cancelFontSizeAdjustment() {
+    if (_disposed || (!fontSizeAdjusting && fontDragPreviewSize == null)) {
+      return;
+    }
+    fontSizeAdjusting = false;
+    fontDragPreviewSize = null;
+    if (_fontCancellationPending) return;
+    _fontCancellationPending = true;
+    scheduleMicrotask(() {
+      _fontCancellationPending = false;
+      if (!_disposed) notifyListeners();
+    });
+  }
+
   /// 在左对齐、居中、右对齐之间循环切换
   void switchLyricTextAlign() {
     lyricTextAlign = switch (lyricTextAlign) {
@@ -198,29 +218,31 @@ class LyricViewController extends ChangeNotifier {
 }
 
 class LyricViewControls extends StatelessWidget {
-  const LyricViewControls({super.key});
+  const LyricViewControls({super.key, this.hidden});
+
+  final ValueListenable<bool>? hidden;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return const Padding(
-      padding: EdgeInsets.all(8.0),
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
       child: SingleChildScrollView(
           child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          SetLyricSourceBtn(),
-          SizedBox(height: 8.0),
-          _LyricWorkbenchBtn(),
-          SizedBox(height: 8.0),
-          _LyricEditBtn(),
-          SizedBox(height: 8.0),
-          _LyricAlignSwitchBtn(),
-          SizedBox(height: 8.0),
-          _LyricReadingMenu(),
-          SizedBox(height: 8.0),
-          LyricFontSizeMenu(),
+          const SetLyricSourceBtn(),
+          const SizedBox(height: 8.0),
+          const _LyricWorkbenchBtn(),
+          const SizedBox(height: 8.0),
+          const _LyricEditBtn(),
+          const SizedBox(height: 8.0),
+          const _LyricAlignSwitchBtn(),
+          const SizedBox(height: 8.0),
+          const _LyricReadingMenu(),
+          const SizedBox(height: 8.0),
+          LyricFontSizeMenu(hidden: hidden),
         ],
       )),
     );
@@ -470,8 +492,74 @@ class _LyricAlignSwitchBtn extends StatelessWidget {
   }
 }
 
-class LyricFontSizeMenu extends StatelessWidget {
-  const LyricFontSizeMenu({super.key});
+class LyricFontSizeMenu extends StatefulWidget {
+  const LyricFontSizeMenu({super.key, this.hidden});
+
+  final ValueListenable<bool>? hidden;
+
+  @override
+  State<LyricFontSizeMenu> createState() => _LyricFontSizeMenuState();
+}
+
+class _LyricFontSizeMenuState extends State<LyricFontSizeMenu>
+    with WidgetsBindingObserver {
+  LyricViewController? _controller;
+  AppLifecycleState? _lifecycle;
+  bool _tickerEnabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = WidgetsBinding.instance.lifecycleState;
+    WidgetsBinding.instance.addObserver(this);
+    widget.hidden?.addListener(_syncAvailability);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = context.read<LyricViewController>();
+    if (!identical(_controller, controller)) {
+      _controller?.cancelFontSizeAdjustment();
+      _controller = controller;
+    }
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _syncAvailability();
+  }
+
+  @override
+  void didUpdateWidget(LyricFontSizeMenu oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.hidden, widget.hidden)) {
+      oldWidget.hidden?.removeListener(_syncAvailability);
+      widget.hidden?.addListener(_syncAvailability);
+      _syncAvailability();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
+    _syncAvailability();
+  }
+
+  void _syncAvailability() {
+    if (!_tickerEnabled ||
+        widget.hidden?.value == true ||
+        _lifecycle == AppLifecycleState.hidden ||
+        _lifecycle == AppLifecycleState.paused ||
+        _lifecycle == AppLifecycleState.detached) {
+      _controller?.cancelFontSizeAdjustment();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.hidden?.removeListener(_syncAvailability);
+    WidgetsBinding.instance.removeObserver(this);
+    _controller?.cancelFontSizeAdjustment();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -481,10 +569,7 @@ class LyricFontSizeMenu extends StatelessWidget {
 
     return AppMenuAnchor(
       consumeOutsideTap: true,
-      onClose: () {
-        lyricViewController.setFontDragPreview(null);
-        lyricViewController.setFontSizeAdjusting(false);
-      },
+      onClose: lyricViewController.cancelFontSizeAdjustment,
       style: MenuStyle(
         shape: const WidgetStatePropertyAll(AppShape.surface),
         backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainer),
@@ -530,15 +615,34 @@ class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
   bool _dragged = false;
   bool _cancelled = false;
 
+  void _discardLocalDraft() {
+    _cancelled = true;
+    _draftSize = null;
+    _sizingPointer = null;
+    _pointerDown = null;
+    _dragged = false;
+  }
+
+  @override
+  void didUpdateWidget(_LyricFontSizePanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      oldWidget.controller.cancelFontSizeAdjustment();
+      _discardLocalDraft();
+    }
+  }
+
   void _finishSizeChange(double value) {
     // Material Slider also sends onChangeEnd after a pointer cancellation.
     // The Listener has already discarded that draft, so do not persist it.
-    if (_cancelled ||
-        (_sizingPointer != null && !widget.controller.fontSizeAdjusting)) {
+    if (_cancelled) {
+      _discardLocalDraft();
+      return;
+    }
+    if (_sizingPointer != null && !widget.controller.fontSizeAdjusting) {
       // The menu's onClose also discards a drag, while its Slider can remain
       // mounted throughout the exit fade and receive a late pointer release.
       _cancelSizeChange();
-      _cancelled = false;
       return;
     }
     widget.controller.setFontDragPreview(null);
@@ -578,6 +682,9 @@ class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
 
   @override
   Widget build(BuildContext context) {
+    if (_draftSize != null && !widget.controller.fontSizeAdjusting) {
+      _discardLocalDraft();
+    }
     UiLanguageScope.watch(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;

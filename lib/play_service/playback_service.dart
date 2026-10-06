@@ -2413,7 +2413,10 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
     if (_practiceRemaining != null && segmentLoop.enabled) {
-      _schedulePracticeInterval();
+      // Repeated play/SMTC commands must not restart an interval that is
+      // already counting down. A manual pause removes its timer and captures
+      // the remaining wait; only that paused wait needs to be scheduled again.
+      if (_practiceTimer == null) _schedulePracticeInterval();
       return;
     }
     if (segmentLoop.finished) segmentLoop.setEnabled(false);

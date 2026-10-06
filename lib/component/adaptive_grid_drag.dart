@@ -306,6 +306,8 @@ class _GridEdgeAutoScrollRegionState extends State<GridEdgeAutoScrollRegion> {
   Timer? _timer;
   double _step = 0;
   bool _treeVisible = true;
+  int? _lastMovedPointer, _scrollPointer;
+  Offset? _lastMovedPosition;
 
   @override
   void didChangeDependencies() {
@@ -329,6 +331,13 @@ class _GridEdgeAutoScrollRegionState extends State<GridEdgeAutoScrollRegion> {
     if (box is! RenderBox || !box.hasSize || box.size.height <= 0) {
       _stop();
       return;
+    }
+    // The drag uses pointerDragAnchorStrategy, so its global position matches
+    // the raw pointer. A second contact may tap/cancel inside this region while
+    // the owning pointer remains still at the edge.
+    final moved = _lastMovedPosition;
+    if (moved != null && (moved - globalPosition).distanceSquared < .0001) {
+      _scrollPointer = _lastMovedPointer;
     }
     final local = box.globalToLocal(globalPosition);
     // Drag targets beside the grid must not keep its old edge timer running.
@@ -372,8 +381,22 @@ class _GridEdgeAutoScrollRegionState extends State<GridEdgeAutoScrollRegion> {
 
   void _stop() {
     _step = 0;
+    _scrollPointer = null;
     _timer?.cancel();
     _timer = null;
+  }
+
+  void _rememberPointer(PointerEvent event) {
+    _lastMovedPointer = event.pointer;
+    _lastMovedPosition = event.position;
+  }
+
+  void _releasePointer(PointerEvent event) {
+    if (event.pointer == _scrollPointer) _stop();
+    if (event.pointer == _lastMovedPointer) {
+      _lastMovedPointer = null;
+      _lastMovedPosition = null;
+    }
   }
 
   @override
@@ -389,8 +412,9 @@ class _GridEdgeAutoScrollRegionState extends State<GridEdgeAutoScrollRegion> {
         child: Listener(
           key: _regionKey,
           behavior: HitTestBehavior.translucent,
-          onPointerUp: (_) => _stop(),
-          onPointerCancel: (_) => _stop(),
+          onPointerMove: _rememberPointer,
+          onPointerUp: _releasePointer,
+          onPointerCancel: _releasePointer,
           child: widget.child,
         ),
       );

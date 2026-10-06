@@ -1,12 +1,14 @@
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/viewport_visibility.dart';
+import 'package:dan_player/component/player_guide_playlist_demo.dart';
 import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-enum PlayerGuideDemoKind { progress, lyrics }
+enum PlayerGuideDemoKind { progress, lyrics, playlists }
 
 /// Small, local examples: no audio, network, library or preferences are changed.
 /// Animations start only after input and finish once; losing visibility settles
@@ -23,11 +25,12 @@ class PlayerGuideDemo extends StatefulWidget {
 class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _surface = GlobalKey();
+  final _motionGate = ValueNotifier(false);
   late final AnimationController _animation = AnimationController(
       vsync: this,
       value: widget.kind == PlayerGuideDemoKind.progress ? .32 : 1);
   late ValueListenable<bool> _hidden;
-  ScrollPosition? _scroll;
+  Set<ScrollPosition> _scrollPositions = {};
   bool _visible = false, _treeVisible = true, _queued = false;
   bool _lifecycleVisible = true;
   bool _changingLine = false;
@@ -36,9 +39,11 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
 
   static const _lyricLines = ['音乐|点亮|每一天', '下一句|轻轻|向上浮起'];
 
-  MotionKind get _motion => widget.kind == PlayerGuideDemoKind.progress
-      ? MotionKind.layout
-      : MotionKind.lyrics;
+  MotionKind get _motion => switch (widget.kind) {
+        PlayerGuideDemoKind.progress => MotionKind.layout,
+        PlayerGuideDemoKind.lyrics => MotionKind.lyrics,
+        PlayerGuideDemoKind.playlists => MotionKind.tracking,
+      };
 
   @override
   void initState() {
@@ -75,12 +80,14 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     super.didChangeDependencies();
     _treeVisible = TickerMode.valuesOf(context).enabled &&
         (ModalRoute.of(context)?.isCurrent ?? true);
-    final position = Scrollable.maybeOf(context)?.position;
-    if (_scroll != position) {
-      _scroll?.removeListener(_scheduleVisibility);
-      _scroll = position;
-      _scroll?.addListener(_scheduleVisibility);
+    final positions = scrollPositionsOf(context);
+    for (final position in _scrollPositions.difference(positions)) {
+      position.removeListener(_scheduleVisibility);
     }
+    for (final position in positions.difference(_scrollPositions)) {
+      position.addListener(_scheduleVisibility);
+    }
+    _scrollPositions = positions;
     _applyVisibility();
     _scheduleVisibility();
   }
@@ -104,8 +111,10 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
   }
 
   void _applyVisibility() {
-    if (!mounted || _canAnimate) return;
-    _settle();
+    if (!mounted) return;
+    final enabled = _canAnimate;
+    if (_motionGate.value != enabled) _motionGate.value = enabled;
+    if (!enabled) _settle();
   }
 
   void _scheduleVisibility() {
@@ -119,22 +128,9 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
   }
 
   void _checkViewport() {
-    final render = _surface.currentContext?.findRenderObject();
-    var visible = false;
-    if (render is RenderBox && render.attached && render.hasSize) {
-      var viewport = Offset.zero & MediaQuery.sizeOf(context);
-      final scrollRender =
-          Scrollable.maybeOf(context)?.context.findRenderObject();
-      if (scrollRender is RenderBox &&
-          scrollRender.attached &&
-          scrollRender.hasSize) {
-        viewport = viewport.intersect(
-            scrollRender.localToGlobal(Offset.zero) & scrollRender.size);
-      }
-      visible =
-          (render.localToGlobal(Offset.zero) & render.size).overlaps(viewport);
-    }
-    _visible = visible;
+    _visible = intersectsPaintViewport(
+        _surface.currentContext?.findRenderObject(),
+        MediaQuery.sizeOf(context));
     _applyVisibility();
   }
 
@@ -177,9 +173,12 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _scroll?.removeListener(_scheduleVisibility);
+    for (final position in _scrollPositions) {
+      position.removeListener(_scheduleVisibility);
+    }
     _hidden.removeListener(_applyVisibility);
     _animation.dispose();
+    _motionGate.dispose();
     super.dispose();
   }
 
@@ -191,7 +190,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: DecoratedBox(
-            key: _surface,
+            key: widget.kind == PlayerGuideDemoKind.playlists ? null : _surface,
             decoration: ShapeDecoration(
                 color: colors.surfaceContainerLow,
                 shape: AppShape.surface
@@ -199,23 +198,34 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
             child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                          ui(widget.kind == PlayerGuideDemoKind.progress
-                              ? '试一试：进度定位'
-                              : '试一试：歌词动效'),
+                          ui(switch (widget.kind) {
+                            PlayerGuideDemoKind.progress => '试一试：进度定位',
+                            PlayerGuideDemoKind.lyrics => '试一试：歌词动效',
+                            PlayerGuideDemoKind.playlists => '试一试：歌单视图',
+                          }),
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 6),
                       Text(ui('仅本卡片演示，不播放声音、不联网，也不修改曲库或设置。'),
                           style: Theme.of(context).textTheme.bodySmall),
                       const SizedBox(height: 12),
-                      AnimatedBuilder(
-                          animation: _animation,
-                          builder: (context, _) =>
-                              widget.kind == PlayerGuideDemoKind.progress
-                                  ? _progress(context)
-                                  : _lyrics(context)),
+                      if (widget.kind == PlayerGuideDemoKind.playlists)
+                        ValueListenableBuilder(
+                            valueListenable: _motionGate,
+                            child:
+                                PlayerGuidePlaylistDemo(viewportKey: _surface),
+                            builder: (context, enabled, child) =>
+                                TickerMode(enabled: enabled, child: child!))
+                      else
+                        AnimatedBuilder(
+                            animation: _animation,
+                            builder: (context, _) =>
+                                widget.kind == PlayerGuideDemoKind.progress
+                                    ? _progress(context)
+                                    : _lyrics(context)),
                     ]))));
   }
 

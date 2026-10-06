@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/process_resource_chart.dart';
+import 'package:dan_player/component/viewport_visibility.dart';
 import 'package:dan_player/component/sidebar_motion.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/desktop_integration.dart';
@@ -48,7 +50,7 @@ class _CompactProcessResourceMonitorState
   late ProcessResourceLease _lease;
   late ValueListenable<ProcessResourcePreferences> _preferences;
   late ValueListenable<bool> _hidden;
-  ScrollPosition? _scroll;
+  Set<ScrollPosition> _scrolls = {};
   bool _queued = false, _treeVisible = false, _inViewport = false;
   bool _lifecycleVisible = true;
   bool _surfaceActive = false;
@@ -104,14 +106,17 @@ class _CompactProcessResourceMonitorState
     super.didChangeDependencies();
     final drawer = DrawerController.maybeOf(context);
     _treeVisible = TickerMode.valuesOf(context).enabled &&
+        AppEntranceScope.isReadyOf(context) &&
         (ModalRoute.of(context)?.isCurrent ?? true) &&
         (drawer == null || drawer.isDrawerOpen);
-    final position = Scrollable.maybeOf(context)?.position;
-    if (_scroll != position) {
-      _scroll?.removeListener(_scheduleVisibility);
-      _scroll = position;
-      _scroll?.addListener(_scheduleVisibility);
+    final positions = scrollPositionsOf(context);
+    for (final removed in _scrolls.difference(positions)) {
+      removed.removeListener(_scheduleVisibility);
     }
+    for (final added in positions.difference(_scrolls)) {
+      added.addListener(_scheduleVisibility);
+    }
+    _scrolls = positions;
     _syncVisibility();
     _scheduleVisibility();
   }
@@ -150,21 +155,7 @@ class _CompactProcessResourceMonitorState
       _queued = false;
       if (!mounted) return;
       final render = _surface.currentContext?.findRenderObject();
-      var visible = false;
-      if (render is RenderBox && render.attached && render.hasSize) {
-        final rect = render.localToGlobal(Offset.zero) & render.size;
-        var viewport = Offset.zero & MediaQuery.sizeOf(context);
-        final scrollRender =
-            Scrollable.maybeOf(context)?.context.findRenderObject();
-        if (scrollRender is RenderBox &&
-            scrollRender.attached &&
-            scrollRender.hasSize) {
-          viewport = viewport.intersect(
-              scrollRender.localToGlobal(Offset.zero) & scrollRender.size);
-        }
-        visible = !rect.isEmpty && rect.overlaps(viewport);
-      }
-      _inViewport = visible;
+      _inViewport = intersectsPaintViewport(render, MediaQuery.sizeOf(context));
       _syncVisibility();
     });
   }
@@ -174,7 +165,9 @@ class _CompactProcessResourceMonitorState
     WidgetsBinding.instance.removeObserver(this);
     _preferences.removeListener(_changed);
     _hidden.removeListener(_syncVisibility);
-    _scroll?.removeListener(_scheduleVisibility);
+    for (final scroll in _scrolls) {
+      scroll.removeListener(_scheduleVisibility);
+    }
     _lease.dispose();
     super.dispose();
   }

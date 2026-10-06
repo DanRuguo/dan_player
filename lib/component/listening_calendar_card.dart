@@ -7,16 +7,25 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/statistics/listening_calendar.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
+import 'package:dan_player/statistics/recent_listening_activity.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 class ListeningCalendarCard extends StatefulWidget {
   const ListeningCalendarCard(
-      {super.key, required this.statistics, this.now, this.dailyChart});
+      {super.key,
+      required this.statistics,
+      this.now,
+      this.dailyChart,
+      this.recentActivitySnapshot});
   final PlaybackStatistics statistics;
   final DateTime? now;
   final Widget? dailyChart;
+
+  /// An optional captured display projection. Standalone/live callers retain
+  /// their existing behavior when no frozen projection is supplied.
+  final RecentListeningActivity? recentActivitySnapshot;
 
   @override
   State<ListeningCalendarCard> createState() => _ListeningCalendarCardState();
@@ -231,7 +240,7 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
     final selectedDay =
         selected.isEmpty ? calendar.thisWeek.last : selected.first;
     final daily = _range == _ListeningActivityRange.daily;
-    final recent =
+    final recent = widget.recentActivitySnapshot ??
         widget.statistics.recentActivity(widget.now ?? DateTime.now());
     final countValue = daily ? recent.playCount : calendar.rangePlayCount;
     final complete = daily ? recent.complete : calendar.completeRangePlayCounts;

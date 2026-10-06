@@ -213,9 +213,9 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
       // words with visible shaped boxes can keep its sampler alive. Recompute
       // after every width/font/direction/mode layout, including restored glyphs.
       _wordEndMilliseconds = 0;
-      for (var index = 0; index < widget.words.length; index++) {
+      for (var index = 0; index < _layout!.words.length; index++) {
         if (_layout!.wordExtents[index] <= 0) continue;
-        final word = widget.words[index];
+        final word = _layout!.words[index];
         _wordEndMilliseconds = math.max(_wordEndMilliseconds,
             word.startMilliseconds + math.max(0, word.lengthMilliseconds));
       }
@@ -260,7 +260,7 @@ class _GlyphPaint {
 class _DesktopLyricTextLayout {
   _DesktopLyricTextLayout(
       {required String text,
-      required this.words,
+      required List<DesktopLyricWord> words,
       required this.vertical,
       required double? maxVerticalUnitWidth,
       required double? maxHorizontalWidth,
@@ -269,7 +269,8 @@ class _DesktopLyricTextLayout {
       required Color unplayedColor,
       required Color? strokeColor,
       required TextDirection direction,
-      required TextScaler scaler}) {
+      required TextScaler scaler})
+      : words = _shapedWords(text, words) {
     fontSize = scaler.scale(style.fontSize ?? 22);
     final width = !vertical && maxHorizontalWidth != null
         ? math.max(0.0, maxHorizontalWidth)
@@ -306,7 +307,7 @@ class _DesktopLyricTextLayout {
       stroke = outline(text);
       size = base!.size;
       var offset = 0;
-      for (final word in words) {
+      for (final word in this.words) {
         wordBoxes.add(base!
             .getBoxesForSelection(TextSelection(
               baseOffset: offset,
@@ -353,7 +354,7 @@ class _DesktopLyricTextLayout {
     }
     size = Size(columnWidth, top);
     var offset = 0;
-    for (final word in words) {
+    for (final word in this.words) {
       final start = offset.clamp(0, text.length);
       offset += word.content.length;
       final end = offset.clamp(0, text.length);
@@ -379,8 +380,6 @@ class _DesktopLyricTextLayout {
             ));
           }
         } else if (glyph.glyph.start >= start && glyph.glyph.start < end) {
-          // Malformed timing may split an emoji across tokens. Paint it once
-          // and assign it to the token containing the grapheme's start.
           boxes.add((rect: glyph.bounds, rtl: false, horizontal: false));
         }
       }
@@ -409,6 +408,45 @@ class _DesktopLyricTextLayout {
     for (final extent in wordExtents)
       LyricWordEffects.softEdgeWidth(fontSize: fontSize, extent: extent)
   ];
+
+  /// The owning player's renderer also joins timing fragments that divide one
+  /// Unicode grapheme. Keep one mask and the union of its actual timing here;
+  /// partial selections have no horizontal boxes and would lose later timing
+  /// in vertical mode. This runs only when shaping, never on clock samples.
+  static List<DesktopLyricWord> _shapedWords(
+      String text, List<DesktopLyricWord> authored) {
+    if (authored.isEmpty) return authored;
+    final boundaries = <int>{0};
+    var endOffset = 0;
+    for (final character in text.characters) {
+      endOffset += character.length;
+      boundaries.add(endOffset);
+    }
+    final result = <DesktopLyricWord>[];
+    var offset = 0;
+    for (var index = 0; index < authored.length; index++) {
+      final word = authored[index];
+      offset += word.content.length;
+      int start = word.startMilliseconds;
+      int end = start + math.max(0, word.lengthMilliseconds);
+      StringBuffer? joined;
+      while (offset < text.length &&
+          !boundaries.contains(offset) &&
+          index + 1 < authored.length) {
+        final next = authored[++index];
+        joined ??= StringBuffer(word.content);
+        joined.write(next.content);
+        start = math.min(start, next.startMilliseconds);
+        end = math.max(
+            end, next.startMilliseconds + math.max(0, next.lengthMilliseconds));
+        offset += next.content.length;
+      }
+      result.add(joined == null
+          ? word
+          : DesktopLyricWord(start, end - start, joined.toString()));
+    }
+    return result;
+  }
 
   // A separate cached pass under both fills. Word clipping never cuts an
   // outline in half and no paragraphs are laid out on playback clock ticks.

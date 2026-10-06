@@ -17,6 +17,7 @@ import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:dan_player/statistics/listening_trends.dart';
 import 'package:dan_player/statistics/listening_calendar.dart';
+import 'package:dan_player/statistics/recent_listening_activity.dart';
 import 'package:dan_player/statistics/statistics_display_service.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -51,6 +52,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   late PlaybackStatistics _displayStats;
   StatisticsDisplaySnapshot? _displaySnapshot;
   ListeningTrendsSnapshot? _listeningTrends;
+  RecentListeningActivity? _recentListening;
   String _rankingGroup = 'tracks';
   final _storageKey = GlobalKey();
   final _cacheKey = GlobalKey();
@@ -130,6 +132,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
     _displayStats = PlaybackStatistics.displayCopy(next?.playbackData,
         storageWarning: next?.storageWarning);
     _displaySnapshot = next;
+    // Both recent cards share this frozen projection. Language/theme/layout
+    // changes must not repeatedly walk up to 20,000 recorded intervals.
+    _recentListening =
+        next == null ? null : _displayStats.recentActivity(next.capturedAt);
     _listeningTrends = next == null
         ? null
         : ListeningTrendsSnapshot.fromDaily(
@@ -245,9 +251,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       order: 1,
                       child: ListeningCalendarCard(
                           statistics: stats,
+                          recentActivitySnapshot: _recentListening,
                           now: _displaySnapshot?.capturedAt ?? widget.now,
                           dailyChart: _DailyListeningDistribution(
                               statistics: stats,
+                              recentActivitySnapshot: _recentListening,
                               now: _displaySnapshot?.capturedAt ??
                                   widget.now ??
                                   DateTime.now())),
@@ -509,9 +517,12 @@ String _hourRange(int hour) => '${hour.toString().padLeft(2, '0')}:00–'
 
 class _DailyListeningDistribution extends StatefulWidget {
   const _DailyListeningDistribution(
-      {required this.statistics, required this.now});
+      {required this.statistics,
+      required this.now,
+      this.recentActivitySnapshot});
   final PlaybackStatistics statistics;
   final DateTime now;
+  final RecentListeningActivity? recentActivitySnapshot;
   @override
   State<_DailyListeningDistribution> createState() =>
       _DailyListeningDistributionState();
@@ -525,7 +536,8 @@ class _DailyListeningDistributionState
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    final recent = widget.statistics.recentActivity(widget.now);
+    final recent = widget.recentActivitySnapshot ??
+        widget.statistics.recentActivity(widget.now);
     String stamp(DateTime time) =>
         '${time.month}/${time.day} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
     return Column(
@@ -552,6 +564,18 @@ class _DailyListeningDistributionState
             Text(ui("完整 {0} 次", [widget.statistics.totalCompletedCount])),
             Text(ui("提前跳过 {0} 次", [widget.statistics.totalSkippedCount])),
           ]),
+        ] else ...[
+          const SizedBox(height: 12),
+          Tooltip(
+              message: ui('按最近24小时已记录的连续收听片段计算；暂停或缺失的间隔不连接、不补算。'),
+              child: Text(
+                  ui('最长连续收听：{0}', [
+                    recent.recordedSince == null
+                        ? '—'
+                        : '${recent.complete ? '' : '≥ '}${_formatListeningDuration(recent.longestIntervalMilliseconds, precise: true)}'
+                  ]),
+                  key: const ValueKey('statistics-longest-listening-interval'),
+                  style: Theme.of(context).textTheme.labelMedium)),
         ],
         const SizedBox(height: 16),
         _StatisticsHeading(

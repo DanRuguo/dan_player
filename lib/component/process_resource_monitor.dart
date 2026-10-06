@@ -3,9 +3,11 @@ import 'dart:math' as math;
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_dialog_resize.dart';
+import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/process_resource_chart.dart';
+import 'package:dan_player/component/viewport_visibility.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/component/settings_section_visibility.dart';
 import 'package:dan_player/desktop_integration.dart';
@@ -43,7 +45,7 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
   ProcessResourceLease? _lease;
   late ValueListenable<ProcessResourcePreferences> _preferences;
   late ValueListenable<bool> _hidden;
-  ScrollPosition? _scroll;
+  Set<ScrollPosition> _scrolls = {};
   bool _queued = false,
       _treeVisible = true,
       _lifecycleVisible = true,
@@ -116,15 +118,18 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _treeVisible = TickerMode.valuesOf(context).enabled &&
+        AppEntranceScope.isReadyOf(context) &&
         (ModalRoute.of(context)?.isCurrent ?? true) &&
         SettingsSectionVisibility.isVisibleOf(context);
     if (!_treeVisible) _visibilityChanged();
-    final position = Scrollable.maybeOf(context)?.position;
-    if (_scroll != position) {
-      _scroll?.removeListener(_scheduleVisibility);
-      _scroll = position;
-      _scroll?.addListener(_scheduleVisibility);
+    final positions = scrollPositionsOf(context);
+    for (final removed in _scrolls.difference(positions)) {
+      removed.removeListener(_scheduleVisibility);
     }
+    for (final added in positions.difference(_scrolls)) {
+      added.addListener(_scheduleVisibility);
+    }
+    _scrolls = positions;
     _scheduleVisibility();
   }
 
@@ -163,21 +168,7 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
       _queued = false;
       if (!mounted) return;
       final render = _surface.currentContext?.findRenderObject();
-      var visible = false;
-      if (render is RenderBox && render.attached && render.hasSize) {
-        final rect = render.localToGlobal(Offset.zero) & render.size;
-        Rect viewport = Offset.zero & MediaQuery.sizeOf(context);
-        final scrollRender =
-            Scrollable.maybeOf(context)?.context.findRenderObject();
-        if (scrollRender is RenderBox &&
-            scrollRender.attached &&
-            scrollRender.hasSize) {
-          viewport = viewport.intersect(
-              scrollRender.localToGlobal(Offset.zero) & scrollRender.size);
-        }
-        visible = !rect.isEmpty && rect.overlaps(viewport);
-      }
-      _inViewport = visible;
+      _inViewport = intersectsPaintViewport(render, MediaQuery.sizeOf(context));
       _visibilityChanged();
     });
   }
@@ -204,7 +195,9 @@ class _ProcessResourceMonitorState extends State<ProcessResourceMonitor>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _detach();
-    _scroll?.removeListener(_scheduleVisibility);
+    for (final scroll in _scrolls) {
+      scroll.removeListener(_scheduleVisibility);
+    }
     super.dispose();
   }
 

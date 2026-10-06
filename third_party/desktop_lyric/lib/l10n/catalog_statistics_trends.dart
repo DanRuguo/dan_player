@@ -1,4 +1,14 @@
 const Map<String, List<String>> catalogStatisticsTrends = {
+  '最长连续收听：{0}': [
+    'Longest uninterrupted listening: {0}',
+    '最長連続リスニング：{0}',
+    '최장 연속 청취: {0}'
+  ],
+  '按最近24小时已记录的连续收听片段计算；暂停或缺失的间隔不连接、不补算。': [
+    'Uses recorded uninterrupted intervals in the last 24 hours. Pauses and missing intervals are not joined or filled in.',
+    '過去24時間に記録された連続リスニング区間で計算します。一時停止や記録のない間隔は結合・補完しません。',
+    '최근 24시간에 기록된 연속 청취 구간으로 계산합니다. 일시정지하거나 기록이 없는 간격은 연결하거나 보충하지 않습니다.'
+  ],
   '按严格一周': ['Calendar week', '暦週（月〜日）', '달력 기준 주'],
   '前期收听': ['Previous period', '前期のリスニング', '이전 기간 청취'],
   '两期对比': ['Compare both periods', '両期間を比較', '두 기간 비교'],
