@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
+import 'package:dan_player/component/app_sort_button.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:dan_player/component/touch_gestures.dart';
@@ -186,10 +187,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         kind: changed ? AppNoticeKind.success : AppNoticeKind.info);
   }
 
-  Widget _menuLabel(String text) => ConstrainedBox(
+  Widget _menuLabel(String text, {double? maxWidth}) => ConstrainedBox(
       constraints: BoxConstraints(
-          maxWidth:
-              (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0)),
+          maxWidth: math.min(maxWidth ?? 360,
+              (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0))),
       child: Text(ui(text), softWrap: true));
 
   VoidCallback _queueMenuAction(List<Audio> queue, VoidCallback action) {
@@ -229,6 +230,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
             AppSubmenuButton(
               key: ValueKey('queue-extra-${arrangement ? 'arrange' : 'sort'}'),
               leadingIcon: Icon(arrangement ? Symbols.shuffle : Symbols.sort),
+              menuStyle: const MenuStyle(
+                  maximumSize: WidgetStatePropertyAll(
+                      Size(appSortMenuMaxWidth, double.infinity))),
               menuChildren: [
                 if (!arrangement) ...[
                   for (final option in const [
@@ -244,7 +248,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                 queue, () => _orderUpcoming(field: option.$1))
                             : null,
                         leadingIcon: const Icon(Symbols.sort),
-                        child: _menuLabel(option.$2)),
+                        child: _menuLabel(option.$2,
+                            maxWidth: appSortMenuLabelMaxWidth)),
                   const Divider(),
                 ],
                 for (final order in UpcomingQueueOrder.values
@@ -260,7 +265,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                       message: ui(order == UpcomingQueueOrder.added
                           ? '本地使用文件创建时间；联网使用加入乐库时间。'
                           : audioSortMissingValueNote),
-                      child: _menuLabel(order.label),
+                      child: _menuLabel(order.label,
+                          maxWidth: appSortMenuLabelMaxWidth),
                     ),
                   ),
                 if (!arrangement) ...[
@@ -272,7 +278,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                               queue, () => _orderUpcoming(reverse: true))
                           : null,
                       leadingIcon: const Icon(Symbols.swap_vert),
-                      child: _menuLabel('反转待播歌曲顺序')),
+                      child: _menuLabel('反转待播歌曲顺序',
+                          maxWidth: appSortMenuLabelMaxWidth)),
                 ],
               ],
               child: _menuLabel(arrangement ? '待播洗牌与编排' : '待播排序'),

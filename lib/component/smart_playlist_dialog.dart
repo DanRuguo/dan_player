@@ -13,6 +13,7 @@ import 'dart:math' as math;
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_sort_button.dart';
 import 'package:dan_player/component/audio_selection_toolbar.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
@@ -567,42 +568,58 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                         _history == SmartPlaylistHistory.notRecent)
                       _field('history-days', '最近多少天', _historyDays,
                           number: true),
-                    DropdownButtonFormField<SmartPlaylistSort>(
-                      borderRadius: AppShape.controlRadius,
-                      elevation: 3,
-                      dropdownColor:
-                          Theme.of(context).colorScheme.surfaceContainerLow,
-                      key: ValueKey('smart-sort-$_editingId-$_editorEpoch'),
-                      initialValue: _sort,
-                      isExpanded: true,
-                      itemHeight: null,
-                      decoration: InputDecoration(
-                          labelText: ui('结果排序'), border: AppShape.inputBorder),
-                      items: [
-                        for (final sort in SmartPlaylistSort.values)
-                          DropdownMenuItem(
-                              value: sort, child: Text(ui(_sortLabel(sort))))
-                      ],
-                      selectedItemBuilder: (_) => [
-                        for (final sort in SmartPlaylistSort.values)
-                          Tooltip(
-                            message: ui(_sortLabel(sort)),
-                            child: Text(ui(_sortLabel(sort)),
-                                maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: ConstrainedBox(
+                        constraints:
+                            const BoxConstraints(maxWidth: appSortMenuMaxWidth),
+                        child: ButtonTheme.fromButtonThemeData(
+                          data: ButtonTheme.of(context)
+                              .copyWith(alignedDropdown: true),
+                          child: DropdownButtonFormField<SmartPlaylistSort>(
+                            borderRadius: AppShape.controlRadius,
+                            elevation: 3,
+                            dropdownColor: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerLow,
+                            key: ValueKey(
+                                'smart-sort-$_editingId-$_editorEpoch'),
+                            initialValue: _sort,
+                            isExpanded: true,
+                            itemHeight: null,
+                            decoration: InputDecoration(
+                                labelText: ui('结果排序'),
+                                border: AppShape.inputBorder),
+                            items: [
+                              for (final sort in SmartPlaylistSort.values)
+                                DropdownMenuItem(
+                                    value: sort,
+                                    child: Text(ui(_sortLabel(sort))))
+                            ],
+                            selectedItemBuilder: (_) => [
+                              for (final sort in SmartPlaylistSort.values)
+                                Tooltip(
+                                  message: ui(_sortLabel(sort)),
+                                  child: Text(ui(_sortLabel(sort)),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                            ],
+                            onChanged: _saving
+                                ? null
+                                : (value) {
+                                    if (value != null) {
+                                      if (value == SmartPlaylistSort.random &&
+                                          _sort != SmartPlaylistSort.random) {
+                                        _randomSeed = _newRandomSeed();
+                                      }
+                                      _sort = value;
+                                      _queuePreview();
+                                    }
+                                  },
                           ),
-                      ],
-                      onChanged: _saving
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                if (value == SmartPlaylistSort.random &&
-                                    _sort != SmartPlaylistSort.random) {
-                                  _randomSeed = _newRandomSeed();
-                                }
-                                _sort = value;
-                                _queuePreview();
-                              }
-                            },
+                        ),
+                      ),
                     ),
                     _field('minimum', '最短时长（秒）', _minimum, number: true),
                     _field('maximum', '最长时长（秒）', _maximum, number: true),

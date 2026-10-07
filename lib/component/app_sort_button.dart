@@ -10,6 +10,12 @@ import 'package:flutter/material.dart';
 export 'package:dan_player/sorting/sort_direction.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
+/// Shared popup limit for sorting controls, independent of trigger width.
+const appSortMenuMaxWidth = 280.0;
+// Native cascading menus release horizontal panel constraints internally.
+// Bound their labels as well, leaving room for the existing icon/padding slots.
+const appSortMenuLabelMaxWidth = appSortMenuMaxWidth - 64;
+
 class AppSortOption<T> {
   const AppSortOption({
     required this.value,
@@ -178,10 +184,7 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
                   : scheme.onSurface.withValues(alpha: .38)),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(ui(label),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                semanticsLabel: ui(label)),
+            child: Text(ui(label), semanticsLabel: ui(label)),
           ),
           if (checked) ...[
             const SizedBox(width: 8),
@@ -284,7 +287,8 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
         elevation: 4,
         requestFocus: true,
         constraints: BoxConstraints(
-          maxWidth: math.max(44, math.min(360, size.width - 32)),
+          maxWidth:
+              math.max(44, math.min(appSortMenuMaxWidth, size.width - 32)),
           maxHeight: math.max(48, math.min(480, size.height - 48)),
         ),
         menuPadding: const EdgeInsets.symmetric(vertical: 6),

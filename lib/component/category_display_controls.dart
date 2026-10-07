@@ -66,6 +66,9 @@ class CategoryDisplayControls extends StatelessWidget {
                       child: Text(ui('显示数量与来源'))),
                   AppSubmenuButton(
                       leadingIcon: const Icon(Icons.sort),
+                      menuStyle: const MenuStyle(
+                          maximumSize: WidgetStatePropertyAll(
+                              Size(appSortMenuMaxWidth, double.infinity))),
                       menuChildren: [
                         for (final entry in [
                           (CategorySort.standard, '默认顺序'),
@@ -79,7 +82,10 @@ class CategoryDisplayControls extends StatelessWidget {
                                   : null,
                               onPressed: () =>
                                   onChanged(value.copyWith(sort: entry.$1)),
-                              child: Text(ui(entry.$2))),
+                              child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                      maxWidth: appSortMenuLabelMaxWidth),
+                                  child: Text(ui(entry.$2)))),
                         const Divider(),
                         for (final entry in [(false, '升序'), (true, '降序')])
                           MenuItemButton(
@@ -88,7 +94,10 @@ class CategoryDisplayControls extends StatelessWidget {
                                   : null,
                               onPressed: () => onChanged(
                                   value.copyWith(descending: entry.$1)),
-                              child: Text(ui(entry.$2))),
+                              child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                      maxWidth: appSortMenuLabelMaxWidth),
+                                  child: Text(ui(entry.$2)))),
                       ],
                       child: Text(ui('排序'))),
                   MenuItemButton(
