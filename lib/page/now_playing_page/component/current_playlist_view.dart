@@ -186,9 +186,24 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         kind: changed ? AppNoticeKind.success : AppNoticeKind.info);
   }
 
-  Widget _menuLabel(String text) => SizedBox(
-      width: (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0),
+  Widget _menuLabel(String text) => ConstrainedBox(
+      constraints: BoxConstraints(
+          maxWidth:
+              (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0)),
       child: Text(ui(text), softWrap: true));
+
+  VoidCallback _queueMenuAction(List<Audio> queue, VoidCallback action) {
+    final owner = playbackService;
+    return () {
+      // Native MenuItemButton closes before dispatching on the next frame.
+      // A replacement queue or player retires the menu's original action.
+      if (mounted &&
+          identical(owner, playbackService) &&
+          identical(queue, owner.playlist.value)) {
+        action();
+      }
+    };
+  }
 
   Widget _organizeMenu(List<Audio> queue, int current) {
     final editable = playbackService.canEditQueue && current >= 0;
@@ -197,20 +212,21 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         menuChildren: [
           MenuItemButton(
               key: const ValueKey('queue-trim-before'),
-              onPressed:
-                  editable && current > 0 ? () => _trimQueue(true) : null,
+              onPressed: editable && current > 0
+                  ? _queueMenuAction(queue, () => _trimQueue(true))
+                  : null,
               leadingIcon: const Icon(Symbols.playlist_remove),
               child: _menuLabel('移除当前歌曲之前的队列项')),
           MenuItemButton(
               key: const ValueKey('queue-trim-after'),
               onPressed: editable && current < queue.length - 1
-                  ? () => _trimQueue(false)
+                  ? _queueMenuAction(queue, () => _trimQueue(false))
                   : null,
               leadingIcon: const Icon(Symbols.playlist_remove),
               child: _menuLabel('移除当前歌曲之后的队列项')),
           const Divider(),
           for (final arrangement in [false, true])
-            SubmenuButton(
+            AppSubmenuButton(
               key: ValueKey('queue-extra-${arrangement ? 'arrange' : 'sort'}'),
               leadingIcon: Icon(arrangement ? Symbols.shuffle : Symbols.sort),
               menuChildren: [
@@ -224,7 +240,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                     MenuItemButton(
                         key: ValueKey('queue-sort-${option.$1.name}'),
                         onPressed: hasUpcoming
-                            ? () => _orderUpcoming(field: option.$1)
+                            ? _queueMenuAction(
+                                queue, () => _orderUpcoming(field: option.$1))
                             : null,
                         leadingIcon: const Icon(Symbols.sort),
                         child: _menuLabel(option.$2)),
@@ -234,8 +251,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                     .where((order) => order.arrangement == arrangement))
                   MenuItemButton(
                     key: ValueKey('queue-order-${order.name}'),
-                    onPressed:
-                        hasUpcoming ? () => _arrangeUpcoming(order) : null,
+                    onPressed: hasUpcoming
+                        ? _queueMenuAction(queue, () => _arrangeUpcoming(order))
+                        : null,
                     leadingIcon:
                         Icon(arrangement ? Symbols.shuffle : Symbols.sort),
                     child: Tooltip(
@@ -250,7 +268,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                   MenuItemButton(
                       key: const ValueKey('queue-reverse-upcoming'),
                       onPressed: hasUpcoming
-                          ? () => _orderUpcoming(reverse: true)
+                          ? _queueMenuAction(
+                              queue, () => _orderUpcoming(reverse: true))
                           : null,
                       leadingIcon: const Icon(Symbols.swap_vert),
                       child: _menuLabel('反转待播歌曲顺序')),
@@ -372,7 +391,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         menuChildren: [
           MenuItemButton(
             key: const ValueKey('queue-export-m3u-all'),
-            onPressed: queue.isEmpty || _exportingQueue ? null : _exportQueue,
+            onPressed: queue.isEmpty || _exportingQueue
+                ? null
+                : _queueMenuAction(queue, _exportQueue),
             leadingIcon: const Icon(Symbols.save_alt),
             child: _menuLabel('导出队列为 M3U8'),
           ),
@@ -381,7 +402,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
               key: const ValueKey('queue-export-m3u-search'),
               onPressed: visibleIndices.isEmpty || _exportingQueue
                   ? null
-                  : () => _exportQueue(searchResults: true),
+                  : _queueMenuAction(
+                      queue, () => _exportQueue(searchResults: true)),
               leadingIcon: const Icon(Symbols.filter_alt),
               child: _menuLabel('导出搜索结果为 M3U8'),
             ),
@@ -389,7 +411,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
             key: const ValueKey('queue-export-folder-all'),
             onPressed: queue.isEmpty || _exportingQueue
                 ? null
-                : () => _exportQueue(musicFolder: true),
+                : _queueMenuAction(
+                    queue, () => _exportQueue(musicFolder: true)),
             leadingIcon: const Icon(Symbols.folder_copy),
             child: _menuLabel('导出队列音乐文件夹'),
           ),
@@ -398,7 +421,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
               key: const ValueKey('queue-export-folder-search'),
               onPressed: visibleIndices.isEmpty || _exportingQueue
                   ? null
-                  : () => _exportQueue(searchResults: true, musicFolder: true),
+                  : _queueMenuAction(
+                      queue,
+                      () =>
+                          _exportQueue(searchResults: true, musicFolder: true)),
               leadingIcon: const Icon(Symbols.folder_copy),
               child: _menuLabel('导出搜索结果音乐文件夹'),
             ),
@@ -1070,6 +1096,9 @@ class _PlaylistViewItem extends StatelessWidget {
           : scheme.onSurfaceVariant,
     );
     final durationText = Duration(seconds: item.duration).toStringHMMSS();
+    final stopTarget = playbackService.queueStopBoundary.target;
+    final stopCommandRevision =
+        playbackService.queueStopBoundary.commandRevision;
     final reduced = !AppMotion.enabled(context, MotionKind.feedback);
     final placeholder = ColoredBox(
       color: current
@@ -1114,10 +1143,17 @@ class _PlaylistViewItem extends StatelessWidget {
           leadingIcon: const Icon(Symbols.stop_circle),
           child: Text(ui('播完此条后停止')),
         ),
-        if (playbackService.queueOccurrenceId(index) ==
-            playbackService.queueStopBoundary.target)
+        if (stopTarget != null &&
+            playbackService.queueOccurrenceId(index) == stopTarget)
           MenuItemButton(
-              onPressed: playbackService.cancelQueueStop,
+              onPressed: () {
+                if (_stillCurrentQueue &&
+                    playbackService.queueStopBoundary.target == stopTarget &&
+                    playbackService.queueStopBoundary.commandRevision ==
+                        stopCommandRevision) {
+                  playbackService.cancelQueueStop();
+                }
+              },
               leadingIcon: const Icon(Symbols.close),
               child: Text(ui('取消停止目标'))),
         MenuItemButton(

@@ -926,8 +926,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
           child: label(ui('撤销进度跳转')),
         ),
         if (bookmarks.isNotEmpty)
-          SubmenuButton(
-            alignmentOffset: appSubmenuBottomOffset(context, bookmarks.length),
+          AppSubmenuButton(
             menuStyle: menuStyle,
             leadingIcon: const Icon(Icons.bookmarks_outlined),
             menuChildren: [

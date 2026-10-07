@@ -64,7 +64,7 @@ class CategoryDisplayControls extends StatelessWidget {
                       onPressed: () => onChanged(
                           value.copyWith(showDetails: !value.showDetails)),
                       child: Text(ui('显示数量与来源'))),
-                  SubmenuButton(
+                  AppSubmenuButton(
                       leadingIcon: const Icon(Icons.sort),
                       menuChildren: [
                         for (final entry in [

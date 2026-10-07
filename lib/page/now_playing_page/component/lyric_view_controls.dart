@@ -614,6 +614,8 @@ class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
   Offset? _pointerDown;
   bool _dragged = false;
   bool _cancelled = false;
+  bool _pointerSizeCycle = false;
+  bool _ignoreAdjustmentCycle = false;
 
   void _discardLocalDraft() {
     _cancelled = true;
@@ -633,6 +635,11 @@ class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
   }
 
   void _finishSizeChange(double value) {
+    if (_ignoreAdjustmentCycle) {
+      _ignoreAdjustmentCycle = false;
+      return;
+    }
+    _pointerSizeCycle = false;
     // Material Slider also sends onChangeEnd after a pointer cancellation.
     // The Listener has already discarded that draft, so do not persist it.
     if (_cancelled) {
@@ -781,12 +788,21 @@ class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
                 allowedInteraction: SliderInteraction.tapAndSlide,
                 semanticFormatterCallback: (value) => '${value.round()}',
                 onChangeStart: (_) {
+                  // Stock Slider semantics/keyboard actions synchronously emit
+                  // another start/change/end while a physical drag is held.
+                  // That cycle cannot commit or release the pointer's draft.
+                  if (_pointerSizeCycle) {
+                    _ignoreAdjustmentCycle = true;
+                    return;
+                  }
+                  _pointerSizeCycle = _sizingPointer != null;
                   // Keyboard/semantics adjustments do not deliver pointer down.
                   _cancelled = false;
                   widget.controller.setFontSizeAdjusting(true);
                 },
                 onChanged: (value) {
-                  if (_cancelled ||
+                  if (_ignoreAdjustmentCycle ||
+                      _cancelled ||
                       (_sizingPointer != null &&
                           !widget.controller.fontSizeAdjusting)) {
                     return;

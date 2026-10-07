@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/readable_ellipsis_text.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -35,7 +36,7 @@ class SongArtistMenu extends StatelessWidget {
         );
     if (names.isEmpty) return const SizedBox.shrink();
     if (names.length == 1) return item(names.entries.single);
-    return SubmenuButton(
+    return AppSubmenuButton(
       leadingIcon: const Icon(Symbols.artist),
       menuStyle: const MenuStyle(
         maximumSize: WidgetStatePropertyAll(Size(420, double.infinity)),

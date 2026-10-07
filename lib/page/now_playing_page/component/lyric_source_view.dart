@@ -77,7 +77,7 @@ class SetLyricSourceBtn extends StatelessWidget {
   }
 }
 
-class LyricSourceMenuButton extends StatelessWidget {
+class LyricSourceMenuButton extends StatefulWidget {
   const LyricSourceMenuButton({
     super.key,
     required this.enabled,
@@ -96,6 +96,44 @@ class LyricSourceMenuButton extends StatelessWidget {
   final VoidCallback onLocal;
 
   @override
+  State<LyricSourceMenuButton> createState() => _LyricSourceMenuButtonState();
+}
+
+class _LyricSourceMenuButtonState extends State<LyricSourceMenuButton> {
+  VoidCallback Function()? _holdVisibility;
+  VoidCallback? _releaseVisibility;
+  bool _menuOpen = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final holdVisibility = LyricControlsSurface.menuVisibilityOf(context);
+    if (identical(_holdVisibility, holdVisibility)) return;
+    _releaseVisibility?.call();
+    _releaseVisibility = null;
+    _holdVisibility = holdVisibility;
+    if (_menuOpen) _releaseVisibility = _holdVisibility?.call();
+  }
+
+  void _opened() {
+    _menuOpen = true;
+    _releaseVisibility ??= _holdVisibility?.call();
+  }
+
+  void _closed() {
+    _menuOpen = false;
+    _releaseVisibility?.call();
+    _releaseVisibility = null;
+  }
+
+  @override
+  void dispose() {
+    // MenuAnchor deliberately omits onClose when its overlay is disposed.
+    _releaseVisibility?.call();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
@@ -107,16 +145,12 @@ class LyricSourceMenuButton extends StatelessWidget {
         minimumSize: WidgetStatePropertyAll(Size(220, 0)),
         maximumSize: WidgetStatePropertyAll(Size(320, double.infinity)),
       ),
-      onOpen: () {
-        ALWAYS_SHOW_LYRIC_VIEW_CONTROLS = true;
-      },
-      onClose: () {
-        ALWAYS_SHOW_LYRIC_VIEW_CONTROLS = false;
-      },
+      onOpen: _opened,
+      onClose: _closed,
       menuChildren: [
         MenuItemButton(
           key: const ValueKey('lyric-source-choose-default'),
-          onPressed: onChooseDefault,
+          onPressed: widget.onChooseDefault,
           leadingIcon: const Icon(Symbols.search),
           child: Text(
             ui("指定默认歌词"),
@@ -126,25 +160,27 @@ class LyricSourceMenuButton extends StatelessWidget {
         ),
         MenuItemButton(
           key: const ValueKey('lyric-source-online'),
-          onPressed: onOnline,
+          onPressed: widget.onOnline,
           leadingIcon: const Icon(Symbols.cloud),
-          trailingIcon:
-              isLocal == false ? const Icon(Symbols.check, size: 20) : null,
+          trailingIcon: widget.isLocal == false
+              ? const Icon(Symbols.check, size: 20)
+              : null,
           child: Text(ui("在线")),
         ),
-        if (showLocal)
+        if (widget.showLocal)
           MenuItemButton(
             key: const ValueKey('lyric-source-local-menu-item'),
-            onPressed: onLocal,
+            onPressed: widget.onLocal,
             leadingIcon: const Icon(Symbols.folder),
-            trailingIcon:
-                isLocal == true ? const Icon(Symbols.check, size: 20) : null,
+            trailingIcon: widget.isLocal == true
+                ? const Icon(Symbols.check, size: 20)
+                : null,
             child: Text(ui("本地")),
           ),
       ],
       builder: (context, controller, _) => IconButton(
         key: const ValueKey('lyric-source-menu-button'),
-        onPressed: !enabled
+        onPressed: !widget.enabled
             ? null
             : () {
                 if (controller.isOpen) {

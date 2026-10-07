@@ -933,9 +933,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         parent != null && (parent.parent != null || folder != null);
     return [
       if (_view == PlaylistViewMode.grid)
-        SubmenuButton(
-            alignmentOffset:
-                appSubmenuBottomOffset(context, CategoryTileSize.values.length),
+        AppSubmenuButton(
             leadingIcon: const Icon(Icons.photo_size_select_large),
             menuChildren: [
               for (final size in CategoryTileSize.values)

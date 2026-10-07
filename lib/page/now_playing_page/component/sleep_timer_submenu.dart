@@ -85,10 +85,8 @@ class SleepTimerSubmenu extends StatelessWidget {
       builder: (context, _) {
         final remaining = service.sleepTimerRemaining.value;
         final stopAfter = service.stopAfterCurrent.value;
-        final rowCount = 10 +
-            (service.queueStopBoundary.active ? 1 : 0) +
-            (remaining != null ? 4 : 0);
-        final dividerCount = 1 + (remaining != null ? 1 : 0);
+        final stopTarget = service.queueStopBoundary.target;
+        final stopCommandRevision = service.queueStopBoundary.commandRevision;
         final theme = Theme.of(context);
         return MenuButtonTheme(
           data: MenuButtonThemeData(
@@ -100,9 +98,7 @@ class SleepTimerSubmenu extends StatelessWidget {
                       : theme.colorScheme.primary),
             ),
           ),
-          child: SubmenuButton(
-            alignmentOffset: appSubmenuBottomOffset(context, rowCount,
-                dividerCount: dividerCount),
+          child: AppSubmenuButton(
             leadingIcon: Icon(
               remaining != null || stopAfter || service.queueStopBoundary.active
                   ? Symbols.bedtime
@@ -149,9 +145,18 @@ class SleepTimerSubmenu extends StatelessWidget {
                 leadingIcon: const Icon(Symbols.stop_circle),
                 child: label(ui('播完当前队列后停止')),
               ),
-              if (service.queueStopBoundary.active)
+              if (stopTarget != null)
                 MenuItemButton(
-                    onPressed: service.cancelQueueStop,
+                    onPressed: () {
+                      // MenuItemButton invokes this after restoring focus in
+                      // the next frame. A newer target belongs to its own
+                      // command, even if this old overlay has just closed.
+                      if (service.queueStopBoundary.target == stopTarget &&
+                          service.queueStopBoundary.commandRevision ==
+                              stopCommandRevision) {
+                        service.cancelQueueStop();
+                      }
+                    },
                     leadingIcon: const Icon(Symbols.close),
                     child: label(ui('取消停止目标'))),
               if (remaining != null) const Divider(),

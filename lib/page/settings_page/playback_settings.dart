@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/playback_pitch_control.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -300,7 +301,7 @@ class PlaybackRateMenu extends StatelessWidget {
           ),
         if (onPitchSelected != null) ...[
           const Divider(),
-          SubmenuButton(
+          AppSubmenuButton(
             key: const ValueKey('playback-pitch-submenu'),
             leadingIcon: const Icon(Icons.music_note_outlined),
             menuChildren: pitchEnabled

@@ -15,6 +15,10 @@ class QueueStopBoundary extends ChangeNotifier {
   int? target;
   int? _playing;
   int? _session;
+  int _commandRevision = 0;
+
+  /// Every arming is a new command, including selecting the same occurrence.
+  int get commandRevision => _commandRevision;
   QueueStopCancelReason? lastCancellation;
   bool get active => target != null;
   bool canAdvanceAutomatically = true;
@@ -28,6 +32,7 @@ class QueueStopBoundary extends ChangeNotifier {
   }
 
   void arm(int occurrence) {
+    _commandRevision++;
     target = occurrence;
     lastCancellation = null;
     notifyListeners();
@@ -35,6 +40,7 @@ class QueueStopBoundary extends ChangeNotifier {
 
   bool cancel(QueueStopCancelReason reason) {
     if (target == null) return false;
+    _commandRevision++;
     target = null;
     lastCancellation = reason;
     notifyListeners();

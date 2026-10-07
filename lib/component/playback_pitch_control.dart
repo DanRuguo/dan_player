@@ -13,8 +13,10 @@ List<Widget> playbackPitchMenuItems({
   required double pitch,
   required ValueChanged<double> onSelected,
 }) {
-  Widget label(String text) => SizedBox(
-      width: (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0),
+  Widget label(String text) => ConstrainedBox(
+      constraints: BoxConstraints(
+          maxWidth:
+              (MediaQuery.sizeOf(context).width - 128).clamp(80.0, 360.0)),
       child: Text(text));
   return [
     MenuItemButton(

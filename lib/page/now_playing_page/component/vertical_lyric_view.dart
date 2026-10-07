@@ -29,8 +29,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
-bool ALWAYS_SHOW_LYRIC_VIEW_CONTROLS = false;
-
 class VerticalLyricView extends StatefulWidget {
   const VerticalLyricView({super.key});
 
@@ -144,6 +142,12 @@ class LyricControlsSurface extends StatefulWidget {
   final Widget controls;
   final VoidCallback? onFind;
 
+  /// An open menu retains only its owning surface until close or unmount.
+  static VoidCallback Function()? menuVisibilityOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<_LyricControlsMenuScope>()
+          ?.holdVisibility;
+
   @override
   State<LyricControlsSurface> createState() => _LyricControlsSurfaceState();
 }
@@ -152,6 +156,34 @@ class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
   bool _hovering = false;
   bool _controlsFocused = false;
   bool _directControls = false;
+  final _menuOwners = <Object>{};
+  bool _menuUpdateQueued = false;
+  late final VoidCallback Function() _holdMenuVisibility = _holdMenu;
+
+  VoidCallback _holdMenu() {
+    final owner = Object();
+    _setMenuVisible(owner, true);
+    return () => _setMenuVisible(owner, false);
+  }
+
+  void _setMenuVisible(Object owner, bool visible) {
+    final changed =
+        visible ? _menuOwners.add(owner) : _menuOwners.remove(owner);
+    if (!changed || !mounted) return;
+    // A child can close/unmount while this surface is being rebuilt. Keep the
+    // ownership change immediate and defer only that frame's notification.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_menuUpdateQueued) return;
+      _menuUpdateQueued = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _menuUpdateQueued = false;
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
+  }
 
   void _hoverChanged(PointerEvent event, bool hovering) {
     setState(() {
@@ -165,7 +197,7 @@ class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
     final visible = _hovering ||
         _controlsFocused ||
         _directControls ||
-        ALWAYS_SHOW_LYRIC_VIEW_CONTROLS;
+        _menuOwners.isNotEmpty;
     final surface = MouseRegion(
       onEnter: (event) => _hoverChanged(event, true),
       onExit: (event) => _hoverChanged(event, false),
@@ -207,10 +239,22 @@ class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
         ),
       ),
     );
-    return widget.onFind == null
+    final child = widget.onFind == null
         ? surface
         : LyricFindShortcut(onFind: widget.onFind!, child: surface);
+    return _LyricControlsMenuScope(
+        holdVisibility: _holdMenuVisibility, child: child);
   }
+}
+
+class _LyricControlsMenuScope extends InheritedWidget {
+  const _LyricControlsMenuScope(
+      {required this.holdVisibility, required super.child});
+  final VoidCallback Function() holdVisibility;
+
+  @override
+  bool updateShouldNotify(_LyricControlsMenuScope oldWidget) =>
+      !identical(oldWidget.holdVisibility, holdVisibility);
 }
 
 /// The real lyric surface, separated from the player singleton so its loading,

@@ -496,9 +496,7 @@ class _CategoryTileState extends State<_CategoryTile> {
           consumeOutsideTap: true,
           menuChildren: [
             if (!circle)
-              SubmenuButton(
-                  alignmentOffset: appSubmenuBottomOffset(
-                      context, CategoryTileSize.values.length),
+              AppSubmenuButton(
                   leadingIcon: const Icon(Icons.photo_size_select_large),
                   menuChildren: [
                     for (final size in CategoryTileSize.values)
