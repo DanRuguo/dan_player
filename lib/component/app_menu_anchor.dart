@@ -2,8 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
-/// Keep a cascading menu attached to its button's bottom using the items that
-/// have just been laid out, including wrapped labels and custom row heights.
+/// Attach a cascading menu to the button's bottom, or its top when there is
+/// insufficient space above, using the panel that has just been laid out.
 /// Material still owns focus, hover, scrolling, animation and screen fitting.
 class AppSubmenuButton extends StatefulWidget {
   const AppSubmenuButton({
@@ -69,9 +69,30 @@ class _AppSubmenuButtonState extends State<AppSubmenuButton> {
     return _panel?.hasSize == true ? _panel!.size.height : 0;
   }
 
+  double _allowedTop(Rect anchor, MediaQueryData mediaQuery) {
+    final layout = _panel?.parent;
+    if (layout is! RenderCustomSingleChildLayoutBox) return 0;
+    // Match Material's overlay coordinates and safe-area/sub-screen choice.
+    // Constraints are available in this same layout without reading the size
+    // of an ancestor or scheduling a second measurement frame.
+    final bounds = mediaQuery.padding.deflateRect(mediaQuery.viewInsets
+        .deflateRect(Offset.zero & layout.constraints.biggest));
+    final screens = DisplayFeatureSubScreen.subScreensInBounds(
+        bounds, DisplayFeatureSubScreen.avoidBounds(mediaQuery));
+    var closest = screens.first;
+    for (final screen in screens.skip(1)) {
+      if ((screen.center - anchor.center).distance <
+          (closest.center - anchor.center).distance) {
+        closest = screen;
+      }
+    }
+    return closest.top;
+  }
+
   @override
   Widget build(BuildContext context) {
     final menuStyle = widget.menuStyle ?? const MenuStyle();
+    final mediaQuery = MediaQuery.of(context);
     final padding = (menuStyle.padding?.resolve(const {}) ??
             MenuTheme.of(context).style?.padding?.resolve(const {}) ??
             const EdgeInsets.symmetric(vertical: 8))
@@ -89,7 +110,8 @@ class _AppSubmenuButtonState extends State<AppSubmenuButton> {
       // containing MenuAnchor retains its own entrance/exit animation.
       menuStyle: menuStyle.copyWith(
         padding: WidgetStatePropertyAll(padding),
-        alignment: _SubmenuBottomAlignment(_panelHeight, padding.top),
+        alignment: _SubmenuEdgeAlignment(_panelHeight,
+            (anchor) => _allowedTop(anchor, mediaQuery), padding.top),
       ),
       menuChildren: widget.menuChildren,
       child: widget.child,
@@ -100,14 +122,16 @@ class _AppSubmenuButtonState extends State<AppSubmenuButton> {
 /// Menu alignment is resolved after its children are laid out. Reading their
 /// sizes here corrects the first frame without a hidden measurement pass,
 /// a post-frame rebuild or a second menu animation.
-class _SubmenuBottomAlignment extends AlignmentDirectional {
-  const _SubmenuBottomAlignment(this.height, this.topPadding) : super(1, 1);
+class _SubmenuEdgeAlignment extends AlignmentDirectional {
+  const _SubmenuEdgeAlignment(this.height, this.allowedTop, this.topPadding)
+      : super(1, 1);
   final double Function() height;
+  final double Function(Rect) allowedTop;
   final double topPadding;
 
   @override
   Alignment resolve(TextDirection? direction) => _SubmenuResolvedAlignment(
-      direction == TextDirection.rtl ? -1 : 1, height, topPadding);
+      direction == TextDirection.rtl ? -1 : 1, height, allowedTop, topPadding);
 
   @override
   bool operator ==(Object other) => identical(this, other);
@@ -116,14 +140,21 @@ class _SubmenuBottomAlignment extends AlignmentDirectional {
 }
 
 class _SubmenuResolvedAlignment extends Alignment {
-  const _SubmenuResolvedAlignment(double x, this.height, this.topPadding)
+  const _SubmenuResolvedAlignment(
+      double x, this.height, this.allowedTop, this.topPadding)
       : super(x, 1);
   final double Function() height;
+  final double Function(Rect) allowedTop;
   final double topPadding;
 
   @override
-  Offset withinRect(Rect rect) => Offset(
-      x < 0 ? rect.left : rect.right, rect.bottom - height() + topPadding);
+  Offset withinRect(Rect rect) {
+    final bottomAlignedTop = rect.bottom - height();
+    final top =
+        bottomAlignedTop >= allowedTop(rect) ? bottomAlignedTop : rect.top;
+    // SubmenuButton subtracts its menu's top padding after this alignment.
+    return Offset(x < 0 ? rect.left : rect.right, top + topPadding);
+  }
 }
 
 /// Serialize reopen requests through the existing closing animation. Starting

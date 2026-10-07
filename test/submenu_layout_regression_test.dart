@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_menu_anchor.dart';
+import 'package:dan_player/component/playback_pitch_control.dart';
 import 'package:dan_player/page/settings_page/playback_settings.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +28,9 @@ void main() {
       double scale = 1,
       bool animate = false,
       TextDirection direction = TextDirection.ltr,
+      Alignment alignment = Alignment.bottomLeft,
+      EdgeInsets? safePadding,
+      EdgeInsets? viewInsets,
       GlobalKey? boundary}) async {
     tester.view.physicalSize = Size(width, height);
     tester.view.devicePixelRatio = 1;
@@ -46,6 +50,8 @@ void main() {
         child: MediaQuery(
           data: MediaQuery.of(context).copyWith(
               disableAnimations: !animate,
+              padding: safePadding,
+              viewInsets: viewInsets,
               textScaler: TextScaler.linear(scale)),
           child: Directionality(textDirection: direction, child: child!),
         ),
@@ -53,7 +59,7 @@ void main() {
       home: Scaffold(
           body: Padding(
               padding: const EdgeInsets.all(24),
-              child: Align(alignment: Alignment.bottomLeft, child: child))),
+              child: Align(alignment: alignment, child: child))),
     )));
     await tester.pumpAndSettle();
   }
@@ -97,6 +103,155 @@ void main() {
           expect(tester.binding.transientCallbackCount, 0);
         });
       }
+    }
+  }
+
+  for (final language in UiLanguage.values) {
+    for (final width in [1100.0, 360.0]) {
+      for (final scale in [1.0, 2.0]) {
+        testWidgets(
+            'top edge submenu aligns trigger top ${language.name} $width $scale',
+            (tester) async {
+          uiLanguage.value = language;
+          final boundary = GlobalKey();
+          await mount(
+              tester,
+              Builder(
+                  builder: (context) => AppMenuAnchor(
+                          menuChildren: [
+                            AppSubmenuButton(
+                              key: const ValueKey('top-pitch-submenu'),
+                              menuChildren: playbackPitchMenuItems(
+                                  context: context,
+                                  pitch: 0,
+                                  onSelected: (_) {}),
+                              child: Text(ui('升降调')),
+                            ),
+                          ],
+                          builder: (_, controller, __) => TextButton(
+                              onPressed: controller.open,
+                              child: const Text('Open')))),
+              width: width,
+              scale: scale,
+              alignment: Alignment.topLeft,
+              boundary: boundary);
+          await tester.tap(find.text('Open'));
+          await tester.pumpAndSettle();
+          final trigger = find.byKey(const ValueKey('top-pitch-submenu'));
+          await tester.tap(trigger);
+          await tester.pump();
+          Rect panel() => panelRect(
+              tester, find.byKey(const ValueKey('playback-pitch-step-down')));
+          expect(panel().top, closeTo(tester.getRect(trigger).top, .01),
+              reason: 'Top attachment must be correct on its first frame.');
+          await tester.pumpAndSettle();
+          expect(panel().top, closeTo(tester.getRect(trigger).top, .01));
+          expect(panel().bottom, lessThanOrEqualTo(1100));
+          expect(panel().left, greaterThanOrEqualTo(0));
+          expect(panel().right, lessThanOrEqualTo(width));
+          expect(tester.takeException(), isNull);
+          await capturePlaylistFeature(tester, boundary,
+              'top-submenu-${language.name}-${width.toInt()}-$scale');
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pumpAndSettle();
+          expect(tester.binding.transientCallbackCount, 0);
+        });
+      }
+    }
+  }
+
+  for (final direction in TextDirection.values) {
+    for (final local in [false, true]) {
+      testWidgets('top edge submenu tracks safe region $direction local=$local',
+          (tester) async {
+        var rows = 3;
+        late StateSetter update;
+        final boundary = GlobalKey();
+        Widget anchor() => StatefulBuilder(builder: (_, setState) {
+              update = setState;
+              return AppMenuAnchor(
+                  menuChildren: [
+                    AppSubmenuButton(
+                        key: const ValueKey('top-region-submenu'),
+                        menuStyle: MenuStyle(
+                            maximumSize: WidgetStatePropertyAll(
+                                Size(260, local ? 288 : 680)),
+                            padding: const WidgetStatePropertyAll(
+                                EdgeInsets.fromLTRB(6, 13, 6, 19))),
+                        menuChildren: [
+                          for (var index = 0; index < rows; index++)
+                            MenuItemButton(
+                                key: ValueKey(('top-region-item', index)),
+                                onPressed: () {},
+                                child: Text('Item $index')),
+                        ],
+                        child: const Text('Submenu')),
+                  ],
+                  builder: (_, controller, __) => TextButton(
+                      onPressed: controller.open, child: const Text('Open')));
+            });
+        final entry = OverlayEntry(
+            builder: (_) => Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                    padding: const EdgeInsets.all(12), child: anchor())));
+        await mount(
+            tester,
+            local
+                ? SizedBox(
+                    width: 400,
+                    height: 320,
+                    child: RepaintBoundary(
+                        key: boundary, child: Overlay(initialEntries: [entry])))
+                : Padding(
+                    padding: const EdgeInsets.only(top: 160), child: anchor()),
+            alignment: Alignment.topLeft,
+            direction: direction,
+            safePadding: local ? null : const EdgeInsets.only(top: 96),
+            viewInsets:
+                local ? null : const EdgeInsets.only(top: 40, bottom: 180));
+        final allowed = local
+            ? tester.getRect(find.byKey(boundary))
+            : const Rect.fromLTRB(0, 136, 1100, 920);
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+        final trigger = find.byKey(const ValueKey('top-region-submenu'));
+        await tester.tap(trigger);
+        await tester.pump();
+        Rect panel() => panelRect(
+            tester, find.byKey(const ValueKey(('top-region-item', 0))));
+        expect(panel().top, closeTo(tester.getRect(trigger).top, .01));
+        expect(panel().top, greaterThanOrEqualTo(allowed.top));
+        expect(panel().bottom, lessThanOrEqualTo(allowed.bottom));
+        update(() => rows = 2);
+        await tester.pumpAndSettle();
+        final bottomAlignedTop =
+            tester.getRect(trigger).bottom - panel().height;
+        expect(
+            panel().top,
+            closeTo(
+                bottomAlignedTop >= allowed.top
+                    ? bottomAlignedTop
+                    : tester.getRect(trigger).top,
+                .01));
+        update(() => rows = 30);
+        await tester.pumpAndSettle();
+        expect(panel().top, greaterThanOrEqualTo(allowed.top));
+        expect(panel().bottom, lessThanOrEqualTo(allowed.bottom));
+        final last = find.byKey(const ValueKey(('top-region-item', 29)));
+        await tester.ensureVisible(last);
+        await tester.pumpAndSettle();
+        expect(tester.getRect(last).bottom, lessThanOrEqualTo(panel().bottom));
+        expect(tester.takeException(), isNull);
+        if (local) {
+          entry.remove();
+          await tester.pumpAndSettle();
+        }
+        entry.dispose();
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        expect(tester.binding.transientCallbackCount, 0);
+      });
     }
   }
 
