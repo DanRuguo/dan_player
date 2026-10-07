@@ -14,7 +14,7 @@ import 'package:desktop_lyric/ui_language.dart';
 
 /// One bounded line and compact controls. No translation column, hover toolbar,
 /// layout on clock ticks, or independent playback/settings path.
-class TaskbarLyricRow extends StatelessWidget {
+class TaskbarLyricRow extends StatefulWidget {
   const TaskbarLyricRow(
       {super.key,
       required this.controller,
@@ -23,6 +23,17 @@ class TaskbarLyricRow extends StatelessWidget {
   final DesktopLyricController controller;
   final DesktopLyricWindowLayout windowLayout;
   final void Function(String)? sendMessage;
+
+  @override
+  State<TaskbarLyricRow> createState() => _TaskbarLyricRowState();
+}
+
+class _TaskbarLyricRowState extends State<TaskbarLyricRow> {
+  Object? _projectionIdentity;
+  _TaskbarTextProjection? _projection;
+  DesktopLyricController get controller => widget.controller;
+  DesktopLyricWindowLayout get windowLayout => widget.windowLayout;
+  void Function(String)? get sendMessage => widget.sendMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -66,11 +77,18 @@ class TaskbarLyricRow extends StatelessWidget {
             prefs.taskbarTranslation && translation?.trim().isNotEmpty == true;
         final raw =
             translated ? translation! : detailed?.content ?? legacy.content;
-        // One line even for malformed/multiline input; bounded work for huge tags.
-        final text =
-            (raw.trim().isEmpty ? controller.nowPlaying.value.title : raw)
-                .replaceAll(RegExp(r'[\r\n\t]+'), ' ');
-        final visibleText = text.characters.take(2048).toString();
+        final fallback = raw.trim().isEmpty;
+        final content = fallback ? controller.nowPlaying.value.title : raw;
+        final authored = translated || fallback
+            ? const <DesktopLyricWord>[]
+            : detailed?.words ?? const <DesktopLyricWord>[];
+        final projectionIdentity = (content, authored);
+        if (_projectionIdentity != projectionIdentity) {
+          _projection = _TaskbarTextProjection.singleLine(content, authored);
+          _projectionIdentity = projectionIdentity;
+        }
+        final text = _projection!.text;
+        final visibleText = _projection!.visibleText;
         final compact = bounds.maxWidth < 520;
         final controls = <Widget>[
           if (!compact)
@@ -135,9 +153,7 @@ class TaskbarLyricRow extends StatelessWidget {
                                   ? Colors.black
                                   : Colors.white)
                               : null,
-                          words: translated
-                              ? const []
-                              : detailed?.words ?? const [],
+                          words: _projection!.words,
                           reducedMotion: reducedMotion,
                         )),
                   )));
@@ -154,6 +170,63 @@ class TaskbarLyricRow extends StatelessWidget {
       }),
     );
   }
+}
+
+/// The displayed UTF-16 prefix and authored timing use one projection. A
+/// collapsed separator belongs to the first contributing span; later empty
+/// spans retain their timing but have no glyph boxes or visual demand. Neither
+/// the protocol nor the controller's original word data is changed.
+class _TaskbarTextProjection {
+  const _TaskbarTextProjection(this.text, this.visibleText, this.words);
+
+  factory _TaskbarTextProjection.singleLine(
+      String raw, List<DesktopLyricWord> authored) {
+    final text = raw.replaceAll(RegExp(r'[\r\n\t]+'), ' ');
+    final visibleText = text.characters.take(2048).toString();
+    _TaskbarTextProjection untimed() =>
+        _TaskbarTextProjection(text, visibleText, const []);
+    if (authored.isEmpty) return untimed();
+    // As in the native taskbar publisher, an unrelated or partial word source
+    // cannot acquire timing for displayed text merely through matching length.
+    var offset = 0;
+    for (final word in authored) {
+      if (!raw.startsWith(word.content, offset)) return untimed();
+      offset += word.content.length;
+    }
+    if (offset != raw.length) return untimed();
+    if (visibleText == raw) {
+      return _TaskbarTextProjection(text, visibleText, authored);
+    }
+
+    final projected = <DesktopLyricWord>[];
+    var remaining = visibleText.length;
+    var inSeparators = false;
+    for (final word in authored) {
+      if (remaining <= 0) break;
+      final buffer = StringBuffer();
+      for (var index = 0; index < word.content.length; index++) {
+        if (remaining <= 0) break;
+        final code = word.content.codeUnitAt(index);
+        final separator = code == 13 || code == 10 || code == 9;
+        if (!separator || !inSeparators) {
+          buffer.writeCharCode(separator ? 32 : code);
+          remaining--;
+        }
+        inSeparators = separator;
+      }
+      projected.add(DesktopLyricWord(
+          word.startMilliseconds, word.lengthMilliseconds, buffer.toString()));
+    }
+    // The global character prefix guarantees that even a grapheme divided
+    // across authored spans is fully retained at the 2048-character boundary.
+    assert(projected.map((word) => word.content).join() == visibleText);
+    return _TaskbarTextProjection(
+        text, visibleText, List.unmodifiable(projected));
+  }
+
+  final String text;
+  final String visibleText;
+  final List<DesktopLyricWord> words;
 }
 
 /// Binary search only on line/width/preferences changes, never on playback ticks.

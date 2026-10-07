@@ -316,7 +316,14 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   }
 
   void _seekByKeyboard(double fraction) {
-    if (widget.onSeek == null || _length == 0) return;
+    // Keyboard and semantics share this path. Neither may take a pending or
+    // accepted primary touch, or seek a surface whose visibility just changed.
+    if (!_active ||
+        _seekPointer != null ||
+        widget.onSeek == null ||
+        _length == 0) {
+      return;
+    }
     _cancelSeek();
     try {
       _applySeek(fraction);

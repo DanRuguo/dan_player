@@ -52,6 +52,21 @@ enum PlayerState {
   unknown,
 }
 
+/// A seek invalidates the previous polling stamp. Preserve active playback's
+/// position and completion observation without starting a paused transport.
+/// A data stall retains playback intent and resumes natively after refill.
+Timer? rearmBassPositionUpdaterAfterSeek(
+  Timer? current, {
+  required PlayerState stateBeforeSeek,
+  required Timer Function() create,
+}) {
+  current?.cancel();
+  return stateBeforeSeek == PlayerState.playing ||
+          stateBeforeSeek == PlayerState.stalled
+      ? create()
+      : null;
+}
+
 enum BassNetworkConfigurationFailure { proxy, timeout }
 
 /// A native setup failure that can be localized after the URL worker returns.
@@ -1912,11 +1927,11 @@ class BassPlayer {
   /// do nothing if [setSource] hasn't been called
   void seek(double position) {
     if (_fstream == null) return;
-    final wasPlaying = playerState == PlayerState.playing;
+    final stateBeforeSeek = playerState;
 
     if (wasapiExclusive && _wasapiInitialized) {
       seekWasapiOutput(
-        wasPlaying: playerState == PlayerState.playing,
+        wasPlaying: stateBeforeSeek == PlayerState.playing,
         flush: () {
           // A paused mixer source leaves the resident endpoint running. Stop
           // only a currently started endpoint to flush pre-seek device data;
@@ -1940,8 +1955,11 @@ class BassPlayer {
     // paused sliders/lyrics update without resuming playback, and report BASS's
     // real (possibly sample-rounded) position rather than an optimistic target.
     _eventBoundary.command(rearm: true);
-    _positionUpdater?.cancel();
-    _positionUpdater = wasPlaying ? _getPositionUpdater() : null;
+    _positionUpdater = rearmBassPositionUpdaterAfterSeek(
+      _positionUpdater,
+      stateBeforeSeek: stateBeforeSeek,
+      create: _getPositionUpdater,
+    );
     _publishPosition();
     _publishState(playerState);
   }

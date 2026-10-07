@@ -224,6 +224,21 @@ abstract interface class LyricTextReadingGeometry {
   double? readingLayoutY(int offset, RenderBox ancestor);
 }
 
+/// Map cached glyph geometry before paint without reading Transform sizes.
+double? lyricReadingLayoutY(RenderBox box, Offset point, RenderBox ancestor) {
+  // The viewport needs layout coordinates before paint. Walking layout
+  // offsets avoids reading an ancestor Transform's size while a more
+  // distant parent is laying out; paint-only emphasis stays separate.
+  RenderObject? current = box;
+  var local = point;
+  while (current != null && !identical(current, ancestor)) {
+    final data = current.parentData;
+    if (data is BoxParentData) local += data.offset;
+    current = current.parent;
+  }
+  return identical(current, ancestor) ? local.dy : null;
+}
+
 class _BalancedLyricTextState extends State<BalancedLyricText>
     implements LyricTextReadingGeometry {
   @override
@@ -234,20 +249,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
       _readingY(offset, (box, point) => box.localToGlobal(point).dy);
 
   @override
-  double? readingLayoutY(int offset, RenderBox ancestor) =>
-      _readingY(offset, (box, point) {
-        // The viewport needs layout coordinates before paint. Walking layout
-        // offsets avoids reading an ancestor Transform's size while a more
-        // distant parent is laying out; paint-only emphasis stays separate.
-        RenderObject? current = box;
-        var local = point;
-        while (current != null && !identical(current, ancestor)) {
-          final data = current.parentData;
-          if (data is BoxParentData) local += data.offset;
-          current = current.parent;
-        }
-        return identical(current, ancestor) ? local.dy : null;
-      });
+  double? readingLayoutY(int offset, RenderBox ancestor) => _readingY(
+      offset, (box, point) => lyricReadingLayoutY(box, point, ancestor));
 
   double? _readingY(
       int offset, double? Function(RenderBox box, Offset point) map) {

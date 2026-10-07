@@ -20,6 +20,7 @@ import 'package:dan_player/utils.dart';
 import 'package:dan_player/window_mode_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
@@ -252,11 +253,14 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
   double? _dragPosition;
   Object? _dragTrackIdentity;
   bool _dragging = false;
+  bool _ignoreAdjustmentCycle = false;
   int? _seekPointer;
+  late final FocusNode _seekFocus;
 
   @override
   void initState() {
     super.initState();
+    _seekFocus = FocusNode(onKeyEvent: _handleSeekKey);
     _livePosition.value = widget.position;
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
@@ -331,6 +335,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
     widget.hidden?.removeListener(_syncPositionActivity);
     _preferences?.removeListener(_syncPositionActivity);
     _livePosition.dispose();
+    _seekFocus.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -346,6 +351,28 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
   bool get _canSeek =>
       widget.onSeek != null && _duration > 0 && !widget.isBuffering;
 
+  KeyEventResult _handleSeekKey(FocusNode node, KeyEvent event) {
+    if ((_active && !_dragging) ||
+        (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    // The current touch owns its preview until release. Consume stock Slider
+    // arrows here; afterward its usual keyboard and semantics actions remain.
+    return key == LogicalKeyboardKey.arrowLeft ||
+            key == LogicalKeyboardKey.arrowRight ||
+            key == LogicalKeyboardKey.arrowUp ||
+            key == LogicalKeyboardKey.arrowDown
+        ? KeyEventResult.handled
+        : KeyEventResult.ignored;
+  }
+
   void _cancelSeekPointer(int pointer) {
     if (_seekPointer != pointer) return;
     _seekPointer = null;
@@ -359,8 +386,14 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
   }
 
   void _finishSeek(double value) {
-    final shouldSeek =
-        _dragging && _canSeek && _dragTrackIdentity == widget.trackIdentity;
+    if (_ignoreAdjustmentCycle) {
+      _ignoreAdjustmentCycle = false;
+      return;
+    }
+    final shouldSeek = _active &&
+        _dragging &&
+        _canSeek &&
+        _dragTrackIdentity == widget.trackIdentity;
     setState(() {
       _dragging = false;
       _dragTrackIdentity = null;
@@ -382,6 +415,19 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
             widget.readPosition?.call() ?? _livePosition.value;
       }
     }
+  }
+
+  void _beginSeek(double value) {
+    // Semantics start/change/end may run inside a still active physical drag.
+    if (_dragging && _seekPointer != null) {
+      _ignoreAdjustmentCycle = true;
+      return;
+    }
+    setState(() {
+      _dragging = true;
+      _dragTrackIdentity = widget.trackIdentity;
+      _dragPosition = value;
+    });
   }
 
   @override
@@ -754,24 +800,19 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
                   ),
                   child: Slider(
                     key: const ValueKey('compact-progress-slider'),
+                    focusNode: _seekFocus,
                     value: _position,
                     max: _duration > 0 ? _duration : 1,
                     semanticFormatterCallback: (value) =>
                         '${_timeText(value)} / ${_timeText(_duration)}',
                     onChanged: _canSeek
                         ? (value) {
-                            if (_dragging) {
+                            if (_dragging && !_ignoreAdjustmentCycle) {
                               setState(() => _dragPosition = value);
                             }
                           }
                         : null,
-                    onChangeStart: _canSeek
-                        ? (value) => setState(() {
-                              _dragging = true;
-                              _dragTrackIdentity = widget.trackIdentity;
-                              _dragPosition = value;
-                            })
-                        : null,
+                    onChangeStart: _canSeek ? _beginSeek : null,
                     onChangeEnd: _canSeek ? _finishSeek : null,
                   ),
                 ),

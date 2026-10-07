@@ -12,6 +12,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.d
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderCustomPaint;
 import 'package:flutter/semantics.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -25,6 +26,7 @@ class LyricViewTile extends StatelessWidget {
     required this.position,
     required this.opacity,
     required this.reducedMotion,
+    this.snapPresentation = false,
     this.distance = 1,
     this.onTap,
     this.onPractice,
@@ -37,6 +39,7 @@ class LyricViewTile extends StatelessWidget {
   final double opacity;
   final int distance;
   final bool reducedMotion;
+  final bool snapPresentation;
   final VoidCallback? onTap;
   final VoidCallback? onPractice;
   final VoidCallback? onContentRevealEnd;
@@ -48,6 +51,11 @@ class LyricViewTile extends StatelessWidget {
     final controller = context.watch<LyricViewController>();
     final scheme = Theme.of(context).colorScheme;
     final isMainLine = distance == 0;
+    // A found row can be far from the singer, or before the first timestamp.
+    // Its existing finite reveal also releases the reading-layout anchor.
+    final notifyReadingSettingEnd = isMainLine ||
+        (controller.readingMode &&
+            identical(controller.readingTarget?.line, line));
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
     final glowAllowed =
         !highContrast && RenderingPreferencesScope.of(context).surfaceBlur;
@@ -136,8 +144,8 @@ class LyricViewTile extends StatelessWidget {
                     alignment: alignment,
                   ),
                   directFontSize: controller.directFontSize,
-                  reducedMotion: reducedMotion,
-                  onEnd: isMainLine ? onPresentationEnd : null,
+                  reducedMotion: reducedMotion || snapPresentation,
+                  onEnd: notifyReadingSettingEnd ? onPresentationEnd : null,
                   builder: (context, activation, presentation, fontTransition) {
                     TextStyle primaryStyle(double size) =>
                         DefaultTextStyle.of(context).style.copyWith(
@@ -329,7 +337,9 @@ class LyricViewTile extends StatelessWidget {
                                 romanization: controller.showRomanization,
                                 translation: controller.showTranslation,
                                 reducedMotion: reducedMotion,
-                                onEnd: isMainLine ? onContentRevealEnd : null,
+                                onEnd: notifyReadingSettingEnd
+                                    ? onContentRevealEnd
+                                    : null,
                                 builder: (context, _) => SizedBox(
                                   // Keep blank-row choreography and let the
                                   // current row signal the end of a setting
@@ -352,7 +362,9 @@ class LyricViewTile extends StatelessWidget {
                                 romanization: controller.showRomanization,
                                 translation: controller.showTranslation,
                                 reducedMotion: reducedMotion,
-                                onEnd: isMainLine ? onContentRevealEnd : null,
+                                onEnd: notifyReadingSettingEnd
+                                    ? onContentRevealEnd
+                                    : null,
                                 builder: (context, visibility) => Column(
                                   mainAxisSize: MainAxisSize.min,
                                   crossAxisAlignment:
@@ -513,11 +525,57 @@ class _TimedLyricText extends StatefulWidget {
   State<_TimedLyricText> createState() => _TimedLyricTextState();
 }
 
-class _TimedLyricTextState extends State<_TimedLyricText> {
+/// Identify the primary timed paragraph independently from auxiliary text.
+abstract interface class TimedLyricReadingGeometry
+    implements LyricTextReadingGeometry {
+  SyncLyricLine get readingLine;
+}
+
+class _TimedLyricTextState extends State<_TimedLyricText>
+    implements TimedLyricReadingGeometry {
   Object? _shapeIdentity;
   Object? _layoutIdentity;
   _TimedLyricParagraph? _paragraph;
   _TimedLyricLayout? _layout;
+
+  @override
+  SyncLyricLine get readingLine => widget.line;
+
+  @override
+  String get readingText => widget.line.content;
+
+  @override
+  double? readingGlobalY(int offset) =>
+      _readingY(offset, (box, point) => box.localToGlobal(point).dy);
+
+  @override
+  double? readingLayoutY(int offset, RenderBox ancestor) => _readingY(
+      offset, (box, point) => lyricReadingLayoutY(box, point, ancestor));
+
+  double? _readingY(
+      int offset, double? Function(RenderBox box, Offset point) map) {
+    final layout = _layout;
+    if (layout == null) return null;
+    final glyphY = layout.readingGlyphY(offset);
+    if (glyphY == null) return null;
+    double? result;
+    void visit(RenderObject object) {
+      if (result != null || !object.attached) return;
+      if (object is RenderCustomPaint &&
+          object.hasSize &&
+          object.painter is LyricWordHighlightPainter) {
+        final painter = object.painter! as LyricWordHighlightPainter;
+        if (identical(painter._layout, layout)) {
+          result = map(object, Offset(0, glyphY + painter.inkOffset.dy));
+        }
+      }
+      if (result == null) object.visitChildren(visit);
+    }
+
+    final root = context.findRenderObject();
+    if (root != null) visit(root);
+    return result;
+  }
 
   @override
   void didUpdateWidget(_TimedLyricText oldWidget) {
@@ -859,6 +917,28 @@ class _TimedLyricLayout {
       paragraph.gradientInk(shader);
 
   late final List<_TimedWordShape> words;
+  final _readingGlyphYs = <int, double?>{};
+
+  // Read tools alone query this existing paragraph. Cache a complete grapheme
+  // box for the layout's lifetime; playback never shapes or searches for it.
+  double? readingGlyphY(int offset) {
+    if (offset < 0 || offset >= line.content.length) return null;
+    return _readingGlyphYs.putIfAbsent(offset, () {
+      var start = 0;
+      for (final character in line.content.characters) {
+        final end = start + character.length;
+        if (end <= offset) {
+          start = end;
+          continue;
+        }
+        final boxes = base.getBoxesForSelection(
+            TextSelection(baseOffset: start, extentOffset: end));
+        return boxes.isEmpty ? null : boxes.first.top;
+      }
+      return null;
+    });
+  }
+
   late final bool completeWordInk;
   late final Set<int> movingIndices;
   late final List<List<Rect>> wordInkClips = () {

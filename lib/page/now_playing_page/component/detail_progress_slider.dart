@@ -143,6 +143,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   bool _hovered = false;
   bool _focused = false;
   bool _dragging = false;
+  bool _ignoreAdjustmentCycle = false;
   Object? _dragIdentity;
   int? _pointer;
   double _target = 0;
@@ -426,6 +427,12 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   }
 
   void _begin(double value) {
+    // Semantics adjustments synchronously emit a second start/change/end even
+    // while Material's physical drag remains active. Keep that touch's preview.
+    if (_dragging && _pointer != null) {
+      _ignoreAdjustmentCycle = true;
+      return;
+    }
     _smoothing.stop();
     _dragOrigin = _safe(widget.readPosition());
     _dragIdentity = widget.trackIdentity;
@@ -435,8 +442,16 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   }
 
   void _finish(double value) {
-    final canSeek =
-        _dragging && _enabled && _dragIdentity == widget.trackIdentity;
+    if (_ignoreAdjustmentCycle) {
+      _ignoreAdjustmentCycle = false;
+      return;
+    }
+    // An end while the finger is still down is a semantics cycle or an arena
+    // cancellation to the controls' scrollable, never a physical release.
+    final canSeek = _pointer == null &&
+        _dragging &&
+        _enabled &&
+        _dragIdentity == widget.trackIdentity;
     // MouseRegion does not emit hover while a button is down. Hand off at the
     // last drag position instead of reviving the stale pre-drag hover point.
     _hoverPosition.value = _hovered ? _safe(value) : null;
@@ -500,10 +515,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (!_enabled ||
-        !_active ||
-        _dragging ||
-        (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
     final keyboard = HardwareKeyboard.instance;
@@ -513,6 +525,17 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
+    if (_dragging || _pointer != null || !_active) {
+      // Ignoring an arrow lets Material's enclosing shortcut commit the
+      // preview through onChangeStart/onChangeEnd while a pointer still owns it.
+      return key == LogicalKeyboardKey.arrowLeft ||
+              key == LogicalKeyboardKey.arrowRight ||
+              key == LogicalKeyboardKey.arrowUp ||
+              key == LogicalKeyboardKey.arrowDown
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
+    if (!_enabled) return KeyEventResult.ignored;
     final step = keyboard.isShiftPressed ? 1.0 : 5.0;
     double? target;
     if (key == LogicalKeyboardKey.arrowLeft ||
@@ -690,7 +713,8 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                                 onChangeStart: _enabled ? _begin : null,
                                 onChanged: _enabled
                                     ? (value) {
-                                        if (_dragging) {
+                                        if (_dragging &&
+                                            !_ignoreAdjustmentCycle) {
                                           _markHandleJump(
                                               _display.value, _safe(value));
                                           _display.value = _safe(value);
@@ -852,6 +876,15 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
               child: child);
 
   Widget _timeMenu(ColorScheme scheme) {
+    final identity = widget.trackIdentity;
+    final generation = _generation;
+    final undoPosition = _undoPosition;
+    bool current() =>
+        mounted &&
+        !_dragging &&
+        _pointer == null &&
+        identity == widget.trackIdentity &&
+        generation == _generation;
     final menuWidth =
         (MediaQuery.sizeOf(context).width - 32).clamp(120.0, 360.0);
     final menuStyle = MenuStyle(
@@ -882,12 +915,12 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
         ),
         MenuItemButton(
           key: const ValueKey('detail-progress-undo-seek'),
-          onPressed: !_enabled || _undoPosition == null
+          onPressed: !_enabled || undoPosition == null
               ? null
               : () {
-                  final target = _undoPosition!;
+                  if (!current() || _undoPosition != undoPosition) return;
                   setState(() => _undoPosition = null);
-                  _seekFromAction(target, remember: false);
+                  _seekFromAction(undoPosition, remember: false);
                 },
           leadingIcon: const Icon(Icons.undo),
           child: label(ui('撤销进度跳转')),
@@ -901,7 +934,9 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
               for (final bookmark in bookmarks)
                 MenuItemButton(
                   onPressed: _enabled
-                      ? () => _seekFromAction(bookmark.position)
+                      ? () {
+                          if (current()) _seekFromAction(bookmark.position);
+                        }
                       : null,
                   child: label(
                       '${_time(bookmark.position)} · ${bookmark.label}',

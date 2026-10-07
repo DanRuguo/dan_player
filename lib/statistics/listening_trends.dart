@@ -52,6 +52,10 @@ class ListeningTrendComparison {
   final int currentMilliseconds, previousMilliseconds;
   final int activeDays, previousActiveDays;
   final int maximumDailyMilliseconds;
+  late final int currentMaximumDailyMilliseconds =
+      current.fold(0, (maximum, day) => math.max(maximum, day.milliseconds));
+  late final int previousMaximumDailyMilliseconds =
+      previous.fold(0, (maximum, day) => math.max(maximum, day.milliseconds));
   int get periodDays => current.length;
   int get deltaMilliseconds => currentMilliseconds - previousMilliseconds;
   double? get changePercent => previousMilliseconds == 0

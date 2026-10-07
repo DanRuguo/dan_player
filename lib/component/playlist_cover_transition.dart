@@ -7,6 +7,8 @@ import 'dart:ui' as ui;
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'category_cover_flight.dart';
 import 'category_tile_layout.dart';
+import 'cover_image_readiness.dart';
+import 'cover_route_landing.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -32,61 +34,10 @@ class PlaylistCoverRouteFlight extends StatefulWidget {
 class _PlaylistCoverRouteFlightState extends State<PlaylistCoverRouteFlight>
     with WidgetsBindingObserver {
   final _contentKey = GlobalKey();
-  final _artKey = GlobalKey();
-  ui.Image? _landingImage;
-  Timer? _landingTimeout;
-  int _landingGeneration = 0;
-  bool _readinessScheduled = false;
+  late final _landing =
+      CoverRouteLandingController(canRetain: () => mounted && _allowsFlight);
 
   bool get _allowsFlight => coverFlightMotionAllowed(context);
-
-  void _acceptSource(ui.Image? image) {
-    if (image == null || !mounted || !_allowsFlight) return;
-    final render = _artKey.currentContext?.findRenderObject();
-    if (render is RenderBox && _coverImage(render) != null) return;
-    final retained = image.clone();
-    final generation = ++_landingGeneration;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || generation != _landingGeneration || !_allowsFlight) {
-        retained.dispose();
-        return;
-      }
-      _clearLanding();
-      setState(() => _landingImage = retained);
-      // Match the existing bounded artwork handoff. Loading never drives a
-      // frame loop, and a failed codec cannot leave an old texture forever.
-      _landingTimeout = Timer(const Duration(seconds: 10), _clearLanding);
-      _imageMayBeReady();
-    });
-  }
-
-  void _imageMayBeReady() {
-    if (_landingImage == null || _readinessScheduled) return;
-    _readinessScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _readinessScheduled = false;
-      if (!mounted || _landingImage == null) return;
-      final render = _artKey.currentContext?.findRenderObject();
-      if (render is RenderBox && _coverImage(render) != null) {
-        _clearLanding();
-      }
-    });
-  }
-
-  void _clearLanding({bool notify = true}) {
-    ++_landingGeneration;
-    _landingTimeout?.cancel();
-    _landingTimeout = null;
-    final image = _landingImage;
-    _landingImage = null;
-    if (image == null) return;
-    if (notify && mounted) {
-      setState(() {});
-      WidgetsBinding.instance.addPostFrameCallback((_) => image.dispose());
-    } else {
-      image.dispose();
-    }
-  }
 
   @override
   void initState() {
@@ -97,26 +48,28 @@ class _PlaylistCoverRouteFlightState extends State<PlaylistCoverRouteFlight>
   @override
   void didChangeAccessibilityFeatures() {
     if (!mounted) return;
-    if (!_allowsFlight) _clearLanding(notify: false);
+    if (!_allowsFlight) _landing.retire(notify: false);
     setState(() {});
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!mounted) return;
-    if (!_allowsFlight) _clearLanding(notify: false);
+    if (!_allowsFlight) _landing.retire(notify: false);
     setState(() {});
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_allowsFlight) _clearLanding(notify: false);
+  void didUpdateWidget(PlaylistCoverRouteFlight oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.playlistId != widget.playlistId) {
+      _landing.retire(notify: false);
+    }
   }
 
   @override
   void dispose() {
-    _clearLanding(notify: false);
+    _landing.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -129,21 +82,12 @@ class _PlaylistCoverRouteFlightState extends State<PlaylistCoverRouteFlight>
         borderRadius: widget.borderRadius,
         // The artwork owns its natural square in centered circle tiles. Only
         // the temporary landing image fills that already established geometry.
-        child: Stack(fit: StackFit.loose, children: [
-          _CoverReadinessObserver(
-              key: _artKey,
-              onChanged: _imageMayBeReady,
-              hidePlaceholder: false,
-              child: widget.child),
-          if (_landingImage != null)
-            Positioned.fill(
-                child: ExcludeSemantics(
-                    child: RawImage(
-                        key: const ValueKey('playlist-route-landing-image'),
-                        image: _landingImage,
-                        fit: BoxFit.cover,
-                        filterQuality: FilterQuality.medium))),
-        ]));
+        child: CoverRouteLanding(
+            controller: _landing,
+            identity: widget.playlistId,
+            borderRadius: widget.borderRadius,
+            imageKey: const ValueKey('playlist-route-landing-image'),
+            child: widget.child));
     if (!_allowsFlight) {
       return content;
     }
@@ -157,22 +101,9 @@ class _PlaylistCoverRouteFlightState extends State<PlaylistCoverRouteFlight>
       flightShuttleBuilder: (context, animation, direction, from, to) {
         final source = (from.widget as Hero).child as _PlaylistRouteContent;
         final destination = (to.widget as Hero).child as _PlaylistRouteContent;
-        ui.Image? image;
-        void findImage(RenderObject render) {
-          if (image != null) return;
-          if (render is RenderImage &&
-              render.image != null &&
-              render.color == null &&
-              render.fit == BoxFit.cover) {
-            image = render.image;
-          } else {
-            render.visitChildren(findImage);
-          }
-        }
-
         final render = from.findRenderObject();
-        if (render != null) findImage(render);
-        destination.owner._acceptSource(image);
+        final image = render == null ? null : firstDecodedCoverImage(render);
+        destination.owner._landing.acceptSource(image);
         return CoverFlightMotionGate(
             child: _PlaylistRouteShuttle(
                 animation: animation,
@@ -508,7 +439,7 @@ class _PlaylistCoverTransitionHostState
             in visible.take(PlaylistCoverTransitionHost.maximumSnapshots)) {
           if (captureIds != null && !captureIds.contains(entry.$1)) continue;
           final old = oldFlights[entry.$1];
-          final image = _coverImage(entry.$2.boundary) ??
+          final image = decodedCoverImage(entry.$2.boundary) ??
               (old?.hadImage == true ? old!.image : null);
           if (image != null) {
             retained.add(_CoverFlight(entry.$1, entry.$2, image.clone(),
@@ -580,7 +511,7 @@ class _PlaylistCoverTransitionHostState
                 math.max(geometry.boundary.size.width,
                     geometry.boundary.size.height),
           );
-          final retained = _coverImage(geometry.boundary);
+          final retained = decodedCoverImage(geometry.boundary);
           final ui.Image image;
           if (retained != null) {
             // The decoded texture already exists. Clone only its handle, not
@@ -745,7 +676,7 @@ class _PlaylistCoverTransitionHostState
   bool _targetsReady() => _flights.every((flight) =>
       flight.target == null ||
       ((_markers[flight.id]?._motionReady ?? true) &&
-          (!flight.hadImage || _hasImage(flight.target!.boundary))));
+          (!flight.hadImage || hasDecodedCoverImage(flight.target!.boundary))));
 
   void _tryReveal() {
     if (!_busy ||
@@ -1121,7 +1052,7 @@ class _PlaylistCoverTransitionMarkerState
           : const AlwaysStoppedAnimation(1),
       child: RepaintBoundary(
           key: _boundary,
-          child: _CoverReadinessObserver(
+          child: CoverImageReadinessObserver(
               onChanged: () => _owner?._imageMayBeReady(),
               hidePlaceholder: scope?.hidden.contains(widget.entryId) == true &&
                   scope!.owner._flights.any((flight) =>
@@ -1133,7 +1064,7 @@ class _PlaylistCoverTransitionMarkerState
 
 class _CoverGeometry {
   _CoverGeometry(this.rect, this.radius, this.boundary)
-      : hadImage = _hasImage(boundary);
+      : hadImage = hasDecodedCoverImage(boundary);
   final bool hadImage;
   final Rect rect;
   final BorderRadius radius;
@@ -1219,96 +1150,4 @@ class _CoverFlightsPainter extends CustomPainter {
       flights != oldDelegate.flights ||
       animation != oldDelegate.animation ||
       reveal != oldDelegate.reveal;
-}
-
-ui.Image? _coverImage(RenderBox boundary) {
-  RenderImage? found;
-  var usable = true;
-  void visit(RenderObject render) {
-    if (!usable) return;
-    if (render is RenderOpacity && render.opacity != 1 ||
-        render is RenderAnimatedOpacity && render.opacity.value != 1) {
-      usable = false;
-      return;
-    }
-    if (render is RenderImage && render.image != null) {
-      if (found != null ||
-          render.fit != BoxFit.cover ||
-          render.color != null ||
-          render.centerSlice != null ||
-          render.repeat != ImageRepeat.noRepeat ||
-          render.matchTextDirection) {
-        usable = false;
-        return;
-      }
-      final rect = MatrixUtils.transformRect(
-          render.getTransformTo(boundary), Offset.zero & render.size);
-      final box = Offset.zero & boundary.size;
-      if ((rect.topLeft - box.topLeft).distance > .5 ||
-          (rect.bottomRight - box.bottomRight).distance > .5) {
-        usable = false;
-        return;
-      }
-      found = render;
-    }
-    render.visitChildren(visit);
-  }
-
-  visit(boundary);
-  return usable ? found?.image : null;
-}
-
-bool _hasImage(RenderObject render) {
-  if (!render.attached) return false;
-  if (render is RenderImage && render.image != null) return true;
-  var found = false;
-  render.visitChildren((child) {
-    if (!found) found = _hasImage(child);
-  });
-  return found;
-}
-
-/// Image completion changes a descendant's layout/paint state even while the
-/// target is fully transparent. Observe those events instead of polling frames.
-class _CoverReadinessObserver extends SingleChildRenderObjectWidget {
-  const _CoverReadinessObserver(
-      {super.key,
-      required this.onChanged,
-      required this.hidePlaceholder,
-      required super.child});
-  final VoidCallback onChanged;
-  final bool hidePlaceholder;
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _RenderCoverReadiness(onChanged, hidePlaceholder);
-  @override
-  void updateRenderObject(
-      BuildContext context, _RenderCoverReadiness renderObject) {
-    renderObject.onChanged = onChanged;
-    renderObject.hidePlaceholder = hidePlaceholder;
-    renderObject.markNeedsPaint();
-  }
-}
-
-class _RenderCoverReadiness extends RenderProxyBox {
-  _RenderCoverReadiness(this.onChanged, this.hidePlaceholder);
-  VoidCallback onChanged;
-  bool hidePlaceholder;
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    if (hidePlaceholder && child != null && !_hasImage(child!)) return;
-    super.paint(context, offset);
-  }
-
-  @override
-  void markNeedsPaint() {
-    super.markNeedsPaint();
-    onChanged();
-  }
-
-  @override
-  void performLayout() {
-    super.performLayout();
-    onChanged();
-  }
 }

@@ -396,6 +396,12 @@ typedef LyricFontTransition = ({
   double visualProgress,
 });
 
+/// Reading anchors use the line's current paint geometry during parent layout.
+/// Plain values avoid accessing a descendant Transform's size in that phase.
+abstract interface class LyricLineReadingGeometry {
+  double readingPaintY(double layoutY, double lineHeight);
+}
+
 class LyricLineMotion extends ImplicitlyAnimatedWidget {
   const LyricLineMotion({
     super.key,
@@ -449,13 +455,20 @@ class _SettledAlignmentTween extends AlignmentTween {
   Alignment lerp(double t) => super.lerp(_settledGeometryProgress(t));
 }
 
-class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
+class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion>
+    implements LyricLineReadingGeometry {
   Tween<double>? _opacity;
   Tween<double>? _scale;
   Tween<double>? _activation;
   Tween<double>? _fontSize;
   Tween<double>? _translationFontSize;
   AlignmentTween? _alignment;
+
+  @override
+  double readingPaintY(double layoutY, double lineHeight) {
+    final pivot = (_alignment!.evaluate(animation).y + 1) * lineHeight / 2;
+    return pivot + (layoutY - pivot) * _scale!.evaluate(animation);
+  }
 
   @override
   void didUpdateWidget(LyricLineMotion oldWidget) {
@@ -471,7 +484,8 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
     _opacity = visitor(_opacity, widget.opacity,
         (value) => Tween<double>(begin: value as double)) as Tween<double>?;
     _scale = visitor(_scale, widget.scale,
-        (value) => _SettledScaleTween(begin: value as double)) as Tween<double>?;
+            (value) => _SettledScaleTween(begin: value as double))
+        as Tween<double>?;
     _activation = visitor(_activation, widget.activation,
         (value) => Tween<double>(begin: value as double)) as Tween<double>?;
     _fontSize = visitor(_fontSize, widget.presentation.fontSize,
@@ -493,8 +507,8 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion> {
     final fontSize = _fontSize!.transform(fontProgress);
     final translationFontSize = _translationFontSize!.transform(fontProgress);
     final alignment = _alignment!.evaluate(animation);
-    final hasGeometryMotion = _scale!.begin != _scale!.end ||
-        _alignment!.begin != _alignment!.end;
+    final hasGeometryMotion =
+        _scale!.begin != _scale!.end || _alignment!.begin != _alignment!.end;
     return Opacity(
       opacity: _opacity!.evaluate(animation).clamp(0.0, 1.0),
       alwaysIncludeSemantics: true,

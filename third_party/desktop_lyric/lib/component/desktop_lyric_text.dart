@@ -133,6 +133,8 @@ class DesktopLyricText extends StatefulWidget {
 
 class _DesktopLyricTextState extends State<DesktopLyricText> {
   Object? _identity;
+  Object? _shapeIdentity;
+  _DesktopLyricTextShaping? _shaping;
   _DesktopLyricTextLayout? _layout;
   bool _reduced = true;
   int _wordEndMilliseconds = 0;
@@ -181,12 +183,13 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
     // TextPainter does not inherit the app's font as Text does. Merge the real
     // desktop typography before caching so CJK/fallback fonts stay identical.
     final style = DefaultTextStyle.of(context).style.merge(widget.style);
-    final identity = (
+    final shapeIdentity = (
       widget.text,
       widget.words,
       widget.vertical,
-      widget.maxVerticalUnitWidth,
-      widget.maxHorizontalWidth,
+      !widget.vertical &&
+          widget.maxHorizontalWidth != null &&
+          widget.maxHorizontalWidth!.isFinite,
       style,
       widget.playedColor,
       widget.unplayedColor,
@@ -194,20 +197,33 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
       direction,
       scaler
     );
+    final identity = (
+      shapeIdentity,
+      widget.maxVerticalUnitWidth,
+      widget.maxHorizontalWidth,
+    );
     if (_identity != identity) {
-      _layout?.dispose();
+      if (_shapeIdentity != shapeIdentity) {
+        _shaping?.dispose();
+        _shaping = _DesktopLyricTextShaping(
+            text: widget.text,
+            words: widget.words,
+            vertical: widget.vertical,
+            bounded: !widget.vertical &&
+                widget.maxHorizontalWidth != null &&
+                widget.maxHorizontalWidth!.isFinite,
+            style: style,
+            playedColor: widget.playedColor,
+            unplayedColor: widget.unplayedColor,
+            strokeColor: widget.strokeColor,
+            direction: direction,
+            scaler: scaler);
+        _shapeIdentity = shapeIdentity;
+      }
       _layout = _DesktopLyricTextLayout(
-          text: widget.text,
-          words: widget.words,
-          vertical: widget.vertical,
+          shaping: _shaping!,
           maxVerticalUnitWidth: widget.maxVerticalUnitWidth,
-          maxHorizontalWidth: widget.maxHorizontalWidth,
-          style: style,
-          playedColor: widget.playedColor,
-          unplayedColor: widget.unplayedColor,
-          strokeColor: widget.strokeColor,
-          direction: direction,
-          scaler: scaler);
+          maxHorizontalWidth: widget.maxHorizontalWidth);
       _identity = identity;
       // A bounded paragraph can omit trailing authored words entirely. Only
       // words with visible shaped boxes can keep its sampler alive. Recompute
@@ -241,47 +257,42 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
     if (widget.words.isNotEmpty) {
       widget.clock.removeListener(_syncSamplingDemand);
     }
-    _layout?.dispose();
+    _shaping?.dispose();
     super.dispose();
   }
 }
 
-class _GlyphPaint {
-  _GlyphPaint(this.glyph, this.base, this.highlight, this.stroke);
+class _GlyphShaping {
+  _GlyphShaping(this.glyph, this.base, this.highlight, this.stroke);
   final DesktopLyricGlyph glyph;
   final TextPainter base;
   final TextPainter highlight;
   final TextPainter? stroke;
-  late Rect bounds;
-  late Offset paintOffset;
-  double scale = 1;
 }
 
-class _DesktopLyricTextLayout {
-  _DesktopLyricTextLayout(
-      {required String text,
+/// Width changes relayout retained horizontal paragraphs or rescale already
+/// shaped vertical units. Text, typography and paint changes own their lifetime.
+class _DesktopLyricTextShaping {
+  _DesktopLyricTextShaping(
+      {required this.text,
       required List<DesktopLyricWord> words,
       required this.vertical,
-      required double? maxVerticalUnitWidth,
-      required double? maxHorizontalWidth,
+      required bool bounded,
       required TextStyle style,
       required Color playedColor,
       required Color unplayedColor,
       required Color? strokeColor,
       required TextDirection direction,
       required TextScaler scaler})
-      : words = _shapedWords(text, words) {
+      : words = _DesktopLyricTextLayout._shapedWords(text, words) {
     fontSize = scaler.scale(style.fontSize ?? 22);
-    final width = !vertical && maxHorizontalWidth != null
-        ? math.max(0.0, maxHorizontalWidth)
-        : double.infinity;
     TextPainter painter(String text, Color color) => TextPainter(
           text: TextSpan(text: text, style: style.copyWith(color: color)),
           textDirection: direction,
           textScaler: scaler,
           maxLines: 1,
-          ellipsis: width.isFinite ? '…' : null,
-        )..layout(maxWidth: width);
+          ellipsis: bounded ? '…' : null,
+        );
     TextPainter? outline(String text) => strokeColor == null
         ? null
         : (TextPainter(
@@ -299,15 +310,75 @@ class _DesktopLyricTextLayout {
             textDirection: direction,
             textScaler: scaler,
             maxLines: 1,
-            ellipsis: width.isFinite ? '…' : null,
-          )..layout(maxWidth: width));
+            ellipsis: bounded ? '…' : null,
+          ));
     if (!vertical) {
       base = painter(text, unplayedColor);
       highlight = painter(text, playedColor);
       stroke = outline(text);
+      return;
+    }
+    for (final glyph in desktopLyricVerticalUnits(text)) {
+      final display =
+          glyph.text == '\n' || glyph.text == '\r\n' ? ' ' : glyph.text;
+      final stroke = outline(display);
+      stroke?.layout();
+      glyphs.add(_GlyphShaping(glyph, painter(display, unplayedColor)..layout(),
+          painter(display, playedColor)..layout(), stroke));
+    }
+  }
+
+  final String text;
+  final List<DesktopLyricWord> words;
+  final bool vertical;
+  late final double fontSize;
+  final List<_GlyphShaping> glyphs = [];
+  TextPainter? base;
+  TextPainter? highlight;
+  TextPainter? stroke;
+
+  void dispose() {
+    base?.dispose();
+    highlight?.dispose();
+    stroke?.dispose();
+    for (final glyph in glyphs) {
+      glyph.base.dispose();
+      glyph.highlight.dispose();
+      glyph.stroke?.dispose();
+    }
+  }
+}
+
+class _GlyphPaint {
+  _GlyphPaint(this.shaping,
+      {required this.bounds, required this.paintOffset, required this.scale});
+  final _GlyphShaping shaping;
+  DesktopLyricGlyph get glyph => shaping.glyph;
+  TextPainter get base => shaping.base;
+  TextPainter get highlight => shaping.highlight;
+  TextPainter? get stroke => shaping.stroke;
+  final Rect bounds;
+  final Offset paintOffset;
+  final double scale;
+}
+
+/// Each width owns independent geometry, so replacing a layout never mutates
+/// the old painter's boxes or makes shouldRepaint miss a retained paragraph.
+class _DesktopLyricTextLayout {
+  _DesktopLyricTextLayout(
+      {required this.shaping,
+      required double? maxVerticalUnitWidth,
+      required double? maxHorizontalWidth}) {
+    if (!vertical) {
+      final width = maxHorizontalWidth == null
+          ? double.infinity
+          : math.max(0.0, maxHorizontalWidth);
+      base!.layout(maxWidth: width);
+      highlight!.layout(maxWidth: width);
+      stroke?.layout(maxWidth: width);
       size = base!.size;
       var offset = 0;
-      for (final word in this.words) {
+      for (final word in words) {
         wordBoxes.add(base!
             .getBoxesForSelection(TextSelection(
               baseOffset: offset,
@@ -322,39 +393,31 @@ class _DesktopLyricTextLayout {
       }
       return;
     }
-    for (final glyph in desktopLyricVerticalUnits(text)) {
-      final display =
-          glyph.text == '\n' || glyph.text == '\r\n' ? ' ' : glyph.text;
-      glyphs.add(_GlyphPaint(glyph, painter(display, unplayedColor),
-          painter(display, playedColor), outline(display)));
-    }
     final widthLimit = maxVerticalUnitWidth != null &&
             maxVerticalUnitWidth.isFinite &&
             maxVerticalUnitWidth > 0
         ? maxVerticalUnitWidth
         : double.infinity;
-    for (final glyph in glyphs) {
-      if (glyph.base.width > widthLimit) {
-        glyph.scale = widthLimit / glyph.base.width;
-      }
-    }
-    final columnWidth = glyphs.fold<double>(
+    double scaleFor(_GlyphShaping glyph) =>
+        glyph.base.width > widthLimit ? widthLimit / glyph.base.width : 1;
+    final columnWidth = shaping.glyphs.fold<double>(
         0,
         (maxWidth, glyph) =>
-            math.max(maxWidth, glyph.base.width * glyph.scale));
+            math.max(maxWidth, glyph.base.width * scaleFor(glyph)));
     var top = 0.0;
-    for (final glyph in glyphs) {
-      final height = math.max(
-          glyph.base.height, scaler.scale(style.fontSize ?? 22) * 1.15);
-      glyph.bounds = Rect.fromLTWH(0, top, columnWidth, height);
-      glyph.paintOffset = Offset(
-          (columnWidth - glyph.base.width * glyph.scale) / 2,
-          top + (height - glyph.base.height * glyph.scale) / 2);
+    for (final glyph in shaping.glyphs) {
+      final scale = scaleFor(glyph);
+      final height = math.max(glyph.base.height, fontSize * 1.15);
+      glyphs.add(_GlyphPaint(glyph,
+          bounds: Rect.fromLTWH(0, top, columnWidth, height),
+          paintOffset: Offset((columnWidth - glyph.base.width * scale) / 2,
+              top + (height - glyph.base.height * scale) / 2),
+          scale: scale));
       top += height;
     }
     size = Size(columnWidth, top);
     var offset = 0;
-    for (final word in this.words) {
+    for (final word in words) {
       final start = offset.clamp(0, text.length);
       offset += word.content.length;
       final end = offset.clamp(0, text.length);
@@ -387,14 +450,16 @@ class _DesktopLyricTextLayout {
     }
   }
 
-  final List<DesktopLyricWord> words;
-  final bool vertical;
+  final _DesktopLyricTextShaping shaping;
+  String get text => shaping.text;
+  List<DesktopLyricWord> get words => shaping.words;
+  bool get vertical => shaping.vertical;
   final List<_GlyphPaint> glyphs = [];
-  TextPainter? base;
-  TextPainter? highlight;
-  TextPainter? stroke;
+  TextPainter? get base => shaping.base;
+  TextPainter? get highlight => shaping.highlight;
+  TextPainter? get stroke => shaping.stroke;
   late final Size size;
-  late final double fontSize;
+  double get fontSize => shaping.fontSize;
   final List<List<({Rect rect, bool rtl, bool horizontal})>> wordBoxes = [];
   late final List<double> wordExtents = [
     for (final boxes in wordBoxes)
@@ -479,17 +544,6 @@ class _DesktopLyricTextLayout {
       canvas.restore();
     }
   }
-
-  void dispose() {
-    base?.dispose();
-    highlight?.dispose();
-    stroke?.dispose();
-    for (final glyph in glyphs) {
-      glyph.base.dispose();
-      glyph.highlight.dispose();
-      glyph.stroke?.dispose();
-    }
-  }
 }
 
 class DesktopLyricTextPainter extends CustomPainter {
@@ -508,6 +562,20 @@ class DesktopLyricTextPainter extends CustomPainter {
   bool get vertical => _layout.vertical;
   @visibleForTesting
   Object get layoutCacheIdentity => _layout;
+
+  /// Opaque diagnostic identities; read only from resize regressions, never
+  /// from the playback sampling or painting path.
+  @visibleForTesting
+  List<Object> get cachedShapingIdentities => List<Object>.unmodifiable([
+        if (_layout.base != null) _layout.base!,
+        if (_layout.highlight != null) _layout.highlight!,
+        if (_layout.stroke != null) _layout.stroke!,
+        for (final glyph in _layout.glyphs) ...[
+          glyph.base,
+          glyph.highlight,
+          if (glyph.stroke != null) glyph.stroke!,
+        ],
+      ]);
   @visibleForTesting
   int get cachedStrokePainterCount => _layout.vertical
       ? _layout.glyphs.where((glyph) => glyph.stroke != null).length

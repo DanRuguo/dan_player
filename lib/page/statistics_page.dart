@@ -54,6 +54,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
   ListeningTrendsSnapshot? _listeningTrends;
   RecentListeningActivity? _recentListening;
   String _rankingGroup = 'tracks';
+  // The detached display adapter changes only with a new session capture.
+  final _rankings = <String, _RankingRows>{};
   final _storageKey = GlobalKey();
   final _cacheKey = GlobalKey();
   bool _storageLocated = false;
@@ -132,6 +134,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     _displayStats = PlaybackStatistics.displayCopy(next?.playbackData,
         storageWarning: next?.storageWarning);
     _displaySnapshot = next;
+    _rankings.clear();
     // Both recent cards share this frozen projection. Language/theme/layout
     // changes must not repeatedly walk up to 20,000 recorded intervals.
     _recentListening =
@@ -145,6 +148,27 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 listeningDayKey(localCalendarDate(next.capturedAt))]);
     previous.dispose();
   }
+
+  _RankingRows _rankingRows() => _rankings.putIfAbsent(_rankingGroup, () {
+        final grouped = _rankingGroup == 'tracks'
+            ? null
+            : _displayStats.groupedRankings(albums: _rankingGroup == 'albums');
+        return (
+          play: grouped == null
+              ? _displayStats.topPlayCount(limit: 10)
+              : ((List<TrackPlaybackStatistics>.of(grouped)
+                    ..sort((a, b) => b.playCount.compareTo(a.playCount)))
+                  .take(10)
+                  .toList()),
+          time: grouped == null
+              ? _displayStats.topListeningTime(limit: 10)
+              : ((List<TrackPlaybackStatistics>.of(grouped)
+                    ..sort((a, b) =>
+                        b.listenMilliseconds.compareTo(a.listenMilliseconds)))
+                  .take(10)
+                  .toList()),
+        );
+      });
 
   @override
   void dispose() {
@@ -344,27 +368,33 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 0.0),
                     sliver: SliverToBoxAdapter(
-                      child: _SectionCard(
-                        title: ui("占用空间最多"),
-                        icon: Symbols.hard_drive,
-                        child: Column(children: [
-                          for (final file in library.largestFiles)
-                            StatisticsBarRow(
-                              label: file.title,
-                              detail: file.path,
-                              valueLabel: formatLibraryBytes(file.bytes),
-                              valueColumnWidth: StatisticsBarRow.measureValues(
-                                  context,
-                                  library.largestFiles.map((file) =>
-                                      formatLibraryBytes(file.bytes))),
-                              value: file.bytes.toDouble(),
-                              maximum: library.largestFiles.fold<double>(
-                                  0,
-                                  (largest, file) =>
-                                      math.max(largest, file.bytes.toDouble())),
-                            ),
-                        ]),
-                      ),
+                      child: Builder(builder: (context) {
+                        final values = library.largestFiles
+                            .map((file) => formatLibraryBytes(file.bytes))
+                            .toList(growable: false);
+                        final valueWidth =
+                            StatisticsBarRow.measureValues(context, values);
+                        final maximum = library.largestFiles.fold<double>(
+                            0,
+                            (largest, file) =>
+                                math.max(largest, file.bytes.toDouble()));
+                        return _SectionCard(
+                          title: ui("占用空间最多"),
+                          icon: Symbols.hard_drive,
+                          child: Column(children: [
+                            for (final (index, file)
+                                in library.largestFiles.indexed)
+                              StatisticsBarRow(
+                                label: file.title,
+                                detail: file.path,
+                                valueLabel: values[index],
+                                valueColumnWidth: valueWidth,
+                                value: file.bytes.toDouble(),
+                                maximum: maximum,
+                              ),
+                          ]),
+                        );
+                      }),
                     ),
                   ),
                 SliverPadding(
@@ -405,29 +435,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   sliver: SliverToBoxAdapter(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final grouped = _rankingGroup == 'tracks'
-                            ? null
-                            : stats.groupedRankings(
-                                albums: _rankingGroup == 'albums');
-                        final topPlay = grouped == null
-                            ? stats.topPlayCount(limit: 10)
-                            : ((List<TrackPlaybackStatistics>.of(grouped)
-                                  ..sort((a, b) =>
-                                      b.playCount.compareTo(a.playCount)))
-                                .take(10)
-                                .toList());
-                        final topTime = grouped == null
-                            ? stats.topListeningTime(limit: 10)
-                            : ((List<TrackPlaybackStatistics>.of(grouped)
-                                  ..sort((a, b) => b.listenMilliseconds
-                                      .compareTo(a.listenMilliseconds)))
-                                .take(10)
-                                .toList());
+                        final rankings = _rankingRows();
                         final cards = [
                           _RankingCard(
                             title: ui("播放最多"),
                             icon: Symbols.play_circle,
-                            tracks: topPlay,
+                            tracks: rankings.play,
                             grouped: _rankingGroup != 'tracks',
                             value: (item) => ui("{0} 次", [item.playCount]),
                             magnitude: (item) => item.playCount.toDouble(),
@@ -435,7 +448,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           _RankingCard(
                             title: ui("收听最久"),
                             icon: Symbols.headphones,
-                            tracks: topTime,
+                            tracks: rankings.time,
                             grouped: _rankingGroup != 'tracks',
                             value: (item) => _formatListeningDuration(
                                 item.listenMilliseconds),
@@ -1858,6 +1871,11 @@ class _SectionCard extends StatelessWidget {
       );
 }
 
+typedef _RankingRows = ({
+  List<TrackPlaybackStatistics> play,
+  List<TrackPlaybackStatistics> time,
+});
+
 class _RankingCard extends StatelessWidget {
   const _RankingCard(
       {required this.title,
@@ -1876,6 +1894,9 @@ class _RankingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final maximum = tracks.fold<double>(
         0, (maxValue, track) => math.max(maxValue, magnitude(track)));
+    final values = tracks.map(value).toList(growable: false);
+    final valueWidth =
+        tracks.isEmpty ? null : StatisticsBarRow.measureValues(context, values);
     return _SectionCard(
         title: title,
         icon: icon,
@@ -1896,9 +1917,8 @@ class _RankingCard extends StatelessWidget {
                                       track.candidateTrackIds.length
                                     ])}" : ""}',
                       rank: index + 1,
-                      valueColumnWidth: StatisticsBarRow.measureValues(
-                          context, tracks.map(value)),
-                      valueLabel: value(track),
+                      valueColumnWidth: valueWidth,
+                      valueLabel: values[index],
                       value: magnitude(track),
                       maximum: maximum),
               ]));

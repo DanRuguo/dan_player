@@ -33,6 +33,8 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
   (double, double)? _weekGeometry;
   bool _revealWeekSelection = false;
   bool _weekRevealScheduled = false;
+  (ListeningTrendComparison, Size, double, bool)? _lineGeometryKey;
+  StatisticsComparisonLineGeometry? _lineGeometry;
   ListeningTrendComparison get _data => _calendarWeek
       ? widget.snapshot.calendarWeek
       : widget.snapshot.comparisons[_period]!;
@@ -43,10 +45,13 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
       .clamp(0, _period - 1);
   bool get _showCurrent => _series != _TrendSeries.previous;
   bool get _showPrevious => _series != _TrendSeries.current;
-  double get _maximum => [
-        if (_showCurrent) ..._data.current,
-        if (_showPrevious) ..._data.previous
-      ].fold(0.0, (value, day) => math.max(value, day.milliseconds.toDouble()));
+  double get _maximum => switch (_series) {
+        _TrendSeries.current =>
+          _data.currentMaximumDailyMilliseconds.toDouble(),
+        _TrendSeries.previous =>
+          _data.previousMaximumDailyMilliseconds.toDouble(),
+        _TrendSeries.both => _data.maximumDailyMilliseconds.toDouble(),
+      };
 
   @override
   void didUpdateWidget(StatisticsListeningTrends oldWidget) {
@@ -233,10 +238,23 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
         } else {
           _weekGeometry = null;
         }
+        final size = Size(width, 160);
+        final maximum = _maximum;
+        final key = (current, size, maximum, _calendarWeek);
+        if (_lineGeometryKey != key) {
+          _lineGeometryKey = key;
+          _lineGeometry = StatisticsComparisonLineGeometry(size,
+              count: current.periodDays,
+              maximum: maximum,
+              current: (index) => current.current[index].milliseconds,
+              previous: (index) => current.previous[index].milliseconds,
+              centerSlots: _calendarWeek);
+        }
         final paint = CustomPaint(
             painter: _TrendPainter(
                 data: current,
-                maximum: _maximum,
+                maximum: maximum,
+                geometry: _lineGeometry!,
                 selection: _index,
                 showCurrent: _showCurrent,
                 showPrevious: _showPrevious,
@@ -463,6 +481,7 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
 class _TrendPainter extends CustomPainter {
   const _TrendPainter(
       {required this.data,
+      required this.geometry,
       required this.maximum,
       required this.showCurrent,
       required this.showPrevious,
@@ -472,29 +491,25 @@ class _TrendPainter extends CustomPainter {
       required this.previousColor,
       required this.gridColor});
   final ListeningTrendComparison data;
+  final StatisticsComparisonLineGeometry geometry;
   final int selection;
   final double maximum;
   final bool showCurrent, showPrevious, calendarWeek;
   final Color currentColor, previousColor, gridColor;
 
   @override
-  void paint(Canvas canvas, Size size) =>
-      paintStatisticsComparisonLines(canvas, size,
-          count: data.periodDays,
-          maximum: maximum,
-          current: (index) => data.current[index].milliseconds,
-          previous: (index) => data.previous[index].milliseconds,
-          selection: selection,
-          currentColor: currentColor,
-          previousColor: previousColor,
-          gridColor: gridColor,
-          centerSlots: calendarWeek,
-          showCurrent: showCurrent,
-          showPrevious: showPrevious);
+  void paint(Canvas canvas, Size size) => geometry.paint(canvas,
+      selection: selection,
+      currentColor: currentColor,
+      previousColor: previousColor,
+      gridColor: gridColor,
+      showCurrent: showCurrent,
+      showPrevious: showPrevious);
 
   @override
   bool shouldRepaint(_TrendPainter old) =>
       !identical(data, old.data) ||
+      !identical(geometry, old.geometry) ||
       selection != old.selection ||
       maximum != old.maximum ||
       showCurrent != old.showCurrent ||

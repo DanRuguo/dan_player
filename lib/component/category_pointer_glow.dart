@@ -1,25 +1,68 @@
+import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'app_toolbar_style.dart';
+
+bool _pressedHoverDevice(PointerMoveEvent event) =>
+    event.kind == PointerDeviceKind.mouse ||
+    event.kind == PointerDeviceKind.stylus;
 
 /// Consume the most recent hardware sample once per rendered frame. Gaming
 /// mice can deliver hundreds of samples between frames; none need a separate
 /// walk of the mounted grid's coordinate transforms.
 class _FramePointer extends ValueNotifier<Offset?> {
-  _FramePointer() : super(null);
+  _FramePointer({required Offset? Function(Offset) project})
+      : _project = project,
+        super(null);
+  final Offset? Function(Offset) _project;
   int? _callback;
+  int? _device;
   Offset? _pending;
+  bool _paintProjectionCached = false;
+  Offset? _paintProjection;
 
-  void move(Offset point) {
+  Offset? get paintValue {
+    final point = value;
+    if (point == null) return null;
+    // Frame callbacks precede layout. Resolve in paint so a move and parent
+    // relayout in the same frame use the current bounds and transform.
+    if (SchedulerBinding.instance.schedulerPhase !=
+        SchedulerPhase.persistentCallbacks) {
+      return _project(point);
+    }
+    if (!_paintProjectionCached) {
+      _paintProjection = _project(point);
+      _paintProjectionCached = true;
+      // Shared covers reuse one scope bounds check during this paint. This
+      // finite invalidation neither requests another frame nor starts a clock.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _paintProjectionCached = false;
+      });
+    }
+    return _paintProjection;
+  }
+
+  void move(Offset point, int device) {
+    // Even an identical coordinate transfers ownership. An older device's
+    // exit must not clear a newer sample or cancel its pending frame.
+    _device = device;
     if (point == (_callback == null ? value : _pending)) return;
     _pending = point;
     _callback ??= SchedulerBinding.instance.scheduleFrameCallback((_) {
       _callback = null;
+      _paintProjectionCached = false;
       value = _pending;
     });
   }
 
+  void exit(int device) {
+    if (_device == device) clear();
+  }
+
   void clear() {
+    _paintProjectionCached = false;
+    _device = null;
     final hadPendingSample = _callback != null;
     if (_callback case final callback?) {
       SchedulerBinding.instance.cancelFrameCallbackWithId(callback);
@@ -35,7 +78,10 @@ class _FramePointer extends ValueNotifier<Offset?> {
     }
   }
 
-  void refresh() => notifyListeners();
+  void refresh() {
+    _paintProjectionCached = false;
+    notifyListeners();
+  }
 
   @override
   void dispose() {
@@ -55,7 +101,7 @@ class CoverPointerScope extends StatefulWidget {
 
 class _CoverPointerScopeState extends State<CoverPointerScope>
     with WidgetsBindingObserver {
-  final position = _FramePointer();
+  late final position = _FramePointer(project: _pointWithinScope);
   bool _enabled = true;
 
   @override
@@ -89,6 +135,22 @@ class _CoverPointerScopeState extends State<CoverPointerScope>
     super.dispose();
   }
 
+  void _pressedMove(PointerMoveEvent event) {
+    if (!_enabled || !_pressedHoverDevice(event)) return;
+    position.move(event.position, event.device);
+  }
+
+  Offset? _pointWithinScope(Offset point) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox ||
+        !box.attached ||
+        !box.hasSize ||
+        !(Offset.zero & box.size).contains(box.globalToLocal(point))) {
+      return null;
+    }
+    return point;
+  }
+
   @override
   Widget build(BuildContext context) => _CoverPointerData(
       position: position,
@@ -97,15 +159,20 @@ class _CoverPointerScopeState extends State<CoverPointerScope>
             position.clear();
             return false;
           },
-          child: MouseRegion(
-              opaque: false,
-              hitTestBehavior: HitTestBehavior.translucent,
-              onEnter:
-                  _enabled ? (event) => position.move(event.position) : null,
-              onHover:
-                  _enabled ? (event) => position.move(event.position) : null,
-              onExit: (_) => position.clear(),
-              child: widget.child)));
+          child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerMove: _pressedMove,
+              child: MouseRegion(
+                  opaque: false,
+                  hitTestBehavior: HitTestBehavior.translucent,
+                  onEnter: _enabled
+                      ? (event) => position.move(event.position, event.device)
+                      : null,
+                  onHover: _enabled
+                      ? (event) => position.move(event.position, event.device)
+                      : null,
+                  onExit: (event) => position.exit(event.device),
+                  child: widget.child))));
 }
 
 /// Reuse a tile's existing layout clock when it moves under a stationary mouse.
@@ -121,7 +188,7 @@ class CoverPointerMotion extends InheritedWidget {
 
 class _CoverPointerData extends InheritedWidget {
   const _CoverPointerData({required this.position, required super.child});
-  final ValueNotifier<Offset?> position;
+  final _FramePointer position;
   @override
   bool updateShouldNotify(_CoverPointerData oldWidget) =>
       position != oldWidget.position;
@@ -139,8 +206,8 @@ class CategoryPointerGlow extends StatefulWidget {
 
 class _CategoryPointerGlowState extends State<CategoryPointerGlow>
     with WidgetsBindingObserver {
-  final _position = _FramePointer();
-  ValueNotifier<Offset?>? _shared;
+  late final _position = _FramePointer(project: _localPoint);
+  _FramePointer? _shared;
   Listenable? _motion;
   bool _enabled = true;
   @override
@@ -217,8 +284,8 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow>
 
   Offset? _paintPosition() {
     if (!_enabled) return null;
-    if (_shared == null) return _position.value;
-    final global = _shared!.value;
+    if (_shared == null) return _position.paintValue;
+    final global = _shared!.paintValue;
     final box = context.findRenderObject();
     if (global == null || box is! RenderBox || !box.hasSize) return null;
     // Animation notifications precede layout/transform updates. Resolve only
@@ -245,16 +312,34 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow>
     super.dispose();
   }
 
+  void _pressedMove(PointerMoveEvent event) {
+    // Shared grids publish once at their scope. A Listener observes the input
+    // without joining the gesture arena or intercepting tap/drag ownership.
+    if (!_enabled || _shared != null || !_pressedHoverDevice(event)) return;
+    _position.move(event.position, event.device);
+  }
+
+  Offset? _localPoint(Offset global) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) {
+      return null;
+    }
+    final point = box.globalToLocal(global);
+    return (Offset.zero & box.size).contains(point) ? point : null;
+  }
+
   @override
-  Widget build(BuildContext context) => MouseRegion(
+  Widget build(BuildContext context) => Listener(
+      onPointerMove: _pressedMove,
+      child: MouseRegion(
         onHover: (event) {
           if (!_enabled) return;
           if (_shared == null) {
-            _position.move(event.localPosition);
+            _position.move(event.position, event.device);
           }
         },
-        onExit: (_) {
-          if (_shared == null) _position.clear();
+        onExit: (event) {
+          if (_shared == null) _position.exit(event.device);
         },
         child: RepaintBoundary(
             child: CustomPaint(
@@ -264,7 +349,7 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow>
           // independent layers. Hover must not repaint the entire cover.
           child: RepaintBoundary(child: widget.child),
         )),
-      );
+      ));
 }
 
 class _GlowPainter extends CustomPainter {

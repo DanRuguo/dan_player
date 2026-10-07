@@ -114,6 +114,7 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
 }
 
 class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
+  final _coverFlightKey = GlobalKey();
   late SortMethodDesc<S>? currSortMethod = _preferredSortMethod();
   late SortOrder currSortOrder = widget.pref.sortOrder;
   late ContentView currContentView = widget.pref.contentView;
@@ -302,6 +303,7 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                               key: const ValueKey('uni-detail-header-scroll'),
                               primary: false,
                               child: _UniDetailPageHeader(
+                                coverFlightKey: _coverFlightKey,
                                 key: ValueKey(widget.primaryContent),
                                 pic: widget.primaryPic,
                                 coverFlightTag: widget.coverFlightTag,
@@ -532,6 +534,7 @@ class _UniDetailPageHeader extends StatelessWidget {
   const _UniDetailPageHeader({
     super.key,
     required this.pic,
+    required this.coverFlightKey,
     this.coverFlightTag,
     required this.backgroundPic,
     required this.picShape,
@@ -543,6 +546,7 @@ class _UniDetailPageHeader extends StatelessWidget {
   });
 
   final Future<ImageProvider?> pic;
+  final Key coverFlightKey;
   final Object? coverFlightTag;
   final Future<ImageProvider?> backgroundPic;
   final PicShape picShape;
@@ -611,6 +615,7 @@ class _UniDetailPageHeader extends StatelessWidget {
         key: const ValueKey('uni-detail-cover'),
         dimension: coverSize,
         child: CategoryCoverFlight(
+            key: coverFlightKey,
             tag: coverFlightTag,
             radius: picShape == PicShape.oval
                 ? coverSize / 2

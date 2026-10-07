@@ -126,12 +126,11 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
       ? widget.initialView ??
           PlaylistViewMode.resolve(null, legacy: widget.initialContentView.name)
       : AppPreference.instance.unifiedPlaylistsLayout ?? PlaylistViewMode.list;
-  late final PlaylistViewMode _detailDefaultView =
-      widget.initialPlaylist == null
-          ? PlaylistViewMode.list
-          : widget.initialView ??
-              PlaylistViewMode.resolve(null,
-                  legacy: widget.initialContentView.name);
+  PlaylistViewMode get _detailDefaultView => widget.initialPlaylist == null
+      ? PlaylistViewMode.list
+      : widget.initialView ??
+          PlaylistViewMode.resolve(null,
+              legacy: widget.initialContentView.name);
   PlaylistViewMode _viewFor(Playlist? playlist) => playlist == null
       ? _rootView
       : PlaylistViewMode.parse(playlist.presentation['view']) ??
@@ -278,7 +277,18 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             PlaylistViewMode.resolve(null,
                 legacy: widget.initialContentView.name);
       }
-      _view = _viewFor(_current);
+      final nextView = _viewFor(_current);
+      // A new page input owns an unoverridden layout, including while the old
+      // toolbar request is waiting for capture. An echoed committed choice or
+      // a default change underneath a saved playlist choice keeps its flight.
+      if (nextView != _view ||
+          (_requestedView != null &&
+              (_current == null ||
+                  PlaylistViewMode.parse(_current!.presentation['view']) ==
+                      null))) {
+        _cancelCoverTransition();
+      }
+      _view = nextView;
     }
   }
 
