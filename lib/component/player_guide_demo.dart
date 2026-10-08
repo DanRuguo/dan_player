@@ -14,9 +14,13 @@ enum PlayerGuideDemoKind { progress, lyrics, playlists }
 /// Animations start only after input and finish once; losing visibility settles
 /// them immediately instead of retaining an offscreen animation clock.
 class PlayerGuideDemo extends StatefulWidget {
-  const PlayerGuideDemo({super.key, required this.kind, this.isHidden});
+  const PlayerGuideDemo(
+      {super.key, required this.kind, this.isHidden, this.layoutChanges});
   final PlayerGuideDemoKind kind;
   final ValueListenable<bool>? isHidden;
+
+  /// Layout notifications from the owning guide, without a periodic monitor.
+  final Listenable? layoutChanges;
 
   @override
   State<PlayerGuideDemo> createState() => _PlayerGuideDemoState();
@@ -50,6 +54,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     super.initState();
     _hidden = widget.isHidden ?? DesktopIntegration.instance.isHidden;
     _hidden.addListener(_applyVisibility);
+    widget.layoutChanges?.addListener(_layoutChanged);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _lifecycleVisible = lifecycle == null ||
         lifecycle == AppLifecycleState.resumed ||
@@ -60,6 +65,11 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
   @override
   void didUpdateWidget(covariant PlayerGuideDemo oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.layoutChanges != widget.layoutChanges) {
+      oldWidget.layoutChanges?.removeListener(_layoutChanged);
+      widget.layoutChanges?.addListener(_layoutChanged);
+      _layoutChanged();
+    }
     if (oldWidget.isHidden != widget.isHidden) {
       _hidden.removeListener(_applyVisibility);
       _hidden = widget.isHidden ?? DesktopIntegration.instance.isHidden;
@@ -127,6 +137,13 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     });
   }
 
+  void _layoutChanged() {
+    _scheduleVisibility();
+    // Scroll metrics arrive after the layout frame, possibly its last one.
+    // Request only the coalesced check's frame; idle demos own no clock.
+    if (mounted) WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   void _checkViewport() {
     _visible = intersectsPaintViewport(
         _surface.currentContext?.findRenderObject(),
@@ -177,6 +194,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
       position.removeListener(_scheduleVisibility);
     }
     _hidden.removeListener(_applyVisibility);
+    widget.layoutChanges?.removeListener(_layoutChanged);
     _animation.dispose();
     _motionGate.dispose();
     super.dispose();

@@ -70,6 +70,10 @@ class SegmentLoopController extends ChangeNotifier {
   }
 
   void manualSeek(double position) {
+    // A successful explicit seek acknowledges the new position even while
+    // paused, or within B's 100ms automatic-seek acknowledgement margin.
+    // Automatic repeats still wait for their ordinary position sample.
+    if (position.isFinite) _awaitingSeek = false;
     if (enabled && (position < start! || position >= end!)) setEnabled(false);
   }
 

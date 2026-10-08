@@ -513,7 +513,18 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
             hintText: hint == null ? null : ui(hint),
             border: AppShape.inputBorder,
             counterText: ''),
-        onChanged: (_) => _queuePreview(),
+        onChanged: (_) {
+          if (_editingId == null) return;
+          // A name does not change matching or order. Keep the visible batch
+          // and any pending evaluation; invalid names and failed previews
+          // still follow the existing validation/retry path.
+          if (id == 'name' &&
+              _previewError == null &&
+              _draft(forPreview: true).validate() == null) {
+            return;
+          }
+          _queuePreview();
+        },
       );
 
   Widget _fields() => ExpansionTile(

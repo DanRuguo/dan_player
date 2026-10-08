@@ -1,3 +1,5 @@
+import 'package:flutter/widgets.dart' show CharacterRange;
+
 import 'lyric.dart';
 import 'plain_lyric.dart';
 
@@ -41,17 +43,25 @@ class LyricSearchRow {
         if (hit != null) break;
       }
       if (hit == null || part.length <= 160) return part;
-      var from = (hit.start - 40).clamp(0, part.length);
-      var to = (from + 160).clamp(hit.end, part.length);
-      if (from > 0 &&
-          part.codeUnitAt(from) >= 0xdc00 &&
-          part.codeUnitAt(from) <= 0xdfff) {
-        from--;
+      final requestedFrom = (hit.start - 40).clamp(0, part.length);
+      final requestedTo = (requestedFrom + 160).clamp(hit.end, part.length);
+      final budget = requestedTo - requestedFrom;
+      // Inspect only the two window edges, using the same Unicode rules as
+      // lyric rendering. Keep original UTF-16 indices for the reading target.
+      final leading = CharacterRange.at(part, requestedFrom);
+      final trailing = CharacterRange.at(part, requestedTo);
+      var from = leading.stringBeforeLength;
+      var to = part.length - trailing.stringAfterLength;
+      // A boundary cluster can contain thousands of authored combining marks.
+      // Omit an oversized non-matching edge as a whole rather than enlarging
+      // the compact result; the matching cluster retains long-query semantics.
+      if (to - from > budget && from < requestedFrom) {
+        final leadingEnd = part.length - leading.stringAfterLength;
+        if (leadingEnd <= hit.start) from = leadingEnd;
       }
-      if (to < part.length &&
-          part.codeUnitAt(to - 1) >= 0xd800 &&
-          part.codeUnitAt(to - 1) <= 0xdbff) {
-        to++;
+      if (to - from > budget && to > requestedTo) {
+        final trailingStart = trailing.stringBeforeLength;
+        if (trailingStart >= hit.end) to = trailingStart;
       }
       return '${from > 0 ? '…' : ''}${part.substring(from, to)}${to < part.length ? '…' : ''}';
     }).join('\n');

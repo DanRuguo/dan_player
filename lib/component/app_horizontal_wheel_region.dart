@@ -61,14 +61,13 @@ class _AppHorizontalWheelRegionState extends State<AppHorizontalWheelRegion>
     final position = _targetPosition;
     final visible = _visible;
     final generation = ++_generation;
-    _target = null;
-    _targetPosition = null;
+    // Keep ownership until this callback runs. A later hide in the same frame
+    // can then replace this visible settlement instead of leaving a stale jump.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          generation != _generation ||
-          position?.context.notificationContext?.mounted != true) {
-        return;
-      }
+      if (!mounted || generation != _generation) return;
+      _target = null;
+      _targetPosition = null;
+      if (position?.context.notificationContext?.mounted != true) return;
       if (visible) {
         position!.jumpTo(
             target.clamp(position.minScrollExtent, position.maxScrollExtent));

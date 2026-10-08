@@ -75,6 +75,7 @@ const _guideChapters = [
 ];
 
 class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
+  final _demoLayoutChanges = ValueNotifier(0);
   final _chapterKeys = {
     for (final chapter in _guideChapters) chapter.$1: GlobalKey(),
   };
@@ -106,6 +107,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
     for (final controller in _quickControllers.values) {
       controller.dispose();
     }
+    _demoLayoutChanges.dispose();
     super.dispose();
   }
 
@@ -132,7 +134,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final screen = MediaQuery.sizeOf(context);
-    return Dialog(
+    final dialog = Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -648,6 +650,15 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
         ),
       ),
     );
+    return NotificationListener<ScrollMetricsNotification>(
+        onNotification: (notification) {
+          if (notification.depth == 0 &&
+              notification.metrics.axis == Axis.vertical) {
+            _demoLayoutChanges.value++;
+          }
+          return false;
+        },
+        child: dialog);
   }
 
   Widget _section(BuildContext context, String id, String title, IconData icon,
@@ -736,6 +747,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
       child: PlayerGuideDemo(
           key: ValueKey('guide-demo-${kind.name}'),
           kind: kind,
+          layoutChanges: _demoLayoutChanges,
           isHidden: widget.demoIsHidden));
 
   Widget _text(String key) => Text(ui(key));

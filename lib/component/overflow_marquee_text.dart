@@ -200,28 +200,32 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
     final locale = Localizations.maybeLocaleOf(context);
     final text = widget.text.replaceAll(RegExp(r'[\r\n]+'), ' ');
     return LayoutBuilder(builder: (context, constraints) {
-      final changed = _measuredText != text ||
+      final measurementChanged = _measuredText != text ||
           _measuredStyle != style ||
           _measuredScaler != scaler ||
           _measuredDirection != direction ||
-          _measuredLocale != locale ||
-          _width != constraints.maxWidth;
-      if (changed) {
+          _measuredLocale != locale;
+      final widthChanged = _width != constraints.maxWidth;
+      if (measurementChanged || widthChanged) {
         _reset();
-        _textPainter?.dispose();
-        _measuredText = text;
-        _measuredStyle = style;
-        _measuredScaler = scaler;
-        _measuredDirection = direction;
-        _measuredLocale = locale;
         _width = constraints.maxWidth;
-        _textPainter = TextPainter(
-            text: TextSpan(text: text, style: style),
-            textDirection: direction,
-            textScaler: scaler,
-            locale: locale,
-            maxLines: 1)
-          ..layout();
+        // Natural single-line shaping has no viewport-width constraint. A
+        // resize still resets its reading pose, but only clips the same glyphs.
+        if (measurementChanged) {
+          _textPainter?.dispose();
+          _measuredText = text;
+          _measuredStyle = style;
+          _measuredScaler = scaler;
+          _measuredDirection = direction;
+          _measuredLocale = locale;
+          _textPainter = TextPainter(
+              text: TextSpan(text: text, style: style),
+              textDirection: direction,
+              textScaler: scaler,
+              locale: locale,
+              maxLines: 1)
+            ..layout();
+        }
         _overflow =
             _width.isFinite && _width > 0 && _textPainter!.width > _width + .5;
       }
