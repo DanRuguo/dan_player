@@ -113,6 +113,8 @@ class _PersonalAnnotationsCardState extends State<PersonalAnnotationsCard> {
     final theme = Theme.of(context), scheme = theme.colorScheme;
     final snapshot = widget.snapshot;
     final ratings = _group == 'ratings';
+    final count =
+        (ratings ? snapshot?.ratedTracks : snapshot?.tagAnnotations) ?? 0;
     return Card.filled(
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
@@ -173,9 +175,13 @@ class _PersonalAnnotationsCardState extends State<PersonalAnnotationsCard> {
                           chartId: _group,
                           availableWidth: constraints.maxWidth,
                           slices: _slices(context, snapshot),
-                          centerValue:
-                              '${ratings ? snapshot.ratedTracks : snapshot.tagAnnotations}',
-                          centerLabel: ''),
+                          centerValue: '$count',
+                          centerLabel: ui(ratings ? '个评级' : '个标签'),
+                          centerSemanticsLabel: ui(
+                              ratings
+                                  ? (count == 1 ? '1 个评级' : '{0} 个评级')
+                                  : (count == 1 ? '1 次标签标注' : '{0} 次标签标注'),
+                              [count])),
                       const SizedBox(height: 16),
                       Text(
                           ratings

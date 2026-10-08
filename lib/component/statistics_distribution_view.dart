@@ -124,6 +124,7 @@ class StatisticsDistributionView extends StatelessWidget {
     required this.slices,
     required this.centerValue,
     required this.centerLabel,
+    this.centerSemanticsLabel,
   });
 
   final String chartId;
@@ -131,6 +132,7 @@ class StatisticsDistributionView extends StatelessWidget {
   final List<StatisticsDistributionSlice> slices;
   final String centerValue;
   final String centerLabel;
+  final String? centerSemanticsLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +152,7 @@ class StatisticsDistributionView extends StatelessWidget {
     final compactLegend = rowWidth / textScale < 340;
     final chart = Semantics(
       label:
-          '${centerLabel.isEmpty ? '' : '$centerLabel '}$centerValue。${slices.map((item) => '${item.label} ${item.amount}').join('，')}',
+          '${centerSemanticsLabel ?? '${centerLabel.isEmpty ? '' : '$centerLabel '}$centerValue'}。${slices.map((item) => '${item.label} ${item.amount}').join('，')}',
       excludeSemantics: true,
       child: SizedBox.square(
         key: ValueKey('statistics-chart-$chartId'),

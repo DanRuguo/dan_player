@@ -106,17 +106,51 @@ void _expectCompactDescriptions(
   final chart = _key('statistics-chart-${view.chartId}');
   final center = find.descendant(
       of: chart, matching: find.text(view.centerValue, skipOffstage: false));
-  expect(view.centerLabel, isEmpty);
+  final ratings = view.chartId == 'ratings';
+  final count = int.parse(view.centerValue);
+  expect(view.centerLabel, ui(ratings ? '个评级' : '个标签'));
   expect(
-      find.descendant(of: chart, matching: find.byType(Text)), findsOneWidget);
+      view.centerSemanticsLabel,
+      ui(
+          ratings
+              ? (count == 1 ? '1 个评级' : '{0} 个评级')
+              : (count == 1 ? '1 次标签标注' : '{0} 次标签标注'),
+          [count]));
+  final caption = find.descendant(
+      of: chart, matching: find.text(view.centerLabel, skipOffstage: false));
+  expect(find.descendant(of: chart, matching: find.byType(Text)),
+      findsNWidgets(2));
+  expect(caption, findsOneWidget);
   expect(tester.getRect(center).center.dx,
       closeTo(tester.getRect(chart).center.dx, .05));
-  expect(tester.getRect(center).center.dy,
-      closeTo(tester.getRect(chart).center.dy, .05));
+  expect(tester.getRect(caption).center.dx,
+      closeTo(tester.getRect(chart).center.dx, .05));
+  expect(
+      tester.getRect(caption).top, greaterThan(tester.getRect(center).bottom));
+  final centerBounds =
+      tester.getRect(center).expandToInclude(tester.getRect(caption));
+  expect(centerBounds.center.dy, closeTo(tester.getRect(chart).center.dy, .05));
+  final innerBounds = tester.getRect(chart).deflate(32);
+  for (final text in [center, caption]) {
+    final paragraph = tester.renderObject<RenderParagraph>(find.descendant(
+        of: text, matching: find.byType(RichText, skipOffstage: false)));
+    expect(paragraph.didExceedMaxLines, isFalse);
+    final boxes = paragraph.getBoxesForSelection(TextSelection(
+        baseOffset: 0, extentOffset: paragraph.text.toPlainText().length));
+    expect(boxes, isNotEmpty);
+    for (final box in boxes) {
+      final rect = MatrixUtils.transformRect(
+          paragraph.getTransformTo(null), box.toRect());
+      expect(rect.left, greaterThanOrEqualTo(innerBounds.left - 1));
+      expect(rect.right, lessThanOrEqualTo(innerBounds.right + 1));
+      expect(rect.top, greaterThanOrEqualTo(innerBounds.top - 3));
+      expect(rect.bottom, lessThanOrEqualTo(innerBounds.bottom + 3));
+    }
+  }
   expect(
       tester.getSemantics(chart).label.split('\n'),
       contains(
-          '${view.centerValue}。${view.slices.map((slice) => '${slice.label} ${slice.amount}').join('，')}'));
+          '${view.centerSemanticsLabel}。${view.slices.map((slice) => '${slice.label} ${slice.amount}').join('，')}'));
   for (final (index, slice) in view.slices.indexed) {
     final row = _key('statistics-comparison-${view.chartId}-$index');
     final bar = find.descendant(of: row, matching: find.byType(ClipRRect));
@@ -230,6 +264,49 @@ void main() {
     }
     expect(find.text(ui('按已评级歌曲计算比例；未评级歌曲不参与。')), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'personal center units and spoken counts cover all four languages',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      for (final language in UiLanguage.values) {
+        uiLanguage.value = language;
+        for (final count in [0, 1, 14]) {
+          await mount(
+              tester,
+              _project([
+                for (var index = 0; index < count; index++)
+                  PersonalTrack(
+                      rating: 3, tags: ['Shared', if (count > 1) 'Second']),
+              ]));
+          for (final group in ['ratings', 'tags']) {
+            await _choose(tester, group);
+            final view = _view(tester);
+            _expectCompactDescriptions(tester, view);
+            final total = group == 'ratings' || count <= 1 ? count : count * 2;
+            expect(view.centerValue, '$total');
+            final expected = switch (language) {
+              UiLanguage.zh =>
+                group == 'ratings' ? '$total 个评级' : '$total 次标签标注',
+              UiLanguage.en => group == 'ratings'
+                  ? '$total ${total == 1 ? 'rating' : 'ratings'}'
+                  : '$total tag ${total == 1 ? 'assignment' : 'assignments'}',
+              UiLanguage.ja =>
+                group == 'ratings' ? '$total 件の評価' : '$total 件のタグ付与',
+              UiLanguage.ko =>
+                group == 'ratings' ? '평점 $total개' : '태그 부여 $total회',
+            };
+            expect(view.centerSemanticsLabel, expected);
+            expect(view.slices.every((slice) => slice.detail.isEmpty), isTrue);
+            expect(tester.takeException(), isNull);
+          }
+        }
+      }
+    } finally {
+      semantics.dispose();
+    }
   });
 
   testWidgets('tag top five and other retain the full multi-tag denominator',
