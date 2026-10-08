@@ -85,7 +85,7 @@ void main() {
       stats.dispose();
     }
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     Future<void> measureLyricRows(int rowCount, int cycles,
         {bool reducedMotion = false}) async {

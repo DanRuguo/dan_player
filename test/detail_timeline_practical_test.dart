@@ -379,7 +379,7 @@ void main() {
       (tester) async {
     await tester.runAsync(() async {
       await (FontLoader(danEmbeddedFontFamily)
-            ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+            ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
           .load();
       final numerals = File('C:/Windows/Fonts/segoeui.ttf');
       if (await numerals.exists()) {
@@ -447,7 +447,7 @@ void main() {
     if (output.isEmpty) return;
     await tester.runAsync(() async {
       await (FontLoader(danEmbeddedFontFamily)
-            ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+            ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
           .load();
       final iconPath = File(
           '../tool/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf');

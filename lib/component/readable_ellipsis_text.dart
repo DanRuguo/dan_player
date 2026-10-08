@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:flutter/widgets.dart';
 
 typedef ReadableTextFits = bool Function(String candidate);
@@ -99,6 +100,7 @@ class ReadableEllipsisText extends Text {
       label: fullText,
       excludeSemantics: true,
       child: _ReadableEllipsisLeaf(
+        policy: AppFontScope.of(context),
         text: fullText,
         style: effectiveStyle,
         textAlign: textAlign ?? defaults.textAlign ?? TextAlign.start,
@@ -130,6 +132,7 @@ class ReadableEllipsisText extends Text {
 
 class _ReadableEllipsisLeaf extends LeafRenderObjectWidget {
   const _ReadableEllipsisLeaf({
+    required this.policy,
     required this.text,
     required this.style,
     required this.textAlign,
@@ -138,6 +141,7 @@ class _ReadableEllipsisLeaf extends LeafRenderObjectWidget {
     required this.locale,
   });
 
+  final AppFontPolicy policy;
   final String text;
   final TextStyle style;
   final TextAlign textAlign;
@@ -148,6 +152,7 @@ class _ReadableEllipsisLeaf extends LeafRenderObjectWidget {
   @override
   _RenderReadableEllipsisText createRenderObject(BuildContext context) =>
       _RenderReadableEllipsisText(
+        policy: policy,
         text: text,
         style: style,
         textAlign: textAlign,
@@ -162,6 +167,7 @@ class _ReadableEllipsisLeaf extends LeafRenderObjectWidget {
     _RenderReadableEllipsisText renderObject,
   ) {
     renderObject
+      ..policy = policy
       ..text = text
       ..style = style
       ..textAlign = textAlign
@@ -173,13 +179,15 @@ class _ReadableEllipsisLeaf extends LeafRenderObjectWidget {
 
 class _RenderReadableEllipsisText extends RenderBox {
   _RenderReadableEllipsisText({
+    required AppFontPolicy policy,
     required String text,
     required TextStyle style,
     required TextAlign textAlign,
     required TextDirection textDirection,
     required TextScaler textScaler,
     required Locale? locale,
-  })  : _text = text,
+  })  : _policy = policy,
+        _text = text,
         _style = style,
         _textAlign = textAlign,
         _textDirection = textDirection,
@@ -194,6 +202,13 @@ class _RenderReadableEllipsisText extends RenderBox {
         );
 
   final TextPainter _painter;
+  AppFontPolicy _policy;
+  set policy(AppFontPolicy value) {
+    if (_policy == value) return;
+    _policy = value;
+    markNeedsLayout();
+  }
+
   String _text;
   TextStyle _style;
   TextAlign _textAlign;
@@ -239,7 +254,7 @@ class _RenderReadableEllipsisText extends RenderBox {
   }
 
   TextPainter _newPainter(String value) => TextPainter(
-        text: TextSpan(text: value, style: _style, locale: _locale),
+        text: appFontSpan(value, style: _style, policy: _policy),
         textAlign: _textAlign,
         textDirection: _textDirection,
         textScaler: _textScaler,
@@ -298,11 +313,7 @@ class _RenderReadableEllipsisText extends RenderBox {
   void performLayout() {
     displayedText = _displayFor(constraints.maxWidth);
     _painter
-      ..text = TextSpan(
-        text: displayedText,
-        style: _style,
-        locale: _locale,
-      )
+      ..text = appFontSpan(displayedText, style: _style, policy: _policy)
       ..textAlign = _textAlign
       ..textDirection = _textDirection
       ..textScaler = _textScaler

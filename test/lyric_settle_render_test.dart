@@ -28,7 +28,7 @@ void main() {
   testWidgets('completed follow keeps identical glyph sampling after cleanup',
       (tester) async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     final key = GlobalKey();
     Widget surface(bool completed, {double scale = 1}) => Directionality(

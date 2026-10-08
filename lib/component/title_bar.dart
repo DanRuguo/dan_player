@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 // ignore_for_file: camel_case_types
 
 import 'package:dan_player/app_settings.dart';
@@ -141,12 +142,13 @@ class _TitleBar_Small extends StatelessWidget {
                   child: AppEntrance(
                     identity: 'title-name',
                     order: 1,
-                    child: Text(
+                    child: AppFontText(
                       "Dan Player",
                       maxLines: 1,
                       softWrap: false,
                       overflow: TextOverflow.ellipsis,
                       style: danCjkTextStyle(
+                        fontFamily: AppFontScope.of(context).uiFamily,
                         color: foreground,
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -187,9 +189,10 @@ class _TitleBar_Medium extends StatelessWidget {
                 AppEntrance(
                   identity: 'title-name',
                   order: 1,
-                  child: Text(
+                  child: AppFontText(
                     "Dan Player",
                     style: danCjkTextStyle(
+                      fontFamily: AppFontScope.of(context).uiFamily,
                       color: foreground,
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
@@ -248,6 +251,7 @@ class _TitleBar_Large extends StatelessWidget {
                           Text(
                             "Dan Player",
                             style: danCjkTextStyle(
+                              fontFamily: AppFontScope.of(context).uiFamily,
                               color: foreground,
                               fontSize: 16,
                               fontWeight: FontWeight.w700,

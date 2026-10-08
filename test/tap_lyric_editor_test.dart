@@ -60,7 +60,7 @@ void main() {
   setUpAll(() async {
     for (final entry in {
       'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
-      danEmbeddedFontFamily: 'assets/fonts/PingFangSC-Regular.ttf',
+      danEmbeddedFontFamily: 'packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf',
       'packages/material_symbols_icons/MaterialSymbolsOutlined':
           'packages/material_symbols_icons/lib/fonts/MaterialSymbolsOutlined.ttf',
     }.entries) {

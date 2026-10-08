@@ -2,6 +2,7 @@ import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/component/foreground.dart';
 import 'package:desktop_lyric/message.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -39,13 +40,13 @@ class NowPlayingInfo extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
+              AppFontText(
                 nowPlaying.title,
                 style: textStyle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              Text(
+              AppFontText(
                 "${nowPlaying.artist} - ${nowPlaying.album}",
                 style: textStyle.copyWith(
                   color: textColor.withValues(alpha: 0.82),

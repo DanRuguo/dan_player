@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -1262,7 +1263,8 @@ class _PlaylistViewItem extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
+                            appFontText(
+                              context,
                               item.displayTitle,
                               key: ValueKey('current-playlist-title-$index'),
                               maxLines: 1,
@@ -1270,7 +1272,8 @@ class _PlaylistViewItem extends StatelessWidget {
                               style: titleStyle,
                             ),
                             const SizedBox(height: 2),
-                            Text(
+                            appFontText(
+                              context,
                               "${item.artist} - ${item.album}",
                               key: ValueKey('current-playlist-metadata-$index'),
                               maxLines: 1,

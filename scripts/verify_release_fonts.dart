@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as path;
 
+import 'support/bundled_font_assets.dart';
 import 'support/release_font_audit.dart';
 
 /// This gate reads the final bundle, not build/unit_test_assets or SDK fonts.
@@ -88,7 +89,25 @@ Future<void> main(List<String> arguments) async {
     final sourceAssets = <Map<String, Object>>[];
     final pubspec =
         await File(path.join(project.path, 'pubspec.yaml')).readAsString();
-    if (RegExp(r'^name:\s*dan_player\s*$', multiLine: true).hasMatch(pubspec)) {
+    final mainProject =
+        RegExp(r'^name:\s*dan_player\s*$', multiLine: true).hasMatch(pubspec);
+    final catalog = BundledFontCatalog.parse(jsonDecode(await File(path.join(
+            path.dirname(Platform.script.toFilePath()),
+            'support',
+            'bundled_fonts.json'))
+        .readAsString()));
+    final bundledUiFonts = auditBundledFontAssets(
+      catalog: catalog,
+      mainProject: mainProject,
+      manifest: manifest,
+      assets: fontBytes,
+    );
+    if (mainProject) {
+      if (await File(path.join(assetsDirectory.path, 'assets', 'fonts',
+              'PingFangSC-Regular.ttf'))
+          .exists()) {
+        throw StateError('Stale duplicate main UI font is still bundled.');
+      }
       // Logo assets are separate from icon fonts. Catch an omitted or stale
       // logo explicitly instead of attributing every blank image to subsetting.
       for (final relative in const [
@@ -131,6 +150,7 @@ Future<void> main(List<String> arguments) async {
           },
       ],
       'sourceAssets': sourceAssets,
+      'bundledUiFonts': bundledUiFonts,
     };
     final reportPath = options['--report'];
     if (reportPath != null) {

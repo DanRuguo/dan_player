@@ -7,11 +7,30 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "gdiplus.lib")
 
 namespace desktop_integration {
+
+enum class FontLanguage { kZh = 0, kEn = 1, kJa = 2, kKo = 3 };
+struct NativeFontFace {
+  std::wstring family, path;
+  bool operator==(const NativeFontFace& other) const {
+    return family == other.family && path == other.path;
+  }
+};
+struct NativeFontPolicy {
+  FontLanguage language = FontLanguage::kZh;
+  bool mixed_scripts = true;
+  std::array<NativeFontFace, 4> faces{};
+  NativeFontFace base_fallback;
+  bool operator==(const NativeFontPolicy& other) const {
+    return language == other.language && mixed_scripts == other.mixed_scripts && faces == other.faces && base_fallback == other.base_fallback;
+  }
+};
 
 // GDI does not know Flutter's FontLoader aliases. Register the same local font
 // privately, resolve its native family, and reuse DPI-specific HFONTs between
@@ -32,7 +51,7 @@ class PopupFonts {
   PopupFonts& operator=(const PopupFonts&) = delete;
 
   bool Configure(std::wstring family, std::wstring path) {
-    if (family == requested_family_ && path == requested_path_) return false;
+    if (Matches(family, path)) return false;
     Clear();
     requested_family_ = std::move(family);
     requested_path_ = std::move(path);
@@ -47,6 +66,36 @@ class PopupFonts {
     }
     return true;
   }
+
+  bool Matches(const std::wstring& family, const std::wstring& path) const {
+    return !policy_ && family == requested_family_ && path == requested_path_;
+  }
+  bool Matches(const NativeFontPolicy& policy) const {
+    return policy_ && *policy_ == policy;
+  }
+  bool Configure(const NativeFontPolicy& policy) {
+    if (Matches(policy)) return false;
+    Clear();
+    policy_ = policy;
+    for (size_t index = 0; index < policy_faces_.size(); ++index) {
+      const auto& requested = index < policy.faces.size() ? policy.faces[index] : policy.base_fallback;
+      if (!requested.path.empty() &&
+          std::find(policy_paths_.begin(), policy_paths_.end(), requested.path) == policy_paths_.end() &&
+          AddFontResourceExW(requested.path.c_str(), FR_PRIVATE, nullptr) > 0) {
+        policy_paths_.push_back(requested.path);
+      }
+      // Builtin snapshots contain the font's real name, rather than a Flutter
+      // alias. Custom single-face files can resolve an arbitrary loader alias.
+      auto& face = policy_faces_[index];
+      if (std::find(policy_paths_.begin(), policy_paths_.end(), requested.path) != policy_paths_.end())
+        face = PrivateFamily(requested.path, requested.family, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
+      if (face.empty() && requested.family.size() < LF_FACESIZE &&
+          requested.family.find(L"packages/") != 0) face = requested.family;
+    }
+    face_ = policy_faces_[static_cast<size_t>(policy.language)];
+    return true;
+  }
+  const std::optional<NativeFontPolicy>& policy() const { return policy_; }
 
   bool ConfigureIcons(std::wstring path) {
     if (path == icon_requested_path_) return false;
@@ -85,6 +134,14 @@ class PopupFonts {
     title_ = CreateFontIndirectW(&font);
     font.lfHeight = -MulDiv(15, static_cast<int>(dpi), 96);
     row_ = CreateFontIndirectW(&font);
+    if (policy_) for (size_t index = 0; index < policy_faces_.size(); ++index) {
+      auto script_font = font;
+      if (!policy_faces_[index].empty())
+        wcsncpy_s(script_font.lfFaceName, policy_faces_[index].c_str(), _TRUNCATE);
+      policy_row_[index] = CreateFontIndirectW(&script_font);
+      script_font.lfHeight = -MulDiv(16, static_cast<int>(dpi), 96);
+      policy_title_[index] = CreateFontIndirectW(&script_font);
+    }
     // Explicit per-label fallback for scripts missing from the main face.
     // Cache every handle at the current DPI: hover paints allocate no fonts.
     constexpr std::array<const wchar_t*, 6> fallback{
@@ -108,6 +165,7 @@ class PopupFonts {
 
   HFONT ForText(HDC dc, const wchar_t* text, bool title = false) {
     const auto primary = title ? this->title() : row();
+    if (policy_) return primary;  // Explicit runs are selected by NativeTextLayout.
     if (!dc || !text || !*text) return primary;
     for (const auto& choice : choices_) {
       if (choice.font && choice.title == title && choice.text == text) return choice.font;
@@ -143,6 +201,8 @@ class PopupFonts {
     title_ = row_ = icons_ = legacy_icons_ = nullptr;
     for (auto& font : fallback_row_) { if (font) DeleteObject(font); font = nullptr; }
     for (auto& font : fallback_title_) { if (font) DeleteObject(font); font = nullptr; }
+    for (auto& font : policy_row_) { if (font) DeleteObject(font); font = nullptr; }
+    for (auto& font : policy_title_) { if (font) DeleteObject(font); font = nullptr; }
     for (auto& choice : choices_) choice = {};
     next_choice_ = 0;
     dpi_ = 0;
@@ -151,6 +211,11 @@ class PopupFonts {
   void Clear() {
     // Fonts must not remain selected into a DC while resources are retired.
     ResetHandles();
+    for (const auto& path : policy_paths_)
+      RemoveFontResourceExW(path.c_str(), FR_PRIVATE, nullptr);
+    policy_paths_.clear();
+    policy_faces_ = {};
+    policy_.reset();
     if (!registered_path_.empty()) {
       RemoveFontResourceExW(registered_path_.c_str(), FR_PRIVATE, nullptr);
     }
@@ -168,6 +233,12 @@ class PopupFonts {
 
   HFONT title() const { return OrSystem(title_); }
   HFONT row() const { return OrSystem(row_); }
+  HFONT ForLanguage(FontLanguage language, bool title = false) const {
+    if (!policy_) return title ? this->title() : row();
+    const auto index = static_cast<size_t>(language);
+    return OrSystem(title ? policy_title_[index] : policy_row_[index]);
+  }
+  HFONT BaseFallback(bool title = false) const { return OrSystem(title ? policy_title_[4] : policy_row_[4]); }
   HFONT icons(bool material = true) const { return OrSystem(material ? icons_ : legacy_icons_); }
   const std::wstring& face() const { return face_; }
   bool private_font_loaded() const { return !registered_path_.empty(); }
@@ -180,7 +251,7 @@ class PopupFonts {
   }
 
   std::wstring PrivateFamily(const std::wstring& path,
-                             const std::wstring& requested) const {
+                             const std::wstring& requested, LANGID language = LANG_NEUTRAL) const {
     if (!gdiplus_) return {};
     Gdiplus::PrivateFontCollection collection;
     if (collection.AddFontFile(path.c_str()) != Gdiplus::Ok) return {};
@@ -194,7 +265,7 @@ class PopupFonts {
     std::wstring first;
     for (int index = 0; index < found; ++index) {
       WCHAR name[LF_FACESIZE]{};
-      if (families[index].GetFamilyName(name) != Gdiplus::Ok) continue;
+      if (families[index].GetFamilyName(name, language) != Gdiplus::Ok) continue;
       if (first.empty()) first = name;
       const std::wstring family(name);
       if (_wcsnicmp(requested.c_str(), family.c_str(), family.size()) == 0) {
@@ -211,6 +282,10 @@ class PopupFonts {
   std::wstring requested_path_;
   std::wstring registered_path_;
   std::wstring face_;
+  std::optional<NativeFontPolicy> policy_;
+  std::vector<std::wstring> policy_paths_;
+  std::array<std::wstring, 5> policy_faces_{};
+  std::array<HFONT, 5> policy_row_{}, policy_title_{};
   std::wstring icon_requested_path_, icon_registered_path_, icon_face_;
   struct FontChoice { std::wstring text; bool title = false; HFONT font = nullptr; };
   std::array<FontChoice, 16> choices_{};

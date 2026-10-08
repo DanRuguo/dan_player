@@ -12,7 +12,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     await (FontLoader('MaterialIcons')
           ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')))

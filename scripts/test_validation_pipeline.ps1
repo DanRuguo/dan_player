@@ -18,7 +18,7 @@ $business = Get-WindowsCiImpact $repo @('test/queue_undo_test.dart')
 Assert-Policy ($business.Profile -eq 'business' -and 'test/queue_undo_test.dart' -cin $business.Tests) 'Dart fixture changes must retain their affected test.'
 $business = Get-WindowsCiImpact $repo @('lib/play_service/queue_edits.dart')
 Assert-Policy ($business.Profile -eq 'business' -and 'test/queue_undo_test.dart' -cin $business.Tests -and 'test/current_playlist_view_test.dart' -cin $business.Tests) 'Production business changes must follow actual dependent tests.'
-foreach ($path in @('lib/main.dart', 'lib/play_service/playback_service.dart', 'lib/src/rust/frb_generated.dart', 'lib/update/update_service.dart', 'lib/page/updating_page.dart', 'windows/runner/main.cpp', 'third_party/desktop_lyric/lib/main.dart', 'assets/fonts/PingFangSC-Regular.ttf', 'pubspec.lock', 'scripts/build_windows_release.ps1', 'new-unknown-input')) {
+foreach ($path in @('lib/main.dart', 'lib/play_service/playback_service.dart', 'lib/src/rust/frb_generated.dart', 'lib/update/update_service.dart', 'lib/page/updating_page.dart', 'windows/runner/main.cpp', 'third_party/desktop_lyric/lib/main.dart', 'third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf', 'pubspec.lock', 'scripts/build_windows_release.ps1', 'new-unknown-input')) {
     Assert-Policy ((Get-WindowsCiImpact $repo @($path)).Profile -eq 'integration') "Shared/unknown input was under-tested: $path"
 }
 Assert-Policy ((Get-WindowsCiImpact $repo @('README.md') -ForceIntegration).Profile -eq 'integration') 'Explicit release/integration dispatch must never take the documentation shortcut.'

@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:dan_player/desktop_tray_appearance.dart';
+import 'package:dan_player/font/app_font_manager.dart';
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'dart:io';
 
@@ -305,7 +307,8 @@ class DesktopIntegration implements Listenable {
         _themeOverride = null,
         _syncAppearance = true,
         _onError = HotkeysHelper.showError,
-        _taskbarLyrics = TaskbarLyricService.instance;
+        _taskbarLyrics = TaskbarLyricService.instance,
+        _fontPolicyOverride = AppFontManager.instance.policy;
 
   @visibleForTesting
   DesktopIntegration.forTesting({
@@ -320,6 +323,7 @@ class DesktopIntegration implements Listenable {
     ThemeProvider? themeProvider,
     ValueListenable<TaskbarProgressValue?>? progressOperations,
     TaskbarLyricService? taskbarLyrics,
+    ValueListenable<AppFontPolicy>? fontPolicy,
   })  : _native = native,
         _window = window,
         _playback = playback,
@@ -330,7 +334,8 @@ class DesktopIntegration implements Listenable {
         _themeOverride = themeProvider,
         _syncAppearance = syncAppearance,
         _onError = onError,
-        _taskbarLyrics = taskbarLyrics;
+        _taskbarLyrics = taskbarLyrics,
+        _fontPolicyOverride = fontPolicy;
 
   static final instance = DesktopIntegration._();
   final powerRequestStatus = ValueNotifier<String>('未请求');
@@ -350,6 +355,7 @@ class DesktopIntegration implements Listenable {
   String? _previewError;
   final void Function(String)? _onError;
   final TaskbarLyricService? _taskbarLyrics;
+  final ValueListenable<AppFontPolicy>? _fontPolicyOverride;
   bool _taskbarLyricsVertical = false;
   bool get taskbarLyricsVertical => _taskbarLyricsVertical;
   int _taskbarLyricsAreaCount = 0;
@@ -410,7 +416,7 @@ class DesktopIntegration implements Listenable {
   bool? _sentTaskbar;
   double? _sentTrayBlurRadius;
   bool? _sentRoundedCorners;
-  (bool, int, String, String)? _sentAppearance;
+  (bool, int, String, String, AppFontPolicy?)? _sentAppearance;
   UiLanguage? _sentLanguage;
 
   Map<String, String> _menuLabels() => {
@@ -481,6 +487,7 @@ class DesktopIntegration implements Listenable {
         if (appearance != null) 'accent': appearance.$2,
         if (appearance != null) 'fontFamily': appearance.$3,
         if (appearance != null) 'fontPath': appearance.$4,
+        if (appearance?.$5 case final policy?) 'fontPolicy': policy.toJson(),
       }));
       if (_closed) return;
       _sentTaskbar = initialTaskbar;
@@ -511,6 +518,7 @@ class DesktopIntegration implements Listenable {
       _preferences.addListener(_scheduleSync);
       uiLanguage.addListener(_scheduleSync);
       if (_syncAppearance) _theme.addListener(_scheduleSync);
+      _fontPolicyOverride?.addListener(_scheduleSync);
       _playback.addListener(_scheduleSync);
       _playback.startObserving();
       _taskbarLyrics?.attach(
@@ -525,6 +533,7 @@ class DesktopIntegration implements Listenable {
             accent: _theme.currScheme.primary.toARGB32(),
             fontFamily: appearance.$3,
             fontPath: appearance.$4,
+            fontPolicy: appearance.$5,
             placement: taskbar.position.name,
             areaSelection: taskbar.areaSelection,
             showNextTrack: taskbar.showNextTrack,
@@ -552,21 +561,44 @@ class DesktopIntegration implements Listenable {
     }
   }
 
-  (bool, int, String, String) _appearance() {
+  (bool, int, String, String, AppFontPolicy?) _appearance() {
     final scheme = _theme.currScheme;
     final argb = scheme.primary.toARGB32();
     // Win32 COLORREF is 0x00BBGGRR, while Flutter stores 0xAARRGGBB.
     final colorRef =
         ((argb >> 16) & 0xff) | (argb & 0x0000ff00) | ((argb & 0xff) << 16);
+    final policy = _fontPolicyOverride?.value;
+    if (policy != null) {
+      return (
+        scheme.brightness == Brightness.dark,
+        colorRef,
+        policy.uiFamily,
+        policy.uiFace.path ?? '',
+        policy
+      );
+    }
     final family = _theme.fontFamily;
     final settings = AppSettings.instance;
     final fontPath = family == danEmbeddedFontFamily
-        ? path.join(File(Platform.resolvedExecutable).parent.path, 'data',
-            'flutter_assets', 'assets', 'fonts', 'PingFangSC-Regular.ttf')
+        ? path.join(
+            File(Platform.resolvedExecutable).parent.path,
+            'data',
+            'flutter_assets',
+            'packages',
+            'desktop_lyric',
+            'assets',
+            'fonts',
+            'PingFangSC-Regular.ttf')
         : settings.fontFamily == family
             ? settings.fontPath ?? ''
             : '';
-    return (scheme.brightness == Brightness.dark, colorRef, family, fontPath);
+    return (
+      scheme.brightness == Brightness.dark,
+      colorRef,
+      family,
+      fontPath,
+      null
+    );
   }
 
   void _applyState(Object? raw) {
@@ -662,6 +694,8 @@ class DesktopIntegration implements Listenable {
             if (appearance != null) 'accent': appearance.$2,
             if (appearance != null) 'fontFamily': appearance.$3,
             if (appearance != null) 'fontPath': appearance.$4,
+            if (appearance?.$5 case final policy?)
+              'fontPolicy': policy.toJson(),
           }));
           _sentTaskbar = taskbar;
           _sentTrayBlurRadius = blurRadius;
@@ -849,6 +883,7 @@ class DesktopIntegration implements Listenable {
       _preferences.removeListener(_scheduleSync);
       uiLanguage.removeListener(_scheduleSync);
       if (_syncAppearance) _theme.removeListener(_scheduleSync);
+      _fontPolicyOverride?.removeListener(_scheduleSync);
       _playback.removeListener(_scheduleSync);
       try {
         await _playback.stopObserving();

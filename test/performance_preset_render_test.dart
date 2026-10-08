@@ -17,7 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   setUpAll(() async {
     for (final font in [
-      (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
+      (danEmbeddedFontFamily, 'packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf'),
       ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf')
     ]) {
       await (FontLoader(font.$1)..addFont(rootBundle.load(font.$2))).load();

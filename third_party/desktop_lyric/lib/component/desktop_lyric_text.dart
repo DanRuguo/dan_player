@@ -4,6 +4,8 @@ import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
 import 'package:desktop_lyric/lyric_word_effects.dart';
 import 'package:desktop_lyric/message.dart';
+import 'package:desktop_lyric/font_policy.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 
 /// A whole Unicode grapheme or a vertical display unit, never a partial UTF-16
@@ -175,6 +177,8 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
   @override
   Widget build(BuildContext context) {
     final direction = Directionality.of(context);
+    final locale = Localizations.maybeLocaleOf(context);
+    final fontPolicy = AppFontScope.of(context);
     final scaler = MediaQuery.textScalerOf(context);
     final reducedMotion = widget.reducedMotion ||
         !AppMotion.enabled(context, MotionKind.lyrics) ||
@@ -195,7 +199,9 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
       widget.unplayedColor,
       widget.strokeColor,
       direction,
-      scaler
+      scaler,
+      locale,
+      fontPolicy
     );
     final identity = (
       shapeIdentity,
@@ -217,7 +223,9 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
             unplayedColor: widget.unplayedColor,
             strokeColor: widget.strokeColor,
             direction: direction,
-            scaler: scaler);
+            scaler: scaler,
+            locale: locale,
+            fontPolicy: fontPolicy);
         _shapeIdentity = shapeIdentity;
       }
       _layout = _DesktopLyricTextLayout(
@@ -283,48 +291,75 @@ class _DesktopLyricTextShaping {
       required Color unplayedColor,
       required Color? strokeColor,
       required TextDirection direction,
-      required TextScaler scaler})
+      required TextScaler scaler,
+      required Locale? locale,
+      required AppFontPolicy fontPolicy})
       : words = _DesktopLyricTextLayout._shapedWords(text, words) {
     fontSize = scaler.scale(style.fontSize ?? 22);
-    TextPainter painter(String text, Color color) => TextPainter(
-          text: TextSpan(text: text, style: style.copyWith(color: color)),
+    TextPainter painter(String text, Color color, {UiLanguage? language}) =>
+        TextPainter(
+          text: appFontSpan(text,
+              style: style.copyWith(color: color),
+              policy: fontPolicy,
+              language: language),
           textDirection: direction,
           textScaler: scaler,
+          locale: locale,
           maxLines: 1,
           ellipsis: bounded ? '…' : null,
         );
-    TextPainter? outline(String text) => strokeColor == null
-        ? null
-        : (TextPainter(
-            text: TextSpan(
-                text: text,
-                style: style.copyWith(
-                  foreground: Paint()
-                    ..style = PaintingStyle.stroke
-                    ..strokeWidth =
-                        ((style.fontSize ?? 22) * .06).clamp(1.2, 2.4)
-                    ..strokeJoin = StrokeJoin.round
-                    ..color = strokeColor,
-                  shadows: const [],
-                )),
-            textDirection: direction,
-            textScaler: scaler,
-            maxLines: 1,
-            ellipsis: bounded ? '…' : null,
-          ));
+    TextPainter? outline(String text, {UiLanguage? language}) =>
+        strokeColor == null
+            ? null
+            : (TextPainter(
+                text: appFontSpan(text,
+                    policy: fontPolicy,
+                    language: language,
+                    style: style.copyWith(
+                      foreground: Paint()
+                        ..style = PaintingStyle.stroke
+                        ..strokeWidth =
+                            ((style.fontSize ?? 22) * .06).clamp(1.2, 2.4)
+                        ..strokeJoin = StrokeJoin.round
+                        ..color = strokeColor,
+                      shadows: const [],
+                    )),
+                textDirection: direction,
+                textScaler: scaler,
+                locale: locale,
+                maxLines: 1,
+                ellipsis: bounded ? '…' : null,
+              ));
     if (!vertical) {
       base = painter(text, unplayedColor);
       highlight = painter(text, playedColor);
       stroke = outline(text);
       return;
     }
+    // Resolve script context on the complete original line, then reuse it for
+    // upright units. Isolated Han glyphs would otherwise lose adjacent Kana
+    // or Hangul context. UTF-16 starts still belong to the authored text.
+    final runs = fontPolicy.mixedScripts
+        ? appFontRuns(text, fontPolicy.language)
+        : const <AppFontRun>[];
+    var runIndex = 0;
+    var runEnd = runs.isEmpty ? text.length : runs.first.text.length;
     for (final glyph in desktopLyricVerticalUnits(text)) {
+      while (runIndex + 1 < runs.length && glyph.start >= runEnd) {
+        runIndex++;
+        runEnd += runs[runIndex].text.length;
+      }
+      final language =
+          runs.isEmpty ? fontPolicy.language : runs[runIndex].language;
       final display =
           glyph.text == '\n' || glyph.text == '\r\n' ? ' ' : glyph.text;
-      final stroke = outline(display);
+      final stroke = outline(display, language: language);
       stroke?.layout();
-      glyphs.add(_GlyphShaping(glyph, painter(display, unplayedColor)..layout(),
-          painter(display, playedColor)..layout(), stroke));
+      glyphs.add(_GlyphShaping(
+          glyph,
+          painter(display, unplayedColor, language: language)..layout(),
+          painter(display, playedColor, language: language)..layout(),
+          stroke));
     }
   }
 

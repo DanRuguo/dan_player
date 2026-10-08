@@ -32,7 +32,7 @@ target_compile_options(dan_installer_controls_test PRIVATE /W4 /WX /utf-8 /EHsc)
 target_compile_definitions(dan_installer_controls_test PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(dan_installer_controls_test PRIVATE dan_installer_native gdi32)
 add_test(NAME dan_installer_controls_test COMMAND dan_installer_controls_test
-  "${CMAKE_CURRENT_SOURCE_DIR}/../assets/fonts/PingFangSC-Regular.ttf"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf"
   "${CMAKE_BINARY_DIR}/test-sandbox")
 add_executable(dan_installer_progress_test tests/installer_progress_test.cpp)
 target_compile_options(dan_installer_progress_test PRIVATE /W4 /WX /utf-8 /EHsc)

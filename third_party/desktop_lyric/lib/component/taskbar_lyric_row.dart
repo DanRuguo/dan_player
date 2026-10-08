@@ -7,6 +7,7 @@ import 'package:desktop_lyric/component/desktop_lyric_text.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
 import 'package:desktop_lyric/desktop_lyric_window_layout.dart';
 import 'package:desktop_lyric/message.dart';
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
@@ -127,6 +128,7 @@ class _TaskbarLyricRowState extends State<TaskbarLyricRow> {
                   style: baseStyle,
                   scaler: scaler,
                   direction: Directionality.of(context),
+                  fontPolicy: AppFontScope.of(context),
                   width: lineBounds.maxWidth,
                   height: lineBounds.maxHeight - 4,
                   preferred: prefs.lyricFontSize,
@@ -237,11 +239,15 @@ double taskbarLyricFontSize(String text,
     required double width,
     required double height,
     required double preferred,
-    required double minimum}) {
+    required double minimum,
+    AppFontPolicy? fontPolicy}) {
   final painter =
       TextPainter(textDirection: direction, textScaler: scaler, maxLines: 1);
   bool fits(double size) {
-    painter.text = TextSpan(text: text, style: style.copyWith(fontSize: size));
+    painter.text = fontPolicy == null
+        ? TextSpan(text: text, style: style.copyWith(fontSize: size))
+        : appFontSpan(text,
+            style: style.copyWith(fontSize: size), policy: fontPolicy);
     painter.layout();
     return painter.width <= width && painter.height <= height;
   }

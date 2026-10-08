@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -107,8 +108,9 @@ const musicGridTitleStyle = TextStyle(fontSize: 16, height: 1.25);
 /// at accessibility scales, with the actual active font and text scaler.
 double musicGridLineHeight(BuildContext context, {double fontSize = 16}) {
   final painter = TextPainter(
-    text: TextSpan(
-      text: ui("Ag国"),
+    text: appFontSpan(
+      "Ag国かな한글",
+      policy: AppFontScope.of(context),
       style: DefaultTextStyle.of(context).style.merge(
             TextStyle(fontSize: fontSize, height: 1.25),
           ),
@@ -160,7 +162,7 @@ class MusicGridTileBody extends StatelessWidget {
           // Keep mouse hover hints without entering the touch gesture arena;
           // the song card owns long-press context menus.
           triggerMode: TooltipTriggerMode.manual,
-          child: Text(
+          child: AppFontText(
             title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,

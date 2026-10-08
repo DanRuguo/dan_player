@@ -50,7 +50,7 @@ void main() {
             .toList();
     final lyric = _FixtureLyric(lines);
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     final settings = LyricViewController();
     final boundary = GlobalKey();

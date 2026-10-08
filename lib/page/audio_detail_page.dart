@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/personal_library_dialog.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/album_tile.dart';
@@ -247,12 +248,13 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                       )
                     else
                       _DetailSection(
-                          title: ui("艺术家"), child: Text(audio.artist)),
+                          title: ui("艺术家"), child: AppFontText(audio.artist)),
                     if (album != null)
                       _DetailSection(
                           title: ui("专辑"), child: AlbumTile(album: album))
                     else
-                      _DetailSection(title: ui("专辑"), child: Text(audio.album)),
+                      _DetailSection(
+                          title: ui("专辑"), child: AppFontText(audio.album)),
                   ];
                   return constraints.maxWidth /
                               MediaQuery.textScalerOf(context).scale(1) >=
@@ -282,14 +284,14 @@ class _AudioDetailPageState extends State<AudioDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SelectableText(audio.localFilePath),
+                        AppFontSelectableText(audio.localFilePath),
                         if (audio.cueTrack case final cue?) ...[
                           const SizedBox(height: 8),
                           Text(ui('CUE 分轨 · 第 {0} 轨 · 起点 {1} 秒', [
                             cue.number,
                             cue.startSeconds.toStringAsFixed(2)
                           ])),
-                          SelectableText(cue.cuePath),
+                          AppFontSelectableText(cue.cuePath),
                         ],
                         const SizedBox(height: 8.0),
                         OutlinedButton.icon(
@@ -407,14 +409,14 @@ class _HeroInfo extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10.0),
-        Text(
+        AppFontText(
           audio.displayTitle,
           style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
         ),
         const SizedBox(height: 6.0),
-        Text(
+        AppFontText(
           "${audio.artist} · ${audio.album}",
           style: Theme.of(context).textTheme.titleMedium,
         ),

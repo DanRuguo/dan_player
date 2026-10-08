@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:dan_player/font/app_font_manager.dart';
+import 'package:desktop_lyric/font_policy.dart';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_fonts.dart';
@@ -32,6 +34,10 @@ class ThemeProvider extends ChangeNotifier with WidgetsBindingObserver {
     _platformBrightness =
         WidgetsBinding.instance.platformDispatcher.platformBrightness;
     WidgetsBinding.instance.addObserver(this);
+    if (_connectPlayback) {
+      fontFamily = AppFontManager.instance.policy.value.uiFamily;
+      AppFontManager.instance.policy.addListener(_fontChanged);
+    }
   }
 
   /// Keeps artwork race/failure tests independent of native playback and IO.
@@ -73,6 +79,11 @@ class ThemeProvider extends ChangeNotifier with WidgetsBindingObserver {
   ImageProvider? get backdropImage => _backdropImage;
 
   String fontFamily = danEmbeddedFontFamily;
+  AppFontPolicy get fontPolicy => AppFontManager.instance.policy.value;
+  void _fontChanged() {
+    fontFamily = fontPolicy.uiFamily;
+    _publishTheme();
+  }
 
   ColorScheme get currScheme {
     final isDark = themeMode == ThemeMode.dark ||
@@ -284,6 +295,9 @@ class ThemeProvider extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     _disposed = true;
+    if (_connectPlayback) {
+      AppFontManager.instance.policy.removeListener(_fontChanged);
+    }
     WidgetsBinding.instance.removeObserver(this);
     _invalidateArtwork();
     if (_followingPlayback) {

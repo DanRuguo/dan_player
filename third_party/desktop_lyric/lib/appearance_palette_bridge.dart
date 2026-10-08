@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_typography.dart';
+import 'font_loader.dart';
+import 'font_policy.dart';
 import 'appearance_controller.dart';
 import 'desktop_lyric_appearance.dart';
 import 'desktop_lyric_controller.dart';
@@ -75,6 +77,7 @@ class DesktopLyricPaletteHost {
         desktopMotionPreferences,
         controller.appearance,
         controller.theme,
+        controller.fontPolicy,
         controller.isDarkMode,
         controller.appearanceSaveError,
         layout.lastError,
@@ -95,8 +98,9 @@ class DesktopLyricPaletteHost {
       'language': uiLanguage.value.code,
       'frameRate': frameRatePreference.value.toMap(),
       'animations': desktopMotionPreferences.value.toMap(),
-      'fontFamily': DesktopLyricTypography.fontFamily,
-      'fontFamilyFallback': DesktopLyricTypography.fontFamilyFallback,
+      'fontPolicy': controller.fontPolicy.value.toJson(),
+      'fontFamily': controller.fontPolicy.value.uiFamily,
+      'fontFamilyFallback': controller.fontPolicy.value.fallback,
       'saveError': controller.appearanceSaveError.value == null
           ? null
           : ui(controller.appearanceSaveError.value!),
@@ -264,9 +268,11 @@ class DesktopLyricPaletteScope extends InheritedWidget {
 class DesktopLyricPaletteClient extends ChangeNotifier {
   DesktopLyricPaletteClient(
       {MethodChannel? channel,
+      Future<void> Function(AppFontPolicy)? ensureFontsLoaded,
       this.flushInterval = const Duration(milliseconds: 33),
       this.timeout = const Duration(seconds: 5)})
-      : channel = channel ??
+      : _ensureFontsLoaded = ensureFontsLoaded ?? ensureAppFontsLoaded,
+        channel = channel ??
             const MethodChannel('dan_player/desktop_lyric_palette_child') {
     appearance = TextDisplayController(onChanged: _edit);
     this.channel.setMethodCallHandler((call) async {
@@ -276,6 +282,8 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
             beginSession: call.method == 'present')) {
           throw const FormatException('Invalid new palette session');
         }
+        await fontsReady;
+        if (_disposed) return null;
         if (call.method == 'refresh') {
           _presentationEpoch++;
           notifyListeners();
@@ -295,6 +303,7 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
       }
       if (!_disposed && call.method == 'snapshot') {
         applySnapshot(call.arguments);
+        await fontsReady;
       }
       if (!_disposed && call.method == 'requestClose') unawaited(close());
     });
@@ -302,6 +311,7 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
   final MethodChannel channel;
   final Duration flushInterval;
   final Duration timeout;
+  final Future<void> Function(AppFontPolicy) _ensureFontsLoaded;
   late final TextDisplayController appearance;
   final theme = ValueNotifier(
       const ThemeChangedMessage(0xff2196f3, 0xffffffff, 0xff000000));
@@ -310,6 +320,19 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
   final layoutError = ValueNotifier<String?>(null);
   String fontFamily = DesktopLyricTypography.fontFamily;
   List<String> fontFamilyFallback = DesktopLyricTypography.fontFamilyFallback;
+  AppFontPolicy fontPolicy = AppFontPolicy.defaults();
+  AppFontPolicy? _requestedFontPolicy;
+  Future<void> _fontLoading = Future.value();
+  int _fontRequest = 0;
+
+  Future<void> get fontsReady async {
+    while (!_disposed) {
+      final pending = _fontLoading;
+      await pending;
+      if (identical(pending, _fontLoading)) return;
+    }
+  }
+
   DesktopLyricAppearance _base = DesktopLyricAppearance.defaults;
   DesktopLyricAppearance _displayed = DesktopLyricAppearance.defaults;
   Map<String, Object?> _pending = {};
@@ -355,6 +378,7 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
     if (!_disposed && !applySnapshot(snapshot)) {
       throw const FormatException('Invalid initial palette snapshot');
     }
+    await fontsReady;
   }
 
   bool applySnapshot(Object? raw, {bool beginSession = false}) {
@@ -380,6 +404,7 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
         (raw['layoutError'] != null && raw['layoutError'] is! String) ||
         (raw['language'] != null && raw['language'] is! String) ||
         (raw['fontFamily'] != null && raw['fontFamily'] is! String) ||
+        (raw['fontPolicy'] != null && raw['fontPolicy'] is! Map) ||
         (fallback != null &&
             (fallback is! List || fallback.any((e) => e is! String))) ||
         (beginSession
@@ -389,6 +414,8 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
     }
     if (beginSession) {
       _presentationEpoch++;
+      _fontRequest++;
+      _requestedFontPolicy = null;
       _timer?.cancel();
       _timer = null;
       _flushFuture = null;
@@ -414,11 +441,28 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
       frameRatePreference.value = FrameRatePreference.fromMap(raw['frameRate']);
       desktopMotionPreferences.value =
           MotionPreferences.fromMap(raw['animations']);
-      fontFamily =
-          raw['fontFamily'] as String? ?? DesktopLyricTypography.fontFamily;
-      fontFamilyFallback =
-          (raw['fontFamilyFallback'] as List?)?.cast<String>() ??
-              DesktopLyricTypography.fontFamilyFallback;
+      if (raw['fontPolicy'] != null) {
+        _applyFontPolicy(AppFontPolicy.fromJson(raw['fontPolicy']));
+      } else {
+        // Older snapshots have no loading contract. Keep their already-loaded
+        // family and fallback fields compatible with existing embedders.
+        _fontRequest++;
+        _requestedFontPolicy = null;
+        _fontLoading = Future.value();
+        fontFamily =
+            raw['fontFamily'] as String? ?? DesktopLyricTypography.fontFamily;
+        fontFamilyFallback =
+            (raw['fontFamilyFallback'] as List?)?.cast<String>() ??
+                DesktopLyricTypography.fontFamilyFallback;
+        final face = AppFontFace(id: 'legacy', family: fontFamily);
+        fontPolicy = AppFontPolicy(
+            language: uiLanguage.value,
+            mixedScripts: false,
+            zh: face,
+            en: face,
+            ja: face,
+            ko: face);
+      }
     }
     final ack = raw['editAck'];
     if (ack is int && ack >= _inflightSequence) _inflight = {};
@@ -428,6 +472,32 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
         _displayed; // Snapshot application must never echo edits.
     notifyListeners();
     return true;
+  }
+
+  void _applyFontPolicy(AppFontPolicy next) {
+    if (next == _requestedFontPolicy) return;
+    _requestedFontPolicy = next;
+    final request = ++_fontRequest;
+    final session = _session;
+    if (next == fontPolicy) {
+      _fontLoading = Future.value();
+      return;
+    }
+    _fontLoading = () async {
+      try {
+        await _ensureFontsLoaded(next);
+        if (_disposed || request != _fontRequest || session != _session) return;
+        fontPolicy = next;
+        fontFamily = next.uiFamily;
+        fontFamilyFallback = next.fallback;
+        notifyListeners();
+      } catch (error, stack) {
+        if (!_disposed && request == _fontRequest && session == _session) {
+          _requestedFontPolicy = null;
+          stderr.writeln('Lyric palette font loading failed: $error\n$stack');
+        }
+      }
+    }();
   }
 
   void _edit(DesktopLyricAppearance next) {
@@ -559,6 +629,7 @@ class DesktopLyricPaletteClient extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _fontRequest++;
     _timer?.cancel();
     channel.setMethodCallHandler(null);
     appearance.dispose();

@@ -11,6 +11,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $build = Get-Content -LiteralPath $BuildReceiptPath -Raw | ConvertFrom-Json
+. (Join-Path $PSScriptRoot 'support\bundled_fonts.ps1')
+$installerFont = Get-BundledInstallerFont -RepositoryRoot (Split-Path -Parent $PSScriptRoot)
+if ($build.EmbeddedFontSource -cne $installerFont.RelativePath -or
+    $build.EmbeddedFontSha256 -cne $installerFont.Sha256) { throw 'Installer embedded font source/hash changed.' }
 $config = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $BuildReceiptPath) 'build-config.iss') -Raw
 if ($build.QaBuild -or $config -match '#define Qa|native_qa' -or $build.Installer -match '-QA\.exe$') {
     throw 'Refusing a QA installer as a release.'
@@ -77,5 +81,6 @@ if ($RequireSigned) {
 [pscustomobject]@{
     Passed=$true; Version=$build.Version; Installer=$exe.FullName; Sha256=$build.Sha256;
     VerifiedManifestEntries=$seen.Count; CompanionChecksumVerified=$true;
+    EmbeddedFontSha256=$installerFont.Sha256;
     Signatures=$signatures; InstallationExecuted=$false
 }

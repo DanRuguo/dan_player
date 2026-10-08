@@ -54,7 +54,7 @@ void main({String? onlyCase}) {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     final windows = Platform.environment['WINDIR'];
     if (windows != null) {

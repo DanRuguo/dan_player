@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'dart:ui' as drawing;
 import 'dart:math' as math;
 
@@ -588,6 +589,7 @@ class _TimedLyricTextState extends State<_TimedLyricText>
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final fontPolicy = AppFontScope.of(context);
     final follow = widget.active && !widget.reducedMotion
         ? LyricWordFollowScope.of(context)
         : null;
@@ -606,6 +608,7 @@ class _TimedLyricTextState extends State<_TimedLyricText>
         final paintAlign =
             widget.alignmentX == null ? widget.textAlign : TextAlign.left;
         final shapeIdentity = (
+          fontPolicy,
           widget.line,
           widget.line.content,
           widget.style,
@@ -619,6 +622,7 @@ class _TimedLyricTextState extends State<_TimedLyricText>
           _layout = null;
           _paragraph?.dispose();
           _paragraph = _TimedLyricParagraph(
+            policy: fontPolicy,
             line: widget.line,
             style: widget.style,
             textAlign: paintAlign,
@@ -679,14 +683,15 @@ class _TimedLyricTextState extends State<_TimedLyricText>
 /// has a distinct identity so a changed wrap always invalidates its painter.
 class _TimedLyricParagraph {
   _TimedLyricParagraph({
+    required this.policy,
     required this.line,
     required this.style,
     required TextAlign textAlign,
     required TextDirection direction,
     required TextScaler scaler,
   })  : base = TextPainter(
-          text: TextSpan(
-              text: line.content, style: style.copyWith(color: Colors.white)),
+          text: appFontSpan(line.content,
+              style: style.copyWith(color: Colors.white), policy: policy),
           textDirection: direction,
           textAlign: textAlign,
           textScaler: scaler,
@@ -696,6 +701,7 @@ class _TimedLyricParagraph {
         _direction = direction,
         _scaler = scaler;
 
+  final AppFontPolicy policy;
   final SyncLyricLine line;
   final TextStyle style;
   final TextPainter base;
@@ -717,7 +723,7 @@ class _TimedLyricParagraph {
   }
 
   TextPainter _newInkPainter(TextStyle inkStyle) => TextPainter(
-        text: TextSpan(text: line.content, style: inkStyle),
+        text: appFontSpan(line.content, style: inkStyle, policy: policy),
         textDirection: _direction,
         textAlign: _textAlign,
         textScaler: _scaler,
@@ -747,7 +753,8 @@ class _TimedLyricParagraph {
       _gradientInk = _newInkPainter(styleWithShader);
     } else {
       _gradientInk!
-        ..text = TextSpan(text: line.content, style: styleWithShader)
+        ..text =
+            appFontSpan(line.content, style: styleWithShader, policy: policy)
         ..layout(maxWidth: base.width);
     }
     return _gradientInk!;

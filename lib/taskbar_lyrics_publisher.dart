@@ -4,6 +4,7 @@ import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric_timeline.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:flutter/foundation.dart';
 
 @immutable
@@ -12,6 +13,7 @@ class TaskbarLyricAppearance {
     required this.accent,
     required this.fontFamily,
     required this.fontPath,
+    this.fontPolicy,
     this.animate = true,
     this.layoutAnimate = true,
     this.placement = 'auto',
@@ -26,6 +28,7 @@ class TaskbarLyricAppearance {
   final int accent;
   final String fontFamily;
   final String fontPath;
+  final AppFontPolicy? fontPolicy;
   final bool animate;
   final bool layoutAnimate;
   final String placement;
@@ -109,6 +112,8 @@ class TaskbarLyricsPublisher {
   Object? _lastIntent;
   int _timelineRevision = 0;
   Duration? _lastPositionAt;
+  AppFontPolicy? _serializedFontPolicy;
+  Map<String, Object?>? _fontPolicyJson;
 
   void refresh() {
     if (_closed || _scheduled) return;
@@ -204,12 +209,17 @@ class TaskbarLyricsPublisher {
       _lastIntent = intent;
       _timelineRevision++;
     }
+    if (style.fontPolicy != _serializedFontPolicy) {
+      _serializedFontPolicy = style.fontPolicy;
+      _fontPolicyJson = style.fontPolicy?.toJson();
+    }
     final content = <String, Object>{
       'enabled': true,
       ..._line,
       'accent': style.accent,
       'fontFamily': style.fontFamily,
       'fontPath': style.fontPath,
+      if (_fontPolicyJson != null) 'fontPolicy': _fontPolicyJson!,
       'animate': style.animate,
       'animateLayout': style.layoutAnimate,
       'playing': _source.playing,

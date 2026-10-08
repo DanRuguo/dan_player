@@ -111,7 +111,7 @@ void main() {
   late List<Uint8List> covers;
   setUpAll(() async {
     final font = FontLoader(danEmbeddedFontFamily)
-      ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf'));
+      ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf'));
     await font.load();
     for (final entry in [
       ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),

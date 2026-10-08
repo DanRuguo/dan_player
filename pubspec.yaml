@@ -65,7 +65,3 @@ flutter:
     - assets/images/RCE_logo_white.png
     - assets/branding/danruguo_light.png
     - assets/branding/danruguo_dark.png
-  fonts:
-    - family: DanPingFangSC
-      fonts:
-        - asset: assets/fonts/PingFangSC-Regular.ttf

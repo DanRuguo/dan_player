@@ -180,7 +180,7 @@ void main() {
     // Real font metrics prevent Ahem from inventing title overflow that does
     // not occur in the shipped Windows UI.
     final loader = FontLoader(danEmbeddedFontFamily);
-    loader.addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf'));
+    loader.addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf'));
     await loader.load();
   });
 

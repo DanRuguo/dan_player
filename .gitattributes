@@ -1,4 +1,9 @@
-# Preserve the upstream font and license bytes on Windows checkouts.
-/assets/fonts/PingFangSC-Regular.ttf -text
-/third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf -text
-/licenses/NOTO-SANS-CJK/OFL.txt -text
+# Preserve original upstream font and license bytes on every checkout.
+/third_party/desktop_lyric/assets/fonts/* -text
+/licenses/SOURCE-HAN-SANS/* -text
+/licenses/GOOGLE-SANS/* -text
+/licenses/PRETENDARD/* -text
+# These pinned upstream notices retain their original CRLF/trailing spaces.
+/licenses/GOOGLE-SANS/OFL.txt whitespace=cr-at-eol,-blank-at-eol
+/licenses/GOOGLE-SANS/TRADEMARKS.md whitespace=cr-at-eol,-blank-at-eol
+/licenses/PRETENDARD/OFL.txt whitespace=cr-at-eol,-blank-at-eol

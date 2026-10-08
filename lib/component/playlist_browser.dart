@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/category_presentation.dart';
 import 'package:dan_player/component/playlist_rectangle_tile.dart';
 import 'package:dan_player/component/playlist_tile_grid.dart';
@@ -1310,7 +1311,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                         row.playlist == null ? Icons.music_note : Icons.folder),
                     const SizedBox(width: 8),
                     Flexible(
-                      child: Text(row.label,
+                      child: appFontText(context, row.label,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),
                   ],
@@ -1743,7 +1744,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
                                             children: [
-                                              Text(row.label,
+                                              appFontText(context, row.label,
                                                   maxLines: 1,
                                                   overflow:
                                                       TextOverflow.ellipsis,

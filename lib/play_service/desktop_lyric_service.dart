@@ -16,6 +16,7 @@ import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/message.dart' as msg;
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -35,6 +36,7 @@ class DesktopLyricService extends ChangeNotifier {
     bool Function(String)? executableExists,
     Future<void> Function()? saveAppearance,
     ColorScheme Function()? readTheme,
+    AppFontPolicy Function()? readFontPolicy,
     ValueListenable<bool>? playbackReady,
     Duration Function()? elapsed,
     LyricDisplayCoordinator? displayCoordinator,
@@ -43,6 +45,8 @@ class DesktopLyricService extends ChangeNotifier {
         _executableExists =
             executableExists ?? ((executable) => File(executable).existsSync()),
         _readTheme = readTheme ?? (() => ThemeProvider.instance.currScheme),
+        _readFontPolicy =
+            readFontPolicy ?? (() => ThemeProvider.instance.fontPolicy),
         _playbackReady = playbackReady ?? PlayService.playbackReady,
         _elapsed = elapsed,
         _displayCoordinator =
@@ -64,6 +68,7 @@ class DesktopLyricService extends ChangeNotifier {
   final bool Function(String) _executableExists;
   final Future<void> Function() _saveAppearance;
   final ColorScheme Function() _readTheme;
+  final AppFontPolicy Function() _readFontPolicy;
   final ValueListenable<bool> _playbackReady;
   final Duration Function()? _elapsed;
   final LyricDisplayCoordinator _displayCoordinator;
@@ -186,6 +191,7 @@ class DesktopLyricService extends ChangeNotifier {
             playbackRate: playback?.playbackRate.value ?? 1.0,
             appearance: AppSettings.instance.desktopLyricAppearance.value,
             language: uiLanguage.value.code,
+            fontPolicy: _readFontPolicy(),
           ).toJson(),
         ),
       ]);
@@ -648,6 +654,7 @@ class DesktopLyricService extends ChangeNotifier {
         scheme.primary.toARGB32(),
         scheme.surfaceContainer.toARGB32(),
         scheme.onSurface.toARGB32(),
+        fontPolicy: _readFontPolicy(),
       ),
     );
   }

@@ -22,7 +22,7 @@ void main() {
           ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')))
         .load();
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     for (final font in {
       'Malgun Gothic': 'malgun.ttf',

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 #include <utility>
-#include "desktop_integration_fonts.h"
+#include "desktop_integration_text.h"
 #include "taskbar_lyrics_policy.h"
 
 struct TaskbarLyricWord {
@@ -23,24 +23,12 @@ struct WordCoverage {
   int top = -1, bottom = -1;
   double begin = 0, end = 1;
 };
-struct ShapedText {
-  HDC dc = CreateCompatibleDC(nullptr);
-  HFONT font = nullptr;
-  HGDIOBJ original_font = nullptr;
-  SCRIPT_STRING_ANALYSIS analysis = nullptr;
-  std::wstring text;
-  SIZE measured{};
-  ~ShapedText() {
-    if (analysis) ScriptStringFree(&analysis);
-    if (dc && original_font) SelectObject(dc, original_font);
-    if (font) DeleteObject(font);
-    if (dc) DeleteDC(dc);
-  }
-};
+using ShapedText = desktop_integration::NativeTextLayout;
 struct LongText {
   std::wstring text;
   std::vector<std::pair<int, int>> chunks;
   std::vector<TaskbarLyricWord> words;
+  std::optional<desktop_integration::FontLanguage> han_context;
 };
 struct WrappedText {
   std::shared_ptr<LongText> source;
@@ -147,9 +135,12 @@ inline std::shared_ptr<LongText> DivideLongText(const std::wstring& text,
       offset += static_cast<int>(word.content.size()); word_ends.push_back(offset);
     }
   }
-  // Bound shaping work independently of document size. Never split a UTF-16
-  // surrogate pair, nor a normal combining/ZWJ cluster at the chosen boundary.
+  // Bound shaping work independently of document size. Use the same complete
+  // grapheme boundaries as shaping, including authored word-end candidates.
+  // Retain one lookahead so a pathological oversized cluster is scanned once,
+  // rather than repeatedly scanning its remaining marks for every chunk.
   int begin = 0;
+  int cluster_end = 0;
   const int length = static_cast<int>(text.size());
   while (begin < length) {
     int end = std::min(length, begin + 2048);
@@ -160,15 +151,22 @@ inline std::shared_ptr<LongText> DivideLongText(const std::wstring& text,
       const int earliest = std::max(begin + 1, end - 128);
       for (int space = end - 1; space >= earliest; --space)
         if (text[space] == L' ') { end = space + 1; break; }
-      if (text[end] >= 0xdc00 && text[end] <= 0xdfff && end > begin) --end;
-      while (end > begin + 1) {
-        WORD kind = 0; GetStringTypeW(CT_CTYPE3, text.data() + end, 1, &kind);
-        if (!(kind & (C3_NONSPACING | C3_DIACRITIC | C3_VOWELMARK)) &&
-            text[end] != 0x200d && text[end - 1] != 0x200d) break;
-        --end;
-        if (text[end] >= 0xdc00 && text[end] <= 0xdfff && end > begin) --end;
-      }
-      if (end <= begin) end = std::min(length, begin + 2048);
+    }
+    int complete = begin;
+    while (cluster_end <= end) {
+      if (cluster_end > begin) complete = cluster_end;
+      if (cluster_end == length) break;
+      cluster_end = static_cast<int>(desktop_integration::FontClusterEnd(text, cluster_end));
+    }
+    if (complete > begin) end = complete;
+    else if (cluster_end <= begin + 2048) end = cluster_end;
+    else {
+      // A single cluster larger than the shaping cap retains bounded splitting
+      // at whole UTF-16 characters, without a second grapheme scan.
+      end = std::min(length, begin + 2048);
+      size_t count = 0;
+      desktop_integration::FontCodePoint(text, end - 1, &count);
+      if (count == 2) --end;
     }
     source->chunks.emplace_back(begin, end); begin = end;
   }
@@ -263,7 +261,7 @@ inline double WordReadPosition(const TextMask& mask, double position) {
 // A pathological tag gets a bounded page of the same shaped paragraph. Page
 // changes do not re-shape or truncate text, and use no ellipsis/substrings.
 inline bool PaintPage(TextMask& output, int wanted_origin) {
-  if (!output.shaping || !output.shaping->dc || !output.shaping->analysis) return false;
+  if (!output.shaping || !output.shaping->dc || !output.shaping->valid()) return false;
   const int origin = std::clamp(wanted_origin, 0, std::max(0, output.natural_width - output.width));
   if (!output.pixels.empty() && output.origin == origin) return true;
   BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -279,8 +277,7 @@ inline bool PaintPage(TextMask& output, int wanted_origin) {
   SetTextColor(dc, RGB(255, 255, 255)); SetBkMode(dc, TRANSPARENT);
   IntersectClipRect(dc, 0, 0, output.width, output.height);
   const int top = std::max(0L, (output.height - output.shaping->measured.cy) / 2L);
-  const HRESULT result = ScriptStringOut(output.shaping->analysis,
-      output.padding - origin, top, 0, nullptr, 0, 0, FALSE);
+  const HRESULT result = output.shaping->Paint(output.padding - origin, top);
   RestoreDC(dc, saved); SelectObject(dc, old_bitmap);
   if (SUCCEEDED(result)) {
     output.origin = origin;
@@ -299,42 +296,26 @@ inline bool PaintPage(TextMask& output, int wanted_origin) {
 inline TextMask RasterText(HDC measuring, desktop_integration::PopupFonts& fonts,
                           const std::wstring& text, int viewport_width, int height,
                           UINT dpi, bool animate, const std::vector<TaskbarLyricWord>& words = {}, int font_size = 16,
-                          bool paint = true) {
+                          bool paint = true,
+                          std::optional<desktop_integration::FontLanguage> han_context = std::nullopt) {
   TextMask output;
   if (!measuring || text.empty() || text.size() > 2 * 1024 * 1024 || viewport_width <= 0 ||
       viewport_width > 7680 || height <= 0 || height > 960) return output;
   if (text.size() > 2048) {
     auto source = DivideLongText(text, words);
+    if (fonts.policy()) source->han_context = desktop_integration::HanFontLanguage(text, *fonts.policy());
     const auto range = source->chunks.front();
     output = RasterText(measuring, fonts, text.substr(range.first, range.second - range.first),
-        viewport_width, height, dpi, animate, ChunkWords(*source, 0), font_size, paint);
+        viewport_width, height, dpi, animate, ChunkWords(*source, 0), font_size, paint, source->han_context);
     output.long_text = std::move(source); output.paged = true;
     return output;
   }
   fonts.Ensure(dpi);
-  LOGFONTW description{};
-  GetObjectW(fonts.ForText(measuring, text.c_str()), sizeof(description), &description);
-  description.lfWeight = FW_MEDIUM; description.lfQuality = ANTIALIASED_QUALITY;
+  if (fonts.policy() && !han_context) han_context = desktop_integration::HanFontLanguage(text, *fonts.policy());
   const int pad = std::max(3, MulDiv(4, dpi, 96));
   auto shaping = std::make_shared<ShapedText>();
-  shaping->text = text;
-  if (!shaping->dc) return output;
   for (int size = font_size; size >= std::min(12, font_size); --size) {
-    if (shaping->analysis) ScriptStringFree(&shaping->analysis);
-    if (shaping->font) {
-      SelectObject(shaping->dc, shaping->original_font);
-      DeleteObject(shaping->font); shaping->font = nullptr;
-    }
-    description.lfHeight = -MulDiv(size, dpi, 96);
-    shaping->font = CreateFontIndirectW(&description);
-    if (!shaping->font) return output;
-    const auto old = SelectObject(shaping->dc, shaping->font);
-    if (!shaping->original_font) shaping->original_font = old;
-    const HRESULT status = ScriptStringAnalyse(shaping->dc, shaping->text.data(), static_cast<int>(text.size()),
-        static_cast<int>(text.size() * 2 + 16), -1, SSA_GLYPHS | SSA_FALLBACK | SSA_LINK | SSA_BREAK,
-        0, nullptr, nullptr, nullptr, nullptr, nullptr, &shaping->analysis);
-    if (FAILED(status) || !shaping->analysis || !ScriptString_pSize(shaping->analysis)) return output;
-    shaping->measured = *ScriptString_pSize(shaping->analysis);
+    if (!shaping->Shape(fonts, text, dpi, size, FW_MEDIUM, ANTIALIASED_QUALITY, false, han_context)) return output;
     if (animate || shaping->measured.cx <= viewport_width - pad * 2) break;
   }
   output.natural_width = shaping->measured.cx + pad * 2;
@@ -348,10 +329,9 @@ inline TextMask RasterText(HDC measuring, desktop_integration::PopupFonts& fonts
     for (const auto& word : words) {
       int leading = 0, trailing = 0;
       const int end = offset + static_cast<int>(word.content.size());
-      const int final_cp = end == static_cast<int>(text.size()) ? std::max(0, end - 1) : end;
-      if (SUCCEEDED(ScriptStringCPtoX(output.shaping->analysis, offset, FALSE, &leading)) &&
-          SUCCEEDED(ScriptStringCPtoX(output.shaping->analysis, final_cp,
-              end == static_cast<int>(text.size()), &trailing)))
+      const int final_cp = std::max(offset, end - 1);
+      if (SUCCEEDED(output.shaping->CpToX( offset, FALSE, &leading)) &&
+          SUCCEEDED(output.shaping->CpToX(final_cp, TRUE, &trailing)))
         output.words.push_back({word.start, word.length, leading + pad, trailing + pad});
       offset = end;
     }
@@ -389,10 +369,9 @@ inline void MapWords(TextMask& output, const std::wstring& text,
   for (const auto& word : words) {
     int leading = 0, trailing = 0;
     const int end = offset + static_cast<int>(word.content.size());
-    const int final_cp = end == static_cast<int>(text.size()) ? std::max(0, end - 1) : end;
-    if (SUCCEEDED(ScriptStringCPtoX(output.shaping->analysis, offset, FALSE, &leading)) &&
-        SUCCEEDED(ScriptStringCPtoX(output.shaping->analysis, final_cp,
-            end == static_cast<int>(text.size()), &trailing)))
+    const int final_cp = std::max(offset, end - 1);
+    if (SUCCEEDED(output.shaping->CpToX( offset, FALSE, &leading)) &&
+        SUCCEEDED(output.shaping->CpToX(final_cp, TRUE, &trailing)))
       output.words.push_back({word.start, word.length, leading + output.padding, trailing + output.padding});
     offset = end;
   }
@@ -422,7 +401,7 @@ inline bool SelectTextChunk(TextMask& output, double position, double line_start
   if (chunk == output.chunk) return false;
   const auto range = source->chunks[chunk];
   auto next = RasterText(measuring, fonts, source->text.substr(range.first, range.second - range.first),
-      width, output.height, dpi, animate, ChunkWords(*source, chunk));
+      width, output.height, dpi, animate, ChunkWords(*source, chunk), 16, true, source->han_context);
   if (next.pixels.empty()) return false;
   next.long_text = source; next.chunk = chunk; next.paged = true; output = std::move(next);
   return true;
@@ -457,12 +436,12 @@ inline bool SelectWrappedPage(TextMask& output, double position, double line_sta
   const auto range = source.chunks[chunk];
   const auto text = source.text.substr(range.first, range.second - range.first);
   if (state->chunk != chunk) {
-    auto measured = RasterText(dc, fonts, text, output.width, MulDiv(state->font_size + 8, output.dpi, 96), output.dpi, true, {}, state->font_size);
+    auto measured = RasterText(dc, fonts, text, output.width, MulDiv(state->font_size + 8, output.dpi, 96), output.dpi, true, {}, state->font_size, true, source.han_context);
     if (!measured.shaping) return false;
     state->shaping = measured.shaping;
     state->logical_widths.assign(text.size() + 1, 0);
-    if (FAILED(ScriptStringGetLogicalWidths(state->shaping->analysis, state->logical_widths.data()))) return false;
-    const auto attributes = ScriptString_pLogAttr(state->shaping->analysis);
+    state->logical_widths = state->shaping->logical_widths;
+    const auto attributes = state->shaping->attributes.data();
     const int available = std::max(1, output.width - measured.padding * 2);
     state->pitch = std::max(MulDiv(state->font_size + 4, output.dpi, 96), static_cast<int>(state->shaping->measured.cy) + MulDiv(3, output.dpi, 96));
     state->rows.clear();
@@ -501,10 +480,10 @@ inline bool SelectWrappedPage(TextMask& output, double position, double line_sta
   for (int index = first; index < static_cast<int>(state->rows.size()) && index < first + capacity; ++index) {
     const auto row_range = state->rows[index];
     const auto segment = text.substr(row_range.first, row_range.second - row_range.first);
-    auto glyph = RasterText(dc, fonts, segment, output.width, state->pitch, output.dpi, true, {}, state->font_size);
+    auto glyph = RasterText(dc, fonts, segment, output.width, state->pitch, output.dpi, true, {}, state->font_size, true, source.han_context);
     if (!glyph.shaping) return false;
     if (glyph.natural_width > output.width)
-      glyph = RasterText(dc, fonts, segment, output.width, state->pitch, output.dpi, false, {}, state->font_size);
+      glyph = RasterText(dc, fonts, segment, output.width, state->pitch, output.dpi, false, {}, state->font_size, true, source.han_context);
     if (!glyph.shaping || glyph.pixels.empty()) return false;
     const int top = (index - first) * state->pitch;
     for (int y = 0; y < state->pitch && top + y < output.height; ++y)
@@ -517,9 +496,8 @@ inline bool SelectWrappedPage(TextMask& output, double position, double line_sta
       if (begin < end) {
         int leading = 0, trailing = 0;
         const int final_cp = end - row_range.first;
-        const bool final = final_cp == static_cast<int>(segment.size());
-        if (SUCCEEDED(ScriptStringCPtoX(glyph.shaping->analysis, begin - row_range.first, FALSE, &leading)) &&
-            SUCCEEDED(ScriptStringCPtoX(glyph.shaping->analysis, final ? final_cp - 1 : final_cp, final, &trailing))) {
+        if (SUCCEEDED(glyph.shaping->CpToX(begin - row_range.first, FALSE, &leading)) &&
+            SUCCEEDED(glyph.shaping->CpToX(final_cp - 1, TRUE, &trailing))) {
           const double total = std::max(1, prefix[word_end] - prefix[word_begin]);
           next_words.push_back({word.start, word.length, leading + glyph.padding, trailing + glyph.padding,
               top, top + state->pitch, (prefix[begin] - prefix[word_begin]) / total,
@@ -544,6 +522,7 @@ inline TextMask RasterWrappedText(HDC dc, desktop_integration::PopupFonts& fonts
   output.wrapped = std::make_shared<WrappedText>();
   output.wrapped->font_size = font_size;
   output.wrapped->source = DivideLongText(text, words);
+  if (fonts.policy()) output.wrapped->source->han_context = desktop_integration::HanFontLanguage(text, *fonts.policy());
   if (!SelectWrappedPage(output, position, line_start, line_end, dc, fonts)) return {};
   return output;
 }

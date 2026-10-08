@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import 'app_typography.dart';
+import 'font_policy.dart';
 import 'desktop_lyric_theme_transition.dart';
 import 'message.dart';
 import 'app_input_theme.dart';
@@ -39,7 +40,8 @@ class DesktopLyricAppearanceApp extends StatelessWidget {
   Widget _themedApp(BuildContext context, ThemeChangedMessage colors) {
     final brightness =
         client.isDarkMode.value ? Brightness.dark : Brightness.light;
-    final base = DesktopLyricTypography.theme(brightness);
+    final base =
+        DesktopLyricTypography.theme(brightness, fontPolicy: client.fontPolicy);
     final scheme = base.colorScheme.copyWith(
         primary: Color(colors.primary),
         surface: Color(colors.surfaceContainer),
@@ -92,15 +94,17 @@ class DesktopLyricAppearanceApp extends StatelessWidget {
       locale: uiLanguage.value.locale,
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: UiLanguage.values.map((e) => e.locale),
-      builder: (context, child) => MotionPreferencesScope(
-          preferences: desktopMotionPreferences.value,
-          child: TickerMode(
-              enabled: client.active,
-              child: ExcludeFocus(
-                  excluding: !client.active,
-                  child: UiLanguageTransition(
-                      key: ValueKey(client.presentationId),
-                      child: child ?? const SizedBox.shrink())))),
+      builder: (context, child) => AppFontScope(
+          policy: client.fontPolicy,
+          child: MotionPreferencesScope(
+              preferences: desktopMotionPreferences.value,
+              child: TickerMode(
+                  enabled: client.active,
+                  child: ExcludeFocus(
+                      excluding: !client.active,
+                      child: UiLanguageTransition(
+                          key: ValueKey(client.presentationId),
+                          child: child ?? const SizedBox.shrink()))))),
       home: CallbackShortcuts(
           bindings: {
             const SingleActivator(LogicalKeyboardKey.escape): () =>

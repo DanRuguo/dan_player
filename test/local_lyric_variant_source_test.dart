@@ -46,7 +46,7 @@ void main() {
     root = await Directory(data).create(recursive: true);
     await TrackIdentityRegistry.instance.initialize(directory: root);
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     await (FontLoader('packages/material_symbols_icons/MaterialSymbolsOutlined')
           ..addFont(rootBundle.load(

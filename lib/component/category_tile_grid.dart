@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/category_pointer_glow.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
@@ -403,14 +404,14 @@ class _CategoryTileState extends State<_CategoryTile> {
                   color: circle ? scheme.onSurface : colors.foreground),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 if (p.showTitle)
-                  Text(categoryDisplayTitle(group),
+                  appFontText(context, categoryDisplayTitle(group),
                       maxLines: 2,
                       textAlign: TextAlign.center,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontWeight: FontWeight.w600, height: 1.3)),
                 if (p.showDetails && group.subtitle != null)
-                  Text(group.subtitle!,
+                  appFontText(context, group.subtitle!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,

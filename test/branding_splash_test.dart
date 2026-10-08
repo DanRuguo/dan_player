@@ -84,7 +84,7 @@ class _FailingImageProvider extends ImageProvider<_FailingImageProvider> {
 void main() {
   setUpAll(() async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
   });
   testWidgets('brands use 750 / 500 ms phases with a soft handoff',

@@ -13,7 +13,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     final loader = FontLoader(danEmbeddedFontFamily)
-      ..addFont(File('assets/fonts/PingFangSC-Regular.ttf')
+      ..addFont(File('third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')
           .readAsBytes()
           .then((bytes) => ByteData.sublistView(bytes)));
     await loader.load();

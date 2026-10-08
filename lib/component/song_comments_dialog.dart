@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -562,7 +563,8 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SelectableText('${widget.audio.title} · ${widget.audio.artist}',
+              AppFontSelectableText(
+                  '${widget.audio.title} · ${widget.audio.artist}',
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 6),
               Text(_target == null
@@ -860,7 +862,7 @@ class _CommentCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SelectableText(comment.author,
+                AppFontSelectableText(comment.author,
                     style: TextStyle(
                         color: scheme.onSurface, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 4),
@@ -872,10 +874,10 @@ class _CommentCard extends StatelessWidget {
                       style: TextStyle(color: scheme.onSurfaceVariant)),
                 ]),
                 const SizedBox(height: 10),
-                SelectableText(comment.content),
+                AppFontSelectableText(comment.content),
                 for (final reply in comment.replies) ...[
                   const SizedBox(height: 10),
-                  SelectableText(
+                  AppFontSelectableText(
                       ui("引用 / 回复 · {0}\n{1}", [reply.author, reply.content]),
                       style: TextStyle(color: scheme.onSurfaceVariant)),
                 ],

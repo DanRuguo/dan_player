@@ -1,9 +1,11 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:flutter/material.dart';
 
 TextStyle sideNavLabelStyle(BuildContext context,
         {Color? color, bool selected = false}) =>
     Theme.of(context).textTheme.bodyMedium!.merge(danCjkTextStyle(
+          fontFamily: AppFontScope.of(context).uiFamily,
           color: color,
           fontSize: 16,
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,

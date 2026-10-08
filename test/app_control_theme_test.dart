@@ -92,7 +92,7 @@ void main() {
     // real font; no Ahem-only width assertions or installed-font/file access.
     for (final family in [danEmbeddedFontFamily, _alternateFont]) {
       final loader = FontLoader(family)
-        ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf'));
+        ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf'));
       await loader.load();
     }
   });

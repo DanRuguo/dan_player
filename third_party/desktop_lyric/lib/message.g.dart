@@ -19,6 +19,7 @@ InitArgsMessage _$InitArgsMessageFromJson(Map<String, dynamic> json) =>
       vertical: json['vertical'] as bool? ?? false,
       playbackRate: safeDesktopPlaybackRate(json['playbackRate']),
       language: json['language'] is String ? json['language'] as String : 'zh',
+      fontPolicy: _fontPolicyFromJson(json['fontPolicy']),
       appearance: DesktopLyricAppearance.fromJson(json['appearance']),
     );
 
@@ -35,6 +36,7 @@ Map<String, dynamic> _$InitArgsMessageToJson(InitArgsMessage instance) =>
       'vertical': instance.vertical,
       'playbackRate': safeDesktopPlaybackRate(instance.playbackRate),
       'language': instance.language,
+      'fontPolicy': _fontPolicyToJson(instance.fontPolicy),
       'appearance': instance.appearance.toJson(),
     };
 
@@ -136,6 +138,7 @@ ThemeChangedMessage _$ThemeChangedMessageFromJson(Map<String, dynamic> json) =>
       (json['primary'] as num).toInt(),
       (json['surfaceContainer'] as num).toInt(),
       (json['onSurface'] as num).toInt(),
+      fontPolicy: _fontPolicyFromJson(json['fontPolicy']),
     );
 
 Map<String, dynamic> _$ThemeChangedMessageToJson(
@@ -144,6 +147,7 @@ Map<String, dynamic> _$ThemeChangedMessageToJson(
       'primary': instance.primary,
       'surfaceContainer': instance.surfaceContainer,
       'onSurface': instance.onSurface,
+      'fontPolicy': _fontPolicyToJson(instance.fontPolicy),
     };
 
 UnlockMessage _$UnlockMessageFromJson(Map<String, dynamic> json) =>

@@ -1064,6 +1064,22 @@ class TrackStorageUsage {
   final int bytes;
 }
 
+/// Storage of verified, unique physical files credited to one metadata group.
+/// Empty metadata remains an explicit unassigned group; it is not inferred.
+class MetadataStorageUsage {
+  const MetadataStorageUsage({
+    required this.title,
+    required this.artist,
+    required this.files,
+    required this.bytes,
+  });
+
+  final String title;
+  final String artist;
+  final int files;
+  final int bytes;
+}
+
 class LibraryStatisticsSnapshot {
   LibraryStatisticsSnapshot({
     required this.localTracks,
@@ -1080,6 +1096,8 @@ class LibraryStatisticsSnapshot {
     required List<FormatStorageUsage> formats,
     List<FolderStorageUsage> folders = const [],
     required List<TrackStorageUsage> largestFiles,
+    List<MetadataStorageUsage> largestAlbums = const [],
+    List<MetadataStorageUsage> largestArtists = const [],
     required this.scannedAt,
   })  : languageCounts = Map.unmodifiable(languageCounts),
         taggedLanguageCounts = Map.unmodifiable(taggedLanguageCounts),
@@ -1087,7 +1105,9 @@ class LibraryStatisticsSnapshot {
         lyricLanguageCounts = Map.unmodifiable(lyricLanguageCounts),
         formats = List.unmodifiable(formats),
         folders = List.unmodifiable(folders),
-        largestFiles = List.unmodifiable(largestFiles);
+        largestFiles = List.unmodifiable(largestFiles),
+        largestAlbums = List.unmodifiable(largestAlbums),
+        largestArtists = List.unmodifiable(largestArtists);
 
   final int localTracks;
   final int onlineTracks;
@@ -1103,6 +1123,8 @@ class LibraryStatisticsSnapshot {
   final List<FormatStorageUsage> formats;
   final List<FolderStorageUsage> folders;
   final List<TrackStorageUsage> largestFiles;
+  final List<MetadataStorageUsage> largestAlbums;
+  final List<MetadataStorageUsage> largestArtists;
   final DateTime scannedAt;
 
   int get totalTracks => localTracks + onlineTracks;
@@ -1236,6 +1258,8 @@ class LibraryStatisticsScanner {
     final formatCounts = <String, int>{};
     final folderCounts = <String, _FolderAccumulator>{};
     final files = <TrackStorageUsage>[];
+    final albums = <(String, String), _MetadataStorageAccumulator>{};
+    final artists = <String, _MetadataStorageAccumulator>{};
 
     for (var offset = 0; offset < tracks.length; offset += 8) {
       checkCancelled();
@@ -1313,6 +1337,17 @@ class LibraryStatisticsScanner {
                 path: track.path,
                 bytes: info.bytes,
               ));
+              final artist = _storageMetadata(track.artist);
+              final album = _storageMetadata(track.album);
+              albums.putIfAbsent((
+                artist,
+                album
+              ), () => _MetadataStorageAccumulator(album, artist)).add(
+                  info.bytes);
+              artists
+                  .putIfAbsent(
+                      artist, () => _MetadataStorageAccumulator(artist, ''))
+                  .add(info.bytes);
             case LocalFileAvailability.missing:
               missing++;
             case LocalFileAvailability.inaccessible:
@@ -1362,6 +1397,8 @@ class LibraryStatisticsScanner {
       folders: folderCounts.values.map((item) => item.snapshot()).toList()
         ..sort((a, b) => a.path.compareTo(b.path)),
       largestFiles: files.take(6).toList(),
+      largestAlbums: _largestMetadataStorage(albums.values),
+      largestArtists: _largestMetadataStorage(artists.values),
       scannedAt: DateTime.now(),
     );
   }
@@ -1390,6 +1427,50 @@ class LibraryStatisticsScanner {
       return const LocalAudioFileInfo.inaccessible();
     }
   }
+}
+
+String _storageMetadata(String value) {
+  final trimmed = value.trim();
+  return trimmed.toUpperCase() == 'UNKNOWN' ? '' : trimmed;
+}
+
+class _MetadataStorageAccumulator {
+  _MetadataStorageAccumulator(this.title, this.artist);
+  final String title, artist;
+  int files = 0;
+  int bytes = 0;
+  void add(int length) {
+    files++;
+    bytes += length;
+  }
+}
+
+List<MetadataStorageUsage> _largestMetadataStorage(
+    Iterable<_MetadataStorageAccumulator> groups) {
+  int compare(_MetadataStorageAccumulator a, _MetadataStorageAccumulator b) {
+    final byBytes = b.bytes.compareTo(a.bytes);
+    if (byBytes != 0) return byBytes;
+    final byTitle = a.title.compareTo(b.title);
+    return byTitle != 0 ? byTitle : a.artist.compareTo(b.artist);
+  }
+
+  // Keep only the six visible groups; large libraries do not need a second
+  // full sort or persistent per-file copies when the user switches views.
+  final best = <_MetadataStorageAccumulator>[];
+  for (final group in groups) {
+    if (best.length == 6 && compare(group, best.last) >= 0) continue;
+    best.add(group);
+    best.sort(compare);
+    if (best.length > 6) best.removeLast();
+  }
+  return [
+    for (final group in best)
+      MetadataStorageUsage(
+          title: group.title,
+          artist: group.artist,
+          files: group.files,
+          bytes: group.bytes),
+  ];
 }
 
 class _FolderAccumulator {

@@ -1,5 +1,6 @@
 import 'app_fonts.dart';
 import 'app_input_theme.dart';
+import 'font_policy.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_lyric/app_motion.dart';
 
@@ -7,7 +8,7 @@ abstract final class DesktopLyricTypography {
   static const String fontFamily = danEmbeddedFontFamily;
   static const List<String> fontFamilyFallback = danFontFamilyFallback;
 
-  static ThemeData theme(Brightness brightness) {
+  static ThemeData theme(Brightness brightness, {AppFontPolicy? fontPolicy}) {
     final scheme = ColorScheme.fromSeed(
       seedColor: Colors.blue,
       brightness: brightness,
@@ -17,8 +18,8 @@ abstract final class DesktopLyricTypography {
       inputDecorationTheme: appInputTheme(scheme),
       useMaterial3: true,
       brightness: brightness,
-      fontFamily: fontFamily,
-      fontFamilyFallback: fontFamilyFallback,
+      fontFamily: fontPolicy?.uiFamily ?? fontFamily,
+      fontFamilyFallback: fontPolicy?.fallback ?? fontFamilyFallback,
       colorScheme: scheme,
       iconButtonTheme: IconButtonThemeData(
         style: ButtonStyle(

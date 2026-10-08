@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'dart:io';
 
 import 'package:dan_player/component/app_item_ink_well.dart';
@@ -187,7 +188,7 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
                                                         .foreground,
                                                 height: 1.3,
                                                 fontWeight: FontWeight.w600),
-                                        child: Text(widget.title, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center))))),
+                                        child: AppFontText(widget.title, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center))))),
                   ]);
                 }),
             widget.contentWrapper(

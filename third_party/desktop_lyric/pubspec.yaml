@@ -35,3 +35,16 @@ flutter:
     - family: DanPingFangSC
       fonts:
         - asset: assets/fonts/PingFangSC-Regular.ttf
+          weight: 400
+    - family: DanGoogleSans
+      fonts:
+        - asset: assets/fonts/GoogleSans-VF.ttf
+          weight: 400
+    - family: DanSourceHanJP
+      fonts:
+        - asset: assets/fonts/SourceHanSansJP-Regular.otf
+          weight: 400
+    - family: DanPretendard
+      fonts:
+        - asset: assets/fonts/Pretendard-Regular.otf
+          weight: 400

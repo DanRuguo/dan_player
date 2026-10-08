@@ -53,7 +53,8 @@ class _DesktopLyricThemeTransitionState
     return ThemeChangedMessage(
         lerp(_from.primary, _to.primary),
         lerp(_from.surfaceContainer, _to.surfaceContainer),
-        lerp(_from.onSurface, _to.onSurface));
+        lerp(_from.onSurface, _to.onSurface),
+        fontPolicy: _to.fontPolicy);
   }
 
   @override
@@ -90,8 +91,10 @@ class _DesktopLyricThemeTransitionState
       } else {
         _animation.value = 1;
       }
-    } else if (!_canAnimate) {
-      _animation.value = 1;
+    } else {
+      // A font update with identical colours has no colour animation to start.
+      _to = next;
+      if (!_canAnimate) _animation.value = 1;
     }
   }
 

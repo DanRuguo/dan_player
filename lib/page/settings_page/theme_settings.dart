@@ -1,11 +1,9 @@
+import 'package:dan_player/page/settings_page/font_management_dialog.dart';
 import 'dart:async';
 
-import 'package:dan_player/component/font_preview_loader.dart';
-import 'package:dan_player/page/settings_page/font_selector_dialog.dart';
+import 'package:dan_player/utils.dart';
 export 'package:dan_player/page/settings_page/font_selector_dialog.dart';
 import 'package:dan_player/component/app_presentation.dart';
-import 'package:dan_player/src/rust/api/installed_font.dart';
-import 'package:dan_player/utils.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
@@ -226,78 +224,20 @@ class SelectFontCombobox extends StatefulWidget {
 }
 
 class _SelectFontComboboxState extends State<SelectFontCombobox> {
-  bool _busy = false;
-
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return SettingsTile(
-      description: ui("自定义字体"),
-      subtitle: ui("使用电脑上已安装的字体显示界面文字，歌曲标签和文件不受影响。"),
+      description: ui('字体管理'),
+      subtitle: ui('统一或按语言选择字体，主界面与歌词共用。'),
       icon: Symbols.text_fields,
       action: FilledButton.icon(
-        onPressed: _busy
-            ? null
-            : () async {
-                setState(() => _busy = true);
-                try {
-                  final installedFont = await getInstalledFonts();
-                  if (installedFont == null || installedFont.isEmpty) {
-                    showAppNotice(ui("无法获取字体"), kind: AppNoticeKind.error);
-                    return;
-                  }
-
-                  if (context.mounted) {
-                    final selectedFont = await showAppDialog<InstalledFont>(
-                      context: context,
-                      dialogBottomInset: 0,
-                      builder: (context) =>
-                          FontSelectorDialog(installedFont: installedFont),
-                    );
-                    if (selectedFont == null) return;
-
-                    final settings = AppSettings.instance;
-                    final previousFamily = settings.fontFamily;
-                    final previousPath = settings.fontPath;
-                    final preview = FontPreviewLoader.instance
-                        .acquire(selectedFont, explicit: true);
-                    try {
-                      if (await preview.family == null) {
-                        throw StateError('Selected font is unavailable');
-                      }
-                      settings.fontFamily = selectedFont.fullName;
-                      settings.fontPath = selectedFont.path;
-                      await settings.saveSettings(
-                          captureWindowSize: false,
-                          throwOnError: true,
-                          requireCommit: true);
-                      ThemeProvider.instance
-                          .changeFontFamily(selectedFont.fullName);
-                    } catch (err) {
-                      settings.fontFamily = previousFamily;
-                      settings.fontPath = previousPath;
-                      LOGGER.e("[select font] $err");
-                      if (context.mounted) {
-                        showAppNotice(ui('字体应用失败，已保留原字体。'),
-                            context: context, kind: AppNoticeKind.error);
-                      }
-                    } finally {
-                      preview.release();
-                    }
-                  }
-                } catch (err) {
-                  LOGGER.e('[installed fonts] $err');
-                  if (context.mounted) {
-                    showAppNotice(ui('无法获取字体'),
-                        context: context, kind: AppNoticeKind.error);
-                  }
-                } finally {
-                  if (mounted) setState(() => _busy = false);
-                }
-              },
-        label: Text(ui("选择字体")),
-        icon: const Icon(Symbols.text_fields),
-      ),
+          onPressed: () => showAppDialog<bool>(
+              context: context,
+              dialogBottomInset: 0,
+              builder: (_) => const FontManagementDialog()),
+          label: Text(ui('选择字体')),
+          icon: const Icon(Symbols.text_fields)),
     );
   }
 }

@@ -210,7 +210,7 @@ void main() {
     final output = Platform.environment['DAN_VIGNETTE_RENDER_DIR'];
     if (sourcePath == null || output == null) return;
     await tester.runAsync(() => (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load());
     final source = MemoryImage(
         (await tester.runAsync(() => File(sourcePath).readAsBytes()))!);

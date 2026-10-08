@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:desktop_lyric/appearance_palette_bridge.dart';
+import 'package:desktop_lyric/app_fonts.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
 import 'package:desktop_lyric/desktop_lyric_window_layout.dart';
 import 'package:desktop_lyric/message.dart';
@@ -191,7 +192,7 @@ void main() {
     expect(pair.client.saveError.value, 'save fixture');
     expect(pair.client.layoutError.value, 'layout fixture');
     expect(pair.snapshot!['language'], 'ko');
-    expect(pair.client.fontFamily, 'DanPingFangSC');
+    expect(pair.client.fontFamily, danEmbeddedFontFamily);
     expect(pair.messages, isEmpty);
     await pair.end();
   });

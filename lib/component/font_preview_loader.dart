@@ -3,7 +3,8 @@ import 'dart:collection';
 import 'dart:io';
 
 import 'package:dan_player/src/rust/api/installed_font.dart';
-import 'package:flutter/services.dart';
+import 'package:desktop_lyric/font_loader.dart';
+import 'package:desktop_lyric/font_policy.dart';
 
 /// Font registration cannot be undone in Flutter. Load only visible rows or
 /// an explicitly selected preview, share successful loads for this process,
@@ -33,11 +34,8 @@ class FontPreviewLoader {
   String? loadedFamilyFor(InstalledFont font) => _entries[font]?.loadedFamily;
 
   static Future<void> _loadInstalledFont(InstalledFont font) async {
-    final loader = FontLoader(font.fullName)
-      ..addFont(File(font.path)
-          .readAsBytes()
-          .then((bytes) => ByteData.sublistView(bytes)));
-    await loader.load();
+    await ensureAppFontLoaded(
+        AppFontFace(id: 'custom', family: font.fullName, path: font.path));
   }
 
   FontPreviewLease acquire(InstalledFont font, {bool explicit = false}) {

@@ -283,7 +283,7 @@ void main() {
           path: 'C:/Windows/Fonts/msyh.ttc', fullName: 'Microsoft YaHei'),
     ].where((font) => File(font.path).existsSync()).toList();
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     await (FontLoader('MaterialIcons')
           ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')))

@@ -172,7 +172,7 @@ void main() {
       'the next two lyric lines stay clear and context blurs across the viewport',
       (tester) async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     final fixture = _Fixture(chinese: true);
     tester.view.physicalSize = const Size(960, 800);

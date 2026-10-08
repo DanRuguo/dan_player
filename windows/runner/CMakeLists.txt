@@ -361,3 +361,38 @@ set_target_properties(window_backdrop_transition_test PROPERTIES
 add_executable(dan_player_shell_action WIN32 "shell_action_bridge.cpp")
 apply_standard_settings(dan_player_shell_action)
 target_link_libraries(dan_player_shell_action PRIVATE shell32 user32)
+
+add_executable(taskbar_font_policy_test EXCLUDE_FROM_ALL
+  "tests/taskbar_font_policy_test.cpp")
+target_compile_definitions(taskbar_font_policy_test PRIVATE NOMINMAX UNICODE _UNICODE)
+target_link_libraries(taskbar_font_policy_test PRIVATE gdi32 user32 gdiplus usp10)
+if(MSVC)
+  target_compile_options(taskbar_font_policy_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_font_policy_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+
+add_executable(taskbar_font_snapshot_surface_test EXCLUDE_FROM_ALL
+  "tests/taskbar_font_snapshot_surface_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_font_snapshot_surface_test PRIVATE
+  NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_font_snapshot_surface_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_font_snapshot_surface_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_font_snapshot_surface_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+
+add_executable(taskbar_font_edge_test EXCLUDE_FROM_ALL
+  "tests/taskbar_font_edge_test.cpp")
+target_compile_definitions(taskbar_font_edge_test PRIVATE NOMINMAX UNICODE _UNICODE)
+target_link_libraries(taskbar_font_edge_test PRIVATE gdi32 user32 gdiplus usp10)
+if(MSVC)
+  target_compile_options(taskbar_font_edge_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_font_edge_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")

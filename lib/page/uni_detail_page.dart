@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/component/category_cover_flight.dart';
 import 'package:dan_player/component/detail_header_backdrop.dart';
@@ -399,7 +400,8 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                                   SliverToBoxAdapter(
                                     child: Padding(
                                       padding: const EdgeInsets.all(24),
-                                      child: Text(
+                                      child: appFontText(
+                                        context,
                                         ui("未找到匹配的歌曲"),
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
@@ -415,7 +417,8 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                                     child: AppEntrance(
                                       identity: 'detail-tertiary-title',
                                       order: 2,
-                                      child: Text(
+                                      child: appFontText(
+                                        context,
                                         widget.tertiaryContentTitle,
                                         style: TextStyle(
                                           color: scheme.onSurface,
@@ -589,7 +592,8 @@ class _UniDetailPageHeader extends StatelessWidget {
         children: [
           Tooltip(
             message: title,
-            child: Text(
+            child: appFontText(
+              context,
               title,
               key: const ValueKey('uni-detail-title'),
               maxLines: 2,
@@ -602,7 +606,8 @@ class _UniDetailPageHeader extends StatelessWidget {
           ),
           Tooltip(
             message: subtitle,
-            child: Text(
+            child: appFontText(
+              context,
               subtitle,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,

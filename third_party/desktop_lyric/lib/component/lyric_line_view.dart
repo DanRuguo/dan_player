@@ -2,6 +2,7 @@ import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/component/foreground.dart';
 import 'package:desktop_lyric/component/lyric_line_display_area.dart';
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -138,6 +139,10 @@ class _LyricLineViewState extends State<LyricLineView>
         settings.lyricFontSize,
         settings.translationFontSize,
         MediaQuery.textScalerOf(context),
+        DefaultTextStyle.of(context).style,
+        AppFontScope.of(context),
+        Localizations.maybeLocaleOf(context),
+        Directionality.of(context),
         _reduced
       );
       if (_layoutIdentity != identity) {

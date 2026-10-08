@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_motion.dart';
 // ignore_for_file: camel_case_types
 
@@ -126,6 +127,7 @@ class SideNav extends StatelessWidget {
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return danCjkTextStyle(
+              fontFamily: AppFontScope.of(context).uiFamily,
               color:
                   selected ? scheme.onPrimaryContainer : unselectedForeground,
               fontSize: 16.0,
@@ -170,11 +172,13 @@ class SideNav extends StatelessWidget {
                 elevation: 0,
                 labelType: NavigationRailLabelType.all,
                 selectedLabelTextStyle: danCjkTextStyle(
+                  fontFamily: AppFontScope.of(context).uiFamily,
                   color: scheme.onPrimaryContainer,
                   fontSize: 13.5,
                   fontWeight: FontWeight.w700,
                 ),
                 unselectedLabelTextStyle: danCjkTextStyle(
+                  fontFamily: AppFontScope.of(context).uiFamily,
                   color: unselectedForeground,
                   fontSize: 13.5,
                   fontWeight: FontWeight.w500,

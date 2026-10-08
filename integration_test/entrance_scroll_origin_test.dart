@@ -33,7 +33,7 @@ void main() {
   testWidgets('production page entrance retains its raster origin',
       (tester) async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     await windowManager.ensureInitialized();
     await windowManager.hide();

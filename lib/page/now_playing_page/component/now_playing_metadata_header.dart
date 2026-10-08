@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:desktop_lyric/font_policy.dart';
 
 import 'package:dan_player/component/overflow_marquee_text.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -12,9 +13,9 @@ const _metadataDivider = 21.0;
 
 Size _measureHeaderText(BuildContext context, String text, TextStyle style) {
   final painter = TextPainter(
-      text: TextSpan(
-          text: text.replaceAll(RegExp(r'[\r\n]+'), ' '),
-          style: DefaultTextStyle.of(context).style.merge(style)),
+      text: appFontSpan(text.replaceAll(RegExp(r'[\r\n]+'), ' '),
+          style: DefaultTextStyle.of(context).style.merge(style),
+          policy: AppFontScope.of(context)),
       textDirection: Directionality.of(context),
       textScaler: MediaQuery.textScalerOf(context),
       locale: Localizations.maybeLocaleOf(context),

@@ -877,7 +877,8 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
                        std::int64_t timeline_revision, double line_start, double line_end,
                        std::wstring placement, std::wstring next_track_text,
                        bool show_pause_indicator, bool stroke_enabled, unsigned area_selection, bool paused,
-                       std::wstring color_scheme,bool show_next_button,bool next_button_enabled,bool animate_layout,bool show_next_lyric,bool playback_button_enabled) {
+                       std::wstring color_scheme,bool show_next_button,bool next_button_enabled,bool animate_layout,bool show_next_lyric,bool playback_button_enabled,
+                       std::optional<desktop_integration::NativeFontPolicy> font_policy) {
   if (!enabled || text.empty()) { Close(); return true; }
   const auto parsed_placement = taskbar_lyrics::ParsePlacement(placement);
   const auto parsed_color=taskbar_lyrics::ParseColorScheme(color_scheme);
@@ -900,7 +901,13 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
   // line freezes its fallback reading clock; a seek or new line resets it.
   const bool transport_switch=!source_changed && !line_changed && self.playing!=playing &&
       std::abs(position-previous_position)<=100;
-  const bool family_changed = self.fonts.Configure(std::move(family), std::move(path));
+  const bool family_changed = font_policy ? !self.fonts.Matches(*font_policy) : !self.fonts.Matches(family, path);
+  if (family_changed) {
+    // Retire every shaped DC before replacing the process-private font files.
+    self.current_mask = {}; self.next_mask = {}; self.old_mask = {}; self.metadata_mask = {};
+    if (font_policy) self.fonts.Configure(*font_policy);
+    else self.fonts.Configure(std::move(family), std::move(path));
+  }
   if(family_changed) self.metadata_read_offset=0;
   const bool row_mode_changed=self.show_next_lyric!=show_next_lyric;
   if((discontinuity && !transport_switch) || line_changed) {

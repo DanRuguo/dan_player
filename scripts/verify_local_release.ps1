@@ -75,7 +75,9 @@ if ((Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant
 }
 $desktopLyricMode = Get-ReleaseDesktopLyricMode $payload $receipt
 $sharedExecutable = $desktopLyricMode -eq 'shared-executable-v1'
-$requiredEntries = @('Dan Player.exe', 'rust_lib_dan_player.dll', 'flutter_windows.dll', 'data/app.so', 'data/icudtl.dat', 'data/flutter_assets/FontManifest.json', 'FONT-INTEGRITY.json', 'BUILD-PROVENANCE.json', 'licenses/NOTO-SANS-CJK/OFL.txt', 'licenses/NOTO-SANS-CJK/PROVENANCE.md', 'licenses/NOTO-SANS-CJK/NOTICE.txt')
+. (Join-Path $PSScriptRoot 'support\bundled_fonts.ps1')
+$bundledFontNotices = @(Get-BundledFontNotices -RepositoryRoot $repo)
+$requiredEntries = @('Dan Player.exe', 'rust_lib_dan_player.dll', 'flutter_windows.dll', 'data/app.so', 'data/icudtl.dat', 'data/flutter_assets/FontManifest.json', 'FONT-INTEGRITY.json', 'BUILD-PROVENANCE.json') + @($bundledFontNotices.RelativePath)
 $ownedBinaries = @('Dan Player.exe', 'rust_lib_dan_player.dll')
 if ($sharedExecutable) {
     . (Join-Path $PSScriptRoot 'support\release_version.ps1')
@@ -90,10 +92,9 @@ $sourcePairs = @{
     'Dan Player.exe' = 'build\windows\x64\runner\Release\Dan Player.exe'
     'rust_lib_dan_player.dll' = 'build\windows\x64\runner\Release\rust_lib_dan_player.dll'
     'data\app.so' = 'build\windows\x64\runner\Release\data\app.so'
-    'licenses\NOTO-SANS-CJK\OFL.txt' = 'licenses\NOTO-SANS-CJK\OFL.txt'
-    'licenses\NOTO-SANS-CJK\PROVENANCE.md' = 'licenses\NOTO-SANS-CJK\PROVENANCE.md'
-    'licenses\NOTO-SANS-CJK\NOTICE.txt' = 'licenses\NOTO-SANS-CJK\NOTICE.txt'
-
+}
+foreach ($notice in $bundledFontNotices) {
+    $sourcePairs[$notice.RelativePath] = $notice.RelativePath
 }
 if (-not $sharedExecutable) {
     $sourcePairs['desktop_lyric\desktop_lyric.exe'] = 'third_party\desktop_lyric\build\windows\x64\runner\Release\desktop_lyric.exe'

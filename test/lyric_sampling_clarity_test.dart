@@ -13,7 +13,7 @@ void main() {
     testWidgets('near-zero lyric blur hands off to clear ink at DPI $dpi',
         (tester) async {
       await (FontLoader(danEmbeddedFontFamily)
-            ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+            ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
           .load();
       tester.view.devicePixelRatio = dpi;
       tester.view.physicalSize = Size(900 * dpi, 300 * dpi);
@@ -120,7 +120,7 @@ void main() {
   testWidgets('fractional lyric sampling retains small glyph edge contrast',
       (tester) async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetDevicePixelRatio);

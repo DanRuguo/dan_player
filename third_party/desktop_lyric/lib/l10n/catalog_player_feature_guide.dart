@@ -845,17 +845,17 @@ const Map<String, List<String>> catalogPlayerFeatureGuide = {
     'ローカル容量・ファイル形式の環状グラフと太い棒は実際の元ファイルのバイト数、細い棒はファイル数です。形式は拡張子別です。ローカル分布・フォルダーは曲数と使用容量を切り替え、選択指標の上位7フォルダーと、残りをまとめたその他を表示します。完全なパスが違う同名フォルダーは別々に扱い、直接の親ごとに集計して子フォルダーは再帰的に合算しません。',
     '로컬 공간 · 파일 형식의 원형 차트와 굵은 막대는 실제 원본 파일 바이트이며 가는 막대는 파일 수를 비교합니다. 형식은 확장자로 묶습니다. 로컬 분포 · 폴더는 곡 수와 사용 공간을 전환하고 해당 지표 상위 7개와 나머지를 기타 폴더로 합칩니다. 전체 경로가 다른 동명 폴더는 분리하며 직접 상위 폴더별로 묶고 하위 폴더를 재귀 합산하지 않습니다.'
   ],
-  '空间只包含已核实的本地源文件，不计联网曲目、缺失或不可读文件、播放器缓存及磁盘分配开销；重复源记录会合并。“占用空间最多”列出最大的 6 个已核实文件及路径。文件夹页右键“查看占用统计”可直达对应目录；这些图表只读，不移动或删除文件。':
+  '空间只包含已核实的本地源文件，重复源记录会合并。“占用空间最多”可按歌曲、专辑或艺术家查看前 6 项；专辑和艺术家汇总全部已核实文件，同名专辑按艺术家区分，合作艺术家按完整署名统计。文件夹页右键“查看占用统计”可直达对应目录；图表只读，不移动或删除文件。':
       [
-    'Storage includes verified local source files only, excluding online tracks, missing or unreadable files, player caches and filesystem allocation overhead. Duplicate source records are merged. Largest storage usage lists the six largest verified files with their paths. Right-click View storage statistics on a folder to jump to its entry. These charts are read-only and do not move or delete files.',
-    '容量は確認済みローカル元ファイルだけで、オンライン曲・欠落や読み取り不可のファイル・プレイヤーのキャッシュ・ディスク割当の追加容量を含みません。重複元ファイルの記録はまとめます。容量の大きいファイルは最大6件とパスを示します。フォルダーページの右クリックから容量統計を見るで該当項目へ移動できます。グラフは読み取り専用で移動や削除を行いません。',
-    '용량에는 확인된 로컬 원본 파일만 포함하며 온라인 곡, 누락·읽기 불가 파일, 플레이어 캐시와 디스크 할당 오버헤드는 제외합니다. 중복 원본 기록은 합칩니다. 가장 큰 파일 6개와 경로도 표시합니다. 폴더 화면에서 오른쪽 클릭 후 사용량 통계 보기로 해당 항목에 바로 이동합니다. 차트는 읽기 전용이며 파일을 옮기거나 지우지 않습니다.'
+    'Storage includes verified local source files, with duplicates merged. Largest storage usage shows the top six tracks, albums or artists. Album and artist totals include all verified files; same-name albums are separated by artist and collaborations use the full credit. Right-click View storage statistics on a folder to jump to its entry. Charts are read-only and do not move or delete files.',
+    '容量は確認済みのローカル元ファイルを対象とし、重複はまとめます。使用量の上位6件を曲・アルバム・アーティスト別に表示できます。アルバムとアーティストは全確認済みファイルを合算し、同名アルバムはアーティスト別、共演者は完全な名義で集計します。フォルダーの右クリックから容量統計を見るで該当項目へ移動できます。グラフは読み取り専用で、移動や削除を行いません。',
+    '확인된 로컬 원본 파일만 집계하고 중복은 합칩니다. 사용 공간 상위 6개를 곡, 앨범 또는 아티스트별로 볼 수 있습니다. 앨범과 아티스트는 확인된 모든 파일을 합산하며 동명 앨범은 아티스트별, 공동 작업은 전체 표기로 구분합니다. 폴더에서 오른쪽 클릭 후 사용량 통계 보기로 해당 항목에 이동합니다. 차트는 읽기 전용이며 파일을 옮기거나 지우지 않습니다.'
   ],
-  '“缓存与播放器数据占用”另外列出总字节与文件数，以及封面、联网歌词、评论、自选图片、曲库与用户资料、迁移快照等分类。名称便于阅读，悬停查看真实目录；评论只展示上级 song_comments 目录。播放器资料与可重建缓存分开统计，不能把这一整块都当作可随意删除的缓存；链接不跟随，无法读取或达到扫描上限会提示。缓存和整页共用右上角刷新按钮。':
+  '占用栏目可切换“缓存与播放器数据”和“播放器目录”，查看总字节、文件数及各组件分类，悬停查看路径。前者包含用户资料，不能当作可随意删除的缓存；后者只统计播放器所在目录，不含外部音乐、用户数据或外部工具。播放器目录首次选中时读取，之后切换复用结果，整页共用右上角刷新按钮。链接不跟随，无法读取或达到扫描上限会提示。':
       [
-    'Cache and player data storage separately shows total bytes and files, categorized as artwork, online lyrics, comments, custom images, library and user data, migration snapshots and more. Readable names have real directories on hover; comments show the parent song_comments folder only. Player data and rebuildable caches are classified separately, so this whole block is not disposable cache. Links are not followed; unreadable items and scan limits are reported. Cache storage shares the page\'s top-right refresh button.',
-    'キャッシュとプレイヤーデータの容量には合計バイト数・ファイル数と、ジャケット、オンライン歌詞、コメント、自選画像、曲庫・ユーザー資料、移行スナップショットなどを表示します。分かりやすい名前を使い、ホバーで実際の場所を確認できます。コメントは上位のsong_commentsだけを示します。ユーザー資料と再作成できるキャッシュは別分類なので、全てを削除可能なキャッシュと考えないでください。リンクは辿らず、読めない項目や走査上限は案内します。右上の更新ボタンはページ全体と共通です。',
-    '캐시 및 플레이어 데이터 용량은 총 바이트와 파일 수 및 표지, 온라인 가사, 댓글, 사용자 이미지, 보관함·사용자 자료, 이전 스냅샷 등을 따로 보여 줍니다. 읽기 쉬운 이름을 쓰고 가리키면 실제 디렉터리가 나타나며 댓글은 상위 song_comments만 표시합니다. 사용자 자료와 다시 만들 수 있는 캐시는 별도 분류이므로 전체를 마음대로 지워도 되는 캐시로 보지 마세요. 링크를 따라가지 않고 읽기 실패나 검색 한도는 알립니다. 오른쪽 위 새로 고침은 전체 페이지와 공유합니다.'
+    'Switch between Cache & player data and Player directory to see total bytes, file counts and component categories; hover for paths. The former contains user data and is not disposable cache. The latter covers only the player directory, excluding external music, user data and tools. It is read on first selection; switching reuses the result. Both share the page refresh action. Links are not followed; unreadable items and scan limits are reported.',
+    'キャッシュとプレイヤーデータ／プレイヤーフォルダーを切り替え、総バイト数・ファイル数・構成要素別の使用量を確認できます。ホバーでパスを表示します。前者はユーザーデータを含むため全て削除可能なキャッシュではありません。後者はプレイヤーのフォルダー内だけを対象とし、外部の音楽・ユーザーデータ・ツールは含みません。初回選択時に読み取り、その後の切り替えでは結果を再利用します。ページ全体の更新ボタンを共用し、リンク先はたどらず、読み取り不可や走査上限は案内します。',
+    '캐시 및 플레이어 데이터와 플레이어 폴더를 전환하여 총 바이트, 파일 수 및 구성 요소별 사용량을 확인하고 가리키면 경로를 볼 수 있습니다. 전자는 사용자 데이터를 포함하므로 전체를 삭제 가능한 캐시로 취급하지 마세요. 후자는 플레이어 폴더 내부만 집계하며 외부 음악, 사용자 데이터 및 도구는 제외합니다. 처음 선택할 때 읽고 이후 전환은 결과를 재사용합니다. 페이지 새로 고침을 공유하며 링크를 따라가지 않고 읽기 실패나 검색 한도는 알립니다.'
   ],
   '8. 按需查看播放器资源': [
     '8. Inspect player resources when needed',

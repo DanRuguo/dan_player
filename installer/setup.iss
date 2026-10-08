@@ -107,7 +107,7 @@ Source: "{#RepositoryRoot}\app_icon.ico"; Flags: dontcopy
 Source: "{#RepositoryRoot}\assets\images\RCE_logo_white.png"; Flags: dontcopy
 Source: "{#RepositoryRoot}\assets\branding\danruguo_light.png"; Flags: dontcopy
 Source: "{#RepositoryRoot}\assets\branding\danruguo_dark.png"; Flags: dontcopy
-Source: "{#RepositoryRoot}\assets\fonts\PingFangSC-Regular.ttf"; Flags: dontcopy
+Source: "{#EmbeddedFontSource}"; DestName: "PingFangSC-Regular.ttf"; Flags: dontcopy
 #include PayloadFileEntries
 
 [Icons]

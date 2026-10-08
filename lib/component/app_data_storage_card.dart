@@ -13,8 +13,21 @@ class AppDataStorageCard extends StatefulWidget {
       {super.key,
       this.directory,
       this.reading,
+      this.title,
+      this.icon = Symbols.database,
+      this.scopeDescription,
+      this.headerControls,
+      this.readingScope,
       this.scanner = const AppDataStorageScanner()});
   final Directory? directory;
+  final String? title;
+  final IconData icon;
+  final String? scopeDescription;
+  final Widget? headerControls;
+
+  /// Reset only the displayed result when switching between different roots.
+  /// Refreshing the same root retains its previous result until completion.
+  final Object? readingScope;
 
   /// The statistics page owns refreshes; standalone cards read once on entry.
   final Future<AppDataStorageSnapshot>? reading;
@@ -41,6 +54,7 @@ class _AppDataStorageCardState extends State<AppDataStorageCard> {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final theme = Theme.of(context);
+    final title = widget.title ?? ui('缓存与播放器数据占用');
     return Card.filled(
         shape: RoundedRectangleBorder(
             borderRadius: AppShape.controlRadius,
@@ -51,67 +65,83 @@ class _AppDataStorageCardState extends State<AppDataStorageCard> {
         margin: EdgeInsets.zero,
         child: Padding(
             padding: const EdgeInsets.all(18),
-            child: FutureBuilder<AppDataStorageSnapshot>(
-                future: _reading,
-                builder: (context, result) {
-                  final data = result.data;
-                  final total = data?.bytes ?? 0;
-                  final waiting =
-                      result.connectionState == ConnectionState.waiting;
-                  return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Tooltip(
-                              message:
-                                  waiting ? ui('正在读取占用信息…') : ui('缓存与播放器数据占用'),
-                              child: Icon(
-                                  waiting
-                                      ? Symbols.hourglass_empty
-                                      : Symbols.database,
-                                  color: theme.colorScheme.primary)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                              child: Text(ui('缓存与播放器数据占用'),
-                                  style: theme.textTheme.titleMedium)),
-                        ]),
-                        if (data != null) ...[
-                          Tooltip(
-                              message: data.path,
-                              child: Text(
-                                  '${formatLibraryBytes(total)} · ${ui('{0} 个文件', [
-                                        data.files
-                                      ])}',
-                                  style: theme.textTheme.titleLarge?.copyWith(
-                                      color: theme.colorScheme.primary))),
-                          const SizedBox(height: 8),
-                          for (final part in data.parts)
-                            StatisticsBarRow(
-                                label: ui(part.label),
-                                wrapLabel: true,
-                                detail: '${ui('{0} 个文件', [
-                                      part.files
-                                    ])}\n${part.paths.join('\n')}',
-                                valueLabel: formatLibraryBytes(part.bytes),
-                                value: part.bytes.toDouble(),
-                                maximum: total.toDouble()),
-                          if (data.truncated ||
-                              data.unreadable > 0 ||
-                              data.skippedLinks > 0)
-                            Text(ui('统计未包含：不可读 {0} 项、链接 {1} 项{2}', [
-                              data.unreadable,
-                              data.skippedLinks,
-                              data.truncated ? ui('；已达到扫描上限') : ''
-                            ])),
-                        ] else if (result.hasError)
-                          Text(ui('无法读取此目录的占用信息'))
-                        else
-                          Text(ui('正在读取占用信息…')),
-                        const SizedBox(height: 8),
-                        Text(ui('实际文件字节；用户资料、自选图片与可重建缓存分别统计。链接不跟随，仅打开此页或手动刷新时读取。'),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant)),
-                      ]);
-                })));
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.headerControls != null) ...[
+                    widget.headerControls!,
+                    const SizedBox(height: 12),
+                  ],
+                  FutureBuilder<AppDataStorageSnapshot>(
+                      key: ValueKey(widget.readingScope),
+                      future: _reading,
+                      builder: (context, result) {
+                        final data = result.data;
+                        final total = data?.bytes ?? 0;
+                        final waiting =
+                            result.connectionState == ConnectionState.waiting;
+                        return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                Tooltip(
+                                    message: waiting ? ui('正在读取占用信息…') : title,
+                                    child: Icon(
+                                        waiting
+                                            ? Symbols.hourglass_empty
+                                            : widget.icon,
+                                        color: theme.colorScheme.primary)),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                    child: Text(title,
+                                        style: theme.textTheme.titleMedium)),
+                              ]),
+                              if (data != null) ...[
+                                Tooltip(
+                                    message: data.path,
+                                    child: Text(
+                                        '${formatLibraryBytes(total)} · ${ui('{0} 个文件', [
+                                              data.files
+                                            ])}',
+                                        style: theme.textTheme.titleLarge
+                                            ?.copyWith(
+                                                color: theme
+                                                    .colorScheme.primary))),
+                                const SizedBox(height: 8),
+                                for (final part in data.parts)
+                                  StatisticsBarRow(
+                                      label: ui(part.label),
+                                      wrapLabel: true,
+                                      detail: '${ui('{0} 个文件', [
+                                            part.files
+                                          ])}\n${part.paths.join('\n')}',
+                                      valueLabel:
+                                          formatLibraryBytes(part.bytes),
+                                      value: part.bytes.toDouble(),
+                                      maximum: total.toDouble()),
+                                if (data.truncated ||
+                                    data.unreadable > 0 ||
+                                    data.skippedLinks > 0)
+                                  Text(ui('统计未包含：不可读 {0} 项、链接 {1} 项{2}', [
+                                    data.unreadable,
+                                    data.skippedLinks,
+                                    data.truncated ? ui('；已达到扫描上限') : ''
+                                  ])),
+                              ] else if (result.hasError)
+                                Text(ui('无法读取此目录的占用信息'))
+                              else
+                                Text(ui('正在读取占用信息…')),
+                              const SizedBox(height: 8),
+                              Text(
+                                  widget.scopeDescription ??
+                                      ui(
+                                          '实际文件字节；用户资料、自选图片与可重建缓存分别统计。链接不跟随，仅打开此页或手动刷新时读取。'),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant)),
+                            ]);
+                      }),
+                ])));
   }
 }

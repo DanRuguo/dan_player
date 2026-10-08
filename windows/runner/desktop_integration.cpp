@@ -22,6 +22,7 @@
 #include "desktop_integration_policy.h"
 #include "desktop_integration_paint.h"
 #include "desktop_integration_fonts.h"
+#include "desktop_integration_text.h"
 #include "desktop_integration_tray_style.h"
 #include "resource.h"
 #include "taskbar_peek_geometry.h"
@@ -127,6 +128,43 @@ bool ReadWideString(const EncodableMap& map, const char* key,
   output->resize(length);
   MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value->data(),
       static_cast<int>(value->size()), output->data(), length);
+  return true;
+}
+
+bool ReadFontPolicy(const EncodableMap& map, std::optional<policy::NativeFontPolicy>* output) {
+  const auto found = map.find(EncodableValue("fontPolicy"));
+  if (found == map.end()) return true;  // Older peers retain their single-font protocol.
+  const auto* value = std::get_if<EncodableMap>(&found->second);
+  policy::NativeFontPolicy snapshot;
+  std::wstring language;
+  if (!value || !ReadWideString(*value, "language", 8, &language) ||
+      !ReadBool(*value, "mixedScripts", &snapshot.mixed_scripts)) return false;
+  if (language == L"zh") snapshot.language = policy::FontLanguage::kZh;
+  else if (language == L"en") snapshot.language = policy::FontLanguage::kEn;
+  else if (language == L"ja") snapshot.language = policy::FontLanguage::kJa;
+  else if (language == L"ko") snapshot.language = policy::FontLanguage::kKo;
+  else return false;
+  constexpr std::array<const char*, 4> keys{"zh", "en", "ja", "ko"};
+  for (size_t index = 0; index < keys.size(); ++index) {
+    const auto field = value->find(EncodableValue(keys[index]));
+    const auto* face = field == value->end() ? nullptr : std::get_if<EncodableMap>(&field->second);
+    if (!face || !ReadWideString(*face, "nativeFamily", 1024, &snapshot.faces[index].family)) {
+      if (!face || !ReadWideString(*face, "family", 1024, &snapshot.faces[index].family)) return false;
+    }
+    const auto path = face->find(EncodableValue("path"));
+    if (path != face->end() && !std::holds_alternative<std::monostate>(path->second) &&
+        !ReadWideString(*face, "path", 32768, &snapshot.faces[index].path)) return false;
+  }
+  const auto fallback = value->find(EncodableValue("baseFallback"));
+  if (fallback != value->end() && !std::holds_alternative<std::monostate>(fallback->second)) {
+    const auto* face = std::get_if<EncodableMap>(&fallback->second);
+    if (!face || (!ReadWideString(*face, "nativeFamily", 1024, &snapshot.base_fallback.family) &&
+        !ReadWideString(*face, "family", 1024, &snapshot.base_fallback.family))) return false;
+    const auto path = face->find(EncodableValue("path"));
+    if (path != face->end() && !std::holds_alternative<std::monostate>(path->second) &&
+        !ReadWideString(*face, "path", 32768, &snapshot.base_fallback.path)) return false;
+  }
+  *output = std::move(snapshot);
   return true;
 }
 
@@ -323,6 +361,7 @@ struct DesktopIntegrationController::Impl
   policy::PopupPaintBuffer popup_paint;
   UINT menu_dpi = 96;
   policy::PopupFonts popup_fonts;
+  policy::NativeTextCache popup_text;
   std::array<wchar_t, 9> material_glyphs{};
   policy::PopupBlurImage popup_blur;
   policy::PopupEffectsPreference popup_effects;
@@ -429,6 +468,7 @@ struct DesktopIntegrationController::Impl
       double position = 0, rate = 1, line_start = 0, line_end = 0;
       std::int64_t timeline_revision = 0;
       std::vector<TaskbarLyricWord> words;
+      std::optional<policy::NativeFontPolicy> font_policy;
       if (!ReadWideString(*args, "text", 2 * 1024 * 1024, &text) ||
           !ReadInt(*args, "accent", &lyric_accent) ||
           !ReadWideString(*args, "fontFamily", 1024, &family) ||
@@ -441,7 +481,7 @@ struct DesktopIntegrationController::Impl
           !ReadLyricNumber(*args, "playbackRate", &rate) || rate <= 0 || rate > 8 ||
           !ReadLyricNumber(*args, "lineStartMilliseconds", &line_start) ||
           !ReadLyricNumber(*args, "lineEndMilliseconds", &line_end) ||
-          !ReadLyricInteger(*args, "timelineRevision", &timeline_revision)) {
+          !ReadLyricInteger(*args, "timelineRevision", &timeline_revision) || !ReadFontPolicy(*args, &font_policy)) {
         result->Error("INVALID_ARGUMENT", "Invalid taskbar lyric snapshot"); return;
       }
       const auto word_arg = args->find(EncodableValue("words"));
@@ -485,7 +525,7 @@ struct DesktopIntegrationController::Impl
           std::move(family), std::move(path), animate, playing, std::move(words),
           std::move(next_text), position, rate, std::move(source), std::move(line),
           timeline_revision, line_start, line_end, std::move(placement), std::move(next_track),
-          show_pause_indicator, stroke_enabled, static_cast<unsigned>(area_selection), paused,std::move(color_scheme),show_next_button,next_button_enabled,animate_layout,show_next_lyric,playback_button_enabled))
+          show_pause_indicator, stroke_enabled, static_cast<unsigned>(area_selection), paused,std::move(color_scheme),show_next_button,next_button_enabled,animate_layout,show_next_lyric,playback_button_enabled,std::move(font_policy)))
         result->Error("TASKBAR_LYRICS_FAILED", "Could not create taskbar lyric surface");
       else result->Success();
       return;
@@ -517,10 +557,16 @@ struct DesktopIntegrationController::Impl
       ReadInt(*args, "accent", &next_accent);
       std::wstring font_family;
       std::wstring font_path;
-      const bool font_changed =
-          ReadWideString(*args, "fontFamily", 1024, &font_family) &&
-          ReadWideString(*args, "fontPath", 32768, &font_path) &&
-          popup_fonts.Configure(std::move(font_family), std::move(font_path));
+      std::optional<policy::NativeFontPolicy> font_policy;
+      if (!ReadFontPolicy(*args, &font_policy)) { result->Error("INVALID_ARGUMENT", "Invalid font snapshot"); return; }
+      const bool has_font = font_policy || (ReadWideString(*args, "fontFamily", 1024, &font_family) &&
+          ReadWideString(*args, "fontPath", 32768, &font_path));
+      const bool font_changed = has_font && (font_policy ? !popup_fonts.Matches(*font_policy) : !popup_fonts.Matches(font_family, font_path));
+      if (font_changed) {
+        popup_text.Clear();
+        if (font_policy) popup_fonts.Configure(*font_policy);
+        else popup_fonts.Configure(std::move(font_family), std::move(font_path));
+      }
       std::wstring icon_font_path;
       bool icons_changed = ReadWideString(*args, "trayIconFontPath", 32768, &icon_font_path) &&
                             popup_fonts.ConfigureIcons(std::move(icon_font_path));
@@ -1186,13 +1232,13 @@ struct DesktopIntegrationController::Impl
     const auto old_font = SelectObject(dc, popup_fonts.ForText(dc, tooltip.c_str(), true));
     SetTextColor(dc, foreground);
     RECT title{Scale(18), Scale(11), client.right - Scale(18), Scale(38)};
-    DrawTextW(dc, tooltip.c_str(), -1, &title,
-              DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    if (!popup_fonts.policy() || !popup_text.Draw(dc, popup_fonts, tooltip, title, menu_dpi, true))
+      DrawTextW(dc, tooltip.c_str(), -1, &title, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
     SelectObject(dc, popup_fonts.ForText(dc, kPublisherCaption));
     SetTextColor(dc, secondary);
     RECT caption{Scale(18), Scale(36), client.right - Scale(18), Scale(56)};
-    DrawTextW(dc, kPublisherCaption, -1, &caption,
-              DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    if (!popup_fonts.policy() || !popup_text.Draw(dc, popup_fonts, kPublisherCaption, caption, menu_dpi))
+      DrawTextW(dc, kPublisherCaption, -1, &caption, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
 
     const auto items = PopupItems();
     for (int index = 0; index < static_cast<int>(items.size()); ++index) {
@@ -1238,8 +1284,8 @@ struct DesktopIntegrationController::Impl
       SetTextColor(dc, item_color);
       RECT label{row.left + Scale(48), row.top,
                  row.right - Scale(34), row.bottom};
-      DrawTextW(dc, items[index].label, -1, &label,
-                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+      if (!popup_fonts.policy() || !popup_text.Draw(dc, popup_fonts, items[index].label, label, menu_dpi))
+        DrawTextW(dc, items[index].label, -1, &label, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
       if (items[index].id == policy::kDesktopLyrics &&
           playback.desktop_lyrics) {
         if (popup_fonts.material_icons_loaded() && material_glyphs[8]) {
@@ -1705,6 +1751,7 @@ struct DesktopIntegrationController::Impl
     if (menu_open) EndMenu();
     popup_paint.Clear();
     ClearPopupBlur();
+    popup_text.Clear();
     popup_fonts.Clear();
     if (old_taskbar) old_taskbar->SetProgressState(window, TBPF_NOPROGRESS);
     if (old_taskbar && had_buttons) {

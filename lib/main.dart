@@ -1,4 +1,5 @@
 import 'package:dan_player/startup_progress.dart';
+import 'package:dan_player/font/app_font_manager.dart';
 import 'package:desktop_lyric/frame_pacing.dart';
 import 'package:dan_player/data/snapshot3_upgrade.dart';
 import 'dart:io';
@@ -26,7 +27,6 @@ import 'package:dan_player/window_layout_controller.dart';
 import 'package:dan_player/window_mode_controller.dart';
 import 'package:dan_player/windows_shell.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:desktop_lyric/main.dart' as desktop_lyric;
@@ -104,21 +104,8 @@ Future<void> showPreparedWindow() async {
 }
 
 Future<void> loadPrefFont() async {
-  final settings = AppSettings.instance;
-  if (settings.fontFamily == null || settings.fontPath == null) return;
-
   try {
-    final fontFile = File(settings.fontPath!);
-    if (!fontFile.existsSync()) return;
-
-    final fontLoader = FontLoader(settings.fontFamily!);
-    fontLoader.addFont(
-      fontFile.readAsBytes().then((value) {
-        return ByteData.sublistView(value);
-      }),
-    );
-    await fontLoader.load();
-    ThemeProvider.instance.changeFontFamily(settings.fontFamily!);
+    await AppFontManager.instance.initialize();
   } catch (err, trace) {
     LOGGER.e(err, stackTrace: trace);
   }

@@ -123,7 +123,7 @@ void main() {
 
   setUpAll(() async {
     final loader = FontLoader(danEmbeddedFontFamily)
-      ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf'));
+      ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf'));
     await loader.load();
   });
 

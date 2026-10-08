@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -306,6 +307,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
   })? _wrapGeometry;
   @override
   Widget build(BuildContext context) {
+    final fontPolicy = AppFontScope.of(context);
     final follow = widget.wordFollow ? LyricWordFollowScope.of(context) : null;
     return LayoutBuilder(builder: (context, constraints) {
       final direction = Directionality.of(context);
@@ -325,6 +327,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
       final needsPainter = widget.wordFollow || widget.alignmentX != null;
       final shapeIdentity = (
         widget.text,
+        fontPolicy,
         style,
         paintAlign,
         direction,
@@ -339,7 +342,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
         if (_painter == null || _shapeIdentity != shapeIdentity) {
           _painter?.dispose();
           _painter = TextPainter(
-              text: TextSpan(text: widget.text, style: widget.style),
+              text: appFontSpan(widget.text,
+                  style: widget.style, policy: fontPolicy),
               textAlign: paintAlign,
               textDirection: direction,
               textScaler: scaler,
@@ -371,7 +375,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
       }
       if (_painter != null && _color != widget.style.color) {
         _painter!
-          ..text = TextSpan(text: widget.text, style: widget.style)
+          ..text =
+              appFontSpan(widget.text, style: widget.style, policy: fontPolicy)
           ..layout(minWidth: _width!.isFinite ? _width! : 0, maxWidth: _width!);
         _color = widget.style.color;
       }
@@ -398,7 +403,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
               ? math.max(1.0, constraints.maxWidth - targetGuard * 2)
               : constraints.maxWidth;
           final target = TextPainter(
-              text: TextSpan(text: widget.text, style: targetStyle),
+              text: appFontSpan(widget.text,
+                  style: targetStyle, policy: fontPolicy),
               textAlign: paintAlign,
               textDirection: direction,
               textScaler: scaler,
@@ -460,7 +466,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
                     padding: EdgeInsets.symmetric(
                         horizontal: horizontalGuard,
                         vertical: lyricVerticalInkGuard),
-                    child: Text(widget.text,
+                    child: AppFontText(widget.text,
                         textAlign: widget.textAlign, style: widget.style))));
       }
       return Align(

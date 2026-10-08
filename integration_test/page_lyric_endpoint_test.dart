@@ -55,7 +55,7 @@ void main() {
   testWidgets('native page and lyric endpoints retain ink and layout',
       (tester) async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     const output = String.fromEnvironment('DAN_ENDPOINT_RENDER');
     final boundary = GlobalKey();

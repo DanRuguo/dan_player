@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'dart:math' as math;
 
 import 'package:dan_player/component/music_grid.dart';
@@ -62,7 +63,7 @@ class PlaylistCircleTile extends StatelessWidget {
             height: geometry.titleHeight,
             child: Align(
                 alignment: Alignment.topCenter,
-                child: Text(
+                child: AppFontText(
                   title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,

@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:path/path.dart' as path;
 import 'package:dan_player/app_settings.dart';
-import 'package:dan_player/component/app_data_storage_card.dart';
+import 'package:dan_player/component/directory_storage_card.dart';
+import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/statistics/app_data_storage.dart';
+import 'package:dan_player/statistics/player_directory_storage.dart';
 
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
@@ -31,6 +34,8 @@ class StatisticsPage extends StatefulWidget {
       this.now,
       this.displayService,
       this.storageScanner = const AppDataStorageScanner(),
+      this.playerStorageScanner = const PlayerDirectoryStorageScanner(),
+      this.playerDirectory,
       this.initialStorageSection,
       this.initialStorageFolder});
   final String? initialStorageSection, initialStorageFolder;
@@ -41,6 +46,8 @@ class StatisticsPage extends StatefulWidget {
   final DateTime? now;
   final StatisticsDisplayService? displayService;
   final AppDataStorageScanner storageScanner;
+  final PlayerDirectoryStorageScanner playerStorageScanner;
+  final Directory? playerDirectory;
 
   @override
   State<StatisticsPage> createState() => _StatisticsPageState();
@@ -60,6 +67,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   final _cacheKey = GlobalKey();
   bool _storageLocated = false;
   late Future<AppDataStorageSnapshot> _cacheReading;
+  Future<AppDataStorageSnapshot>? _playerReading;
   bool _refreshingAll = false;
 
   Future<AppDataStorageSnapshot> _readCache(
@@ -80,17 +88,48 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Future<void> _refreshAll() async {
     if (_refreshingAll || _display.refreshing) return;
     final reading = _readCache(after: _cacheReading);
+    final playerReading = _playerReading == null
+        ? null
+        : _readPlayerDirectory(after: _playerReading);
     setState(() {
       _refreshingAll = true;
       _cacheReading = reading;
+      _playerReading = playerReading;
     });
     try {
-      await Future.wait<void>([_display.refresh(), reading.then<void>((_) {})]);
+      await Future.wait<void>([
+        _display.refresh(),
+        reading.then<void>((_) {}),
+        if (playerReading != null) playerReading.then<void>((_) {}),
+      ]);
     } catch (_) {
       // Each card displays its own failure. The shared action stays retryable.
     } finally {
       if (mounted) setState(() => _refreshingAll = false);
     }
+  }
+
+  Future<AppDataStorageSnapshot> _readPlayerDirectory(
+      {Future<AppDataStorageSnapshot>? after}) async {
+    if (after != null) {
+      try {
+        await after;
+      } catch (_) {
+        // An explicit refresh can retry an unreadable or cancelled directory.
+      }
+    }
+    if (!mounted) throw StateError('Statistics page closed');
+    return widget.playerStorageScanner.scan(
+        widget.playerDirectory ??
+            Directory(path.dirname(Platform.resolvedExecutable)),
+        isCancelled: () => !mounted);
+  }
+
+  void _selectPlayerDirectory() {
+    if (_playerReading != null) return;
+    setState(() {
+      _playerReading = _readPlayerDirectory();
+    });
   }
 
   void _locateStorage() {
@@ -368,40 +407,17 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 0.0),
                     sliver: SliverToBoxAdapter(
-                      child: Builder(builder: (context) {
-                        final values = library.largestFiles
-                            .map((file) => formatLibraryBytes(file.bytes))
-                            .toList(growable: false);
-                        final valueWidth =
-                            StatisticsBarRow.measureValues(context, values);
-                        final maximum = library.largestFiles.fold<double>(
-                            0,
-                            (largest, file) =>
-                                math.max(largest, file.bytes.toDouble()));
-                        return _SectionCard(
-                          title: ui("占用空间最多"),
-                          icon: Symbols.hard_drive,
-                          child: Column(children: [
-                            for (final (index, file)
-                                in library.largestFiles.indexed)
-                              StatisticsBarRow(
-                                label: file.title,
-                                detail: file.path,
-                                valueLabel: values[index],
-                                valueColumnWidth: valueWidth,
-                                value: file.bytes.toDouble(),
-                                maximum: maximum,
-                              ),
-                          ]),
-                        );
-                      }),
+                      child: _LargestStorageCard(snapshot: library),
                     ),
                   ),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
                   sliver: SliverToBoxAdapter(
-                      child: AppDataStorageCard(
-                          key: _cacheKey, reading: _cacheReading)),
+                      child: DirectoryStorageCard(
+                          key: _cacheKey,
+                          cacheReading: _cacheReading,
+                          playerReading: _playerReading,
+                          onPlayerSelected: _selectPlayerDirectory)),
                 ),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
@@ -1851,6 +1867,104 @@ class _StatisticsHeading extends StatelessWidget {
                   fontWeight: FontWeight.w600))),
     ]);
     return Semantics(header: true, child: heading);
+  }
+}
+
+class _LargestStorageCard extends StatefulWidget {
+  const _LargestStorageCard({required this.snapshot});
+  final LibraryStatisticsSnapshot snapshot;
+
+  @override
+  State<_LargestStorageCard> createState() => _LargestStorageCardState();
+}
+
+class _LargestStorageCardState extends State<_LargestStorageCard> {
+  String _group = 'tracks';
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final library = widget.snapshot;
+    final rows = _group == 'tracks'
+        ? [
+            for (final file in library.largestFiles)
+              (label: file.title, detail: file.path, bytes: file.bytes),
+          ]
+        : [
+            for (final group in _group == 'albums'
+                ? library.largestAlbums
+                : library.largestArtists)
+              (
+                label: group.title.isEmpty
+                    ? ui(_group == 'albums' ? '未标注专辑' : '未标注艺术家')
+                    : group.title,
+                detail: [
+                  if (_group == 'albums')
+                    group.artist.isEmpty ? ui('未标注艺术家') : group.artist,
+                  ui('{0} 个文件', [group.files]),
+                ].join(' · '),
+                bytes: group.bytes,
+              ),
+          ];
+    final values = rows
+        .map((row) => formatLibraryBytes(row.bytes))
+        .toList(growable: false);
+    final valueWidth = StatisticsBarRow.measureValues(context, values);
+    final maximum = rows.fold<double>(
+        0, (largest, row) => math.max(largest, row.bytes.toDouble()));
+    return _StatisticsCard(
+      child: LayoutBuilder(builder: (context, constraints) {
+        final inline =
+            constraints.maxWidth / _statisticsTextScale(context) >= 800;
+        final selector = AppSegmentedControl<String>(
+          key: const ValueKey('statistics-storage-group'),
+          value: _group,
+          maxWidth: inline ? constraints.maxWidth * .6 : constraints.maxWidth,
+          wrapCompactLabel: true,
+          semanticLabel: ui('占用空间分组'),
+          options: [
+            AppSegmentOption(
+                value: 'tracks', label: ui('歌曲'), icon: Symbols.music_note),
+            AppSegmentOption(
+                value: 'albums', label: ui('专辑'), icon: Symbols.album),
+            AppSegmentOption(
+                value: 'artists', label: ui('艺术家'), icon: Symbols.artist),
+          ],
+          onChanged: (group) => setState(() => _group = group),
+        );
+        final heading =
+            _StatisticsHeading(title: ui('占用空间最多'), icon: Symbols.hard_drive);
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (inline)
+            Row(children: [
+              Expanded(child: heading),
+              const SizedBox(width: 12),
+              selector
+            ])
+          else ...[
+            heading,
+            const SizedBox(height: 12),
+            Align(alignment: AlignmentDirectional.centerEnd, child: selector),
+          ],
+          const SizedBox(height: 12),
+          if (rows.isEmpty) Text(ui('暂无可统计的文件')),
+          for (final (index, row) in rows.indexed)
+            StatisticsBarRow(
+                label: row.label,
+                wrapLabel: true,
+                detail: row.detail,
+                valueLabel: values[index],
+                valueColumnWidth: valueWidth,
+                value: row.bytes.toDouble(),
+                maximum: maximum),
+          if (_group != 'tracks') ...[
+            const SizedBox(height: 8),
+            Text(ui('汇总全部已核实文件；同名专辑按艺术家区分，合作艺术家按完整署名统计。'),
+                style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ]);
+      }),
+    );
   }
 }
 

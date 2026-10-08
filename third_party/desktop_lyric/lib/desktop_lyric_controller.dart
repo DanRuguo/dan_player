@@ -6,6 +6,8 @@ import 'dart:io';
 
 import 'package:desktop_lyric/appearance_controller.dart';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
+import 'package:desktop_lyric/font_loader.dart';
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:desktop_lyric/message.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -145,6 +147,7 @@ class DesktopLyricRenderingPolicy {
 }
 
 class DesktopLyricController {
+  final fontPolicy = ValueNotifier(AppFontPolicy.defaults());
   ValueNotifier<bool> isPlaying = ValueNotifier(false);
   ValueNotifier<bool> isDarkMode = ValueNotifier(false);
   ValueNotifier<ThemeChangedMessage> theme = ValueNotifier(
@@ -173,6 +176,20 @@ class DesktopLyricController {
   final Future<void> Function(bool) _setIgnoreMouseEvents;
   final Future<void> Function() _closeWindow;
   final void Function(String) _sendMessage;
+  final Future<void> Function(AppFontPolicy) _ensureFontsLoaded;
+  Future<void> _fontsReady = Future.value();
+  AppFontPolicy? _requestedFontPolicy;
+  int _fontRequest = 0;
+
+  /// Startup waits for the active font request before showing the first frame.
+  /// Runtime requests keep the current usable face until replacement is ready.
+  Future<void> get fontsReady async {
+    while (!_disposed) {
+      final pending = _fontsReady;
+      await pending;
+      if (identical(pending, _fontsReady)) return;
+    }
+  }
 
   int activeSequence = 0;
   int _lockRevision = 0;
@@ -243,7 +260,9 @@ class DesktopLyricController {
       initArgs.primary,
       initArgs.surfaceContainer,
       initArgs.onSurface,
+      fontPolicy: initArgs.fontPolicy,
     );
+    if (initArgs.fontPolicy != null) _applyFontPolicy(initArgs.fontPolicy!);
   }
 
   static DesktopLyricController? _instance;
@@ -259,7 +278,9 @@ class DesktopLyricController {
     Stream<List<int>>? input,
     Future<void> Function()? closeWindow,
     void Function(String)? sendMessage,
+    Future<void> Function(AppFontPolicy)? ensureFontsLoaded,
   })  : playbackClock = clock ?? PlaybackClock(),
+        _ensureFontsLoaded = ensureFontsLoaded ?? ensureAppFontsLoaded,
         _sendMessage = sendMessage ?? stdout.write,
         _closeWindow = closeWindow ?? (() => windowManager.close()),
         _setIgnoreMouseEvents = setIgnoreMouseEvents ??
@@ -283,6 +304,7 @@ class DesktopLyricController {
     Stream<List<int>>? input,
     Future<void> Function()? closeWindow,
     void Function(String)? sendMessage,
+    Future<void> Function(AppFontPolicy)? ensureFontsLoaded,
   }) =>
       DesktopLyricController._(
         clock: clock,
@@ -291,7 +313,30 @@ class DesktopLyricController {
         input: input,
         closeWindow: closeWindow,
         sendMessage: sendMessage,
+        ensureFontsLoaded: ensureFontsLoaded,
       );
+
+  void _applyFontPolicy(AppFontPolicy next) {
+    if (_disposed || next == _requestedFontPolicy) return;
+    _requestedFontPolicy = next;
+    final request = ++_fontRequest;
+    if (next == fontPolicy.value) {
+      _fontsReady = Future.value();
+      return;
+    }
+    _fontsReady = () async {
+      try {
+        await _ensureFontsLoaded(next);
+        if (!_disposed && request == _fontRequest) fontPolicy.value = next;
+      } catch (error, stack) {
+        if (!_disposed && request == _fontRequest) {
+          // Keep the last ready policy; a later explicit retry can load again.
+          _requestedFontPolicy = null;
+          stderr.writeln('Desktop lyric font loading failed: $error\n$stack');
+        }
+      }
+    }();
+  }
 
   void _appearanceChanged(DesktopLyricAppearance value) {
     if (_disposed || _inputClosed) return;
@@ -357,7 +402,9 @@ class DesktopLyricController {
       } else if (type == getMessageTypeName<ThemeModeChangedMessage>()) {
         isDarkMode.value = ThemeModeChangedMessage.fromJson(content).darkMode;
       } else if (type == getMessageTypeName<ThemeChangedMessage>()) {
-        theme.value = ThemeChangedMessage.fromJson(content);
+        final next = ThemeChangedMessage.fromJson(content);
+        theme.value = next;
+        if (next.fontPolicy != null) _applyFontPolicy(next.fontPolicy!);
       } else if (type == getMessageTypeName<DesktopLyricDisplayMessage>()) {
         vertical.value = DesktopLyricDisplayMessage.fromJson(content).vertical;
       } else if (type == getMessageTypeName<DesktopLyricAppearanceMessage>()) {
@@ -420,12 +467,14 @@ class DesktopLyricController {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _fontRequest++;
     _lockRevision++;
     unawaited(_inputSubscription?.cancel());
     playbackClock.dispose();
     isPlaying.dispose();
     isDarkMode.dispose();
     theme.dispose();
+    fontPolicy.dispose();
     nowPlaying.dispose();
     lyricLine.dispose();
     detailedLyricLine.dispose();

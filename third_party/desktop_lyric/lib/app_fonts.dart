@@ -1,6 +1,6 @@
 /// Font identity and fallback order shared by the main and lyric engines.
 /// Keep the bundled family name aligned with the application's font manifest.
-const String danEmbeddedFontFamily = "DanPingFangSC";
+const String danEmbeddedFontFamily = "packages/desktop_lyric/DanPingFangSC";
 
 const List<String> danFontFamilyFallback = [
   danEmbeddedFontFamily,

@@ -8,6 +8,7 @@ import 'package:dan_player/src/rust/api/installed_font.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 class FontSelectorDialog extends StatefulWidget {
@@ -16,10 +17,12 @@ class FontSelectorDialog extends StatefulWidget {
     required this.installedFont,
     this.currentFont,
     this.loader,
+    this.stageSelection = false,
   });
   final List<InstalledFont> installedFont;
   final String? currentFont;
   final FontPreviewLoader? loader;
+  final bool stageSelection;
 
   @override
   State<FontSelectorDialog> createState() => _FontSelectorDialogState();
@@ -42,6 +45,9 @@ class _FontSelectorDialogState extends State<FontSelectorDialog> {
   String? _selectedFamily;
   int _selectionGeneration = 0;
   bool _previewFailed = false;
+  final _previewActive = ValueNotifier(true);
+  bool _closed = false;
+  bool _explicitSelection = false;
 
   FontPreviewLoader get _loader => widget.loader ?? FontPreviewLoader.instance;
 
@@ -53,11 +59,22 @@ class _FontSelectorDialogState extends State<FontSelectorDialog> {
         explicit: false);
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _setPreviewActive(!_closed && TickerMode.valuesOf(context).enabled);
+  }
+
   void _select(InstalledFont? font, {bool explicit = true}) {
-    if (font == null || (font == _selected && _selectedFamily != null)) return;
+    if (!_previewActive.value ||
+        font == null ||
+        (font == _selected && _selectedFamily != null)) {
+      return;
+    }
     _preview?.release();
     final generation = ++_selectionGeneration;
     _selected = font;
+    _explicitSelection = explicit;
     _selectedFamily = null;
     _previewFailed = false;
     final request = _preview = _loader.acquire(font, explicit: explicit);
@@ -70,9 +87,31 @@ class _FontSelectorDialogState extends State<FontSelectorDialog> {
     });
   }
 
+  void _setPreviewActive(bool value) {
+    if (value == _previewActive.value) return;
+    if (!value) {
+      ++_selectionGeneration;
+      _preview?.release();
+      _preview = null;
+    }
+    _previewActive.value = value;
+    if (value && _selectedFamily == null && _selected != null) {
+      _select(_selected, explicit: _explicitSelection);
+    }
+  }
+
+  void _beginExit() {
+    if (_closed) return;
+    _closed = true;
+    // The route stays mounted while fading out. Retire every row's pending
+    // file check now, before it can register a font for the entire engine.
+    _setPreviewActive(false);
+  }
+
   @override
   void dispose() {
-    _preview?.release();
+    _beginExit();
+    _previewActive.dispose();
     _search.dispose();
     _sample.dispose();
     _scroll.dispose();
@@ -89,157 +128,171 @@ class _FontSelectorDialogState extends State<FontSelectorDialog> {
         .where((font) =>
             query.isEmpty || font.fullName.toLowerCase().contains(query))
         .toList(growable: false);
-    return Dialog(
-      child: AppDialogContent(
-        width: 640,
-        maxHeight: 660,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Flexible(
-              child: CustomScrollView(
-                key: const ValueKey('font-selector-scroll'),
-                controller: _scroll,
-                shrinkWrap: true,
-                scrollCacheExtent: const ScrollCacheExtent.pixels(0),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        AppDialogTitle(ui('选择字体'),
-                            style: theme.textTheme.titleLarge
-                                ?.copyWith(color: scheme.onSurface),
-                            leading:
-                                Icon(Icons.text_fields, color: scheme.primary)),
-                        const SizedBox(height: 10),
-                        Text(ui('字体名称使用自身样式显示；选择后可预览，点击应用才会更改界面。'),
-                            style: theme.textTheme.bodyMedium
-                                ?.copyWith(color: scheme.onSurfaceVariant)),
-                        const SizedBox(height: 16),
-                        TextField(
-                          key: const ValueKey('font-selector-search'),
-                          controller: _search,
-                          decoration: InputDecoration(
-                            labelText: ui('搜索字体'),
-                            prefixIcon: const Icon(Icons.search),
-                            suffixIcon: query.isEmpty
-                                ? null
-                                : IconButton(
-                                    tooltip: ui('清除搜索'),
-                                    onPressed: _search.clear,
-                                    icon: const Icon(Icons.close),
-                                  ),
-                          ),
+    return PopScope(
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) _beginExit();
+        },
+        child: Dialog(
+          child: AppDialogContent(
+            width: 640,
+            maxHeight: 660,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(
+                  child: CustomScrollView(
+                    key: const ValueKey('font-selector-scroll'),
+                    controller: _scroll,
+                    shrinkWrap: true,
+                    scrollCacheExtent: const ScrollCacheExtent.pixels(0),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            AppDialogTitle(ui('选择字体'),
+                                style: theme.textTheme.titleLarge
+                                    ?.copyWith(color: scheme.onSurface),
+                                leading: Icon(Icons.text_fields,
+                                    color: scheme.primary)),
+                            const SizedBox(height: 10),
+                            Text(
+                                ui(widget.stageSelection
+                                    ? '选择后返回字体管理，点击那里的应用后生效。'
+                                    : '字体名称使用自身样式显示；选择后可预览，点击应用才会更改界面。'),
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(color: scheme.onSurfaceVariant)),
+                            const SizedBox(height: 16),
+                            TextField(
+                              key: const ValueKey('font-selector-search'),
+                              controller: _search,
+                              decoration: InputDecoration(
+                                labelText: ui('搜索字体'),
+                                prefixIcon: const Icon(Icons.search),
+                                suffixIcon: query.isEmpty
+                                    ? null
+                                    : IconButton(
+                                        tooltip: ui('清除搜索'),
+                                        onPressed: _search.clear,
+                                        icon: const Icon(Icons.close),
+                                      ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerLow,
+                                borderRadius: AppShape.controlRadius,
+                                border:
+                                    Border.all(color: scheme.outlineVariant),
+                              ),
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Text(
+                                        ui('当前字体：{0}',
+                                            [danFontDisplayName(_current)]),
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(
+                                                color:
+                                                    scheme.onSurfaceVariant)),
+                                    const SizedBox(height: 8),
+                                    Text(_selected?.fullName ?? ui('选择字体以预览'),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                color: scheme.primary,
+                                                fontFamily: _selectedFamily,
+                                                fontFamilyFallback:
+                                                    danFontFamilyFallback)),
+                                    const SizedBox(height: 8),
+                                    TextField(
+                                      key: const ValueKey(
+                                          'font-selector-preview'),
+                                      controller: _sample,
+                                      minLines: 2,
+                                      maxLines: 3,
+                                      // Let the dialog retain vertical drag/wheel
+                                      // scrolling instead of trapping it in this sample.
+                                      scrollPhysics:
+                                          const NeverScrollableScrollPhysics(),
+                                      style: TextStyle(
+                                        fontFamily: _selectedFamily ?? _current,
+                                        fontFamilyFallback:
+                                            danFontFamilyFallback,
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.normal,
+                                        height: 1.4,
+                                      ),
+                                      decoration: InputDecoration(
+                                        isDense: true,
+                                        border: InputBorder.none,
+                                        labelText: ui('预览文字（可编辑）'),
+                                        errorText: _previewFailed
+                                            ? ui('此字体无法加载，请选择其他字体。')
+                                            : null,
+                                        errorMaxLines: 3,
+                                      ),
+                                    ),
+                                  ]),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(ui('已安装字体 · {0}', [visible.length]),
+                                style: theme.textTheme.labelLarge
+                                    ?.copyWith(color: scheme.onSurfaceVariant)),
+                            const SizedBox(height: 8),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: scheme.surfaceContainerLow,
-                            borderRadius: AppShape.controlRadius,
-                            border: Border.all(color: scheme.outlineVariant),
-                          ),
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Text(
-                                    ui('当前字体：{0}',
-                                        [danFontDisplayName(_current)]),
-                                    style: theme.textTheme.labelMedium
-                                        ?.copyWith(
-                                            color: scheme.onSurfaceVariant)),
-                                const SizedBox(height: 8),
-                                Text(_selected?.fullName ?? ui('选择字体以预览'),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.titleMedium
-                                        ?.copyWith(
-                                            color: scheme.primary,
-                                            fontFamily: _selectedFamily,
-                                            fontFamilyFallback:
-                                                danFontFamilyFallback)),
-                                const SizedBox(height: 8),
-                                TextField(
-                                  key: const ValueKey('font-selector-preview'),
-                                  controller: _sample,
-                                  minLines: 2,
-                                  maxLines: 3,
-                                  // Let the dialog retain vertical drag/wheel
-                                  // scrolling instead of trapping it in this sample.
-                                  scrollPhysics:
-                                      const NeverScrollableScrollPhysics(),
-                                  style: TextStyle(
-                                    fontFamily: _selectedFamily ?? _current,
-                                    fontFamilyFallback: danFontFamilyFallback,
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.normal,
-                                    height: 1.4,
-                                  ),
-                                  decoration: InputDecoration(
-                                    isDense: true,
-                                    border: InputBorder.none,
-                                    labelText: ui('预览文字（可编辑）'),
-                                    errorText: _previewFailed
-                                        ? ui('此字体无法加载，请选择其他字体。')
-                                        : null,
-                                    errorMaxLines: 3,
-                                  ),
-                                ),
-                              ]),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(ui('已安装字体 · {0}', [visible.length]),
-                            style: theme.textTheme.labelLarge
-                                ?.copyWith(color: scheme.onSurfaceVariant)),
-                        const SizedBox(height: 8),
-                      ],
-                    ),
+                      ),
+                      if (visible.isEmpty)
+                        SliverToBoxAdapter(
+                            child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 24),
+                          child:
+                              Text(ui('没有匹配的字体'), textAlign: TextAlign.center),
+                        )),
+                      SliverList.builder(
+                        itemCount: visible.length,
+                        itemBuilder: (_, index) {
+                          final font = visible[index];
+                          return _FontRow(
+                            key: ValueKey(font),
+                            font: font,
+                            loader: _loader,
+                            previewActive: _previewActive,
+                            current: font.fullName == _current,
+                            selected: font == _selected,
+                            selectedFamily:
+                                font == _selected ? _selectedFamily : null,
+                            onSelected: () => setState(() => _select(font)),
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                  if (visible.isEmpty)
-                    SliverToBoxAdapter(
-                        child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Text(ui('没有匹配的字体'), textAlign: TextAlign.center),
-                    )),
-                  SliverList.builder(
-                    itemCount: visible.length,
-                    itemBuilder: (_, index) {
-                      final font = visible[index];
-                      return _FontRow(
-                        key: ValueKey(font),
-                        font: font,
-                        loader: _loader,
-                        current: font.fullName == _current,
-                        selected: font == _selected,
-                        selectedFamily:
-                            font == _selected ? _selectedFamily : null,
-                        onSelected: () => setState(() => _select(font)),
-                      );
-                    },
+                ),
+                const SizedBox(height: 16),
+                AppDialogActions(children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(ui('取消')),
                   ),
-                ],
-              ),
+                  FilledButton.icon(
+                    key: const ValueKey('font-selector-apply'),
+                    onPressed: _selectedFamily == null
+                        ? null
+                        : () => Navigator.pop(context, _selected),
+                    icon: const Icon(Icons.check),
+                    label: Text(ui(widget.stageSelection ? '使用此字体' : '应用')),
+                  ),
+                ]),
+              ]),
             ),
-            const SizedBox(height: 16),
-            AppDialogActions(children: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(ui('取消')),
-              ),
-              FilledButton.icon(
-                key: const ValueKey('font-selector-apply'),
-                onPressed: _selectedFamily == null
-                    ? null
-                    : () => Navigator.pop(context, _selected),
-                icon: const Icon(Icons.check),
-                label: Text(ui('应用')),
-              ),
-            ]),
-          ]),
-        ),
-      ),
-    );
+          ),
+        ));
   }
 }
 
@@ -248,12 +301,14 @@ class _FontRow extends StatefulWidget {
       {super.key,
       required this.font,
       required this.loader,
+      required this.previewActive,
       required this.current,
       required this.selected,
       required this.selectedFamily,
       required this.onSelected});
   final InstalledFont font;
   final FontPreviewLoader loader;
+  final ValueListenable<bool> previewActive;
   final bool current;
   final bool selected;
   final String? selectedFamily;
@@ -264,17 +319,35 @@ class _FontRow extends StatefulWidget {
 }
 
 class _FontRowState extends State<_FontRow> {
-  late final _lease = widget.loader.acquire(widget.font);
+  late FontPreviewLease? _lease =
+      widget.previewActive.value ? widget.loader.acquire(widget.font) : null;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.previewActive.addListener(_syncPreview);
+  }
+
+  void _syncPreview() {
+    if (widget.previewActive.value) {
+      _lease ??= widget.loader.acquire(widget.font);
+    } else {
+      _lease?.release();
+      _lease = null;
+    }
+    setState(() {});
+  }
 
   @override
   void dispose() {
-    _lease.release();
+    widget.previewActive.removeListener(_syncPreview);
+    _lease?.release();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<String?>(
-        future: _lease.family,
+        future: _lease?.family,
         initialData: widget.loader.loadedFamilyFor(widget.font),
         builder: (context, snapshot) {
           final scheme = Theme.of(context).colorScheme;
@@ -283,7 +356,7 @@ class _FontRowState extends State<_FontRow> {
               snapshot.data;
           final failed = snapshot.connectionState == ConnectionState.done &&
               family == null &&
-              !_lease.deferred;
+              !(_lease?.deferred ?? false);
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Material(
@@ -316,7 +389,7 @@ class _FontRowState extends State<_FontRow> {
                         fontWeight: FontWeight.normal)),
                 subtitle: failed
                     ? Text(ui('无法预览此字体'))
-                    : family == null && _lease.deferred
+                    : family == null && (_lease?.deferred ?? false)
                         ? Text(ui('选中以预览'))
                         : null,
                 trailing: widget.current

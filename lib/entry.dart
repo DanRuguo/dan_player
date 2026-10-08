@@ -1,4 +1,5 @@
 import 'package:dan_player/startup_progress.dart';
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_route_transition.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -209,67 +210,69 @@ class Entry extends StatelessWidget {
                     return ValueListenableBuilder<RenderingPreferences>(
                         valueListenable: AppSettings.instance.rendering,
                         builder: (context, rendering, _) => MaterialApp.router(
-                              themeAnimationDuration:
-                                  rendering.animations.allows(MotionKind.theme)
-                                      ? AppMotion.standard
-                                      : Duration.zero,
-                              themeAnimationCurve: AppMotion.standardCurve,
-                              title: "Dan Player",
-                              scaffoldMessengerKey: SCAFFOLD_MESSAGER,
-                              debugShowCheckedModeBanner: false,
-                              theme: fromSchemeAndFontFamily(
-                                fontFamily: theme.fontFamily,
-                                colorScheme: theme.lightScheme,
-                              ),
-                              darkTheme: fromSchemeAndFontFamily(
-                                fontFamily: theme.fontFamily,
-                                colorScheme: theme.darkScheme,
-                              ),
-                              themeMode: theme.themeMode,
-                              localizationsDelegates:
-                                  GlobalMaterialLocalizations.delegates,
-                              supportedLocales: supportedLocales,
-                              locale: language.locale,
-                              scrollBehavior: const DanPlayerScrollBehavior(),
-                              routerConfig: config,
-                              builder: (context, child) =>
-                                  RenderingPreferencesScope(
-                                preferences: AppSettings.instance.rendering,
-                                child: UiLanguageTransition(
-                                    child: ValueListenableBuilder<
-                                            UiLayoutPreferences>(
-                                        valueListenable:
-                                            AppSettings.instance.uiLayout,
-                                        builder: (context, layout, _) =>
-                                            UiLayoutScope(
-                                                preferences: layout,
-                                                child: WindowBackdropThemeSync(
-                                                  child: PlayerShortcuts(
+                            themeAnimationDuration:
+                                rendering.animations.allows(MotionKind.theme)
+                                    ? AppMotion.standard
+                                    : Duration.zero,
+                            themeAnimationCurve: AppMotion.standardCurve,
+                            title: "Dan Player",
+                            scaffoldMessengerKey: SCAFFOLD_MESSAGER,
+                            debugShowCheckedModeBanner: false,
+                            theme: fromSchemeAndFontFamily(
+                              fontFamily: theme.fontFamily,
+                              colorScheme: theme.lightScheme,
+                            ),
+                            darkTheme: fromSchemeAndFontFamily(
+                              fontFamily: theme.fontFamily,
+                              colorScheme: theme.darkScheme,
+                            ),
+                            themeMode: theme.themeMode,
+                            localizationsDelegates:
+                                GlobalMaterialLocalizations.delegates,
+                            supportedLocales: supportedLocales,
+                            locale: language.locale,
+                            scrollBehavior: const DanPlayerScrollBehavior(),
+                            routerConfig: config,
+                            builder: (context, child) => AppFontScope(
+                                  policy: theme.fontPolicy,
+                                  child: RenderingPreferencesScope(
+                                    preferences: AppSettings.instance.rendering,
+                                    child: UiLanguageTransition(
+                                        child: ValueListenableBuilder<
+                                                UiLayoutPreferences>(
+                                            valueListenable:
+                                                AppSettings.instance.uiLayout,
+                                            builder: (context, layout, _) =>
+                                                UiLayoutScope(
+                                                    preferences: layout,
                                                     child:
-                                                        DesktopVisibilityHost(
-                                                      child: StartupSplash(
-                                                        progress:
-                                                            StartupProgress
-                                                                .instance,
-                                                        showProgress: layout
-                                                                .startupFooter ==
-                                                            StartupFooter
-                                                                .progress,
+                                                        WindowBackdropThemeSync(
+                                                      child: PlayerShortcuts(
                                                         child:
-                                                            AppPresentationHost(
-                                                          child:
-                                                              AppWindowModeHost(
-                                                            child: child ??
-                                                                const SizedBox
-                                                                    .shrink(),
+                                                            DesktopVisibilityHost(
+                                                          child: StartupSplash(
+                                                            progress:
+                                                                StartupProgress
+                                                                    .instance,
+                                                            showProgress: layout
+                                                                    .startupFooter ==
+                                                                StartupFooter
+                                                                    .progress,
+                                                            child:
+                                                                AppPresentationHost(
+                                                              child:
+                                                                  AppWindowModeHost(
+                                                                child: child ??
+                                                                    const SizedBox
+                                                                        .shrink(),
+                                                              ),
+                                                            ),
                                                           ),
                                                         ),
                                                       ),
-                                                    ),
-                                                  ),
-                                                )))),
-                              ),
-                            ));
+                                                    )))),
+                                  ),
+                                )));
                   },
                 )));
   }
@@ -503,8 +506,9 @@ class Entry extends StatelessWidget {
             path: app_paths.STATISTICS_PAGE,
             pageBuilder: (context, state) => SlideTransitionPage(
               key: state.pageKey,
-              child: StatisticsPage(initialStorageSection: state.uri.queryParameters['section'],
-                initialStorageFolder: state.uri.queryParameters['folder']),
+              child: StatisticsPage(
+                  initialStorageSection: state.uri.queryParameters['section'],
+                  initialStorageFolder: state.uri.queryParameters['folder']),
             ),
           ),
 

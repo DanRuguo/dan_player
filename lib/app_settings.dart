@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:dan_player/font/font_preferences.dart';
 import 'package:dan_player/lyric/local_lyric_preferences.dart';
 export 'package:dan_player/lyric/local_lyric_preferences.dart';
 import 'dart:io';
@@ -301,6 +302,7 @@ class AppSettings {
   bool windowGeometryCaptureSuspended = false;
   bool isWindowMaximized = false;
 
+  AppFontPreferences fontPreferences = const AppFontPreferences();
   String? fontFamily;
   String? fontPath;
 
@@ -517,10 +519,11 @@ class AppSettings {
 
       final ff = settingsMap["FontFamily"];
       final fp = settingsMap["FontPath"];
-      if (ff != null) {
-        _instance.fontFamily = ff;
-        _instance.fontPath = fp;
-      }
+      _instance.fontFamily = ff is String ? ff : null;
+      _instance.fontPath = fp is String ? fp : null;
+      _instance.fontPreferences = AppFontPreferences.decode(
+          settingsMap['Fonts'], legacyFamily: _instance.fontFamily,
+          legacyPath: _instance.fontPath);
 
       _readUpdatePreferences(settingsMap);
     } catch (err, trace) {
@@ -614,6 +617,7 @@ class AppSettings {
         ...updateChannel.toMap(),
         "IgnoredUpdateVersion": ignoredUpdateVersion,
         "LastUpdateCheckAt": lastUpdateCheckAt?.toIso8601String(),
+        'Fonts': fontPreferences.toJson(),
         "FontFamily": fontFamily,
         "FontPath": fontPath,
       };

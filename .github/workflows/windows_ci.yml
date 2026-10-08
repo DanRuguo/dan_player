@@ -204,7 +204,7 @@ jobs:
       - name: Test native backdrop and desktop integration policies
         if: steps.impact.outputs.profile == 'integration' && steps.resume.outputs.reuse_completed != 'true'
         run: |
-          cmake --build build/windows/x64 --config Release --target window_resize_policy_test window_corner_region_test window_backdrop_policy_test window_backdrop_updates_test desktop_integration_policy_test taskbar_progress_policy_test taskbar_thumbnail_policy_test taskbar_peek_bitmap_test taskbar_peek_geometry_test desktop_integration_fonts_test desktop_integration_blur_test desktop_integration_paint_test installer_launch_test windows_shell_policy_test desktop_entry_policy_test
+          cmake --build build/windows/x64 --config Release --target window_resize_policy_test window_corner_region_test window_backdrop_policy_test window_backdrop_updates_test desktop_integration_policy_test taskbar_progress_policy_test taskbar_thumbnail_policy_test taskbar_peek_bitmap_test taskbar_peek_geometry_test desktop_integration_fonts_test taskbar_font_policy_test taskbar_font_snapshot_surface_test taskbar_font_edge_test desktop_integration_blur_test desktop_integration_paint_test installer_launch_test windows_shell_policy_test desktop_entry_policy_test
           if ($LASTEXITCODE -ne 0) { throw 'Native backdrop tests did not compile.' }
           & .\build\windows\x64\window_tests\Release\window_resize_policy_test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Native window resize policy tests failed.' }
@@ -224,8 +224,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native taskbar Peek size/pixel/lifetime tests failed.' }
           & .\build\windows\x64\desktop_tests\Release\taskbar_peek_geometry_test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Hidden minimized-window Peek geometry tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\desktop_integration_fonts_test.exe .\assets\fonts\PingFangSC-Regular.ttf .\build\windows\x64\runner\Release\data\flutter_assets\packages\material_symbols_icons\lib\fonts\MaterialSymbolsOutlined.ttf
+          & .\build\windows\x64\desktop_tests\Release\desktop_integration_fonts_test.exe .\third_party\desktop_lyric\assets\fonts\PingFangSC-Regular.ttf .\build\windows\x64\runner\Release\data\flutter_assets\packages\material_symbols_icons\lib\fonts\MaterialSymbolsOutlined.ttf
           if ($LASTEXITCODE -ne 0) { throw 'Native tray font lifetime tests failed.' }
+          $nativeFontRoot = '.\third_party\desktop_lyric\assets\fonts'
+          $nativeFontInputs = @(
+            (Join-Path $nativeFontRoot 'PingFangSC-Regular.ttf'),
+            (Join-Path $nativeFontRoot 'GoogleSans-VF.ttf'),
+            (Join-Path $nativeFontRoot 'SourceHanSansJP-Regular.otf'),
+            (Join-Path $nativeFontRoot 'Pretendard-Regular.otf')
+          )
+          & .\build\windows\x64\desktop_tests\Release\taskbar_font_policy_test.exe @nativeFontInputs
+          if ($LASTEXITCODE -ne 0) { throw 'Native mixed-font policy/cache tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\taskbar_font_snapshot_surface_test.exe @nativeFontInputs
+          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar font snapshot/surface tests failed.' }
+          & .\build\windows\x64\desktop_tests\Release\taskbar_font_edge_test.exe @nativeFontInputs
+          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar long-cluster boundary tests failed.' }
           & .\build\windows\x64\desktop_tests\Release\desktop_integration_blur_test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Native tray Gaussian blur/lifetime tests failed.' }
           & .\build\windows\x64\desktop_tests\Release\desktop_integration_paint_test.exe

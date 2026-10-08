@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/anchored_menu_action.dart';
@@ -715,7 +716,7 @@ class _AudioTileState extends State<AudioTile> {
                                               crossAxisAlignment:
                                                   CrossAxisAlignment.start,
                                               children: [
-                                                Text(
+                                                AppFontText(
                                                   audio.displayTitle,
                                                   style: TextStyle(
                                                       color: textColor,
@@ -725,7 +726,7 @@ class _AudioTileState extends State<AudioTile> {
                                                       TextOverflow.ellipsis,
                                                 ),
                                                 const SizedBox(width: 4.0),
-                                                Text(
+                                                AppFontText(
                                                   widget.showSourceLabel &&
                                                           sourceLabel != null
                                                       ? '${ui("来源：{0}", [

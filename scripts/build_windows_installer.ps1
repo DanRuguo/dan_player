@@ -28,6 +28,8 @@ if (-not $QaBuild -and $QaTheme -ne 'system') { throw 'Forced theme is available
 if (-not $QaBuild -and $QaDialogFontSize -ne 0) { throw 'Forced font metrics are available only in the fictional QA build.' }
 $installerRepository = Split-Path -Parent $PSScriptRoot
 $installerWorkspace = Split-Path -Parent $installerRepository
+. (Join-Path $PSScriptRoot 'support\bundled_fonts.ps1')
+$installerFont = Get-BundledInstallerFont -RepositoryRoot $installerRepository
 if (-not $NativeDirectory) { $NativeDirectory = Join-Path $installerWorkspace 'tool\qa-installer\build\Release' }
 if (-not $Compiler) { $Compiler = Join-Path $installerWorkspace 'tool\inno-7.1.0\ISCC.exe' }
 if (-not $OutputRoot) { $OutputRoot = Join-Path $installerWorkspace 'tool\qa-installer\packages' }
@@ -173,6 +175,7 @@ $stem = 'DanPlayer-' + $installerVersion + '-Setup-x64' + $(if ($QaBuild) { '-QA
 $defines = [ordered]@{
     AppVersion=$installerVersion; DisplayVersion=$displayVersion; NumericVersion=$numericVersion;
     RepositoryRoot=$installerRepository; NativeLibrary=$nativeFile; ManifestFile=$manifestFile;
+    EmbeddedFontSource=$installerFont.SourcePath;
     PayloadFileEntries=$fileEntriesPath; OutputDirectory=$runDirectory; OutputFilename=$stem
 }
 $configText = ''
@@ -194,6 +197,6 @@ $checksumFile = $executable + '.sha256'
 # A Release asset has a flat basename, not our local installer-run subdirectory.
 # This exact companion is selected before any optional aggregate SHA256SUMS.
 Write-NewInstallerText $checksumFile ($installerSha256 + '  ' + [IO.Path]::GetFileName($executable) + "`n")
-$result = [ordered]@{ Version=$installerVersion; DisplayVersion=$displayVersion; QaBuild=[bool]$QaBuild; Signed=[bool]$Sign; Installer=$executable; Sha256=$installerSha256; ChecksumFile=$checksumFile; PayloadFiles=$entries.Count; PayloadBytes=$totalBytes; CompilerVersion=$compilerVersion; Manifest=$manifestFile; NativeLibrarySha256=(Get-FileHash -LiteralPath $nativeFile -Algorithm SHA256).Hash.ToLowerInvariant() }
+$result = [ordered]@{ Version=$installerVersion; DisplayVersion=$displayVersion; QaBuild=[bool]$QaBuild; Signed=[bool]$Sign; Installer=$executable; Sha256=$installerSha256; ChecksumFile=$checksumFile; PayloadFiles=$entries.Count; PayloadBytes=$totalBytes; CompilerVersion=$compilerVersion; Manifest=$manifestFile; NativeLibrarySha256=(Get-FileHash -LiteralPath $nativeFile -Algorithm SHA256).Hash.ToLowerInvariant(); EmbeddedFontSource=$installerFont.RelativePath; EmbeddedFontSha256=$installerFont.Sha256 }
 Write-NewInstallerText (Join-Path $runDirectory 'installer-build.json') (($result | ConvertTo-Json -Depth 4) + "`n")
 [pscustomobject]$result

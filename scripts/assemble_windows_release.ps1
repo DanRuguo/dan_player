@@ -29,6 +29,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $repositoryRoot
 . (Join-Path $PSScriptRoot 'support\release_version.ps1')
+. (Join-Path $PSScriptRoot 'support\bundled_fonts.ps1')
+$bundledFontNotices = @(Get-BundledFontNotices -RepositoryRoot $repositoryRoot)
 $releaseVersion = Get-ReleaseVersionInfo $repositoryRoot
 if (-not $MainReleaseDirectory) { $MainReleaseDirectory = Join-Path $repositoryRoot 'build\windows\x64\runner\Release' }
 if ($DesktopLyricReleaseDirectory) {
@@ -295,13 +297,14 @@ try {
     $un4seenDirectory = Join-Path $licenceDirectory 'UN4SEEN'
     $microsoftDirectory = Join-Path $licenceDirectory 'Microsoft-CRT'
     $bassFxDirectory = Join-Path $licenceDirectory 'BASS_FX'
-    $notoDirectory = Join-Path $licenceDirectory 'NOTO-SANS-CJK'
     $null = New-Item -ItemType Directory -Path $licenceDirectory
     $null = New-Item -ItemType Directory -Path $microsoftDirectory
     $null = New-Item -ItemType Directory -Path $bassFxDirectory
-    $null = New-Item -ItemType Directory -Path $notoDirectory
-    foreach ($notice in @('OFL.txt', 'PROVENANCE.md', 'NOTICE.txt')) {
-        Copy-FileUnchanged (Join-Path $repositoryRoot "licenses/NOTO-SANS-CJK/$notice") (Join-Path $notoDirectory $notice)
+    foreach ($notice in $bundledFontNotices) {
+        $fontNoticeTarget = Join-Path $payloadDirectory $notice.RelativePath
+        $fontNoticeParent = Split-Path -Parent $fontNoticeTarget
+        if (-not (Test-Path -LiteralPath $fontNoticeParent)) { $null = New-Item -ItemType Directory -Path $fontNoticeParent }
+        Copy-FileUnchanged $notice.SourcePath $fontNoticeTarget
     }
     Copy-FileUnchanged $bassFx.NoticePath (Join-Path $bassFxDirectory 'bass_fx.txt')
     Copy-FileUnchanged $bassFx.ArchivePath (Join-Path $bassFxDirectory 'bass_fx24-2.4.12.6.zip')
@@ -411,7 +414,7 @@ Working tree modified: $workingTreeDirty
     Write-PortableZip $payloadDirectory $zipPath $packageStem
     $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
     try {
-        foreach ($requiredEntry in @('Dan Player.exe', 'DESKTOP-LYRIC-MODE', 'flutter_windows.dll', 'rust_lib_dan_player.dll', 'data/app.so', 'data/icudtl.dat', 'BASS/basswasapi.dll', 'BASS/bassmix.dll', 'licenses/UN4SEEN/bass.txt', 'licenses/UN4SEEN/bassmix.txt', 'BASS/bass_fx.dll', 'licenses/BASS_FX/bass_fx24-2.4.12.6.zip', 'licenses/NOTO-SANS-CJK/OFL.txt', 'licenses/NOTO-SANS-CJK/PROVENANCE.md', 'licenses/NOTO-SANS-CJK/NOTICE.txt', 'BUILD-PROVENANCE.json', 'SHA256SUMS')) {
+        foreach ($requiredEntry in (@('Dan Player.exe', 'DESKTOP-LYRIC-MODE', 'flutter_windows.dll', 'rust_lib_dan_player.dll', 'data/app.so', 'data/icudtl.dat', 'BASS/basswasapi.dll', 'BASS/bassmix.dll', 'licenses/UN4SEEN/bass.txt', 'licenses/UN4SEEN/bassmix.txt', 'BASS/bass_fx.dll', 'licenses/BASS_FX/bass_fx24-2.4.12.6.zip', 'BUILD-PROVENANCE.json', 'SHA256SUMS') + @($bundledFontNotices.RelativePath))) {
             if (-not $zip.GetEntry($packageStem + '/' + $requiredEntry)) { throw "ZIP is missing $requiredEntry" }
         }
         Assert-ZipFontAudit $zip ($packageStem + '/') $mainFontReport
@@ -426,9 +429,8 @@ Working tree modified: $workingTreeDirty
         }
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx24-2.4.12.6.zip') $bassFx.Package.ArchiveSha256
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx.txt') $bassFx.Package.NoticeSha256
-        foreach ($notice in @('OFL.txt', 'PROVENANCE.md', 'NOTICE.txt')) {
-            $noticeHash = (Get-FileHash -LiteralPath (Join-Path $repositoryRoot "licenses/NOTO-SANS-CJK/$notice") -Algorithm SHA256).Hash
-            Assert-ZipEntryHash $zip ($packageStem + '/licenses/NOTO-SANS-CJK/' + $notice) $noticeHash
+        foreach ($notice in $bundledFontNotices) {
+            Assert-ZipEntryHash $zip ($packageStem + '/' + $notice.RelativePath) $notice.Sha256
         }
     } finally { $zip.Dispose() }
 

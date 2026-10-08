@@ -32,6 +32,7 @@ class AppSegmentedControl<T> extends StatelessWidget {
     this.maxWidth,
     this.compact = false,
     this.showLabels = true,
+    this.wrapCompactLabel = false,
     this.semanticLabel,
     this.segmentWidth,
   }) : assert(options.length >= 2);
@@ -44,6 +45,10 @@ class AppSegmentedControl<T> extends StatelessWidget {
 
   /// Icon-only segments retain translated tooltips and accessibility labels.
   final bool showLabels;
+
+  /// Keep the selected label readable in a narrow menu button, growing its
+  /// height to fit rather than switching to the default icon-only fallback.
+  final bool wrapCompactLabel;
   final String? semanticLabel;
 
   /// Align related groups using the same measured segment width.
@@ -172,8 +177,13 @@ class AppSegmentedControl<T> extends StatelessWidget {
                 textStyle: WidgetStatePropertyAll(textStyle),
                 foregroundColor: style.foregroundColor,
               ),
-              child: Text(option.label,
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
+              child: wrapCompactLabel
+                  ? ConstrainedBox(
+                      constraints: BoxConstraints(
+                          maxWidth: math.max(1.0, popupWidth - 96)),
+                      child: Text(option.label, softWrap: true))
+                  : Text(option.label,
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
             ),
         ],
         builder: (context, controller, child) {
@@ -187,17 +197,29 @@ class AppSegmentedControl<T> extends StatelessWidget {
               : '$semanticLabel · ${selected.label}';
           return ConstrainedBox(
             constraints: BoxConstraints(maxWidth: available),
-            child: canShowLabel
+            child: canShowLabel || wrapCompactLabel
                 ? Tooltip(
                     message: tooltip,
                     child: OutlinedButton(
                       style: baseStyle.copyWith(
+                          fixedSize: wrapCompactLabel
+                              ? const WidgetStatePropertyAll<Size?>(null)
+                              : baseStyle.fixedSize,
                           foregroundColor: style.foregroundColor),
                       onPressed: onChanged == null ? null : toggle,
-                      child: AppToolbarLabel(
-                          label: selected.label,
-                          icon: selected.icon,
-                          trailing: const Icon(Icons.expand_more, size: 18)),
+                      child: wrapCompactLabel
+                          ? Row(children: [
+                              Icon(selected.icon, size: appToolbarIconSize),
+                              const SizedBox(width: appToolbarLabelGap),
+                              Expanded(child: Text(selected.label)),
+                              const SizedBox(width: appToolbarTrailingGap),
+                              const Icon(Icons.expand_more, size: 18),
+                            ])
+                          : AppToolbarLabel(
+                              label: selected.label,
+                              icon: selected.icon,
+                              trailing:
+                                  const Icon(Icons.expand_more, size: 18)),
                     ),
                   )
                 : IconButton.outlined(

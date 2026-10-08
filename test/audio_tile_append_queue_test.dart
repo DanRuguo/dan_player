@@ -96,7 +96,7 @@ void main() {
     }
     await Directory(renderDirectory).create(recursive: true);
     for (final font in [
-      (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
+      (danEmbeddedFontFamily, 'packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf'),
       ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
       (
         'packages/material_symbols_icons/MaterialSymbolsOutlined',

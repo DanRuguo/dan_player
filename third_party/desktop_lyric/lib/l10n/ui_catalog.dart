@@ -1,4 +1,6 @@
 import 'catalog_statistics_trends.dart';
+import 'catalog_directory_storage.dart';
+import 'catalog_font_management.dart';
 import 'catalog_onboarding_guide_prompt.dart';
 import 'catalog_player_feature_guide.dart';
 import 'catalog_process_resources.dart';
@@ -89,6 +91,7 @@ import 'catalog_comments_feedback_2605.dart';
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogOnboardingGuidePrompt,
   ...catalogStatisticsTrends,
+  ...catalogDirectoryStorage,
   ...catalogPlayerFeatureGuide,
   ...catalogProcessResources,
   ...catalogFolderTools,
@@ -168,6 +171,7 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogSettingsOrganization,
   ...catalogPlaylistTiles,
   ...catalogFontPicker,
+  ...catalogFontManagement,
   ...catalogAudioTrim,
   ...catalogAnimations,
   ...catalogCoverImport,

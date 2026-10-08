@@ -18,7 +18,7 @@ void main() {
   final positions = StreamController<double>.broadcast(sync: true);
   setUpAll(() async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
   });
   tearDownAll(positions.close);

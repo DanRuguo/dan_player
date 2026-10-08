@@ -235,14 +235,14 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 | 目录 | 用途 |
 | --- | --- |
 | [lib/](lib/) | 主界面、曲库、播放服务与数据模型 |
-| [third_party/desktop_lyric/](third_party/desktop_lyric/) | 通过 path 依赖共用的桌面歌词组件与 Windows 宿主 |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | 通过 path 依赖共用的桌面歌词组件、字体资源与 Windows 宿主 |
 | [rust/](rust/)、[rust_builder/](rust_builder/) | 标签处理、Flutter/Rust 桥接与 Cargokit 构建支持 |
 | [windows/](windows/) | 主程序的 Windows 窗口、任务栏与系统集成 |
 | [installer/](installer/) | Inno 安装器、原生组件与安装事务测试 |
 | [test/](test/)、[test/support/](test/support/) | Dart/Widget 回归、隔离夹具与渲染辅助 |
 | [integration_test/](integration_test/)、[test_driver/](test_driver/) | Windows Profile 原生显示入口与驱动 |
 | [scripts/](scripts/) | 依赖准备、构建、校验与发布脚本 |
-| [assets/](assets/)、[shaders/](shaders/) | 产品资源、字体与着色器 |
+| [assets/](assets/)、[shaders/](shaders/) | 产品界面资源与着色器 |
 | [docs/](docs/) | 接口说明、配置示例与公开界面图片 |
 
 按改动选择实际入口；普通 `flutter test` 不包含 `integration_test/`：
@@ -300,7 +300,7 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 
 本项目按 [LICENSE](LICENSE) 分发；第三方组件保留各自许可，BASS 的使用与分发须遵守其官方许可。
 
-内置界面字体为 Noto Sans CJK SC，按 SIL Open Font License 1.1 分发；[字体许可与来源](licenses/NOTO-SANS-CJK/PROVENANCE.md) 随便携包和安装器提供。旧字体资源路径及内部别名仅用于兼容已有设置，实际字体显示名为 Noto Sans CJK SC。
+主程序与桌面歌词共用一份字体资源，支持统一选择、四语言分别选择，以及混合文字按语种使用字体。内置 [思源黑体 SC／JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md)、[Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md) 和 [Pretendard](licenses/PRETENDARD/PROVENANCE.md)，均按 SIL Open Font License 1.1 分发；原版许可与来源随便携包和安装器提供。`DanPingFangSC` 内部兼容别名对应思源黑体 SC，不包含苹果字体。
 
 Dan Player 基于 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) 修改，感谢原作者提供的播放器基础、曲库结构和歌词体验。同时感谢 [desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge) 及 [Flutter](https://flutter.dev/) 与 Material Design。
 

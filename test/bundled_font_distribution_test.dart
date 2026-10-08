@@ -6,119 +6,123 @@ import 'package:crypto/crypto.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../scripts/support/bundled_font_assets.dart';
 import '../scripts/support/sfnt_font.dart';
 
-const _fontSha256 =
-    '2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b';
-const _fontGitBlob = 'dc15562470b4f842321894787a0d066879ccff8b';
-const _upstreamCommit = '523d033d6cb47f4a80c58a35753646f5c3608a78';
-const _licenseSha256 =
-    '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2';
-const _fontPaths = [
-  'assets/fonts/PingFangSC-Regular.ttf',
-  'third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf',
-];
-
 void main() {
+  late Map<String, dynamic> catalogJson;
+  late BundledFontCatalog catalog;
   late List<Uint8List> fontBytes;
   late List<SfntFont> fonts;
   late List<Map<int, Set<String>>> names;
   setUpAll(() {
-    fontBytes = [for (final path in _fontPaths) File(path).readAsBytesSync()];
+    catalogJson = jsonDecode(
+        File('scripts/support/bundled_fonts.json').readAsStringSync());
+    catalog = BundledFontCatalog.parse(catalogJson);
+    fontBytes = [
+      for (final font in catalog.fonts) File(font.source).readAsBytesSync()
+    ];
     fonts = [for (final bytes in fontBytes) SfntFont.parse(bytes)];
     names = [for (final bytes in fontBytes) _unicodeNames(bytes)];
   });
 
-  test('both compatibility asset paths contain the unchanged upstream OTF', () {
+  test('the four shared resources contain unchanged pinned upstream fonts', () {
     for (var index = 0; index < fontBytes.length; index++) {
       final bytes = fontBytes[index];
-      expect(bytes.length, 16437364, reason: _fontPaths[index]);
-      expect(sha256.convert(bytes).toString(), _fontSha256,
-          reason: _fontPaths[index]);
-      expect(ascii.decode(bytes.sublist(0, 4)), 'OTTO');
+      final font = catalog.fonts[index];
+      expect(bytes.length, font.bytes, reason: font.source);
+      expect(sha256.convert(bytes).toString(), font.sha256,
+          reason: font.source);
+      expect(ByteData.sublistView(bytes).getUint32(0, Endian.big),
+          font.variable ? 0x00010000 : 0x4f54544f);
     }
   });
 
   test('the actual font blob matches its pinned upstream source provenance',
       () {
-    for (final bytes in fontBytes) {
+    for (var index = 0; index < fontBytes.length; index++) {
+      final bytes = fontBytes[index];
       final gitBytes = (BytesBuilder(copy: false)
             ..add(utf8.encode('blob ${bytes.length}\u0000'))
             ..add(bytes))
           .takeBytes();
-      expect(sha1.convert(gitBytes).toString(), _fontGitBlob);
-    }
-    final provenance =
-        File('licenses/NOTO-SANS-CJK/PROVENANCE.md').readAsStringSync();
-    for (final source in [
-      'https://github.com/notofonts/noto-cjk',
-      'Sans2.004',
-      _upstreamCommit,
-      'Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf',
-      _fontGitBlob,
-      _fontSha256,
-      _licenseSha256,
-    ]) {
-      expect(provenance, contains(source));
+      final font = catalog.fonts[index];
+      final raw = catalogJson['fonts'][index] as Map<String, dynamic>;
+      final upstream = raw['upstream'] as Map<String, dynamic>;
+      expect(sha1.convert(gitBytes).toString(), font.gitBlob);
+      final provenance =
+          File('${raw['licenseDirectory']}/PROVENANCE.md').readAsStringSync();
+      for (final source in [
+        upstream['repository'],
+        upstream['commit'],
+        upstream['path'],
+        if (upstream['tag'] != null) upstream['tag'],
+        font.gitBlob,
+        font.sha256,
+      ]) {
+        expect(provenance, contains(source));
+      }
     }
   });
 
-  test('the real name tables identify Noto with its original Adobe copyright',
-      () {
-    for (final name in names) {
-      expect(name[0], {'© 2014-2021 Adobe (http://www.adobe.com/).'});
-      expect(name[1], {'Noto Sans CJK SC'});
-      expect(name[2], {'Regular'});
-      expect(name[4], {'Noto Sans CJK SC'});
-      expect(name[5], isNotEmpty);
-      for (final version in name[5]!) {
-        expect(version, startsWith('Version 2.004;'));
+  test('the real name tables retain each original family and copyright', () {
+    for (var index = 0; index < names.length; index++) {
+      final expected = catalogJson['fonts'][index]['names'] as Map;
+      for (final id in [0, 1, 2, 4, 5, 6]) {
+        expect(names[index][id], (expected['$id'] as List).toSet());
       }
-      expect(name[6], {'NotoSansCJKsc-Regular'});
     }
   });
 
   test('the bundled license is the original OFL and agrees with font metadata',
       () {
-    final licenseBytes =
-        File('licenses/NOTO-SANS-CJK/OFL.txt').readAsBytesSync();
-    expect(sha256.convert(licenseBytes).toString(), _licenseSha256);
-    final license = utf8.decode(licenseBytes);
-    expect(license, contains('SIL OPEN FONT LICENSE Version 1.1'));
-    expect(license, contains('may be bundled,'));
-    expect(license, contains('redistributed and/or sold with any software'));
+    for (final entry in catalogJson['licenses'] as List) {
+      for (final file in entry['files'] as List) {
+        final bytes =
+            File('${entry['directory']}/${file['name']}').readAsBytesSync();
+        expect(sha256.convert(bytes).toString(), file['sha256']);
+      }
+      final license = File('${entry['directory']}/OFL.txt').readAsStringSync();
+      expect(license, contains('SIL OPEN FONT LICENSE Version 1.1'));
+      expect(license, contains('may be bundled,'));
+      expect(license, contains('redistributed and/or sold with any software'));
+    }
     for (final name in names) {
       expect(name[13], isNotEmpty);
       for (final description in name[13]!) {
         expect(description, contains('SIL Open Font License, Version 1.1'));
       }
-      expect(name[14], {'http://scripts.sil.org/OFL'});
+      expect(name[14], isNotEmpty);
     }
   });
 
   test('the readable notice preserves every embedded Unicode copyright entry',
       () {
-    final notice = File('licenses/NOTO-SANS-CJK/NOTICE.txt').readAsStringSync();
-    for (final name in names) {
-      for (final copyright in name[0]!) {
+    for (var index = 0; index < names.length; index++) {
+      final directory = catalogJson['fonts'][index]['licenseDirectory'];
+      final notice = File('$directory/NOTICE.txt').readAsStringSync();
+      for (final copyright in names[index][0]!) {
         expect(notice, contains(copyright));
       }
+      expect(notice, contains('OFL.txt'));
+      expect(notice, contains('PROVENANCE.md'));
     }
-    expect(notice, contains('OFL.txt'));
-    expect(notice, contains('PROVENANCE.md'));
   });
 
-  test('saved Flutter aliases remain compatible while the display name is Noto',
-      () {
-    expect(danEmbeddedFontFamily, 'DanPingFangSC');
+  test('shared Flutter registration preserves the legacy family identity', () {
+    expect(danEmbeddedFontFamily, 'packages/desktop_lyric/DanPingFangSC');
     expect(danCjkFontFamily, danEmbeddedFontFamily);
-    expect(danFontDisplayName(danEmbeddedFontFamily), 'Noto Sans CJK SC');
-    expect(danFontDisplayName(null), 'Noto Sans CJK SC');
-    for (final prefix in ['', 'third_party/desktop_lyric/']) {
-      final pubspec = File('${prefix}pubspec.yaml').readAsStringSync();
-      expect(pubspec, contains('family: $danEmbeddedFontFamily'));
-      expect(pubspec, contains('asset: assets/fonts/PingFangSC-Regular.ttf'));
+    expect(danFontDisplayName(danEmbeddedFontFamily), 'Source Han Sans SC');
+    expect(danFontDisplayName(null), 'Source Han Sans SC');
+    final owner =
+        File('third_party/desktop_lyric/pubspec.yaml').readAsStringSync();
+    for (final font in catalog.fonts) {
+      expect(owner, contains('family: ${font.family}'));
+      expect(owner, contains('asset: ${font.asset}'));
     }
+    expect(
+        File('pubspec.yaml').readAsStringSync(), isNot(contains('  fonts:')));
+    expect(File('assets/fonts/PingFangSC-Regular.ttf').existsSync(), isFalse);
   });
 
   const samples = {
@@ -128,13 +132,14 @@ void main() {
     'Korean': '한국어한글음악재생',
   };
   for (final sample in samples.entries) {
-    test('both actual fonts map representative ${sample.key} glyphs', () {
-      for (var index = 0; index < fonts.length; index++) {
-        for (final rune in sample.value.runes) {
-          expect(fonts[index].glyphIndex(rune), greaterThan(0),
-              reason: '${_fontPaths[index]} lacks '
-                  'U+${rune.toRadixString(16)} (${String.fromCharCode(rune)})');
-        }
+    test('the shared fallback maps representative ${sample.key} glyphs', () {
+      // Both surfaces use this exact single authoritative full-CJK resource.
+      final index =
+          catalog.fonts.indexWhere((font) => font.id == 'sourceHanSC');
+      for (final rune in sample.value.runes) {
+        expect(fonts[index].glyphIndex(rune), greaterThan(0),
+            reason: '${catalog.fonts[index].source} lacks '
+                'U+${rune.toRadixString(16)} (${String.fromCharCode(rune)})');
       }
     });
   }

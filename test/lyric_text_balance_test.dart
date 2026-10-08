@@ -66,7 +66,7 @@ void main() {
   test('a steadily wider lyric does not move words back to a later line',
       () async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     const text = 'Maybe we should let this go';
     final words = RegExp(r'\S+').allMatches(text).toList();

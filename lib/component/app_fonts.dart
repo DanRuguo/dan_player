@@ -3,18 +3,22 @@ import 'package:flutter/material.dart';
 
 export 'package:desktop_lyric/app_fonts.dart';
 
-const String danEmbeddedFontDisplayName = "Noto Sans CJK SC";
+const String danEmbeddedFontDisplayName = "Source Han Sans SC";
 const String danCjkFontFamily = danEmbeddedFontFamily;
 
 String danFontDisplayName(String? fontFamily) {
   final family = fontFamily?.trim();
-  if (family == null || family.isEmpty || family == danEmbeddedFontFamily) {
+  if (family == null ||
+      family.isEmpty ||
+      family == 'DanPingFangSC' ||
+      family == danEmbeddedFontFamily) {
     return danEmbeddedFontDisplayName;
   }
   return family;
 }
 
 TextStyle danCjkTextStyle({
+  String? fontFamily,
   Color? color,
   double? fontSize,
   FontWeight? fontWeight,
@@ -23,7 +27,7 @@ TextStyle danCjkTextStyle({
     color: color,
     fontSize: fontSize,
     fontWeight: fontWeight,
-    fontFamily: danCjkFontFamily,
+    fontFamily: fontFamily ?? danCjkFontFamily,
     fontFamilyFallback: danFontFamilyFallback,
   );
 }

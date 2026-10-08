@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
+import 'package:desktop_lyric/font_policy.dart';
 
 import 'package:json_annotation/json_annotation.dart';
 
@@ -61,6 +62,8 @@ class InitArgsMessage {
   final bool vertical;
   final double playbackRate;
   final String language;
+  @JsonKey(fromJson: _fontPolicyFromJson, toJson: _fontPolicyToJson)
+  final AppFontPolicy? fontPolicy;
   @JsonKey(fromJson: DesktopLyricAppearance.fromJson)
   final DesktopLyricAppearance appearance;
 
@@ -69,6 +72,7 @@ class InitArgsMessage {
       {this.vertical = false,
       this.playbackRate = 1.0,
       this.language = 'zh',
+      this.fontPolicy,
       this.appearance = DesktopLyricAppearance.defaults});
 
   factory InitArgsMessage.fromJson(Map<String, dynamic> json) =>
@@ -393,12 +397,15 @@ class ThemeChangedMessage extends Message {
   final int primary;
   final int surfaceContainer;
   final int onSurface;
+  @JsonKey(fromJson: _fontPolicyFromJson, toJson: _fontPolicyToJson)
+  final AppFontPolicy? fontPolicy;
 
   const ThemeChangedMessage(
     this.primary,
     this.surfaceContainer,
-    this.onSurface,
-  );
+    this.onSurface, {
+    this.fontPolicy,
+  });
 
   factory ThemeChangedMessage.fromJson(Map<String, dynamic> json) =>
       _$ThemeChangedMessageFromJson(json);
@@ -406,6 +413,12 @@ class ThemeChangedMessage extends Message {
   @override
   Map<String, dynamic> _toJson() => _$ThemeChangedMessageToJson(this);
 }
+
+AppFontPolicy? _fontPolicyFromJson(Object? value) =>
+    value == null ? null : AppFontPolicy.fromJson(value);
+
+Map<String, Object?>? _fontPolicyToJson(AppFontPolicy? value) =>
+    value?.toJson();
 
 /// player -> desktop lyric
 @JsonSerializable()

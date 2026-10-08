@@ -1,3 +1,4 @@
+import 'package:desktop_lyric/font_policy.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -43,6 +44,7 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
   AppLifecycleState? _lifecycle;
   bool _treeVisible = true, _contextAllowsMotion = true, _overflow = false;
   TextPainter? _textPainter;
+  AppFontPolicy? _measuredPolicy;
   TextStyle? _measuredStyle;
   TextScaler? _measuredScaler;
   Locale? _measuredLocale;
@@ -194,13 +196,15 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
 
   @override
   Widget build(BuildContext context) {
+    final policy = AppFontScope.of(context);
     final style = DefaultTextStyle.of(context).style.merge(widget.style);
     final scaler = MediaQuery.textScalerOf(context);
     final direction = Directionality.of(context);
     final locale = Localizations.maybeLocaleOf(context);
     final text = widget.text.replaceAll(RegExp(r'[\r\n]+'), ' ');
     return LayoutBuilder(builder: (context, constraints) {
-      final measurementChanged = _measuredText != text ||
+      final measurementChanged = _measuredPolicy != policy ||
+          _measuredText != text ||
           _measuredStyle != style ||
           _measuredScaler != scaler ||
           _measuredDirection != direction ||
@@ -214,12 +218,13 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
         if (measurementChanged) {
           _textPainter?.dispose();
           _measuredText = text;
+          _measuredPolicy = policy;
           _measuredStyle = style;
           _measuredScaler = scaler;
           _measuredDirection = direction;
           _measuredLocale = locale;
           _textPainter = TextPainter(
-              text: TextSpan(text: text, style: style),
+              text: appFontSpan(text, style: style, policy: policy),
               textDirection: direction,
               textScaler: scaler,
               locale: locale,
@@ -231,7 +236,7 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
       }
       if (!_overflow || !_motionAllowed) {
         _reset();
-        return Text(text,
+        return AppFontText(text,
             style: widget.style,
             textAlign: widget.textAlign,
             maxLines: 1,

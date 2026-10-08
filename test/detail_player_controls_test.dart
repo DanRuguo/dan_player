@@ -21,7 +21,7 @@ void main() {
       ..addFont(rootBundle.load(
           'packages/material_symbols_icons/lib/fonts/MaterialSymbolsOutlined.ttf'));
     final font = FontLoader('DetailTestFont')
-      ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf'));
+      ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf'));
     await Future.wait([icons.load(), font.load()]);
   });
 

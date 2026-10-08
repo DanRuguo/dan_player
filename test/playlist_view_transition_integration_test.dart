@@ -119,7 +119,7 @@ void main() {
     images = await Future.wait(colors.map(_art));
     await File('${data.path}/folder.png').writeAsBytes(images[0]);
     for (final font in [
-      (danEmbeddedFontFamily, 'assets/fonts/PingFangSC-Regular.ttf'),
+      (danEmbeddedFontFamily, 'packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf'),
       ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
       (
         'packages/material_symbols_icons/MaterialSymbolsOutlined',

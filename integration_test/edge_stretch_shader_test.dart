@@ -27,7 +27,7 @@ void main() {
     expect(ui.ImageFilter.isShaderFilterSupported, isTrue,
         reason: 'This regression requires the actual Impeller image sampler.');
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     final key = GlobalKey();
     final textKey = GlobalKey();

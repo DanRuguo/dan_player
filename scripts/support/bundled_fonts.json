@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 1,
+  "ownerPackage": "desktop_lyric",
+  "ownerDirectory": "third_party/desktop_lyric",
+  "fonts": [
+    {
+      "id": "sourceHanSC",
+      "family": "DanPingFangSC",
+      "asset": "assets/fonts/PingFangSC-Regular.ttf",
+      "source": "third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf",
+      "bytes": 16529832,
+      "sha256": "f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
+      "gitBlob": "8113ad53da18b6a08b133c6c460ae1d818a0f865",
+      "upstream": {
+        "repository": "https://github.com/adobe-fonts/source-han-sans",
+        "tag": "2.005R",
+        "commit": "6c709ca72d3d7c46ab42ebecc1a26e7d69595a37",
+        "path": "OTF/SimplifiedChinese/SourceHanSansSC-Regular.otf"
+      },
+      "licenseDirectory": "licenses/SOURCE-HAN-SANS",
+      "realFamily": "Source Han Sans SC",
+      "names": {
+        "0": [
+          "© 2014-2025 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+        ],
+        "1": [
+          "Source Han Sans SC",
+          "思源黑体"
+        ],
+        "2": [
+          "Regular"
+        ],
+        "4": [
+          "Source Han Sans SC",
+          "思源黑体"
+        ],
+        "5": [
+          "Version 2.005;addfeatures 5.0.0b21"
+        ],
+        "6": [
+          "SourceHanSansSC-Regular"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This Font Software is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the SIL Open Font License for the specific language, permissions and limitations governing your use of this Font Software."
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "variable": false,
+      "axes": [],
+      "requiredSamples": [
+        "Dan Player 0123",
+        "歌词播放汉语音量",
+        "日本語あいうアイウ再生",
+        "한국어한글음악재생",
+        "𠮷ゕゖ"
+      ]
+    },
+    {
+      "id": "googleSans",
+      "family": "DanGoogleSans",
+      "asset": "assets/fonts/GoogleSans-VF.ttf",
+      "source": "third_party/desktop_lyric/assets/fonts/GoogleSans-VF.ttf",
+      "bytes": 4974940,
+      "sha256": "d0a87d835a944b8b40d0e82a5651bb59ab97b936a2aeed5946eb57e7b2a3a90a",
+      "gitBlob": "a5e76cc713206f1cfe9a7fc31cc1b6f035034d81",
+      "upstream": {
+        "repository": "https://github.com/google/fonts",
+        "tag": null,
+        "commit": "5e8a3ba899557829a76cfdac30fa512bda91d7ca",
+        "path": "ofl/googlesans/GoogleSans%5BGRAD%2Copsz%2Cwght%5D.ttf"
+      },
+      "licenseDirectory": "licenses/GOOGLE-SANS",
+      "realFamily": "Google Sans",
+      "names": {
+        "0": [
+          "Copyright 2025 The Google Sans Project Authors (github.com/googlefonts/googlesans)"
+        ],
+        "1": [
+          "Google Sans"
+        ],
+        "2": [
+          "Regular"
+        ],
+        "4": [
+          "Google Sans Regular"
+        ],
+        "5": [
+          "Version 14.000;[08f2ac800]"
+        ],
+        "6": [
+          "GoogleSans-Regular"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org"
+        ],
+        "14": [
+          "https://openfontlicense.org"
+        ]
+      },
+      "variable": true,
+      "axes": [
+        {
+          "tag": "opsz",
+          "minimum": 17.0,
+          "default": 18.0,
+          "maximum": 18.0
+        },
+        {
+          "tag": "wght",
+          "minimum": 400.0,
+          "default": 400.0,
+          "maximum": 700.0
+        },
+        {
+          "tag": "GRAD",
+          "minimum": -50.0,
+          "default": 0.0,
+          "maximum": 200.0
+        }
+      ],
+      "requiredSamples": [
+        "Dan Player 0123"
+      ]
+    },
+    {
+      "id": "sourceHanJP",
+      "family": "DanSourceHanJP",
+      "asset": "assets/fonts/SourceHanSansJP-Regular.otf",
+      "source": "third_party/desktop_lyric/assets/fonts/SourceHanSansJP-Regular.otf",
+      "bytes": 4562224,
+      "sha256": "40d1b760d1135539f6b6e0ee2b9f415de6d97576f7676840b06306c7c190c074",
+      "gitBlob": "5c11ef7a56fca42de83614aa7480304814b295d7",
+      "upstream": {
+        "repository": "https://github.com/adobe-fonts/source-han-sans",
+        "tag": "2.005R",
+        "commit": "6c709ca72d3d7c46ab42ebecc1a26e7d69595a37",
+        "path": "SubsetOTF/JP/SourceHanSansJP-Regular.otf"
+      },
+      "licenseDirectory": "licenses/SOURCE-HAN-SANS",
+      "realFamily": "Source Han Sans JP",
+      "names": {
+        "0": [
+          "© 2014-2025 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'."
+        ],
+        "1": [
+          "Source Han Sans JP",
+          "源ノ角ゴシック JP"
+        ],
+        "2": [
+          "Regular"
+        ],
+        "4": [
+          "Source Han Sans JP",
+          "源ノ角ゴシック JP"
+        ],
+        "5": [
+          "Version 2.005;addfeatures 5.0.0b21"
+        ],
+        "6": [
+          "SourceHanSansJP-Regular"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This Font Software is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the SIL Open Font License for the specific language, permissions and limitations governing your use of this Font Software."
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "variable": false,
+      "axes": [],
+      "requiredSamples": [
+        "Dan Player 0123",
+        "日本語あいうアイウ再生",
+        "𠮷ゕゖ"
+      ]
+    },
+    {
+      "id": "pretendard",
+      "family": "DanPretendard",
+      "asset": "assets/fonts/Pretendard-Regular.otf",
+      "source": "third_party/desktop_lyric/assets/fonts/Pretendard-Regular.otf",
+      "bytes": 1574352,
+      "sha256": "3ffbacde6ab8411f1d2db54bb9b1f0b3ee2a738932033722cf0388c06aed1c93",
+      "gitBlob": "08bf4cfc2164a0bff74a4bf844128d3b843bbf87",
+      "upstream": {
+        "repository": "https://github.com/orioncactus/pretendard",
+        "tag": "v1.3.9",
+        "commit": "5c41199ea0024a9e0b2cb31735265056e5472d76",
+        "path": "packages/pretendard/dist/public/static/Pretendard-Regular.otf"
+      },
+      "licenseDirectory": "licenses/PRETENDARD",
+      "realFamily": "Pretendard",
+      "names": {
+        "0": [
+          "Copyright © 2023 Kil Hyung-jin",
+          "Copyright © 2023 길형진"
+        ],
+        "1": [
+          "Pretendard"
+        ],
+        "2": [
+          "Regular"
+        ],
+        "4": [
+          "Pretendard Regular"
+        ],
+        "5": [
+          "Version 1.309;Glyphs 3.2 (3225)"
+        ],
+        "6": [
+          "Pretendard-Regular"
+        ],
+        "13": [
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL"
+        ],
+        "14": [
+          "http://scripts.sil.org/OFL"
+        ]
+      },
+      "variable": false,
+      "axes": [],
+      "requiredSamples": [
+        "Dan Player 0123",
+        "한국어한글음악재생"
+      ]
+    }
+  ],
+  "licenses": [
+    {
+      "directory": "licenses/SOURCE-HAN-SANS",
+      "files": [
+        {
+          "name": "OFL.txt",
+          "sha256": "fcac737e761ec63dbfbdce11030a1780161920d80315edba9c8beff1c2bac5a2"
+        },
+        {
+          "name": "PROVENANCE.md",
+          "sha256": "0c5881e2c14fcac927847826c8339d051350884e7a760ef72c31e29e4d1d8588"
+        },
+        {
+          "name": "NOTICE.txt",
+          "sha256": "8d8c0a8cbe897e31f1a8805e0209766933fff11f92130fa853e207fb87e6d5ee"
+        }
+      ]
+    },
+    {
+      "directory": "licenses/GOOGLE-SANS",
+      "files": [
+        {
+          "name": "OFL.txt",
+          "sha256": "2b75ef20f13d83a7514aee452c4782c20cdc9ff2dee17600f44d37a06d4fb958"
+        },
+        {
+          "name": "PROVENANCE.md",
+          "sha256": "cd9aa3988f11a4dc9a00eb1435120500500f398f59bbf76d650ba756ed2bc7fb"
+        },
+        {
+          "name": "NOTICE.txt",
+          "sha256": "583bc4fb806365bc77187da73f984145ccc6a8540cd5c0379db792c28adb9b1b"
+        },
+        {
+          "name": "TRADEMARKS.md",
+          "sha256": "215bc8c1ce46d1b81531f33ebb5af201e7a5da76b8f3ae4c705336fd70fc89e1"
+        }
+      ]
+    },
+    {
+      "directory": "licenses/PRETENDARD",
+      "files": [
+        {
+          "name": "OFL.txt",
+          "sha256": "d31ddd9f2bed32fd7e302a205cf2380ba0de6529152d239ef99cfb6f261bfc04"
+        },
+        {
+          "name": "PROVENANCE.md",
+          "sha256": "1334bcfa26122541981c078aff38d6a4157ff456fdb4fbf221be0deb9c9686b0"
+        },
+        {
+          "name": "NOTICE.txt",
+          "sha256": "01d0e9c9e375d3ba1b8c1dd1025a7f1646729336453f811c4767ed514ebe8cd6"
+        }
+      ]
+    }
+  ]
+}

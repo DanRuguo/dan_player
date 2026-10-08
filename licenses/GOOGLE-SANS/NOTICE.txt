@@ -1,0 +1,5 @@
+Copyright 2025 The Google Sans Project Authors (github.com/googlefonts/googlesans)
+
+These original fonts are distributed under SIL Open Font License 1.1.
+See OFL.txt and PROVENANCE.md.
+See also the original TRADEMARKS.md.
