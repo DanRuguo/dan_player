@@ -424,14 +424,17 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                           detail: ui('前期 {0} 天', [current.previousActiveDays])),
                     ];
                     return columns == 3
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
+                        ? IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
                                 for (var i = 0; i < 3; i++) ...[
                                   if (i > 0) const SizedBox(width: 12),
                                   Expanded(child: metrics[i])
                                 ]
-                              ])
+                              ],
+                            ),
+                          )
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [

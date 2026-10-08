@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dan_player/component/app_data_storage_card.dart';
-import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/statistics_bar_row.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/page/statistics_page.dart';
@@ -149,22 +148,21 @@ Future<void> _waitFor(WidgetTester tester, bool Function() arrived) async {
 Future<void> _choose(WidgetTester tester, Finder selector, String label) async {
   await tester.ensureVisible(selector);
   await tester.pumpAndSettle();
-  final compact =
-      find.descendant(of: selector, matching: find.byType(OutlinedButton));
-  if (compact.evaluate().isNotEmpty) {
-    await tester.tap(compact);
-    await tester.pumpAndSettle();
-    final item = find.widgetWithText(MenuItemButton, label).hitTestable();
-    expect(item, findsOneWidget);
-    final menuRect = tester.getRect(item);
-    expect(menuRect.left, greaterThanOrEqualTo(0));
-    expect(
-        menuRect.right, lessThanOrEqualTo(tester.view.physicalSize.width + 1));
-    await tester.tap(item);
-  } else {
-    await tester.tap(find.descendant(of: selector, matching: find.text(label)));
-  }
+  final chip = find.descendant(
+      of: selector, matching: find.widgetWithText(ChoiceChip, label));
+  expect(chip, findsOneWidget);
+  await tester.ensureVisible(chip);
   await tester.pumpAndSettle();
+  expect(chip.hitTestable(), findsOneWidget);
+  expect(
+      tester
+          .widget<RawChip>(
+              find.descendant(of: chip, matching: find.byType(RawChip)))
+          .showCheckmark,
+      isTrue);
+  await tester.tap(chip);
+  await tester.pumpAndSettle();
+  expect(tester.widget<ChoiceChip>(chip).selected, isTrue);
 }
 
 Future<void> _revealRefresh(WidgetTester tester) async {
@@ -394,20 +392,81 @@ void main() {
       final boundary = GlobalKey();
       uiLanguage.value = language;
       await mount(tester, rig, width: 360, scale: 2, boundary: boundary);
-      final selector =
-          tester.widget<AppSegmentedControl<String>>(_storageSelector);
-      expect(selector.options.map((item) => item.value),
-          ['tracks', 'albums', 'artists']);
+      final chips = find.descendant(
+          of: _storageSelector,
+          matching: find.byType(ChoiceChip, skipOffstage: false),
+          skipOffstage: false);
+      expect(chips, findsNWidgets(3));
       final heading = find.text(ui('占用空间最多'), skipOffstage: false);
       await tester.ensureVisible(_storageSelector);
       await tester.pumpAndSettle();
       expect(tester.getRect(_storageSelector).top,
           greaterThan(tester.getRect(heading).bottom));
+      final contentColumn = find
+          .ancestor(
+              of: _storageSelector,
+              matching: find.byType(Column, skipOffstage: false))
+          .first;
+      expect(tester.getRect(_storageSelector).right,
+          closeTo(tester.getRect(contentColumn).right, 1),
+          reason: 'The second-line choices align with the card content end');
+      final rowEnds = <double, double>{};
+      for (final label in ['歌曲', '专辑', '艺术家']) {
+        final chip = find.descendant(
+            of: _storageSelector,
+            matching: find.widgetWithText(ChoiceChip, ui(label)));
+        expect(chip.hitTestable(), findsOneWidget);
+        final data = tester.widget<ChoiceChip>(chip);
+        expect(
+            tester
+                .widget<RawChip>(
+                    find.descendant(of: chip, matching: find.byType(RawChip)))
+                .showCheckmark,
+            isTrue);
+        expect(data.selected, label == '歌曲');
+        final rect = tester.getRect(chip);
+        final containerRect = tester.getRect(_storageSelector);
+        expect(rect.left, greaterThanOrEqualTo(containerRect.left - 1));
+        expect(rect.right, lessThanOrEqualTo(containerRect.right + 1));
+        rowEnds.update(
+            rect.top, (right) => right > rect.right ? right : rect.right,
+            ifAbsent: () => rect.right);
+        final text = find.descendant(of: chip, matching: find.text(ui(label)));
+        final paragraph = tester.renderObject<RenderParagraph>(
+            find.descendant(of: text, matching: find.byType(RichText)));
+        expect(paragraph.didExceedMaxLines, isFalse);
+        expect(paragraph.text.toPlainText(), ui(label));
+        final boxes = paragraph.getBoxesForSelection(
+            TextSelection(baseOffset: 0, extentOffset: ui(label).length));
+        expect(boxes, isNotEmpty);
+        for (final box in boxes) {
+          final glyph =
+              box.toRect().shift(paragraph.localToGlobal(Offset.zero));
+          expect(glyph.left, greaterThanOrEqualTo(rect.left - 1));
+          expect(glyph.right, lessThanOrEqualTo(rect.right + 1));
+          expect(glyph.top, greaterThanOrEqualTo(rect.top - 3));
+          expect(glyph.bottom, lessThanOrEqualTo(rect.bottom + 3));
+        }
+      }
+      expect(rowEnds.length, greaterThan(1),
+          reason: 'Narrow large-text choices must wrap onto real rows');
+      for (final end in rowEnds.values) {
+        expect(end, closeTo(tester.getRect(_storageSelector).right, 1),
+            reason: 'Each wrapped choice row stays aligned at the content end');
+      }
+      final rankingCard = find
+          .ancestor(of: _storageSelector, matching: find.byType(Card))
+          .first;
+      await tester.ensureVisible(rankingCard);
+      await tester.pumpAndSettle();
+      await capturePlaylistFeature(
+          tester, boundary, 'storage-choice-chips-${language.code}-360-200');
       for (final (group, label) in [('albums', '专辑'), ('artists', '艺术家')]) {
         await _choose(tester, _storageSelector, ui(label));
         final selected =
-            tester.widget<AppSegmentedControl<String>>(_storageSelector);
-        expect(selected.value, group);
+            tester.widgetList<ChoiceChip>(chips).where((chip) => chip.selected);
+        expect(selected, hasLength(1));
+        expect((selected.single.label as Text).data, ui(label));
         final targetLabel = group == 'albums'
             ? rig.tracks.first.album
             : rig.tracks.first.artist;
@@ -442,6 +501,31 @@ void main() {
         expect(rig.cache.requests, hasLength(1));
         expect(tester.takeException(), isNull);
       }
+      // Resizing the actual mounted page preserves the frozen snapshot and
+      // selected group. A wide heading uses the same row as its controls.
+      sizePlaylistFeature(tester, width: 1080, height: 1100);
+      await tester.pumpWidget(
+          playlistFeatureHost(rig.page, textScale: 1, boundary: boundary));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(_storageSelector);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(heading).center.dy,
+          closeTo(tester.getRect(_storageSelector).center.dy, 1));
+      expect(tester.getRect(heading).right,
+          lessThan(tester.getRect(_storageSelector).left));
+      expect(tester.getRect(_storageSelector).right,
+          closeTo(tester.getRect(contentColumn).right, 1));
+      final wideRows = tester
+          .widgetList<ChoiceChip>(chips)
+          .map((chip) => tester.getRect(find.byWidget(chip)).top)
+          .toSet();
+      expect(wideRows, hasLength(1));
+      expect(rig.libraryReads, 3);
+      expect(rig.player.requests, isEmpty);
+      expect(rig.cache.requests, hasLength(1));
+      await capturePlaylistFeature(
+          tester, boundary, 'storage-choice-chips-${language.code}-1080-100');
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       expect(tester.binding.transientCallbackCount, 0);
     });

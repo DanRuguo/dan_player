@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/personal_library.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:flutter/foundation.dart';
@@ -22,6 +23,8 @@ class StatisticsDisplaySnapshot {
     required this.capturedAt,
     required this.libraryRevision,
     required this.storageWarning,
+    required this.personalSummary,
+    required this.personalWarning,
   });
 
   final Map<String, Object?> playbackData;
@@ -29,6 +32,8 @@ class StatisticsDisplaySnapshot {
   final DateTime capturedAt;
   final int libraryRevision;
   final String? storageWarning;
+  final PersonalOrganizationSummary? personalSummary;
+  final Object? personalWarning;
 }
 
 /// Application-session display cache. Neither library changes nor recording
@@ -39,6 +44,7 @@ class StatisticsDisplayService extends ChangeNotifier {
     LibraryStatisticsScanner? scanner,
     List<Audio> Function()? readLibrary,
     int Function()? readLibraryRevision,
+    FutureOr<Map<String, PersonalTrack>> Function()? readPersonal,
     DateTime Function()? clock,
   })  : _statistics = statistics ?? PlaybackStatistics.instance,
         _scanner = scanner ?? LibraryStatisticsScanner(),
@@ -46,14 +52,17 @@ class StatisticsDisplayService extends ChangeNotifier {
             readLibrary ?? (() => AudioLibrary.instance.audioCollection),
         _readLibraryRevision =
             readLibraryRevision ?? (() => AudioLibrary.revision),
+        _readPersonal = readPersonal ?? (() => PersonalLibrary.latest),
         _clock = clock ?? DateTime.now;
 
-  static final instance = StatisticsDisplayService();
+  static final instance = StatisticsDisplayService(
+      readPersonal: () async => (await PersonalLibrary.instance).snapshot());
 
   final PlaybackStatistics _statistics;
   final LibraryStatisticsScanner _scanner;
   final List<Audio> Function() _readLibrary;
   final int Function() _readLibraryRevision;
+  final FutureOr<Map<String, PersonalTrack>> Function() _readPersonal;
   final DateTime Function() _clock;
   StatisticsDisplaySnapshot? _snapshot;
   Future<void>? _pending;
@@ -87,6 +96,8 @@ class StatisticsDisplayService extends ChangeNotifier {
     final playbackData =
         _freeze(_statistics.snapshot()) as Map<String, Object?>;
     final audios = List<Audio>.of(_readLibrary());
+    final trackIds =
+        List<String>.unmodifiable(audios.map((audio) => audio.stableTrackId));
     final capturedAt = _clock();
     final revision = _readLibraryRevision();
     final warning = _statistics.storageWarning;
@@ -99,16 +110,40 @@ class StatisticsDisplayService extends ChangeNotifier {
     // Reserve single-flight ownership before invoking a scanner: an injected
     // scanner may fail synchronously, without reaching its first await.
     final capture =
-        _capture(audios, playbackData, capturedAt, revision, warning);
+        _capture(audios, trackIds, playbackData, capturedAt, revision, warning);
     if (_refreshing) notifyListeners();
     unawaited(capture.then<void>((_) => operation.complete()));
     return operation.future;
   }
 
-  Future<void> _capture(List<Audio> audios, Map<String, Object?> playbackData,
-      DateTime capturedAt, int revision, String? warning) async {
+  Future<(PersonalOrganizationSummary?, Object?)> _capturePersonal(
+      List<String> trackIds) async {
     try {
-      final library = await _scanner.scan(audios,
+      final reading = _readPersonal();
+      // A synchronous injected snapshot must be projected before yielding;
+      // neither mutable Audio identities nor later tag edits can enter it.
+      final personal = reading is Future<Map<String, PersonalTrack>>
+          ? await reading
+          : reading;
+      return (
+        PersonalOrganizationSummary.fromTrackIds(
+            trackIds: trackIds, personal: personal),
+        null
+      );
+    } catch (error) {
+      return (null, error);
+    }
+  }
+
+  Future<void> _capture(
+      List<Audio> audios,
+      List<String> trackIds,
+      Map<String, Object?> playbackData,
+      DateTime capturedAt,
+      int revision,
+      String? warning) async {
+    try {
+      final libraryReading = _scanner.scan(audios,
           isCancelled: () => _disposed,
           onProgress: (completed, total) {
             if (_disposed) return;
@@ -116,13 +151,18 @@ class StatisticsDisplayService extends ChangeNotifier {
             _total = total;
             notifyListeners();
           });
+      final personalReading = _capturePersonal(trackIds);
+      final library = await libraryReading;
+      final (personalSummary, personalWarning) = await personalReading;
       if (_disposed) return;
       _snapshot = StatisticsDisplaySnapshot._(
           playbackData: playbackData,
           library: library,
           capturedAt: capturedAt,
           libraryRevision: revision,
-          storageWarning: warning);
+          storageWarning: warning,
+          personalSummary: personalSummary,
+          personalWarning: personalWarning);
     } on LibraryScanCancelled {
       // Session disposal invalidates an in-flight capture, never a page exit.
     } catch (error) {

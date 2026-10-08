@@ -16,6 +16,7 @@ class PageScaffold extends StatelessWidget {
     super.key,
     required this.title,
     this.subtitle,
+    this.wrapSubtitle = false,
     required this.actions,
     this.responsiveActions,
     this.header,
@@ -25,6 +26,7 @@ class PageScaffold extends StatelessWidget {
 
   final String title;
   final String? subtitle;
+  final bool wrapSubtitle;
   final List<Widget> actions;
 
   /// A compact, self-wrapping toolbar. Unlike the legacy actions list, it is
@@ -232,7 +234,7 @@ class PageScaffold extends StatelessWidget {
           Text(
             subtitle!,
             style: TextStyle(fontSize: 14.0, color: scheme.onSurface),
-            overflow: TextOverflow.ellipsis,
+            overflow: wrapSubtitle ? TextOverflow.clip : TextOverflow.ellipsis,
           )
         ],
       );

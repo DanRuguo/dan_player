@@ -4,6 +4,8 @@ import 'package:dan_player/component/settings_tile.dart';
 import 'dart:math' as math;
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_menu_anchor.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_date_range_dialog.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -73,75 +75,31 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
   }
 
   Future<void> _editTag([String? original]) async {
-    var input = original ?? '';
+    int compare(MapEntry<String, int> a, MapEntry<String, int> b) {
+      final count = b.value.compareTo(a.value);
+      return count != 0 ? count : a.key.compareTo(b.key);
+    }
+
+    final tags = <MapEntry<String, int>>[];
+    if (original == null) {
+      final counts = PersonalOrganizationSummary.project(
+              audios: AudioLibrary.instance.audioCollection,
+              personal: _before ?? const {})
+          .tagCounts;
+      for (final entry in counts.entries) {
+        var index = 0;
+        while (index < tags.length && compare(tags[index], entry) <= 0) {
+          index++;
+        }
+        if (index >= 8) continue;
+        tags.insert(index, entry);
+        if (tags.length > 8) tags.removeLast();
+      }
+    }
     final value = await showAppDialog<String>(
         context: context,
-        builder: (context) => AlertDialog(
-              title: AppDialogTitle(ui(original == null ? '添加标签' : '编辑标签')),
-              content: SizedBox(
-                  width: 320,
-                  child: TextFormField(
-                      initialValue: input,
-                      onChanged: (value) => input = value,
-                      autofocus: true,
-                      maxLength: 80,
-                      decoration: InputDecoration(labelText: ui('标签名称')),
-                      onFieldSubmitted: (v) {
-                        if (v.trim().isNotEmpty)
-                          Navigator.pop(context, v.trim());
-                      })),
-              actions: [
-                SizedBox(
-                    width: 400,
-                    child: Builder(builder: (context) {
-                      final available =
-                          math.min(400, MediaQuery.sizeOf(context).width - 128);
-                      final delete = original == null
-                          ? null
-                          : TextButton.icon(
-                              onPressed: () => Navigator.pop(context, ''),
-                              icon: const Icon(Symbols.delete),
-                              label: Text(ui('删除')),
-                              style: TextButton.styleFrom(
-                                  foregroundColor:
-                                      Theme.of(context).colorScheme.error));
-                      final actions = Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          alignment: WrapAlignment.end,
-                          children: [
-                            TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: Text(ui('取消'))),
-                            FilledButton(
-                                onPressed: () {
-                                  if (input.trim().isNotEmpty)
-                                    Navigator.pop(context, input.trim());
-                                },
-                                child: Text(ui('确定')))
-                          ]);
-                      if (available <
-                          340 * MediaQuery.textScalerOf(context).scale(14) / 14)
-                        return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (delete != null)
-                                Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: delete),
-                              Align(
-                                  alignment: Alignment.centerRight,
-                                  child: actions)
-                            ]);
-                      return Row(children: [
-                        if (delete != null) delete,
-                        const Spacer(),
-                        actions
-                      ]);
-                    }))
-              ],
-            ));
+        builder: (_) => _TagNameDialog(
+            original: original, history: List.unmodifiable(tags.take(8))));
     if (!mounted || value == null) return;
     setState(() {
       if (original != null) _draftTags.remove(original);
@@ -252,6 +210,191 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
             onPressed:
                 !_ready || (!_ratingChanged && !_tagsChanged) ? null : _save,
             child: Text(ui('保存')))
+      ],
+    );
+  }
+}
+
+class _TagNameDialog extends StatefulWidget {
+  const _TagNameDialog({this.original, required this.history});
+  final String? original;
+  final List<MapEntry<String, int>> history;
+  @override
+  State<_TagNameDialog> createState() => _TagNameDialogState();
+}
+
+class _TagNameDialogState extends State<_TagNameDialog> {
+  late final _input = TextEditingController(text: widget.original ?? '');
+  final _focus = FocusNode();
+  late final _countFocus = {
+    for (final entry in widget.history) entry.key: FocusNode()
+  };
+
+  void _showCount(MenuController controller, String tag, [Offset? position]) {
+    controller.open(position: position);
+    // The context menu owns Escape while open, rather than the input dialog.
+    _countFocus[tag]!.requestFocus();
+  }
+
+  void _confirm() {
+    final value = _input.text.trim();
+    if (value.isNotEmpty) Navigator.pop(context, value);
+  }
+
+  void _fill(String tag) {
+    _input.value = TextEditingValue(
+        text: tag, selection: TextSelection.collapsed(offset: tag.length));
+    _focus.requestFocus();
+  }
+
+  @override
+  void dispose() {
+    _input.dispose();
+    _focus.dispose();
+    for (final focus in _countFocus.values) {
+      focus.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final scheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: AppDialogTitle(ui(widget.original == null ? '添加标签' : '编辑标签')),
+      content: SizedBox(
+          width: 320,
+          child: SingleChildScrollView(
+              child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                TextFormField(
+                    key: const ValueKey('personal-tag-input'),
+                    controller: _input,
+                    focusNode: _focus,
+                    autofocus: true,
+                    maxLength: 80,
+                    decoration: InputDecoration(labelText: ui('标签名称')),
+                    onFieldSubmitted: (_) => _confirm()),
+                if (widget.history.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    key: const ValueKey('personal-tag-history-wrap'),
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      for (final entry in widget.history)
+                        ConstrainedBox(
+                          key: ValueKey(('personal-tag-history', entry.key)),
+                          constraints: BoxConstraints(
+                              maxWidth: math.max(
+                                  48, MediaQuery.sizeOf(context).width - 128)),
+                          child: AppMenuAnchor(
+                            style: const MenuStyle(
+                                shape:
+                                    WidgetStatePropertyAll(AppShape.control)),
+                            menuChildren: [
+                              MenuItemButton(
+                                  focusNode: _countFocus[entry.key],
+                                  style: MenuItemButton.styleFrom(
+                                      foregroundColor: scheme.onSurfaceVariant),
+                                  onPressed: () {},
+                                  child: Semantics(
+                                      label: ui('使用次数：{0}', [entry.value]),
+                                      child: Text('${entry.value}'))),
+                            ],
+                            builder: (context, controller, _) => Semantics(
+                              hint: ui('右键点击或长按查看使用次数'),
+                              child: Tooltip(
+                                message: '${entry.key}\n${ui('右键点击或长按查看使用次数')}',
+                                child: GestureDetector(
+                                  onSecondaryTapUp: (details) => _showCount(
+                                      controller,
+                                      entry.key,
+                                      details.localPosition),
+                                  child: TextButton(
+                                    onPressed: () => _fill(entry.key),
+                                    onLongPress: () =>
+                                        _showCount(controller, entry.key),
+                                    style: TextButton.styleFrom(
+                                        shape: const StadiumBorder(),
+                                        minimumSize: const Size(48, 40),
+                                        visualDensity: VisualDensity.standard,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 8),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                        foregroundColor:
+                                            scheme.onSurfaceVariant,
+                                        backgroundColor:
+                                            scheme.surfaceContainerHighest,
+                                        textStyle: (Theme.of(context)
+                                                    .textTheme
+                                                    .bodyMedium ??
+                                                const TextStyle())
+                                            .copyWith(fontSize: 14),
+                                        animationDuration: AppMotion.duration(
+                                            context,
+                                            MotionKind.feedback,
+                                            AppMotion.quick)),
+                                    child: Text(entry.key,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ]))),
+      actions: [
+        SizedBox(
+            width: 400,
+            child: Builder(builder: (context) {
+              final available =
+                  math.min(400, MediaQuery.sizeOf(context).width - 128);
+              final delete = widget.original == null
+                  ? null
+                  : TextButton.icon(
+                      onPressed: () => Navigator.pop(context, ''),
+                      icon: const Icon(Symbols.delete),
+                      label: Text(ui('删除')),
+                      style:
+                          TextButton.styleFrom(foregroundColor: scheme.error));
+              final actions = Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(ui('取消'))),
+                    FilledButton(onPressed: _confirm, child: Text(ui('确定'))),
+                  ]);
+              if (available <
+                  340 * MediaQuery.textScalerOf(context).scale(14) / 14) {
+                return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (delete != null)
+                        Align(alignment: Alignment.centerLeft, child: delete),
+                      Align(alignment: Alignment.centerRight, child: actions),
+                    ]);
+              }
+              return Row(children: [
+                if (delete != null) delete,
+                const Spacer(),
+                actions
+              ]);
+            }))
       ],
     );
   }

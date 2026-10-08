@@ -71,6 +71,9 @@ class _CategoriesPageState extends State<CategoriesPage> {
   bool _classificationsReady = false;
   String _query = '';
   bool _personal = false;
+  PersonalOrganizationSummary? _personalSummary;
+  bool _personalSummaryDirty = true;
+  int _personalSummaryGeneration = 0;
   late CategoryCoverStore _covers =
       widget.coverStore ?? CategoryCoverStore.shared;
   MusicCategories? _lastCoverReconciliationSnapshot;
@@ -85,6 +88,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
     super.initState();
     _classificationRevision = AudioLibrary.classificationRevision;
     AudioLibrary.changes.addListener(_refresh);
+    PersonalLibrary.changes.addListener(_personalChanged);
+    PlaybackBookmarkStore.changes.addListener(_personalChanged);
     _covers.addListener(_coverChanged);
     unawaited(_covers.load());
     _scanClassificationsIfNeeded();
@@ -96,6 +101,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
 
   void _refresh() {
     if (!mounted) return;
+    _personalChanged();
     final revision = AudioLibrary.classificationRevision;
     if (revision == _classificationRevision) {
       // A duration correction can move a song between duration buckets, but
@@ -108,6 +114,46 @@ class _CategoriesPageState extends State<CategoriesPage> {
     _classificationRevision = revision;
     setState(_invalidateClassifications);
     _scanClassificationsIfNeeded();
+  }
+
+  void _personalChanged() {
+    _personalSummaryGeneration++;
+    _personalSummaryDirty = true;
+    _personalSummary = null;
+    if (mounted && _personal) {
+      setState(() {});
+      unawaited(_loadPersonalSummary());
+    }
+  }
+
+  void _choosePersonal() {
+    if (_personal) return;
+    setState(() => _personal = true);
+    if (_personalSummaryDirty) unawaited(_loadPersonalSummary());
+  }
+
+  Future<void> _loadPersonalSummary() async {
+    final generation = ++_personalSummaryGeneration;
+    final ids = _audios.map((audio) => audio.stableTrackId).toSet();
+    final personalStore = widget.personalStore;
+    final bookmarkStore = widget.bookmarkStore;
+    try {
+      final personal =
+          await (personalStore ?? await PersonalLibrary.instance).snapshot();
+      if (!mounted || generation != _personalSummaryGeneration) return;
+      final bookmarks =
+          await (bookmarkStore ?? await PlaybackBookmarkStore.instance).all();
+      if (!mounted || generation != _personalSummaryGeneration) return;
+      final summary = PersonalOrganizationSummary.fromTrackIds(
+          trackIds: ids, personal: personal, bookmarks: bookmarks);
+      setState(() {
+        _personalSummary = summary;
+        _personalSummaryDirty = false;
+      });
+    } catch (_) {
+      // Existing panels report storage errors. Do not invent a zero total
+      // when either source cannot be read; reopening can retry the summary.
+    }
   }
 
   void _invalidateClassifications() {
@@ -153,6 +199,11 @@ class _CategoriesPageState extends State<CategoriesPage> {
   @override
   void didUpdateWidget(CategoriesPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.audios, widget.audios) ||
+        !identical(oldWidget.personalStore, widget.personalStore) ||
+        !identical(oldWidget.bookmarkStore, widget.bookmarkStore)) {
+      _personalChanged();
+    }
     final oldCoverStore = oldWidget.coverStore ?? CategoryCoverStore.shared;
     final newCoverStore = widget.coverStore ?? CategoryCoverStore.shared;
     if (!identical(oldCoverStore, newCoverStore)) {
@@ -277,12 +328,16 @@ class _CategoriesPageState extends State<CategoriesPage> {
     final selector = _CategorySelector(
       selected: _personal ? null : _kind,
       onSelected: _chooseKind,
-      onPersonal: () => setState(() => _personal = true),
+      onPersonal: _choosePersonal,
     );
     if (_personal) {
       return PageScaffold(
         title: ui('分类'),
-        subtitle: ui('共 {0} 首歌曲', [_audios.length]),
+        wrapSubtitle: true,
+        subtitle: _personalSummary == null
+            ? ui('共 {0} 首歌曲', [_audios.length])
+            : ui('共 {0} 首歌曲 · {1} 个标注',
+                [_audios.length, _personalSummary!.totalAnnotations]),
         actions: const [],
         responsiveActions: selector,
         body: AppContentTransition(
@@ -464,6 +519,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
   @override
   void dispose() {
     AudioLibrary.changes.removeListener(_refresh);
+    PersonalLibrary.changes.removeListener(_personalChanged);
+    PlaybackBookmarkStore.changes.removeListener(_personalChanged);
     _covers.removeListener(_coverChanged);
     _search.dispose();
     super.dispose();

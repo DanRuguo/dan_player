@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/data/protected_json_store.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/playback_bookmarks.dart';
 import 'package:dan_player/library/track_identity.dart';
 import 'package:dan_player/play_service/track_playback_settings.dart';
 import 'package:flutter/foundation.dart';
@@ -34,6 +35,76 @@ class PersonalTrack {
           ? null
           : DateTime.fromMillisecondsSinceEpoch(value['added'] as int,
               isUtc: true));
+}
+
+/// Detached library-wide counts; view filters and animation frames do not
+/// participate. Personal records are keyed by the same durable IDs as edits.
+class PersonalOrganizationSummary {
+  PersonalOrganizationSummary._(this.ratingCounts, this.tagCounts,
+      this.ratedTracks, this.tagAnnotations, this.bookmarkCount);
+
+  final Map<int, int> ratingCounts;
+  final Map<String, int> tagCounts;
+  final int ratedTracks, tagAnnotations, bookmarkCount;
+  int get totalAnnotations => ratedTracks + tagAnnotations + bookmarkCount;
+
+  factory PersonalOrganizationSummary.project({
+    required Iterable<Audio> audios,
+    required Map<String, PersonalTrack> personal,
+    Iterable<PlaybackBookmark> bookmarks = const [],
+    TrackIdentityRegistry? identities,
+  }) =>
+      PersonalOrganizationSummary.fromTrackIds(
+          trackIds: audios.map((audio) => audio.stableTrackId),
+          personal: personal,
+          bookmarks: bookmarks,
+          identities: identities);
+
+  /// Callers with asynchronous reads can freeze identities before the first
+  /// await, without retaining mutable Audio objects in their display snapshot.
+  factory PersonalOrganizationSummary.fromTrackIds({
+    required Iterable<String> trackIds,
+    required Map<String, PersonalTrack> personal,
+    Iterable<PlaybackBookmark> bookmarks = const [],
+    TrackIdentityRegistry? identities,
+  }) {
+    final ids = trackIds.toSet();
+    final ratings = {for (var stars = 1; stars <= 5; stars++) stars: 0};
+    final tags = <String, int>{};
+    var ratedTracks = 0, tagAnnotations = 0, bookmarkCount = 0;
+    for (final id in ids) {
+      final record = personal[id];
+      if (record == null) continue;
+      final rating = record.rating;
+      if (rating != null && rating >= 1 && rating <= 5) {
+        ratings[rating] = ratings[rating]! + 1;
+        ratedTracks++;
+      }
+      for (final tag
+          in record.tags.where((tag) => tag.trim().isNotEmpty).toSet()) {
+        tags.update(tag, (count) => count + 1, ifAbsent: () => 1);
+        tagAnnotations++;
+      }
+    }
+    final registry = identities ?? TrackIdentityRegistry.instance;
+    final resolvedPaths = <String, String?>{};
+    final bookmarkIds = <String>{};
+    for (final item in bookmarks) {
+      if (!bookmarkIds.add(item.id)) continue;
+      if (ids.contains(item.track)) {
+        bookmarkCount++;
+      } else if (!TrackIdentityRegistry.isTrackId(item.track) &&
+          !item.track.startsWith('online://')) {
+        // Old path bookmarks follow the existing unique-alias resolver.
+        // Several bookmarks on one song share this single lookup.
+        final id = resolvedPaths.putIfAbsent(
+            item.track, () => registry.resolvePath(item.track));
+        if (id != null && ids.contains(id)) bookmarkCount++;
+      }
+    }
+    return PersonalOrganizationSummary._(Map.unmodifiable(ratings),
+        Map.unmodifiable(tags), ratedTracks, tagAnnotations, bookmarkCount);
+  }
 }
 
 class PersonalLibrary {

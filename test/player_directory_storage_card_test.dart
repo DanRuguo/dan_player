@@ -49,28 +49,74 @@ Widget _card(Future<AppDataStorageSnapshot> reading) => DirectoryStorageCard(
 Future<void> _selectScope(
     WidgetTester tester, DirectoryStorageScope scope) async {
   final key = ValueKey('directory-storage-scope-${scope.name}');
-  if (find.byKey(key).hitTestable().evaluate().isEmpty) {
-    final control = find.byKey(const ValueKey('directory-storage-scope'));
-    await tester.ensureVisible(control);
-    await tester.tap(control);
+  expect(find.byType(ChoiceChip), findsNWidgets(2));
+  final wrap = tester
+      .widget<Wrap>(find.byKey(const ValueKey('directory-storage-scope')));
+  expect(wrap.spacing, 8);
+  expect(wrap.runSpacing, 8);
+  expect(wrap.alignment, WrapAlignment.end);
+  for (final item in [
+    (DirectoryStorageScope.cache, ui('缓存与播放器数据')),
+    (DirectoryStorageScope.player, ui('播放器目录')),
+  ]) {
+    final chip =
+        find.byKey(ValueKey('directory-storage-scope-${item.$1.name}'));
+    await tester.ensureVisible(chip);
     await tester.pumpAndSettle();
-    for (final label in [ui('缓存与播放器数据'), ui('播放器目录')]) {
-      final row = find.widgetWithText(MenuItemButton, label);
-      final panel = tester.getRect(find
-          .ancestor(
-              of: row,
-              matching: find.byWidgetPredicate((widget) =>
-                  widget is Material && widget.type == MaterialType.canvas))
-          .first);
-      expect(panel.left, greaterThanOrEqualTo(-.1));
-      expect(
-          panel.right, lessThanOrEqualTo(tester.view.physicalSize.width + .1));
-      _completeLabel(tester, row, label);
-    }
+    final bounds = tester.getRect(chip);
+    expect(bounds.left, greaterThanOrEqualTo(-.1));
+    expect(
+        bounds.right, lessThanOrEqualTo(tester.view.physicalSize.width + .1));
+    expect(tester.widget<ChoiceChip>(chip).showCheckmark, isTrue);
+    _completeLabel(tester, chip, item.$2);
+    final widget = tester.widget<ChoiceChip>(chip);
+    final paragraph = tester.renderObject<RenderParagraph>(
+        find.descendant(of: chip, matching: find.text(item.$2)));
+    final line = TextPainter(
+        text: paragraph.text,
+        textDirection: paragraph.textDirection,
+        textScaler: paragraph.textScaler,
+        maxLines: 1)
+      ..layout();
+    expect(widget.avatarBoxConstraints!.maxHeight, closeTo(line.height, .1));
+    expect(widget.avatarBoxConstraints!.maxWidth, closeTo(line.height, .1));
+    line.dispose();
   }
   await tester.ensureVisible(find.byKey(key));
   await tester.tap(find.byKey(key));
   await tester.pumpAndSettle();
+  expect(tester.widget<ChoiceChip>(find.byKey(key)).selected, isTrue);
+  final other = scope == DirectoryStorageScope.cache ? 'player' : 'cache';
+  expect(
+      tester
+          .widget<ChoiceChip>(
+              find.byKey(ValueKey('directory-storage-scope-$other')))
+          .selected,
+      isFalse);
+  final header =
+      tester.getRect(find.byKey(const ValueKey('app-data-storage-heading')));
+  final card = tester.getRect(find.byType(AppDataStorageCard));
+  final chips = [
+    tester.getRect(find.byKey(const ValueKey('directory-storage-scope-cache'))),
+    tester
+        .getRect(find.byKey(const ValueKey('directory-storage-scope-player'))),
+  ];
+  if (tester.view.physicalSize.width >= 800) {
+    final controls =
+        tester.getRect(find.byKey(const ValueKey('directory-storage-scope')));
+    expect(header.center.dy, closeTo(controls.center.dy, .1));
+    expect(header.right + 12, lessThanOrEqualTo(chips.first.left + .1));
+  } else {
+    for (final chip in chips) {
+      expect(chip.top, greaterThan(header.bottom));
+    }
+  }
+  // Each wrapped row, rather than only the Wrap box, ends at the content edge.
+  for (var index = 0; index < chips.length; index++) {
+    if (index == chips.length - 1 || chips[index + 1].top > chips[index].top) {
+      expect(chips[index].right, closeTo(card.right - 18, .1));
+    }
+  }
 }
 
 AppDataStorageSnapshot _snapshot({bool partial = false}) =>
@@ -113,6 +159,11 @@ Future<void> _capture(
     WidgetTester tester, GlobalKey boundary, String name) async {
   final directory = Platform.environment['DAN_DIRECTORY_STORAGE_RENDER_DIR'];
   if (directory == null) return;
+  if (name.endsWith('-top') || name.endsWith('-choices')) {
+    final scroll = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    scroll.position.jumpTo(0);
+    await tester.pumpAndSettle();
+  }
   await tester.runAsync(() async {
     final image = await (boundary.currentContext!.findRenderObject()!
             as RenderRepaintBoundary)
@@ -142,7 +193,8 @@ void _completeLabel(WidgetTester tester, Finder row, String label) {
           paragraph.getTransformTo(null), box.toRect());
       expect(bounds.contains(glyphs.topLeft), isTrue);
       expect(bounds.contains(glyphs.bottomRight), isTrue,
-          reason: 'The complete category must fit its painted row: $label');
+          reason: 'The complete category must fit its painted row: $label '
+              '(row $bounds, glyphs $glyphs)');
     }
   }
 }
@@ -179,6 +231,9 @@ void main() {
         await tester.pumpWidget(_host(_card(reading),
             language: language, scale: layout.$2, boundary: boundary));
         await tester.pumpAndSettle();
+        await _selectScope(tester, DirectoryStorageScope.cache);
+        await _capture(tester, boundary,
+            'storage-${language.code}-${layout.$1.toInt()}-choices');
         await _selectScope(tester, DirectoryStorageScope.player);
         expect(find.text(ui('播放器组件目录占用')), findsOneWidget);
         expect(find.text(ui('缓存与播放器数据占用')), findsNothing);
@@ -342,6 +397,245 @@ void main() {
     await tester.pump();
     expect(tester.binding.hasScheduledFrame, isFalse,
         reason: 'Storage selection starts no sampling or polling clock');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('completed scopes keep data height and scroll on the first frame',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 260);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final cache = _snapshot();
+    final player = AppDataStorageSnapshot(
+        path: 'injected player',
+        parts: [
+          for (final part in cache.parts)
+            AppDataStoragePart(part.label, part.files, part.bytes * 2),
+        ],
+        unreadable: 0,
+        skippedLinks: 0,
+        truncated: false);
+    await tester.pumpWidget(_host(DirectoryStorageCard(
+        cacheReading: Future.value(cache),
+        playerReading: Future.value(player),
+        onPlayerSelected: () => fail('No scan is required'))));
+    await tester.pumpAndSettle();
+    await _selectScope(tester, DirectoryStorageScope.player);
+    final card = find.byType(AppDataStorageCard);
+    final heights = <DirectoryStorageScope, double>{
+      DirectoryStorageScope.player: tester.getSize(card).height,
+    };
+    await _selectScope(tester, DirectoryStorageScope.cache);
+    heights[DirectoryStorageScope.cache] = tester.getSize(card).height;
+    final scroll = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    scroll.position.jumpTo(50);
+    await tester.pumpAndSettle();
+    final pixels = scroll.position.pixels;
+    for (final scope in [
+      DirectoryStorageScope.player,
+      DirectoryStorageScope.cache,
+      DirectoryStorageScope.player,
+    ]) {
+      await tester
+          .tap(find.byKey(ValueKey('directory-storage-scope-${scope.name}')));
+      await tester.pump();
+      final data = scope == DirectoryStorageScope.player ? player : cache;
+      expect(
+          find.text('${formatLibraryBytes(data.bytes)} · '
+              '${ui('{0} 个文件', [data.files])}'),
+          findsOneWidget,
+          reason: 'A completed scope must paint its own result immediately');
+      expect(find.text(ui('正在读取占用信息…')), findsNothing);
+      expect(tester.getSize(card).height, closeTo(heights[scope]!, .1));
+      expect(scroll.position.pixels, closeTo(pixels, .1),
+          reason: 'A one-frame empty body must not clamp page scrolling');
+      await tester.pumpAndSettle();
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('inactive completion is cached without a frame and returns ready',
+      (tester) async {
+    final pending = Completer<AppDataStorageSnapshot>();
+    final data = _snapshot();
+    await tester.pumpWidget(_host(DirectoryStorageCard(
+        cacheReading: Future.value(_empty),
+        playerReading: pending.future,
+        onPlayerSelected: () =>
+            fail('The player future is already injected'))));
+    await tester.pumpAndSettle();
+    await _selectScope(tester, DirectoryStorageScope.player);
+    expect(find.text(ui('正在读取占用信息…')), findsOneWidget);
+    await _selectScope(tester, DirectoryStorageScope.cache);
+    pending.complete(data);
+    await tester.idle();
+    expect(tester.binding.hasScheduledFrame, isFalse,
+        reason: 'An inactive completion only stores data; it schedules no UI');
+    expect(find.byType(StatisticsBarRow), findsNothing);
+    await tester
+        .tap(find.byKey(const ValueKey('directory-storage-scope-player')));
+    await tester.pump();
+    expect(find.byType(StatisticsBarRow), findsNWidgets(data.parts.length));
+    expect(find.text(ui('正在读取占用信息…')), findsNothing);
+    expect(find.byIcon(Symbols.hourglass_empty), findsNothing);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('refresh errors clear only their scope and retire stale owners',
+      (tester) async {
+    final cache = Future.value(const AppDataStorageSnapshot(
+        path: 'injected cache',
+        parts: [AppDataStoragePart('封面缓存', 3, 7)],
+        unreadable: 0,
+        skippedLinks: 0,
+        truncated: false));
+    final data = _snapshot();
+    Widget card(Future<AppDataStorageSnapshot> player) =>
+        _host(DirectoryStorageCard(
+            cacheReading: cache,
+            playerReading: player,
+            onPlayerSelected: () => fail('No scan is required')));
+    await tester.pumpWidget(card(Future.value(data)));
+    await tester.pumpAndSettle();
+    await _selectScope(tester, DirectoryStorageScope.player);
+    final stale = Completer<AppDataStorageSnapshot>();
+    final latest = Completer<AppDataStorageSnapshot>();
+    await tester.pumpWidget(card(stale.future));
+    expect(find.byType(StatisticsBarRow), findsNWidgets(data.parts.length));
+    expect(find.byIcon(Symbols.hourglass_empty), findsOneWidget);
+    await tester.pumpWidget(card(latest.future));
+    stale.complete(_empty);
+    await tester.pumpAndSettle();
+    expect(find.byType(StatisticsBarRow), findsNWidgets(data.parts.length));
+    latest.completeError(const FileSystemException('injected refresh failure'));
+    await tester.pumpAndSettle();
+    expect(find.byType(StatisticsBarRow), findsNothing);
+    expect(find.text(ui('无法读取此目录的占用信息')), findsOneWidget);
+    expect(find.byIcon(Symbols.hourglass_empty), findsNothing);
+    await _selectScope(tester, DirectoryStorageScope.cache);
+    expect(find.text(ui('封面缓存')), findsOneWidget,
+        reason: 'A failed player refresh must not clear the cache snapshot');
+    await tester
+        .tap(find.byKey(const ValueKey('directory-storage-scope-player')));
+    await tester.pump();
+    expect(find.byType(StatisticsBarRow), findsNothing);
+    expect(find.text(ui('无法读取此目录的占用信息')), findsOneWidget,
+        reason: 'Returning to a failed scope must not revive its old data');
+    final abandoned = Completer<AppDataStorageSnapshot>();
+    await tester.pumpWidget(card(abandoned.future));
+    expect(find.text(ui('无法读取此目录的占用信息')), findsNothing,
+        reason: 'A new reading must not inherit a retired FutureBuilder error');
+    expect(find.text(ui('正在读取占用信息…')), findsOneWidget);
+    expect(find.byIcon(Symbols.hourglass_empty), findsOneWidget);
+    expect(find.byType(StatisticsBarRow), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    abandoned.completeError(const FileSystemException('after unmount'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('native chips expose selection and retain keyboard focus',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      final cache = find.byKey(const ValueKey('directory-storage-scope-cache'));
+      final player =
+          find.byKey(const ValueKey('directory-storage-scope-player'));
+      await tester.pumpWidget(_host(_card(Future.value(_snapshot()))));
+      await tester.pumpAndSettle();
+      expect(
+          tester.getSemantics(cache),
+          matchesSemantics(
+              isSelected: true,
+              hasSelectedState: true,
+              isButton: true,
+              hasEnabledState: true,
+              isEnabled: true,
+              isFocusable: true,
+              hasTapAction: true,
+              hasFocusAction: true,
+              label: ui('缓存与播放器数据')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      final focus = FocusManager.instance.primaryFocus;
+      expect(focus, isNotNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pumpAndSettle();
+      expect(tester.widget<ChoiceChip>(player).selected, isTrue);
+      expect(FocusManager.instance.primaryFocus, same(focus),
+          reason: 'Scope-specific data replacement must not recreate controls');
+      expect(tester.getSemantics(player).flagsCollection.isSelected,
+          raster.Tristate.isTrue);
+      expect(tester.takeException(), isNull);
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('multiline native check has no artificial avatar background',
+      (tester) async {
+    final previous = uiLanguage.value;
+    uiLanguage.value = UiLanguage.en;
+    addTearDown(() => uiLanguage.value = previous);
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final boundary = GlobalKey();
+    final cache = find.byKey(const ValueKey('directory-storage-scope-cache'));
+    await tester.pumpWidget(_host(_card(Future.value(_snapshot())),
+        language: UiLanguage.en, scale: 2, boundary: boundary));
+    await tester.pumpAndSettle();
+    final chip = tester.widget<ChoiceChip>(cache);
+    // RawChip's AnimatedSwitcher centers the empty child in its avatar slot.
+    final avatar = Rect.fromCenter(
+        center: tester.getCenter(
+            find.descendant(of: cache, matching: find.byWidget(chip.avatar!))),
+        width: chip.avatarBoxConstraints!.maxWidth,
+        height: chip.avatarBoxConstraints!.maxHeight);
+    final render =
+        boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final origin = render.localToGlobal(Offset.zero);
+    await _capture(tester, boundary, 'storage-native-check-360-200');
+    await tester.runAsync(() async {
+      final image = await render.toImage();
+      try {
+        final bytes =
+            await image.toByteData(format: raster.ImageByteFormat.rawRgba);
+        final rgba = bytes!.buffer.asUint8List();
+        List<int> pixel(Offset point) {
+          final offset = point - origin;
+          final index =
+              (offset.dy.floor() * image.width + offset.dx.floor()) * 4;
+          return rgba.sublist(index, index + 4);
+        }
+
+        final background = pixel(
+            avatar.topLeft + Offset(avatar.width * .05, avatar.height * .05));
+        // Above the native check strokes, but inside the circular scrim that
+        // RawChip would otherwise paint for a dummy avatar.
+        expect(
+            pixel(avatar.topLeft +
+                Offset(avatar.width * .5, avatar.height * .12)),
+            background);
+        var ink = 0;
+        for (var y = avatar.top.ceil(); y < avatar.bottom.floor(); y++) {
+          for (var x = avatar.left.ceil(); x < avatar.right.floor(); x++) {
+            final color = pixel(Offset(x.toDouble(), y.toDouble()));
+            if (color.toString() != background.toString()) ink++;
+          }
+        }
+        expect(ink, greaterThan(10),
+            reason: 'The SDK check strokes must still be genuinely painted');
+      } finally {
+        image.dispose();
+      }
+    });
     expect(tester.takeException(), isNull);
   });
 }
