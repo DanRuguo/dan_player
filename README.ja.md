@@ -67,12 +67,13 @@
 
 | バージョン | 用途 | ダウンロード |
 | --- | --- | --- |
-| **26.0.6 · 安定版** | タスクバー歌詞と操作マニュアルを含む最新正式版 | [インストーラー・ポータブル ZIP・チェックサム](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
+| **最新安定版** | 日常利用と更新。バージョンはリリースページで確認 | [インストーラー・ポータブル ZIP・チェックサム](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **26.0.6 · リリース履歴** | タスクバー歌詞と操作マニュアルの更新記録 | [26.0.6 の配布ファイル](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
 | **26.0.5 · 旧版** | 前の正式版と独立した FFmpeg コンポーネント | [過去の配布ファイル](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
-**インストーラー版**はセットアップを実行してください。既存のインストールを更新できます。**ポータブル版**は ZIP 全体を展開して `Dan Player.exe` を起動してください。EXE だけを取り出さないでください。26.0.5 では、デスクトップ歌詞は同じ実行ファイルから別プロセスとして起動します。
+**インストーラー版**はセットアップを実行してください。既存のインストールを更新できます。**ポータブル版**は ZIP 全体を展開して `Dan Player.exe` を起動してください。EXE だけを取り出さないでください。デスクトップ歌詞は同じ実行ファイルから別プロセスとして起動します。
 
-歌詞の試聴と音声の切り出しに使う FFmpeg は任意のコンポーネントです。手動ダウンロード時は [26.0.5 で公開した独立パッケージ](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)を再利用し、固定したサイズと SHA-256 を検証します。26.0.6 のインストーラーとポータブル ZIP には重複して同梱しません。
+歌詞の試聴と音声の切り出しに使う FFmpeg は任意のコンポーネントです。手動ダウンロード時は [26.0.5 で公開した独立パッケージ](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)を再利用し、固定したサイズと SHA-256 を検証します。インストーラーとポータブル ZIP には重複して同梱しません。
 
 > **ダウンロードと署名について**：本プロジェクトの実行ファイルには RCEIT.Inc の自己署名証明書を使用しているため、Windows に信頼性の警告が表示される場合があります。インストーラーが信頼済み証明書を自動で登録することはありません。古い署名のバージョンから更新する場合は、新しいインストーラーを手動でダウンロードしてください。プレビュー版は Latest の安定版を置き換えません。更新前に、アプリのバックアップと復元設定から個人データを保存することをおすすめします。
 
@@ -229,18 +230,32 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 | ディレクトリ | 用途 |
 | --- | --- |
-| `lib/` | UI、ライブラリ、再生サービス |
-| `rust/`、`rust_builder/` | タグ処理と Flutter/Rust の橋渡し |
-| `windows/`、`installer/` | Windows 統合とインストーラー |
-| `third_party/` | 同梱コンポーネントとライセンス情報 |
-| `test/`、`test_driver/` | 自動テスト |
-| `scripts/` | ビルド・検証・リリース用スクリプト |
-| `docs/` | API ドキュメント、設定例、UI 画像 |
+| [lib/](lib/) | 主 UI、ライブラリ、再生サービス、データモデル |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | path 依存で共有するデスクトップ歌詞と Windows ホスト |
+| [rust/](rust/)、[rust_builder/](rust_builder/) | タグ処理、Flutter/Rust ブリッジ、Cargokit ビルド支援 |
+| [windows/](windows/) | 主アプリの Windows ホスト、タスクバー、システム統合 |
+| [installer/](installer/) | Inno インストーラー、ネイティブ部品、インストール処理のテスト |
+| [test/](test/)、[test/support/](test/support/) | Dart/Widget 回帰、隔離フィクスチャ、描画補助 |
+| [integration_test/](integration_test/)、[test_driver/](test_driver/) | Windows Profile の表示テストとドライバー |
+| [scripts/](scripts/) | 依存の準備、ビルド、検証、リリース用スクリプト |
+| [assets/](assets/)、[shaders/](shaders/) | 製品リソース、フォント、シェーダー |
+| [docs/](docs/) | API ドキュメント、設定例、公開 UI 画像 |
+
+変更対象に応じて入口を選びます。通常の `flutter test` に `integration_test/` は含まれません。
+
+| 確認範囲 | 入口と対象 |
+| --- | --- |
+| Dart/Widget | `flutter test --no-pub test/<module>_test.dart`。保存先をモックするテストは固有のフィクスチャを使い、全体設定で上書きしない |
+| Rust | `cargo test --manifest-path rust/Cargo.toml --locked` |
+| Windows 表示 | [verify_native_display_regressions.ps1](scripts/verify_native_display_regressions.ps1) は選定した Profile 表示回帰を実行。他の入口は [integration_test/](integration_test/) を参照 |
+| Windows C++ | 対象別のターゲットは [主ホスト CMake](windows/runner/CMakeLists.txt) と [デスクトップ歌詞 CMake](third_party/desktop_lyric/windows/runner/CMakeLists.txt) に定義 |
+| インストーラー | [verify_installer_native.ps1](scripts/verify_installer_native.ps1) はネイティブ部品を確認。[installer/tests/](installer/tests/) には UI、新規インストール、更新、アンインストールのサンドボックスも収録 |
+| リリース方針 | [test_validation_pipeline.ps1](scripts/test_validation_pipeline.ps1)、[CI 再開](scripts/test_windows_ci_resume.py)、[分類監査](scripts/test_audit_classification_metadata.py) のオフライン回帰 |
 
 リポジトリのルートで実行してください。日常使用しているライブラリと設定に影響しないよう、独立したデータディレクトリを使用します。
 
 ```powershell
-$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-data/readme-debug'))
+$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-local/readme-debug'))
 flutter pub get
 flutter run -d windows
 ```
@@ -280,6 +295,8 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 ## ライセンスと謝辞
 
 本プロジェクトは [LICENSE](LICENSE) に従って配布します。サードパーティーのコンポーネントには、それぞれのライセンス条件が適用されます。BASS の利用と配布は公式ライセンスに従ってください。
+
+内蔵 UI フォントは Noto Sans CJK SC で、SIL Open Font License 1.1 に従って配布します。[フォントのライセンスと出典](licenses/NOTO-SANS-CJK/PROVENANCE.md) はポータブル版とインストーラーに同梱します。旧リソースパスと内部エイリアスは既存設定との互換性のために保持し、表示名は Noto Sans CJK SC です。
 
 Dan Player は [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) を基に開発しています。プレーヤーの基盤、ライブラリ構造、歌詞表示を提供してくださった原作者に感謝します。また、[desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge)、[Flutter](https://flutter.dev/)、Material Design にも感謝します。
 

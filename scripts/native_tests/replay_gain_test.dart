@@ -1,5 +1,5 @@
 // Explicit Windows integration probe. All files must be generated fixtures in
-// workspace/tool; decoders are read without playback, and player streams remain
+// workspace/tool/qa-local; decoders are read without playback, and streams remain
 // stopped/paused. No system volume or user media/settings are changed.
 // ignore_for_file: avoid_print
 import 'dart:convert';
@@ -26,9 +26,10 @@ void main() {
     final workspace = Directory.current.parent.path;
     if (!Platform.isWindows ||
         fixtures == null ||
-        !path.isWithin(path.join(workspace, 'tool'), path.absolute(fixtures))) {
+        !path.isWithin(path.join(workspace, 'tool', 'qa-local'),
+            path.absolute(fixtures))) {
       throw StateError(
-          'Set DAN_PLAYER_REPLAYGAIN_FIXTURES to generated workspace/tool fixtures.');
+          'Set DAN_PLAYER_REPLAYGAIN_FIXTURES to generated workspace/tool/qa-local fixtures.');
     }
     final runtime =
         path.join(path.dirname(Platform.resolvedExecutable), 'BASS');
@@ -185,7 +186,9 @@ void main() {
           'native album peak clamp',
           'tempo',
           'mute',
-          exclusiveAvailable ? 'exclusive reopen' : 'exclusive failure rollback',
+          exclusiveAvailable
+              ? 'exclusive reopen'
+              : 'exclusive failure rollback',
           'shared reopen',
           'settings during open',
           'stale open rejection',

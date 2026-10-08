@@ -104,7 +104,8 @@ Future<NetworkProxyProbeResult> _probeGitHub({
   try {
     final result = await (() async {
       final request = await client.getUrl(Uri.https('api.github.com', '/'));
-      request.headers.set(HttpHeaders.userAgentHeader, 'DanPlayer/26.0.6');
+      request.headers.set(
+          HttpHeaders.userAgentHeader, 'DanPlayer/${AppSettings.version}');
       request.headers
           .set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
       final response = await request.close();

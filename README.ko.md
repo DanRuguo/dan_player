@@ -67,12 +67,13 @@
 
 | 버전 | 용도 | 다운로드 |
 | --- | --- | --- |
-| **26.0.6 · 안정 버전** | 작업 표시줄 가사와 사용 설명서가 포함된 최신 정식 버전 | [설치 프로그램, 포터블 ZIP 및 체크섬](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
+| **최신 안정 버전** | 일상적인 사용과 업데이트. 버전은 릴리스 페이지에서 확인 | [설치 프로그램, 포터블 ZIP 및 체크섬](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **26.0.6 · 릴리스 기록** | 작업 표시줄 가사와 사용 설명서의 업데이트 기록 | [26.0.6 배포 파일](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
 | **26.0.5 · 이전 버전** | 이전 정식 버전과 별도 FFmpeg 구성 요소 | [이전 배포 파일](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
-**설치 버전**은 설치 프로그램을 실행하면 되며, 기존 설치를 업데이트할 수 있습니다. **포터블 버전**은 ZIP 전체를 압축 해제한 뒤 `Dan Player.exe`를 실행하세요. EXE 파일만 따로 복사하지 마세요. 26.0.5 정식 버전의 바탕 화면 가사는 동일한 실행 파일에서 별도 프로세스로 실행됩니다.
+**설치 버전**은 설치 프로그램을 실행하면 되며, 기존 설치를 업데이트할 수 있습니다. **포터블 버전**은 ZIP 전체를 압축 해제한 뒤 `Dan Player.exe`를 실행하세요. EXE 파일만 따로 복사하지 마세요. 바탕 화면 가사는 동일한 실행 파일에서 별도 프로세스로 실행됩니다.
 
-가사 미리 듣기와 자르기에 필요한 FFmpeg는 선택 사항입니다. 직접 다운로드할 때 [26.0.5에 공개한 별도 구성 요소 패키지](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)를 재사용하고 고정된 크기와 SHA-256을 검증합니다. 26.0.6 설치 프로그램과 포터블 ZIP에는 중복해서 포함하지 않습니다.
+가사 미리 듣기와 자르기에 필요한 FFmpeg는 선택 사항입니다. 직접 다운로드할 때 [26.0.5에 공개한 별도 구성 요소 패키지](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)를 재사용하고 고정된 크기와 SHA-256을 검증합니다. 설치 프로그램과 포터블 ZIP에는 중복해서 포함하지 않습니다.
 
 > **다운로드 및 서명 안내:** 프로젝트에서 빌드한 실행 파일은 RCEIT.Inc 자체 서명 인증서를 사용하므로 Windows에 신뢰 관련 경고가 나타날 수 있습니다. 설치 프로그램은 신뢰할 수 있는 인증서를 자동으로 설치하지 않습니다. 이전 서명을 사용하는 버전에서 업데이트할 때는 새 설치 프로그램을 직접 다운로드하세요. 미리 보기 버전은 Latest로 표시된 안정 버전을 대체하지 않습니다. 업데이트 전에 앱의 백업 및 복원 설정에서 개인 데이터를 백업하는 것이 좋습니다.
 
@@ -229,18 +230,32 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 | 디렉터리 | 용도 |
 | --- | --- |
-| `lib/` | 인터페이스, 라이브러리 및 재생 서비스 |
-| `rust/`, `rust_builder/` | 태그 처리 및 Flutter/Rust 연결 |
-| `windows/`, `installer/` | Windows 통합 및 설치 프로그램 |
-| `third_party/` | 포함된 구성 요소 및 라이선스 정보 |
-| `test/`, `test_driver/` | 자동화 테스트 |
-| `scripts/` | 빌드, 검증 및 릴리스 스크립트 |
-| `docs/` | API 문서, 설정 예시 및 인터페이스 이미지 |
+| [lib/](lib/) | 기본 인터페이스, 라이브러리, 재생 서비스 및 데이터 모델 |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | path 의존성으로 공유하는 바탕 화면 가사 및 Windows 호스트 |
+| [rust/](rust/), [rust_builder/](rust_builder/) | 태그 처리, Flutter/Rust 연결 및 Cargokit 빌드 지원 |
+| [windows/](windows/) | 기본 Windows 호스트, 작업 표시줄 및 시스템 통합 |
+| [installer/](installer/) | Inno 설치 프로그램, 네이티브 구성 요소 및 설치 트랜잭션 테스트 |
+| [test/](test/), [test/support/](test/support/) | Dart/Widget 회귀, 격리된 테스트 데이터 및 렌더링 도우미 |
+| [integration_test/](integration_test/), [test_driver/](test_driver/) | Windows Profile 표시 테스트 및 드라이버 |
+| [scripts/](scripts/) | 의존성 준비, 빌드, 검증 및 릴리스 스크립트 |
+| [assets/](assets/), [shaders/](shaders/) | 제품 리소스, 글꼴 및 셰이더 |
+| [docs/](docs/) | API 문서, 설정 예시 및 공개 인터페이스 이미지 |
+
+변경 범위에 맞는 진입점을 선택하세요. 일반 `flutter test`에는 `integration_test/`가 포함되지 않습니다.
+
+| 검사 범위 | 진입점 및 대상 |
+| --- | --- |
+| Dart/Widget | `flutter test --no-pub test/<module>_test.dart`. 저장소 테스트의 개별 데이터 주입을 따르고 모의 디렉터리를 전역 설정으로 덮어쓰지 않습니다 |
+| Rust | `cargo test --manifest-path rust/Cargo.toml --locked` |
+| Windows 표시 | [verify_native_display_regressions.ps1](scripts/verify_native_display_regressions.ps1)은 선택된 Profile 표시 회귀를 실행합니다. 다른 진입점은 [integration_test/](integration_test/)를 확인하세요 |
+| Windows C++ | 개별 대상은 [기본 호스트 CMake](windows/runner/CMakeLists.txt)와 [바탕 화면 가사 CMake](third_party/desktop_lyric/windows/runner/CMakeLists.txt)에 정의되어 있습니다 |
+| 설치 프로그램 | [verify_installer_native.ps1](scripts/verify_installer_native.ps1)은 네이티브 구성 요소를 검사합니다. [installer/tests/](installer/tests/)에는 UI, 새 설치, 업데이트 및 제거 샌드박스 스크립트도 있습니다 |
+| 릴리스 정책 | [test_validation_pipeline.ps1](scripts/test_validation_pipeline.ps1), [CI 재개](scripts/test_windows_ci_resume.py), [분류 감사](scripts/test_audit_classification_metadata.py)의 오프라인 회귀 |
 
 저장소 루트에서 실행하세요. 디버깅이 평소 사용하는 라이브러리와 설정에 영향을 주지 않도록 별도 데이터 디렉터리를 사용합니다.
 
 ```powershell
-$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-data/readme-debug'))
+$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-local/readme-debug'))
 flutter pub get
 flutter run -d windows
 ```
@@ -280,6 +295,8 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 ## 라이선스 및 감사의 말
 
 이 프로젝트는 [LICENSE](LICENSE)에 따라 배포됩니다. 타사 구성 요소에는 각자의 라이선스 조건이 적용되며, BASS 사용과 배포는 공식 라이선스를 따라야 합니다.
+
+내장 UI 글꼴은 Noto Sans CJK SC이며 SIL Open Font License 1.1에 따라 배포합니다. [글꼴 라이선스와 출처](licenses/NOTO-SANS-CJK/PROVENANCE.md)는 포터블 버전과 설치 프로그램에 함께 제공합니다. 기존 설정과의 호환성을 위해 이전 리소스 경로와 내부 별칭을 유지하며, 표시 이름은 Noto Sans CJK SC입니다.
 
 Dan Player는 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player)를 기반으로 개발되었습니다. 플레이어 기반, 라이브러리 구조, 가사 기능을 제공한 원작자에게 감사드립니다. 또한 [desktop_lyric](https://github.com/Ferry-200/desktop_lyric), [music_api_dart](https://github.com/Ferry-200/music_api_dart), [BASS](https://www.un4seen.com/bass.html), [Lofty](https://crates.io/crates/lofty), [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge), [Flutter](https://flutter.dev/), Material Design에 감사드립니다.
 

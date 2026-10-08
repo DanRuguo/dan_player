@@ -40,7 +40,7 @@ Uint8List _silentWave({
 void main() {
   test('actual player tempo, paused seek, URL ownership and completion',
       () async {
-    const workspace = r'D:\code\codex\player';
+    final workspace = path.normalize(Directory.current.parent.path);
     final executable = path.normalize(Platform.resolvedExecutable);
     if (!Platform.isWindows ||
         path.basename(executable).toLowerCase() != 'flutter_tester.exe' ||
@@ -48,12 +48,11 @@ void main() {
       throw StateError('Run only in the workspace Flutter test process.');
     }
     final requestedOutput = Platform.environment['DAN_PLAYER_TEMPO_QA'];
-    final output = Directory(
-        requestedOutput ?? path.join(workspace, 'tool', 'qa-tempo-player'));
-    if (!path.isWithin(
-        path.join(workspace, 'tool'), path.absolute(output.path))) {
-      throw StateError(
-          'Probe output must stay under the workspace tool folder.');
+    final qa = path.join(workspace, 'tool', 'qa-local');
+    final output =
+        Directory(requestedOutput ?? path.join(qa, 'native-tempo-player'));
+    if (!path.isWithin(qa, path.absolute(output.path))) {
+      throw StateError('Probe output must stay under workspace tool/qa-local.');
     }
     await output.create(recursive: true);
     final run = await output.createTemp('native-player-');

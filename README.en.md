@@ -67,12 +67,13 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 | Release | Best for | Download |
 | --- | --- | --- |
-| **26.0.6 · Stable** | Current release with taskbar lyrics and a player manual | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
+| **Latest stable** | Everyday use and upgrades; check the release page for its version | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **26.0.6 · Release history** | Taskbar lyrics and player manual release notes | [26.0.6 release assets](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
 | **26.0.5 · Previous** | Previous release and the separate FFmpeg component | [Previous release assets](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
-**Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. In the 26.0.5 release, desktop lyrics run in a separate process launched from the same executable.
+**Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. Desktop lyrics run in a separate process launched from the same executable.
 
-FFmpeg for lyric previews and trimming is optional. When you choose to download it, the player reuses the [separate 26.0.5 component package](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) and verifies its pinned size and SHA-256. The 26.0.6 installer and portable ZIP do not bundle another copy.
+FFmpeg for lyric previews and trimming is optional. When you choose to download it, the player reuses the [separate 26.0.5 component package](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) and verifies its pinned size and SHA-256. The installer and portable ZIP do not bundle another copy.
 
 > **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through the app's backup and restore settings before upgrading.
 
@@ -229,18 +230,32 @@ Built with **Flutter, Rust and BASS**. Development requires Flutter, Rust and th
 
 | Directory | Purpose |
 | --- | --- |
-| `lib/` | Interface, library and playback services |
-| `rust/`, `rust_builder/` | Tag processing and Flutter/Rust bridging |
-| `windows/`, `installer/` | Windows integration and installer |
-| `third_party/` | Bundled components and their license information |
-| `test/`, `test_driver/` | Automated tests |
-| `scripts/` | Build, verification and release scripts |
-| `docs/` | API documentation, examples and interface images |
+| [lib/](lib/) | Main interface, library, playback services and data models |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | Shared desktop-lyrics path dependency and Windows host |
+| [rust/](rust/), [rust_builder/](rust_builder/) | Tag processing, Flutter/Rust bridging and Cargokit build support |
+| [windows/](windows/) | Main Windows host, taskbar and system integration |
+| [installer/](installer/) | Inno installer, native components and installation transaction tests |
+| [test/](test/), [test/support/](test/support/) | Dart/Widget regressions, isolated fixtures and rendering helpers |
+| [integration_test/](integration_test/), [test_driver/](test_driver/) | Windows Profile display entry points and drivers |
+| [scripts/](scripts/) | Dependency preparation, build, verification and release scripts |
+| [assets/](assets/), [shaders/](shaders/) | Product assets, fonts and shaders |
+| [docs/](docs/) | API documentation, configuration examples and public UI images |
+
+Choose entry points for the change. Ordinary `flutter test` does not include `integration_test/`:
+
+| Check | Entry point and scope |
+| --- | --- |
+| Dart/Widget | `flutter test --no-pub test/<module>_test.dart`; respect storage fixture injection instead of overriding mocked directories globally |
+| Rust | `cargo test --manifest-path rust/Cargo.toml --locked` |
+| Windows display | [verify_native_display_regressions.ps1](scripts/verify_native_display_regressions.ps1) runs selected Profile display regressions; see [integration_test/](integration_test/) for other entry points |
+| Windows C++ | Focused targets are defined in the [main host CMake](windows/runner/CMakeLists.txt) and [desktop-lyrics CMake](third_party/desktop_lyric/windows/runner/CMakeLists.txt) |
+| Installer | [verify_installer_native.ps1](scripts/verify_installer_native.ps1) checks native components; [installer/tests/](installer/tests/) also contains UI, install, update and uninstall sandbox scripts |
+| Release policies | Offline regressions in [test_validation_pipeline.ps1](scripts/test_validation_pipeline.ps1), [CI continuation](scripts/test_windows_ci_resume.py) and [classification audit](scripts/test_audit_classification_metadata.py) |
 
 Run the following from the repository root. Use an isolated data directory so debugging does not affect your everyday library and settings:
 
 ```powershell
-$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-data/readme-debug'))
+$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-local/readme-debug'))
 flutter pub get
 flutter run -d windows
 ```
@@ -280,6 +295,8 @@ Maintain only necessary, long-lived documentation. Keep machine-local developmen
 ## License & acknowledgments
 
 This project is distributed under [LICENSE](LICENSE). Third-party components retain their own licensing terms; BASS use and distribution must follow its official license.
+
+The bundled UI font is Noto Sans CJK SC, distributed under the SIL Open Font License 1.1. Its [license and provenance](licenses/NOTO-SANS-CJK/PROVENANCE.md) accompany both portable and installer packages. Legacy asset paths and the internal alias preserve existing settings; the displayed font name is Noto Sans CJK SC.
 
 Dan Player is based on [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player). Thanks to the original author for the player foundation, library structure and lyrics experience. We also acknowledge [desktop_lyric](https://github.com/Ferry-200/desktop_lyric), [music_api_dart](https://github.com/Ferry-200/music_api_dart), [BASS](https://www.un4seen.com/bass.html), [Lofty](https://crates.io/crates/lofty), [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge), [Flutter](https://flutter.dev/) and Material Design.
 

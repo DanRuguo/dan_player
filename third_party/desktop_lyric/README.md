@@ -1,5 +1,7 @@
 ﻿# desktop_lyric: Dan Player 的桌面歌词组件
 
+内置字体使用 Noto Sans CJK SC，许可及固定上游来源见 [字体分发说明](../../licenses/NOTO-SANS-CJK/PROVENANCE.md)。DanPingFangSC 和旧字体资源文件名保留为兼容标识，文件内实际为未修改的 Noto OpenType 字体。
+
 - [x] 支持普通歌词
 - [x] 自定义歌词样式（字体大小、字体颜色）
 - [x] 基本的播放控制（上一曲、暂停/播放、下一曲）

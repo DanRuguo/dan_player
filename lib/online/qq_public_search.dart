@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/online/online_http_request.dart';
 
 typedef QqSearchHttpClientFactory = HttpClient Function();
@@ -96,7 +97,7 @@ class QqPublicSearchTransport {
           final request = await client.getUrl(uri);
           request.followRedirects = false;
           request.headers.set(HttpHeaders.userAgentHeader,
-              'Mozilla/5.0 DanPlayer/26.0.4 PublicSearch');
+              'Mozilla/5.0 DanPlayer/${AppSettings.version} PublicSearch');
           request.headers.set(HttpHeaders.acceptHeader, 'application/json');
           request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');
           final response = await request.close();

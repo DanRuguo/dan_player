@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/online/kugou_music_api.dart';
@@ -836,7 +837,7 @@ class CustomMusicSourceTransport {
       request.followRedirects = false;
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'DanPlayer/26.0.4 CustomSource/1',
+        'DanPlayer/${AppSettings.version} CustomSource/1',
       );
       request.headers.set(HttpHeaders.acceptHeader, accept);
       for (final entry in profile.publicHeaders.entries) {

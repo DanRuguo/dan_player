@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/lyric/krc_decoder.dart';
@@ -607,7 +608,8 @@ class _KugouSession {
     final request = await client.getUrl(uri);
     token.check();
     request.followRedirects = false;
-    request.headers.set(HttpHeaders.userAgentHeader, 'DanPlayer/26.0.4');
+    request.headers.set(
+        HttpHeaders.userAgentHeader, 'DanPlayer/${AppSettings.version}');
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(HttpHeaders.refererHeader, 'https://www.kugou.com/');
     request.headers.set('Origin', 'https://www.kugou.com');

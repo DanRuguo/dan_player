@@ -32,6 +32,16 @@ Uint8List silentWave(int sampleRate, int milliseconds) {
   return bytes;
 }
 
+Directory _fixtureOutput(String workspace) {
+  final qa = path.join(workspace, 'tool', 'qa-local');
+  final output = Directory(Platform.environment['DAN_PLAYER_COMPLETION_QA'] ??
+      path.join(qa, 'native-playback-completion'));
+  if (!path.isWithin(qa, path.absolute(output.path))) {
+    throw StateError('Probe output must stay under workspace tool/qa-local.');
+  }
+  return output;
+}
+
 void main() {
   test('completed CUE can pause and replay from its segment start', () async {
     final workspace = path.normalize(Directory.current.parent.path);
@@ -41,8 +51,7 @@ void main() {
         !path.isWithin(path.join(workspace, 'tool'), executable)) {
       throw StateError('Use the workspace Windows Flutter tester.');
     }
-    final output = Directory(
-        path.join(workspace, 'tool', 'validation', 'playback-completion'));
+    final output = _fixtureOutput(workspace);
     await output.create(recursive: true);
     final run = await output.createTemp('replay-');
     final wave = File(path.join(run.path, 'cue.wav'));
@@ -77,8 +86,7 @@ void main() {
         !path.isWithin(path.join(workspace, 'tool'), executable)) {
       throw StateError('Use the workspace Windows Flutter tester.');
     }
-    final output = Directory(
-        path.join(workspace, 'tool', 'validation', 'playback-completion'));
+    final output = _fixtureOutput(workspace);
     await output.create(recursive: true);
     final run = await output.createTemp('silent-');
     final player = BassPlayer();

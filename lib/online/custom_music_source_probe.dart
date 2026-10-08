@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lyric_source_exception.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
@@ -376,8 +377,8 @@ class CustomMusicSourceProbeService {
         request.headers.set(
             HttpHeaders.rangeHeader, 'bytes=0-${resourcePrefixByteLimit - 1}');
         request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-        request.headers
-            .set(HttpHeaders.userAgentHeader, 'DanPlayer/26.0.4 Probe/1');
+        request.headers.set(HttpHeaders.userAgentHeader,
+            'DanPlayer/${AppSettings.version} Probe/1');
         final base = Uri.parse(profile.baseUrl);
         if (_sameOrigin(base, uri)) {
           for (final header in profile.publicHeaders.entries) {

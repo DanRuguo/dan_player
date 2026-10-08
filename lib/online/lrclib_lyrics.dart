@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/online/online_http_request.dart';
 
 typedef LrclibHttpClientFactory = HttpClient Function();
@@ -118,7 +119,7 @@ class LrclibLyricsTransport {
         request.followRedirects = false;
         request.headers.set(
           HttpHeaders.userAgentHeader,
-          'DanPlayer/26.0.4 (anonymous read-only lyrics)',
+          'DanPlayer/${AppSettings.version} (anonymous read-only lyrics)',
         );
         request.headers.set(HttpHeaders.acceptHeader, 'application/json');
         final response = await request.close();

@@ -554,7 +554,7 @@ class OnlineMusicService {
           final request = await client.postUrl(uri);
           request.followRedirects = false;
           request.headers.set(HttpHeaders.userAgentHeader,
-              'Mozilla/5.0 DanPlayer/26.0.4 AnonymousSearch');
+              'Mozilla/5.0 DanPlayer/${AppSettings.version} AnonymousSearch');
           request.headers.set(HttpHeaders.acceptHeader, 'application/json');
           request.headers
               .set(HttpHeaders.refererHeader, 'https://music.163.com/');
@@ -709,7 +709,7 @@ class OnlineMusicService {
         request.headers
             .set(HttpHeaders.refererHeader, 'https://music.163.com/');
         request.headers.set(HttpHeaders.userAgentHeader,
-            'Mozilla/5.0 DanPlayer/26.0.4 AnonymousMetadata');
+            'Mozilla/5.0 DanPlayer/${AppSettings.version} AnonymousMetadata');
         final response = await request.close();
         token.check();
         const limit = 256 * 1024;
@@ -1110,7 +1110,8 @@ class OnlineMusicService {
       requireCurrentDownloadProfile();
       final request = await client.getUrl(uri).timeout(_requestTimeout);
       requireCurrentDownloadProfile();
-      request.headers.set(HttpHeaders.userAgentHeader, "Dan Player/26.0.4");
+      request.headers.set(
+          HttpHeaders.userAgentHeader, "Dan Player/${AppSettings.version}");
       final response = await request.close().timeout(_requestTimeout);
       requireCurrentDownloadProfile();
       if (response.statusCode < 200 || response.statusCode >= 300) {

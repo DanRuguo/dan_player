@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Keep the bundled upstream font byte-for-byte identical.
+/assets/fonts/PingFangSC-Regular.ttf -text

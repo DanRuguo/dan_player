@@ -245,7 +245,7 @@ class AnonymousSongCommentsTransport implements SongCommentsTransport {
       cancellation.check();
       request.followRedirects = false;
       request.headers.set(HttpHeaders.userAgentHeader,
-          'Mozilla/5.0 DanPlayer/26.0.4 AnonymousComments');
+          'Mozilla/5.0 DanPlayer/${AppSettings.version} AnonymousComments');
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
           HttpHeaders.refererHeader,

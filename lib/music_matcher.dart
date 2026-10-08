@@ -1212,7 +1212,7 @@ Future<Object?> _loadNeteaseLyricPayload(String songId) async {
     request.followRedirects = false;
     request.headers.set(
       HttpHeaders.userAgentHeader,
-      'Mozilla/5.0 DanPlayer/26.0.4 AnonymousLyrics',
+      'Mozilla/5.0 DanPlayer/${AppSettings.version} AnonymousLyrics',
     );
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
@@ -1298,7 +1298,7 @@ Future<Object?> _loadQqPublicLyricPayload(
     request.followRedirects = false;
     request.headers.set(
       HttpHeaders.userAgentHeader,
-      'Mozilla/5.0 DanPlayer/26.0.4 AnonymousLyrics',
+      'Mozilla/5.0 DanPlayer/${AppSettings.version} AnonymousLyrics',
     );
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(HttpHeaders.refererHeader, 'https://y.qq.com/');

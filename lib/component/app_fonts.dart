@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 export 'package:desktop_lyric/app_fonts.dart';
 
-const String danEmbeddedFontDisplayName = ".PingFang SC Regular";
+const String danEmbeddedFontDisplayName = "Noto Sans CJK SC";
 const String danCjkFontFamily = danEmbeddedFontFamily;
 
 String danFontDisplayName(String? fontFamily) {

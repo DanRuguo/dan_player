@@ -49,9 +49,48 @@ int wmain(int argc, wchar_t** argv) {
   WORD korean_glyphs[5]{};
   CHECK(GetGlyphIndicesW(dc, korean, 5, korean_glyphs, GGI_MARK_NONEXISTING_GLYPHS) != GDI_ERROR);
   for (WORD glyph : korean_glyphs) CHECK(glyph != 0xffff);
-  CHECK(korean_font != fonts.row());
+  // The bundled Noto face covers Korean directly. Font replacement must not
+  // turn wider coverage into a requirement to choose a system fallback.
+  CHECK(korean_font == fonts.row());
   CHECK(fonts.ForText(dc, korean) == korean_font);
   CHECK(fonts.ForText(dc, L"Dan\u6b4c\u8bcd") == fonts.row());
+  for (const auto* text : {L"Dan lyrics", L"\u6b4c\u8bcd\u97f3\u4e50",
+                          L"\u6b4c\u8a5e\u30ab\u30bf\u30ab\u30ca", korean}) {
+    CHECK(fonts.ForText(dc, text) == fonts.row());
+    const auto length = static_cast<int>(wcslen(text));
+    std::vector<WORD> script_glyphs(length);
+    SelectObject(dc, fonts.row());
+    CHECK(GetGlyphIndicesW(dc, text, length, script_glyphs.data(),
+                          GGI_MARK_NONEXISTING_GLYPHS) != GDI_ERROR);
+    for (const auto glyph : script_glyphs) CHECK(glyph != 0xffff);
+  }
+  // Select an actually absent BMP symbol that an existing system fallback can
+  // draw. A fixed missing-script assumption would become stale as the bundled
+  // font's repertoire expands. This bounded scan belongs only to this test.
+  std::wstring fallback_sample;
+  HFONT fallback_font = nullptr;
+  for (wchar_t symbol = 0x2200; symbol < 0x2c00; ++symbol) {
+    const wchar_t text[]{symbol, 0};
+    WORD glyph = 0;
+    CHECK(GetGlyphIndicesW(dc, text, 1, &glyph,
+                          GGI_MARK_NONEXISTING_GLYPHS) != GDI_ERROR);
+    if (glyph != 0xffff) continue;
+    const auto selected = fonts.ForText(dc, text);
+    if (selected == fonts.row()) continue;
+    SelectObject(dc, selected);
+    CHECK(GetGlyphIndicesW(dc, text, 1, &glyph,
+                          GGI_MARK_NONEXISTING_GLYPHS) != GDI_ERROR);
+    CHECK(glyph != 0xffff);
+    SelectObject(dc, fonts.row());
+    fallback_sample = text;
+    fallback_font = selected;
+    break;
+  }
+  CHECK(!fallback_sample.empty());
+  CHECK(fonts.ForText(dc, fallback_sample.c_str()) == fallback_font);
+  std::cout << "Four-language private glyph coverage; cached fallback U+"
+            << std::hex << static_cast<unsigned>(fallback_sample.front())
+            << std::dec << " (missing from the private face)\n";
   SelectObject(dc, old);
   CHECK(DeleteDC(dc));
   LOGFONTW font{};

@@ -22,7 +22,7 @@ const ffmpegModuleBytes = 73513838;
 /// proxy (including PAC); no mode changes the machine proxy or prints secrets.
 /// The pinned hash is verified before extraction.
 const _downloadScript = r'''
-param([string]$Url,[string]$Destination,[string]$ProxyMode,[string]$ProxyUrl)
+param([string]$Url,[string]$Destination,[string]$ProxyMode,[string]$ProxyUrl,[string]$UserAgent)
 $ErrorActionPreference='Stop'
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 $response=$null
@@ -38,7 +38,7 @@ for($redirect=0;$redirect -lt 6;$redirect++) {
   $request.AllowAutoRedirect=$false
   $request.Timeout=30000
   $request.ReadWriteTimeout=30000
-  $request.UserAgent='DanPlayer/26.0.6-snapshot.1'
+  $request.UserAgent=$UserAgent
   $response=$request.GetResponse()
   if([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
     $Url=([Uri]::new($uri,$response.Headers['Location'])).AbsoluteUri
@@ -135,7 +135,9 @@ class FfmpegModuleInstaller {
             '-ProxyMode',
             proxy.mode.name,
             '-ProxyUrl',
-            proxyUrl ?? ''
+            proxyUrl ?? '',
+            '-UserAgent',
+            'DanPlayer/${AppSettings.version}'
           ],
           runInShell: false);
       await _process!.stdin.close();

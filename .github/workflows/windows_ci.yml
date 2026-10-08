@@ -70,6 +70,7 @@ jobs:
           . .\scripts\support\release_version.ps1
           Get-ReleaseVersionInfo $env:GITHUB_WORKSPACE
           & .\scripts\test_validation_pipeline.ps1
+          & .\scripts\test_flutter_test_groups.ps1
           python -B -m unittest discover -s scripts -p test_audit_classification_metadata.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Metadata audit privacy tests failed.' }
 
@@ -131,9 +132,11 @@ jobs:
       - name: Analyze and test Dan Player
         if: steps.impact.outputs.profile != 'documents' && steps.resume.outputs.reuse_completed != 'true'
         run: |
-          # Legacy persistence tests mock path_provider and deliberately require
-          # no override. New real-storage tests use a separate disposable root.
-          $testTemp = Join-Path $env:GITHUB_WORKSPACE 'tool/ci-test-temp'
+          . .\scripts\support\flutter_test_groups.ps1
+          # Keep fixtures outside the checkout, matching the local workspace
+          # contract used by real-storage tests. Both runners share discovery.
+          $testRoot = Join-Path (Split-Path -Parent $env:GITHUB_WORKSPACE) "tool/qa-local/ci-flutter-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $testTemp = Join-Path $testRoot 'temp'
           $null = New-Item -ItemType Directory -Path $testTemp -Force
           $env:TEMP = $testTemp
           $env:TMP = $testTemp
@@ -143,37 +146,33 @@ jobs:
           $impact = Get-Content -LiteralPath tool/ci-impact.json -Raw | ConvertFrom-Json
           $testFailures = [Collections.Generic.List[string]]::new()
           if ($impact.Profile -eq 'integration' -or $impact.AllDartTests) {
-            $storageTests = @(
-              'listening_calendar_storage_test.dart',
-              'local_lyric_discovery_test.dart',
-              'local_lyric_preferences_test.dart',
-              'local_lyric_settings_render_test.dart',
-              'search_cache_settings_render_test.dart',
-              'snapshot2_followup_data_test.dart'
-            )
-            $isolated = @(Get-ChildItem -LiteralPath test -Recurse -Filter '*_test.dart' | Where-Object { $_.Name -in $storageTests })
-            if ($isolated.Count -ne $storageTests.Count) { throw 'Missing isolated storage test.' }
-            $remaining = @(Get-ChildItem -LiteralPath test -Recurse -Filter '*_test.dart' | Where-Object { $_.Name -notin $storageTests } | ForEach-Object FullName)
-            # Explicit exclusions preserve all tests without exceeding Windows'
-            # command-line limit as the suite grows beyond 480 files.
-            for ($offset = 0; $offset -lt $remaining.Count; $offset += 50) {
-              $last = [Math]::Min($offset + 49, $remaining.Count - 1)
-              $batch = @($remaining[$offset..$last])
-              flutter test --no-pub @batch
-              if ($LASTEXITCODE -ne 0) { $testFailures.Add("Dart files $offset through $last") }
-            }
-            $env:DAN_PLAYER_DATA_DIR = Join-Path (Split-Path -Parent $env:GITHUB_WORKSPACE) 'tool/qa-local/ci-storage'
-            $null = New-Item -ItemType Directory -Path $env:DAN_PLAYER_DATA_DIR -Force
-            try {
-              flutter test --no-pub --concurrency=1 @($isolated | ForEach-Object FullName)
-              if ($LASTEXITCODE -ne 0) { $testFailures.Add('Isolated storage tests') }
-            } finally { Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue }
+            $testGroups = Get-FlutterTestGroups -ProjectRoot $env:GITHUB_WORKSPACE
           }
           else {
             $tests = @($impact.Tests)
             if ($tests.Count -eq 0) { throw 'A business change must have explicit dependent test coverage.' }
-            flutter test --no-pub @tests
-            if ($LASTEXITCODE -ne 0) { $testFailures.Add('Selected Dart tests') }
+            $testGroups = Get-FlutterTestGroups -ProjectRoot $env:GITHUB_WORKSPACE -TestFile $tests
+          }
+          try {
+            foreach ($testGroup in @('MockedDataRoot', 'WorkspaceDataRoot')) {
+              $testConcurrency = 2
+              Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue
+              if ($testGroup -eq 'WorkspaceDataRoot') {
+                $testConcurrency = 1
+                $env:DAN_PLAYER_DATA_DIR = Join-Path $testRoot 'data'
+                $null = New-Item -ItemType Directory -Path $env:DAN_PLAYER_DATA_DIR -Force
+              }
+              $testPaths = @($testGroups.$testGroup | ForEach-Object FullName)
+              # Retain bounded batches below Windows' command-line limit.
+              for ($offset = 0; $offset -lt $testPaths.Count; $offset += 50) {
+                $last = [Math]::Min($offset + 49, $testPaths.Count - 1)
+                $batch = @($testPaths[$offset..$last])
+                flutter test --no-pub "--concurrency=$testConcurrency" @batch
+                if ($LASTEXITCODE -ne 0) { $testFailures.Add("$testGroup files $offset through $last") }
+              }
+            }
+          } finally {
+            Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue
           }
           if ($impact.Profile -eq 'integration') {
             rustup run stable cargo test --manifest-path rust/Cargo.toml --locked

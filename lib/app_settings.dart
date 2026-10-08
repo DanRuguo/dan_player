@@ -157,7 +157,7 @@ Future<bool> hasPendingAppDataDirectoryChange() async {
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.0.6";
+  static const String version = "26.1.1";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";

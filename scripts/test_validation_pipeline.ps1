@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string] $OutputDirectory)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'support/validation_receipt.ps1')
@@ -33,7 +33,13 @@ Assert-Policy (-not (Test-ValidationReceipt $receipt $inputs ([pscustomobject]@{
 Assert-Policy (-not (Test-ValidationReceipt $null $inputs $tools @('a'))) 'A missing receipt cannot bypass tests.'
 Assert-Policy (-not (Test-ValidationReceipt ([pscustomobject]@{Schema=1}) $inputs $tools @('a'))) 'A malformed receipt cannot bypass tests.'
 
-$temporary = Join-Path $repo ('tool/qa-validation-pipeline/' + [Guid]::NewGuid().ToString('N'))
+$pipelineQaParent = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $repo) 'tool/qa-local')).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+$pipelineQaRoot = $(if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) }
+    else { Join-Path $pipelineQaParent 'validation-pipeline' })
+if (-not $pipelineQaRoot.StartsWith($pipelineQaParent, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Validation policy fixtures must remain inside workspace tool/qa-local.'
+}
+$temporary = Join-Path $pipelineQaRoot ([Guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $temporary -Force
 try {
     $file = Join-Path $temporary 'artifact.bin'
@@ -52,7 +58,7 @@ try {
     Write-LocalValidationReceipt $path $receipt
     Assert-Policy (Test-ValidationReceipt (Read-LocalValidationReceipt $path) $inputs $tools @('b')) 'Receipts must preserve coverage through durable save/load.'
 } finally {
-    $approved = [IO.Path]::GetFullPath((Join-Path $repo 'tool/qa-validation-pipeline')).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    $approved = [IO.Path]::GetFullPath($pipelineQaRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     $resolved = [IO.Path]::GetFullPath($temporary)
     if (-not $resolved.StartsWith($approved, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe test cleanup path.' }
     Remove-Item -LiteralPath $resolved -Recurse -Force

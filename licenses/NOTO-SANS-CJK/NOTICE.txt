@@ -1,0 +1,8 @@
+Noto Sans CJK SC Regular, version 2.004
+
+Original copyright notice from the unmodified upstream font:
+© 2014-2021 Adobe (http://www.adobe.com/).
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+See OFL.txt for the full license and PROVENANCE.md for the source and hashes.
+Upstream license information: http://scripts.sil.org/OFL

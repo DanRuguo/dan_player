@@ -69,12 +69,13 @@
 
 | 版本 | 适用场景 | 下载 |
 | --- | --- | --- |
-| **26.0.6 · 稳定版** | 当前正式版，包含任务栏歌词与操作说明书 | [安装器、便携 ZIP 与校验文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
+| **最新稳定版** | 日常使用与升级，版本以发布页为准 | [安装器、便携 ZIP 与校验文件](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **26.0.6 · 历史版本** | 查看任务栏歌词与操作说明书的发行记录 | [26.0.6 发行文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
 | **26.0.5 · 旧版** | 查看上一正式版及独立 FFmpeg 组件 | [历史发行文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
-**安装版**运行安装器，支持原位升级；**便携版**完整解压 ZIP 后运行 `Dan Player.exe`，不要只复制一个 EXE。26.0.5 的桌面歌词由同一程序启动独立进程。
+**安装版**运行安装器，支持原位升级；**便携版**完整解压 ZIP 后运行 `Dan Player.exe`，不要只复制一个 EXE。桌面歌词由同一程序启动独立进程。
 
-试听与裁剪所需的 FFmpeg 是可选组件；手动点击下载时，播放器沿用 [26.0.5 发布的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，并校验固定大小和 SHA-256。26.0.6 的安装器与便携包不重复附带该组件。
+试听与裁剪所需的 FFmpeg 是可选组件；手动点击下载时，播放器沿用 [26.0.5 发布的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，并校验固定大小和 SHA-256。安装器与便携包不重复附带该组件。
 
 > **下载与签名说明**：自有程序使用 RCEIT.Inc 自签名证书，Windows 仍可能显示信任提示；安装器不会自动安装信任证书。旧签名版本请手动下载新安装器升级。预览版不替换稳定版 Latest；升级前建议通过播放器的“备份与恢复”保存个人资料。
 
@@ -233,18 +234,32 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 | 目录 | 用途 |
 | --- | --- |
-| `lib/` | 界面、曲库和播放服务 |
-| `rust/`、`rust_builder/` | 标签处理与 Flutter/Rust 桥接 |
-| `windows/`、`installer/` | Windows 集成与安装器 |
-| `third_party/` | 随附组件及其许可证 |
-| `test/`、`test_driver/` | 自动化测试 |
-| `scripts/` | 构建、校验与发布脚本 |
-| `docs/` | 接口说明、示例和界面图片 |
+| [lib/](lib/) | 主界面、曲库、播放服务与数据模型 |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | 通过 path 依赖共用的桌面歌词组件与 Windows 宿主 |
+| [rust/](rust/)、[rust_builder/](rust_builder/) | 标签处理、Flutter/Rust 桥接与 Cargokit 构建支持 |
+| [windows/](windows/) | 主程序的 Windows 窗口、任务栏与系统集成 |
+| [installer/](installer/) | Inno 安装器、原生组件与安装事务测试 |
+| [test/](test/)、[test/support/](test/support/) | Dart/Widget 回归、隔离夹具与渲染辅助 |
+| [integration_test/](integration_test/)、[test_driver/](test_driver/) | Windows Profile 原生显示入口与驱动 |
+| [scripts/](scripts/) | 依赖准备、构建、校验与发布脚本 |
+| [assets/](assets/)、[shaders/](shaders/) | 产品资源、字体与着色器 |
+| [docs/](docs/) | 接口说明、配置示例与公开界面图片 |
+
+按改动选择实际入口；普通 `flutter test` 不包含 `integration_test/`：
+
+| 检查范围 | 入口与边界 |
+| --- | --- |
+| Dart/Widget | `flutter test --no-pub test/<模块>_test.dart`；存储测试遵循各自夹具注入，不全局覆盖模拟目录 |
+| Rust | `cargo test --manifest-path rust/Cargo.toml --locked` |
+| Windows 原生显示 | [verify_native_display_regressions.ps1](scripts/verify_native_display_regressions.ps1) 运行精选 Profile 显示回归；其他入口见 [integration_test/](integration_test/) |
+| Windows C++ | 定向目标见 [主宿主 CMake](windows/runner/CMakeLists.txt) 与 [桌面歌词 CMake](third_party/desktop_lyric/windows/runner/CMakeLists.txt) |
+| 安装器 | [verify_installer_native.ps1](scripts/verify_installer_native.ps1) 检查原生组件；[installer/tests/](installer/tests/) 另含 UI、新装、更新与卸载沙箱脚本 |
+| 发布策略 | [test_validation_pipeline.ps1](scripts/test_validation_pipeline.ps1)、[CI 续测](scripts/test_windows_ci_resume.py) 与 [分类审计](scripts/test_audit_classification_metadata.py) 的离线回归 |
 
 在仓库根目录执行，使用独立资料目录，避免调试影响日常曲库与设置：
 
 ```powershell
-$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-data/readme-debug'))
+$env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-local/readme-debug'))
 flutter pub get
 flutter run -d windows
 ```
@@ -284,6 +299,8 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 ## 许可证与致谢
 
 本项目按 [LICENSE](LICENSE) 分发；第三方组件保留各自许可，BASS 的使用与分发须遵守其官方许可。
+
+内置界面字体为 Noto Sans CJK SC，按 SIL Open Font License 1.1 分发；[字体许可与来源](licenses/NOTO-SANS-CJK/PROVENANCE.md) 随便携包和安装器提供。旧字体资源路径及内部别名仅用于兼容已有设置，实际字体显示名为 Noto Sans CJK SC。
 
 Dan Player 基于 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) 修改，感谢原作者提供的播放器基础、曲库结构和歌词体验。同时感谢 [desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge) 及 [Flutter](https://flutter.dev/) 与 Material Design。
 

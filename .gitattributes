@@ -1,0 +1,4 @@
+# Preserve the upstream font and license bytes on Windows checkouts.
+/assets/fonts/PingFangSC-Regular.ttf -text
+/third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf -text
+/licenses/NOTO-SANS-CJK/OFL.txt -text
