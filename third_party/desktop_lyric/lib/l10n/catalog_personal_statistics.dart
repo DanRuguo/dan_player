@@ -1,4 +1,9 @@
 const catalogPersonalStatistics = <String, List<String>>{
+  '已合并 {0} 条重复记录。': [
+    '{0} duplicate records merged.',
+    '重複する {0} 件の記録を統合しました。',
+    '중복 기록 {0}개를 병합했습니다.'
+  ],
   '使用次数：{0}': ['Usage count: {0}', '使用回数：{0}', '사용 횟수: {0}'],
   '右键点击或长按查看使用次数': [
     'Right-click or hold to view usage count',

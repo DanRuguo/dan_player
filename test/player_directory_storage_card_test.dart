@@ -7,6 +7,8 @@ import 'package:dan_player/component/app_data_storage_card.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/directory_storage_card.dart';
 import 'package:dan_player/component/statistics_bar_row.dart';
+import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/statistics/app_data_storage.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
 import 'package:desktop_lyric/font_loader.dart';
@@ -78,8 +80,9 @@ Future<void> _selectScope(
         textScaler: paragraph.textScaler,
         maxLines: 1)
       ..layout();
-    expect(widget.avatarBoxConstraints!.maxHeight, closeTo(line.height, .1));
-    expect(widget.avatarBoxConstraints!.maxWidth, closeTo(line.height, .1));
+    final markSize = widget.selected ? line.height : 0.0;
+    expect(widget.avatarBoxConstraints!.maxHeight, closeTo(markSize, .1));
+    expect(widget.avatarBoxConstraints!.maxWidth, closeTo(markSize, .1));
     line.dispose();
   }
   await tester.ensureVisible(find.byKey(key));
@@ -215,6 +218,243 @@ void main() {
 
   for (final language in UiLanguage.values) {
     testWidgets(
+        '${language.code} pending scopes reserve complete category layout',
+        (tester) async {
+      final previous = uiLanguage.value;
+      uiLanguage.value = language;
+      addTearDown(() => uiLanguage.value = previous);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      for (final layout in [(1000.0, 1.0), (360.0, 2.0)]) {
+        tester.view.physicalSize = Size(layout.$1, 800);
+        final cache = Completer<AppDataStorageSnapshot>();
+        final player = Completer<AppDataStorageSnapshot>();
+        final boundary = GlobalKey();
+        await tester.pumpWidget(_host(
+            Column(children: [
+              DirectoryStorageCard(
+                  cacheReading: cache.future,
+                  playerReading: player.future,
+                  onPlayerSelected: () =>
+                      fail('Injected futures must not scan')),
+              const Text('below-directory'),
+            ]),
+            language: language,
+            scale: layout.$2,
+            boundary: boundary));
+        await tester.pumpAndSettle();
+        final card = find.byType(AppDataStorageCard);
+        final height = tester.getSize(card).height;
+        await _capture(tester, boundary,
+            'storage-pending-${language.code}-${layout.$1.toInt()}-top');
+        final scroll =
+            tester.state<ScrollableState>(find.byType(Scrollable).first);
+        scroll.position
+            .jumpTo(scroll.position.maxScrollExtent.clamp(0.0, 60.0));
+        await tester.pumpAndSettle();
+        final pixels = scroll.position.pixels;
+        final positions = [
+          for (final row in find.byType(StatisticsBarRow).evaluate())
+            tester.getTopLeft(find.byWidget(row.widget)).dy,
+        ];
+        expect(positions, hasLength(AppDataStorageScanner.categories.length));
+        for (final row in tester
+            .widgetList<StatisticsBarRow>(find.byType(StatisticsBarRow))) {
+          expect(row.valueLabel, '—');
+          expect(row.value, 0);
+        }
+        cache.complete(AppDataStorageSnapshot(
+            path: 'injected cache',
+            parts: [
+              for (final label in AppDataStorageScanner.categories)
+                AppDataStoragePart(label, 50, 1024 * 1024),
+            ],
+            unreadable: 2,
+            skippedLinks: 3,
+            truncated: true));
+        await tester.pumpAndSettle();
+        expect(tester.getSize(card).height, closeTo(height, .1));
+        expect(scroll.position.pixels, closeTo(pixels, .1));
+        final cachePositions = [
+          for (final row in find.byType(StatisticsBarRow).evaluate())
+            tester.getTopLeft(find.byWidget(row.widget)).dy,
+        ];
+        expect(cachePositions, orderedEquals(positions));
+        await tester
+            .tap(find.byKey(const ValueKey('directory-storage-scope-player')));
+        await tester.pump();
+        expect(tester.getSize(card).height, closeTo(height, .1),
+            reason: 'First selection must not shorten the lower page');
+        expect(scroll.position.pixels, closeTo(pixels, .1));
+        final pendingPositions = [
+          for (final row in find.byType(StatisticsBarRow).evaluate())
+            tester.getTopLeft(find.byWidget(row.widget)).dy,
+        ];
+        expect(pendingPositions, orderedEquals(positions));
+        player.complete(_snapshot(partial: true));
+        await tester.pumpAndSettle();
+        expect(tester.getSize(card).height, closeTo(height, .1));
+        expect(scroll.position.pixels, closeTo(pixels, .1));
+        expect(tester.getTopLeft(find.text('below-directory')).dy,
+            closeTo(tester.getRect(card).bottom, .1));
+        for (final row in find.byType(StatisticsBarRow).evaluate()) {
+          final widget = row.widget as StatisticsBarRow;
+          _completeLabel(tester, find.byWidget(widget), widget.label);
+        }
+        await _capture(tester, boundary,
+            'storage-fixed-${language.code}-${layout.$1.toInt()}-top');
+        await tester.pump();
+        expect(tester.binding.hasScheduledFrame, isFalse);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    });
+  }
+
+  testWidgets('boundary widths retain pending rows after large amounts arrive',
+      (tester) async {
+    final previous = uiLanguage.value;
+    uiLanguage.value = UiLanguage.en;
+    addTearDown(() => uiLanguage.value = previous);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    for (final layout in [
+      (667.0, 1.0),
+      (669.0, 1.0),
+      (1267.0, 2.0),
+      (1269.0, 2.0)
+    ]) {
+      tester.view.physicalSize = Size(layout.$1, 900);
+      final pending = Completer<AppDataStorageSnapshot>();
+      await tester.pumpWidget(_host(_card(pending.future),
+          language: UiLanguage.en, scale: layout.$2));
+      await _selectScope(tester, DirectoryStorageScope.player);
+      final height = tester.getSize(find.byType(AppDataStorageCard)).height;
+      final rows = [
+        for (final row in find.byType(StatisticsBarRow).evaluate())
+          tester.getRect(find.byWidget(row.widget))
+      ];
+      pending.complete(AppDataStorageSnapshot(
+          path: _root,
+          parts: [
+            for (final label in _labels)
+              AppDataStoragePart(label, 20000, 1 << 50),
+          ],
+          unreadable: 200000,
+          skippedLinks: 200000,
+          truncated: true));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(AppDataStorageCard)).height,
+          closeTo(height, .1));
+      final readyRows = [
+        for (final row in find.byType(StatisticsBarRow).evaluate())
+          tester.getRect(find.byWidget(row.widget))
+      ];
+      expect(readyRows, orderedEquals(rows));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('bar reveal is finite shared and retires on visual gates',
+      (tester) async {
+    tester.view.physicalSize = const Size(1000, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final preferences = ValueNotifier(const RenderingPreferences());
+    addTearDown(preferences.dispose);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    final cache = Future.value(_empty);
+    var pending = Completer<AppDataStorageSnapshot>();
+    var visible = true;
+    late StateSetter rebuild;
+    await tester.pumpWidget(_host(StatefulBuilder(builder: (context, setState) {
+      rebuild = setState;
+      return RenderingPreferencesScope(
+          preferences: preferences,
+          child: TickerMode(
+              enabled: visible,
+              child: DirectoryStorageCard(
+                  cacheReading: cache,
+                  playerReading: pending.future,
+                  onPlayerSelected: () => fail('No scan is needed'))));
+    })));
+    await _selectScope(tester, DirectoryStorageScope.player);
+    List<StatisticsBarRow> rows() => tester
+        .widgetList<StatisticsBarRow>(find.byType(StatisticsBarRow))
+        .toList();
+    Future<void> complete() async {
+      pending.complete(_snapshot());
+      await tester.pump();
+      // Future completion can start the ticker after the preceding frame's
+      // transient callbacks. Establish its first (zero elapsed) real frame.
+      await tester.pump();
+    }
+
+    await complete();
+    final initialRows = rows();
+    final progress = initialRows.first.progress!;
+    expect(progress.value, 0);
+    expect(
+        initialRows.every((row) => identical(row.progress, progress)), isTrue,
+        reason: 'Nine bars use one finite owner, not nine controllers');
+    await tester.pump(const Duration(milliseconds: 90));
+    expect(progress.value, inExclusiveRange(0.0, 1.0));
+    for (var index = 0; index < initialRows.length; index++) {
+      expect(rows()[index], same(initialRows[index]),
+          reason: 'Animation ticks must not remeasure or rebuild row text');
+    }
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(progress.value, 1);
+    await tester.pump();
+    expect(tester.binding.hasScheduledFrame, isFalse);
+
+    for (final gate in ['ticker', 'feedback', 'native-reduce', 'hidden']) {
+      rebuild(() => pending = Completer<AppDataStorageSnapshot>());
+      await tester.pump();
+      await complete();
+      expect(rows().first.progress!.value, 0);
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(rows().first.progress!.value, inExclusiveRange(0.0, 1.0));
+      if (gate == 'ticker') rebuild(() => visible = false);
+      if (gate == 'feedback') {
+        preferences.value = const RenderingPreferences(
+            animations: MotionPreferences(disabled: {MotionKind.feedback}));
+      }
+      if (gate == 'native-reduce') {
+        tester.platformDispatcher.accessibilityFeaturesTestValue =
+            const FakeAccessibilityFeatures(reduceMotion: true);
+      }
+      if (gate == 'hidden') {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      }
+      await tester.pump();
+      expect(rows().first.progress!.value, 1);
+      await tester.pump();
+      expect(tester.binding.hasScheduledFrame, isFalse);
+      if (gate == 'ticker') rebuild(() => visible = true);
+      if (gate == 'feedback') preferences.value = const RenderingPreferences();
+      if (gate == 'native-reduce') {
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue();
+      }
+      if (gate == 'hidden') {
+        tester.binding
+            .handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      }
+      await tester.pump();
+      expect(rows().first.progress!.value, 1,
+          reason: 'Restoring visibility must not replay a retired reveal');
+      await tester.pump();
+      expect(tester.binding.hasScheduledFrame, isFalse);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final language in UiLanguage.values) {
+    testWidgets(
         '${language.code} directory totals and complete labels wide/narrow',
         (tester) async {
       final previous = uiLanguage.value;
@@ -300,7 +540,12 @@ void main() {
     expect(tester.state(find.byType(AppDataStorageCard)), same(state));
     stale.complete(_snapshot());
     await tester.pumpAndSettle();
-    expect(find.byType(StatisticsBarRow), findsNothing);
+    expect(find.byType(StatisticsBarRow), findsNWidgets(_labels.length));
+    expect(
+        tester
+            .widgetList<StatisticsBarRow>(find.byType(StatisticsBarRow))
+            .every((row) => row.valueLabel == '—' && row.value == 0),
+        isTrue);
     current.completeError(const FileSystemException('injected inaccessible'));
     await tester.pumpAndSettle();
     expect(find.text(ui('无法读取此目录的占用信息')), findsOneWidget);
@@ -314,8 +559,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-      'empty installation reports zero rather than fabricated categories',
+  testWidgets('empty installation retains all known categories with zero bytes',
       (tester) async {
     const data = AppDataStorageSnapshot(
         path: _root,
@@ -327,7 +571,12 @@ void main() {
     await tester.pumpAndSettle();
     await _selectScope(tester, DirectoryStorageScope.player);
     expect(find.text('0 B · ${ui('{0} 个文件', [0])}'), findsOneWidget);
-    expect(find.byType(StatisticsBarRow), findsNothing);
+    expect(find.byType(StatisticsBarRow), findsNWidgets(_labels.length));
+    expect(
+        tester
+            .widgetList<StatisticsBarRow>(find.byType(StatisticsBarRow))
+            .every((row) => row.valueLabel == '0 B' && row.value == 0),
+        isTrue);
     expect(find.byIcon(Symbols.folder), findsWidgets);
     expect(tester.takeException(), isNull);
   });
@@ -406,12 +655,23 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final cache = _snapshot();
+    final cache = AppDataStorageSnapshot(
+        path: 'injected cache',
+        parts: [
+          for (var index = 0;
+              index < AppDataStorageScanner.categories.length;
+              index++)
+            AppDataStoragePart(AppDataStorageScanner.categories[index],
+                index + 1, (index + 1) * 1024),
+        ],
+        unreadable: 0,
+        skippedLinks: 0,
+        truncated: false);
     final player = AppDataStorageSnapshot(
         path: 'injected player',
         parts: [
-          for (final part in cache.parts)
-            AppDataStoragePart(part.label, part.files, part.bytes * 2),
+          for (var index = 0; index < _labels.length; index++)
+            AppDataStoragePart(_labels[index], index + 1, (index + 1) * 2048),
         ],
         unreadable: 0,
         skippedLinks: 0,
@@ -472,7 +732,8 @@ void main() {
     await tester.idle();
     expect(tester.binding.hasScheduledFrame, isFalse,
         reason: 'An inactive completion only stores data; it schedules no UI');
-    expect(find.byType(StatisticsBarRow), findsNothing);
+    expect(find.byType(StatisticsBarRow), findsNWidgets(_labels.length));
+    expect(find.text(ui('主程序')), findsNothing);
     await tester
         .tap(find.byKey(const ValueKey('directory-storage-scope-player')));
     await tester.pump();
@@ -511,7 +772,17 @@ void main() {
     expect(find.byType(StatisticsBarRow), findsNWidgets(data.parts.length));
     latest.completeError(const FileSystemException('injected refresh failure'));
     await tester.pumpAndSettle();
-    expect(find.byType(StatisticsBarRow), findsNothing);
+    expect(find.byType(StatisticsBarRow), findsNWidgets(_labels.length));
+    expect(
+        tester
+            .widgetList<StatisticsBarRow>(find.byType(StatisticsBarRow))
+            .every((row) => row.valueLabel == '—' && row.value == 0),
+        isTrue);
+    expect(
+        find.text('${formatLibraryBytes(data.bytes)} · ${ui('{0} 个文件', [
+              data.files
+            ])}'),
+        findsNothing);
     expect(find.text(ui('无法读取此目录的占用信息')), findsOneWidget);
     expect(find.byIcon(Symbols.hourglass_empty), findsNothing);
     await _selectScope(tester, DirectoryStorageScope.cache);
@@ -520,7 +791,12 @@ void main() {
     await tester
         .tap(find.byKey(const ValueKey('directory-storage-scope-player')));
     await tester.pump();
-    expect(find.byType(StatisticsBarRow), findsNothing);
+    expect(find.byType(StatisticsBarRow), findsNWidgets(_labels.length));
+    expect(
+        tester
+            .widgetList<StatisticsBarRow>(find.byType(StatisticsBarRow))
+            .every((row) => row.valueLabel == '—' && row.value == 0),
+        isTrue);
     expect(find.text(ui('无法读取此目录的占用信息')), findsOneWidget,
         reason: 'Returning to a failed scope must not revive its old data');
     final abandoned = Completer<AppDataStorageSnapshot>();
@@ -529,7 +805,12 @@ void main() {
         reason: 'A new reading must not inherit a retired FutureBuilder error');
     expect(find.text(ui('正在读取占用信息…')), findsOneWidget);
     expect(find.byIcon(Symbols.hourglass_empty), findsOneWidget);
-    expect(find.byType(StatisticsBarRow), findsNothing);
+    expect(find.byType(StatisticsBarRow), findsNWidgets(_labels.length));
+    expect(
+        tester
+            .widgetList<StatisticsBarRow>(find.byType(StatisticsBarRow))
+            .every((row) => row.valueLabel == '—' && row.value == 0),
+        isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
     abandoned.completeError(const FileSystemException('after unmount'));
     await tester.pumpAndSettle();
@@ -637,5 +918,101 @@ void main() {
       }
     });
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unselected chips match native spacing throughout switches',
+      (tester) async {
+    final previous = uiLanguage.value;
+    addTearDown(() => uiLanguage.value = previous);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const referenceKey = ValueKey('native-unselected-chip');
+    for (final language in UiLanguage.values) {
+      uiLanguage.value = language;
+      for (final layout in [(1000.0, 1.0), (360.0, 2.0)]) {
+        tester.view.physicalSize = Size(layout.$1, 1400);
+        final boundary = GlobalKey();
+        await tester.pumpWidget(_host(
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Align(
+                  alignment: Alignment.centerRight,
+                  child: ChoiceChip(
+                      key: referenceKey,
+                      label: const Text('Native control'),
+                      selected: false,
+                      onSelected: (_) {})),
+              _card(Future.value(_empty)),
+            ]),
+            language: language,
+            scale: layout.$2,
+            boundary: boundary));
+        await tester.pumpAndSettle();
+        final reference = tester.getRect(find.byKey(referenceKey));
+        final referenceText = tester.getRect(find.descendant(
+            of: find.byKey(referenceKey),
+            matching: find.text('Native control')));
+        final nativeInset = referenceText.left - reference.left;
+        void check() {
+          for (final item in [
+            (DirectoryStorageScope.cache, ui('缓存与播放器数据')),
+            (DirectoryStorageScope.player, ui('播放器目录')),
+          ]) {
+            final finder =
+                find.byKey(ValueKey('directory-storage-scope-${item.$1.name}'));
+            final chip = tester.widget<ChoiceChip>(finder);
+            _completeLabel(tester, finder, item.$2);
+            if (!chip.selected) {
+              final bounds = tester.getRect(finder);
+              final text = tester.getRect(
+                  find.descendant(of: finder, matching: find.text(item.$2)));
+              expect(text.left - bounds.left, closeTo(nativeInset, .1),
+                  reason: 'An unselected ${language.code} chip must have '
+                      'native padding, with no invisible check slot');
+              expect(text.center.dx, closeTo(bounds.center.dx, .1));
+            }
+          }
+          expect(tester.takeException(), isNull);
+        }
+
+        check();
+        for (final scope in [
+          DirectoryStorageScope.player,
+          DirectoryStorageScope.cache,
+        ]) {
+          await tester.tap(
+              find.byKey(ValueKey('directory-storage-scope-${scope.name}')));
+          await tester.pump();
+          check();
+          final first = [
+            for (final item in DirectoryStorageScope.values)
+              tester.getRect(
+                  find.byKey(ValueKey('directory-storage-scope-${item.name}'))),
+          ];
+          await _capture(tester, boundary,
+              'check-${language.code}-${layout.$1.toInt()}-${scope.name}-first');
+          await tester.pump(const Duration(milliseconds: 75));
+          check();
+          for (final item in DirectoryStorageScope.values) {
+            expect(
+                tester.getRect(find
+                    .byKey(ValueKey('directory-storage-scope-${item.name}'))),
+                first[item.index],
+                reason: 'No reverse drawer may expand to multiline height');
+          }
+          await _capture(tester, boundary,
+              'check-${language.code}-${layout.$1.toInt()}-${scope.name}-middle');
+          await tester.pump(const Duration(milliseconds: 160));
+          check();
+          for (final item in DirectoryStorageScope.values) {
+            expect(
+                tester.getRect(find
+                    .byKey(ValueKey('directory-storage-scope-${item.name}'))),
+                first[item.index]);
+          }
+          await tester.pumpAndSettle();
+        }
+      }
+    }
   });
 }

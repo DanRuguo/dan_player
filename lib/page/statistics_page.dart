@@ -7,6 +7,7 @@ import 'package:dan_player/component/directory_storage_card.dart';
 import 'package:dan_player/component/personal_annotations_card.dart';
 import 'package:dan_player/component/statistics_distribution_view.dart';
 import 'package:dan_player/component/statistics_card_header.dart';
+import 'package:dan_player/component/statistics_resize.dart';
 import 'package:dan_player/statistics/app_data_storage.dart';
 import 'package:dan_player/library/personal_library.dart';
 import 'package:dan_player/statistics/player_directory_storage.dart';
@@ -68,6 +69,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
   final _rankings = <String, _RankingRows>{};
   final _storageKey = GlobalKey();
   final _cacheKey = GlobalKey();
+  final _playRankingKey = GlobalKey();
+  final _timeRankingKey = GlobalKey();
   bool _storageLocated = false;
   late Future<AppDataStorageSnapshot> _cacheReading;
   Future<AppDataStorageSnapshot>? _playerReading;
@@ -235,11 +238,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
             child: CustomScrollView(
               slivers: [
                 SliverPadding(
+                  key: const ValueKey('statistics-heading-section'),
                   padding: const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 12.0),
                   sliver: SliverToBoxAdapter(
                     child: AppEntrance(
                       identity: 'statistics-heading',
-                      child: Column(
+                      child: StatisticsResize(
+                          child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
@@ -305,41 +310,49 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                 [stats.legacyUnassignedCount])),
                           ],
                         ],
-                      ),
+                      )),
                     ),
                   ),
                 ),
                 SliverPadding(
+                  key: const ValueKey('statistics-calendar-section'),
                   padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
                   sliver: SliverToBoxAdapter(
                     child: AppEntrance(
                       identity: 'statistics-calendar',
                       order: 1,
-                      child: ListeningCalendarCard(
-                          statistics: stats,
-                          recentActivitySnapshot: _recentListening,
-                          now: _displaySnapshot?.capturedAt ?? widget.now,
-                          dailyChart: _DailyListeningDistribution(
+                      child: StatisticsResize(
+                          child: ListeningCalendarCard(
                               statistics: stats,
                               recentActivitySnapshot: _recentListening,
-                              now: _displaySnapshot?.capturedAt ??
-                                  widget.now ??
-                                  DateTime.now())),
+                              now: _displaySnapshot?.capturedAt ?? widget.now,
+                              dailyChart: _DailyListeningDistribution(
+                                  statistics: stats,
+                                  recentActivitySnapshot: _recentListening,
+                                  now: _displaySnapshot?.capturedAt ??
+                                      widget.now ??
+                                      DateTime.now()))),
                     ),
                   ),
                 ),
-                if (_listeningTrends != null)
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-                    sliver: SliverToBoxAdapter(
-                      child: AppEntrance(
-                          identity: 'statistics-listening-trends',
-                          order: 2,
-                          child: StatisticsListeningTrends(
-                              snapshot: _listeningTrends!)),
-                    ),
-                  ),
                 SliverPadding(
+                  key: const ValueKey('statistics-trends-section'),
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  sliver: SliverToBoxAdapter(
+                    child: StatisticsResize(
+                        child: _listeningTrends == null
+                            ? const SizedBox.shrink()
+                            : Padding(
+                                padding: const EdgeInsets.only(bottom: 20),
+                                child: AppEntrance(
+                                    identity: 'statistics-listening-trends',
+                                    order: 2,
+                                    child: StatisticsListeningTrends(
+                                        snapshot: _listeningTrends!)))),
+                  ),
+                ),
+                SliverPadding(
+                  key: const ValueKey('statistics-library-heading-section'),
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
                   sliver: SliverToBoxAdapter(
                     child: Text(
@@ -351,15 +364,19 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   ),
                 ),
                 SliverPadding(
+                  key: const ValueKey('statistics-library-overview-section'),
                   padding: const EdgeInsets.symmetric(horizontal: 24.0),
                   sliver: SliverToBoxAdapter(
-                    child: _LibraryOverview(snapshot: library),
+                    child: StatisticsResize(
+                        child: _LibraryOverview(snapshot: library)),
                   ),
                 ),
                 SliverPadding(
+                  key: const ValueKey('statistics-library-caption-section'),
                   padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 0.0),
                   sliver: SliverToBoxAdapter(
-                    child: Column(
+                    child: StatisticsResize(
+                        child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (_display.refreshing) ...[
@@ -387,74 +404,90 @@ class _StatisticsPageState extends State<StatisticsPage> {
                               _clock(library.scannedAt),
                               library.duplicateEntries == 0
                                   ? ''
-                                  : ' 已合并 ${library.duplicateEntries} 条重复记录。'
+                                  : ' ${ui('已合并 {0} 条重复记录。', [
+                                          library.duplicateEntries
+                                        ])}'
                             ]),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                       ],
-                    ),
+                    )),
                   ),
                 ),
                 SliverPadding(
+                  key: const ValueKey('statistics-distributions-section'),
                   padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 0.0),
                   sliver: SliverToBoxAdapter(
-                    child: _LibraryDistributions(
-                        folderKey: _storageKey,
-                        snapshot: library,
-                        personalSummary: _displaySnapshot?.personalSummary,
-                        personalWarning: _displaySnapshot?.personalWarning,
-                        initialFolder: widget.initialStorageFolder,
-                        initialBytes:
-                            widget.initialStorageSection == 'folders'),
+                    child: StatisticsResize(
+                        child: _LibraryDistributions(
+                            folderKey: _storageKey,
+                            snapshot: library,
+                            personalSummary: _displaySnapshot?.personalSummary,
+                            personalWarning: _displaySnapshot?.personalWarning,
+                            initialFolder: widget.initialStorageFolder,
+                            initialBytes:
+                                widget.initialStorageSection == 'folders')),
                   ),
                 ),
-                if (library != null && library.largestFiles.isNotEmpty)
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 0.0),
-                    sliver: SliverToBoxAdapter(
-                      child: _LargestStorageCard(snapshot: library),
-                    ),
-                  ),
                 SliverPadding(
+                  key: const ValueKey('statistics-largest-storage-section'),
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  sliver: SliverToBoxAdapter(
+                    child: StatisticsResize(
+                        child: library == null || library.largestFiles.isEmpty
+                            ? const SizedBox.shrink()
+                            : Padding(
+                                padding: const EdgeInsets.only(top: 20),
+                                child: _LargestStorageCard(snapshot: library))),
+                  ),
+                ),
+                SliverPadding(
+                  key: const ValueKey('statistics-directory-storage-section'),
                   padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
                   sliver: SliverToBoxAdapter(
-                      child: DirectoryStorageCard(
-                          key: _cacheKey,
-                          cacheReading: _cacheReading,
-                          playerReading: _playerReading,
-                          onPlayerSelected: _selectPlayerDirectory)),
+                      child: StatisticsResize(
+                          child: DirectoryStorageCard(
+                              key: _cacheKey,
+                              cacheReading: _cacheReading,
+                              playerReading: _playerReading,
+                              onPlayerSelected: _selectPlayerDirectory))),
                 ),
                 SliverPadding(
+                  key: const ValueKey('statistics-ranking-selector-section'),
                   padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
                   sliver: SliverToBoxAdapter(
-                      child: Wrap(spacing: 8, runSpacing: 8, children: [
-                    for (final item in [
-                      ('tracks', '歌曲'),
-                      ('artists', '艺术家'),
-                      ('albums', '专辑')
-                    ])
-                      ChoiceChip(
-                          key: ValueKey('statistics-ranking-${item.$1}'),
-                          label: Text(ui(item.$2)),
-                          selected: _rankingGroup == item.$1,
-                          onSelected: (selected) {
-                            if (selected) {
-                              setState(() => _rankingGroup = item.$1);
-                            }
-                          }),
-                  ])),
+                      child: StatisticsResize(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                        Wrap(spacing: 8, runSpacing: 8, children: [
+                          for (final item in [
+                            ('tracks', '歌曲'),
+                            ('artists', '艺术家'),
+                            ('albums', '专辑')
+                          ])
+                            ChoiceChip(
+                                key: ValueKey('statistics-ranking-${item.$1}'),
+                                label: Text(ui(item.$2)),
+                                selected: _rankingGroup == item.$1,
+                                onSelected: (selected) {
+                                  if (selected) {
+                                    setState(() => _rankingGroup = item.$1);
+                                  }
+                                }),
+                        ]),
+                        if (_rankingGroup != 'tracks') ...[
+                          const SizedBox(height: 8),
+                          Text(ui('按已明确归属的历史记录汇总；同名专辑按艺术家区分。'),
+                              style: Theme.of(context).textTheme.bodySmall),
+                        ],
+                      ]))),
                 ),
-                if (_rankingGroup != 'tracks')
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-                    sliver: SliverToBoxAdapter(
-                        child: Text(ui('按已明确归属的历史记录汇总；同名专辑按艺术家区分。'),
-                            style: Theme.of(context).textTheme.bodySmall)),
-                  ),
                 SliverPadding(
+                  key: const ValueKey('statistics-rankings-section'),
                   padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 0.0),
                   sliver: SliverToBoxAdapter(
-                    child: LayoutBuilder(
+                    child: StatisticsResize(child: LayoutBuilder(
                       builder: (context, constraints) {
                         final rankings = _rankingRows();
                         final cards = [
@@ -479,6 +512,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         ]
                             .indexed
                             .map((entry) => AppEntrance(
+                                  key: entry.$1 == 0
+                                      ? _playRankingKey
+                                      : _timeRankingKey,
                                   identity: ('statistics-ranking', entry.$1),
                                   order: entry.$1 + 4,
                                   child: entry.$2,
@@ -503,10 +539,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                 ],
                               );
                       },
-                    ),
+                    )),
                   ),
                 ),
-                const SliverPadding(padding: EdgeInsets.only(bottom: 112.0)),
+                const SliverPadding(
+                    key: ValueKey('statistics-bottom-section'),
+                    padding: EdgeInsets.only(bottom: 112.0)),
               ],
             ),
           ),

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:dan_player/component/app_data_storage_card.dart';
 import 'package:dan_player/statistics/app_data_storage.dart';
+import 'package:dan_player/statistics/player_directory_storage.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -53,6 +54,19 @@ class _DirectoryStorageCardState extends State<DirectoryStorageCard> {
             ? widget.playerReading ?? _awaitingPlayer.future
             : widget.cacheReading,
         readingScope: _scope,
+        layoutIndex: _scope.index,
+        layouts: [
+          StorageCardLayout(
+              title: ui('缓存与播放器数据占用'),
+              categories: AppDataStorageScanner.categories,
+              description:
+                  ui('实际文件字节；用户资料、自选图片与可重建缓存分别统计。链接不跟随，仅打开此页或手动刷新时读取。')),
+          StorageCardLayout(
+              title: ui('播放器组件目录占用'),
+              categories: PlayerDirectoryStorageScanner.categories,
+              description:
+                  ui('播放器目录内的实际文件字节；不包含外部音乐、用户数据或外部工具。链接不跟随，首次选择或手动刷新时读取。')),
+        ],
         title: player ? ui('播放器组件目录占用') : null,
         icon: player ? Symbols.folder : Symbols.database,
         scopeDescription: player
@@ -76,6 +90,8 @@ class _DirectoryStorageCardState extends State<DirectoryStorageCard> {
             final label = Builder(builder: (context) {
               // RawChip supplies a one-line default. Keep its resolved
               // selected/disabled style while allowing the full label.
+              // A shared maximum wrap budget keeps selection from changing
+              // line count; the unselected native leading slot still is zero.
               return DefaultTextStyle(
                   style: DefaultTextStyle.of(context).style,
                   softWrap: true,
@@ -92,10 +108,14 @@ class _DirectoryStorageCardState extends State<DirectoryStorageCard> {
                 // Keep the native check at a normal single-line size when the
                 // label wraps. Its slot must use the resolved chip font's
                 // actual line metrics, not the Theme's nominal font height.
+                // Keeping the empty avatar attached also avoids RawChip's
+                // reverse drawer switching to the whole multiline height.
+                // The unselected slot occupies zero space and paints no mark.
                 avatar: const SizedBox.shrink(),
                 avatarBorder: const _EmptyAvatarBorder(),
-                avatarBoxConstraints:
-                    BoxConstraints.tightFor(width: markSize, height: markSize),
+                avatarBoxConstraints: BoxConstraints.tightFor(
+                    width: selected ? markSize : 0,
+                    height: selected ? markSize : 0),
                 showCheckmark: true,
                 selected: selected,
                 onSelected: (_) => _select(scope));

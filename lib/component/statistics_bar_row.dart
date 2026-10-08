@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// A sequential scale derived from the current palette rather than fixed chart
@@ -23,12 +24,21 @@ class StatisticsBarRow extends StatelessWidget {
       required this.maximum,
       this.rank,
       this.wrapLabel = false,
-      this.valueColumnWidth});
+      this.valueColumnWidth,
+      this.progress,
+      this.showTooltip = true});
   final bool wrapLabel;
   final String label, detail, valueLabel;
   final double value, maximum;
   final int? rank;
   final double? valueColumnWidth;
+
+  /// An optional shared, finite reveal. Only the bar rebuilds on its ticks;
+  /// text measurement and row layout keep their existing static path.
+  final ValueListenable<double>? progress;
+
+  /// Disabled for nonpainted layout templates, which need no pointer routes.
+  final bool showTooltip;
 
   static double measureValues(BuildContext context, Iterable<String> values) {
     final painter = TextPainter(
@@ -58,19 +68,34 @@ class StatisticsBarRow extends StatelessWidget {
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
     final numberWidth =
         valueColumnWidth ?? measureValues(context, [valueLabel]);
-    final title = Tooltip(
-        message: '$label\n$detail',
-        child: Text(label,
+    final labelText = showTooltip
+        ? Text(label,
             maxLines: wrapLabel ? null : 1,
-            overflow:
-                wrapLabel ? TextOverflow.visible : TextOverflow.ellipsis));
-    final amount = Text(valueLabel,
-        textAlign: TextAlign.right,
-        style: Theme.of(context)
-            .textTheme
-            .labelLarge
-            ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600));
-    final bar = ClipRRect(
+            overflow: wrapLabel ? TextOverflow.visible : TextOverflow.ellipsis)
+        : RichText(
+            text: TextSpan(
+                text: label, style: DefaultTextStyle.of(context).style),
+            textDirection: Directionality.of(context),
+            textScaler: MediaQuery.textScalerOf(context),
+            maxLines: wrapLabel ? null : 1,
+            overflow: wrapLabel ? TextOverflow.visible : TextOverflow.ellipsis);
+    final title = showTooltip
+        ? Tooltip(message: '$label\n$detail', child: labelText)
+        : labelText;
+    final amountStyle = Theme.of(context)
+        .textTheme
+        .labelLarge
+        ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600);
+    final amount = showTooltip
+        ? Text(valueLabel, textAlign: TextAlign.right, style: amountStyle)
+        : RichText(
+            text: TextSpan(
+                text: valueLabel,
+                style: DefaultTextStyle.of(context).style.merge(amountStyle)),
+            textAlign: TextAlign.right,
+            textDirection: Directionality.of(context),
+            textScaler: MediaQuery.textScalerOf(context));
+    Widget paintBar(double progress) => ClipRRect(
         borderRadius: BorderRadius.circular(5),
         child: SizedBox(
             height: 8,
@@ -79,11 +104,16 @@ class StatisticsBarRow extends StatelessWidget {
                 child: Align(
                     alignment: Alignment.centerLeft,
                     child: FractionallySizedBox(
-                        widthFactor: fraction,
+                        widthFactor: fraction * progress.clamp(0.0, 1.0),
                         heightFactor: 1,
                         child: ColoredBox(
                             color: StatisticsMagnitudeColor.resolve(
                                 scheme, fraction)))))));
+    final bar = progress == null
+        ? paintBar(1)
+        : ValueListenableBuilder<double>(
+            valueListenable: progress!,
+            builder: (context, value, child) => paintBar(value));
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: LayoutBuilder(builder: (context, constraints) {

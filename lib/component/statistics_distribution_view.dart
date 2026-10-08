@@ -27,7 +27,7 @@ double _statisticsTextScale(BuildContext context) =>
 /// Only the bounded metric/distribution cards use intrinsic row sizing.
 /// Natural text/legend height determines the row height; there is no clipping
 /// or fixed-height scroll area when accessibility text sizes grow.
-class StatisticsEqualHeightRows extends StatelessWidget {
+class StatisticsEqualHeightRows extends StatefulWidget {
   const StatisticsEqualHeightRows({
     super.key,
     required this.children,
@@ -40,15 +40,38 @@ class StatisticsEqualHeightRows extends StatelessWidget {
   final double spacing;
 
   @override
+  State<StatisticsEqualHeightRows> createState() =>
+      _StatisticsEqualHeightRowsState();
+}
+
+class _StatisticsEqualHeightRowsState extends State<StatisticsEqualHeightRows> {
+  final _slots = <GlobalKey>[];
+
+  Widget _child(int index) =>
+      KeyedSubtree(key: _slots[index], child: widget.children[index]);
+
+  @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    // Only these bounded card/legend slots survive a responsive column change;
+    // original child keys still determine identity within each slot.
+    while (_slots.length < widget.children.length) {
+      _slots.add(GlobalKey());
+    }
+    if (_slots.length > widget.children.length) {
+      _slots.removeRange(widget.children.length, _slots.length);
+    }
+    final columns = widget.columns;
+    final spacing = widget.spacing;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (var start = 0; start < children.length; start += columns) ...[
+        for (var start = 0;
+            start < widget.children.length;
+            start += columns) ...[
           if (start != 0) SizedBox(height: spacing),
           if (columns == 1)
-            children[start]
+            _child(start)
           else
             IntrinsicHeight(
               child: Row(
@@ -57,8 +80,8 @@ class StatisticsEqualHeightRows extends StatelessWidget {
                   for (var column = 0; column < columns; column++) ...[
                     if (column != 0) SizedBox(width: spacing),
                     Expanded(
-                      child: start + column < children.length
-                          ? children[start + column]
+                      child: start + column < widget.children.length
+                          ? _child(start + column)
                           : const SizedBox.shrink(),
                     ),
                   ],
@@ -127,7 +150,7 @@ class StatisticsDistributionView extends StatelessWidget {
     final compactLegend = rowWidth / textScale < 340;
     final chart = Semantics(
       label:
-          '$centerLabel $centerValue。${slices.map((item) => '${item.label} ${item.amount}').join('，')}',
+          '${centerLabel.isEmpty ? '' : '$centerLabel '}$centerValue。${slices.map((item) => '${item.label} ${item.amount}').join('，')}',
       excludeSemantics: true,
       child: SizedBox.square(
         key: ValueKey('statistics-chart-$chartId'),
@@ -165,12 +188,14 @@ class StatisticsDistributionView extends StatelessWidget {
                               ),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        centerLabel,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
+                      if (centerLabel.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          centerLabel,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -309,37 +334,40 @@ class _DistributionComparisonRow extends StatelessWidget {
             label: '${slice.label} ${slice.amount} $percentage',
             child: _bar(context, fraction),
           ),
-          const SizedBox(height: 5),
-          if (slice.comparisonValue == null)
-            Text(slice.detail,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant))
-          else
-            Tooltip(
-              message: ui("源文件数量"),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 2,
-                    alignment: WrapAlignment.spaceBetween,
-                    children: [
-                      Text(slice.detail, style: theme.textTheme.bodySmall),
-                      Text(
-                          '${(slice.comparisonValue! * 100).toStringAsFixed(1)}%',
-                          style: theme.textTheme.bodySmall),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Semantics(
-                    label: '${ui("源文件数量")} ${slice.detail}',
-                    child:
-                        _bar(context, slice.comparisonValue!, secondary: true),
-                  ),
-                ],
+          if (slice.detail.isNotEmpty || slice.comparisonValue != null) ...[
+            const SizedBox(height: 5),
+            if (slice.comparisonValue == null)
+              Text(slice.detail,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant))
+            else
+              Tooltip(
+                message: ui("源文件数量"),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 2,
+                      alignment: WrapAlignment.spaceBetween,
+                      children: [
+                        if (slice.detail.isNotEmpty)
+                          Text(slice.detail, style: theme.textTheme.bodySmall),
+                        Text(
+                            '${(slice.comparisonValue! * 100).toStringAsFixed(1)}%',
+                            style: theme.textTheme.bodySmall),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Semantics(
+                      label: '${ui("源文件数量")} ${slice.detail}',
+                      child: _bar(context, slice.comparisonValue!,
+                          secondary: true),
+                    ),
+                  ],
+                ),
               ),
-            ),
+          ],
         ],
       ),
     );

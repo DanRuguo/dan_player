@@ -72,7 +72,7 @@ class _PersonalAnnotationsCardState extends State<PersonalAnnotationsCard> {
                 amount: snapshot.ratingCounts[rating] == 1
                     ? ui('1 首')
                     : ui('{0} 首', [snapshot.ratingCounts[rating]]),
-                detail: ui('已评级歌曲'),
+                detail: '',
                 percentage: snapshot.ratedTracks == 0
                     ? 0
                     : snapshot.ratingCounts[rating]! *
@@ -87,7 +87,7 @@ class _PersonalAnnotationsCardState extends State<PersonalAnnotationsCard> {
             label: tag.key,
             value: tag.value,
             amount: tag.value == 1 ? ui('1 次标注') : ui('{0} 次标注', [tag.value]),
-            detail: ui('标签附着次数'),
+            detail: '',
             percentage: snapshot.tagAnnotations == 0
                 ? 0
                 : tag.value * 100 / snapshot.tagAnnotations,
@@ -175,11 +175,7 @@ class _PersonalAnnotationsCardState extends State<PersonalAnnotationsCard> {
                           slices: _slices(context, snapshot),
                           centerValue:
                               '${ratings ? snapshot.ratedTracks : snapshot.tagAnnotations}',
-                          centerLabel: ratings
-                              ? ui(snapshot.ratedTracks == 0 ? '暂无评级' : '已评级歌曲')
-                              : ui(snapshot.tagAnnotations == 0
-                                  ? '暂无标签'
-                                  : '标签附着次数')),
+                          centerLabel: ''),
                       const SizedBox(height: 16),
                       Text(
                           ratings
