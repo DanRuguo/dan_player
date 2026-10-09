@@ -499,6 +499,14 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               () =>
                                   _setting(context, 'desktop', 'integration')),
                         ]),
+                        _section(context, 'fonts', '字体管理',
+                            Icons.font_download_outlined, [
+                          _text('字体可统一设置，或分别设置中文、英文、日文、韩文；主界面、桌面歌词与任务栏歌词同步应用。'),
+                          const SizedBox(height: 8),
+                          _text('英文、假名与韩文分别使用所选字体；共用汉字结合上下文和界面语言判断，缺字自动回退。'),
+                          _link(context, 'guide-font-settings', '字体管理',
+                              () => _setting(context, 'appearance', 'font')),
+                        ]),
                         _chapter(context, 7,
                             '先查看听歌与文件占用，再按需开启资源监控；备份、恢复和已搬目录的重定位用于维护与换机。'),
                         _section(context, 'statistics', '统计与资源监控',

@@ -1364,15 +1364,17 @@ class PlaybackService extends ChangeNotifier {
     queueStopBoundary.sleepExpired();
     stopAfterCurrent.value = false;
     final occurrence = _currentOccurrence;
+    final state = playerState;
     if (finishCurrent &&
         occurrence != null &&
         resolvingAudioPath.value == null &&
         !isChangingOutput.value &&
-        playerState == PlayerState.playing &&
+        (state == PlayerState.playing || state == PlayerState.stalled) &&
         length > 0 &&
         position < length) {
       // Bind to this occurrence/session, rather than a flag that could stop
       // an unrelated track after the user explicitly changes the source.
+      // A runtime data stall retains native playback intent and can refill.
       queueStopBoundary.arm(occurrence.id);
       queueStopBoundary.resumeAdvance();
       showAppNotice(ui('睡眠定时已到，将播完当前歌曲后停止'));

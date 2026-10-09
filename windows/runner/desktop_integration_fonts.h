@@ -262,16 +262,22 @@ class PopupFonts {
     if (collection.GetFamilies(count, families.get(), &found) != Gdiplus::Ok) {
       return {};
     }
-    std::wstring first;
+    std::wstring first, matched;
     for (int index = 0; index < found; ++index) {
       WCHAR name[LF_FACESIZE]{};
       if (families[index].GetFamilyName(name, language) != Gdiplus::Ok) continue;
       if (first.empty()) first = name;
       const std::wstring family(name);
-      if (_wcsnicmp(requested.c_str(), family.c_str(), family.size()) == 0) {
-        return family;
+      if (_wcsicmp(requested.c_str(), family.c_str()) == 0) return family;
+      // Full face names can extend a family with a style suffix. Collections
+      // may enumerate "Yu Gothic" before "Yu Gothic UI"; retain the longest
+      // matching family rather than binding UI faces to the shorter sibling.
+      if (family.size() > matched.size() &&
+          _wcsnicmp(requested.c_str(), family.c_str(), family.size()) == 0) {
+        matched = family;
       }
     }
+    if (!matched.empty()) return matched;
     // A FontLoader alias has no GDI identity. A single-face TTF is unambiguous;
     // TTC collections otherwise retain the requested system family fallback.
     return count == 1 || requested == L"DanPingFangSC" ? first : std::wstring{};

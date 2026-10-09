@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env,
     fs::{self, read_dir},
     path::{Path, PathBuf},
@@ -51,24 +52,29 @@ fn _read_fonts_in_folder(path: &Path, result: &mut Vec<InstalledFont>) -> anyhow
                         continue;
                     }
                 };
-                let face = match ttf_parser::Face::parse(&font, 0) {
-                    Ok(value) => value,
-                    Err(err) => {
-                        log_to_dart(err.to_string());
-                        continue;
-                    }
-                };
-                for name in face.names() {
-                    if name.name_id == ttf_parser::name_id::FULL_NAME {
-                        let full_name = match name.to_string() {
-                            Some(value) => value,
-                            None => continue,
-                        };
-                        result.push(InstalledFont {
-                            path: entry.path().to_string_lossy().to_string(),
-                            full_name,
-                        });
-                        break;
+                let mut names = HashSet::new();
+                for index in 0..ttf_parser::fonts_in_collection(&font).unwrap_or(1) {
+                    let face = match ttf_parser::Face::parse(&font, index) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            log_to_dart(err.to_string());
+                            continue;
+                        }
+                    };
+                    for name in face.names() {
+                        if name.name_id == ttf_parser::name_id::FULL_NAME {
+                            let full_name = match name.to_string() {
+                                Some(value) => value,
+                                None => continue,
+                            };
+                            if names.insert(full_name.clone()) {
+                                result.push(InstalledFont {
+                                    path: entry.path().to_string_lossy().to_string(),
+                                    full_name,
+                                });
+                            }
+                            break;
+                        }
                     }
                 }
             }
@@ -91,3 +97,7 @@ fn _get_installed_fonts() -> Result<Vec<InstalledFont>, anyhow::Error> {
 
     Ok(installed_fonts)
 }
+
+#[cfg(test)]
+#[path = "installed_font_tests.rs"]
+mod tests;

@@ -32,6 +32,8 @@ class TaskbarLyricRow extends StatefulWidget {
 class _TaskbarLyricRowState extends State<TaskbarLyricRow> {
   Object? _projectionIdentity;
   _TaskbarTextProjection? _projection;
+  Object? _fitIdentity;
+  double _fitFontSize = 0;
   DesktopLyricController get controller => widget.controller;
   DesktopLyricWindowLayout get windowLayout => widget.windowLayout;
   void Function(String)? get sendMessage => widget.sendMessage;
@@ -124,15 +126,51 @@ class _TaskbarLyricRowState extends State<TaskbarLyricRow> {
               final baseStyle = DefaultTextStyle.of(context).style.merge(
                   const TextStyle(height: 1.25, fontWeight: FontWeight.w700));
               final scaler = MediaQuery.textScalerOf(context);
-              final fontSize = taskbarLyricFontSize(visibleText,
-                  style: baseStyle,
-                  scaler: scaler,
-                  direction: Directionality.of(context),
-                  fontPolicy: AppFontScope.of(context),
-                  width: lineBounds.maxWidth,
-                  height: lineBounds.maxHeight - 4,
-                  preferred: prefs.lyricFontSize,
-                  minimum: prefs.taskbarMinimumFontSize);
+              final direction = Directionality.of(context);
+              final fontPolicy = AppFontScope.of(context);
+              // Fit uses advances and line metrics, not the current palette.
+              // In particular, a background theme frame must not restart its
+              // binary search. Keep just one entry for this row's actual inputs.
+              final metricsStyle = TextStyle(
+                  inherit: baseStyle.inherit,
+                  fontFamily: baseStyle.fontFamily,
+                  fontFamilyFallback: baseStyle.fontFamilyFallback,
+                  fontWeight: baseStyle.fontWeight,
+                  fontStyle: baseStyle.fontStyle,
+                  letterSpacing: baseStyle.letterSpacing,
+                  wordSpacing: baseStyle.wordSpacing,
+                  textBaseline: baseStyle.textBaseline,
+                  height: baseStyle.height,
+                  leadingDistribution: baseStyle.leadingDistribution,
+                  locale: baseStyle.locale,
+                  fontFeatures: baseStyle.fontFeatures,
+                  fontVariations: baseStyle.fontVariations,
+                  overflow: baseStyle.overflow);
+              final fitIdentity = (
+                visibleText,
+                metricsStyle,
+                scaler,
+                direction,
+                fontPolicy,
+                Localizations.maybeLocaleOf(context),
+                lineBounds.maxWidth,
+                lineBounds.maxHeight - 4,
+                prefs.lyricFontSize,
+                prefs.taskbarMinimumFontSize
+              );
+              if (_fitIdentity != fitIdentity) {
+                _fitFontSize = taskbarLyricFontSize(visibleText,
+                    style: baseStyle,
+                    scaler: scaler,
+                    direction: direction,
+                    fontPolicy: fontPolicy,
+                    width: lineBounds.maxWidth,
+                    height: lineBounds.maxHeight - 4,
+                    preferred: prefs.lyricFontSize,
+                    minimum: prefs.taskbarMinimumFontSize);
+                _fitIdentity = fitIdentity;
+              }
+              final fontSize = _fitFontSize;
               final color = prefs.customColor == null
                   ? primary
                   : Color(prefs.customColor!);

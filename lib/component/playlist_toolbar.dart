@@ -233,7 +233,10 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
   void didUpdateWidget(PlaylistToolbar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isRoot != widget.isRoot ||
-        oldWidget.selecting != widget.selecting) {
+        oldWidget.selecting != widget.selecting ||
+        oldWidget.view != widget.view) {
+      // Native compact-menu actions arrive after the frame. A newer layout
+      // input must retire that opening action before it can overwrite the view.
       _modeEpoch++;
     }
   }

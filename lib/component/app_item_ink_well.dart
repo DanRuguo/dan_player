@@ -30,6 +30,8 @@ class _AppItemInkWellState extends State<AppItemInkWell> {
   final _states = WidgetStatesController();
   final _focus = FocusNode(debugLabel: 'item ink');
   TapDownDetails? _secondary;
+  int? _pressPointer;
+  int _pressGeneration = 0;
 
   @override
   void initState() {
@@ -42,11 +44,28 @@ class _AppItemInkWellState extends State<AppItemInkWell> {
   }
 
   void _release() {
+    final generation = _pressGeneration;
     scheduleMicrotask(() {
-      if (!mounted) return;
+      if (!mounted || generation != _pressGeneration || _pressPointer != null) {
+        return;
+      }
       _states.update(WidgetState.pressed, false);
       _states.update(WidgetState.hovered, false);
     });
+  }
+
+  void _pointerDown(PointerDownEvent event) {
+    if (_pressPointer != null) return;
+    _pressPointer = event.pointer;
+    _pressGeneration++;
+  }
+
+  void _pointerEnd(PointerEvent event) {
+    // The native gesture recognizer owns the first pointer's pressed state.
+    // A second touch ending must not clear that still-active visual feedback.
+    if (_pressPointer != event.pointer) return;
+    _pressPointer = null;
+    _release();
   }
 
   Color _stateColor(BuildContext context, Set<WidgetState> states) {
@@ -72,8 +91,9 @@ class _AppItemInkWellState extends State<AppItemInkWell> {
 
   @override
   Widget build(BuildContext context) => Listener(
-      onPointerUp: (_) => _release(),
-      onPointerCancel: (_) => _release(),
+      onPointerDown: _pointerDown,
+      onPointerUp: _pointerEnd,
+      onPointerCancel: _pointerEnd,
       child: ListenableBuilder(
           listenable: _states,
           // Flutter's InkHighlight keeps its creation-time opacity independently

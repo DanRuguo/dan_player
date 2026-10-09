@@ -1,4 +1,9 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '字体可统一设置，或分别设置中文、英文、日文、韩文；主界面、桌面歌词与任务栏歌词同步应用。': [
+    'Choose one font for all languages or separate fonts for Chinese, English, Japanese and Korean. The interface, desktop lyrics and taskbar lyrics follow the same choices.',
+    '全言語で共通のフォント、または中国語・英語・日本語・韓国語別のフォントを選べます。画面、デスクトップ歌詞、タスクバー歌詞に同じ選択を適用します。',
+    '모든 언어에 같은 글꼴을 쓰거나 중국어·영어·일본어·한국어별로 선택할 수 있습니다. 화면, 바탕 화면 가사, 작업 표시줄 가사에 함께 적용됩니다.'
+  ],
   '试一试：歌单视图': ['Try it: playlist views', '試す：プレイリスト表示', '체험: 재생목록 보기'],
   '晨光': ['Dawn', '朝', '아침'],
   '午后': ['Noon', '午後', '정오'],

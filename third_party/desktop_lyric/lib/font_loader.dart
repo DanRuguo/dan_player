@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'font_policy.dart';
+import 'font_collection.dart';
 
-final _loaded = <(String, String), Future<void>>{};
+final _loaded = <(String, String, String), Future<void>>{};
 
 /// Each Flutter engine owns its font registry. Concurrent requests share IO;
 /// failures are removed so a restored custom file can be retried.
@@ -14,14 +15,16 @@ Future<void> ensureAppFontsLoaded(AppFontPolicy policy) async {
 Future<void> ensureAppFontLoaded(AppFontFace face) {
   final source = face.asset ?? face.path;
   if (source == null) return Future<void>.value();
-  final key = (face.family, source);
+  final selectedName = face.nativeFamily ?? face.family;
+  final key = (face.family, source, selectedName);
   return _loaded.putIfAbsent(key, () async {
     try {
       final bytes = face.asset != null
           ? await _bundledBytes(face.asset!)
           : ByteData.sublistView(await File(face.path!).readAsBytes());
       _validateFont(bytes);
-      final loader = FontLoader(face.family)..addFont(Future.value(bytes));
+      final selected = fontBytesForFace(bytes, selectedName);
+      final loader = FontLoader(face.family)..addFont(Future.value(selected));
       await loader.load();
     } catch (_) {
       _loaded.remove(key);

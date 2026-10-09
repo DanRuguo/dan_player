@@ -161,6 +161,17 @@ add_executable(desktop_integration_fonts_test EXCLUDE_FROM_ALL
   "tests/desktop_integration_fonts_test.cpp"
 )
 
+add_executable(font_collection_family_test EXCLUDE_FROM_ALL
+  "tests/font_collection_family_test.cpp")
+target_compile_definitions(font_collection_family_test PRIVATE NOMINMAX UNICODE _UNICODE)
+target_link_libraries(font_collection_family_test PRIVATE gdi32 gdiplus user32)
+if(MSVC)
+  target_compile_options(font_collection_family_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(font_collection_family_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+
 add_executable(desktop_integration_blur_test EXCLUDE_FROM_ALL
   "tests/desktop_integration_blur_test.cpp"
 )
