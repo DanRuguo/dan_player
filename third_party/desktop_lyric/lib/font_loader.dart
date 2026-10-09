@@ -4,9 +4,10 @@ import 'font_policy.dart';
 import 'font_collection.dart';
 
 final _loaded = <(String, String, String), Future<void>>{};
+final _pendingSources = <(bool, String), Future<ByteData>>{};
 
-/// Each Flutter engine owns its font registry. Concurrent requests share IO;
-/// failures are removed so a restored custom file can be retried.
+/// Each Flutter engine owns its font registry. Concurrent selections share
+/// source IO and validation; failures allow a restored custom file to retry.
 Future<void> ensureAppFontsLoaded(AppFontPolicy policy) async {
   final faces = <AppFontFace>{...policy.faces, policy.baseFallback};
   await Future.wait(faces.map(ensureAppFontLoaded));
@@ -19,10 +20,7 @@ Future<void> ensureAppFontLoaded(AppFontFace face) {
   final key = (face.family, source, selectedName);
   return _loaded.putIfAbsent(key, () async {
     try {
-      final bytes = face.asset != null
-          ? await _bundledBytes(face.asset!)
-          : ByteData.sublistView(await File(face.path!).readAsBytes());
-      _validateFont(bytes);
+      final bytes = await _validatedSource(face.asset != null, source);
       final selected = fontBytesForFace(bytes, selectedName);
       final loader = FontLoader(face.family)..addFont(Future.value(selected));
       await loader.load();
@@ -30,6 +28,23 @@ Future<void> ensureAppFontLoaded(AppFontFace face) {
       _loaded.remove(key);
       rethrow;
     }
+  });
+}
+
+Future<ByteData> _validatedSource(bool asset, String source) {
+  final key = (asset, source);
+  return _pendingSources.putIfAbsent(key, () {
+    // Keep bytes only while the source read and validation are pending. Each
+    // selected face still owns its engine registration and extracted SFNT.
+    return Future<ByteData>.sync(() async {
+      final bytes = asset
+          ? await _bundledBytes(source)
+          : ByteData.sublistView(await File(source).readAsBytes());
+      _validateFont(bytes);
+      return bytes;
+    }).whenComplete(() {
+      _pendingSources.remove(key);
+    });
   });
 }
 

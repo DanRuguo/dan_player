@@ -12,11 +12,14 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/component/player_guide_demo.dart';
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/page/search_page/search_page.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 class PlayerFeatureGuideSettings extends StatelessWidget {
@@ -76,6 +79,9 @@ const _guideChapters = [
 
 class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
   final _demoLayoutChanges = ValueNotifier(0);
+  late ValueListenable<bool> _demoHidden;
+  int _commonRevealEpoch = 0;
+  ScrollPosition? _commonRevealPosition;
   final _chapterKeys = {
     for (final chapter in _guideChapters) chapter.$1: GlobalKey(),
   };
@@ -88,22 +94,110 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
     for (final id in ['queue', 'lyrics', 'playlists', 'sound']) id: GlobalKey(),
   };
 
+  @override
+  void initState() {
+    super.initState();
+    _demoHidden = widget.demoIsHidden ?? DesktopIntegration.instance.isHidden;
+    _demoHidden.addListener(_hiddenChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant PlayerFeatureGuideDialog oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.demoIsHidden != widget.demoIsHidden) {
+      _demoHidden.removeListener(_hiddenChanged);
+      _demoHidden = widget.demoIsHidden ?? DesktopIntegration.instance.isHidden;
+      _demoHidden.addListener(_hiddenChanged);
+      _cancelCommonReveal();
+    }
+  }
+
+  bool get _canRevealCommon =>
+      mounted &&
+      !_demoHidden.value &&
+      TickerMode.valuesOf(context).enabled &&
+      (ModalRoute.of(context)?.isCurrent ?? true);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_canRevealCommon) _cancelCommonReveal();
+  }
+
+  void _cancelCommonReveal() {
+    final epoch = ++_commonRevealEpoch;
+    final position = _commonRevealPosition;
+    _commonRevealPosition = null;
+    if (position == null) return;
+    void stop() {
+      if (mounted &&
+          epoch == _commonRevealEpoch &&
+          position.context.notificationContext?.mounted == true) {
+        position.jumpTo(position.pixels);
+      }
+    }
+
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => stop());
+    } else {
+      stop();
+    }
+  }
+
+  void _hiddenChanged() {
+    if (_demoHidden.value) _cancelCommonReveal();
+  }
+
+  Duration _commonRevealDuration(Duration duration) =>
+      appToolbarReduceMotion(context, kind: MotionKind.layout)
+          ? Duration.zero
+          : AppMotion.duration(context, MotionKind.layout, duration);
+
   void _showCommonSection(String id) {
     _quickControllers[id]!.expand();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final target = _quickAnchors[id]!.currentContext;
+    _revealGuideTarget(_quickAnchors[id]!);
+  }
+
+  void _revealGuideTarget(GlobalKey anchor) {
+    final epoch = ++_commonRevealEpoch;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!_canRevealCommon || epoch != _commonRevealEpoch) return;
+      final target = anchor.currentContext;
       if (target == null) return;
-      Scrollable.ensureVisible(target,
+      _commonRevealPosition = Scrollable.maybeOf(target)?.position;
+      await Scrollable.ensureVisible(target,
           alignment: 0,
-          duration: AppMotion.duration(
-              context, MotionKind.layout, AppMotion.standard),
+          duration: _commonRevealDuration(AppMotion.standard),
           curve: AppMotion.standardCurve);
+      if (!_canRevealCommon || epoch != _commonRevealEpoch) return;
+      _commonRevealPosition = null;
+      // Expansions already started before this scroll, using the same duration.
+      // Its first target preceded their final layout, so finish toward the
+      // settled geometry with one short scroll, never an abrupt large jump.
+      // New input or hiding retires both phases of that owner.
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!_canRevealCommon ||
+            epoch != _commonRevealEpoch ||
+            !target.mounted) {
+          return;
+        }
+        _commonRevealPosition = Scrollable.maybeOf(target)?.position;
+        await Scrollable.ensureVisible(target,
+            alignment: 0,
+            duration: _commonRevealDuration(AppMotion.quick),
+            curve: AppMotion.standardCurve);
+        if (mounted && epoch == _commonRevealEpoch) {
+          _commonRevealPosition = null;
+        }
+      });
+      WidgetsBinding.instance.ensureVisualUpdate();
     });
   }
 
   @override
   void dispose() {
+    _demoHidden.removeListener(_hiddenChanged);
     for (final controller in _quickControllers.values) {
       controller.dispose();
     }
@@ -661,15 +755,26 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
         ),
       ),
     );
-    return NotificationListener<ScrollMetricsNotification>(
-        onNotification: (notification) {
-          if (notification.depth == 0 &&
-              notification.metrics.axis == Axis.vertical) {
-            _demoLayoutChanges.value++;
-          }
-          return false;
-        },
-        child: dialog);
+    return Listener(
+        onPointerDown: (_) => _cancelCommonReveal(),
+        onPointerSignal: (_) => _cancelCommonReveal(),
+        onPointerPanZoomStart: (_) => _cancelCommonReveal(),
+        child: Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            onKeyEvent: (_, event) {
+              if (event is! KeyUpEvent) _cancelCommonReveal();
+              return KeyEventResult.ignored;
+            },
+            child: NotificationListener<ScrollMetricsNotification>(
+                onNotification: (notification) {
+                  if (notification.depth == 0 &&
+                      notification.metrics.axis == Axis.vertical) {
+                    _demoLayoutChanges.value++;
+                  }
+                  return false;
+                },
+                child: dialog)));
   }
 
   Widget _section(BuildContext context, String id, String title, IconData icon,
@@ -795,14 +900,10 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
               TextButton(
                   key: ValueKey('guide-jump-${_guideChapters[index].$1}'),
                   onPressed: () {
-                    final destination =
-                        _chapterKeys[_guideChapters[index].$1]!.currentContext;
-                    if (destination == null) return;
-                    Scrollable.ensureVisible(destination,
-                        alignment: 0,
-                        duration: AppMotion.duration(
-                            context, MotionKind.layout, AppMotion.standard),
-                        curve: AppMotion.standardCurve);
+                    // Activation also owns the scroll when no preceding
+                    // pointer/key event reached the ancestor input guards.
+                    _cancelCommonReveal();
+                    _revealGuideTarget(_chapterKeys[_guideChapters[index].$1]!);
                   },
                   child:
                       Text('${index + 1} · ${ui(_guideChapters[index].$2)}')),

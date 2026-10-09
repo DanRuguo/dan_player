@@ -34,7 +34,10 @@ function Get-BundledInstallerFont {
     $fontCatalog = Get-Content -LiteralPath (Join-Path $fontRoot 'scripts\support\bundled_fonts.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $fontChoices = @($fontCatalog.fonts | Where-Object { $_.family -ceq 'DanPingFangSC' })
     if ($fontCatalog.schemaVersion -ne 1 -or $fontChoices.Count -ne 1 -or
-        $fontChoices[0].source -cne 'third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf') {
+        $fontCatalog.ownerPackage -cne 'desktop_lyric' -or
+        $fontCatalog.ownerDirectory -cne 'third_party/desktop_lyric' -or
+        $fontChoices[0].source -cne 'third_party/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf' -or
+        $fontChoices[0].source -cne ($fontCatalog.ownerDirectory + '/' + $fontChoices[0].asset)) {
         throw 'Installer must use the authoritative shared SC font.'
     }
     $fontChoice = $fontChoices[0]
@@ -43,5 +46,29 @@ function Get-BundledInstallerFont {
     if ((Get-Item -LiteralPath $fontSource).Length -ne $fontChoice.bytes -or $fontHash -cne $fontChoice.sha256) {
         throw 'Installer font differs from its pinned original.'
     }
-    [pscustomobject]@{ SourcePath=$fontSource; RelativePath=$fontChoice.source; Sha256=$fontHash; Bytes=$fontChoice.bytes }
+    [pscustomobject]@{
+        SourcePath=$fontSource; RelativePath=$fontChoice.source; Sha256=$fontHash; Bytes=$fontChoice.bytes
+        PayloadRelativePath=('data/flutter_assets/packages/' + $fontCatalog.ownerPackage + '/' + $fontChoice.asset)
+    }
+}
+
+function Get-InstallerPayloadSource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string] $RelativePath,
+        [Parameter(Mandatory=$true)][string] $SourcePath,
+        [Parameter(Mandatory=$true)][string] $Sha256,
+        [Parameter(Mandatory=$true)][long] $Bytes,
+        [Parameter(Mandatory=$true)][object] $InstallerFont
+    )
+    if (-not $RelativePath.Equals($InstallerFont.PayloadRelativePath, [StringComparison]::OrdinalIgnoreCase)) {
+        return $SourcePath
+    }
+    if ($Bytes -ne $InstallerFont.Bytes -or $Sha256 -cne $InstallerFont.Sha256) {
+        throw 'Runtime installer font differs from its pinned original.'
+    }
+    # Inno merges entries by source path. Share the authoritative file with the
+    # private wizard font only after auditing the runtime copy; destinations,
+    # manifest bytes and installation callbacks remain those of the payload.
+    return $InstallerFont.SourcePath
 }

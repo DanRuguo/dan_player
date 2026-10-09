@@ -120,7 +120,8 @@ foreach ($file in $files) {
     if ($known.ContainsKey($relative)) { throw "Duplicate payload path: $relative" }
     $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $known.Add($relative, $hash)
-    $entries.Add([pscustomobject]@{ Relative=$relative; Source=$file.FullName; Hash=$hash; Length=$file.Length })
+    $entrySource = Get-InstallerPayloadSource -RelativePath $relative -SourcePath $file.FullName -Sha256 $hash -Bytes $file.Length -InstallerFont $installerFont
+    $entries.Add([pscustomobject]@{ Relative=$relative; Source=$entrySource; Hash=$hash; Length=$file.Length })
     $totalBytes += $file.Length
 }
 if ($totalBytes -gt 8GB) { throw 'Payload exceeds 8 GiB safety budget' }

@@ -1809,7 +1809,7 @@ fn resize_picture(pic: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
         cover_decode_dimensions(loaded_pic.width(), loaded_pic.height(), width, height);
     let resized_img = if result_width == loaded_pic.width() && result_height == loaded_pic.height()
     {
-        loaded_pic.to_rgba8()
+        loaded_pic.into_rgba8()
     } else {
         imageops::resize(
             &loaded_pic,
@@ -1820,10 +1820,14 @@ fn resize_picture(pic: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     };
     let mut output = Cursor::new(Vec::new());
     resized_img
-        .write_to(&mut output, image::ImageFormat::Png)
+        .write_with_encoder(image::codecs::png::PngEncoder::new(&mut output))
         .ok()?;
     Some(output.into_inner())
 }
+
+#[cfg(test)]
+#[path = "cover_png_encoder_tests.rs"]
+mod cover_png_encoder_tests;
 
 fn _get_picture_by_lofty(path: &String, width: u32, height: u32) -> Option<Vec<u8>> {
     if let Some(picture) = id3_compat::read_picture(Path::new(path), width, height) {
