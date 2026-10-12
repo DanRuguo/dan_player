@@ -5,6 +5,8 @@ import 'package:desktop_lyric/desktop_lyric_controller.dart';
 import 'package:desktop_lyric/lyric_word_effects.dart';
 import 'package:desktop_lyric/message.dart';
 import 'package:desktop_lyric/font_policy.dart';
+import 'package:desktop_lyric/lyric_ruby.dart';
+import 'package:desktop_lyric/lyric_glyph_morph.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 
@@ -110,8 +112,11 @@ class DesktopLyricText extends StatefulWidget {
       this.strokeColor,
       this.words = const [],
       this.vertical = false,
+      this.verticalLetterSpacing = 0,
       this.maxVerticalUnitWidth,
       this.maxHorizontalWidth,
+      this.rubySpans = const [],
+      this.rubyVisibility = 1,
       this.reducedMotion = false});
 
   final String text;
@@ -121,7 +126,13 @@ class DesktopLyricText extends StatefulWidget {
   final Color unplayedColor;
   final Color? strokeColor;
   final List<DesktopLyricWord> words;
+  final List<LyricRubySpan> rubySpans;
+  final double rubyVisibility;
   final bool vertical;
+
+  /// Additional gap between complete upright display units. Horizontal words
+  /// retain their natural TextStyle tracking; the extra gap is applied once.
+  final double verticalLetterSpacing;
   final double? maxVerticalUnitWidth;
 
   /// Bounded single-line mode shares the same timed-word painter. Flutter's
@@ -133,18 +144,72 @@ class DesktopLyricText extends StatefulWidget {
   State<DesktopLyricText> createState() => _DesktopLyricTextState();
 }
 
-class _DesktopLyricTextState extends State<DesktopLyricText> {
+class _DesktopLyricTextState extends State<DesktopLyricText>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   Object? _identity;
   Object? _shapeIdentity;
   _DesktopLyricTextShaping? _shaping;
   _DesktopLyricTextLayout? _layout;
+  _DesktopLyricTextShaping? _previousShaping;
+  _DesktopLyricTextLayout? _previousLayout;
+  Object? _spacingBaseIdentity;
+  double? _lastSpacing;
+  Size? _retargetSize;
+  final _glyphMotions = <int, LyricGlyphMorph>{};
+  final _strokeMotions = <int, LyricGlyphMorph>{};
+  double _retargetProgress = 1;
+  static const _spacingCurve = Cubic(.22, 0, .16, 1);
+  bool _lifecycleHidden = false;
+  late final AnimationController _spacingMotion =
+      AnimationController(vsync: this, duration: AppMotion.lyricLine, value: 1)
+        ..addStatusListener((status) {
+          if (status == AnimationStatus.completed) _releasePrevious();
+        });
   bool _reduced = true;
   int _wordEndMilliseconds = 0;
 
   @override
   void initState() {
     super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _lifecycleHidden = lifecycle == AppLifecycleState.hidden ||
+        lifecycle == AppLifecycleState.paused ||
+        lifecycle == AppLifecycleState.detached;
+    WidgetsBinding.instance.addObserver(this);
     _attachClock();
+  }
+
+  void _releasePrevious() {
+    for (final morph in [..._glyphMotions.values, ..._strokeMotions.values]) {
+      morph.dispose();
+    }
+    _glyphMotions.clear();
+    _strokeMotions.clear();
+    _previousLayout?.ruby?.dispose();
+    _previousShaping?.dispose();
+    _previousShaping = null;
+    _previousLayout = null;
+    _retargetSize = null;
+  }
+
+  void _finishSpacing() {
+    _spacingMotion.stop();
+    _spacingMotion.value = 1;
+    _releasePrevious();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleHidden = state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached;
+    if (_lifecycleHidden) _finishSpacing();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (mounted) setState(() {});
   }
 
   void _attachClock() {
@@ -181,16 +246,73 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
     final fontPolicy = AppFontScope.of(context);
     final scaler = MediaQuery.textScalerOf(context);
     final reducedMotion = widget.reducedMotion ||
+        _lifecycleHidden ||
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
+            .disableAnimations ||
         !AppMotion.enabled(context, MotionKind.lyrics) ||
         !TickerMode.valuesOf(context).enabled;
     _reduced = reducedMotion;
     // TextPainter does not inherit the app's font as Text does. Merge the real
     // desktop typography before caching so CJK/fallback fonts stay identical.
     final style = DefaultTextStyle.of(context).style.merge(widget.style);
+    final spacingBaseIdentity = (
+      widget.text,
+      widget.words,
+      widget.rubySpans,
+      widget.vertical,
+      widget.maxHorizontalWidth != null && widget.maxHorizontalWidth!.isFinite,
+      style.copyWith(
+          letterSpacing:
+              (style.letterSpacing ?? 0) - widget.verticalLetterSpacing),
+      widget.playedColor,
+      widget.unplayedColor,
+      widget.strokeColor,
+      direction,
+      scaler,
+      locale,
+      fontPolicy,
+    );
+    final spacingAllowed = !reducedMotion &&
+        !_lifecycleHidden &&
+        AppMotion.enabled(context, MotionKind.layout) &&
+        !WidgetsBinding
+            .instance.platformDispatcher.accessibilityFeatures.reduceMotion;
+    if (!spacingAllowed) _finishSpacing();
+    _DesktopLyricTextShaping shape(double spacing) => _DesktopLyricTextShaping(
+        text: widget.text,
+        rubySpans: widget.rubySpans,
+        words: widget.words,
+        vertical: widget.vertical,
+        verticalLetterSpacing: spacing,
+        bounded: !widget.vertical &&
+            widget.maxHorizontalWidth != null &&
+            widget.maxHorizontalWidth!.isFinite,
+        style: lyricRubyPrimaryStyle(
+            spacing == widget.verticalLetterSpacing
+                ? style
+                : style.copyWith(
+                    letterSpacing: (style.letterSpacing ?? 0) -
+                        widget.verticalLetterSpacing +
+                        spacing),
+            widget.vertical ? const [] : widget.rubySpans),
+        playedColor: widget.playedColor,
+        unplayedColor: widget.unplayedColor,
+        strokeColor: widget.strokeColor,
+        direction: direction,
+        scaler: scaler,
+        locale: locale,
+        fontPolicy: fontPolicy);
+    _DesktopLyricTextLayout geometry(_DesktopLyricTextShaping shaping) =>
+        _DesktopLyricTextLayout(
+            shaping: shaping,
+            maxVerticalUnitWidth: widget.maxVerticalUnitWidth,
+            maxHorizontalWidth: widget.maxHorizontalWidth);
     final shapeIdentity = (
       widget.text,
       widget.words,
+      widget.rubySpans,
       widget.vertical,
+      widget.vertical ? widget.verticalLetterSpacing : 0,
       !widget.vertical &&
           widget.maxHorizontalWidth != null &&
           widget.maxHorizontalWidth!.isFinite,
@@ -209,29 +331,106 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
       widget.maxHorizontalWidth,
     );
     if (_identity != identity) {
+      // A retained paragraph is relaid out in place when only its width
+      // changes. Continue from the last presented geometry before mutating
+      // that target, just as a second spacing edit does.
+      if (_shapeIdentity == shapeIdentity && _previousLayout != null) {
+        final progress = _spacingCurve.transform(_spacingMotion.value);
+        final presentedSize = Size.lerp(
+            _retargetSize ?? _previousLayout!.size, _layout!.size, progress)!;
+        final presented = _DesktopLyricTextLayout.interpolate(
+            _previousLayout!, _layout!, progress,
+            sourceShaping: _previousShaping);
+        _previousLayout?.ruby?.dispose();
+        _previousLayout = presented;
+        _retargetSize = presentedSize;
+        _retargetProgress = progress;
+        _spacingMotion.forward(from: 0);
+      }
       if (_shapeIdentity != shapeIdentity) {
-        _shaping?.dispose();
-        _shaping = _DesktopLyricTextShaping(
-            text: widget.text,
-            words: widget.words,
-            vertical: widget.vertical,
-            bounded: !widget.vertical &&
-                widget.maxHorizontalWidth != null &&
-                widget.maxHorizontalWidth!.isFinite,
-            style: style,
-            playedColor: widget.playedColor,
-            unplayedColor: widget.unplayedColor,
-            strokeColor: widget.strokeColor,
-            direction: direction,
-            scaler: scaler,
-            locale: locale,
-            fontPolicy: fontPolicy);
+        final spacingChanged = _lastSpacing != null &&
+            _lastSpacing != widget.verticalLetterSpacing &&
+            _spacingBaseIdentity == spacingBaseIdentity &&
+            spacingAllowed;
+        if (spacingChanged) {
+          final progress = _spacingCurve.transform(_spacingMotion.value);
+          final presentedSize = _previousLayout == null
+              ? _layout!.size
+              : Size.lerp(_retargetSize ?? _previousLayout!.size, _layout!.size,
+                  progress)!;
+          final wasMoving = _previousLayout != null;
+          _spacingMotion.stop();
+          if (wasMoving) {
+            final presented = _DesktopLyricTextLayout.interpolate(
+                _previousLayout!, _layout!, progress,
+                sourceShaping: _previousShaping);
+            _previousLayout?.ruby?.dispose();
+            _previousLayout = presented;
+            _layout?.ruby?.dispose();
+            _shaping?.dispose();
+          } else {
+            _previousShaping = _shaping;
+            _previousLayout = _layout;
+          }
+          _retargetProgress = progress;
+          _retargetSize = wasMoving ? presentedSize : null;
+          _spacingMotion.forward(from: 0);
+        } else {
+          _finishSpacing();
+          _layout?.ruby?.dispose();
+          _shaping?.dispose();
+        }
+        _shaping = shape(widget.verticalLetterSpacing);
         _shapeIdentity = shapeIdentity;
       }
-      _layout = _DesktopLyricTextLayout(
-          shaping: _shaping!,
-          maxVerticalUnitWidth: widget.maxVerticalUnitWidth,
-          maxHorizontalWidth: widget.maxHorizontalWidth);
+      if (identical(_layout?.shaping, _shaping)) _layout?.ruby?.dispose();
+      _layout = geometry(_shaping!);
+      if (_previousShaping != null) {
+        final from = _previousLayout!;
+        void cache(int key, TextPainter source, TextPainter target,
+            Map<int, LyricGlyphMorph> motions,
+            {bool centered = false}) {
+          final existing = motions[key];
+          final offset = centered
+              ? Offset((source.width - target.width) / 2, 0)
+              : Offset.zero;
+          final next = existing == null
+              ? LyricGlyphMorph(
+                  from: source,
+                  to: target,
+                  targetOffset: offset,
+                  pixelRatio: MediaQuery.devicePixelRatioOf(context))
+              : LyricGlyphMorph.retarget(existing, target, _retargetProgress,
+                  targetOffset: centered
+                      ? Offset(
+                          (existing.sourceSize.width - target.width) / 2, 0)
+                      : Offset.zero);
+          existing?.dispose();
+          motions[key] = next;
+        }
+
+        if (!widget.vertical) {
+          cache(0, from.highlight!, _layout!.highlight!, _glyphMotions,
+              centered: true);
+          if (from.stroke != null && _layout!.stroke != null) {
+            cache(0, from.stroke!, _layout!.stroke!, _strokeMotions,
+                centered: true);
+          }
+        } else {
+          for (var index = 0; index < from.glyphs.length; index++) {
+            if (!from.glyphs[index].glyph.horizontal) continue;
+            cache(index, from.glyphs[index].highlight,
+                _layout!.glyphs[index].highlight, _glyphMotions);
+            if (from.glyphs[index].stroke != null &&
+                _layout!.glyphs[index].stroke != null) {
+              cache(index, from.glyphs[index].stroke!,
+                  _layout!.glyphs[index].stroke!, _strokeMotions);
+            }
+          }
+        }
+      }
+      _lastSpacing = widget.verticalLetterSpacing;
+      _spacingBaseIdentity = spacingBaseIdentity;
       _identity = identity;
       // A bounded paragraph can omit trailing authored words entirely. Only
       // words with visible shaped boxes can keep its sampler alive. Recompute
@@ -245,27 +444,58 @@ class _DesktopLyricTextState extends State<DesktopLyricText> {
       }
     }
     _syncSamplingDemand();
-    return SizedBox.fromSize(
-      size: _layout!.size,
-      child: RepaintBoundary(
-          child: CustomPaint(
-        painter: DesktopLyricTextPainter._(
-            layout: _layout!,
-            clock: widget.clock,
-            reducedMotion: reducedMotion),
-        isComplex: true,
-        willChange: widget.words.isNotEmpty && !reducedMotion,
-      )),
+    return AnimatedBuilder(
+      animation: _spacingMotion,
+      builder: (context, _) {
+        final progress = _spacingCurve.transform(_spacingMotion.value);
+        final previous = _previousLayout;
+        var size = previous == null
+            ? _layout!.size
+            : Size.lerp(
+                _retargetSize ?? previous.size, _layout!.size, progress)!;
+        final readingExtent = (_layout!.ruby?.extent ?? 0) +
+            (widget.vertical ? 0 : (_layout!.ruby?.extraLeading ?? 0));
+        size = widget.vertical
+            ? Size(
+                math.max(0,
+                    size.width - readingExtent * (1 - widget.rubyVisibility)),
+                size.height)
+            : Size(
+                size.width,
+                math.max(0,
+                    size.height - readingExtent * (1 - widget.rubyVisibility)));
+        return SizedBox.fromSize(
+          size: size,
+          child: RepaintBoundary(
+              child: CustomPaint(
+            painter: DesktopLyricTextPainter._(
+                layout: _layout!,
+                previousLayout: previous,
+                glyphMotions: _glyphMotions,
+                strokeMotions: _strokeMotions,
+                layoutProgress: progress,
+                clock: widget.clock,
+                rubyVisibility: widget.rubyVisibility,
+                reducedMotion: reducedMotion),
+            isComplex: true,
+            willChange: widget.words.isNotEmpty && !reducedMotion,
+          )),
+        );
+      },
     );
   }
 
   @override
   void dispose() {
     widget.clock.setVisualSamplingDemand(this, false);
+    WidgetsBinding.instance.removeObserver(this);
     if (widget.words.isNotEmpty) {
       widget.clock.removeListener(_syncSamplingDemand);
     }
     _shaping?.dispose();
+    _layout?.ruby?.dispose();
+    _spacingMotion.dispose();
+    _releasePrevious();
     super.dispose();
   }
 }
@@ -283,23 +513,45 @@ class _GlyphShaping {
 class _DesktopLyricTextShaping {
   _DesktopLyricTextShaping(
       {required this.text,
+      required this.rubySpans,
       required List<DesktopLyricWord> words,
       required this.vertical,
+      required double verticalLetterSpacing,
       required bool bounded,
       required TextStyle style,
-      required Color playedColor,
-      required Color unplayedColor,
+      required this.playedColor,
+      required this.unplayedColor,
       required Color? strokeColor,
       required TextDirection direction,
       required TextScaler scaler,
       required Locale? locale,
-      required AppFontPolicy fontPolicy})
+      required this.fontPolicy})
       : words = _DesktopLyricTextLayout._shapedWords(text, words) {
+    rubyStyle = style.copyWith(color: playedColor);
+    rubyDirection = direction;
+    rubyScaler = scaler;
+    rubyLocale = locale;
+    if (rubySpans.isNotEmpty) {
+      rubyShaping = LyricRubyShaping(
+          spans: rubySpans,
+          style: rubyStyle,
+          policy: fontPolicy,
+          direction: direction,
+          scaler: scaler,
+          locale: locale,
+          vertical: vertical);
+    }
     fontSize = scaler.scale(style.fontSize ?? 22);
-    TextPainter painter(String text, Color color, {UiLanguage? language}) =>
+    letterSpacing = verticalLetterSpacing;
+    TextPainter painter(String text, Color color,
+            {UiLanguage? language, bool upright = false}) =>
         TextPainter(
           text: appFontSpan(text,
-              style: style.copyWith(color: color),
+              style: style.copyWith(
+                  color: color,
+                  letterSpacing: upright
+                      ? (style.letterSpacing ?? 0) - verticalLetterSpacing
+                      : style.letterSpacing),
               policy: fontPolicy,
               language: language),
           textDirection: direction,
@@ -308,7 +560,8 @@ class _DesktopLyricTextShaping {
           maxLines: 1,
           ellipsis: bounded ? '…' : null,
         );
-    TextPainter? outline(String text, {UiLanguage? language}) =>
+    TextPainter? outline(String text,
+            {UiLanguage? language, bool upright = false}) =>
         strokeColor == null
             ? null
             : (TextPainter(
@@ -316,6 +569,9 @@ class _DesktopLyricTextShaping {
                     policy: fontPolicy,
                     language: language,
                     style: style.copyWith(
+                      letterSpacing: upright
+                          ? (style.letterSpacing ?? 0) - verticalLetterSpacing
+                          : style.letterSpacing,
                       foreground: Paint()
                         ..style = PaintingStyle.stroke
                         ..strokeWidth =
@@ -353,26 +609,43 @@ class _DesktopLyricTextShaping {
           runs.isEmpty ? fontPolicy.language : runs[runIndex].language;
       final display =
           glyph.text == '\n' || glyph.text == '\r\n' ? ' ' : glyph.text;
-      final stroke = outline(display, language: language);
+      final stroke = outline(display,
+          language: language, upright: !glyph.horizontal && letterSpacing != 0);
       stroke?.layout();
       glyphs.add(_GlyphShaping(
           glyph,
-          painter(display, unplayedColor, language: language)..layout(),
-          painter(display, playedColor, language: language)..layout(),
+          painter(display, unplayedColor,
+              language: language,
+              upright: !glyph.horizontal && letterSpacing != 0)
+            ..layout(),
+          painter(display, playedColor,
+              language: language,
+              upright: !glyph.horizontal && letterSpacing != 0)
+            ..layout(),
           stroke));
     }
   }
 
   final String text;
+  final List<LyricRubySpan> rubySpans;
+  final AppFontPolicy fontPolicy;
+  late final TextStyle rubyStyle;
+  late final TextDirection rubyDirection;
+  late final TextScaler rubyScaler;
+  late final Locale? rubyLocale;
+  LyricRubyShaping? rubyShaping;
   final List<DesktopLyricWord> words;
   final bool vertical;
+  final Color playedColor, unplayedColor;
   late final double fontSize;
+  late final double letterSpacing;
   final List<_GlyphShaping> glyphs = [];
   TextPainter? base;
   TextPainter? highlight;
   TextPainter? stroke;
 
   void dispose() {
+    rubyShaping?.dispose();
     base?.dispose();
     highlight?.dispose();
     stroke?.dispose();
@@ -400,6 +673,37 @@ class _GlyphPaint {
 /// Each width owns independent geometry, so replacing a layout never mutates
 /// the old painter's boxes or makes shouldRepaint miss a retained paragraph.
 class _DesktopLyricTextLayout {
+  _DesktopLyricTextLayout.interpolate(
+      _DesktopLyricTextLayout from, _DesktopLyricTextLayout to, double progress,
+      {_DesktopLyricTextShaping? sourceShaping})
+      : shaping = sourceShaping ?? to.shaping {
+    size = Size.lerp(from.size, to.size, progress)!;
+    if (from.ruby != null && to.ruby != null) {
+      ruby = LyricRubyLayout.interpolate(from.ruby!, to.ruby!, progress,
+          retainSourcePainter: sourceShaping != null);
+    }
+    for (var index = 0; index < to.glyphs.length; index++) {
+      final previous = from.glyphs[index], target = to.glyphs[index];
+      glyphs.add(_GlyphPaint(
+          sourceShaping == null ? target.shaping : sourceShaping.glyphs[index],
+          bounds: Rect.lerp(previous.bounds, target.bounds, progress)!,
+          paintOffset:
+              Offset.lerp(previous.paintOffset, target.paintOffset, progress)!,
+          scale: previous.scale + (target.scale - previous.scale) * progress));
+    }
+    for (var word = 0; word < to.wordBoxes.length; word++) {
+      wordBoxes.add([
+        for (var box = 0; box < to.wordBoxes[word].length; box++)
+          (
+            rect: Rect.lerp(from.wordBoxes[word][box].rect,
+                to.wordBoxes[word][box].rect, progress)!,
+            rtl: to.wordBoxes[word][box].rtl,
+            horizontal: to.wordBoxes[word][box].horizontal,
+          )
+      ]);
+    }
+  }
+
   _DesktopLyricTextLayout(
       {required this.shaping,
       required double? maxVerticalUnitWidth,
@@ -411,7 +715,20 @@ class _DesktopLyricTextLayout {
       base!.layout(maxWidth: width);
       highlight!.layout(maxWidth: width);
       stroke?.layout(maxWidth: width);
-      size = base!.size;
+      if (shaping.rubySpans.isNotEmpty) {
+        ruby = LyricRubyLayout(
+            primary: base,
+            spans: shaping.rubySpans,
+            style: shaping.rubyStyle,
+            policy: shaping.fontPolicy,
+            direction: shaping.rubyDirection,
+            scaler: shaping.rubyScaler,
+            locale: shaping.rubyLocale,
+            shaping: shaping.rubyShaping,
+            width: base!.width);
+      }
+      size = Size(base!.width,
+          base!.height + (ruby?.extent ?? 0) + (ruby?.extraLeading ?? 0));
       var offset = 0;
       for (final word in words) {
         wordBoxes.add(base!
@@ -431,7 +748,10 @@ class _DesktopLyricTextLayout {
     final widthLimit = maxVerticalUnitWidth != null &&
             maxVerticalUnitWidth.isFinite &&
             maxVerticalUnitWidth > 0
-        ? maxVerticalUnitWidth
+        ? math.max(
+            1.0,
+            maxVerticalUnitWidth -
+                (shaping.rubySpans.isEmpty ? 0 : fontSize * .51))
         : double.infinity;
     double scaleFor(_GlyphShaping glyph) =>
         glyph.base.width > widthLimit ? widthLimit / glyph.base.width : 1;
@@ -441,6 +761,7 @@ class _DesktopLyricTextLayout {
             math.max(maxWidth, glyph.base.width * scaleFor(glyph)));
     var top = 0.0;
     for (final glyph in shaping.glyphs) {
+      if (glyphs.isNotEmpty) top += shaping.letterSpacing;
       final scale = scaleFor(glyph);
       final height = math.max(glyph.base.height, fontSize * 1.15);
       glyphs.add(_GlyphPaint(glyph,
@@ -450,7 +771,27 @@ class _DesktopLyricTextLayout {
           scale: scale));
       top += height;
     }
-    size = Size(columnWidth, top);
+    if (shaping.rubySpans.isNotEmpty) {
+      ruby = LyricRubyLayout(
+          spans: shaping.rubySpans,
+          style: shaping.rubyStyle,
+          policy: shaping.fontPolicy,
+          direction: shaping.rubyDirection,
+          scaler: shaping.rubyScaler,
+          locale: shaping.rubyLocale,
+          shaping: shaping.rubyShaping,
+          width: columnWidth,
+          vertical: true,
+          verticalUnits: [
+            for (final glyph in glyphs)
+              (
+                start: glyph.glyph.start,
+                end: glyph.glyph.end,
+                bounds: glyph.bounds
+              )
+          ]);
+    }
+    size = Size(columnWidth + (ruby?.extent ?? 0), top);
     var offset = 0;
     for (final word in words) {
       final start = offset.clamp(0, text.length);
@@ -496,6 +837,7 @@ class _DesktopLyricTextLayout {
   late final Size size;
   double get fontSize => shaping.fontSize;
   final List<List<({Rect rect, bool rtl, bool horizontal})>> wordBoxes = [];
+  LyricRubyLayout? ruby;
   late final List<double> wordExtents = [
     for (final boxes in wordBoxes)
       boxes.fold<double>(
@@ -584,17 +926,40 @@ class _DesktopLyricTextLayout {
 class DesktopLyricTextPainter extends CustomPainter {
   DesktopLyricTextPainter._(
       {required _DesktopLyricTextLayout layout,
+      _DesktopLyricTextLayout? previousLayout,
+      double layoutProgress = 1,
+      Map<int, LyricGlyphMorph> glyphMotions = const {},
+      Map<int, LyricGlyphMorph> strokeMotions = const {},
+      this.rubyVisibility = 1,
       required this.clock,
       required this.reducedMotion})
-      : _layout = layout,
+      : _layout = previousLayout != null && layout.vertical
+            ? _DesktopLyricTextLayout.interpolate(
+                previousLayout, layout, layoutProgress)
+            : layout,
+        _previousLayout = layout.vertical ? null : previousLayout,
+        _glyphMotions = glyphMotions,
+        _strokeMotions = strokeMotions,
+        _layoutProgress = layoutProgress,
         super(
             repaint: layout.words.isNotEmpty && !reducedMotion ? clock : null);
 
   final _DesktopLyricTextLayout _layout;
+  final _DesktopLyricTextLayout? _previousLayout;
+  final Map<int, LyricGlyphMorph> _glyphMotions, _strokeMotions;
+  Size _paintSize = Size.zero;
+  final double _layoutProgress;
+  final double rubyVisibility;
+  @visibleForTesting
+  double get layoutProgress => _layoutProgress;
+  @visibleForTesting
+  bool get retainsPreviousLayout => _layoutProgress < 1;
   final PlaybackClock clock;
   final bool reducedMotion;
 
   bool get vertical => _layout.vertical;
+  @visibleForTesting
+  LyricRubyLayout? get rubyLayout => _layout.ruby;
   @visibleForTesting
   Object get layoutCacheIdentity => _layout;
 
@@ -650,12 +1015,67 @@ class DesktopLyricTextPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    _layout.paintStroke(canvas);
-    if (_layout.words.isEmpty || reducedMotion) {
-      _layout.paint(canvas, played: true);
+    _paintSize = size;
+    final previous = _previousLayout;
+    if (previous == null || _layoutProgress >= 1 || _glyphMotions.isNotEmpty) {
+      _paintLayout(canvas);
       return;
     }
-    _layout.paint(canvas, played: false);
+    void endpoint(_DesktopLyricTextLayout layout, double opacity) {
+      if (opacity <= 0) return;
+      canvas.save();
+      canvas.translate((size.width - layout.size.width) / 2, 0);
+      canvas.saveLayer(Offset.zero & layout.size,
+          Paint()..color = Colors.white.withValues(alpha: opacity));
+      DesktopLyricTextPainter._(
+              layout: layout, clock: clock, reducedMotion: reducedMotion)
+          ._paintLayout(canvas);
+      canvas.restore();
+      canvas.restore();
+    }
+
+    endpoint(previous, 1 - _layoutProgress);
+    endpoint(_layout, _layoutProgress);
+  }
+
+  void _paintLayout(Canvas canvas) {
+    final ruby = _layout.ruby;
+    if (ruby == null) {
+      _paintPrimaryLayout(canvas);
+      return;
+    }
+    canvas.save();
+    if (!vertical) canvas.translate(0, ruby.extent * rubyVisibility);
+    if (vertical) {
+      _paintPrimaryLayout(canvas);
+    } else {
+      ruby.paintPrimary(canvas, () => _paintPrimaryLayout(canvas),
+          visibility: rubyVisibility);
+    }
+    ruby.paint(canvas,
+        visibility: rubyVisibility,
+        displacement: !vertical && _glyphMotions[0] != null
+            ? (glyph) {
+                final motion = _glyphMotions[0]!;
+                final presented = motion.bounds(
+                    glyph.span.start, glyph.span.end, _layoutProgress);
+                if (presented == null) return Offset.zero;
+                final center = (_paintSize.width - motion.sourceSize.width) / 2;
+                return Offset(
+                    presented.center.dx + center - glyph.source.center.dx,
+                    presented.top - glyph.source.top);
+              }
+            : null);
+    canvas.restore();
+  }
+
+  void _paintPrimaryLayout(Canvas canvas) {
+    _paintGlyphs(canvas, played: false, stroke: true);
+    if (_layout.words.isEmpty || reducedMotion) {
+      _paintGlyphs(canvas, played: true);
+      return;
+    }
+    _paintGlyphs(canvas, played: false);
     final completed = Path();
     var hasCompleted = false;
     final active = <({
@@ -676,7 +1096,7 @@ class DesktopLyricTextPainter extends CustomPainter {
           extent: extent,
           softness: _layout.wordSoftness[index]);
       var offset = 0.0;
-      for (final box in _layout.wordBoxes[index]) {
+      for (final box in _presentedWordBoxes(index)) {
         final vertical = _layout.vertical && !box.horizontal;
         final end = offset + (vertical ? box.rect.height : box.rect.width);
         if (progress >= 1 || edges.start >= end) {
@@ -698,7 +1118,7 @@ class DesktopLyricTextPainter extends CustomPainter {
     if (hasCompleted) {
       canvas.save();
       canvas.clipPath(completed);
-      _layout.paint(canvas, played: true);
+      _paintGlyphs(canvas, played: true);
       canvas.restore();
     }
     // Only unfinished word fragments need an alpha mask. Completed text is
@@ -709,7 +1129,7 @@ class DesktopLyricTextPainter extends CustomPainter {
       canvas.save();
       canvas.clipRect(fragment.bounds);
       canvas.saveLayer(fragment.bounds, Paint());
-      _layout.paint(canvas, played: true);
+      _paintGlyphs(canvas, played: true);
       canvas.drawRect(
           fragment.bounds,
           Paint()
@@ -727,9 +1147,91 @@ class DesktopLyricTextPainter extends CustomPainter {
     }
   }
 
+  List<({Rect rect, bool rtl, bool horizontal})> _presentedWordBoxes(
+      int index) {
+    final morph = _glyphMotions[0];
+    if (vertical || morph == null) return _layout.wordBoxes[index];
+    var start = 0;
+    for (var word = 0; word < index; word++) {
+      start += _layout.words[word].content.length;
+    }
+    final shift = Offset((_paintSize.width - morph.sourceSize.width) / 2, 0);
+    return [
+      for (final box in morph.boxes(
+          start, start + _layout.words[index].content.length, _layoutProgress))
+        (
+          rect: box.shift(shift),
+          rtl: _layout.wordBoxes[index].firstOrNull?.rtl ?? false,
+          horizontal: true
+        )
+    ];
+  }
+
+  void _paintGlyphs(Canvas canvas,
+      {required bool played, bool stroke = false}) {
+    final motions = stroke ? _strokeMotions : _glyphMotions;
+    if (motions.isEmpty) {
+      if (stroke) {
+        _layout.paintStroke(canvas);
+      } else {
+        _layout.paint(canvas, played: played);
+      }
+      return;
+    }
+    final tint = stroke
+        ? null
+        : played
+            ? _layout.shaping.playedColor
+            : _layout.shaping.unplayedColor;
+    if (!vertical) {
+      final morph = motions[0]!;
+      canvas.save();
+      canvas.translate((_paintSize.width - morph.sourceSize.width) / 2, 0);
+      morph.paint(canvas,
+          progress: _layoutProgress,
+          tint: tint,
+          colourParagraph: (_previousLayout ?? _layout).base,
+          colourLayoutIdentity: _previousLayout ?? _layout,
+          colourPaint: stroke
+              ? null
+              : (source) =>
+                  (_previousLayout ?? _layout).paint(source, played: played));
+      canvas.restore();
+      return;
+    }
+    for (final (index, glyph) in _layout.glyphs.indexed) {
+      canvas.save();
+      canvas.translate(glyph.paintOffset.dx, glyph.paintOffset.dy);
+      canvas.scale(glyph.scale, glyph.scale);
+      final morph = motions[index];
+      if (morph != null) {
+        morph.paint(canvas,
+            progress: _layoutProgress,
+            tint: tint,
+            colourParagraph: glyph.base,
+            colourLayoutIdentity: glyph.base,
+            colourPaint: stroke
+                ? null
+                : (source) => (played ? glyph.highlight : glyph.base)
+                    .paint(source, Offset.zero));
+      } else {
+        (stroke
+                ? glyph.stroke
+                : played
+                    ? glyph.highlight
+                    : glyph.base)
+            ?.paint(canvas, Offset.zero);
+      }
+      canvas.restore();
+    }
+  }
+
   @override
   bool shouldRepaint(DesktopLyricTextPainter oldDelegate) =>
       !identical(_layout, oldDelegate._layout) ||
+      !identical(_previousLayout, oldDelegate._previousLayout) ||
+      _layoutProgress != oldDelegate._layoutProgress ||
       !identical(clock, oldDelegate.clock) ||
-      reducedMotion != oldDelegate.reducedMotion;
+      reducedMotion != oldDelegate.reducedMotion ||
+      rubyVisibility != oldDelegate.rubyVisibility;
 }

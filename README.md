@@ -75,7 +75,7 @@
 
 **安装版**运行安装器，支持原位升级；**便携版**完整解压 ZIP 后运行 `Dan Player.exe`，不要只复制一个 EXE。桌面歌词由同一程序启动独立进程。
 
-试听与裁剪所需的 FFmpeg 是可选组件；手动点击下载时，播放器沿用 [26.0.5 发布的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，并校验固定大小和 SHA-256。安装器与便携包不重复附带该组件。
+当前便携包包含试听与裁剪所需的 FFmpeg、离线日语假名字典及许可，完整解压后即可使用。精简安装器不附带这两项，并保留已经安装的组件；也可从播放器中手动下载，校验固定大小和 SHA-256。FFmpeg 沿用 [26.0.5 的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，日语词典在 [26.1.1 发布页](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1)单独提供。
 
 > **下载与签名说明**：自有程序使用 RCEIT.Inc 自签名证书，Windows 仍可能显示信任提示；安装器不会自动安装信任证书。旧签名版本请手动下载新安装器升级。预览版不替换稳定版 Latest；升级前建议通过播放器的“备份与恢复”保存个人资料。
 
@@ -113,6 +113,8 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 以上功能已包含在 26.0.5 正式版中；具体更新请查看对应 [Release 更新说明](https://github.com/DanRuguo/dan_player/releases)。
 
 联网音乐与自定义歌源可作为本地曲库的补充。自定义服务按实际声明的能力提供检索、歌词等功能，接入方式见 [自定义歌源 API](docs/custom-music-source-api.md)。
+
+歌词字间距由主歌词、桌面与任务栏共用。日语假名按汉字位置显示，保留原歌词和已有注音，仅保存独立的派生缓存；设置中也可批量处理已缓存歌词。自动联网开启时优先联网、失败回退离线；关闭时需在阅读工具或批量窗口明确选择联网或离线。联网注音需配置自己的 Yahoo! JAPAN Client ID，选用联网时会将待注音文本发送给该服务；凭据只保存在本机。
 
 ### 26.0.6
 
@@ -303,5 +305,7 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 主程序与桌面歌词共用一份字体资源，支持统一选择、四语言分别选择，以及混合文字按语种使用字体。内置 [思源黑体 SC／JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md)、[Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md) 和 [Pretendard](licenses/PRETENDARD/PROVENANCE.md)，均按 SIL Open Font License 1.1 分发；原版许可与来源随便携包和安装器提供。`DanPingFangSC` 内部兼容别名对应思源黑体 SC，不包含苹果字体。
 
 Dan Player 基于 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) 修改，感谢原作者提供的播放器基础、曲库结构和歌词体验。同时感谢 [desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge) 及 [Flutter](https://flutter.dev/) 与 Material Design。
+
+离线假名字典的许可与来源见 [IPADIC](licenses/IPADIC/PROVENANCE.md) 和 [Lindera](licenses/LINDERA/LICENSE)。联网注音：[Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/)。
 
 <sub>徽章由 <a href="https://shields.io/">Shields.io</a> 提供。下载量统计 Release 附件的下载次数，不等于用户数或安装量；技术徽章仅说明使用的技术，不声明最低支持版本。</sub>

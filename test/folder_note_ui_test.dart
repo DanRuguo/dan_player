@@ -6,11 +6,13 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/folder_actions.dart';
+import 'package:dan_player/component/folder_tree_pane.dart';
 import 'package:dan_player/entry.dart';
 import 'package:dan_player/folder_note_preferences.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/page/folders_page.dart';
 import 'package:dan_player/page/uni_page.dart';
+import 'package:dan_player/page/uni_page_components.dart';
 import 'package:desktop_lyric/l10n/catalog_folder_notes.dart';
 import 'package:desktop_lyric/l10n/ui_catalog.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -262,7 +264,7 @@ void main() {
   });
 
   testWidgets(
-      'real folders page keeps cache last in list and grid without counting it',
+      'real folders tree keeps cache last with either legacy view preference',
       (tester) async {
     final library = AudioLibrary.instance;
     final originalFolders = library.folders;
@@ -277,28 +279,28 @@ void main() {
       AudioFolder([], musicPath, 0, 0),
       AudioFolder([], path.join(root, 'data', 'Z-Music'), 0, 0)
     ];
-    AppPreference.instance.foldersPagePref =
-        PagePreference(0, SortOrder.ascending, ContentView.list);
     AppSettings.instance.folderNotes.value =
         const FolderNotePreferences().withNote(cachePath, 'Cache display note');
     sizePlaylistFeature(tester, width: 900, height: 800);
     final capture = GlobalKey();
-    await tester.pumpWidget(UiLanguageScope(
-        child: playlistFeatureHost(
-            AppPresentationHost(
-                child: FoldersPage(dataDirectory: Directory(cachePath))),
-            boundary: capture)));
-    await tester.pumpAndSettle();
     for (final view in [ContentView.list, ContentView.table]) {
-      if (view == ContentView.table) {
-        await tester.tap(find.text(ui('网格')));
-        await tester.pumpAndSettle();
-      }
+      AppPreference.instance.foldersPagePref =
+          PagePreference(0, SortOrder.ascending, view);
+      await tester.pumpWidget(UiLanguageScope(
+          child: playlistFeatureHost(
+              AppPresentationHost(
+                  child: FoldersPage(
+                      key: ValueKey(view),
+                      dataDirectory: Directory(cachePath))),
+              boundary: capture)));
+      await tester.pumpAndSettle();
       expect(find.text(ui('{0} 个文件夹', [2])), findsOneWidget);
-      final page = tester
-          .widget<UniPage<AudioFolder>>(find.byType(UniPage<AudioFolder>));
-      expect(page.contentList.last.path, cachePath);
-      expect(page.contentList, hasLength(3));
+      final pane = tester.widget<FolderTreePane>(find.byType(FolderTreePane));
+      expect(pane.tree.byId, hasLength(2));
+      expect(pane.footer, isA<PlayerDataFolderTile>());
+      expect(find.byType(ContentViewSwitch<AudioFolder>), findsNothing);
+      expect(AppPreference.instance.foldersPagePref.contentView, view,
+          reason: 'The new tree does not rewrite the stored legacy preference');
       expect(find.byType(PlayerDataFolderTile), findsOneWidget);
       expect(find.text('Cache display note'), findsOneWidget);
       final cache = find.byType(PlayerDataFolderTile);

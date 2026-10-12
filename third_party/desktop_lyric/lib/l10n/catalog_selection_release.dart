@@ -37,6 +37,22 @@ const Map<String, List<String>> catalogSelectionRelease = {
     '로컬 파일 경로 {0}개 복사됨'
   ],
   '反选当前列表': ['Invert visible selection', '表示中の選択を反転', '표시된 목록 선택 반전'],
+  '范围选择': ['Range selection', '範囲選択', '범위 선택'],
+  '选中两项之间（含两端）': [
+    'Select between the two items (inclusive)',
+    '選択した2項目の間を選択（両端を含む）',
+    '두 항목 사이 선택 (양 끝 포함)'
+  ],
+  '选中此项及上方全部': [
+    'Select this item and all above',
+    'この項目と上のすべてを選択',
+    '이 항목과 위의 모든 항목 선택'
+  ],
+  '选中此项及下方全部': [
+    'Select this item and all below',
+    'この項目と下のすべてを選択',
+    '이 항목과 아래의 모든 항목 선택'
+  ],
   '处理所选歌曲失败，请重试': [
     'Could not process selected tracks. Please retry.',
     '選択した曲を処理できませんでした。再試行してください。',

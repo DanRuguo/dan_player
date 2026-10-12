@@ -24,6 +24,9 @@ target_link_libraries(dan_installer_cleanup PRIVATE dan_installer_core shell32 v
 add_executable(dan_installer_core_test tests/installer_core_test.cpp)
 target_compile_options(dan_installer_core_test PRIVATE /W4 /WX /utf-8 /EHsc)
 target_link_libraries(dan_installer_core_test PRIVATE dan_installer_core)
+add_executable(dan_installer_optional_components_test EXCLUDE_FROM_ALL tests/installer_optional_components_test.cpp)
+target_compile_options(dan_installer_optional_components_test PRIVATE /W4 /WX /utf-8 /EHsc)
+target_link_libraries(dan_installer_optional_components_test PRIVATE dan_installer_core)
 enable_testing()
 add_test(NAME dan_installer_core_test COMMAND dan_installer_core_test
   "${CMAKE_BINARY_DIR}/test-sandbox")

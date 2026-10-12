@@ -269,7 +269,7 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
 }
 
 /// Capture the selected occurrences before either dialog, including repeats.
-Future<void> exportM3uPlaylist(BuildContext context, List<Audio> audios,
+Future<bool> exportM3uPlaylist(BuildContext context, List<Audio> audios,
     {String name = 'Dan Player',
     FutureOr<String?> Function(String)? pickFile}) async {
   final entries = [
@@ -282,13 +282,13 @@ Future<void> exportM3uPlaylist(BuildContext context, List<Audio> audios,
   if (entries.isEmpty) {
     showAppNotice(ui('所选歌曲中没有可导出的本地文件。'),
         context: context, kind: AppNoticeKind.warning);
-    return;
+    return false;
   }
   final relative = await showAppDialog<bool>(
       context: context,
       builder: (_) => M3uExportDialog(
           count: entries.length, skipped: audios.length - entries.length));
-  if (relative == null || !context.mounted) return;
+  if (relative == null || !context.mounted) return false;
   final safeName =
       name.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_').trim();
   final proposed = '${safeName.isEmpty ? 'Dan Player' : safeName}.m3u8';
@@ -301,20 +301,21 @@ Future<void> exportM3uPlaylist(BuildContext context, List<Audio> audios,
               ..filterSpecification = {'M3U8 (UTF-8)': '*.m3u8'})
             .getFile()
             ?.path)(proposed);
-    if (location == null) return;
+    if (location == null) return false;
     // Preserve the exact path whose overwrite the native picker confirmed.
     if (!location.toLowerCase().endsWith('.m3u8')) {
       if (context.mounted) {
         showAppNotice(ui('导出文件名请使用 .m3u8 后缀。'),
             context: context, kind: AppNoticeKind.warning);
       }
-      return;
+      return false;
     }
     await writeM3uFile(File(location), entries, relative: relative);
     if (context.mounted) {
       showAppNotice(ui('M3U8 歌单已导出（{0} 首）。', [entries.length]),
           context: context, kind: AppNoticeKind.success);
     }
+    return true;
   } catch (error) {
     if (context.mounted) {
       showAppNotice(
@@ -325,6 +326,7 @@ Future<void> exportM3uPlaylist(BuildContext context, List<Audio> audios,
           kind: AppNoticeKind.error);
     }
   }
+  return false;
 }
 
 class M3uExportDialog extends StatefulWidget {

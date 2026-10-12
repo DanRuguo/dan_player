@@ -34,9 +34,25 @@ function Get-FlutterTestGroups {
     )
     $groupRoot = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/')
     $groupFiles = @(Get-ChildItem -LiteralPath (Join-Path $groupRoot 'test') -Recurse -File -Filter '*_test.dart' | Sort-Object FullName)
+    $groupJapaneseFixture = [IO.Path]::GetFullPath((Join-Path $groupRoot 'test/support/japanese_reading_ui_fixture.dart'))
     $groupMockedNames = @($MockedDataRootTest + @(
         $groupFiles | Where-Object {
-            ([IO.File]::ReadAllText($_.FullName)).Contains('plugins.flutter.io/path_provider')
+            $groupSource = [IO.File]::ReadAllText($_.FullName)
+            $groupUsesMock = $groupSource.Contains('plugins.flutter.io/path_provider')
+            # This fixture installs the provider and requires the override to
+            # stay unset. Importing unrelated UI/font helpers is not enough.
+            if (-not $groupUsesMock -and $groupSource -match '(?:\bsetUpJapaneseUiFixture\s*\(|\bsetUpAll\s*\(\s*(?:\w+\.)?setUpJapaneseUiFixture\s*\))') {
+                foreach ($groupImport in [regex]::Matches($groupSource, '(?m)^\s*import\s+[''"]([^''"]+)[''"]')) {
+                    $groupImportPath = $groupImport.Groups[1].Value
+                    if ($groupImportPath -match '^[a-zA-Z][a-zA-Z0-9+.-]*:') { continue }
+                    $groupImportFull = [IO.Path]::GetFullPath((Join-Path $_.DirectoryName $groupImportPath))
+                    if ([StringComparer]::OrdinalIgnoreCase.Equals($groupImportFull, $groupJapaneseFixture)) {
+                        $groupUsesMock = $true
+                        break
+                    }
+                }
+            }
+            $groupUsesMock
         } | ForEach-Object Name
     ) | Sort-Object -Unique)
     foreach ($groupName in $groupMockedNames) {

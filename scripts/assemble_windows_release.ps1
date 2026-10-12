@@ -19,7 +19,9 @@ param(
     [string] $BassCacheRoot,
     [string] $BassFxCacheRoot,
     [string] $OutputRoot,
-    [string] $VcRuntimeDirectory
+    [string] $VcRuntimeDirectory,
+    [switch] $IncludeOptionalComponents,
+    [string] $FfmpegCacheRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,6 +33,9 @@ $workspaceRoot = Split-Path -Parent $repositoryRoot
 . (Join-Path $PSScriptRoot 'support\release_version.ps1')
 . (Join-Path $PSScriptRoot 'support\bundled_fonts.ps1')
 $bundledFontNotices = @(Get-BundledFontNotices -RepositoryRoot $repositoryRoot)
+. (Join-Path $PSScriptRoot 'support\bundled_japanese_readings.ps1')
+$bundledJapaneseReadings = Get-BundledJapaneseReadings -RepositoryRoot $repositoryRoot
+$bundledReadingNotices = @($bundledJapaneseReadings.Notices)
 $releaseVersion = Get-ReleaseVersionInfo $repositoryRoot
 if (-not $MainReleaseDirectory) { $MainReleaseDirectory = Join-Path $repositoryRoot 'build\windows\x64\runner\Release' }
 if ($DesktopLyricReleaseDirectory) {
@@ -244,6 +249,10 @@ $packageStem = 'DanPlayer-{0}-windows-x64' -f $version.Replace('+', '-')
 # Assembly is deliberately offline: downloading is an explicit separate step.
 $bass = & (Join-Path $PSScriptRoot 'prepare_bass_runtime.ps1') -CacheRoot $BassCacheRoot -Offline -VerifyOnly
 $bassFx = & (Join-Path $PSScriptRoot 'prepare_bass_fx_runtime.ps1') -CacheRoot $BassFxCacheRoot -Offline -VerifyOnly
+$ffmpeg = $null
+if ($IncludeOptionalComponents) {
+    $ffmpeg = & (Join-Path $PSScriptRoot 'prepare_ffmpeg_runtime.ps1') -CacheRoot $FfmpegCacheRoot -VerifyOnly
+}
 $crtDirectory = Find-VcRuntimeDirectory
 Assert-TreeHasNoReparsePoints $crtDirectory
 if ((Split-Path -Leaf $crtDirectory) -notmatch '^Microsoft\.VC14[0-9]+\.CRT$' -or
@@ -292,6 +301,21 @@ try {
     foreach ($file in $crtFiles) {
         Copy-FileUnchanged $file.FullName (Join-Path $payloadDirectory $file.Name)
     }
+    if ($IncludeOptionalComponents) {
+        $ffmpegTarget = Join-Path $payloadDirectory 'tool\ffmpeg'
+        $null = New-Item -ItemType Directory -Path $ffmpegTarget
+        foreach ($file in $ffmpeg.Files) {
+            Copy-FileUnchanged (Join-Path $ffmpeg.RuntimeDirectory $file.Name) (Join-Path $ffmpegTarget $file.Name)
+        }
+        $readingTarget = Join-Path $payloadDirectory 'tool\japanese_readings'
+        $null = New-Item -ItemType Directory -Path $readingTarget
+        Copy-FileUnchanged (Join-Path $repositoryRoot 'rust\assets\ipadic-reading.bin.gz') (Join-Path $readingTarget 'ipadic-reading.bin.gz')
+        foreach ($notice in $bundledReadingNotices) {
+            $target = Join-Path $readingTarget $notice.RelativePath
+            $null = New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force
+            Copy-FileUnchanged $notice.SourcePath $target
+        }
+    }
 
     $licenceDirectory = Join-Path $payloadDirectory 'licenses'
     $un4seenDirectory = Join-Path $licenceDirectory 'UN4SEEN'
@@ -300,7 +324,7 @@ try {
     $null = New-Item -ItemType Directory -Path $licenceDirectory
     $null = New-Item -ItemType Directory -Path $microsoftDirectory
     $null = New-Item -ItemType Directory -Path $bassFxDirectory
-    foreach ($notice in $bundledFontNotices) {
+    foreach ($notice in @($bundledFontNotices) + @($bundledReadingNotices)) {
         $fontNoticeTarget = Join-Path $payloadDirectory $notice.RelativePath
         $fontNoticeParent = Split-Path -Parent $fontNoticeTarget
         if (-not (Test-Path -LiteralPath $fontNoticeParent)) { $null = New-Item -ItemType Directory -Path $fontNoticeParent }
@@ -363,7 +387,11 @@ the verified Visual Studio runtime when rebuilding future application releases.
         FontIntegrityReports = @('FONT-INTEGRITY.json')
         Bass = @($bass.Packages | Select-Object Name, Version, Url, ArchiveSha256, Dll, DllSha256)
         BassFx = $bassFx.Package
-        Ffmpeg = @{ Optional = $true; Bundled = $false }
+        Ffmpeg = @{ Optional = $true; Bundled = [bool]$IncludeOptionalComponents }
+        JapaneseReadings = [ordered]@{
+            Engine=$bundledJapaneseReadings.Engine; DictionaryBytes=$bundledJapaneseReadings.DictionaryBytes
+            DictionarySha256=$bundledJapaneseReadings.DictionarySha256; Optional=$true; Bundled=[bool]$IncludeOptionalComponents
+        }
         MicrosoftCrt = $crtManifest
     }
     Write-NewUtf8File (Join-Path $payloadDirectory 'BUILD-PROVENANCE.json') (($buildProvenance | ConvertTo-Json -Depth 8) + "`n")
@@ -375,6 +403,9 @@ Extract the entire ZIP into a writable folder, then run "Dan Player.exe".
 Keep BASS, data, and DESKTOP-LYRIC-MODE beside the main executable. Desktop lyrics
 run as a separate process using "Dan Player.exe --desktop-lyric", sharing the same
 Flutter assets and app-local Microsoft CRT DLLs with the player.
+Optional components bundled: $([bool]$IncludeOptionalComponents). When present,
+tool/ffmpeg and tool/japanese_readings are ready after extracting the entire ZIP.
+The slim installer excludes them and preserves existing component directories.
 
 This assembler does not install software, change Windows settings, sign files,
 or publish a release. Any existing application signatures are preserved.
@@ -414,7 +445,7 @@ Working tree modified: $workingTreeDirty
     Write-PortableZip $payloadDirectory $zipPath $packageStem
     $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
     try {
-        foreach ($requiredEntry in (@('Dan Player.exe', 'DESKTOP-LYRIC-MODE', 'flutter_windows.dll', 'rust_lib_dan_player.dll', 'data/app.so', 'data/icudtl.dat', 'BASS/basswasapi.dll', 'BASS/bassmix.dll', 'licenses/UN4SEEN/bass.txt', 'licenses/UN4SEEN/bassmix.txt', 'BASS/bass_fx.dll', 'licenses/BASS_FX/bass_fx24-2.4.12.6.zip', 'BUILD-PROVENANCE.json', 'SHA256SUMS') + @($bundledFontNotices.RelativePath))) {
+        foreach ($requiredEntry in (@('Dan Player.exe', 'DESKTOP-LYRIC-MODE', 'flutter_windows.dll', 'rust_lib_dan_player.dll', 'data/app.so', 'data/icudtl.dat', 'BASS/basswasapi.dll', 'BASS/bassmix.dll', 'licenses/UN4SEEN/bass.txt', 'licenses/UN4SEEN/bassmix.txt', 'BASS/bass_fx.dll', 'licenses/BASS_FX/bass_fx24-2.4.12.6.zip', 'BUILD-PROVENANCE.json', 'SHA256SUMS') + @($bundledFontNotices.RelativePath) + @($bundledReadingNotices.RelativePath))) {
             if (-not $zip.GetEntry($packageStem + '/' + $requiredEntry)) { throw "ZIP is missing $requiredEntry" }
         }
         Assert-ZipFontAudit $zip ($packageStem + '/') $mainFontReport
@@ -424,12 +455,17 @@ Working tree modified: $workingTreeDirty
         }).Count -gt 0) { throw 'Shared-executable ZIP contains a legacy desktop lyrics helper.' }
         Assert-ZipEntryHash $zip ($packageStem + '/DESKTOP-LYRIC-MODE') (Get-FileHash -LiteralPath (Join-Path $payloadDirectory 'DESKTOP-LYRIC-MODE') -Algorithm SHA256).Hash
         Assert-ZipEntryHash $zip ($packageStem + '/BASS/bass_fx.dll') $bassFx.Package.DllSha256
-        if (@($zip.Entries | Where-Object { $_.FullName -match '/tools?/ffmpeg/' }).Count -gt 0) {
-            throw 'Optional FFmpeg runtime must not be bundled.'
+        if ($IncludeOptionalComponents) {
+            foreach ($file in $ffmpeg.Files) {
+                Assert-ZipEntryHash $zip ($packageStem + '/tool/ffmpeg/' + $file.Name) $file.Sha256
+            }
+            Assert-ZipEntryHash $zip ($packageStem + '/tool/japanese_readings/ipadic-reading.bin.gz') $bundledJapaneseReadings.DictionarySha256
+        } elseif (@($zip.Entries | Where-Object { $_.FullName -match '/tools?/(ffmpeg|japanese_readings)/' }).Count -gt 0) {
+            throw 'A slim candidate contains optional component files.'
         }
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx24-2.4.12.6.zip') $bassFx.Package.ArchiveSha256
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx.txt') $bassFx.Package.NoticeSha256
-        foreach ($notice in $bundledFontNotices) {
+        foreach ($notice in @($bundledFontNotices) + @($bundledReadingNotices)) {
             Assert-ZipEntryHash $zip ($packageStem + '/' + $notice.RelativePath) $notice.Sha256
         }
     } finally { $zip.Dispose() }

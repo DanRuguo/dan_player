@@ -156,6 +156,19 @@ if (-not $QaBuild) {
 $OutputRoot = Assert-InstallerPath $OutputRoot
 $runDirectory = Join-Path $OutputRoot ('installer-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
 $null = New-Item -ItemType Directory -Path $runDirectory
+. (Join-Path $PSScriptRoot 'support\slim_installer_payload.ps1')
+$sourcePayloadDirectory = $PayloadDirectory
+$PayloadDirectory = New-SlimInstallerPayload -Entries $entries -Destination (Join-Path $runDirectory 'core-payload')
+$payloadPrefix = $PayloadDirectory.TrimEnd('\', '/') + '\'
+$entries.Clear()
+$totalBytes = [uint64]0
+foreach ($file in Get-ChildItem -LiteralPath $PayloadDirectory -Recurse -File -Force | Sort-Object FullName) {
+    $relative = $file.FullName.Substring($payloadPrefix.Length).Replace('\', '/')
+    if (Test-OptionalPlayerComponentPath $relative) { throw 'Slim installer contains an optional component.' }
+    $entries.Add([pscustomobject]@{ Relative=$relative; Source=$file.FullName; Hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); Length=$file.Length })
+    $totalBytes += $file.Length
+}
+$totalBytes += (Get-Item -LiteralPath $cleanupFile).Length
 $entries.Add([pscustomobject]@{ Relative='.dan-player-install/cleanup.exe'; Source=$cleanupFile; Hash=(Get-FileHash -LiteralPath $cleanupFile -Algorithm SHA256).Hash.ToLowerInvariant(); Length=(Get-Item -LiteralPath $cleanupFile).Length })
 $manifestFile = Join-Path $runDirectory 'payload.manifest'
 $manifestText = "DANPLAYER_PAYLOAD_V1`n$installerVersion`n"
@@ -198,6 +211,6 @@ $checksumFile = $executable + '.sha256'
 # A Release asset has a flat basename, not our local installer-run subdirectory.
 # This exact companion is selected before any optional aggregate SHA256SUMS.
 Write-NewInstallerText $checksumFile ($installerSha256 + '  ' + [IO.Path]::GetFileName($executable) + "`n")
-$result = [ordered]@{ Version=$installerVersion; DisplayVersion=$displayVersion; QaBuild=[bool]$QaBuild; Signed=[bool]$Sign; Installer=$executable; Sha256=$installerSha256; ChecksumFile=$checksumFile; PayloadFiles=$entries.Count; PayloadBytes=$totalBytes; CompilerVersion=$compilerVersion; Manifest=$manifestFile; NativeLibrarySha256=(Get-FileHash -LiteralPath $nativeFile -Algorithm SHA256).Hash.ToLowerInvariant(); EmbeddedFontSource=$installerFont.RelativePath; EmbeddedFontSha256=$installerFont.Sha256 }
+$result = [ordered]@{ Version=$installerVersion; DisplayVersion=$displayVersion; QaBuild=[bool]$QaBuild; Signed=[bool]$Sign; Installer=$executable; Sha256=$installerSha256; ChecksumFile=$checksumFile; PayloadFiles=$entries.Count; PayloadBytes=$totalBytes; CompilerVersion=$compilerVersion; Manifest=$manifestFile; NativeLibrarySha256=(Get-FileHash -LiteralPath $nativeFile -Algorithm SHA256).Hash.ToLowerInvariant(); EmbeddedFontSource=$installerFont.RelativePath; EmbeddedFontSha256=$installerFont.Sha256; SourcePayloadDirectory=$sourcePayloadDirectory; CorePayloadDirectory=$PayloadDirectory }
 Write-NewInstallerText (Join-Path $runDirectory 'installer-build.json') (($result | ConvertTo-Json -Depth 4) + "`n")
 [pscustomobject]$result

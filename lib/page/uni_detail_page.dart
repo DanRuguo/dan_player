@@ -1,6 +1,7 @@
 import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/component/category_cover_flight.dart';
+import 'package:dan_player/component/multi_selection_lifecycle.dart';
 import 'package:dan_player/component/detail_header_backdrop.dart';
 
 import 'package:dan_player/app_preference.dart';
@@ -173,8 +174,11 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
           !identical(expectedController, widget.multiSelectController)) {
         return;
       }
-      expectedController
-          .retainCurrentItems(clear ? <S>[] : widget.secondaryContent);
+      if (clear) {
+        expectedController.exitMultiSelect();
+      } else {
+        expectedController.retainCurrentItems(widget.secondaryContent);
+      }
     });
   }
 
@@ -241,7 +245,7 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
       ));
     }
 
-    return widget.multiSelectController == null
+    final page = widget.multiSelectController == null
         ? result(null, actions, scheme)
         : ListenableBuilder(
             listenable: widget.multiSelectController!,
@@ -251,6 +255,9 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
               scheme,
             ),
           );
+    return SelectionPageLifecycle(
+        onLeave: () => widget.multiSelectController?.exitMultiSelect(),
+        child: page);
   }
 
   Widget result(MultiSelectController<S>? multiSelectController,
@@ -267,6 +274,9 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                   contentList: visibleSecondaryContent.cast<Audio>(),
                 ),
               if (!widget.enableMultiSelectAddToPlaylist) ...[
+                MultiSelectRangeActions<S>(
+                    controller: multiSelectController,
+                    contentList: visibleSecondaryContent),
                 _VisibleSelectOrClearAll<S>(
                   multiSelectController: multiSelectController,
                   visibleContent: visibleSecondaryContent,

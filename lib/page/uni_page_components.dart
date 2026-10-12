@@ -149,10 +149,15 @@ class AddAllToPlaylist extends StatelessWidget {
       builder: (context, _) => FilledButton(
         onPressed: multiSelectController.selected.isEmpty
             ? null
-            : () => showAddAudiosToPlaylistDialog(
-                  context,
-                  multiSelectController.selected,
-                ),
+            : () async {
+                final session = multiSelectController.session;
+                final committed = await showAddAudiosToPlaylistDialog(
+                    context, List<Audio>.of(multiSelectController.selected));
+                if (committed && multiSelectController.enableMultiSelectView) {
+                  multiSelectController.exitMultiSelect(
+                      expectedSession: session);
+                }
+              },
         style: appToolbarControlStyle(context, primary: true),
         child: AppToolbarLabel(label: ui("加入歌单…"), icon: Symbols.playlist_add),
       ),
@@ -166,21 +171,31 @@ class AudioMultiSelectionActions extends StatelessWidget {
     required this.controller,
     required this.contentList,
     this.onPlay,
+    this.onPlayCommitted,
     this.onAddToPlaylist,
     this.onExport,
+    this.onAddToPlaylistCommitted,
+    this.onExportCommitted,
   });
 
   final MultiSelectController<Audio> controller;
   final List<Audio> contentList;
   final SelectedAudioAction? onPlay;
+  final SelectedAudioCommitAction? onPlayCommitted;
   final SelectedAudioAction? onAddToPlaylist;
   final SelectedAudioAction? onExport;
+  final SelectedAudioCommitAction? onAddToPlaylistCommitted, onExportCommitted;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: controller,
         builder: (context, _) {
           final selected = controller.selectedInOrder(contentList);
+          final session = controller.session;
+          VoidCallback? range(MultiSelectRange kind) =>
+              controller.canSelectRange(contentList, kind)
+                  ? () => controller.selectRange(contentList, kind)
+                  : null;
           return AudioSelectionToolbar(
             selected: selected,
             hiddenSelectionCount: controller.selected.length - selected.length,
@@ -189,13 +204,23 @@ class AudioMultiSelectionActions extends StatelessWidget {
                 contentList.every(controller.selected.contains),
             onToggleAll: () => controller.toggleAllVisible(contentList),
             onInvert: () => controller.invertVisible(contentList),
-            onExit: () {
-              controller.clear();
-              controller.useMultiSelectView(false);
-            },
+            onExit: controller.exitMultiSelect,
             onPlay: onPlay,
+            onPlayCommitted: onPlayCommitted,
             onAddToPlaylist: onAddToPlaylist,
             onExport: onExport,
+            onAddToPlaylistCommitted: onAddToPlaylistCommitted,
+            onExportCommitted: onExportCommitted,
+            onCommitted: () {
+              if (controller.enableMultiSelectView) {
+                controller.exitMultiSelect(expectedSession: session);
+              }
+            },
+            isActionCurrent: () => controller.isSessionCurrent(session),
+            includeRangeActions: true,
+            onSelectBetween: range(MultiSelectRange.between),
+            onSelectAbove: range(MultiSelectRange.above),
+            onSelectBelow: range(MultiSelectRange.below),
           );
         },
       );
@@ -236,6 +261,27 @@ class MultiSelectSelectOrClearAll<T> extends StatelessWidget {
   }
 }
 
+class MultiSelectRangeActions<T> extends StatelessWidget {
+  const MultiSelectRangeActions(
+      {super.key, required this.controller, required this.contentList});
+  final MultiSelectController<T> controller;
+  final List<T> contentList;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        VoidCallback? range(MultiSelectRange kind) =>
+            controller.canSelectRange(contentList, kind)
+                ? () => controller.selectRange(contentList, kind)
+                : null;
+        return SelectionRangeMenuButton(
+            onBetween: range(MultiSelectRange.between),
+            onAbove: range(MultiSelectRange.above),
+            onBelow: range(MultiSelectRange.below));
+      });
+}
+
 class MultiSelectExit<T> extends StatelessWidget {
   final MultiSelectController<T> multiSelectController;
 
@@ -249,8 +295,7 @@ class MultiSelectExit<T> extends StatelessWidget {
           primary: true, tonal: true, iconOnly: true),
       tooltip: ui("退出多选视图"),
       onPressed: () {
-        multiSelectController.useMultiSelectView(false);
-        multiSelectController.clear();
+        multiSelectController.exitMultiSelect();
       },
       icon: const Icon(Symbols.cancel),
     );

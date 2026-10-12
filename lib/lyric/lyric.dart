@@ -1,3 +1,5 @@
+import 'package:desktop_lyric/lyric_ruby.dart';
+
 abstract class Lyric {
   List<LyricLine> lines;
 
@@ -8,7 +10,23 @@ abstract class LyricLine {
   Duration start;
   String? romanization;
 
+  /// Display-only offline reading. Source/cache/document serialization omits it.
+  String? japaneseReading;
+  List<JapaneseLyricReadingSpan> japaneseReadingSpans = const [];
+
   LyricLine(this.start);
+}
+
+/// A derived reading above a complete source-text range (UTF-16, half open).
+class JapaneseLyricReadingSpan implements LyricRubySpan {
+  const JapaneseLyricReadingSpan(
+      {required this.start, required this.end, required this.text});
+  @override
+  final int start;
+  @override
+  final int end;
+  @override
+  final String text;
 }
 
 abstract class UnsyncLyricLine extends LyricLine {

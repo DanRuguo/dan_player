@@ -47,6 +47,7 @@ struct TextMask {
   std::shared_ptr<WrappedText> wrapped;
   std::vector<unsigned char> outline;
   double outline_radius = 0;
+  double letter_spacing = 0;
   int chunk = 0;
   bool overflow = false, paged = false;
 };
@@ -297,16 +298,19 @@ inline TextMask RasterText(HDC measuring, desktop_integration::PopupFonts& fonts
                           const std::wstring& text, int viewport_width, int height,
                           UINT dpi, bool animate, const std::vector<TaskbarLyricWord>& words = {}, int font_size = 16,
                           bool paint = true,
-                          std::optional<desktop_integration::FontLanguage> han_context = std::nullopt) {
+                          std::optional<desktop_integration::FontLanguage> han_context = std::nullopt,
+                          double letter_spacing = 0) {
   TextMask output;
   if (!measuring || text.empty() || text.size() > 2 * 1024 * 1024 || viewport_width <= 0 ||
-      viewport_width > 7680 || height <= 0 || height > 960) return output;
+      viewport_width > 7680 || height <= 0 || height > 960 ||
+      !std::isfinite(letter_spacing) || letter_spacing < 0 || letter_spacing > 12) return output;
+  output.letter_spacing = letter_spacing;
   if (text.size() > 2048) {
     auto source = DivideLongText(text, words);
     if (fonts.policy()) source->han_context = desktop_integration::HanFontLanguage(text, *fonts.policy());
     const auto range = source->chunks.front();
     output = RasterText(measuring, fonts, text.substr(range.first, range.second - range.first),
-        viewport_width, height, dpi, animate, ChunkWords(*source, 0), font_size, paint, source->han_context);
+        viewport_width, height, dpi, animate, ChunkWords(*source, 0), font_size, paint, source->han_context, letter_spacing);
     output.long_text = std::move(source); output.paged = true;
     return output;
   }
@@ -315,7 +319,7 @@ inline TextMask RasterText(HDC measuring, desktop_integration::PopupFonts& fonts
   const int pad = std::max(3, MulDiv(4, dpi, 96));
   auto shaping = std::make_shared<ShapedText>();
   for (int size = font_size; size >= std::min(12, font_size); --size) {
-    if (!shaping->Shape(fonts, text, dpi, size, FW_MEDIUM, ANTIALIASED_QUALITY, false, han_context)) return output;
+    if (!shaping->Shape(fonts, text, dpi, size, FW_MEDIUM, ANTIALIASED_QUALITY, false, han_context, letter_spacing)) return output;
     if (animate || shaping->measured.cx <= viewport_width - pad * 2) break;
   }
   output.natural_width = shaping->measured.cx + pad * 2;
@@ -401,7 +405,7 @@ inline bool SelectTextChunk(TextMask& output, double position, double line_start
   if (chunk == output.chunk) return false;
   const auto range = source->chunks[chunk];
   auto next = RasterText(measuring, fonts, source->text.substr(range.first, range.second - range.first),
-      width, output.height, dpi, animate, ChunkWords(*source, chunk), 16, true, source->han_context);
+      width, output.height, dpi, animate, ChunkWords(*source, chunk), 16, true, source->han_context, output.letter_spacing);
   if (next.pixels.empty()) return false;
   next.long_text = source; next.chunk = chunk; next.paged = true; output = std::move(next);
   return true;
@@ -436,7 +440,7 @@ inline bool SelectWrappedPage(TextMask& output, double position, double line_sta
   const auto range = source.chunks[chunk];
   const auto text = source.text.substr(range.first, range.second - range.first);
   if (state->chunk != chunk) {
-    auto measured = RasterText(dc, fonts, text, output.width, MulDiv(state->font_size + 8, output.dpi, 96), output.dpi, true, {}, state->font_size, true, source.han_context);
+    auto measured = RasterText(dc, fonts, text, output.width, MulDiv(state->font_size + 8, output.dpi, 96), output.dpi, true, {}, state->font_size, true, source.han_context, output.letter_spacing);
     if (!measured.shaping) return false;
     state->shaping = measured.shaping;
     state->logical_widths.assign(text.size() + 1, 0);
@@ -480,10 +484,10 @@ inline bool SelectWrappedPage(TextMask& output, double position, double line_sta
   for (int index = first; index < static_cast<int>(state->rows.size()) && index < first + capacity; ++index) {
     const auto row_range = state->rows[index];
     const auto segment = text.substr(row_range.first, row_range.second - row_range.first);
-    auto glyph = RasterText(dc, fonts, segment, output.width, state->pitch, output.dpi, true, {}, state->font_size, true, source.han_context);
+    auto glyph = RasterText(dc, fonts, segment, output.width, state->pitch, output.dpi, true, {}, state->font_size, true, source.han_context, output.letter_spacing);
     if (!glyph.shaping) return false;
     if (glyph.natural_width > output.width)
-      glyph = RasterText(dc, fonts, segment, output.width, state->pitch, output.dpi, false, {}, state->font_size, true, source.han_context);
+      glyph = RasterText(dc, fonts, segment, output.width, state->pitch, output.dpi, false, {}, state->font_size, true, source.han_context, output.letter_spacing);
     if (!glyph.shaping || glyph.pixels.empty()) return false;
     const int top = (index - first) * state->pitch;
     for (int y = 0; y < state->pitch && top + y < output.height; ++y)
@@ -514,9 +518,12 @@ inline bool SelectWrappedPage(TextMask& output, double position, double line_sta
 inline TextMask RasterWrappedText(HDC dc, desktop_integration::PopupFonts& fonts,
                                   const std::wstring& text, int width, int height, UINT dpi,
                                   const std::vector<TaskbarLyricWord>& words, double position,
-                                  double line_start, double line_end, int font_size = 16) {
+                                  double line_start, double line_end, int font_size = 16,
+                                  double letter_spacing = 0) {
   TextMask output;
-  if (text.empty() || width <= 0 || width > 7680 || height <= 0 || height > 960) return output;
+  if (text.empty() || width <= 0 || width > 7680 || height <= 0 || height > 960 ||
+      !std::isfinite(letter_spacing) || letter_spacing < 0 || letter_spacing > 12) return output;
+  output.letter_spacing = letter_spacing;
   output.width = output.viewport_width = output.natural_width = width;
   output.height = height; output.dpi = dpi;
   output.wrapped = std::make_shared<WrappedText>();

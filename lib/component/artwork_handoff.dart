@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:flutter/material.dart';
 
@@ -14,6 +15,7 @@ class ArtworkHandoff extends StatefulWidget {
     required this.imageBuilder,
     required this.placeholder,
     this.loading,
+    this.animateFirstFrame = false,
   });
 
   final Object artworkKey;
@@ -21,6 +23,7 @@ class ArtworkHandoff extends StatefulWidget {
   final Widget Function(ImageProvider) imageBuilder;
   final Widget placeholder;
   final Widget? loading;
+  final bool animateFirstFrame;
 
   static const loadTimeout = Duration(seconds: 10);
 
@@ -37,16 +40,21 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
   bool _loading = false;
   Timer? _timeout;
   VoidCallback? _removeListener;
-  late final _transition = AnimationController(
-      vsync: this, duration: AppMotion.standard, value: 1)
-    ..addStatusListener((status) {
-      if (status == AnimationStatus.completed && _previous != null && mounted) {
-        setState(() => _previous = null);
-      }
-    });
+  VoidCallback? _releaseFirstFrame;
+  late final _transition =
+      AnimationController(vsync: this, duration: AppMotion.standard, value: 1)
+        ..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            _releaseFirstFrameAnimation();
+            if (_previous != null && mounted) {
+              setState(() => _previous = null);
+            }
+          }
+        });
   late final _opacity =
       _transition.drive(CurveTween(curve: AppMotion.standardCurve));
   bool _animationsEnabled = true;
+  bool _animatingFirstFrame = false;
 
   bool get _platformReducesMotion {
     final features =
@@ -65,13 +73,22 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
     super.didChangeDependencies();
     _animationsEnabled = TickerMode.valuesOf(context).enabled &&
         !(!AppMotion.enabled(context, MotionKind.theme));
-    if (!_animationsEnabled || _platformReducesMotion) _transition.value = 1;
+    if (!_animationsEnabled ||
+        _platformReducesMotion ||
+        (_animatingFirstFrame &&
+            !AppMotion.enabled(context, MotionKind.entrance))) {
+      _transition.value = 1;
+      _releaseFirstFrameAnimation();
+    }
     _resolve();
   }
 
   @override
   void didChangeAccessibilityFeatures() {
-    if (_platformReducesMotion) _transition.value = 1;
+    if (_platformReducesMotion) {
+      _transition.value = 1;
+      _releaseFirstFrameAnimation();
+    }
   }
 
   @override
@@ -85,6 +102,13 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
     _key = widget.artworkKey;
     final request = ++_request;
     _cancelPending();
+    // Finish a first-frame reveal before returning its shared slot. Subsequent
+    // provider replacements retain the displayed frame and their theme fade.
+    if (_animatingFirstFrame) {
+      _transition.value = 1;
+      _animatingFirstFrame = false;
+    }
+    _releaseFirstFrameAnimation();
     _loading = true;
     final configuration = createLocalImageConfiguration(context);
     _timeout = Timer(ArtworkHandoff.loadTimeout, () => _finish(request, null));
@@ -98,12 +122,22 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
         final stream = provider.resolve(configuration);
         late final ImageStreamListener listener;
         var accepted = false;
-        listener = ImageStreamListener((image, _) {
+        listener = ImageStreamListener((image, synchronousCall) {
           image.dispose();
           if (accepted || !_isCurrent(request)) return;
           accepted = true;
           _timeout?.cancel();
           _timeout = null;
+          var animateInitial = _displayed == null &&
+              widget.animateFirstFrame &&
+              !synchronousCall &&
+              _animationsEnabled &&
+              !_platformReducesMotion &&
+              AppMotion.enabled(context, MotionKind.entrance);
+          if (animateInitial) {
+            _releaseFirstFrame = AppEntranceScope.reserveAnimationOf(context);
+            animateInitial = _releaseFirstFrame != null;
+          }
           setState(() {
             _previous = _displayed != provider &&
                     _animationsEnabled &&
@@ -113,7 +147,8 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
             _displayed = provider;
             _loading = false;
           });
-          if (_previous == null) {
+          _animatingFirstFrame = animateInitial;
+          if (_previous == null && !animateInitial) {
             _transition.value = 1;
           } else {
             _transition.forward(from: 0);
@@ -143,8 +178,16 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
       _displayed = provider;
       _previous = null;
       _loading = false;
+      _animatingFirstFrame = false;
     });
     _transition.value = 1;
+    _releaseFirstFrameAnimation();
+  }
+
+  void _releaseFirstFrameAnimation() {
+    final release = _releaseFirstFrame;
+    _releaseFirstFrame = null;
+    release?.call();
   }
 
   void _cancelPending() {
@@ -158,6 +201,7 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
   void dispose() {
     ++_request;
     _cancelPending();
+    _releaseFirstFrameAnimation();
     WidgetsBinding.instance.removeObserver(this);
     _transition.dispose();
     super.dispose();

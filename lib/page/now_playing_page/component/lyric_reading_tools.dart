@@ -1,14 +1,31 @@
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_checkbox_menu_button.dart';
+import 'package:dan_player/lyric/japanese_lyric_readings.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import 'lyric_view_controls.dart';
+
+/// Normal generation outcomes are silent; only problems need a notice.
+void showJapaneseReadingResultNotice(
+    BuildContext context, JapaneseReadingResult result) {
+  final message = switch (result) {
+    JapaneseReadingResult.applied ||
+    JapaneseReadingResult.unchanged ||
+    JapaneseReadingResult.stale =>
+      null,
+    JapaneseReadingResult.unavailable => '当前无法生成日语假名，请稍后重试',
+    JapaneseReadingResult.dictionaryMissing => '请在设置中安装日语假名字典组件',
+    JapaneseReadingResult.tooLarge => '歌词过长，无法一次生成日语假名',
+  };
+  if (message != null) showAppNotice(ui(message), context: context);
+}
 
 Widget _readingMenuLabel(BuildContext context, String label) => ConstrainedBox(
       constraints: BoxConstraints(
@@ -29,6 +46,7 @@ String lyricReadingTimestamp(Duration time) {
 String lyricReadingText(LyricLine line,
     {bool translation = true,
     bool romanization = true,
+    bool japaneseReading = true,
     bool timestamp = false}) {
   final primary = switch (line) {
     SyncLyricLine() => line.content,
@@ -43,6 +61,8 @@ String lyricReadingText(LyricLine line,
   final rows = [
     if (romanization && (line.romanization?.trim().isNotEmpty ?? false))
       line.romanization!,
+    if (japaneseReading && (line.japaneseReading?.trim().isNotEmpty ?? false))
+      line.japaneseReading!,
     if (primary.trim().isNotEmpty)
       '${timestamp ? '[${lyricReadingTimestamp(line.start)}] ' : ''}$primary',
     if (translation) ...translations.where((text) => text.trim().isNotEmpty),
@@ -73,12 +93,17 @@ class LyricReadingMenu extends StatelessWidget {
       required this.readLyric,
       this.onCreateCard,
       this.onFind,
-      this.onPracticeSegment});
+      this.onPracticeSegment,
+      this.onToggleJapaneseReading,
+      this.japaneseReadingsBusy});
   final LyricViewController controller;
   final Future<Lyric?>? Function() readLyric;
   final Future<void> Function(NavigatorState navigator)? onCreateCard;
   final Future<void> Function(NavigatorState navigator)? onPracticeSegment;
   final Future<void> Function(NavigatorState navigator)? onFind;
+  final Future<void> Function(NavigatorState navigator)?
+      onToggleJapaneseReading;
+  final ValueListenable<bool>? japaneseReadingsBusy;
 
   Future<void> _copyAll(BuildContext context) async {
     final future = readLyric();
@@ -94,6 +119,7 @@ class LyricReadingMenu extends StatelessWidget {
                   .map((line) => lyricReadingText(line,
                       translation: controller.showTranslation,
                       romanization: controller.showRomanization,
+                      japaneseReading: controller.showJapaneseReading,
                       timestamp:
                           controller.showTimestamps && lyric is! PlainLyric))
                   .where((text) => text.isNotEmpty)
@@ -109,12 +135,16 @@ class LyricReadingMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final navigator =
-        onCreateCard == null && onPracticeSegment == null && onFind == null
-            ? null
-            : Navigator.of(context, rootNavigator: true);
+    final navigator = onCreateCard == null &&
+            onPracticeSegment == null &&
+            onFind == null &&
+            onToggleJapaneseReading == null
+        ? null
+        : Navigator.of(context, rootNavigator: true);
     return ListenableBuilder(
-        listenable: controller,
+        listenable: japaneseReadingsBusy == null
+            ? controller
+            : Listenable.merge([controller, japaneseReadingsBusy!]),
         builder: (context, _) => AppMenuAnchor(
               menuChildren: [
                 AppCheckboxMenuButton(
@@ -127,6 +157,17 @@ class LyricReadingMenu extends StatelessWidget {
                     onChanged: (value) =>
                         controller.setShowRomanization(value ?? true),
                     child: _readingMenuLabel(context, '显示歌词注音')),
+                AppCheckboxMenuButton(
+                    key: const ValueKey('lyric-show-japanese-reading'),
+                    value: controller.showJapaneseReading,
+                    onChanged: (_) {
+                      if (onToggleJapaneseReading != null) {
+                        onToggleJapaneseReading!(navigator!);
+                      } else {
+                        controller.toggleJapaneseReadingGeneration();
+                      }
+                    },
+                    child: _readingMenuLabel(context, '显示日语假名')),
                 AppCheckboxMenuButton(
                     value: controller.showTimestamps,
                     onChanged: (value) =>
@@ -221,7 +262,8 @@ class LyricLineReadingActions extends StatelessWidget {
                   context,
                   lyricReadingText(line,
                       translation: controller.showTranslation,
-                      romanization: controller.showRomanization)),
+                      romanization: controller.showRomanization,
+                      japaneseReading: controller.showJapaneseReading)),
               leadingIcon: const Icon(Symbols.content_copy),
               child: _readingMenuLabel(context, '复制这一句歌词')),
           if (timed)
@@ -231,6 +273,7 @@ class LyricLineReadingActions extends StatelessWidget {
                     lyricReadingText(line,
                         translation: controller.showTranslation,
                         romanization: controller.showRomanization,
+                        japaneseReading: controller.showJapaneseReading,
                         timestamp: true)),
                 leadingIcon: const Icon(Symbols.schedule),
                 child: _readingMenuLabel(context, '复制歌词与时间')),
@@ -249,7 +292,8 @@ class LyricLineReadingActions extends StatelessWidget {
                     context,
                     lyricReadingText(line,
                         translation: controller.showTranslation,
-                        romanization: controller.showRomanization)),
+                        romanization: controller.showRomanization,
+                        japaneseReading: controller.showJapaneseReading)),
           },
           child: GestureDetector(
             onSecondaryTapUp: (event) =>

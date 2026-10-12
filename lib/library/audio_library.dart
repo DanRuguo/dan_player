@@ -51,6 +51,11 @@ class AudioLibrary {
 
   static int revision = 0;
 
+  /// Changes when library contents or sortable metadata change. Decoded
+  /// artwork notifications still refresh visible covers without discarding
+  /// completed song ordering.
+  static int sortRevision = 0;
+
   /// Changes only when searchable library contents or metadata change.
   /// Playback-side duration corrections deliberately do not invalidate the
   /// text index.
@@ -217,6 +222,7 @@ class AudioLibrary {
   void _buildCollections() {
     _audioByPath = null;
     revision++;
+    sortRevision++;
     searchRevision++;
     classificationRevision++;
     for (var f in folders) {
@@ -288,6 +294,7 @@ class AudioLibrary {
   /// every derived collection after a player-side correction.
   void publishDurationChanges() {
     revision++;
+    sortRevision++;
     changes.value = revision;
   }
 

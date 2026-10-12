@@ -20,12 +20,15 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'now_playing_bar_metrics.dart';
 
-Future<void> showPersonalTrackEditor(
-        BuildContext context, List<Audio> targets) =>
-    showAppDialog<void>(
-        context: context,
-        builder: (_) =>
-            PersonalTrackEditor(targets: List.unmodifiable(targets)));
+Future<bool> showPersonalTrackEditor(BuildContext context, List<Audio> targets,
+    {PersonalLibrary? store}) async {
+  if (targets.isEmpty) return false;
+  return await showAppDialog<bool>(
+          context: context,
+          builder: (_) => PersonalTrackEditor(
+              targets: List.unmodifiable(targets), store: store)) ==
+      true;
+}
 
 class PersonalTrackEditor extends StatefulWidget {
   const PersonalTrackEditor({super.key, required this.targets, this.store});
@@ -120,7 +123,7 @@ class _PersonalTrackEditorState extends State<PersonalTrackEditor> {
           changeTags: _tagsChanged,
           addTags: _draftTags.difference(_initialTags).toList(),
           removeTags: _initialTags.difference(_draftTags).toList());
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) setState(() => _error = '${ui("保存失败，草稿已保留")}: $e');
     } finally {

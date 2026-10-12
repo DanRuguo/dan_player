@@ -1,4 +1,8 @@
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
+import 'package:dan_player/lyric/japanese_lyric_readings.dart';
+import 'package:dan_player/lyric/japanese_reading_preferences.dart';
+import 'package:dan_player/lyric/japanese_reading_analyzer.dart';
+import 'package:dan_player/lyric/plain_lyric.dart';
 import 'dart:async';
 import 'package:dan_player/lyric/cached_lyric.dart';
 export 'package:dan_player/lyric/cached_lyric.dart';
@@ -67,10 +71,15 @@ class LyricService extends ChangeNotifier {
   final Future<Lyric?> Function(Audio, bool Function())?
       _onlineLookupForTesting;
   final LyricDocumentStore? documents;
+  final JapaneseReadingProjector _japaneseProjector;
+  final ValueListenable<JapaneseReadingPreferences> _japanesePreferences;
+  final _japaneseReadingsBusy = ValueNotifier(false);
+  ValueListenable<bool> get japaneseReadingsBusy => _japaneseReadingsBusy;
   bool _disposed = false;
 
   LyricService(PlayService playService)
-      : this._(playService, null, LyricDocumentStore.instance, null, null);
+      : this._(playService, null, LyricDocumentStore.instance, null, null, null,
+            null);
 
   @visibleForTesting
   LyricService.forTesting(
@@ -79,12 +88,16 @@ class LyricService extends ChangeNotifier {
     LyricDocumentStore? documents,
     OnlineLyricCache? onlineCache,
     Future<Lyric?> Function(Audio, bool Function())? onlineLookup,
+    JapaneseReadingProjector? japaneseProjector,
+    ValueListenable<JapaneseReadingPreferences>? japanesePreferences,
   }) : this._(
           playService,
           resolveDefaultLyric,
           documents,
           onlineCache,
           onlineLookup,
+          japaneseProjector,
+          japanesePreferences,
         );
 
   late final StreamSubscription<double> _positionStreamSubscription;
@@ -93,7 +106,14 @@ class LyricService extends ChangeNotifier {
       this._resolveDefaultForTesting,
       this.documents,
       this._onlineCacheForTesting,
-      this._onlineLookupForTesting) {
+      this._onlineLookupForTesting,
+      JapaneseReadingProjector? japaneseProjector,
+      ValueListenable<JapaneseReadingPreferences>? japanesePreferences)
+      : _japaneseProjector = japaneseProjector ?? JapaneseReadingProjector(),
+        _japanesePreferences =
+            japanesePreferences ?? AppSettings.instance.japaneseReadings {
+    _previousJapanesePreferences = _japanesePreferences.value;
+    _japanesePreferences.addListener(_handleJapaneseReadingsChange);
     documents?.addListener(_handleDocumentChange);
     AppSettings.instance.automaticOnlineLyrics
         .addListener(_handleAutomaticOnlineChange);
@@ -124,17 +144,287 @@ class LyricService extends ChangeNotifier {
   Lyric? _resolvedLyric;
   Lyric? _rawResolvedLyric;
   bool _explicitLookupPending = false;
+  Future<Lyric?>? _rawLyricFuture;
+  var _presentationToken = 0;
+  late JapaneseReadingPreferences _previousJapanesePreferences;
+  var _displayOffsetMs = 0;
+  bool _manualJapaneseReadings = false;
+  JapaneseReadingRequestMode? _manualJapaneseMode;
+  Future<JapaneseReadingResult>? _manualReadingRequest;
+  int? _manualReadingSource;
+  int? _manualReadingPresentation;
+  ({
+    int source,
+    int presentation,
+    Future<JapaneseReadingProjection?> result
+  })? _projectingReadings;
 
   /// Canonical timestamps, before the song's application offset. Locking and
   /// editing must use this copy instead of saving the displayed offset twice.
   Lyric? get rawCurrentLyric => _rawResolvedLyric;
+
+  /// The offset-aware lyric already available for this source. Its original
+  /// text may be shown while derived readings are still being generated;
+  /// [currLyricFuture] continues to resolve to the final projected document.
+  Lyric? get currentPresentation => _resolvedLyric;
   int _documentRevision = -1;
   int _lyricToken = 0;
   int get resolutionGeneration => _lyricToken;
   int _currentLyricLine = -1;
   bool _isCurrent(int token) => !_disposed && token == _lyricToken;
 
+  bool _isPresentationCurrent(int token, int presentation) =>
+      _isCurrent(token) && presentation == _presentationToken;
+
+  void _handleJapaneseReadingsChange() {
+    final previous = _previousJapanesePreferences;
+    final next = _japanesePreferences.value;
+    _previousJapanesePreferences = next;
+    // A preference update does not renew a completed manual authorization.
+    _manualJapaneseMode = null;
+    if (!next.enabled) _manualJapaneseReadings = false;
+    if ((!previous.enabled || !previous.offlineGenerationAllowed) &&
+        next.enabled &&
+        next.offlineGenerationAllowed &&
+        previous.copyWith(enabled: true, offlineGenerationAllowed: true) ==
+            next &&
+        !_japaneseReadingsBusy.value &&
+        _hasJapaneseReadings(_resolvedLyric)) {
+      // The new continuous intent is already persisted in the preferences.
+      // Reusing an available display preserves its future and reading owner;
+      // subsequent sources will observe the newly enabled preference.
+      _manualJapaneseReadings = false;
+      return;
+    }
+    if (!_disposed && _rawLyricFuture != null) {
+      _reprojectJapaneseReadings(
+          restoreCached: !(previous.enabled && !next.enabled));
+    }
+  }
+
+  Future<JapaneseReadingProjection?> _presentRaw(Future<Lyric?> raw,
+      {required int token,
+      required int presentation,
+      Audio? audio,
+      bool restoreCached = true}) async {
+    final value = await raw;
+    bool current() => _isPresentationCurrent(token, presentation);
+    if (!current() || value == null) return null;
+    final display = _displayOffsetMs == 0 || value is PlainLyric
+        ? value
+        : LyricSnapshot.capture(value).toLyric(offsetMs: _displayOffsetMs);
+    if (!_manualJapaneseReadings && _hasJapaneseReadings(display)) {
+      return JapaneseReadingProjection(
+          display, JapaneseReadingResult.unchanged);
+    }
+    if (restoreCached &&
+        !_manualJapaneseReadings &&
+        AppSettings.instance.desktopLyricAppearance.value.showJapaneseReading) {
+      // The persisted visibility flag does not grant automatic generation.
+      // Restore its valid display cache before publishing a first plain copy,
+      // so a cached song mounts with its readings in the same presentation.
+      final cached = await _japaneseProjector.projectCached(display,
+          stillCurrent: current);
+      if (!current()) return null;
+      if (cached.result == JapaneseReadingResult.applied) {
+        // Getter consumers (including a paused taskbar adapter) must receive
+        // the same completed cache presentation as FutureBuilder consumers.
+        // The final observer sees this same instance and does not force a
+        // second line publication.
+        if (!identical(_resolvedLyric, cached.lyric)) {
+          _resolvedLyric = cached.lyric;
+          _syncLineAtCurrentPosition(cached.lyric, force: true);
+          notifyListeners();
+          if (!current()) return null;
+        }
+        return cached;
+      }
+    }
+    if (!_japanesePreferences.value.enabled && !_manualJapaneseReadings) {
+      return JapaneseReadingProjection(
+          display, JapaneseReadingResult.unchanged);
+    }
+    // A first source need not wait for derived annotations before publishing
+    // its original text and timeline. Reprojection retains its existing copy.
+    if (_resolvedLyric == null) {
+      _resolvedLyric = display;
+      _syncLineAtCurrentPosition(display, force: true);
+      notifyListeners();
+      if (!current()) return null;
+    }
+    _japaneseReadingsBusy.value = true;
+    try {
+      final projected = await _japaneseProjector.project(display,
+          language: audio?.language,
+          enabled: _japanesePreferences.value.enabled,
+          force: _manualJapaneseReadings,
+          requestMode: _manualJapaneseMode ??
+              (_japanesePreferences.value.enabled &&
+                      _japanesePreferences.value.offlineGenerationAllowed &&
+                      !AppSettings.instance.automaticOnlineLyrics.value
+                  ? JapaneseReadingRequestMode.offline
+                  : JapaneseReadingRequestMode.automatic),
+          stillCurrent: current);
+      return current() ? projected : null;
+    } finally {
+      if (current()) _japaneseReadingsBusy.value = false;
+    }
+  }
+
+  Future<JapaneseReadingProjection?> _reprojectJapaneseReadings(
+      {bool restoreCached = true}) {
+    currLyricFuture.ignore();
+    _japaneseProjector.cancel();
+    _japaneseReadingsBusy.value = false;
+    final presentation = ++_presentationToken;
+    final projected = _presentRaw(_rawLyricFuture!,
+        token: _lyricToken,
+        presentation: presentation,
+        audio: _getNowPlaying(),
+        restoreCached: restoreCached);
+    _projectingReadings =
+        (source: _lyricToken, presentation: presentation, result: projected);
+    currLyricFuture = projected.then((value) => value?.lyric);
+    _observePresentationFuture(_lyricToken, presentation,
+        preservePresentation: true);
+    notifyListeners();
+    return projected;
+  }
+
+  /// One explicit, in-memory reading request for the captured lyric source.
+  /// It never selects a new lyric source or changes the automatic preference.
+  Future<JapaneseReadingResult> ensureJapaneseReadingsForCurrentTrack(
+      {required int expectedGeneration,
+      JapaneseReadingRequestMode mode = JapaneseReadingRequestMode.offline}) {
+    if (!_isCurrent(expectedGeneration) ||
+        _getNowPlaying() == null ||
+        _rawLyricFuture == null) {
+      return Future.value(JapaneseReadingResult.stale);
+    }
+    // Visibility is independent of generation. Reopening a completed display
+    // must not replace its lyric, line identities or current reading position.
+    if (_hasJapaneseReadings(_resolvedLyric)) {
+      return Future.value(JapaneseReadingResult.unchanged);
+    }
+    final projecting = _projectingReadings;
+    if (_japanesePreferences.value.enabled &&
+        !_manualJapaneseReadings &&
+        projecting != null &&
+        projecting.source == expectedGeneration &&
+        projecting.presentation == _presentationToken) {
+      // Enabling the menu and the settings switch starts the same source-owned
+      // projection. Its explicit current-track ensure joins that work.
+      return _joinJapaneseReadings(projecting);
+    }
+    return generateJapaneseReadingsForCurrentTrack(
+        expectedGeneration: expectedGeneration, mode: mode);
+  }
+
+  bool _hasJapaneseReadings(Lyric? lyric) =>
+      lyric?.lines.any((line) {
+        final content = switch (line) {
+          UnsyncLyricLine() => line.content,
+          SyncLyricLine() => line.content,
+          _ => '',
+        };
+        return line.japaneseReadingSpans.any((span) =>
+            span.start >= 0 &&
+            span.end > span.start &&
+            span.end <= content.length &&
+            span.text.trim().isNotEmpty);
+      }) ==
+      true;
+
+  /// A real reader OFF action also retires a legacy one-track request whose
+  /// disabled generation preference would otherwise not emit a change.
+  void cancelJapaneseReadingsForCurrentTrack(
+      {required int expectedGeneration}) {
+    if (!_isCurrent(expectedGeneration) ||
+        _rawLyricFuture == null ||
+        (!_manualJapaneseReadings && !_japaneseReadingsBusy.value)) {
+      return;
+    }
+    _manualJapaneseReadings = false;
+    _manualJapaneseMode = null;
+    _reprojectJapaneseReadings();
+  }
+
+  Future<JapaneseReadingResult> _joinJapaneseReadings(
+      ({
+        int source,
+        int presentation,
+        Future<JapaneseReadingProjection?> result
+      }) projecting) async {
+    bool current() =>
+        _isPresentationCurrent(projecting.source, projecting.presentation);
+    try {
+      final result = await projecting.result;
+      return current()
+          ? result?.result ?? JapaneseReadingResult.unchanged
+          : JapaneseReadingResult.stale;
+    } catch (_) {
+      return current()
+          ? JapaneseReadingResult.unavailable
+          : JapaneseReadingResult.stale;
+    }
+  }
+
+  /// Explicit generation retains its request mode even when a display copy
+  /// already contains readings; showing that copy uses the ensure API above.
+  Future<JapaneseReadingResult> generateJapaneseReadingsForCurrentTrack(
+      {required int expectedGeneration,
+      JapaneseReadingRequestMode mode = JapaneseReadingRequestMode.offline}) {
+    if (_manualReadingSource == expectedGeneration &&
+        _manualReadingPresentation == _presentationToken &&
+        _manualReadingRequest != null &&
+        _manualJapaneseMode == mode) {
+      return _manualReadingRequest!;
+    }
+    final pending = _generateJapaneseReadings(expectedGeneration, mode);
+    _manualReadingRequest = pending;
+    _manualReadingSource = expectedGeneration;
+    _manualReadingPresentation = _presentationToken;
+    pending.whenComplete(() {
+      if (identical(_manualReadingRequest, pending)) {
+        _manualReadingRequest = null;
+        _manualReadingSource = null;
+        _manualReadingPresentation = null;
+      }
+    }).ignore();
+    return pending;
+  }
+
+  Future<JapaneseReadingResult> _generateJapaneseReadings(
+      int expectedGeneration, JapaneseReadingRequestMode mode) async {
+    if (!_isCurrent(expectedGeneration) ||
+        _getNowPlaying() == null ||
+        _rawLyricFuture == null) {
+      return JapaneseReadingResult.stale;
+    }
+    _manualJapaneseReadings = true;
+    _manualJapaneseMode = mode;
+    final pending = _reprojectJapaneseReadings();
+    final presentation = _presentationToken;
+    try {
+      final result = await pending;
+      return _isPresentationCurrent(expectedGeneration, presentation)
+          ? result?.result ?? JapaneseReadingResult.unchanged
+          : JapaneseReadingResult.stale;
+    } catch (_) {
+      return _isPresentationCurrent(expectedGeneration, presentation)
+          ? JapaneseReadingResult.unavailable
+          : JapaneseReadingResult.stale;
+    }
+  }
+
   void _handleAutomaticOnlineChange() {
+    // A remembered manual choice is not a new network authorization.
+    _manualJapaneseMode = null;
+    if (!_disposed &&
+        _rawLyricFuture != null &&
+        (_japanesePreferences.value.enabled || _manualJapaneseReadings)) {
+      _reprojectJapaneseReadings();
+    }
     // Opting in starts a missing default lookup; it must not supersede the
     // source the user is already loading explicitly on this track.
     if (AppSettings.instance.automaticOnlineLyrics.value &&
@@ -159,11 +449,17 @@ class LyricService extends ChangeNotifier {
   void _useRawFuture(Future<Lyric?> raw,
       {int offsetMs = 0, bool explicit = false}) {
     currLyricFuture.ignore();
+    _japaneseProjector.cancel();
+    _japaneseReadingsBusy.value = false;
+    _manualJapaneseReadings = false;
+    _manualJapaneseMode = null;
+    _displayOffsetMs = offsetMs;
+    final presentation = ++_presentationToken;
     _explicitLookupPending = explicit;
     final token = _lyricToken + 1;
     final audio = _getNowPlaying();
     _rawResolvedLyric = null;
-    currLyricFuture = raw.then((value) {
+    final canonical = raw.then((value) {
       if (_isCurrent(token)) {
         _explicitLookupPending = false;
         _rawResolvedLyric = value;
@@ -178,10 +474,14 @@ class LyricService extends ChangeNotifier {
               .ignore();
         }
       }
-      return value == null || offsetMs == 0
-          ? value
-          : LyricSnapshot.capture(value).toLyric(offsetMs: offsetMs);
+      return value;
     });
+    _rawLyricFuture = canonical;
+    final projected = _presentRaw(canonical,
+        token: token, presentation: presentation, audio: audio);
+    _projectingReadings =
+        (source: token, presentation: presentation, result: projected);
+    currLyricFuture = projected.then((value) => value?.lyric);
     _trackLyricFuture();
     notifyListeners();
   }
@@ -189,25 +489,44 @@ class LyricService extends ChangeNotifier {
   void _trackLyricFuture() {
     if (_disposed) return;
     final token = ++_lyricToken;
-    _resolvedLyric = null;
-    _currentLyricLine = -1;
+    _observePresentationFuture(token, _presentationToken);
+  }
+
+  void _observePresentationFuture(int token, int presentation,
+      {bool preservePresentation = false}) {
+    final future = currLyricFuture;
+    if (!preservePresentation) {
+      _resolvedLyric = null;
+      _currentLyricLine = -1;
+    }
     unawaited(currLyricFuture.then<void>(
       (value) {
-        if (!_isCurrent(token)) return;
+        if (!_isPresentationCurrent(token, presentation) ||
+            !identical(future, currLyricFuture)) {
+          return;
+        }
 
+        final previous = _resolvedLyric;
+        final changed = !identical(previous, value);
         _resolvedLyric = value;
         if (value == null || value.lines.isEmpty) {
           playService.desktopLyricService.sendNoLyricMessage();
+          if (previous != null && changed) notifyListeners();
           return;
         }
-        _syncLineAtCurrentPosition(value, force: true);
+        _syncLineAtCurrentPosition(value, force: changed);
       },
       onError: (Object _, StackTrace __) {
-        if (!_isCurrent(token)) return;
+        if (!_isPresentationCurrent(token, presentation) ||
+            !identical(future, currLyricFuture)) {
+          return;
+        }
         _explicitLookupPending = false;
+        final hadPresentation = _resolvedLyric != null;
         _resolvedLyric = null;
         _currentLyricLine = -1;
         playService.desktopLyricService.sendNoLyricMessage();
+        if (hadPresentation) notifyListeners();
       },
     ));
   }
@@ -229,9 +548,15 @@ class LyricService extends ChangeNotifier {
   void findCurrLyricLine() {
     if (_disposed) return;
     final token = _lyricToken;
-    unawaited(currLyricFuture.then<void>(
+    final future = currLyricFuture;
+    unawaited(future.then<void>(
       (value) {
-        if (!_isCurrent(token) || value == null || value.lines.isEmpty) return;
+        if (!_isCurrent(token) ||
+            !identical(future, currLyricFuture) ||
+            value == null ||
+            value.lines.isEmpty) {
+          return;
+        }
         _resolvedLyric = value;
         _syncLineAtCurrentPosition(value, force: true);
       },
@@ -285,16 +610,23 @@ class LyricService extends ChangeNotifier {
         Zone.current[_desktopLyricSyncOwnerKey] as bool Function()?;
     if (_disposed || stillCurrent?.call() == false) return;
     final token = _lyricToken;
+    final future = currLyricFuture;
     Lyric? lyric;
     try {
-      lyric = await currLyricFuture;
+      lyric = currentPresentation ?? await future;
     } catch (_) {
-      if (_isCurrent(token) && stillCurrent?.call() != false) {
+      if (_isCurrent(token) &&
+          identical(future, currLyricFuture) &&
+          stillCurrent?.call() != false) {
         playService.desktopLyricService.sendNoLyricMessage();
       }
       return;
     }
-    if (!_isCurrent(token) || stillCurrent?.call() == false) return;
+    if (!_isCurrent(token) ||
+        !identical(future, currLyricFuture) ||
+        stillCurrent?.call() == false) {
+      return;
+    }
     if (lyric == null || lyric.lines.isEmpty) {
       playService.desktopLyricService.sendNoLyricMessage();
       return;
@@ -544,6 +876,10 @@ class LyricService extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _japanesePreferences.removeListener(_handleJapaneseReadingsChange);
+    _japaneseProjector.dispose();
+    _japaneseReadingsBusy.dispose();
+    _presentationToken++;
     documents?.removeListener(_handleDocumentChange);
     AppSettings.instance.automaticOnlineLyrics
         .removeListener(_handleAutomaticOnlineChange);

@@ -5,21 +5,39 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/library/cover_repair.dart';
 import 'package:dan_player/library/music_categories.dart';
+import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-Future<void> showCoverRepairDialog(BuildContext context, List<Audio> audios,
-    {MusicCategoryGroup? album, CategoryCoverStore? covers}) async {
+Future<bool> showCoverRepairDialog(BuildContext context, List<Audio> audios,
+    {MusicCategoryGroup? album,
+    CategoryCoverStore? covers,
+    CoverRepair Function(List<Audio>)? createRepair}) async {
   final store = covers ?? CategoryCoverStore.shared;
-  await store.load();
-  if (!context.mounted) return;
-  final repair = CoverRepair(audios, album: album, covers: store);
+  try {
+    await store.load();
+  } catch (error) {
+    if (context.mounted) {
+      showAppNotice(error.toString(),
+          context: context, kind: AppNoticeKind.error);
+    }
+    return false;
+  }
+  if (!context.mounted) return false;
+  final targets = List<Audio>.unmodifiable(audios);
+  final repair = createRepair?.call(targets) ??
+      CoverRepair(targets, album: album, covers: store);
   try {
     await showAppDialog<void>(
         context: context,
         barrierDismissible: false,
         builder: (_) => CoverRepairDialog(repair: repair));
+    return !repair.busy &&
+        !repair.cancellationRequested &&
+        repair.count(CoverRepairStatus.success) > 0 &&
+        repair.targets
+            .every((target) => target.status == CoverRepairStatus.success);
   } finally {
     repair.dispose();
   }

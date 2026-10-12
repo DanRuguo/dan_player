@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "engine": "Lindera 6.2.0 / IPADIC reading v2",
+  "resource": {
+    "path": "rust/assets/ipadic-reading.bin.gz",
+    "bytes": 7180257,
+    "sha256": "a8acd8b6352774fe3f6ac3fdbec59313ce04b548dad84340c17f0ee4bfab6e43"
+  },
+  "notices": [
+    {
+      "path": "licenses/LINDERA/LICENSE",
+      "sha256": "d37249886de3136db31717f15f6ade215a36fbed1c782381e38b2bf6047e8ec4"
+    },
+    {
+      "path": "licenses/IPADIC/NOTICE.txt",
+      "sha256": "2cf235bf0842d6d61eb0244fb22e645a321b12408a3cf75feb3a53577d885bde"
+    }
+  ]
+}

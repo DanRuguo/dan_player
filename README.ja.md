@@ -73,7 +73,7 @@
 
 **インストーラー版**はセットアップを実行してください。既存のインストールを更新できます。**ポータブル版**は ZIP 全体を展開して `Dan Player.exe` を起動してください。EXE だけを取り出さないでください。デスクトップ歌詞は同じ実行ファイルから別プロセスとして起動します。
 
-歌詞の試聴と音声の切り出しに使う FFmpeg は任意のコンポーネントです。手動ダウンロード時は [26.0.5 で公開した独立パッケージ](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)を再利用し、固定したサイズと SHA-256 を検証します。インストーラーとポータブル ZIP には重複して同梱しません。
+現在のポータブル ZIP には、試聴・音声切り出し用の FFmpeg、オフラインの日本語読み辞書、各ライセンスを同梱します。全体を展開すれば利用できます。軽量インストーラーにはこれらを含めず、導入済みのコンポーネントは保持します。プレーヤーから手動でダウンロードする場合も、固定サイズと SHA-256 を検証します。FFmpeg は [26.0.5 の独立パッケージ](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)、辞書は [26.1.1 のリリースページ](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1)から個別に取得できます。
 
 > **ダウンロードと署名について**：本プロジェクトの実行ファイルには RCEIT.Inc の自己署名証明書を使用しているため、Windows に信頼性の警告が表示される場合があります。インストーラーが信頼済み証明書を自動で登録することはありません。古い署名のバージョンから更新する場合は、新しいインストーラーを手動でダウンロードしてください。プレビュー版は Latest の安定版を置き換えません。更新前に、アプリのバックアップと復元設定から個人データを保存することをおすすめします。
 
@@ -110,6 +110,8 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 これらの機能は 26.0.5 安定版に含まれています。配布パッケージに含まれる機能は、対応する [Release の更新内容](https://github.com/DanRuguo/dan_player/releases)をご確認ください。
 
 オンライン音楽やカスタムソースも、ローカルでの再生を補う機能として利用できます。カスタムサービスは、明示的に宣言した機能に応じて検索や歌詞などを提供します。接続方法は[カスタム音楽ソース API](docs/custom-music-source-api.md)をご覧ください。
+
+メイン・デスクトップ・タスクバーの歌詞は字間を共有します。生成した読みは漢字の位置にルビで表示し、原歌詞や既存の読みを保持して、独立した派生キャッシュに保存します。保存済み歌詞の一括処理も設定から利用できます。自動通信が有効ならオンラインを優先し、失敗時はオフラインへ切り替えます。無効なら読書ツールや一括処理画面でオンライン／オフラインを明示的に選びます。オンライン生成にはご自身の Yahoo! JAPAN Client ID が必要で、対象テキストを同サービスへ送信します。認証情報はこの PC にのみ保存します。
 
 ### 26.0.6
 
@@ -296,8 +298,10 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 
 本プロジェクトは [LICENSE](LICENSE) に従って配布します。サードパーティーのコンポーネントには、それぞれのライセンス条件が適用されます。BASS の利用と配布は公式ライセンスに従ってください。
 
-内蔵 UI フォントは Noto Sans CJK SC で、SIL Open Font License 1.1 に従って配布します。[フォントのライセンスと出典](licenses/NOTO-SANS-CJK/PROVENANCE.md) はポータブル版とインストーラーに同梱します。旧リソースパスと内部エイリアスは既存設定との互換性のために保持し、表示名は Noto Sans CJK SC です。
+メインプレーヤーとデスクトップ歌詞は同じフォント資源を使います。一括選択、4 言語別の選択、混在する文字の言語別フォントに対応します。内蔵の [Source Han Sans SC／JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md)、[Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md)、[Pretendard](licenses/PRETENDARD/PROVENANCE.md) は SIL Open Font License 1.1 に従って配布し、原版のライセンスと出典をポータブル版・インストーラーに同梱します。互換用の内部エイリアス `DanPingFangSC` は Source Han Sans SC を指し、Apple のフォントを含みません。
 
 Dan Player は [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) を基に開発しています。プレーヤーの基盤、ライブラリ構造、歌詞表示を提供してくださった原作者に感謝します。また、[desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge)、[Flutter](https://flutter.dev/)、Material Design にも感謝します。
+
+オフライン辞書のライセンスと出典：[IPADIC](licenses/IPADIC/PROVENANCE.md)・[Lindera](licenses/LINDERA/LICENSE)。オンラインの読み仮名：[Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/)。
 
 <sub>バッジは <a href="https://shields.io/">Shields.io</a> を利用しています。ダウンロード数は Release アセットのダウンロード回数であり、利用者数やインストール数ではありません。技術バッジは使用技術を示し、最低対応バージョンを示すものではありません。</sub>

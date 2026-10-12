@@ -735,6 +735,7 @@ class DesktopLyricService extends ChangeNotifier {
       msg.LyricLineTimelineMessage(
         sequence: sequence,
         lineIndex: -1,
+        lyricSourceGeneration: playService.lyricResolutionGeneration,
         startMilliseconds: 0,
         lengthMilliseconds: 0,
         content: '无歌词',
@@ -781,11 +782,18 @@ class DesktopLyricService extends ChangeNotifier {
       msg.LyricLineTimelineMessage(
         sequence: sequence,
         lineIndex: lineIndex,
+        lyricSourceGeneration: playService.lyricResolutionGeneration,
         startMilliseconds: line.start.inMilliseconds,
         lengthMilliseconds: length.inMilliseconds,
         content: content,
         translation: translation,
         romanization: line.romanization,
+        japaneseReading: line.japaneseReading,
+        japaneseReadingSpans: [
+          for (final span in line.japaneseReadingSpans)
+            msg.DesktopJapaneseReadingSpan(
+                start: span.start, end: span.end, text: span.text),
+        ],
         words: words,
       ),
     );

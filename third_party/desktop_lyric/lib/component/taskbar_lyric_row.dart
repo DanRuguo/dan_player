@@ -123,8 +123,13 @@ class _TaskbarLyricRowState extends State<TaskbarLyricRow> {
           padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
           child: Row(children: [
             Expanded(child: LayoutBuilder(builder: (context, lineBounds) {
-              final baseStyle = DefaultTextStyle.of(context).style.merge(
+              final naturalStyle = DefaultTextStyle.of(context).style.merge(
                   const TextStyle(height: 1.25, fontWeight: FontWeight.w700));
+              final baseStyle = prefs.lyricLetterSpacing == 0
+                  ? naturalStyle
+                  : naturalStyle.copyWith(
+                      letterSpacing: (naturalStyle.letterSpacing ?? 0) +
+                          prefs.lyricLetterSpacing);
               final scaler = MediaQuery.textScalerOf(context);
               final direction = Directionality.of(context);
               final fontPolicy = AppFontScope.of(context);
@@ -184,6 +189,7 @@ class _TaskbarLyricRowState extends State<TaskbarLyricRow> {
                           key: const ValueKey('taskbar-single-line-text'),
                           text: visibleText,
                           clock: controller.playbackClock,
+                          verticalLetterSpacing: prefs.lyricLetterSpacing,
                           style: baseStyle.copyWith(fontSize: fontSize),
                           maxHorizontalWidth: lineBounds.maxWidth,
                           playedColor: color,

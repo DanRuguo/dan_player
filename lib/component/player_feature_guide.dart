@@ -85,7 +85,12 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
   final _chapterKeys = {
     for (final chapter in _guideChapters) chapter.$1: GlobalKey(),
   };
-  final _demoExpanded = {'queue': false, 'lyrics': false, 'playlists': true};
+  final _demoExpanded = {
+    'queue': false,
+    'lyrics': false,
+    'playlists': true,
+    'sound': false
+  };
   final _quickControllers = {
     for (final id in ['queue', 'lyrics', 'playlists', 'sound'])
       id: ExpansibleController(),
@@ -394,7 +399,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                         _section(context, 'batch-edit', '多选与批量整理',
                             Icons.checklist_outlined, [
                           _text(
-                              '从歌曲菜单进入“多选”，再勾选歌曲；顶部可全选、反选或退出。播放所选、下一批播放、加入队尾与导出都按当前可见顺序处理；被筛选隐藏的已选项不会参与本次操作。'),
+                              '从歌曲菜单进入“多选”，再勾选歌曲；顶部可全选、反选或退出。“更多”可按当前排序选中一项及上方或下方全部，也可圈定已选两项之间（含两端）。操作只处理当前可见所选，保留显示顺序；操作成功或离开页面后退出多选，取消或失败可继续选择。'),
                           _flow(context, 'batch', ['选择歌曲', '预览修改', '应用预览']),
                           _text(
                               '多选“更多”集中提供个人评分与标签、批量编辑标签、重新读取封面和复制信息。个人评分、标签和备注只存在播放器资料中；批量编辑歌曲标签会写入音频文件，先预览再确认，未启用的字段保持原值。'),
@@ -404,7 +409,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                         _section(context, 'storage', '文件夹与缓存管理',
                             Icons.folder_copy_outlined, [
                           _text(
-                              '文件夹页右键、长按或点更多，可备注、浏览、移动文件夹或查看占用。备注只改变显示名，真实名称与路径不变；缓存项有独立图标和标记。'),
+                              '文件夹页点按文件夹即可原地展开：先显示本文件夹歌曲，再显示子文件夹；分组标题与连接线标明归属，同级缩进一致，歌曲封面按行排列。文件夹和歌曲可分别排序，深层目录会收紧缩进。右键、长按或点更多，可备注、浏览、移动文件夹或查看占用；备注只改变显示名，缓存项有独立图标和标记。'),
                           const SizedBox(height: 8),
                           _text(
                               '移动确认后退出，下次启动先剪切并同步资料路径。同盘可直接移动，跨盘先校验再删除原文件，不覆盖已有目标。备份与恢复可按组件选择，缓存分类占用在统计页查看。'),
@@ -422,6 +427,11 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           _paragraph(context, '跟随播放与手动阅读'),
                           _text(
                               '正常播放会跟随当前歌词；单击有时间轴的歌词行可跳到该句，纯文本没有逐句定位。想只阅读而不跳歌，在阅读工具开启“手动阅读歌词”，再用“回到当前歌词”恢复跟随。A± 可拖动调字号；译文、注音与时间各自开关。逐词强调需要带逐字时间的歌词，普通 LRC 主要按句强调。'),
+                          _text(
+                              '阅读工具可调整歌词字间距并勾选显示日语假名，主歌词与桌面歌词共用。优先显示有效缓存；未缓存时，自动联网开启则优先联网并在失败时回退离线，否则使用离线字典。联网配置、字典安装与批量生成位于设置。'),
+                          const SizedBox(height: 8),
+                          _text(
+                              '联网注音需要您自己的 Yahoo! JAPAN Client ID；离线词典缺失时可手动安装组件，也可在设置中批量处理已缓存歌词。生成假名按汉字位置显示并存入独立缓存，保留原歌词和已有注音；自动读音仅供参考。'),
                           _demo('lyrics', PlayerGuideDemoKind.lyrics),
                           const SizedBox(height: 8),
                           _text(
@@ -531,6 +541,9 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '歌词页 1× 按钮打开“播放速度与升降调”，选速度或在子菜单选半音；设置的“曲库与播放 → 播放速度”管理全局默认。更多里的“本曲播放设置”可记住单曲偏好，手动调整全局参数仍立即生效。均衡器可开启、选预设或调整频段；输出不支持时会提示。'),
                           _text(
                               '播放设置中，变速保持音高，升降调独立改变音高而不改变速度与歌词时间；1× 和原调可复位。本曲播放设置可保存该歌曲的偏好。'),
+                          _text(
+                              '在“曲库与播放 → 歌曲过渡”选择常规切换、连续输出或交叉淡入淡出，下次加载歌曲生效。连续输出预备已有的下一首本地歌曲；淡入淡出仅在共享输出混合两曲。暂停、定位、循环与停止目标优先，未能预备时沿用常规切换。'),
+                          _demo('sound', PlayerGuideDemoKind.transitions),
                           const SizedBox(height: 8),
                           _text(
                               '歌词页“更多 → 均衡器”调整频段；ReplayGain 在设置中读取已有响度标签，可按曲目或专辑均衡。已有响度分析与文件校验说明见“导出与音频检查”。'),

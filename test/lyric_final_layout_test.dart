@@ -33,12 +33,73 @@ Finder _plainPaint(String text) => find.byWidgetPredicate((widget) =>
     (widget.painter as PlainLyricWordFollowPainter).text.text?.toPlainText() ==
         text);
 
+Future<Rect> _glyphInkBounds(
+    WidgetTester tester, Finder paint, Rect selection) async {
+  final render = tester.renderObject<RenderCustomPaint>(paint);
+  final transform = render.getTransformTo(null);
+  final inverse = transform.clone()..invert();
+  final paintBounds =
+      MatrixUtils.transformRect(transform, Offset.zero & render.size);
+  final glyphBounds = MatrixUtils.transformRect(transform, selection);
+  // Preserve the actual ancestor's fractional pixel phase. An integral
+  // translation and extra transparent canvas expose source overhang instead
+  // of silently trimming the result to the CustomPaint's logical rectangle.
+  const margin = 24;
+  final origin = Offset(paintBounds.left.floorToDouble() - margin,
+      paintBounds.top.floorToDouble() - margin);
+  final result = await tester.runAsync(() async {
+    final recorder = drawing.PictureRecorder();
+    final canvas = Canvas(recorder)
+      ..translate(-origin.dx, -origin.dy)
+      ..transform(transform.storage);
+    render.painter!.paint(canvas, render.size);
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(
+        (paintBounds.right - origin.dx + margin).ceil(),
+        (paintBounds.bottom - origin.dy + margin).ceil());
+    picture.dispose();
+    final bytes =
+        (await image.toByteData(format: drawing.ImageByteFormat.rawRgba))!
+            .buffer
+            .asUint8List();
+    final selected = glyphBounds.shift(-origin);
+    int? left, top, right, bottom;
+    for (var y = selected.top.floor().clamp(0, image.height);
+        y < selected.bottom.ceil().clamp(0, image.height);
+        y++) {
+      for (var x = selected.left.floor().clamp(0, image.width);
+          x < selected.right.ceil().clamp(0, image.width);
+          x++) {
+        if (!selected.contains(Offset(x + .5, y + .5)) ||
+            bytes[(y * image.width + x) * 4 + 3] == 0) {
+          continue;
+        }
+        left = left == null || x < left ? x : left;
+        top = top == null || y < top ? y : top;
+        right = right == null || x + 1 > right ? x + 1 : right;
+        bottom = bottom == null || y + 1 > bottom ? y + 1 : bottom;
+      }
+    }
+    image.dispose();
+    return left == null
+        ? null
+        : MatrixUtils.transformRect(
+            inverse,
+            Rect.fromLTRB(left.toDouble(), top!.toDouble(), right!.toDouble(),
+                    bottom!.toDouble())
+                .shift(origin));
+  });
+  expect(result, isNotNull, reason: 'The final glyph must have visible ink');
+  return result!;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load(
+              'packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
   });
 
@@ -168,13 +229,17 @@ void main() {
         expect(primary, findsOneWidget);
         final primaryPaint = tester.widget<CustomPaint>(primary).painter!;
         final paintSize = tester.getSize(primary);
-        final lastGlyph = primaryPaint is PlainLyricWordFollowPainter
+        final lastSelection = primaryPaint is PlainLyricWordFollowPainter
             ? primaryPaint.slots.last.boxes.last
                 .toRect()
                 .shift(primaryPaint.inkOffset)
             : (primaryPaint as LyricWordHighlightPainter)
                 .followStationaryWordBounds
                 .last;
+        // A selection box includes native ascent/descent, not just glyph ink.
+        // Source Han's tight box extends above the requested 1.3 line height;
+        // this does not put the actual punctuation near the source edge.
+        final lastGlyph = await _glyphInkBounds(tester, primary, lastSelection);
 
         expect(paintSize.width, lessThanOrEqualTo(width - 24 + .1));
         expect(lastGlyph.left, greaterThanOrEqualTo(3));
@@ -253,6 +318,9 @@ void main() {
           await tester.pump();
           expect(tester.getSize(primary), beforeSize,
               reason: 'Follow motion cannot change the paragraph wrap width');
+          expect(
+              await _glyphInkBounds(tester, primary, lastSelection), lastGlyph,
+              reason: 'The stationary final punctuation retains its ink');
           expect(lastGlyph.right, lessThanOrEqualTo(paintSize.width - 3));
           if (timed) {
             expect(tester.getSize(_balanced(romaji)), phoneticSize,

@@ -17,6 +17,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
+import 'support/lyric_ink_matchers.dart';
 import 'support/playlist_feature_fixture.dart';
 
 class _Lyrics extends Lyric {
@@ -48,6 +49,20 @@ double _glyphY(WidgetTester tester, LrcLine line, int offset) {
   final element = tester.element(_primary(line));
   return ((element as StatefulElement).state as LyricTextReadingGeometry)
       .readingGlobalY(offset)!;
+}
+
+List<ReadingLyricGraphemeBounds> _graphemeBounds(
+    WidgetTester tester, LrcLine line) {
+  final paint = find.descendant(
+      of: _primary(line),
+      matching: find.byWidgetPredicate((widget) =>
+          widget is CustomPaint &&
+          widget.painter is PlainLyricWordFollowPainter));
+  final painter = tester.widget<CustomPaint>(paint).painter!
+      as PlainLyricWordFollowPainter;
+  return readingLyricGraphemeBounds(
+      tester.renderObject<RenderBox>(paint), painter.text,
+      inkOffset: painter.inkOffset);
 }
 
 Future<Uint8List> _pixels(
@@ -184,6 +199,7 @@ void main() {
         final viewport =
             tester.getRect(find.byKey(const ValueKey('vertical-lyric-scroll')));
         final before = _glyphY(tester, target, offset);
+        final glyphBounds = _graphemeBounds(tester, target);
         expect(before, inInclusiveRange(viewport.top, viewport.bottom));
         final ink = tester.getRect(_primary(target));
         final region = Rect.fromLTRB(
@@ -192,6 +208,8 @@ void main() {
             ink.right.floorToDouble(),
             ink.bottom.floorToDouble());
         final reference = await _pixels(tester, boundary, region);
+        expect(reference.buffer.asUint32List().toSet().length, greaterThan(8),
+            reason: 'The reference contains actual multilingual glyph ink');
         switch (change) {
           case 'translation':
             settings.setShowTranslation(false);
@@ -204,26 +222,48 @@ void main() {
         expect(_glyphY(tester, target, offset), closeTo(before, .05),
             reason: 'Content changes must preserve the selected glyph in '
                 'the first layout, even before the first lyric starts');
+        expectReadingLyricGraphemeBounds(
+            _graphemeBounds(tester, target), glyphBounds,
+            reason: 'The first layout keeps every primary grapheme in place');
+        late final Uint8List midPixels;
+        var geometryFrames = 0;
         for (var frame = 0; frame < 36; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
           expect(_glyphY(tester, target, offset), closeTo(before, .05),
               reason: 'Content reveal frame $frame retains the reading glyph');
+          expectReadingLyricGraphemeBounds(
+              _graphemeBounds(tester, target), glyphBounds,
+              reason: 'Reveal frame $frame keeps every primary grapheme');
+          geometryFrames++;
           if (frame == 9) {
-            expect(await _pixels(tester, boundary, region),
-                orderedEquals(reference),
-                reason: 'The selected primary ink stays identical mid-reveal');
+            midPixels = await _pixels(tester, boundary, region);
           }
         }
         await tester.pumpAndSettle();
         expect(_glyphY(tester, target, offset), closeTo(before, .05));
-        expect(
-            await _pixels(tester, boundary, region), orderedEquals(reference),
-            reason: 'The settled primary ink stays in its original pixels');
+        expectReadingLyricGraphemeBounds(
+            _graphemeBounds(tester, target), glyphBounds,
+            reason: 'The settled primary graphemes keep their world bounds');
+        final settledPixels = await _pixels(tester, boundary, region);
+        expect(geometryFrames, 36,
+            reason: 'Complete every geometry frame before the RGB oracle');
         expect(settings.readingMode, isTrue);
         expect(settings.readingTarget!.line, same(target));
         expect(seeks, 0);
         expect(tester.takeException(), isNull);
         expect(tester.binding.transientCallbackCount, 0);
+        final label = 'plain $change reduced=$reduced '
+            'geometryFrames=$geometryFrames graphemes=${glyphBounds.length}';
+        reportReadingLyricRgbaDifference(reference, reference, '$label before');
+        reportReadingLyricRgbaDifference(midPixels, reference, '$label mid');
+        reportReadingLyricRgbaDifference(
+            settledPixels, reference, '$label settled');
+        expect(midPixels, matchesReadingLyricRgba(reference),
+            reason: 'The primary ink stays in place mid-reveal, allowing '
+                'at most two RGB quantization units and exact alpha');
+        expect(settledPixels, matchesReadingLyricRgba(reference),
+            reason: 'The settled primary ink keeps its location and exact '
+                'alpha with at most two RGB quantization units');
         await tester.pumpWidget(const SizedBox.shrink());
       });
     }
@@ -364,6 +404,7 @@ void main() {
     await surface.mount(tester);
     final target = surface.document.lines[12] as LrcLine;
     final before = _glyphY(tester, target, 0);
+    final glyphBounds = _graphemeBounds(tester, target);
     surface.settings.setShowTranslation(false);
     await tester.pump();
     for (var frame = 0; frame < 36; frame++) {
@@ -375,10 +416,16 @@ void main() {
       expect(_glyphY(tester, target, 0), closeTo(before, .05),
           reason: 'Media line changes cannot take the reading reveal owner '
               'at frame $frame');
+      expectReadingLyricGraphemeBounds(
+          _graphemeBounds(tester, target), glyphBounds,
+          reason: 'Media changes keep all reading graphemes at frame $frame');
     }
     surface.change(() => surface.playing = false);
     await tester.pumpAndSettle();
     expect(_glyphY(tester, target, 0), closeTo(before, .05));
+    expectReadingLyricGraphemeBounds(
+        _graphemeBounds(tester, target), glyphBounds,
+        reason: 'Pausing retains every reading grapheme');
     expect(surface.settings.readingTarget!.line, same(target));
     expect(tester.binding.transientCallbackCount, 0,
         reason: 'The content/line transitions end after playback is paused');

@@ -1,6 +1,7 @@
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'dart:async';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -10,6 +11,7 @@ import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/lyric_text_codec.dart';
+import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:flutter/material.dart';
@@ -41,27 +43,50 @@ class LocalLyricChoice {
   }
 }
 
-Future<void> showLocalLyricBatch(
-    BuildContext context, List<Audio> audios) async {
-  final directory = (DirectoryPicker()..title = ui('选择本地歌词目录')).getDirectory();
-  if (directory == null || !context.mounted) return;
+Future<bool> showLocalLyricBatch(BuildContext context, List<Audio> audios,
+    {FutureOr<Directory?> Function()? pickDirectory,
+    LyricDocumentStore? store}) async {
+  Directory? directory;
+  try {
+    directory = await (pickDirectory ??
+        () => (DirectoryPicker()..title = ui('选择本地歌词目录')).getDirectory())();
+  } catch (error) {
+    if (context.mounted) {
+      showAppNotice(error.toString(),
+          context: context, kind: AppNoticeKind.error);
+    }
+    return false;
+  }
+  if (directory == null || !context.mounted) return false;
+  final selectedDirectory = directory;
+  var committed = false;
   await showAppDialog<void>(
       context: context,
       builder: (_) => LocalLyricBatchDialog(
-          audios: List.unmodifiable(audios), directory: directory));
+          audios: List.unmodifiable(audios),
+          directory: selectedDirectory,
+          store: store,
+          onCommitted: () => committed = true));
+  return committed;
 }
 
 class LocalLyricBatchDialog extends StatefulWidget {
   const LocalLyricBatchDialog(
-      {super.key, required this.audios, required this.directory});
+      {super.key,
+      required this.audios,
+      required this.directory,
+      this.store,
+      this.onCommitted});
   final List<Audio> audios;
   final Directory directory;
+  final LyricDocumentStore? store;
+  final VoidCallback? onCommitted;
   @override
   State<LocalLyricBatchDialog> createState() => _LocalLyricBatchDialogState();
 }
 
 class _LocalLyricBatchDialogState extends State<LocalLyricBatchDialog> {
-  final _store = LyricDocumentStore.instance;
+  late final _store = widget.store ?? LyricDocumentStore.instance;
   final _choices = <LocalLyricChoice>[];
   bool _busy = true, _cancel = false, _keepOffset = true;
   String? _error;
@@ -159,6 +184,12 @@ class _LocalLyricBatchDialogState extends State<LocalLyricBatchDialog> {
           }
         }
         if (mounted) setState(() {});
+      }
+      if (mounted &&
+          !_cancel &&
+          selected.isNotEmpty &&
+          _choices.every((choice) => choice.saved)) {
+        widget.onCommitted?.call();
       }
     } catch (e) {
       _error = '${ui("保存失败，未提交项可重试")}: $e';

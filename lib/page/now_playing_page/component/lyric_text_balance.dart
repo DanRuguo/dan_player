@@ -1,5 +1,8 @@
 import 'package:desktop_lyric/font_policy.dart';
+import 'package:desktop_lyric/lyric_ruby.dart';
+import 'package:desktop_lyric/lyric_glyph_morph.dart';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -8,6 +11,20 @@ import 'lyric_follow_words.dart';
 /// TextPainter's advance width can be smaller than antialiased glyph ink.
 /// Keep that ink inside the same paragraph canvas used by the row filter.
 const double lyricVerticalInkGuard = 4;
+
+/// Native fallback runs can extend above the paragraph's logical origin.
+/// Readings own this extra margin around their shaped selection boxes.
+/// Call only when laying out readings, never while media or motion is sampled.
+double lyricTopInkGuard(TextPainter painter) {
+  var top = 0.0;
+  for (final box in painter.getBoxesForSelection(
+      TextSelection(
+          baseOffset: 0, extentOffset: painter.text!.toPlainText().length),
+      boxHeightStyle: ui.BoxHeightStyle.includeLineSpacingMiddle)) {
+    top = math.min(top, box.top);
+  }
+  return (lyricVerticalInkGuard - top).ceilToDouble();
+}
 
 /// The same horizontal anchor is used by the widget alignment, line painter,
 /// font handoff, and geometry probes. Keep intermediate alignments continuous.
@@ -203,7 +220,9 @@ class BalancedLyricText extends StatefulWidget {
       this.alignmentX,
       this.wrapTargetFontSize,
       this.wrapProgress = 0,
-      this.wrapStatus});
+      this.wrapStatus,
+      this.rubyVisibility = 1,
+      this.rubySpans = const []});
   final String text;
   final TextStyle style;
   final TextAlign textAlign;
@@ -212,6 +231,8 @@ class BalancedLyricText extends StatefulWidget {
   final double? wrapTargetFontSize;
   final double wrapProgress;
   final LyricWrapFlightStatus? wrapStatus;
+  final List<LyricRubySpan> rubySpans;
+  final double rubyVisibility;
 
   @override
   State<BalancedLyricText> createState() => _BalancedLyricTextState();
@@ -278,8 +299,14 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
         if (identical(painter.text, _painter)) {
           final boxes = painter.text.getBoxesForSelection(selection);
           if (boxes.isNotEmpty) {
-            result =
-                map(object, Offset(0, boxes.first.top + painter.inkOffset.dy));
+            result = map(
+                object,
+                Offset(
+                    0,
+                    boxes.first.top +
+                        painter.inkOffset.dy +
+                        (painter.ruby?.leadingForOffset(offset) ?? 0) *
+                            painter.rubyVisibility));
           }
         }
       }
@@ -295,9 +322,21 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
   Object? _shapeIdentity;
   double? _width;
   TextPainter? _painter;
+  LyricRubyLayout? _ruby;
+  LyricRubyShaping? _rubyShaping;
   List<LyricFollowWordSlot> _slots = const [];
   bool? _slotsFollow;
   Color? _color;
+  void _bindRubyMotion() => _ruby?.bindMotion(phaseFor: (span) {
+        var phase = 0.0;
+        var count = 0;
+        for (final slot in _slots) {
+          if (slot.end <= span.start || slot.start >= span.end) continue;
+          phase += slot.phase;
+          count++;
+        }
+        return count == 0 ? 1 : phase / count;
+      });
   Object? _wrapIdentity;
   ({
     int suffixStart,
@@ -316,7 +355,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
       final textHeightBehavior =
           DefaultTextStyle.of(context).textHeightBehavior ??
               DefaultTextHeightBehavior.maybeOf(context);
-      final style = widget.style.copyWith(color: Colors.white);
+      final glyphStyle = lyricRubyPrimaryStyle(widget.style, widget.rubySpans);
+      final style = glyphStyle.copyWith(color: Colors.white);
       final horizontalGuard =
           lyricHorizontalInkGuard(widget.style, scaler, constraints.maxWidth);
       final textMaxWidth = constraints.maxWidth.isFinite
@@ -324,7 +364,9 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
           : constraints.maxWidth;
       final paintAlign =
           widget.alignmentX == null ? widget.textAlign : TextAlign.left;
-      final needsPainter = widget.wordFollow || widget.alignmentX != null;
+      final needsPainter = widget.wordFollow ||
+          widget.alignmentX != null ||
+          widget.rubySpans.isNotEmpty;
       final shapeIdentity = (
         widget.text,
         fontPolicy,
@@ -333,17 +375,29 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
         direction,
         scaler,
         locale,
-        textHeightBehavior
+        textHeightBehavior,
+        widget.rubySpans
       );
       final identity = (shapeIdentity, textMaxWidth);
       if (_identity != identity || (needsPainter && _painter == null)) {
         // Window resizing changes wrapping, not the glyph run. Keep the
         // native paragraph so its shaping cache survives the width sweep.
         if (_painter == null || _shapeIdentity != shapeIdentity) {
+          _rubyShaping?.dispose();
+          _rubyShaping = widget.rubySpans.isEmpty
+              ? null
+              : LyricRubyShaping(
+                  spans: widget.rubySpans,
+                  style: widget.style,
+                  policy: fontPolicy,
+                  direction: direction,
+                  scaler: scaler,
+                  locale: locale,
+                  vertical: false);
           _painter?.dispose();
           _painter = TextPainter(
               text: appFontSpan(widget.text,
-                  style: widget.style, policy: fontPolicy),
+                  style: glyphStyle, policy: fontPolicy),
               textAlign: paintAlign,
               textDirection: direction,
               textScaler: scaler,
@@ -363,6 +417,22 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
             ? lyricFollowWordSlots(painter, widget.text)
             : const [];
         _slotsFollow = widget.wordFollow;
+        _ruby?.dispose();
+        _ruby = widget.rubySpans.isEmpty
+            ? null
+            : LyricRubyLayout(
+                primary: painter,
+                spans: widget.rubySpans,
+                style: widget.style,
+                policy: fontPolicy,
+                direction: direction,
+                scaler: scaler,
+                locale: locale,
+                width: painter.width,
+                shaping: _rubyShaping,
+                primaryInset: lyricTopInkGuard(painter) - lyricVerticalInkGuard,
+              );
+        _bindRubyMotion();
         _color = widget.style.color;
         _identity = identity;
       } else if (_slotsFollow != widget.wordFollow) {
@@ -372,17 +442,19 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
             ? lyricFollowWordSlots(_painter!, widget.text)
             : const [];
         _slotsFollow = widget.wordFollow;
+        _bindRubyMotion();
       }
       if (_painter != null && _color != widget.style.color) {
         _painter!
           ..text =
-              appFontSpan(widget.text, style: widget.style, policy: fontPolicy)
+              appFontSpan(widget.text, style: glyphStyle, policy: fontPolicy)
           ..layout(minWidth: _width!.isFinite ? _width! : 0, maxWidth: _width!);
         _color = widget.style.color;
       }
       final targetFontSize = widget.wrapTargetFontSize;
       final sourceFontSize = widget.style.fontSize ?? 14;
       final canMoveSuffix = targetFontSize != null &&
+          widget.rubySpans.isEmpty &&
           needsPainter &&
           direction == TextDirection.ltr &&
           widget.alignmentX != null &&
@@ -476,7 +548,13 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
               child: CustomPaint(
                 painter: PlainLyricWordFollowPainter(
                     _painter!, _slots, follow, _color,
-                    inkOffset: Offset(horizontalGuard, lyricVerticalInkGuard),
+                    inkOffset: Offset(
+                        horizontalGuard,
+                        lyricVerticalInkGuard +
+                            (_ruby?.insetAt(widget.rubyVisibility) ?? 0)),
+                    rubyVisibility: widget.rubyVisibility,
+                    pixelRatio: MediaQuery.devicePixelRatioOf(context),
+                    ruby: _ruby,
                     alignmentX: widget.alignmentX,
                     wrapFlight: wrapFlight,
                     layoutIdentity: identity),
@@ -490,11 +568,16 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
                   label: widget.text,
                   textDirection: direction,
                   child: Padding(
-                    padding: EdgeInsets.symmetric(
-                        horizontal: horizontalGuard,
-                        vertical: lyricVerticalInkGuard),
+                    padding: EdgeInsets.fromLTRB(
+                        horizontalGuard,
+                        lyricVerticalInkGuard +
+                            (_ruby?.insetAt(widget.rubyVisibility) ?? 0),
+                        horizontalGuard,
+                        lyricVerticalInkGuard),
                     child: SizedBox(
-                        width: _painter!.width, height: _painter!.height),
+                        width: _painter!.width,
+                        height: _painter!.height +
+                            (_ruby?.extraLeading ?? 0) * widget.rubyVisibility),
                   ),
                 ),
               )));
@@ -503,16 +586,22 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
 
   @override
   void dispose() {
+    _ruby?.dispose();
+    _rubyShaping?.dispose();
     _painter?.dispose();
     super.dispose();
   }
 }
 
-class PlainLyricWordFollowPainter extends CustomPainter {
+class PlainLyricWordFollowPainter extends CustomPainter
+    implements LyricGlyphMorphConsumer {
   PlainLyricWordFollowPainter(this.text, this.slots, this.follow, this.color,
       {this.inkOffset = Offset.zero,
       this.alignmentX,
       this.wrapFlight,
+      this.ruby,
+      this.rubyVisibility = 1,
+      this.pixelRatio = 1,
       this.layoutIdentity})
       : super(repaint: follow?.clock);
   final TextPainter text;
@@ -524,6 +613,18 @@ class PlainLyricWordFollowPainter extends CustomPainter {
   final LyricWrapFlight? wrapFlight;
   // Capture geometry independently of the mutable retained TextPainter.
   final Object? layoutIdentity;
+  final LyricRubyLayout? ruby;
+  final double rubyVisibility, pixelRatio;
+  @override
+  TextPainter get glyphParagraph => text;
+  @override
+  Object get glyphLayoutIdentity => layoutIdentity ?? text;
+  @override
+  double get glyphPixelRatio => pixelRatio;
+  @override
+  Offset get glyphInkOffset => inkOffset;
+  @override
+  LyricGlyphMorphFrame? glyphMorph;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -531,7 +632,20 @@ class PlainLyricWordFollowPainter extends CustomPainter {
     canvas.translate(inkOffset.dx, inkOffset.dy);
     final flight = wrapFlight;
     if (flight == null) {
-      paintLyricAlignment(canvas, text, alignmentX, () => _paintInk(canvas));
+      void primary() {
+        if (glyphMorph != null) {
+          _paintInk(canvas);
+        } else {
+          paintLyricAlignment(
+              canvas, text, alignmentX, () => _paintInk(canvas));
+        }
+      }
+
+      if (ruby == null) {
+        primary();
+      } else {
+        ruby!.paintPrimary(canvas, primary, visibility: rubyVisibility);
+      }
     } else {
       canvas.save();
       canvas.clipRect(flight.prefixClip, doAntiAlias: false);
@@ -543,11 +657,58 @@ class PlainLyricWordFollowPainter extends CustomPainter {
       _paintInk(canvas);
       canvas.restore();
     }
+    ruby?.paint(canvas, tint: color, visibility: rubyVisibility,
+        displacement: (glyph) {
+      final morph = glyphMorph;
+      final bounds = morph?.geometry
+          .bounds(glyph.span.start, glyph.span.end, morph.progress);
+      return Offset(
+        bounds == null && alignmentX == null
+            ? 0
+            : bounds == null
+                ? lyricAlignedOffset(text.width, glyph.lineWidth, alignmentX!)
+                : bounds.center.dx - glyph.source.center.dx,
+        (bounds == null ? 0 : bounds.top - glyph.source.top) +
+            (follow?.offset(glyph.followPhase,
+                    text.textScaler.scale(text.text?.style?.fontSize ?? 14)) ??
+                0),
+      );
+    });
     canvas.restore();
   }
 
   void _paintInk(Canvas canvas) {
     final motion = follow;
+    final morph = glyphMorph;
+    if (morph != null) {
+      final fontSize = text.textScaler.scale(text.text?.style?.fontSize ?? 14);
+      morph.geometry.paint(canvas,
+          progress: morph.progress,
+          tint: color,
+          nativeParagraph: true,
+          colourPaint: (source) => text.paint(source, Offset.zero),
+          colourParagraph: text,
+          colourLayoutIdentity: glyphLayoutIdentity,
+          displacement: motion == null
+              ? null
+              : (cell, presented) {
+                  var low = 0, high = slots.length;
+                  while (low < high) {
+                    final middle = (low + high) ~/ 2;
+                    if (slots[middle].end <= cell.start) {
+                      low = middle + 1;
+                    } else {
+                      high = middle;
+                    }
+                  }
+                  return Offset(
+                      0,
+                      low < slots.length
+                          ? motion.offset(slots[low].phase, fontSize)
+                          : 0);
+                });
+      return;
+    }
     if (motion == null ||
         slots.isEmpty ||
         motion.clock.value <= 0 ||
@@ -580,7 +741,9 @@ class PlainLyricWordFollowPainter extends CustomPainter {
       inkOffset != oldDelegate.inkOffset ||
       color != oldDelegate.color ||
       alignmentX != oldDelegate.alignmentX ||
-      wrapFlight != oldDelegate.wrapFlight;
+      wrapFlight != oldDelegate.wrapFlight ||
+      rubyVisibility != oldDelegate.rubyVisibility ||
+      !identical(ruby, oldDelegate.ruby);
 }
 
 /// Move each shaped line within its unchanged paragraph as alignment changes.
@@ -618,23 +781,36 @@ class LyricFontMorph extends MultiChildRenderObjectWidget {
     required this.progress,
     required this.alignmentX,
     this.wrapStatus,
+    this.readingIdentity,
+    this.readingAnchorY,
+    this.spacingTransition = false,
     required super.children,
   }) : assert(progress >= 0 && progress <= 1);
 
   final double progress;
   final double alignmentX;
   final LyricWrapFlightStatus? wrapStatus;
+  final Object? readingIdentity;
+
+  /// The active search alone maps its cached glyph into each laid-out endpoint.
+  /// This reads existing boxes and parent data, never shapes or searches text.
+  final double? Function(RenderBox endpoint)? readingAnchorY;
+  final bool spacingTransition;
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderLyricFontMorph(progress, alignmentX, wrapStatus);
+      _RenderLyricFontMorph(progress, alignmentX, wrapStatus, readingIdentity,
+          readingAnchorY, spacingTransition);
 
   @override
   void updateRenderObject(BuildContext context, RenderObject renderObject) {
     (renderObject as _RenderLyricFontMorph)
       ..progress = progress
       ..alignmentX = alignmentX
-      ..wrapStatus = wrapStatus;
+      ..wrapStatus = wrapStatus
+      ..readingIdentity = readingIdentity
+      ..readingAnchorY = readingAnchorY
+      ..spacingTransition = spacingTransition;
   }
 }
 
@@ -686,20 +862,144 @@ class _RenderLyricFontMorph extends RenderBox
     with
         ContainerRenderObjectMixin<RenderBox, _LyricFontMorphParentData>,
         RenderBoxContainerDefaultsMixin<RenderBox, _LyricFontMorphParentData> {
-  _RenderLyricFontMorph(this._progress, this._alignmentX, this._wrapStatus);
+  _RenderLyricFontMorph(this._progress, this._alignmentX, this._wrapStatus,
+      this._readingIdentity, this._readingAnchorY, this._spacingTransition);
 
   double _progress;
   double _alignmentX;
   LyricWrapFlightStatus? _wrapStatus;
   double? _retargetHeight;
+  Object? _readingIdentity;
+  double? Function(RenderBox endpoint)? _readingAnchorY;
+  double? _presentedReadingY, _retargetReadingY;
+  double? _readingWidth;
+  bool _spacingTransition;
+  final _glyphMotions =
+      <int, ({LyricGlyphMorph geometry, Object target, Offset origin})>{};
+  final _glyphConsumers =
+      <({RenderCustomPaint render, LyricGlyphMorphConsumer painter})>[];
+
+  void _clearGlyphMotion() {
+    for (final consumer in _glyphConsumers) {
+      consumer.painter.glyphMorph = null;
+      if (consumer.render.attached) consumer.render.markNeedsPaint();
+    }
+    _glyphConsumers.clear();
+    for (final motion in _glyphMotions.values) {
+      motion.geometry.dispose();
+    }
+    _glyphMotions.clear();
+  }
+
+  List<({RenderCustomPaint render, LyricGlyphMorphConsumer painter})>
+      _paragraphs(RenderBox endpoint) {
+    final result =
+        <({RenderCustomPaint render, LyricGlyphMorphConsumer painter})>[];
+    void visit(RenderObject object) {
+      if (object is RenderCustomPaint &&
+          object.painter is LyricGlyphMorphConsumer) {
+        result.add((
+          render: object,
+          painter: object.painter! as LyricGlyphMorphConsumer
+        ));
+      }
+      object.visitChildren(visit);
+    }
+
+    visit(endpoint);
+    return result;
+  }
+
+  Offset _layoutOffset(RenderBox box) {
+    var result = Offset.zero;
+    RenderObject? current = box;
+    while (current != null && !identical(current, this)) {
+      final data = current.parentData;
+      if (data is BoxParentData) result += data.offset;
+      current = current.parent;
+    }
+    return result;
+  }
+
+  void _syncGlyphMotion() {
+    if (!_spacingTransition ||
+        _progress >= 1 ||
+        identical(firstChild, lastChild)) {
+      _clearGlyphMotion();
+      return;
+    }
+    final sources = _paragraphs(firstChild!);
+    final targets = _paragraphs(lastChild!);
+    for (final consumer in _glyphConsumers) {
+      consumer.painter.glyphMorph = null;
+    }
+    _glyphConsumers.clear();
+    for (var index = 0;
+        index < math.min(sources.length, targets.length);
+        index++) {
+      final source = sources[index], target = targets[index];
+      final from = source.painter.glyphParagraph;
+      final to = target.painter.glyphParagraph;
+      if (from.text?.toPlainText() != to.text?.toPlainText()) continue;
+      final targetOffset = _layoutOffset(target.render) +
+          target.painter.glyphInkOffset -
+          _layoutOffset(source.render) -
+          source.painter.glyphInkOffset;
+      final origin =
+          _layoutOffset(source.render) + source.painter.glyphInkOffset;
+      var motion = _glyphMotions[index];
+      if (motion == null ||
+          motion.target != target.painter.glyphLayoutIdentity) {
+        final geometry = motion == null
+            ? LyricGlyphMorph(
+                from: from,
+                to: to,
+                targetOffset: targetOffset,
+                alignmentX: _alignmentX,
+                pixelRatio: source.painter.glyphPixelRatio)
+            : LyricGlyphMorph.retarget(motion.geometry, to,
+                source.painter.glyphMorph?.progress ?? _previousGlyphProgress,
+                targetOffset: targetOffset,
+                fromOffset: motion.origin - origin,
+                alignmentX: _alignmentX);
+        motion?.geometry.dispose();
+        motion = (
+          geometry: geometry,
+          target: target.painter.glyphLayoutIdentity,
+          origin: origin
+        );
+        _glyphMotions[index] = motion;
+      }
+      source.painter.glyphMorph =
+          LyricGlyphMorphFrame(motion.geometry, _progress);
+      source.render.markNeedsPaint();
+      _glyphConsumers.add(source);
+      _glyphMotions[index] =
+          (geometry: motion.geometry, target: motion.target, origin: origin);
+    }
+    _previousGlyphProgress = _progress;
+  }
+
+  double _previousGlyphProgress = 0;
+
+  set spacingTransition(bool value) {
+    if (_spacingTransition == value) return;
+    _spacingTransition = value;
+    markNeedsPaint();
+  }
+
   set progress(double value) {
     if (_progress == value) return;
     if (value < _progress && hasSize) {
       // A rapid reversal begins at the height currently on screen. Its newly
       // shaped source may already be across a line-break threshold.
       _retargetHeight = size.height;
+      _retargetReadingY = _presentedReadingY;
     }
-    if (value >= 1) _retargetHeight = null;
+    if (value >= 1) {
+      _retargetHeight = null;
+      _retargetReadingY = null;
+    }
     _progress = value;
     markNeedsLayout();
   }
@@ -714,6 +1014,17 @@ class _RenderLyricFontMorph extends RenderBox
     if (identical(_wrapStatus, value)) return;
     _wrapStatus = value;
     markNeedsPaint();
+  }
+
+  set readingIdentity(Object? value) {
+    if (identical(value, _readingIdentity)) return;
+    _readingIdentity = value;
+    _presentedReadingY = _retargetReadingY = null;
+    markNeedsLayout();
+  }
+
+  set readingAnchorY(double? Function(RenderBox endpoint)? value) {
+    _readingAnchorY = value;
   }
 
   @override
@@ -732,6 +1043,13 @@ class _RenderLyricFontMorph extends RenderBox
   @override
   void performLayout() {
     assert(firstChild != null);
+    final readY = _readingAnchorY;
+    if (readY != null && _readingWidth != constraints.maxWidth) {
+      // Width reflows both fixed endpoints. An interrupted height from the
+      // previous width cannot bound a deep search glyph in the new paragraph.
+      _retargetHeight = _retargetReadingY = null;
+    }
+    _readingWidth = readY == null ? null : constraints.maxWidth;
     final childConstraints = constraints.loosen();
     var child = firstChild;
     while (child != null) {
@@ -746,6 +1064,20 @@ class _RenderLyricFontMorph extends RenderBox
           lyricAlignedOffset(size.width, child.size.width, _alignmentX), 0);
       child = childAfter(child);
     }
+    if (readY != null && !identical(firstChild, lastChild)) {
+      final from = readY(firstChild!);
+      final to = readY(lastChild!);
+      if (from != null && to != null) {
+        final start = _retargetReadingY ?? from;
+        final anchor = start + (to - start) * _progress;
+        _presentedReadingY = anchor;
+        final firstData = firstChild!.parentData! as _LyricFontMorphParentData;
+        final lastData = lastChild!.parentData! as _LyricFontMorphParentData;
+        firstData.offset += Offset(0, anchor - from);
+        lastData.offset += Offset(0, anchor - to);
+      }
+    }
+    _syncGlyphMotion();
   }
 
   @override
@@ -759,15 +1091,28 @@ class _RenderLyricFontMorph extends RenderBox
   @override
   void paint(PaintingContext context, Offset offset) {
     final first = firstChild;
-    final last = lastChild;
     if (first == null) return;
+    final last = lastChild!;
     if (identical(first, last)) {
       context.paintChild(first, offset);
       return;
     }
-    final opacity = lyricFontBlendOpacities(
-        _progress, first.size.height, last!.size.height,
-        lateHandoff: _wrapStatus?.active == true);
+    if (_spacingTransition && _glyphConsumers.isNotEmpty) {
+      context.paintChild(first,
+          offset + (first.parentData! as _LyricFontMorphParentData).offset);
+      return;
+    }
+    // Equal-height spacing endpoints do not scale their glyphs. A font-size
+    // late handoff would therefore leave their ink completely static until
+    // its short final fade. Blend throughout the finite spacing trajectory.
+    // A line-break change keeps the original height-aware handoff, so newly
+    // wrapped rows never paint into space that has not been made available.
+    final opacity =
+        _spacingTransition && (first.size.height - last.size.height).abs() < .01
+            ? (outgoing: 1 - _progress, incoming: _progress)
+            : lyricFontBlendOpacities(
+                _progress, first.size.height, last.size.height,
+                lateHandoff: _wrapStatus?.active == true);
     void paintWithOpacity(PaintingContext context, Offset offset,
         RenderBox child, double opacity) {
       if (opacity <= 0) return;
@@ -810,5 +1155,11 @@ class _RenderLyricFontMorph extends RenderBox
   @override
   void visitChildrenForSemantics(RenderObjectVisitor visitor) {
     if (lastChild != null) visitor(lastChild!);
+  }
+
+  @override
+  void dispose() {
+    _clearGlyphMotion();
+    super.dispose();
   }
 }

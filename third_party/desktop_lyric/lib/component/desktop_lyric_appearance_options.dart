@@ -1,5 +1,6 @@
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
 import 'package:desktop_lyric/app_motion.dart';
+import 'package:desktop_lyric/component/lyric_letter_spacing_control.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -86,6 +87,14 @@ class DesktopLyricAppearanceOptions extends StatelessWidget {
               divisions: 46,
               onChanged: (value) =>
                   _change(appearance.copyWith(translationFontSize: value))),
+          const SizedBox(height: 8),
+          LyricLetterSpacingControl(
+              id: 'desktop-lyric-letter-spacing',
+              value: appearance.lyricLetterSpacing,
+              primary: primary,
+              foreground: foreground,
+              onChanged: (value) =>
+                  _change(appearance.copyWith(lyricLetterSpacing: value))),
           const SizedBox(height: 8),
           slider(
               id: 'desktop-text-opacity',

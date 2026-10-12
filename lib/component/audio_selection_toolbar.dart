@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 typedef SelectedAudioAction = FutureOr<void> Function(List<Audio> audios);
+typedef SelectedAudioCommitAction = FutureOr<bool> Function(List<Audio> audios);
 
 /// [selected] is already ordered by the visible list. Playlist callers may
 /// supply repeated occurrences; this component deliberately does not dedupe.
@@ -30,8 +31,17 @@ class AudioSelectionToolbar extends StatelessWidget {
     required this.onExit,
     this.hiddenSelectionCount = 0,
     this.onPlay,
+    this.onPlayCommitted,
     this.onAddToPlaylist,
     this.onExport,
+    this.onAddToPlaylistCommitted,
+    this.onExportCommitted,
+    this.onCommitted,
+    this.isActionCurrent,
+    this.includeRangeActions = false,
+    this.onSelectBetween,
+    this.onSelectAbove,
+    this.onSelectBelow,
   });
 
   final List<Audio> selected;
@@ -42,8 +52,14 @@ class AudioSelectionToolbar extends StatelessWidget {
   final VoidCallback onExit;
   final int hiddenSelectionCount;
   final SelectedAudioAction? onPlay;
+  final SelectedAudioCommitAction? onPlayCommitted;
   final SelectedAudioAction? onAddToPlaylist;
   final SelectedAudioAction? onExport;
+  final SelectedAudioCommitAction? onAddToPlaylistCommitted, onExportCommitted;
+  final VoidCallback? onCommitted;
+  final bool Function()? isActionCurrent;
+  final bool includeRangeActions;
+  final VoidCallback? onSelectBetween, onSelectAbove, onSelectBelow;
 
   @override
   Widget build(BuildContext context) {
@@ -75,10 +91,18 @@ class AudioSelectionToolbar extends StatelessWidget {
               ? null
               : () {
                   final snapshot = List<Audio>.of(selected);
-                  if (onPlay != null) {
+                  if (isActionCurrent?.call() == false) return;
+                  if (onPlayCommitted != null || onPlay == null) {
+                    unawaited(_runCommittedAction(
+                        context,
+                        onPlayCommitted ??
+                            (items) => PlayService.instance.playbackService
+                                .playQueue(0, items),
+                        snapshot,
+                        onCommitted: onCommitted,
+                        isCurrent: isActionCurrent));
+                  } else if (onPlay != null) {
                     unawaited(_runSelectedAction(context, onPlay!, snapshot));
-                  } else {
-                    PlayService.instance.playbackService.play(0, snapshot);
                   }
                 },
           style: appToolbarControlStyle(context, primary: true),
@@ -89,6 +113,14 @@ class AudioSelectionToolbar extends StatelessWidget {
           onAddToPlaylist: onAddToPlaylist,
           onExport: onExport,
           onInvert: hasItems ? onInvert : null,
+          onAddToPlaylistCommitted: onAddToPlaylistCommitted,
+          onExportCommitted: onExportCommitted,
+          onCommitted: onCommitted,
+          isActionCurrent: isActionCurrent,
+          includeRangeActions: includeRangeActions,
+          onSelectBetween: onSelectBetween,
+          onSelectAbove: onSelectAbove,
+          onSelectBelow: onSelectBelow,
         ),
         IconButton.filledTonal(
           key: const ValueKey('audio-selection-toggle-all'),
@@ -119,79 +151,119 @@ class AudioSelectionMenu extends StatelessWidget {
     this.onAddToPlaylist,
     this.onExport,
     this.onInvert,
+    this.onAddToPlaylistCommitted,
+    this.onExportCommitted,
+    this.onCommitted,
+    this.isActionCurrent,
+    this.includeRangeActions = false,
+    this.onSelectBetween,
+    this.onSelectAbove,
+    this.onSelectBelow,
   });
 
   final List<Audio> selected;
   final SelectedAudioAction? onAddToPlaylist;
   final SelectedAudioAction? onExport;
   final VoidCallback? onInvert;
+  final SelectedAudioCommitAction? onAddToPlaylistCommitted, onExportCommitted;
+  final VoidCallback? onCommitted;
+  final bool Function()? isActionCurrent;
+  final bool includeRangeActions;
+  final VoidCallback? onSelectBetween, onSelectAbove, onSelectBelow;
 
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    bool current() =>
+        context.mounted &&
+        identical(context.widget, this) &&
+        (isActionCurrent?.call() ?? true);
     Widget item(
-            String id, String label, IconData icon, SelectedAudioAction action,
-            {bool enabled = true}) =>
+            String id, String label, IconData icon, SelectedAudioAction? action,
+            {SelectedAudioCommitAction? commit, bool enabled = true}) =>
         MenuItemButton(
           key: ValueKey('audio-selection-$id'),
           onPressed: !enabled || selected.isEmpty
               ? null
-              : () => unawaited(_runSelectedAction(
-                  context, action, List<Audio>.of(selected))),
+              : () {
+                  if (!current()) return;
+                  final snapshot = List<Audio>.of(selected);
+                  if (commit != null) {
+                    unawaited(_runCommittedAction(context, commit, snapshot,
+                        onCommitted: onCommitted, isCurrent: isActionCurrent));
+                  } else {
+                    unawaited(_runSelectedAction(context, action!, snapshot));
+                  }
+                },
           leadingIcon: Icon(icon),
-          child: Text(ui(label)),
+          child: _selectionMenuLabel(context, label),
         );
 
     return MenuAnchor(
+      crossAxisUnconstrained: false,
+      reservedPadding: _selectionMenuPadding(context),
       menuChildren: [
-        item(
-            'shuffle',
-            '随机播放所选',
-            Symbols.shuffle,
-            (audios) =>
-                PlayService.instance.playbackService.shuffleAndPlay(audios)),
-        item('next', '下一批播放', Symbols.playlist_play,
-            (audios) => _enqueue(context, audios, next: true)),
-        item('append', '加入播放队尾', Symbols.queue_music,
-            (audios) => _enqueue(context, audios, next: false)),
+        item('shuffle', '随机播放所选', Symbols.shuffle, null,
+            commit: (audios) => PlayService.instance.playbackService
+                .shuffleAndPlayQueue(audios)),
+        item('next', '下一批播放', Symbols.playlist_play, null,
+            commit: (audios) => _enqueue(context, audios, next: true)),
+        item('append', '加入播放队尾', Symbols.queue_music, null,
+            commit: (audios) => _enqueue(context, audios, next: false)),
         const Divider(),
-        item(
-            'playlist',
-            '加入歌单…',
-            Symbols.playlist_add,
-            onAddToPlaylist ??
-                (audios) => showAddAudiosToPlaylistDialog(context, audios)),
-        item('export', '导出所选为 M3U8…', Symbols.file_export,
-            onExport ?? (audios) => exportM3uPlaylist(context, audios)),
-        item('copy-info', '复制曲目信息', Symbols.content_copy, (audios) async {
+        item('playlist', '加入歌单…', Symbols.playlist_add, onAddToPlaylist,
+            commit: onAddToPlaylistCommitted ??
+                (onAddToPlaylist == null
+                    ? (audios) => showAddAudiosToPlaylistDialog(context, audios)
+                    : null)),
+        item('export', '导出所选为 M3U8…', Symbols.file_export, onExport,
+            commit: onExportCommitted ??
+                (onExport == null
+                    ? (audios) => exportM3uPlaylist(context, audios)
+                    : null)),
+        item('copy-info', '复制曲目信息', Symbols.content_copy, null,
+            commit: (audios) async {
           await Clipboard.setData(
               ClipboardData(text: selectedTrackInfo(audios)));
           if (context.mounted) {
             _notice(context, ui('已复制 {0} 首歌曲的信息', [audios.length]));
           }
+          return true;
         }),
-        item('copy-paths', '复制本地文件路径', Symbols.folder_copy, (audios) async {
+        item('copy-paths', '复制本地文件路径', Symbols.folder_copy, null,
+            commit: (audios) async {
           final paths = selectedLocalPaths(audios);
           await Clipboard.setData(ClipboardData(text: paths.join('\r\n')));
           if (context.mounted) {
             _notice(context, ui('已复制 {0} 个本地文件路径', [paths.length]));
           }
+          return true;
         }, enabled: selected.any((audio) => !audio.isOnline)),
-        item('personal-tags', '个人评分与标签', Symbols.star,
-            (audios) => showPersonalTrackEditor(context, audios)),
-        item('local-lyrics', '批量关联本地歌词', Symbols.lyrics,
-            (audios) => showLocalLyricBatch(context, audios)),
-        item('edit-tags', '批量编辑标签', Symbols.edit_note,
-            (audios) => showBatchAudioMetadataDialog(context, audios)),
-        item('reread-covers', '重新读取封面', Symbols.image_search,
-            (audios) => showCoverRepairDialog(context, audios)),
+        item('personal-tags', '个人评分与标签', Symbols.star, null,
+            commit: (audios) => showPersonalTrackEditor(context, audios)),
+        item('local-lyrics', '批量关联本地歌词', Symbols.lyrics, null,
+            commit: (audios) => showLocalLyricBatch(context, audios)),
+        item('edit-tags', '批量编辑标签', Symbols.edit_note, null,
+            commit: (audios) => showBatchAudioMetadataDialog(context, audios)),
+        item('reread-covers', '重新读取封面', Symbols.image_search, null,
+            commit: (audios) => showCoverRepairDialog(context, audios)),
+        if (includeRangeActions) ...[
+          const Divider(),
+          ...selectionRangeMenuItems(context,
+              onBetween: onSelectBetween,
+              onAbove: onSelectAbove,
+              onBelow: onSelectBelow,
+              isCurrent: current),
+        ],
         if (onInvert != null) ...[
           const Divider(),
           MenuItemButton(
             key: const ValueKey('audio-selection-invert'),
-            onPressed: onInvert,
+            onPressed: () {
+              if (current()) onInvert!();
+            },
             leadingIcon: const Icon(Symbols.select_check_box),
-            child: Text(ui('反选当前列表')),
+            child: _selectionMenuLabel(context, '反选当前列表'),
           ),
         ],
       ],
@@ -228,12 +300,100 @@ Future<void> _runSelectedAction(BuildContext context,
   }
 }
 
-void _enqueue(BuildContext context, List<Audio> audios, {required bool next}) {
+Future<void> _runCommittedAction(
+    BuildContext context, SelectedAudioCommitAction action, List<Audio> audios,
+    {VoidCallback? onCommitted, bool Function()? isCurrent}) async {
+  try {
+    final committed = await action(audios);
+    if (committed && context.mounted && (isCurrent?.call() ?? true)) {
+      onCommitted?.call();
+    }
+  } catch (_) {
+    if (context.mounted) {
+      _notice(context, ui('处理所选歌曲失败，请重试'), kind: AppNoticeKind.error);
+    }
+  }
+}
+
+bool _enqueue(BuildContext context, List<Audio> audios, {required bool next}) {
   final added =
       PlayService.instance.playbackService.enqueueAudios(audios, next: next);
   _notice(context,
       added ? ui('已加入播放队列：{0} 首', [audios.length]) : ui('歌曲正在加载，请稍后重试'),
       kind: added ? AppNoticeKind.success : AppNoticeKind.warning);
+  return added;
+}
+
+List<Widget> selectionRangeMenuItems(BuildContext context,
+        {VoidCallback? onBetween,
+        VoidCallback? onAbove,
+        VoidCallback? onBelow,
+        bool autofocusFirst = false,
+        bool Function()? isCurrent}) =>
+    [
+      for (final entry in [
+        ('between', '选中两项之间（含两端）', Symbols.select_all, onBetween),
+        ('above', '选中此项及上方全部', Symbols.arrow_upward, onAbove),
+        ('below', '选中此项及下方全部', Symbols.arrow_downward, onBelow),
+      ])
+        MenuItemButton(
+            key: ValueKey('multi-selection-range-${entry.$1}'),
+            autofocus: autofocusFirst &&
+                entry.$1 ==
+                    (onBetween != null
+                        ? 'between'
+                        : onAbove != null
+                            ? 'above'
+                            : 'below'),
+            onPressed: entry.$4 == null
+                ? null
+                : () {
+                    if (isCurrent?.call() ?? true) entry.$4!();
+                  },
+            leadingIcon: Icon(entry.$3),
+            child: _selectionMenuLabel(context, entry.$2)),
+    ];
+
+EdgeInsets _selectionMenuPadding(BuildContext context) {
+  final media = MediaQuery.of(context);
+  return media.padding + media.viewInsets + const EdgeInsets.all(8);
+}
+
+Widget _selectionMenuLabel(BuildContext context, String label) =>
+    ConstrainedBox(
+        constraints: BoxConstraints(
+            maxWidth:
+                (MediaQuery.sizeOf(context).width - 96).clamp(48.0, 216.0)),
+        child: Text(ui(label), softWrap: true));
+
+class SelectionRangeMenuButton extends StatelessWidget {
+  const SelectionRangeMenuButton(
+      {super.key, this.onBetween, this.onAbove, this.onBelow});
+  final VoidCallback? onBetween, onAbove, onBelow;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return MenuAnchor(
+        crossAxisUnconstrained: false,
+        reservedPadding: _selectionMenuPadding(context),
+        menuChildren: selectionRangeMenuItems(context,
+            autofocusFirst: true,
+            onBetween: onBetween,
+            onAbove: onAbove,
+            onBelow: onBelow,
+            isCurrent: () =>
+                context.mounted && identical(context.widget, this)),
+        builder: (context, controller, _) => FilledButton.tonal(
+            key: const ValueKey('multi-selection-range-menu'),
+            onPressed: onBetween == null && onAbove == null && onBelow == null
+                ? null
+                : () =>
+                    controller.isOpen ? controller.close() : controller.open(),
+            style: appToolbarControlStyle(context, primary: true, tonal: true),
+            child:
+                AppToolbarLabel(label: ui('范围选择'), icon: Symbols.select_all)));
+  }
 }
 
 void _notice(BuildContext context, String text,

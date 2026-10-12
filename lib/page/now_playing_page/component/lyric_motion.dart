@@ -1,3 +1,4 @@
+export 'package:desktop_lyric/lyric_content_reveal.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:dan_player/component/app_motion.dart';
@@ -394,12 +395,149 @@ typedef LyricFontTransition = ({
   double toTranslationFontSize,
   double progress,
   double visualProgress,
+  double fromLetterSpacing,
+  double toLetterSpacing,
 });
 
 /// Reading anchors use the line's current paint geometry during parent layout.
 /// Plain values avoid accessing a descendant Transform's size in that phase.
 abstract interface class LyricLineReadingGeometry {
   double readingPaintY(double layoutY, double lineHeight);
+}
+
+typedef LyricSpacingRestoration = ({int revision, double spacing});
+
+class _VisibleSpacingSnapshot {
+  _VisibleSpacingSnapshot(Object source, this.identity, this.spacing)
+      : source = WeakReference(source);
+  final WeakReference<Object> source;
+  final Object identity;
+  final double spacing;
+}
+
+// One scalar pose survives the now-playing route's maintainState:false. The
+// lyric document remains owned by its service; no glyphs, rows or media clock
+// are retained here. Natural line advances can use the current line's text.
+_VisibleSpacingSnapshot? _visibleSpacingSnapshot;
+int _spacingRestorationRevision = 0;
+
+class LyricSpacingRestore extends StatefulWidget {
+  const LyricSpacingRestore(
+      {super.key,
+      required this.source,
+      required this.identity,
+      required this.spacing,
+      required this.visible,
+      required this.enabled,
+      required this.currentLine,
+      required this.builder});
+
+  final Object source;
+  final Object identity;
+  final double spacing;
+  final bool visible;
+  final bool enabled;
+  final bool currentLine;
+  final Widget Function(BuildContext, LyricSpacingRestoration?) builder;
+
+  @override
+  State<LyricSpacingRestore> createState() => _LyricSpacingRestoreState();
+}
+
+class _LyricSpacingRestoreState extends State<LyricSpacingRestore> {
+  bool _wasVisible = false;
+  Object? _identity;
+  double? _spacing;
+  Object? _source;
+  LyricSpacingRestoration? _restoration;
+  ModalRoute<dynamic>? _route;
+  final _routeAnimations = <Animation<double>>[];
+
+  void _routeStatusChanged(AnimationStatus status) {
+    if (mounted) setState(() {});
+  }
+
+  void _syncRouteListeners() {
+    for (final animation in _routeAnimations) {
+      animation.removeStatusListener(_routeStatusChanged);
+    }
+    _routeAnimations.clear();
+    if (!widget.currentLine) return;
+    for (final animation in [_route?.animation, _route?.secondaryAnimation]) {
+      if (animation == null) continue;
+      animation.addStatusListener(_routeStatusChanged);
+      _routeAnimations.add(animation);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (identical(route, _route)) return;
+    _route = route;
+    _syncRouteListeners();
+  }
+
+  @override
+  void didUpdateWidget(LyricSpacingRestore oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentLine != widget.currentLine) _syncRouteListeners();
+  }
+
+  @override
+  void dispose() {
+    for (final animation in _routeAnimations) {
+      animation.removeStatusListener(_routeStatusChanged);
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Overlay makes the row tickable at the start of a covering route's exit.
+    // Wait for that finite route handoff to expose the paragraph before using
+    // the existing finite lyric transition. Popup routes do not drive the
+    // PageRoute's secondary transition, and ordinary lyric/media motion keeps
+    // its existing visibility contract.
+    final routeReady = (_route?.animation == null ||
+            _route!.animation!.status == AnimationStatus.completed) &&
+        (_route?.secondaryAnimation == null ||
+            _route!.secondaryAnimation!.status == AnimationStatus.dismissed);
+    final visible =
+        widget.visible && TickerMode.valuesOf(context).enabled && routeReady;
+    final previous = _visibleSpacingSnapshot;
+    final sameSource = identical(previous?.source.target, widget.source);
+    if (!widget.enabled ||
+        (sameSource && previous!.identity != widget.identity)) {
+      if (sameSource) _visibleSpacingSnapshot = null;
+      _restoration = null;
+    }
+    if (visible && widget.enabled && widget.currentLine) {
+      if (!_wasVisible &&
+          sameSource &&
+          previous!.identity == widget.identity &&
+          previous.spacing != widget.spacing) {
+        _restoration = (
+          revision: ++_spacingRestorationRevision,
+          spacing: previous.spacing,
+        );
+      } else if (!identical(_source, widget.source) ||
+          _identity != widget.identity ||
+          _spacing != widget.spacing) {
+        _restoration = null;
+      }
+      _visibleSpacingSnapshot = _VisibleSpacingSnapshot(
+          widget.source, widget.identity, widget.spacing);
+    } else {
+      _restoration = null;
+    }
+    _wasVisible = visible;
+    _identity = widget.identity;
+    _spacing = widget.spacing;
+    _source = widget.source;
+    return widget.builder(context, _restoration);
+  }
 }
 
 class LyricLineMotion extends ImplicitlyAnimatedWidget {
@@ -412,10 +550,17 @@ class LyricLineMotion extends ImplicitlyAnimatedWidget {
     required this.alignment,
     required this.presentation,
     this.directFontSize = false,
+    this.letterSpacing = 0,
+    this.animateLetterSpacing = true,
+    this.restoredLetterSpacing,
     required this.builder,
     required bool reducedMotion,
   }) : super(
-          duration: reducedMotion ? Duration.zero : LyricMotion.lineDuration,
+          duration: restoredLetterSpacing != null && animateLetterSpacing
+              ? LyricMotion.lineDuration
+              : reducedMotion
+                  ? Duration.zero
+                  : LyricMotion.lineDuration,
           curve: LyricMotion.curve,
         );
 
@@ -425,6 +570,9 @@ class LyricLineMotion extends ImplicitlyAnimatedWidget {
   final Alignment alignment;
   final LyricTextPresentation presentation;
   final bool directFontSize;
+  final double letterSpacing;
+  final bool animateLetterSpacing;
+  final LyricSpacingRestoration? restoredLetterSpacing;
   final Widget Function(
       BuildContext context,
       double activation,
@@ -462,7 +610,35 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion>
   Tween<double>? _activation;
   Tween<double>? _fontSize;
   Tween<double>? _translationFontSize;
+  Tween<double>? _letterSpacing;
   AlignmentTween? _alignment;
+
+  void _restoreSpacing() {
+    final restoration = widget.restoredLetterSpacing;
+    if (restoration == null || !widget.animateLetterSpacing) return;
+    // Route restoration snaps every other presentation value as before. Only
+    // the settings' spacing gets a fresh, finite visible handoff.
+    _opacity = Tween(begin: widget.opacity, end: widget.opacity);
+    _scale = _SettledScaleTween(begin: widget.scale)..end = widget.scale;
+    _activation = Tween(begin: widget.activation, end: widget.activation);
+    _fontSize = Tween(
+        begin: widget.presentation.fontSize, end: widget.presentation.fontSize);
+    _translationFontSize = Tween(
+        begin: widget.presentation.translationFontSize,
+        end: widget.presentation.translationFontSize);
+    _alignment = AlignmentTween(begin: widget.alignment, end: widget.alignment);
+    _letterSpacing =
+        Tween(begin: restoration.spacing, end: widget.letterSpacing);
+    controller
+      ..duration = LyricMotion.lineDuration
+      ..forward(from: 0);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreSpacing();
+  }
 
   @override
   double readingPaintY(double layoutY, double lineHeight) {
@@ -473,7 +649,36 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion>
   @override
   void didUpdateWidget(LyricLineMotion oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.duration == Duration.zero) {
+    final restoring = widget.restoredLetterSpacing != null &&
+        oldWidget.restoredLetterSpacing != widget.restoredLetterSpacing &&
+        widget.animateLetterSpacing;
+    if (restoring) {
+      _restoreSpacing();
+      return;
+    }
+    if (oldWidget.letterSpacing != widget.letterSpacing &&
+        widget.animateLetterSpacing &&
+        widget.duration != Duration.zero &&
+        oldWidget.presentation == widget.presentation &&
+        oldWidget.opacity == widget.opacity &&
+        oldWidget.scale == widget.scale &&
+        oldWidget.alignment == widget.alignment &&
+        oldWidget.activation == widget.activation) {
+      // The base state has already started its simulation with lineDuration.
+      // Restart only this settings handoff with the finite layout duration.
+      controller
+        ..duration = LyricMotion.lineDuration
+        ..forward(from: 0);
+    }
+    final onlySpacing = _opacity?.begin == _opacity?.end &&
+        _scale?.begin == _scale?.end &&
+        _activation?.begin == _activation?.end &&
+        _fontSize?.begin == _fontSize?.end &&
+        _translationFontSize?.begin == _translationFontSize?.end &&
+        _alignment?.begin == _alignment?.end;
+    if ((widget.duration == Duration.zero &&
+            widget.restoredLetterSpacing == null) ||
+        (!widget.animateLetterSpacing && onlySpacing)) {
       controller.stop();
       controller.value = 1;
     }
@@ -494,6 +699,13 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion>
         _translationFontSize,
         widget.presentation.translationFontSize,
         (value) => Tween<double>(begin: value as double)) as Tween<double>?;
+    if (!widget.animateLetterSpacing) {
+      _letterSpacing =
+          Tween<double>(begin: widget.letterSpacing, end: widget.letterSpacing);
+    } else {
+      _letterSpacing = visitor(_letterSpacing, widget.letterSpacing,
+          (value) => Tween<double>(begin: value as double)) as Tween<double>?;
+    }
     _alignment = visitor(_alignment, widget.alignment,
             (value) => _SettledAlignmentTween(begin: value as Alignment))
         as AlignmentTween?;
@@ -534,93 +746,11 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion>
             toTranslationFontSize: _translationFontSize!.end!,
             progress: fontProgress,
             visualProgress: animation.value,
+            fromLetterSpacing: _letterSpacing!.begin!,
+            toLetterSpacing: _letterSpacing!.end!,
           ),
         )),
       ),
     );
   }
-}
-
-/// Reveals optional lyric tracks without changing the timed paragraph's
-/// element position. Each row keeps its own finite transition so a setting
-/// change can expand every visible row without replacing its glyph painter.
-typedef LyricContentVisibility = ({
-  double timestamp,
-  double romanization,
-  double translation,
-});
-
-class LyricContentReveal extends ImplicitlyAnimatedWidget {
-  const LyricContentReveal({
-    super.key,
-    super.onEnd,
-    required this.timestamp,
-    required this.romanization,
-    required this.translation,
-    required this.builder,
-    required bool reducedMotion,
-  }) : super(
-          duration: reducedMotion ? Duration.zero : LyricMotion.lineDuration,
-          curve: LyricMotion.curve,
-        );
-
-  final bool timestamp;
-  final bool romanization;
-  final bool translation;
-  final Widget Function(BuildContext, LyricContentVisibility) builder;
-
-  /// A zero-height placeholder keeps the following primary paragraph at the
-  /// same child index even when an optional track is entirely hidden.
-  static Widget part(double value, Widget child,
-      {Alignment alignment = Alignment.center}) {
-    final progress = value.clamp(0.0, 1.0);
-    if (progress == 0) return const SizedBox.shrink();
-    return ClipRect(
-      child: Align(
-        alignment: Alignment.topCenter,
-        heightFactor: progress,
-        child: Opacity(
-            opacity: progress,
-            child: Align(alignment: alignment, child: child)),
-      ),
-    );
-  }
-
-  @override
-  AnimatedWidgetBaseState<LyricContentReveal> createState() =>
-      _LyricContentRevealState();
-}
-
-class _LyricContentRevealState
-    extends AnimatedWidgetBaseState<LyricContentReveal> {
-  Tween<double>? _timestamp;
-  Tween<double>? _romanization;
-  Tween<double>? _translation;
-
-  @override
-  void didUpdateWidget(LyricContentReveal oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.duration == Duration.zero) {
-      controller.stop();
-      controller.value = 1;
-    }
-  }
-
-  @override
-  void forEachTween(TweenVisitor<dynamic> visitor) {
-    Tween<double>? number(Tween<double>? tween, bool visible) => visitor(
-        tween,
-        visible ? 1.0 : 0.0,
-        (value) => Tween<double>(begin: value as double)) as Tween<double>?;
-    _timestamp = number(_timestamp, widget.timestamp);
-    _romanization = number(_romanization, widget.romanization);
-    _translation = number(_translation, widget.translation);
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.builder(context, (
-        timestamp: _timestamp!.evaluate(animation),
-        romanization: _romanization!.evaluate(animation),
-        translation: _translation!.evaluate(animation),
-      ));
 }

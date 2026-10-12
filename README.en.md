@@ -73,7 +73,7 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 **Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. Desktop lyrics run in a separate process launched from the same executable.
 
-FFmpeg for lyric previews and trimming is optional. When you choose to download it, the player reuses the [separate 26.0.5 component package](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) and verifies its pinned size and SHA-256. The installer and portable ZIP do not bundle another copy.
+The current portable ZIP includes FFmpeg for previews and trimming, the offline Japanese reading dictionary and their notices. Extract the whole ZIP to use them. The slim installer omits these components and preserves already installed copies; the player also offers explicit downloads with pinned size and SHA-256 verification. FFmpeg uses the [separate 26.0.5 package](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5); the dictionary is available separately on the [26.1.1 release page](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1).
 
 > **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through the app's backup and restore settings before upgrading.
 
@@ -110,6 +110,8 @@ From finding a track to organizing an entire collection, everyday tools work aro
 These features are included in the 26.0.5 stable release; see the corresponding [Release notes](https://github.com/DanRuguo/dan_player/releases) for what is included in a published package.
 
 Online music and custom sources complement local listening. Custom services provide capabilities such as search and lyrics according to what they explicitly declare. See the [custom music source API](docs/custom-music-source-api.md) for integration details.
+
+Main, desktop and taskbar lyrics share letter spacing. Generated Japanese readings align with kanji, preserve the original lyrics and existing annotations, and use a separate derived cache; settings also offer bulk processing of saved lyrics. With automatic online access on, generation tries online first and falls back offline. With it off, explicitly choose online or offline in the reading tools or bulk dialog. Online generation needs your own Yahoo! JAPAN Client ID and sends the text to that service; credentials are stored only on your computer.
 
 ### 26.0.6
 
@@ -296,8 +298,10 @@ Maintain only necessary, long-lived documentation. Keep machine-local developmen
 
 This project is distributed under [LICENSE](LICENSE). Third-party components retain their own licensing terms; BASS use and distribution must follow its official license.
 
-The bundled UI font is Noto Sans CJK SC, distributed under the SIL Open Font License 1.1. Its [license and provenance](licenses/NOTO-SANS-CJK/PROVENANCE.md) accompany both portable and installer packages. Legacy asset paths and the internal alias preserve existing settings; the displayed font name is Noto Sans CJK SC.
+The main player and desktop lyrics share font resources, with one common selection, separate choices for the four UI languages, and script-aware fonts for mixed text. Bundled [Source Han Sans SC / JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md), [Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md) and [Pretendard](licenses/PRETENDARD/PROVENANCE.md) are distributed under the SIL Open Font License 1.1; original licenses and provenance accompany both portable and installer packages. The internal compatibility alias `DanPingFangSC` refers to Source Han Sans SC, not an Apple font.
 
 Dan Player is based on [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player). Thanks to the original author for the player foundation, library structure and lyrics experience. We also acknowledge [desktop_lyric](https://github.com/Ferry-200/desktop_lyric), [music_api_dart](https://github.com/Ferry-200/music_api_dart), [BASS](https://www.un4seen.com/bass.html), [Lofty](https://crates.io/crates/lofty), [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge), [Flutter](https://flutter.dev/) and Material Design.
+
+Offline dictionary licenses and provenance: [IPADIC](licenses/IPADIC/PROVENANCE.md) and [Lindera](licenses/LINDERA/LICENSE). Online readings: [Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/).
 
 <sub>Badges are provided by <a href="https://shields.io/">Shields.io</a>. Downloads count Release asset downloads, not unique users or installations. Framework badges identify the technologies used, not minimum supported versions.</sub>

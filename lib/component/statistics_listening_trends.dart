@@ -120,12 +120,15 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                   dimension: 20,
                   child:
                       _calendarWeek ? const Icon(Icons.check, size: 20) : null),
-              onPressed: () => setState(() {
-                    _calendarWeek = true;
-                    _period = 7;
-                    _selection = null;
-                    _revealWeekSelection = true;
-                  }),
+              onPressed: () {
+                if (!mounted) return;
+                setState(() {
+                  _calendarWeek = true;
+                  _period = 7;
+                  _selection = null;
+                  _revealWeekSelection = true;
+                });
+              },
               child: Text(ui('按严格一周'))),
           for (final days in ListeningTrendsSnapshot.periods)
             MenuItemButton(
@@ -135,11 +138,14 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                   child: !_calendarWeek && days == _period
                       ? const Icon(Icons.check, size: 20)
                       : null),
-              onPressed: () => setState(() {
-                _period = days;
-                _calendarWeek = false;
-                _selection = null;
-              }),
+              onPressed: () {
+                if (!mounted) return;
+                setState(() {
+                  _period = days;
+                  _calendarWeek = false;
+                  _selection = null;
+                });
+              },
               child: Text(ui('近 {0} 天', [days])),
             ),
         ],
@@ -200,7 +206,10 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                   child: series == _series
                       ? const Icon(Icons.check, size: 20)
                       : null),
-              onPressed: () => setState(() => _series = series),
+              onPressed: () {
+                if (!mounted) return;
+                setState(() => _series = series);
+              },
               child: Text(ui(_seriesLabel(series))))
       ],
       builder: (context, controller, _) => OutlinedButton(

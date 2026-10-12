@@ -72,6 +72,12 @@ class PlaybackAudioDeletionTicket {
   bool _resolved = false;
 }
 
+class _NextTransitionPlan {
+  const _NextTransitionPlan(this.source, this.nextOccurrence, this.settings);
+  final int source, nextOccurrence;
+  final TrackPlaybackSettings settings;
+}
+
 /// 只通知 now playing 变更
 class PlaybackService extends ChangeNotifier {
   final PlayService playService;
@@ -124,6 +130,11 @@ class PlaybackService extends ChangeNotifier {
         _smtc = smtc ?? SmtcFlutter() {
     queueStopBoundary.addListener(_onQueueStopChanged);
     segmentLoop.addListener(_practiceChanged);
+    AppSettings.instance.playbackTransitions
+        .addListener(_onTransitionPreferences);
+    stopAfterCurrent.addListener(_invalidatePreparedTransitions);
+    playMode.addListener(_invalidatePreparedTransitions);
+    shuffle.addListener(_invalidatePreparedTransitions);
     _playerStateStreamSub = _player.playbackEvents.listen((event) {
       if (_closed) return;
       // The native source remains playable while the next one resolves.
@@ -190,6 +201,7 @@ class PlaybackService extends ChangeNotifier {
           isChangingOutput.value) {
         return;
       }
+      _considerPreparingNext();
       if (segmentLoop.enabled &&
           playerState == PlayerState.playing &&
           canUseSegmentLoop &&
@@ -227,6 +239,7 @@ class PlaybackService extends ChangeNotifier {
       ..configureReplayGain(AppSettings.instance.replayGain.value)
       ..setEqGains(AppPreference.instance.playbackPref.eqGains)
       ..setEqEnabled(AppPreference.instance.playbackPref.eqEnabled);
+    player.configureTransitions(AppSettings.instance.playbackTransitions.value);
     if (player.supportsPlaybackRate) {
       player.setPlaybackRate(features.playbackRate);
     }
@@ -412,6 +425,7 @@ class PlaybackService extends ChangeNotifier {
       showAppNotice(ui('请等待当前音乐加载完成后再切换输出模式'), kind: AppNoticeKind.warning);
       return;
     }
+    _invalidatePreparedTransitions();
     segmentLoop.setEnabled(false);
     final token = ++_sourceRequestToken;
     _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
@@ -625,6 +639,117 @@ class PlaybackService extends ChangeNotifier {
   /// not change. Position samples and native output recovery do not publish it.
   ValueListenable<Object> get playbackIntent => _playbackIntent;
 
+  _NextTransitionPlan? _nextTransitionPlan;
+  int? _preparingOccurrence;
+  int _transitionRevision = 0;
+  DateTime? _transitionRetryAfter;
+
+  void _onTransitionPreferences() {
+    _invalidatePreparedTransitions();
+    if (!_closed) {
+      _player
+          .configureTransitions(AppSettings.instance.playbackTransitions.value);
+    }
+  }
+
+  void _invalidatePreparedTransitions() {
+    final hadPreparation =
+        _nextTransitionPlan != null || _preparingOccurrence != null;
+    _nextTransitionPlan = null;
+    _preparingOccurrence = null;
+    _transitionRetryAfter = null;
+    _transitionRevision++;
+    if (hadPreparation) _player.cancelPreparedSource();
+  }
+
+  void _considerPreparingNext() {
+    final preferences = AppSettings.instance.playbackTransitions.value;
+    if (_closed ||
+        !preferences.enabled ||
+        !_player.supportsTransitions ||
+        isChangingOutput.value ||
+        resolvingAudioPath.value != null ||
+        playerState != PlayerState.playing ||
+        nowPlaying?.isLocal != true ||
+        nowPlaying?.isCueTrack == true ||
+        segmentLoop.enabled) {
+      return;
+    }
+    final remaining = (length - position) / _player.playbackRate;
+    if (!remaining.isFinite || remaining > 20 || remaining <= 0.5) return;
+    final next = nextAutomaticQueueAudio;
+    if (next == null ||
+        !next.isLocal ||
+        next.isCueTrack ||
+        _sameAudioPath(_deletingAudioPath, next.localFilePath)) {
+      return;
+    }
+    final currentIndex = _currentQueueIndex;
+    final nextIndex = knownNextQueueIndex(
+        length: playlist.value.length,
+        currentIndex: currentIndex,
+        playMode: playMode.value,
+        shuffle: shuffle.value,
+        canAdvance: queueStopBoundary.canAdvanceAutomatically,
+        stopAtCurrent: stopAfterCurrent.value ||
+            (queueStopBoundary.active &&
+                queueStopBoundary.target == _currentOccurrence?.id),
+        repeatingSegment: segmentLoop.enabled);
+    final occurrence = nextIndex == null ? null : queueOccurrenceId(nextIndex);
+    if (occurrence == null ||
+        _preparingOccurrence != null ||
+        _player.preparedSourceIdentity == occurrence ||
+        (_transitionRetryAfter?.isAfter(DateTime.now()) ?? false)) {
+      return;
+    }
+    final token = _sourceRequestToken;
+    final revision = _transitionRevision;
+    final soundRevision = _trackPlaybackOwnership.revision;
+    final defaults = defaultTrackPlaybackSettings;
+    _preparingOccurrence = occurrence;
+    bool current() =>
+        !_closed &&
+        token == _sourceRequestToken &&
+        revision == _transitionRevision &&
+        soundRevision == _trackPlaybackOwnership.revision &&
+        preferences == AppSettings.instance.playbackTransitions.value &&
+        defaults.rate == defaultTrackPlaybackSettings.rate &&
+        defaults.pitch == defaultTrackPlaybackSettings.pitch &&
+        queueOccurrenceId(nextIndex!) == occurrence &&
+        identical(nextAutomaticQueueAudio, next);
+    unawaited(() async {
+      try {
+        final saved = await _readTrackPlaybackSettings(next);
+        if (!current()) return;
+        final settings = saved ?? defaults;
+        final prepared = await _player.prepareNextSource(next.localFilePath,
+            identity: occurrence,
+            rate: settings.rate,
+            pitch: settings.pitch,
+            stillCurrent: current);
+        if (!current()) return;
+        if (prepared) {
+          _nextTransitionPlan =
+              _NextTransitionPlan(token, occurrence, settings);
+        } else {
+          _transitionRetryAfter =
+              DateTime.now().add(const Duration(seconds: 5));
+        }
+      } catch (error, trace) {
+        if (current()) {
+          _transitionRetryAfter =
+              DateTime.now().add(const Duration(seconds: 5));
+          LOGGER.w('[prepare next queue item] $error', stackTrace: trace);
+        }
+      } finally {
+        if (revision == _transitionRevision &&
+            _preparingOccurrence == occurrence) {
+          _preparingOccurrence = null;
+        }
+      }
+    }());
+  }
+
   /// The already-determined natural next item, without generating a shuffle
   /// cycle or changing queue, transport, stop markers or decoder state.
   Audio? get nextAutomaticQueueAudio {
@@ -644,6 +769,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _publishPlaybackIntent({bool transportCommand = false}) {
+    _invalidatePreparedTransitions();
     if (transportCommand) _transportCommandRevision++;
     _playbackIntent.value = (
       command: _transportCommandRevision,
@@ -780,6 +906,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _onQueueStopChanged() {
+    _invalidatePreparedTransitions();
     final reason = queueStopBoundary.lastCancellation;
     if (reason != null && !_closed) {
       showAppNotice(
@@ -803,6 +930,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _publishQueue() {
+    _invalidatePreparedTransitions();
     _playlistBackup = [for (final entry in _backupOccurrences) entry.item];
     playlist.value = [for (final entry in _queueOccurrences) entry.item];
     queueStopBoundary.retain(_queueOccurrences.map((entry) => entry.id));
@@ -929,6 +1057,7 @@ class PlaybackService extends ChangeNotifier {
   Duration? _practiceRemaining;
   int? _practiceToken;
   void _practiceChanged() {
+    _invalidatePreparedTransitions();
     if (!segmentLoop.enabled) {
       _practiceTimer?.cancel();
       _practiceTimer = null;
@@ -1505,9 +1634,13 @@ class PlaybackService extends ChangeNotifier {
   Future<bool> _beginLoadAndPlay(int audioIndex, List<Audio> playlist,
       {bool allowTrackResume = false,
       double? initialPosition,
+      bool preparedApplied = false,
+      TrackPlaybackSettings? preparedSettings,
       bool Function()? stillCurrent}) async {
     if (_closed || stillCurrent?.call() == false) return false;
-    unawaited(_captureTrackResume(force: true));
+    // Automatic handoff already captured the completed predecessor before
+    // adopting the next native handle. Its new clock belongs to the next song.
+    if (!preparedApplied) unawaited(_captureTrackResume(force: true));
     segmentLoop.clear();
     if (audioIndex >= 0 &&
         audioIndex < playlist.length &&
@@ -1519,7 +1652,7 @@ class PlaybackService extends ChangeNotifier {
     _publishPlaybackIntent();
     _playWhenReady = true;
     OnlineMusicService.instance.cancelPendingStreamResolution();
-    _player.cancelPendingSource();
+    if (!preparedApplied) _player.cancelPendingSource();
     _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
     final occurrence = queueOccurrenceId(audioIndex);
     if (occurrence != null) queueStopBoundary.loading(occurrence, token);
@@ -1528,6 +1661,8 @@ class PlaybackService extends ChangeNotifier {
         seekRevision: _manualSeekRevision,
         soundRevision: _trackPlaybackOwnership.revision,
         initialPosition: initialPosition,
+        preparedApplied: preparedApplied,
+        preparedSettings: preparedSettings,
         stillCurrent: stillCurrent);
   }
 
@@ -1539,6 +1674,8 @@ class PlaybackService extends ChangeNotifier {
     required int seekRevision,
     required TrackPlaybackRevision soundRevision,
     double? initialPosition,
+    bool preparedApplied = false,
+    TrackPlaybackSettings? preparedSettings,
     bool Function()? stillCurrent,
   }) async {
     try {
@@ -1549,7 +1686,9 @@ class PlaybackService extends ChangeNotifier {
       _loadingPlaylistIndex = audioIndex;
       isBuffering.value = target.isOnline;
       resolvingAudioPath.value = target.path;
-      final savedSound = await _readTrackPlaybackSettings(target);
+      final savedSound = preparedApplied
+          ? preparedSettings
+          : await _readTrackPlaybackSettings(target);
       if (!_isCurrentSourceRequest(token)) return false;
       final source = target.isOnline
           ? (await OnlineMusicService.instance.resolveStreamUrl(target))
@@ -1558,12 +1697,13 @@ class PlaybackService extends ChangeNotifier {
       if (!_isCurrentSourceRequest(token) || stillCurrent?.call() == false) {
         return false;
       }
-      final applied = await _player.setSource(source,
-          isUrl: target.isOnline,
-          segment: target.cueTrack == null
-              ? null
-              : AudioSegment(
-                  target.cueTrack!.startSeconds, target.cueTrack!.endSeconds));
+      final applied = preparedApplied ||
+          await _player.setSource(source,
+              isUrl: target.isOnline,
+              segment: target.cueTrack == null
+                  ? null
+                  : AudioSegment(target.cueTrack!.startSeconds,
+                      target.cueTrack!.endSeconds));
       if (!applied || !_isCurrentSourceRequest(token)) return false;
       if (allowTrackResume && target.isLocal) {
         try {
@@ -2144,10 +2284,18 @@ class PlaybackService extends ChangeNotifier {
 
   /// 播放playlist[audioIndex]并设置播放列表为playlist
   void play(int audioIndex, List<Audio> playlist) {
-    if (audioIndex < 0 || audioIndex >= playlist.length) return;
+    unawaited(playQueue(audioIndex, playlist));
+  }
+
+  /// Reports the existing load result so bulk selection can finish only after
+  /// playback succeeds. Legacy callers keep the fire-and-forget [play] API.
+  Future<bool> playQueue(int audioIndex, List<Audio> playlist) {
+    if (_closed || audioIndex < 0 || audioIndex >= playlist.length) {
+      return Future.value(false);
+    }
     if (_sameAudioPath(
         _deletingAudioPath, playlist[audioIndex].localFilePath)) {
-      return;
+      return Future.value(false);
     }
 
     if (shuffle.value) {
@@ -2169,28 +2317,32 @@ class PlaybackService extends ChangeNotifier {
               _queueOccurrences.map((e) => e.id).toList(),
               _navigationIndex,
               indexInCycle);
-          _loadAndPlay(indexInCycle, this.playlist.value,
+          return _beginLoadAndPlay(indexInCycle, this.playlist.value,
               allowTrackResume: true);
-          return;
         }
       }
 
       _buildShuffleCycle(playlist, startIndex: audioIndex, replaceQueue: true);
-      _loadAndPlay(0, this.playlist.value, allowTrackResume: true);
+      return _beginLoadAndPlay(0, this.playlist.value, allowTrackResume: true);
     } else {
       _replaceQueue(playlist);
-      _loadAndPlay(audioIndex, this.playlist.value, allowTrackResume: true);
+      return _beginLoadAndPlay(audioIndex, this.playlist.value,
+          allowTrackResume: true);
     }
   }
 
   void shuffleAndPlay(List<Audio> audios) {
-    if (_closed || audios.isEmpty) return;
+    unawaited(shuffleAndPlayQueue(audios));
+  }
+
+  Future<bool> shuffleAndPlayQueue(List<Audio> audios) {
+    if (_closed || audios.isEmpty) return Future.value(false);
     _buildShuffleCycle(audios, replaceQueue: true);
     shuffle.value = true;
     _pref.shuffle = true;
     _scheduleModePreferenceSave();
 
-    _loadAndPlay(0, playlist.value);
+    return _beginLoadAndPlay(0, playlist.value);
   }
 
   /// 下一首播放
@@ -2327,7 +2479,17 @@ class PlaybackService extends ChangeNotifier {
       final source = _playlistBackup.isEmpty ? playlist.value : _playlistBackup;
       _buildShuffleCycle(source, avoidFirstPath: currentPath);
     }
-    _loadAndPlay(step.index!, playlist.value);
+    final prepared = _nextTransitionPlan;
+    if (automatic &&
+        prepared != null &&
+        prepared.nextOccurrence == queueOccurrenceId(step.index!) &&
+        prepared.source == _sourceRequestToken &&
+        _player.takePreparedSource(prepared.nextOccurrence)) {
+      unawaited(_beginLoadAndPlay(step.index!, playlist.value,
+          preparedApplied: true, preparedSettings: prepared.settings));
+    } else {
+      _loadAndPlay(step.index!, playlist.value);
+    }
     return true;
   }
 
@@ -2567,11 +2729,16 @@ class PlaybackService extends ChangeNotifier {
     _playbackRate.dispose();
     _playbackPitch.dispose();
     _eqEnabled.dispose();
+    queueStopBoundary.removeListener(_onQueueStopChanged);
+    AppSettings.instance.playbackTransitions
+        .removeListener(_onTransitionPreferences);
+    stopAfterCurrent.removeListener(_invalidatePreparedTransitions);
+    playMode.removeListener(_invalidatePreparedTransitions);
+    shuffle.removeListener(_invalidatePreparedTransitions);
     _playMode.dispose();
     _shuffle.dispose();
     _sleepTimer.dispose();
     stopAfterCurrent.dispose();
-    queueStopBoundary.removeListener(_onQueueStopChanged);
     queueStopBoundary.dispose();
     _practiceTimer?.cancel();
     segmentLoop.removeListener(_practiceChanged);

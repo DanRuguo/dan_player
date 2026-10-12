@@ -73,7 +73,7 @@
 
 **설치 버전**은 설치 프로그램을 실행하면 되며, 기존 설치를 업데이트할 수 있습니다. **포터블 버전**은 ZIP 전체를 압축 해제한 뒤 `Dan Player.exe`를 실행하세요. EXE 파일만 따로 복사하지 마세요. 바탕 화면 가사는 동일한 실행 파일에서 별도 프로세스로 실행됩니다.
 
-가사 미리 듣기와 자르기에 필요한 FFmpeg는 선택 사항입니다. 직접 다운로드할 때 [26.0.5에 공개한 별도 구성 요소 패키지](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)를 재사용하고 고정된 크기와 SHA-256을 검증합니다. 설치 프로그램과 포터블 ZIP에는 중복해서 포함하지 않습니다.
+현재 포터블 ZIP에는 미리 듣기와 자르기용 FFmpeg, 오프라인 일본어 읽기 사전 및 라이선스가 포함됩니다. ZIP 전체를 풀면 사용할 수 있습니다. 경량 설치 프로그램은 이 구성 요소를 포함하지 않으며 이미 설치한 구성 요소를 유지합니다. 플레이어에서 직접 다운로드할 때도 고정된 크기와 SHA-256을 검증합니다. FFmpeg는 [26.0.5의 별도 패키지](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5), 사전은 [26.1.1 릴리스 페이지](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1)에서 각각 받을 수 있습니다.
 
 > **다운로드 및 서명 안내:** 프로젝트에서 빌드한 실행 파일은 RCEIT.Inc 자체 서명 인증서를 사용하므로 Windows에 신뢰 관련 경고가 나타날 수 있습니다. 설치 프로그램은 신뢰할 수 있는 인증서를 자동으로 설치하지 않습니다. 이전 서명을 사용하는 버전에서 업데이트할 때는 새 설치 프로그램을 직접 다운로드하세요. 미리 보기 버전은 Latest로 표시된 안정 버전을 대체하지 않습니다. 업데이트 전에 앱의 백업 및 복원 설정에서 개인 데이터를 백업하는 것이 좋습니다.
 
@@ -110,6 +110,8 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 이 기능들은 26.0.5 정식 버전에 포함되어 있습니다. 실제 배포 파일에 포함된 기능은 해당 [Release 변경 내용](https://github.com/DanRuguo/dan_player/releases)을 확인하세요.
 
 온라인 음악과 사용자 지정 소스는 로컬 음악 감상을 보완합니다. 사용자 지정 서비스는 명시적으로 선언한 기능에 따라 검색이나 가사 등을 제공합니다. 연결 방법은 [사용자 지정 음악 소스 API](docs/custom-music-source-api.md)를 참고하세요.
+
+메인·바탕 화면·작업 표시줄 가사는 글자 간격을 공유합니다. 생성한 일본어 읽기는 한자 위치에 표시하고 원본 가사와 기존 주석을 보존하며 별도의 파생 캐시에 저장합니다. 설정에서 저장된 가사를 일괄 처리할 수도 있습니다. 자동 접속이 켜져 있으면 온라인을 우선하고 실패 시 오프라인으로 전환합니다. 꺼져 있으면 가사 읽기 도구나 일괄 처리 창에서 온라인 또는 오프라인을 직접 선택해야 합니다. 온라인 생성에는 본인의 Yahoo! JAPAN Client ID가 필요하며 대상 텍스트를 해당 서비스에 전송합니다. 인증 정보는 이 컴퓨터에만 저장합니다.
 
 ### 26.0.6
 
@@ -296,8 +298,10 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 
 이 프로젝트는 [LICENSE](LICENSE)에 따라 배포됩니다. 타사 구성 요소에는 각자의 라이선스 조건이 적용되며, BASS 사용과 배포는 공식 라이선스를 따라야 합니다.
 
-내장 UI 글꼴은 Noto Sans CJK SC이며 SIL Open Font License 1.1에 따라 배포합니다. [글꼴 라이선스와 출처](licenses/NOTO-SANS-CJK/PROVENANCE.md)는 포터블 버전과 설치 프로그램에 함께 제공합니다. 기존 설정과의 호환성을 위해 이전 리소스 경로와 내부 별칭을 유지하며, 표시 이름은 Noto Sans CJK SC입니다.
+메인 플레이어와 바탕 화면 가사는 같은 글꼴 리소스를 사용하며, 통합 선택, 4개 UI 언어별 선택 및 혼합 문자용 언어별 글꼴을 지원합니다. 내장 [Source Han Sans SC / JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md), [Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md), [Pretendard](licenses/PRETENDARD/PROVENANCE.md)는 SIL Open Font License 1.1에 따라 배포하며 원본 라이선스와 출처를 포터블 버전과 설치 프로그램에 함께 제공합니다. 내부 호환 별칭 `DanPingFangSC`는 Source Han Sans SC를 가리키며 Apple 글꼴을 포함하지 않습니다.
 
 Dan Player는 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player)를 기반으로 개발되었습니다. 플레이어 기반, 라이브러리 구조, 가사 기능을 제공한 원작자에게 감사드립니다. 또한 [desktop_lyric](https://github.com/Ferry-200/desktop_lyric), [music_api_dart](https://github.com/Ferry-200/music_api_dart), [BASS](https://www.un4seen.com/bass.html), [Lofty](https://crates.io/crates/lofty), [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge), [Flutter](https://flutter.dev/), Material Design에 감사드립니다.
+
+오프라인 사전 라이선스 및 출처: [IPADIC](licenses/IPADIC/PROVENANCE.md), [Lindera](licenses/LINDERA/LICENSE). 온라인 읽기: [Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/).
 
 <sub>배지는 <a href="https://shields.io/">Shields.io</a>를 사용합니다. 다운로드 수는 Release 에셋의 다운로드 횟수이며 사용자 수나 설치 수가 아닙니다. 기술 배지는 사용 기술을 나타내며 최소 지원 버전을 의미하지 않습니다.</sub>

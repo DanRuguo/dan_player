@@ -138,6 +138,8 @@ class _LyricLineViewState extends State<LyricLineView>
         _controller.vertical.value,
         settings.lyricFontSize,
         settings.translationFontSize,
+        settings.lyricLetterSpacing,
+        settings.value.showJapaneseReading,
         MediaQuery.textScalerOf(context),
         DefaultTextStyle.of(context).style,
         AppFontScope.of(context),

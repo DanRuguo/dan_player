@@ -487,7 +487,9 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   }
 
   void _commitSeek(double target, {double? origin, bool remember = true}) {
-    if (!_enabled || !_active) return;
+    // A direct bookmark lives outside the Slider's pointer filter. It must
+    // respect the same pending/accepted drag owner as keyboard and menu input.
+    if (!_enabled || !_active || _pointer != null || _dragging) return;
     final identity = widget.trackIdentity;
     final before = origin ?? _safe(widget.readPosition());
     final value = _safe(target);

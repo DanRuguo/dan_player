@@ -30,6 +30,24 @@ class AppEntranceScope extends StatefulWidget {
       context.dependOnInheritedWidgetOfExactType<_EntranceScopeData>()?.ready ??
       true;
 
+  /// Shares the existing entrance budget with a finite first-frame reveal.
+  /// A denied reservation snaps to its final state, like a saturated entrance.
+  /// The idempotent release holds its original scope even after reparenting.
+  static VoidCallback? reserveAnimationOf(BuildContext context) {
+    final scope =
+        context.getInheritedWidgetOfExactType<_EntranceScopeData>()?.owner;
+    if (scope == null) return _releaseWithoutScope;
+    if (!scope.acquire()) return null;
+    var released = false;
+    return () {
+      if (released) return;
+      released = true;
+      scope.release();
+    };
+  }
+
+  static void _releaseWithoutScope() {}
+
   @override
   State<AppEntranceScope> createState() => _AppEntranceScopeState();
 }

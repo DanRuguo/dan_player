@@ -2,7 +2,13 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dan_player/app_preference.dart';
+import 'package:dan_player/app_settings.dart';
+import 'package:desktop_lyric/desktop_lyric_appearance.dart';
+import 'package:desktop_lyric/component/lyric_letter_spacing_control.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
+import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_dialog_title.dart';
+import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/lyric_share_dialog.dart';
@@ -10,6 +16,9 @@ import 'package:dan_player/lyric/lyric_share_projection.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_text_search.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
+import 'package:dan_player/lyric/japanese_lyric_readings.dart';
+import 'package:dan_player/lyric/japanese_reading_analyzer.dart';
+import 'package:dan_player/lyric/japanese_reading_preferences.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/component/lyric_workbench_dialog.dart';
@@ -40,10 +49,73 @@ enum LyricTextAlign {
 }
 
 class LyricViewController extends ChangeNotifier {
-  LyricViewController({NowPlayingPagePreference? preferences})
+  LyricViewController(
+      {NowPlayingPagePreference? preferences,
+      ValueNotifier<DesktopLyricAppearance>? appearance,
+      ValueNotifier<JapaneseReadingPreferences>? japaneseReadings,
+      Future<void> Function()? persistAppearance})
       : nowPlayingPagePref =
-            preferences ?? AppPreference.instance.nowPlayingPagePref;
+            preferences ?? AppPreference.instance.nowPlayingPagePref,
+        _appearance = appearance ?? AppSettings.instance.desktopLyricAppearance,
+        _japaneseReadings =
+            japaneseReadings ?? AppSettings.instance.japaneseReadings,
+        _persistAppearance = persistAppearance ??
+            (() => AppSettings.instance
+                .saveSettings(throwOnError: true, captureWindowSize: false)) {
+    _letterSpacing = _appearance.value.lyricLetterSpacing;
+    _showJapaneseReading = _appearance.value.showJapaneseReading;
+    _appearance.addListener(_appearanceChanged);
+  }
   final NowPlayingPagePreference nowPlayingPagePref;
+  final ValueNotifier<DesktopLyricAppearance> _appearance;
+  final ValueNotifier<JapaneseReadingPreferences> _japaneseReadings;
+  final Future<void> Function() _persistAppearance;
+  Future<void> persistLetterSpacing() => _persistAppearance();
+  late double _letterSpacing;
+  double get lyricLetterSpacing => _letterSpacing;
+  late bool _showJapaneseReading;
+  bool get showJapaneseReading => _showJapaneseReading;
+  int _japaneseReadingVisibilityRevision = 0;
+
+  void _appearanceChanged() {
+    final next = _appearance.value.lyricLetterSpacing;
+    final reading = _appearance.value.showJapaneseReading;
+    if (_disposed ||
+        (next == _letterSpacing && reading == _showJapaneseReading)) return;
+    _letterSpacing = next;
+    if (reading != _showJapaneseReading) {
+      _japaneseReadingVisibilityRevision++;
+    }
+    _showJapaneseReading = reading;
+    notifyListeners();
+  }
+
+  void setShowJapaneseReading(bool value) {
+    if (_disposed || value == showJapaneseReading) return;
+    _appearance.value = _appearance.value.copyWith(showJapaneseReading: value);
+  }
+
+  void toggleJapaneseReading() => setShowJapaneseReading(!showJapaneseReading);
+
+  /// A user action opts into the continuous flow, unlike a visibility update
+  /// received from a helper or restored legacy configuration.
+  void toggleJapaneseReadingGeneration() {
+    if (_disposed) return;
+    setJapaneseReadingGeneration(
+        preferences: _japaneseReadings,
+        appearance: _appearance,
+        enabled: !showJapaneseReading);
+  }
+
+  Future<void> persistJapaneseReadingVisibility() => _persistAppearance();
+
+  void setLyricLetterSpacing(double value) {
+    if (_disposed || !value.isFinite) return;
+    final next = value.clamp(0.0, 12.0);
+    if (next == _letterSpacing) return;
+    _appearance.value = _appearance.value.copyWith(lyricLetterSpacing: next);
+  }
+
   late LyricTextAlign lyricTextAlign = nowPlayingPagePref.lyricTextAlign;
   late double lyricFontSize = nowPlayingPagePref.lyricFontSize;
   late double translationFontSize = nowPlayingPagePref.translationFontSize;
@@ -73,6 +145,20 @@ class LyricViewController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A same-source presentation copy retains the reader's document index and
+  /// authored offset. Its parent is already rebuilding for that projection.
+  void rebindProjectedReadingTarget(Lyric from, Lyric to) {
+    final target = readingTarget;
+    if (_disposed ||
+        target == null ||
+        !target.belongsTo(from) ||
+        from.lines.length != to.lines.length) {
+      return;
+    }
+    readingTarget = LyricReadingTarget(to, target.index, to.lines[target.index],
+        textOffset: target.textOffset);
+  }
+
   void discardReadingTarget() {
     if (_disposed || readingTarget == null) return;
     readingTarget = null;
@@ -83,6 +169,7 @@ class LyricViewController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _appearance.removeListener(_appearanceChanged);
     readingTarget = null;
     super.dispose();
   }
@@ -249,8 +336,113 @@ class LyricViewControls extends StatelessWidget {
   }
 }
 
+/// A one-request choice; selecting a mode never changes network preferences.
+Future<JapaneseReadingRequestMode?> showJapaneseReadingModeDialog(
+    BuildContext context) {
+  var selected = JapaneseReadingRequestMode.offline;
+  return showAppDialog<JapaneseReadingRequestMode>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Dialog(
+              shape: AppShape.surface,
+              child: SizedBox(
+                width: math.min(480.0,
+                    math.max(1.0, MediaQuery.sizeOf(context).width - 48)),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppDialogTitle(ui('生成日语假名')),
+                        const SizedBox(height: 24),
+                        Center(
+                          child:
+                              AppSegmentedControl<JapaneseReadingRequestMode>(
+                            key: const ValueKey(
+                                'japanese-reading-generation-mode'),
+                            value: selected,
+                            semanticLabel: ui('生成方式'),
+                            wrapCompactLabel: true,
+                            options: [
+                              AppSegmentOption(
+                                  value: JapaneseReadingRequestMode.offline,
+                                  label: ui('离线生成'),
+                                  icon: Symbols.offline_bolt,
+                                  key: const ValueKey(
+                                      'japanese-reading-mode-offline')),
+                              AppSegmentOption(
+                                  value: JapaneseReadingRequestMode.online,
+                                  label: ui('联网生成'),
+                                  icon: Symbols.cloud_download,
+                                  key: const ValueKey(
+                                      'japanese-reading-mode-online')),
+                            ],
+                            onChanged: (value) =>
+                                setState(() => selected = value),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        AppDialogActions(children: [
+                          TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: Text(ui('取消'))),
+                          FilledButton(
+                              key: const ValueKey(
+                                  'japanese-reading-mode-generate'),
+                              onPressed: () => Navigator.pop(context, selected),
+                              child: Text(ui('生成'))),
+                        ])
+                      ]),
+                ),
+              ),
+            )),
+  );
+}
+
 class _LyricReadingMenu extends StatelessWidget {
   const _LyricReadingMenu();
+
+  Future<void> _toggleJapaneseReadings(NavigatorState navigator,
+      BuildContext ownerContext, LyricViewController controller) async {
+    final service = PlayService.instance.lyricService;
+    final generation = service.resolutionGeneration;
+    final source = service.rawCurrentLyric;
+    controller.toggleJapaneseReadingGeneration();
+    if (!controller.showJapaneseReading) {
+      service.cancelJapaneseReadingsForCurrentTrack(
+          expectedGeneration: generation);
+    }
+    final visibilityRevision = controller._japaneseReadingVisibilityRevision;
+    bool actionOwns() =>
+        !controller._disposed &&
+        ownerContext.mounted &&
+        navigator.mounted &&
+        visibilityRevision == controller._japaneseReadingVisibilityRevision &&
+        generation == service.resolutionGeneration &&
+        identical(source, service.rawCurrentLyric);
+    bool owns() => actionOwns() && controller.showJapaneseReading;
+    try {
+      await controller.persistJapaneseReadingVisibility();
+    } catch (error) {
+      if (actionOwns()) {
+        showAppNotice(ui('设置保存失败，请重试'),
+            context: navigator.context, kind: AppNoticeKind.error);
+      }
+    }
+    if (!owns()) return;
+    final mode = AppSettings.instance.automaticOnlineLyrics.value
+        ? JapaneseReadingRequestMode.automatic
+        : JapaneseReadingRequestMode.offline;
+    final result = await service.ensureJapaneseReadingsForCurrentTrack(
+        expectedGeneration: generation, mode: mode);
+    if (!navigator.mounted ||
+        !owns() ||
+        result == JapaneseReadingResult.stale) {
+      return;
+    }
+    showJapaneseReadingResultNotice(navigator.context, result);
+  }
 
   Future<void> _practiceSegment(NavigatorState navigator) async {
     if (!navigator.mounted) return;
@@ -369,6 +561,10 @@ class _LyricReadingMenu extends StatelessWidget {
         readLyric: () => PlayService.instance.lyricService.currLyricFuture,
         onFind: (navigator) => findCurrentLyrics(navigator, controller),
         onCreateCard: (navigator) => _createCard(navigator, controller),
+        onToggleJapaneseReading: (navigator) =>
+            _toggleJapaneseReadings(navigator, context, controller),
+        japaneseReadingsBusy:
+            PlayService.instance.lyricService.japaneseReadingsBusy,
         onPracticeSegment: _practiceSegment);
   }
 }
@@ -578,7 +774,8 @@ class _LyricFontSizeMenuState extends State<LyricFontSizeMenu>
         padding: const WidgetStatePropertyAll(EdgeInsets.zero),
       ),
       menuChildren: [
-        _LyricFontSizePanel(controller: lyricViewController),
+        _LyricFontSizePanel(
+            controller: lyricViewController, hidden: widget.hidden),
       ],
       builder: (context, menu, _) => IconButton(
         key: const ValueKey('lyric-font-size-open'),
@@ -600,9 +797,10 @@ class _LyricFontSizeMenuState extends State<LyricFontSizeMenu>
 }
 
 class _LyricFontSizePanel extends StatefulWidget {
-  const _LyricFontSizePanel({required this.controller});
+  const _LyricFontSizePanel({required this.controller, this.hidden});
 
   final LyricViewController controller;
+  final ValueListenable<bool>? hidden;
 
   @override
   State<_LyricFontSizePanel> createState() => _LyricFontSizePanelState();
@@ -852,6 +1050,23 @@ class _LyricFontSizePanelState extends State<_LyricFontSizePanel> {
                   ),
                 ),
             ],
+          ),
+          const Divider(height: 24),
+          LyricLetterSpacingControl(
+            id: 'lyric-font-letter-spacing',
+            value: widget.controller.lyricLetterSpacing,
+            hidden: widget.hidden,
+            onChanged: (value) async {
+              widget.controller.setLyricLetterSpacing(value);
+              try {
+                await widget.controller.persistLetterSpacing();
+              } catch (_) {
+                if (context.mounted) {
+                  showAppNotice(ui('歌词字间距保存失败；本次会话仍然生效。'),
+                      context: context, kind: AppNoticeKind.error);
+                }
+              }
+            },
           ),
         ]),
       ),

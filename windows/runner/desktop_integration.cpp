@@ -465,7 +465,7 @@ struct DesktopIntegrationController::Impl
       if (!enabled) { taskbar_lyric_surface.Close(); result->Success(); return; }
       int lyric_accent = 0;
       std::wstring text, family, path, next_text, source, line;
-      double position = 0, rate = 1, line_start = 0, line_end = 0;
+      double position = 0, rate = 1, line_start = 0, line_end = 0, lyric_letter_spacing = 0;
       std::int64_t timeline_revision = 0;
       std::vector<TaskbarLyricWord> words;
       std::optional<policy::NativeFontPolicy> font_policy;
@@ -508,6 +508,8 @@ struct DesktopIntegrationController::Impl
       std::int64_t area_selection = 0;
       const auto present = [&](const char* key) { return args->find(EncodableValue(key)) != args->end(); };
       if ((present("placement") && (!ReadWideString(*args, "placement", 16, &placement) || !taskbar_lyrics::ParsePlacement(placement))) ||
+          (present("lyricLetterSpacing") && (!ReadLyricNumber(*args,"lyricLetterSpacing",&lyric_letter_spacing) ||
+              lyric_letter_spacing < 0 || lyric_letter_spacing > 12)) ||
           (present("nextTrackText") && !ReadWideString(*args, "nextTrackText", 2 * 1024 * 1024, &next_track)) ||
           (present("showPauseIndicator") && !ReadBool(*args, "showPauseIndicator", &show_pause_indicator)) ||
           (present("strokeEnabled") && !ReadBool(*args, "strokeEnabled", &stroke_enabled)) ||
@@ -525,7 +527,7 @@ struct DesktopIntegrationController::Impl
           std::move(family), std::move(path), animate, playing, std::move(words),
           std::move(next_text), position, rate, std::move(source), std::move(line),
           timeline_revision, line_start, line_end, std::move(placement), std::move(next_track),
-          show_pause_indicator, stroke_enabled, static_cast<unsigned>(area_selection), paused,std::move(color_scheme),show_next_button,next_button_enabled,animate_layout,show_next_lyric,playback_button_enabled,std::move(font_policy)))
+          show_pause_indicator, stroke_enabled, static_cast<unsigned>(area_selection), paused,std::move(color_scheme),show_next_button,next_button_enabled,animate_layout,show_next_lyric,playback_button_enabled,std::move(font_policy),lyric_letter_spacing))
         result->Error("TASKBAR_LYRICS_FAILED", "Could not create taskbar lyric surface");
       else result->Success();
       return;

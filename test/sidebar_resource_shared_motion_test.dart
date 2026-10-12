@@ -156,7 +156,8 @@ void main() {
                 ? PointerDeviceKind.touch
                 : PointerDeviceKind.mouse);
         Future<void> move(double width, {int frames = 5}) async {
-          await gesture.moveTo(handle + Offset(width - 300, 0));
+          await gesture.moveTo(
+              handle + Offset((width - 300) * (scenario.rtl ? -1 : 1), 0));
           for (var frame = 0; frame < frames; frame++) {
             await tester.pump(const Duration(milliseconds: 16));
             for (final name in icons.keys) {

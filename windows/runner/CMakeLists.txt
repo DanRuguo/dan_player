@@ -17,6 +17,8 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "installer_launch_core.cpp"
   "installer_launcher.cpp"
+  "japanese_phonetic_controller.cpp"
+  "japanese_phonetic_worker.cpp"
   "main.cpp"
   "utils.cpp"
   "window_backdrop.cpp"
@@ -405,5 +407,53 @@ if(MSVC)
   target_compile_options(taskbar_font_edge_test PRIVATE /W4 /WX /utf-8)
 endif()
 set_target_properties(taskbar_font_edge_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+
+add_executable(taskbar_lyric_spacing_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyric_spacing_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_lyric_spacing_test PRIVATE
+  NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_lyric_spacing_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyric_spacing_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyric_spacing_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+
+add_executable(taskbar_lyric_spacing_motion_test EXCLUDE_FROM_ALL
+  "tests/taskbar_lyric_spacing_motion_test.cpp" "taskbar_lyrics.cpp" "runner.exe.manifest")
+target_compile_definitions(taskbar_lyric_spacing_motion_test PRIVATE
+  NOMINMAX UNICODE _UNICODE DAN_TASKBAR_LYRICS_NATIVE_QA)
+target_link_libraries(taskbar_lyric_spacing_motion_test PRIVATE
+  uiautomationcore ole32 oleaut32 user32 gdi32 gdiplus dwmapi shell32 advapi32 usp10)
+if(MSVC)
+  target_compile_options(taskbar_lyric_spacing_motion_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(taskbar_lyric_spacing_motion_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+
+add_executable(japanese_phonetic_worker_test EXCLUDE_FROM_ALL
+  "tests/japanese_phonetic_worker_test.cpp" "japanese_phonetic_worker.cpp")
+target_compile_definitions(japanese_phonetic_worker_test PRIVATE NOMINMAX UNICODE _UNICODE)
+target_link_libraries(japanese_phonetic_worker_test PRIVATE runtimeobject ole32 user32)
+if(MSVC)
+  target_compile_options(japanese_phonetic_worker_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(japanese_phonetic_worker_test PROPERTIES
+  CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")
+
+add_executable(japanese_phonetic_fallback_test EXCLUDE_FROM_ALL
+  "tests/japanese_phonetic_fallback_test.cpp" "japanese_phonetic_worker.cpp")
+target_compile_definitions(japanese_phonetic_fallback_test PRIVATE NOMINMAX UNICODE _UNICODE)
+target_link_libraries(japanese_phonetic_fallback_test PRIVATE runtimeobject ole32 user32 psapi)
+if(MSVC)
+  target_compile_options(japanese_phonetic_fallback_test PRIVATE /W4 /WX /utf-8)
+endif()
+set_target_properties(japanese_phonetic_fallback_test PROPERTIES
   CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/desktop_tests")

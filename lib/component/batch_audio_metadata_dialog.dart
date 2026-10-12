@@ -9,14 +9,22 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-Future<void> showBatchAudioMetadataDialog(
-    BuildContext context, List<Audio> audios) async {
-  final batch = BatchAudioMetadata(audios);
+Future<bool> showBatchAudioMetadataDialog(
+    BuildContext context, List<Audio> audios,
+    {BatchAudioMetadata Function(List<Audio>)? createBatch}) async {
+  final batch =
+      (createBatch ?? BatchAudioMetadata.new)(List.unmodifiable(audios));
   try {
     await showAppDialog<void>(
         context: context,
         barrierDismissible: false,
         builder: (_) => BatchAudioMetadataDialog(batch: batch));
+    return !batch.busy &&
+        !batch.cancellationRequested &&
+        batch.count(BatchMetadataStatus.success) > 0 &&
+        batch.targets.every((target) =>
+            target.status == BatchMetadataStatus.success ||
+            target.status == BatchMetadataStatus.unchanged);
   } finally {
     batch.dispose();
   }

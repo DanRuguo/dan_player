@@ -27,6 +27,7 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("library", "session", "恢复上次播放会话", []),
   SettingsSearchEntry(
       "library", "playback", "播放速度", ["WASAPI 独占输出", "升降调", "原调"]),
+  SettingsSearchEntry("library", "transition", "歌曲过渡", ["连续输出", "交叉淡入淡出"]),
   SettingsSearchEntry(
       "library", "resume", "按曲记忆播放位置", ["仅长音频", "长音频最短时长", "清除自动记忆位置"]),
   SettingsSearchEntry("library", "gain", "ReplayGain 音量均衡",
@@ -41,6 +42,8 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("lyrics", "experience", "歌词体验", [
     "歌词弹性滚动",
     "桌面歌词竖排",
+    "歌词字间距",
+    "自动生成日语假名",
     "本地歌词多轨顺序",
     "歌词页进度条",
     "波形音柱密度",
@@ -48,6 +51,10 @@ const settingsSearchEntries = <SettingsSearchEntry>[
     "默认样式",
     "LDDC"
   ]),
+  SettingsSearchEntry(
+      "lyrics", "japanese-batch", "批量生成日语假名", ["自动生成日语假名", "开始生成"]),
+  SettingsSearchEntry(
+      "lyrics", "japanese-online", "联网假名注音", ["Yahoo! JAPAN", "Client ID"]),
   SettingsSearchEntry(
       "lyrics", "platforms", "平台直连与公开 API", ["QQ音乐", "网易云音乐", "LRCLIB"]),
   SettingsSearchEntry(

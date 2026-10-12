@@ -1,4 +1,15 @@
 const Map<String, List<String>> catalogFolderTools = {
+  '文件夹排序': ['Folder sorting', 'フォルダーの並べ替え', '폴더 정렬'],
+  '歌曲排序': ['Track sorting', '曲の並べ替え', '곡 정렬'],
+  '本文件夹歌曲': ['Tracks in this folder', 'このフォルダーの曲', '이 폴더의 곡'],
+  '子文件夹': ['Subfolders', 'サブフォルダー', '하위 폴더'],
+  '展开文件夹': ['Expand folder', 'フォルダーを展開', '폴더 펼치기'],
+  '折叠文件夹': ['Collapse folder', 'フォルダーを折りたたむ', '폴더 접기'],
+  '{0} 首歌曲（含子文件夹） · 修改于 {1}': [
+    '{0} tracks (including subfolders) · Modified {1}',
+    '{0} 曲（サブフォルダーを含む） · 更新 {1}',
+    '{0}곡 (하위 폴더 포함) · 수정 {1}'
+  ],
   '播放器缓存与数据': ['Player cache and data', 'キャッシュとプレーヤーデータ', '플레이어 캐시 및 데이터'],
   '封面、歌词、歌单、统计与设置': [
     'Artwork, lyrics, playlists, statistics and settings',
@@ -94,15 +105,25 @@ const Map<String, List<String>> catalogFolderTools = {
     '데이터를 아직 불러오지 않았습니다. 이동 기록과 아직 삭제하지 않은 원본을 보존했습니다. 디스크와 권한을 확인 후 재시도하세요. 다른 폴더를 덮어쓰지 않습니다.'
   ],
   '重试并继续': ['Retry and continue', '再試行して続行', '재시도 및 계속'],
-  '曲库迁移尚未完成': ['Library migration is incomplete', 'ライブラリ移行は未完了です', '라이브러리 이전이 완료되지 않았습니다'],
+  '曲库迁移尚未完成': [
+    'Library migration is incomplete',
+    'ライブラリ移行は未完了です',
+    '라이브러리 이전이 완료되지 않았습니다'
+  ],
   '播放器尚未载入曲库。迁移现场和同批快照已保留；请连接相关目录后重试。只有明确确认的文件夹移动会剪切文件，其他重定位操作只更新关联。': [
     'The library has not loaded. The migration journal and batch snapshots are retained. Connect the folders and retry. Only explicitly confirmed folder moves cut files; other relocation updates references.',
     'ライブラリはまだ読み込まれていません。移行記録とスナップショットは保持されています。関連フォルダーを接続して再試行してください。明示的に確認したフォルダー移動のみファイルを移動し、その他の再関連付けは参照だけを更新します。',
-    '라이브러리를 아직 불러오지 않았습니다. 이전 기록과 스냅샷을 보존했습니다. 관련 폴더를 연결 후 재시도하세요. 명시적으로 확인한 폴더 이동만 파일을 이동하며 다른 경로 재설정은 연결만 갱신합니다.'],
-  '恢复迁移前的资料？': ['Restore pre-migration data?', '移行前のデータを復元しますか？', '이전 전 데이터를 복원할까요?'],
+    '라이브러리를 아직 불러오지 않았습니다. 이전 기록과 스냅샷을 보존했습니다. 관련 폴더를 연결 후 재시도하세요. 명시적으로 확인한 폴더 이동만 파일을 이동하며 다른 경로 재설정은 연결만 갱신합니다.'
+  ],
+  '恢复迁移前的资料？': [
+    'Restore pre-migration data?',
+    '移行前のデータを復元しますか？',
+    '이전 전 데이터를 복원할까요?'
+  ],
   '将成组恢复这一批次的全部资料；尚未开始的迁移则直接取消。': [
     'Restore the entire batch together, or cancel a migration that has not started.',
     'このバッチの全データをまとめて復元します。未開始の移行はキャンセルします。',
-    '해당 배치의 모든 데이터를 함께 복원하며 아직 시작하지 않은 이전은 취소합니다.'],
+    '해당 배치의 모든 데이터를 함께 복원하며 아직 시작하지 않은 이전은 취소합니다.'
+  ],
   '恢复原资料': ['Restore original data', '元のデータを復元', '원본 데이터 복원'],
 };

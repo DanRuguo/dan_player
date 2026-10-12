@@ -118,6 +118,9 @@ class PlayService {
     playbackService;
   }
 
+  /// Passive document owner for IPC; reading it never creates a lyric service.
+  int? get lyricResolutionGeneration => _lyricService?.resolutionGeneration;
+
   LyricService get lyricService {
     final existing = _lyricService;
     if (existing != null) return existing;

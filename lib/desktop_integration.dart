@@ -519,6 +519,7 @@ class DesktopIntegration implements Listenable {
       uiLanguage.addListener(_scheduleSync);
       if (_syncAppearance) _theme.addListener(_scheduleSync);
       _fontPolicyOverride?.addListener(_scheduleSync);
+      AppSettings.instance.desktopLyricAppearance.addListener(_scheduleSync);
       _playback.addListener(_scheduleSync);
       _playback.startObserving();
       _taskbarLyrics?.attach(
@@ -534,6 +535,8 @@ class DesktopIntegration implements Listenable {
             fontFamily: appearance.$3,
             fontPath: appearance.$4,
             fontPolicy: appearance.$5,
+            lyricLetterSpacing: AppSettings
+                .instance.desktopLyricAppearance.value.lyricLetterSpacing,
             placement: taskbar.position.name,
             areaSelection: taskbar.areaSelection,
             showNextTrack: taskbar.showNextTrack,
@@ -884,6 +887,7 @@ class DesktopIntegration implements Listenable {
       uiLanguage.removeListener(_scheduleSync);
       if (_syncAppearance) _theme.removeListener(_scheduleSync);
       _fontPolicyOverride?.removeListener(_scheduleSync);
+      AppSettings.instance.desktopLyricAppearance.removeListener(_scheduleSync);
       _playback.removeListener(_scheduleSync);
       try {
         await _playback.stopObserving();

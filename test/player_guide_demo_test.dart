@@ -90,12 +90,16 @@ void main() {
       'lib/component/player_feature_guide.dart',
       'lib/component/player_guide_demo.dart'
     ]) {
-      final source = File(file).readAsStringSync();
-      final keys = RegExp(r"'((?:\\.|[^'\\])*)'")
-          .allMatches(source)
+      final quotedStrings = RegExp(r"'((?:\\.|[^'\\])*)'");
+      final keys = File(file)
+          .readAsLinesSync()
+          .expand(quotedStrings.allMatches)
           .map((match) => match.group(1)!.replaceAll(r'\n', '\n'))
           .where((text) => RegExp(r'[\u4e00-\u9fff]').hasMatch(text))
           .toSet();
+      if (file == 'lib/component/player_guide_demo.dart') {
+        expect(keys, containsAll(['当前歌曲', '下一首歌曲', '试一试：歌曲过渡']));
+      }
       for (final key in keys) {
         for (final language in UiLanguage.values) {
           final translated = translateUi(key, language);

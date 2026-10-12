@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <usp10.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -184,9 +185,11 @@ class NativeTextLayout {
   bool valid() const { return dc && !runs.empty(); }
   bool Shape(PopupFonts& fonts, const std::wstring& source, UINT dpi, int size,
              int weight = FW_MEDIUM, BYTE quality = ANTIALIASED_QUALITY, bool title = false,
-             std::optional<FontLanguage> han_context = std::nullopt) {
+             std::optional<FontLanguage> han_context = std::nullopt,
+             double letter_spacing = 0) {
     Clear(); text = source;
-    if (!dc || text.empty() || text.size() > 2048) return false;
+    if (!dc || text.empty() || text.size() > 2048 ||
+        !std::isfinite(letter_spacing) || letter_spacing < 0 || letter_spacing > 12) return false;
     fonts.Ensure(dpi);
     auto font_ranges = fonts.policy() ? FontTextRuns(text, *fonts.policy(), han_context) :
         std::vector<FontTextRun>{{0, static_cast<int>(text.size()), FontLanguage::kZh}};
@@ -216,6 +219,8 @@ class NativeTextLayout {
         begin = run.end;
       }
     }
+    int spaced_clusters = 0;
+    const double scaled_spacing = letter_spacing * dpi / 96.0;
     for (auto run : specifications) {
         const size_t font_index = fonts.policy() ? (run.fallback ? 4 : static_cast<size_t>(run.language)) : 0;
         if (!sized_fonts_[font_index]) {
@@ -238,6 +243,32 @@ class NativeTextLayout {
         if (FAILED(status) || !run.analysis || !ScriptString_pSize(run.analysis)) {
           if (run.analysis) ScriptStringFree(&run.analysis);
           Clear(); return false;
+        }
+        if (letter_spacing > 0) {
+          // Request real logical advances from Uniscribe. Authored UTF-16,
+          // shaping clusters, caret mapping and glyph painting stay together;
+          // combining/ZWJ units never acquire an internal tracking gap.
+          std::vector<int> advances(count);
+          if (FAILED(ScriptStringGetLogicalWidths(run.analysis, advances.data()))) {
+            ScriptStringFree(&run.analysis); Clear(); return false;
+          }
+          for (size_t at = run.begin; at < static_cast<size_t>(run.end);) {
+            const auto end = FontClusterEnd(text, at);
+            if (end < text.size()) {
+              const int before = static_cast<int>(std::round(spaced_clusters * scaled_spacing));
+              const int after = static_cast<int>(std::round(++spaced_clusters * scaled_spacing));
+              advances[end - run.begin - 1] += after - before;
+            }
+            at = end;
+          }
+          ScriptStringFree(&run.analysis);
+          if (FAILED(ScriptStringAnalyse(dc, text.data() + run.begin, count, count * 2 + 16,
+              -1, SSA_GLYPHS | SSA_FALLBACK | SSA_LINK | SSA_BREAK, 0, nullptr,
+              fonts.policy() ? &run_state : nullptr, advances.data(), nullptr, nullptr, &run.analysis)) ||
+              !run.analysis || !ScriptString_pSize(run.analysis)) {
+            if (run.analysis) ScriptStringFree(&run.analysis);
+            Clear(); return false;
+          }
         }
         run.size = *ScriptString_pSize(run.analysis);
         baseline_ = std::max(baseline_, run.ascent);

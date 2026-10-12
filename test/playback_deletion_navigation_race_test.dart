@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/play_service/desktop_lyric_service.dart';
 import 'package:dan_player/play_service/lyric_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -22,6 +23,7 @@ class _Decoder extends Fake implements BassPlayer {
   String? currentPath;
   int generation = 0;
   Completer<void>? openBarrier;
+  bool sourceAccepted = true;
   @override
   bool wasapiExclusive = false;
   @override
@@ -55,7 +57,7 @@ class _Decoder extends Fake implements BassPlayer {
     final opening = generation;
     opens.add(path);
     await openBarrier?.future;
-    if (opening != generation) return false;
+    if (opening != generation || !sourceAccepted) return false;
     currentPath = path;
     position = 0;
     playerState = PlayerState.stopped;
@@ -185,6 +187,64 @@ void main() {
     await facade.close();
     playback.dispose();
     readiness.dispose();
+  });
+
+  test(
+      'bulk playback reports success only after the decoder accepts the source',
+      () async {
+    decoder.openBarrier = Completer<void>();
+    var settled = false;
+    final request = playback.playQueue(1, [a, b])..then((_) => settled = true);
+    await _until(() => decoder.opens.last == b.path);
+    expect(settled, isFalse);
+    expect(playback.nowPlaying, a);
+    decoder.openBarrier!.complete();
+    expect(await request, isTrue);
+    expect(playback.nowPlaying, b);
+    expect(playback.playerState, PlayerState.playing);
+  });
+
+  test('rejected bulk playback does not claim success or replace nowPlaying',
+      () async {
+    decoder.sourceAccepted = false;
+    expect(await playback.playQueue(1, [a, b]), isFalse);
+    expect(playback.nowPlaying, a);
+  });
+
+  test('a superseded bulk playback result stays false when a newer source wins',
+      () async {
+    decoder.openBarrier = Completer<void>();
+    final oldRequest = playback.playQueue(1, [a, b]);
+    await _until(() => decoder.opens.last == b.path);
+    final newRequest = playback.playQueue(0, [a, b]);
+    await _until(() => decoder.opens.last == a.path);
+    decoder.openBarrier!.complete();
+    expect(await oldRequest, isFalse);
+    expect(await newRequest, isTrue);
+    expect(playback.nowPlaying, a);
+  });
+
+  test(
+      'bulk shuffle reports the same successful load and keeps both occurrences',
+      () async {
+    final original = AppPreference.instance.playbackPref.shuffle;
+    addTearDown(() => AppPreference.instance.playbackPref.shuffle = original);
+    expect(await playback.shuffleAndPlayQueue([a, b]), isTrue);
+    expect(playback.playlist.value, hasLength(2));
+    expect(playback.nowPlaying, anyOf(a, b));
+    expect(playback.shuffle.value, isTrue);
+  });
+
+  test('invalid bulk playback leaves the existing queue and source untouched',
+      () async {
+    final opens = List<String>.of(decoder.opens);
+    final queue = List<Audio>.of(playback.playlist.value);
+    expect(await playback.playQueue(-1, [a, b]), isFalse);
+    expect(await playback.playQueue(2, [a, b]), isFalse);
+    expect(await playback.shuffleAndPlayQueue([]), isFalse);
+    expect(decoder.opens, opens);
+    expect(playback.playlist.value, queue);
+    expect(playback.nowPlaying, a);
   });
 
   test('next during deletion preparation retains the newer source request',

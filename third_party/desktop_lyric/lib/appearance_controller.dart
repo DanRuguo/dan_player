@@ -9,6 +9,13 @@ class TextDisplayController extends ValueNotifier<DesktopLyricAppearance> {
 
   double get lyricFontSize => value.lyricFontSize;
   double get translationFontSize => value.translationFontSize;
+  double get lyricLetterSpacing => value.lyricLetterSpacing;
+
+  void setLyricLetterSpacing(double spacing) {
+    if (!spacing.isFinite) return;
+    _edit(value.copyWith(lyricLetterSpacing: spacing.clamp(0.0, 12.0)));
+  }
+
   bool get hasSpecifiedColor => value.customColor != null;
   Color get specifiedColor => Color(value.customColor ?? 0xff2196f3);
 

@@ -3,7 +3,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
-
 /// Per-row paint parameters. Only the leaf filter depends on this scope, so a
 /// follow tick does not rebuild or relayout the cached paragraph subtree.
 class LyricFractionalFilterScope extends InheritedWidget {
@@ -28,8 +27,13 @@ class LyricFractionalFilterScope extends InheritedWidget {
 }
 
 class ScopedLyricFractionalFilter extends StatelessWidget {
-  const ScopedLyricFractionalFilter({super.key, required this.child});
+  const ScopedLyricFractionalFilter({
+    super.key,
+    required this.child,
+    this.retainSourceBounds = false,
+  });
   final Widget child;
+  final bool retainSourceBounds;
   @override
   Widget build(BuildContext context) {
     final scope = context
@@ -39,6 +43,7 @@ class ScopedLyricFractionalFilter extends StatelessWidget {
         sigma: scope.sigma,
         dpr: scope.dpr,
         enabled: scope.enabled,
+        retainSourceBounds: retainSourceBounds,
         repaint: scope.enabled ? Scrollable.maybeOf(context)?.position : null,
         repaintToken: scope.repaintToken,
         child: child);
@@ -60,6 +65,7 @@ class LyricFractionalFilter extends SingleChildRenderObjectWidget {
     this.samplingScale = 1.5,
     this.repaintToken,
     this.repaint,
+    this.retainSourceBounds = false,
     super.child,
   })  : assert(sigma >= 0 && sigma < double.infinity),
         assert(samplingScale >= 1 && samplingScale < double.infinity),
@@ -75,9 +81,14 @@ class LyricFractionalFilter extends SingleChildRenderObjectWidget {
   final Object? repaintToken;
   final Listenable? repaint;
 
+  /// Retain the source coverage while attached ruby strokes animate. The
+  /// transparent source guard is painted inside the isolated sampling layer.
+  final bool retainSourceBounds;
+
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderLyricFractionalFilter(sigma, dpr, enabled, samplingScale, repaint);
+      _RenderLyricFractionalFilter(
+          sigma, dpr, enabled, samplingScale, repaint, retainSourceBounds);
 
   @override
   void updateRenderObject(BuildContext context, RenderObject renderObject) {
@@ -87,7 +98,8 @@ class LyricFractionalFilter extends SingleChildRenderObjectWidget {
       ..enabled = enabled
       ..samplingScale = samplingScale
       ..repaintToken = repaintToken
-      ..repaint = repaint;
+      ..repaint = repaint
+      ..retainSourceBounds = retainSourceBounds;
   }
 }
 
@@ -124,13 +136,23 @@ Offset lyricFilterRemainder(Matrix4 logicalToGlobal, double dpr) {
 
 class _RenderLyricFractionalFilter extends RenderProxyBox {
   _RenderLyricFractionalFilter(this._sigma, this._dpr, this._enabled,
-      this._samplingScale, this._repaint);
+      this._samplingScale, this._repaint, this._retainSourceBounds);
   double _sigma;
   double _dpr;
   bool _enabled;
   double _samplingScale;
   Object? _repaintToken;
   Listenable? _repaint;
+  bool _retainSourceBounds;
+  final _sourceGuard = ui.Paint()
+    ..color = const ui.Color(0x00000000)
+    ..blendMode = ui.BlendMode.src;
+
+  set retainSourceBounds(bool value) {
+    if (_retainSourceBounds == value) return;
+    _retainSourceBounds = value;
+    markNeedsPaint();
+  }
 
   void _onAncestorMotion() {
     if (_enabled) markNeedsPaint();
@@ -156,6 +178,12 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   }
 
   final _fallbackFilter = LayerHandle<ImageFilterLayer>();
+  final _gaussianFilter = LayerHandle<ImageFilterLayer>();
+
+  // Retain the Gaussian boundary through zero, as ImageFiltered does, so
+  // hover changes only the convolution of an unchanged clear sampler.
+  @override
+  bool get alwaysNeedsCompositing => child != null && _enabled;
   set sigma(double value) {
     if (_sigma == value) return;
     _sigma = value;
@@ -177,6 +205,7 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   set enabled(bool value) {
     if (_enabled == value) return;
     _enabled = value;
+    markNeedsCompositingBitsUpdate();
     markNeedsPaint();
   }
 
@@ -192,11 +221,13 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   void paint(PaintingContext context, Offset offset) {
     if (child == null || !_enabled) {
       _fallbackFilter.layer = null;
+      _gaussianFilter.layer = null;
       super.paint(context, offset);
       return;
     }
     final sigma = _sigma < .1 ? .1 : _sigma;
     if (child!.needsCompositing) {
+      _gaussianFilter.layer = null;
       // Interlude opacity can require its own layer. Its few geometric dots
       // need no high-resolution glyph sampling; never span canvas state across
       // independently recorded child layers.
@@ -219,31 +250,40 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
       0,
       lyricFilterRemainder(getTransformTo(null), _dpr).dy,
     );
-    final anchor = offset - remainder;
+    final gaussian = _gaussianFilter.layer ??= ImageFilterLayer();
+    gaussian
+      ..imageFilter = ui.ImageFilter.blur(
+          sigmaX: _sigma == 0 ? 0 : sigma * 1.5,
+          sigmaY: _sigma == 0 ? 0 : sigma * 1.5)
+      ..offset = offset - remainder;
+    // Finish physical alignment at the outer layer. The sampler restores
+    // this remainder exactly once; its source stays in local coordinates.
+    context.pushLayer(gaussian, _paintSampler, remainder,
+        childPaintBounds: paintBounds.shift(remainder));
+  }
+
+  void _paintSampler(PaintingContext context, Offset remainder) {
     final samplingScale = _samplingScale;
     final sampling = ui.ImageFilter.matrix(
         (Matrix4.translationValues(remainder.dx, remainder.dy, 0)
               ..scaleByDouble(1 / samplingScale, 1 / samplingScale, 1, 1))
             .storage,
         filterQuality: ui.FilterQuality.medium);
-    // The matrix keeps the same supersampled glyph geometry at the last frame.
-    // A clear row needs no Gaussian convolution over that retained layer.
-    // The downsampling matrix runs before this outer blur. Keep the original
-    // 1.5x blur radius even when glyph source sampling is raised; otherwise
-    // changing sampling density also changes the visible blur strength.
-    final filter = _sigma == 0
-        ? sampling
-        : ui.ImageFilter.compose(
-            outer:
-                ui.ImageFilter.blur(sigmaX: sigma * 1.5, sigmaY: sigma * 1.5),
-            inner: sampling);
+    // Materialize the clear sampler before Gaussian convolution. Composing
+    // both filters changes the intermediate raster and the native diffusion.
+    // Keep the original 1.5x Gaussian radius independently of samplingScale.
     final canvas = context.canvas;
     canvas.save();
-    canvas.translate(anchor.dx, anchor.dy);
     // Null bounds are intentional: explicit saveLayer bounds clip source input
     // before its inverse matrix, while the child keeps its existing clip paths.
-    canvas.saveLayer(null, ui.Paint()..imageFilter = filter);
+    canvas.saveLayer(null, ui.Paint()..imageFilter = sampling);
     canvas.scale(samplingScale);
+    if (_retainSourceBounds) {
+      // Keep the offscreen source origin stable as ruby ink rises. This adds
+      // transparent coverage rather than clipping strokes; BlendMode.src is
+      // confined to this empty sampling layer and cannot erase the backdrop.
+      canvas.drawRect((Offset.zero & size).inflate(24), _sourceGuard);
+    }
     super.paint(context, Offset.zero);
     canvas.restore();
     canvas.restore();
@@ -252,6 +292,7 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   @override
   void dispose() {
     _fallbackFilter.layer = null;
+    _gaussianFilter.layer = null;
     super.dispose();
   }
 }

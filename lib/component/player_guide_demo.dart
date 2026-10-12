@@ -1,14 +1,16 @@
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/viewport_visibility.dart';
 import 'package:dan_player/component/player_guide_playlist_demo.dart';
 import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/desktop_integration.dart';
+import 'package:dan_player/play_service/playback_transition_preferences.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-enum PlayerGuideDemoKind { progress, lyrics, playlists }
+enum PlayerGuideDemoKind { progress, lyrics, playlists, transitions }
 
 /// Small, local examples: no audio, network, library or preferences are changed.
 /// Animations start only after input and finish once; losing visibility settles
@@ -30,16 +32,22 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _surface = GlobalKey();
   final _motionGate = ValueNotifier(false);
-  late final AnimationController _animation = AnimationController(
-      vsync: this,
-      value: widget.kind == PlayerGuideDemoKind.progress ? .32 : 1);
+  late final AnimationController _animation =
+      AnimationController(vsync: this, value: _initialValue(widget.kind));
   late ValueListenable<bool> _hidden;
   Set<ScrollPosition> _scrollPositions = {};
   bool _visible = false, _treeVisible = true, _queued = false;
   bool _lifecycleVisible = true;
   bool _changingLine = false;
   int _line = 0;
-  double _target = 1;
+  late double _target = _initialValue(widget.kind);
+  PlaybackTransitionMode _transition = PlaybackTransitionMode.crossfade;
+
+  static double _initialValue(PlayerGuideDemoKind kind) => switch (kind) {
+        PlayerGuideDemoKind.progress => .32,
+        PlayerGuideDemoKind.transitions => 0,
+        _ => 1,
+      };
 
   static const _lyricLines = ['音乐|点亮|每一天', '下一句|轻轻|向上浮起'];
 
@@ -47,6 +55,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
         PlayerGuideDemoKind.progress => MotionKind.layout,
         PlayerGuideDemoKind.lyrics => MotionKind.lyrics,
         PlayerGuideDemoKind.playlists => MotionKind.tracking,
+        PlayerGuideDemoKind.transitions => MotionKind.layout,
       };
 
   @override
@@ -77,7 +86,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     }
     if (oldWidget.kind != widget.kind) {
       _animation.stop();
-      _target = widget.kind == PlayerGuideDemoKind.progress ? .32 : 1;
+      _target = _initialValue(widget.kind);
       _animation.value = _target;
       _line = 0;
       _changingLine = false;
@@ -224,6 +233,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                             PlayerGuideDemoKind.progress => '试一试：进度定位',
                             PlayerGuideDemoKind.lyrics => '试一试：歌词动效',
                             PlayerGuideDemoKind.playlists => '试一试：歌单视图',
+                            PlayerGuideDemoKind.transitions => '试一试：歌曲过渡',
                           }),
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 6),
@@ -237,6 +247,8 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                                 PlayerGuidePlaylistDemo(viewportKey: _surface),
                             builder: (context, enabled, child) =>
                                 TickerMode(enabled: enabled, child: child!))
+                      else if (widget.kind == PlayerGuideDemoKind.transitions)
+                        _transitions(context)
                       else
                         AnimatedBuilder(
                             animation: _animation,
@@ -250,6 +262,88 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
   String _stamp(double value) {
     final seconds = (value * 180).round();
     return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+  }
+
+  Widget _transitions(BuildContext context) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        AppSegmentedControl<PlaybackTransitionMode>(
+            key: const ValueKey('guide-demo-transition-mode'),
+            value: _transition,
+            wrapCompactLabel: true,
+            semanticLabel: ui('歌曲过渡'),
+            options: [
+              AppSegmentOption(
+                  value: PlaybackTransitionMode.standard,
+                  label: ui('常规切换'),
+                  icon: Icons.skip_next_outlined),
+              AppSegmentOption(
+                  value: PlaybackTransitionMode.gapless,
+                  label: ui('连续输出'),
+                  icon: Icons.link_outlined),
+              AppSegmentOption(
+                  value: PlaybackTransitionMode.crossfade,
+                  label: ui('交叉淡入淡出'),
+                  icon: Icons.merge_outlined),
+            ],
+            onChanged: (mode) {
+              _animation.stop();
+              setState(() => _transition = mode);
+              _target = 0;
+              _animation.value = 0;
+            }),
+        const SizedBox(height: 16),
+        AnimatedBuilder(
+            animation: _animation,
+            builder: (context, _) {
+              final progress = _animation.value;
+              final overlap = ((progress - .35) / .3).clamp(0.0, 1.0);
+              final outgoing = switch (_transition) {
+                PlaybackTransitionMode.standard => progress < .45 ? 1.0 : 0.0,
+                PlaybackTransitionMode.gapless => progress < .5 ? 1.0 : 0.0,
+                PlaybackTransitionMode.crossfade => 1 - overlap,
+              };
+              final incoming = switch (_transition) {
+                PlaybackTransitionMode.standard => progress >= .55 ? 1.0 : 0.0,
+                PlaybackTransitionMode.gapless => progress >= .5 ? 1.0 : 0.0,
+                PlaybackTransitionMode.crossfade => overlap,
+              };
+              return Column(children: [
+                _transitionTrack(context, '当前歌曲', outgoing, 'current'),
+                const SizedBox(height: 12),
+                _transitionTrack(context, '下一首歌曲', incoming, 'next'),
+              ]);
+            }),
+        const SizedBox(height: 12),
+        Text(ui('音量交接示意；实际效果取决于歌曲与输出设备。'),
+            style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 8),
+        Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: OutlinedButton.icon(
+                key: const ValueKey('guide-demo-transition-start'),
+                onPressed: () {
+                  _animation.value = 0;
+                  _animate(1, const Duration(milliseconds: 2400));
+                },
+                icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                label: Text(ui('演示歌曲过渡')))),
+      ]);
+
+  Widget _transitionTrack(
+      BuildContext context, String title, double gain, String id) {
+    final colors = Theme.of(context).colorScheme;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text(ui(title)),
+      const SizedBox(height: 6),
+      LinearProgressIndicator(
+          key: ValueKey('guide-demo-transition-$id'),
+          value: gain,
+          minHeight: 10,
+          borderRadius: AppShape.controlRadius,
+          color: id == 'current' ? colors.primary : colors.tertiary,
+          backgroundColor: colors.surfaceContainerHighest,
+          semanticsLabel: '${ui(title)} · ${ui('示意音量')}'),
+    ]);
   }
 
   Widget _progress(BuildContext context) => Column(children: [

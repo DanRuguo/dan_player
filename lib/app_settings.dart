@@ -15,6 +15,8 @@ import 'package:dan_player/online/network_proxy_preferences.dart';
 import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/play_service/replay_gain.dart';
 import 'package:dan_player/play_service/track_resume_preferences.dart';
+import 'package:dan_player/play_service/playback_transition_preferences.dart';
+import 'package:dan_player/lyric/japanese_reading_preferences.dart';
 import 'package:dan_player/player_shortcut_preferences.dart';
 import 'package:dan_player/src/rust/api/system_theme.dart';
 import 'package:dan_player/utils.dart';
@@ -281,6 +283,9 @@ class AppSettings {
   final libraryAutoRefresh = ValueNotifier(false);
   final replayGain = ValueNotifier(const ReplayGainPreferences());
   final trackResume = ValueNotifier(const TrackResumePreferences());
+  final playbackTransitions =
+      ValueNotifier(const PlaybackTransitionPreferences());
+  final japaneseReadings = ValueNotifier(const JapaneseReadingPreferences());
 
   /// 每 24 小时最多自动检查一次所选通道；不自动下载。
   bool autoCheckUpdates = true;
@@ -403,6 +408,11 @@ class AppSettings {
         ReplayGainPreferences.fromJson(settingsMap['ReplayGain']);
     _instance.trackResume.value =
         TrackResumePreferences.fromJson(settingsMap['TrackResume']);
+    _instance.playbackTransitions.value =
+        PlaybackTransitionPreferences.fromJson(
+            settingsMap['PlaybackTransitions']);
+    _instance.japaneseReadings.value =
+        JapaneseReadingPreferences.fromJson(settingsMap['japaneseReadings']);
     _instance.backgrounds.value =
         BackgroundPreferences.fromMap(settingsMap['Backgrounds']);
     _instance.onlineSources.value =
@@ -522,7 +532,8 @@ class AppSettings {
       _instance.fontFamily = ff is String ? ff : null;
       _instance.fontPath = fp is String ? fp : null;
       _instance.fontPreferences = AppFontPreferences.decode(
-          settingsMap['Fonts'], legacyFamily: _instance.fontFamily,
+          settingsMap['Fonts'],
+          legacyFamily: _instance.fontFamily,
           legacyPath: _instance.fontPath);
 
       _readUpdatePreferences(settingsMap);
@@ -613,6 +624,8 @@ class AppSettings {
         "LibraryAutoRefresh": libraryAutoRefresh.value,
         "ReplayGain": replayGain.value.toJson(),
         "TrackResume": trackResume.value.toJson(),
+        "PlaybackTransitions": playbackTransitions.value.toJson(),
+        "japaneseReadings": japaneseReadings.value.toJson(),
         "AutoCheckUpdates": autoCheckUpdates,
         ...updateChannel.toMap(),
         "IgnoredUpdateVersion": ignoredUpdateVersion,

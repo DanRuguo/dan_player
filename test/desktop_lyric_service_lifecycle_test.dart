@@ -3,8 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/lyric/japanese_lyric_readings.dart';
+import 'package:dan_player/lyric/japanese_reading_preferences.dart';
 import 'package:dan_player/play_service/desktop_lyric_service.dart';
+import 'package:dan_player/play_service/lyric_service.dart';
 import 'package:dan_player/play_service/play_service.dart';
+import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
@@ -84,8 +89,147 @@ class _PhoneticLine extends SyncLyricLine {
   }
 }
 
+class _OwnerAudio extends Fake implements Audio {
+  @override
+  String get path => 'synthetic-desktop-owner-not-opened.wav';
+  @override
+  String? get language => null;
+}
+
+class _OwnerDocument extends Lyric {
+  _OwnerDocument(LyricLine line) : super([line]);
+}
+
+class _OwnerPlayback extends Fake implements PlaybackService {
+  final positions = StreamController<double>.broadcast(sync: true);
+  final audio = _OwnerAudio();
+  @override
+  Stream<double> get positionStream => positions.stream;
+  @override
+  Audio get nowPlaying => audio;
+  @override
+  double get position => 1.2;
+  @override
+  Future<void> close() => positions.close();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('desktop timeline source owner is passive until a lyric service exists',
+      () async {
+    final process = _Process();
+    final readiness = PlaybackReadiness();
+    final desktopReady = ValueNotifier(false);
+    final japanese = ValueNotifier(const JapaneseReadingPreferences());
+    final playback = _OwnerPlayback();
+    var playbackConstructions = 0, lyricConstructions = 0;
+    final facade = PlayService.forTesting(
+      readiness: readiness,
+      createPlayback: (_) {
+        playbackConstructions++;
+        return playback;
+      },
+      createLyric: (owner) {
+        lyricConstructions++;
+        return LyricService.forTesting(owner,
+            resolveDefaultLyric: (_) async => null,
+            japanesePreferences: japanese,
+            japaneseProjector: JapaneseReadingProjector(
+                analyze: (_) async => throw StateError(
+                    'An ownership test must not analyze readings')));
+      },
+      createDesktopLyric: (owner) => DesktopLyricService(owner,
+          executableExists: (_) => true,
+          startProcess: (_, __) async => process,
+          playbackReady: desktopReady,
+          saveAppearance: () async {}),
+    );
+    addTearDown(() async {
+      await facade.close();
+      if (playbackConstructions == 0) await playback.close();
+      readiness.dispose();
+      desktopReady.dispose();
+      japanese.dispose();
+      await process.dispose();
+    });
+
+    expect(facade.lyricResolutionGeneration, isNull);
+    final desktop = facade.desktopLyricService;
+    await desktop.startDesktopLyric();
+    desktop.sendLyricLineMessage(_PhoneticLine(), lineIndex: 3);
+    desktop.sendNoLyricMessage();
+    final cold = (await process.messages())
+        .where((message) => message['type'] == 'LyricLineTimelineMessage')
+        .map((message) => Map<String, dynamic>.from(message['message'] as Map));
+    expect(cold, isNotEmpty);
+    expect(cold.every((message) => !message.containsKey('lyricSourceGeneration')),
+        isTrue);
+    expect(facade.lyricResolutionGeneration, isNull);
+    expect(playbackConstructions, 0);
+    expect(lyricConstructions, 0,
+        reason: 'Sending a cold line must never use the lazy lyric getter');
+
+    final lyrics = facade.lyricService;
+    expect(playbackConstructions, 1);
+    expect(lyricConstructions, 1);
+    final document = _OwnerDocument(_PhoneticLine());
+    lyrics.useSpecificLyric(document);
+    await lyrics.currLyricFuture;
+    await lyrics.syncDesktopLyric();
+    final firstSource = lyrics.resolutionGeneration;
+    final first = (await process.messages()).lastWhere(
+        (message) => message['type'] == 'LyricLineTimelineMessage')['message'];
+    expect(first['lyricSourceGeneration'], firstSource);
+    expect(facade.lyricResolutionGeneration, firstSource);
+    expect(first['content'], '你好');
+
+    // Same track and text, but a real new document command owns its timeline.
+    lyrics.useSpecificLyric(_OwnerDocument(_PhoneticLine()));
+    await lyrics.currLyricFuture;
+    await lyrics.syncDesktopLyric();
+    final replacement = (await process.messages()).lastWhere(
+        (message) => message['type'] == 'LyricLineTimelineMessage')['message'];
+    expect(lyrics.resolutionGeneration, greaterThan(firstSource));
+    expect(replacement['sequence'], first['sequence']);
+    expect(replacement['content'], first['content']);
+    expect(replacement['lyricSourceGeneration'], lyrics.resolutionGeneration);
+    desktop.sendNoLyricMessage();
+    final cleared = (await process.messages()).last['message'];
+    expect(cleared['lyricSourceGeneration'], lyrics.resolutionGeneration);
+    expect(cleared['lineIndex'], -1);
+    expect(lyricConstructions, 1);
+    expect(playbackConstructions, 1);
+  });
+
+  test('desktop timeline document owner is optional for legacy messages', () {
+    const old = msg.LyricLineTimelineMessage(
+        sequence: 7,
+        lineIndex: 2,
+        startMilliseconds: 1000,
+        lengthMilliseconds: 6000,
+        content: '夜空',
+        translation: null,
+        words: []);
+    final payload = Map<String, dynamic>.from(
+        (jsonDecode(old.buildMessageJson()) as Map)['message'] as Map);
+    expect(payload.containsKey('lyricSourceGeneration'), isFalse);
+    expect(msg.LyricLineTimelineMessage.fromJson(payload).lyricSourceGeneration,
+        isNull);
+    for (final value in [null, '9', 9.0]) {
+      final legacy = msg.LyricLineTimelineMessage.fromJson(
+          {...payload, 'lyricSourceGeneration': value});
+      expect(legacy.lyricSourceGeneration, isNull);
+      expect(legacy.content, old.content);
+      expect(legacy.sequence, old.sequence);
+    }
+    final current = msg.LyricLineTimelineMessage.fromJson(
+        {...payload, 'lyricSourceGeneration': 9});
+    expect(current.lyricSourceGeneration, 9);
+    final serialized = (jsonDecode(current.buildMessageJson()) as Map)['message'];
+    expect(serialized['lyricSourceGeneration'], 9);
+    expect(serialized['content'], old.content);
+  });
 
   test(
       'real desktop sender separates pronunciation from word timing and legacy',

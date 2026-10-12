@@ -15,6 +15,7 @@ import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_sort_button.dart';
 import 'package:dan_player/component/audio_selection_toolbar.dart';
+import 'package:dan_player/component/multi_selection_range.dart';
 import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
@@ -102,6 +103,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
   List<Audio> _audios = [];
   final Set<String> _selectedPaths = {};
   bool _selecting = false;
+  int _selectionSession = 0;
   bool _loading = true;
   bool _saving = false;
   bool _confirmingRemoval = false;
@@ -479,8 +481,34 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
     if (widget.onAddToPlaylist != null) {
       await widget.onAddToPlaylist!(audios);
     } else {
-      await showAddAudiosToPlaylistDialog(context, audios);
+      final session = _selectionSession;
+      final owner = _editorEpoch;
+      final committed = await showAddAudiosToPlaylistDialog(context, audios);
+      if (committed &&
+          mounted &&
+          _selecting &&
+          session == _selectionSession &&
+          owner == _editorEpoch) {
+        _exitSelection();
+      }
     }
+  }
+
+  void _exitSelection() {
+    if (!mounted) return;
+    _selectionSession++;
+    setState(() {
+      _selecting = false;
+      _selectedPaths.clear();
+    });
+  }
+
+  VoidCallback? _rangeAction(MultiSelectRange kind) {
+    final items = visibleSelectionRange(
+        _audios, (audio) => _selectedPaths.contains(audio.path), kind);
+    if (items.isEmpty) return null;
+    return () =>
+        setState(() => _selectedPaths.addAll(items.map((audio) => audio.path)));
   }
 
   Future<void> _export(List<Audio> audios) async {
@@ -664,6 +692,8 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
 
   Widget _actions() {
     final selected = _selected;
+    final session = _selectionSession;
+    final owner = _editorEpoch;
     return AppContentTransition(
       identity: _selecting,
       child: Column(
@@ -692,10 +722,27 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                     ..clear()
                     ..addAll(next);
                 }),
-                onExit: () => setState(() => _selecting = false),
-                onPlay: _play,
-                onAddToPlaylist: _add,
-                onExport: _export,
+                onExit: _exitSelection,
+                onPlay: widget.onPlay == null ? null : _play,
+                onAddToPlaylist: widget.onAddToPlaylist == null ? null : _add,
+                onExport: widget.onExport == null ? null : _export,
+                onExportCommitted: widget.onExport != null
+                    ? null
+                    : (audios) => exportM3uPlaylist(context, audios,
+                        name: _name.text.trim().isEmpty
+                            ? ui('智能歌单')
+                            : _name.text.trim()),
+                onCommitted: _exitSelection,
+                isActionCurrent: () =>
+                    mounted &&
+                    _selecting &&
+                    !_previewing &&
+                    session == _selectionSession &&
+                    owner == _editorEpoch,
+                includeRangeActions: true,
+                onSelectBetween: _rangeAction(MultiSelectRange.between),
+                onSelectAbove: _rangeAction(MultiSelectRange.above),
+                onSelectBelow: _rangeAction(MultiSelectRange.below),
               )
             else
               Wrap(spacing: 8, runSpacing: 8, children: [
@@ -739,6 +786,7 @@ class _SmartPlaylistsDialogState extends State<SmartPlaylistsDialog> {
                         ? null
                         : () => setState(() {
                               _selecting = true;
+                              _selectionSession++;
                               _selectedPaths
                                 ..clear()
                                 ..addAll(_audios.map((audio) => audio.path));

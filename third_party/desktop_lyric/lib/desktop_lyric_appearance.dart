@@ -1,7 +1,7 @@
 /// Shared, immutable preferences. Only the player writes these to disk.
 class DesktopLyricAppearance {
   static const defaults = DesktopLyricAppearance._(
-      22, 18, null, 0, 1, false, false, 8, 56, 14, false);
+      22, 18, null, 0, 1, false, false, 8, 56, 14, false, 0, true);
 
   const DesktopLyricAppearance._(
       this.lyricFontSize,
@@ -14,7 +14,9 @@ class DesktopLyricAppearance {
       this.taskbarGap,
       this.taskbarHeight,
       this.taskbarMinimumFontSize,
-      this.taskbarTranslation);
+      this.taskbarTranslation,
+      this.lyricLetterSpacing,
+      this.showJapaneseReading);
 
   final double lyricFontSize;
   final double translationFontSize;
@@ -29,6 +31,13 @@ class DesktopLyricAppearance {
   final double taskbarHeight;
   final double taskbarMinimumFontSize;
   final bool taskbarTranslation;
+
+  /// Additional logical pixels between lyric clusters on every lyric surface.
+  /// Zero preserves each surface's existing natural typography.
+  final double lyricLetterSpacing;
+
+  /// Visibility only: hiding generated readings preserves their source/cache.
+  final bool showJapaneseReading;
 
   static bool _number(Object? value, double min, double max) =>
       value is num && value.isFinite && value >= min && value <= max;
@@ -54,6 +63,10 @@ class DesktopLyricAppearance {
       raw['taskbarTranslation'] is bool
           ? raw['taskbarTranslation'] as bool
           : false,
+      number('lyricLetterSpacing', 0, 12, defaults.lyricLetterSpacing),
+      raw['showJapaneseReading'] is bool
+          ? raw['showJapaneseReading'] as bool
+          : defaults.showJapaneseReading,
     );
   }
 
@@ -75,7 +88,11 @@ class DesktopLyricAppearance {
         (raw.containsKey('taskbarMinimumFontSize') &&
             !_number(raw['taskbarMinimumFontSize'], 12, 24)) ||
         (raw.containsKey('taskbarTranslation') &&
-            raw['taskbarTranslation'] is! bool)) {
+            raw['taskbarTranslation'] is! bool) ||
+        (raw.containsKey('lyricLetterSpacing') &&
+            !_number(raw['lyricLetterSpacing'], 0, 12)) ||
+        (raw.containsKey('showJapaneseReading') &&
+            raw['showJapaneseReading'] is! bool)) {
       return null;
     }
     return DesktopLyricAppearance.fromJson(raw);
@@ -93,7 +110,9 @@ class DesktopLyricAppearance {
       double? taskbarGap,
       double? taskbarHeight,
       double? taskbarMinimumFontSize,
-      bool? taskbarTranslation}) {
+      bool? taskbarTranslation,
+      double? lyricLetterSpacing,
+      bool? showJapaneseReading}) {
     final map = {
       'lyricFontSize': lyricFontSize ?? this.lyricFontSize,
       'translationFontSize': translationFontSize ?? this.translationFontSize,
@@ -107,6 +126,8 @@ class DesktopLyricAppearance {
       'taskbarMinimumFontSize':
           taskbarMinimumFontSize ?? this.taskbarMinimumFontSize,
       'taskbarTranslation': taskbarTranslation ?? this.taskbarTranslation,
+      'lyricLetterSpacing': lyricLetterSpacing ?? this.lyricLetterSpacing,
+      'showJapaneseReading': showJapaneseReading ?? this.showJapaneseReading,
     };
     return tryFromJson(map) ??
         (throw ArgumentError('Invalid lyric appearance'));
@@ -124,6 +145,8 @@ class DesktopLyricAppearance {
         'taskbarHeight': taskbarHeight,
         'taskbarMinimumFontSize': taskbarMinimumFontSize,
         'taskbarTranslation': taskbarTranslation,
+        'lyricLetterSpacing': lyricLetterSpacing,
+        'showJapaneseReading': showJapaneseReading,
       };
 
   @override
@@ -139,7 +162,9 @@ class DesktopLyricAppearance {
       taskbarGap == other.taskbarGap &&
       taskbarHeight == other.taskbarHeight &&
       taskbarMinimumFontSize == other.taskbarMinimumFontSize &&
-      taskbarTranslation == other.taskbarTranslation;
+      taskbarTranslation == other.taskbarTranslation &&
+      lyricLetterSpacing == other.lyricLetterSpacing &&
+      showJapaneseReading == other.showJapaneseReading;
   @override
   int get hashCode => Object.hash(
       lyricFontSize,
@@ -152,5 +177,7 @@ class DesktopLyricAppearance {
       taskbarGap,
       taskbarHeight,
       taskbarMinimumFontSize,
-      taskbarTranslation);
+      taskbarTranslation,
+      lyricLetterSpacing,
+      showJapaneseReading);
 }

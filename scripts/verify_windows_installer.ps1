@@ -32,6 +32,20 @@ if ($checksum -cne ($build.Sha256 + '  ' + $exe.Name)) {
     throw 'Installer companion checksum must name the flat uploaded asset.'
 }
 $payload = (Resolve-Path -LiteralPath $PayloadDirectory).Path.TrimEnd('\', '/')
+if ($build.PSObject.Properties.Name -contains 'CorePayloadDirectory') {
+    $core = (Resolve-Path -LiteralPath $build.CorePayloadDirectory).Path.TrimEnd('\', '/')
+    $runRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $BuildReceiptPath)).Path.TrimEnd('\', '/')
+    if ($core -cne (Join-Path $runRoot 'core-payload')) { throw 'Slim installer core escaped its build directory.' }
+    . (Join-Path $PSScriptRoot 'support\slim_installer_verification.ps1')
+    $null = Assert-SlimInstallerPayloadMetadata -PortableDirectory $payload -CoreDirectory $core
+    foreach ($file in Get-ChildItem -LiteralPath $core -Recurse -File -Force) {
+        $relative = $file.FullName.Substring($core.Length + 1).Replace('\', '/')
+        if ($relative -match '^(?i:tools?)/(?:ffmpeg(?:-7\.1\.1)?|japanese_readings)/') { throw 'Slim installer contains optional components.' }
+        if ($relative -notin @('BUILD-PROVENANCE.json', 'SHA256SUMS') -and
+            (Hash $file.FullName) -ne (Hash (Join-Path $payload $relative))) { throw "Installer core differs from audited portable: $relative" }
+    }
+    $payload = $core
+}
 $lines = @(Get-Content -LiteralPath $build.Manifest)
 if ($lines.Count -lt 3 -or $lines[0] -ne 'DANPLAYER_PAYLOAD_V1' -or $lines[1] -ne $build.Version) {
     throw 'Invalid runtime manifest header.'

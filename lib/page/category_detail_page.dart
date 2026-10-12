@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_content_transition.dart';
+import 'package:dan_player/component/multi_selection_lifecycle.dart';
 import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'dart:async';
 
@@ -151,8 +152,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     if (navigationChanged) {
       _query = '';
       _search.clear();
-      _selection.selected.clear();
-      _selection.enableMultiSelectView = false;
+      _selection.exitMultiSelect();
       _allowInitialGroup = true;
       _sort = widget.kind == MusicCategoryKind.album
           ? AudioSortField.track
@@ -214,6 +214,11 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    return SelectionPageLifecycle(
+        onLeave: _selection.exitMultiSelect, child: _buildPage(context));
+  }
+
+  Widget _buildPage(BuildContext context) {
     UiLanguageScope.watch(context);
     final group = _group;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -259,8 +264,11 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                   AudioMultiSelectionActions(
                     controller: _selection,
                     contentList: queue,
-                    onPlay: (selected) => _play(0, selected),
-                    onAddToPlaylist: _add,
+                    onPlay: widget.onPlay == null
+                        ? null
+                        : (selected) => _play(0, selected),
+                    onAddToPlaylist:
+                        widget.onAddToPlaylist == null ? null : _add,
                   ),
                 if (!selecting)
                   OutlinedButton(

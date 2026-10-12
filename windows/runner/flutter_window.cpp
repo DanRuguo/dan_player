@@ -7,6 +7,7 @@
 #include "flutter/generated_plugin_registrant.h"
 #include "desktop_integration.h"
 #include "installer_launcher.h"
+#include "japanese_phonetic_controller.h"
 #include "window_backdrop.h"
 #include "window_resize_policy.h"
 #include "window_resize_bridge.h"
@@ -93,6 +94,8 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine());
   windows_shell_ = std::make_unique<WindowsShellController>(
       GetHandle(), flutter_controller_->engine());
+  japanese_phonetic_ = std::make_unique<JapanesePhoneticController>(
+      GetHandle(), flutter_controller_->engine());
 
   // Dart applies restored bounds, resize policy and the backdrop before it
   // explicitly shows the HWND. Showing here on the first Flutter frame races
@@ -105,6 +108,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   window_teardown::HideBeforeResources(GetHandle());
+  japanese_phonetic_.reset();
   windows_shell_.reset();
   installer_launcher_.reset();
   desktop_controller_.reset();
@@ -123,6 +127,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
   if (frame_display_) frame_display_->Handle(message);
+  if (japanese_phonetic_ && japanese_phonetic_->HandleMessage(message)) return 0;
   if (windows_shell_) {
     if (const auto result = windows_shell_->HandleMessage(message, wparam, lparam)) {
       return *result;

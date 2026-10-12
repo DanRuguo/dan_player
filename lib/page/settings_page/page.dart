@@ -17,7 +17,10 @@ import 'package:dan_player/page/settings_page/desktop_integration_settings.dart'
 import 'package:dan_player/page/settings_page/desktop_lyric_settings.dart';
 import 'package:dan_player/page/settings_page/grouped_settings.dart';
 import 'package:dan_player/page/settings_page/lyric_experience_settings.dart';
+import 'package:dan_player/page/settings_page/japanese_reading_batch_settings.dart';
+import 'package:dan_player/page/settings_page/japanese_online_reading_settings.dart';
 import 'package:dan_player/page/settings_page/playback_settings.dart';
+import 'package:dan_player/page/settings_page/playback_transition_settings.dart';
 import 'package:dan_player/page/settings_page/library_watch_settings.dart';
 import 'package:dan_player/page/settings_page/library_health_settings.dart';
 import 'package:dan_player/page/settings_page/replay_gain_settings.dart';
@@ -63,6 +66,9 @@ class SettingsPage extends StatelessWidget {
                 const PlaybackSettings(
                   key: ValueKey('setting-playback'),
                 ),
+                const PlaybackTransitionSettings(
+                  key: ValueKey('setting-transition'),
+                ),
                 const TrackResumeSettings(
                   key: ValueKey('setting-resume'),
                 ),
@@ -99,6 +105,12 @@ class SettingsPage extends StatelessWidget {
                 ),
                 const LyricExperienceSettings(
                   key: ValueKey('setting-experience'),
+                ),
+                const JapaneseReadingBatchSettings(
+                  key: ValueKey('setting-japanese-batch'),
+                ),
+                const JapaneseOnlineReadingSettings(
+                  key: ValueKey('setting-japanese-online'),
                 ),
                 const MusicSourceSettings(
                   key: ValueKey('setting-platforms'),

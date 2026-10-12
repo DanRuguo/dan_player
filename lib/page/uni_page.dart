@@ -1,6 +1,8 @@
 import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/now_playing_bar_metrics.dart';
+import 'package:dan_player/component/multi_selection_lifecycle.dart';
+import 'package:dan_player/component/multi_selection_range.dart';
 import 'dart:async';
 
 import 'package:dan_player/app_preference.dart';
@@ -15,6 +17,8 @@ import 'package:dan_player/page/uni_page_components.dart';
 import 'package:dan_player/page/page_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+
+export 'package:dan_player/component/multi_selection_range.dart';
 
 typedef ContentBuilder<T> = Widget Function(BuildContext context, T item,
     int index, MultiSelectController<T>? multiSelectController);
@@ -90,8 +94,20 @@ enum ContentView {
 class MultiSelectController<T> extends ChangeNotifier {
   final Set<T> selected = {};
   bool enableMultiSelectView = false;
+  int _session = 0;
+  bool _disposed = false;
+
+  int get session => _session;
+  bool isSessionCurrent(int session) => !_disposed && session == _session;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
   void useMultiSelectView(bool multiSelectView) {
+    if (enableMultiSelectView != multiSelectView) _session++;
     enableMultiSelectView = multiSelectView;
     notifyListeners();
   }
@@ -158,6 +174,29 @@ class MultiSelectController<T> extends ChangeNotifier {
       ...selected.where((item) => !visible.contains(item)),
       ...visible.where((item) => !selected.contains(item)),
     });
+  }
+
+  bool canSelectRange(Iterable<T> orderedVisible, MultiSelectRange range) =>
+      visibleSelectionRange(orderedVisible, selected.contains, range)
+          .isNotEmpty;
+
+  void selectRange(Iterable<T> orderedVisible, MultiSelectRange range) {
+    final items =
+        visibleSelectionRange(orderedVisible, selected.contains, range);
+    if (items.isNotEmpty) selectAll(items);
+  }
+
+  /// A completed old dialog cannot end a newly entered selection session.
+  void exitMultiSelect({int? expectedSession}) {
+    if (_disposed ||
+        (expectedSession != null && expectedSession != _session) ||
+        (!enableMultiSelectView && selected.isEmpty)) {
+      return;
+    }
+    _session++;
+    enableMultiSelectView = false;
+    selected.clear();
+    notifyListeners();
   }
 }
 
@@ -423,7 +462,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
       ));
     }
 
-    return widget.multiSelectController == null
+    final page = widget.multiSelectController == null
         ? result(null, actions)
         : ListenableBuilder(
             listenable: widget.multiSelectController!,
@@ -432,6 +471,9 @@ class _UniPageState<T> extends State<UniPage<T>> {
               actions,
             ),
           );
+    return SelectionPageLifecycle(
+        onLeave: () => widget.multiSelectController?.exitMultiSelect(),
+        child: page);
   }
 
   Widget result(
@@ -439,7 +481,14 @@ class _UniPageState<T> extends State<UniPage<T>> {
     final enableReorder = currSortMethod?.supportsReorder == true &&
         multiSelectController?.enableMultiSelectView != true;
     final visibleActions = multiSelectController?.enableMultiSelectView == true
-        ? widget.multiSelectViewActions!
+        ? [
+            ...widget.multiSelectViewActions!,
+            if (!widget.multiSelectViewActions!
+                .any((action) => action is AudioMultiSelectionActions))
+              MultiSelectRangeActions<T>(
+                  controller: multiSelectController!,
+                  contentList: widget.contentList),
+          ]
         : actions;
     final gridIndices = currContentView == ContentView.table
         ? <Key, int>{

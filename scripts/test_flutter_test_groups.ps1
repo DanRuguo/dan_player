@@ -49,6 +49,14 @@ try {
     Assert-GroupingRejects { Get-FlutterTestGroups $policyFixture -MockedDataRootTest @() -TestFile @('test/ordinary_test.dart', 'test/nested/../ordinary_test.dart') } 'duplicated'
     Assert-GroupingRejects { Get-FlutterTestGroups $policyFixture -MockedDataRootTest @() -TestFile @('integration_test/window_test.dart') } 'outside the discovered'
     Assert-GroupingRejects { Get-FlutterTestGroups $policyFixture -MockedDataRootTest @() -TestFile @('test/support/helper.dart') } 'outside the discovered'
+    Write-GroupingFixture 'test/support/japanese_reading_ui_fixture.dart' "const provider = 'plugins.flutter.io/path_provider';"
+    Write-GroupingFixture 'test/nested/indirect_mock_test.dart' "import '../support/japanese_reading_ui_fixture.dart' as fixture; void main() { fixture.setUpJapaneseUiFixture(); }"
+    Write-GroupingFixture 'test/import_only_test.dart' "import 'support/japanese_reading_ui_fixture.dart'; void main() {}"
+    Write-GroupingFixture 'test/other_helper_test.dart' "import 'support/helper.dart'; void main() { setUpJapaneseUiFixture(); }"
+    $indirect = Get-FlutterTestGroups $policyFixture -MockedDataRootTest @('explicit_test.dart')
+    Assert-Grouping ('indirect_mock_test.dart' -cin $indirect.MockedDataRoot.Name) 'An active shared provider fixture must keep its mock authoritative.'
+    Assert-Grouping ('import_only_test.dart' -cin $indirect.WorkspaceDataRoot.Name) 'An unused shared fixture import does not change isolation ownership.'
+    Assert-Grouping ('other_helper_test.dart' -cin $indirect.WorkspaceDataRoot.Name) 'An unrelated helper with a similar function name is not a provider fixture.'
     Write-GroupingFixture 'test/mirror/explicit_test.dart'
     Assert-GroupingRejects { Get-FlutterTestGroups $policyFixture -MockedDataRootTest @('explicit_test.dart') } 'stale or ambiguous'
 
@@ -58,6 +66,9 @@ try {
     Assert-Grouping ($union.Count -eq $discovered.Count -and @($union | Sort-Object -Unique).Count -eq $discovered.Count) 'Every real formal test must belong to exactly one group.'
     foreach ($file in @('local_lyric_variants_test.dart', 'local_lyric_variant_source_test.dart', 'ttml_local_integration_test.dart')) {
         Assert-Grouping ($file -cin $actual.WorkspaceDataRoot.Name -and $file -cnotin $actual.MockedDataRoot.Name) "Storage isolation was omitted: $file"
+    }
+    foreach ($file in @('japanese_dictionary_setup_card_test.dart', 'japanese_online_reading_settings_test.dart', 'japanese_reading_batch_settings_test.dart')) {
+        Assert-Grouping ($file -cin $actual.MockedDataRoot.Name) "Shared provider isolation was omitted: $file"
     }
     Assert-Grouping (($policyBefore -join "`n") -ceq (@($env:DAN_PLAYER_DATA_DIR, $env:TEMP, $env:TMP) -join "`n")) 'Discovery must not mutate process fixture settings.'
     $workflow = [IO.File]::ReadAllText((Join-Path $policyRepo '.github/workflows/windows_ci.yml'))

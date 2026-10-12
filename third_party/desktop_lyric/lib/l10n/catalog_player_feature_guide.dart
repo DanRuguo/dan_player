@@ -1,4 +1,14 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '试一试：歌曲过渡': ['Try it: track transitions', '試す：曲の切り替え', '체험: 곡 전환'],
+  '演示歌曲过渡': ['Demonstrate transition', '切り替えを試す', '곡 전환 체험'],
+  '下一首歌曲': ['Next track', '次の曲', '다음 곡'],
+  '当前歌曲': ['Current track', '現在の曲', '현재 곡'],
+  '音量交接示意；实际效果取决于歌曲与输出设备。': [
+    'A visual volume handoff; the actual result depends on your tracks and output device.',
+    '音量の受け渡しを図示します。実際の効果は曲と出力機器によって異なります。',
+    '음량이 넘어가는 모습을 보여 줍니다. 실제 효과는 곡과 출력 기기에 따라 달라집니다.'
+  ],
+  '示意音量': ['Illustrated volume', '図示した音量', '예시 음량'],
   '字体可统一设置，或分别设置中文、英文、日文、韩文；主界面、桌面歌词与任务栏歌词同步应用。': [
     'Choose one font for all languages or separate fonts for Chinese, English, Japanese and Korean. The interface, desktop lyrics and taskbar lyrics follow the same choices.',
     '全言語で共通のフォント、または中国語・英語・日本語・韓国語別のフォントを選べます。画面、デスクトップ歌詞、タスクバー歌詞に同じ選択を適用します。',
@@ -166,10 +176,11 @@ const Map<String, List<String>> catalogPlayerFeatureGuide = {
   '打开桌面歌词设置': ['Open desktop lyric settings', 'デスクトップ歌詞の設定', '바탕 화면 가사 설정 열기'],
   '打开任务栏歌词设置': ['Open taskbar lyric settings', 'タスクバー歌詞の設定', '작업 표시줄 가사 설정 열기'],
   '文件夹与缓存管理': ['Folders and cache', 'フォルダーとキャッシュ', '폴더와 캐시 관리'],
-  '文件夹页右键、长按或点更多，可备注、浏览、移动文件夹或查看占用。备注只改变显示名，真实名称与路径不变；缓存项有独立图标和标记。': [
-    'On the folder page, right-click, long-press or open More to add a note, browse, move or view storage. Notes only change display names; real names and paths stay intact. The cache folder has its own icon and label.',
-    'フォルダーページで右クリック・長押し・その他メニューからメモ、参照、移動、使用量の確認を行います。メモは表示名だけを変え、実際の名前やパスは変えません。キャッシュは専用のアイコンと表示で区別します。',
-    '폴더 화면에서 오른쪽 클릭, 길게 누르기 또는 더 보기로 메모, 탐색, 이동과 사용량 보기를 엽니다. 메모는 표시명만 바꾸며 실제 이름과 경로는 그대로입니다. 캐시 폴더는 별도 아이콘과 표시로 구분합니다.',
+  '文件夹页点按文件夹即可原地展开：先显示本文件夹歌曲，再显示子文件夹；分组标题与连接线标明归属，同级缩进一致，歌曲封面按行排列。文件夹和歌曲可分别排序，深层目录会收紧缩进。右键、长按或点更多，可备注、浏览、移动文件夹或查看占用；备注只改变显示名，缓存项有独立图标和标记。':
+      [
+    'Tap a folder to expand it in place: its own tracks come first, followed by subfolders. Group headings and connecting lines identify where tracks belong, with consistent indentation at each level and track covers in rows. Sort folders and tracks separately; deep trees use tighter indentation. Right-click, long-press or open More to add a note, browse, move or view storage. Notes only change display names, and the cache item has its own icon and label.',
+    'フォルダーを押すとその場で展開します。まずこのフォルダーの曲、次に子フォルダーを表示し、見出しと接続線で所属を示します。同じ階層の字下げを揃え、曲のカバーを行順に並べます。フォルダーと曲は別々に並べ替えられ、深い階層では字下げを狭めます。右クリック・長押し・その他からメモ、参照、移動、使用量の確認を行います。メモは表示名だけを変え、キャッシュは専用のアイコンと表示で区別します。',
+    '폴더를 누르면 그 자리에서 펼쳐집니다. 현재 폴더의 곡을 먼저 표시하고 하위 폴더를 이어서 표시합니다. 그룹 제목과 연결선으로 소속을 구분하고 같은 단계의 들여쓰기를 맞추며 곡 표지는 행 순서로 배치합니다. 폴더와 곡을 각각 정렬할 수 있고 깊은 트리는 들여쓰기를 줄입니다. 오른쪽 클릭, 길게 누르기 또는 더 보기로 메모, 탐색, 이동과 사용량 보기를 엽니다. 메모는 표시명만 바꾸며 캐시는 별도 아이콘과 표시로 구분합니다.',
   ],
   '移动确认后退出，下次启动先剪切并同步资料路径。同盘可直接移动，跨盘先校验再删除原文件，不覆盖已有目标。备份与恢复可按组件选择，缓存分类占用在统计页查看。':
       [
@@ -218,11 +229,11 @@ const Map<String, List<String>> catalogPlayerFeatureGuide = {
     '複数選択と一括整理',
     '다중 선택과 일괄 정리',
   ],
-  '从歌曲菜单进入“多选”，再勾选歌曲；顶部可全选、反选或退出。播放所选、下一批播放、加入队尾与导出都按当前可见顺序处理；被筛选隐藏的已选项不会参与本次操作。':
+  '从歌曲菜单进入“多选”，再勾选歌曲；顶部可全选、反选或退出。“更多”可按当前排序选中一项及上方或下方全部，也可圈定已选两项之间（含两端）。操作只处理当前可见所选，保留显示顺序；操作成功或离开页面后退出多选，取消或失败可继续选择。':
       [
-    'Choose Select multiple in a track menu, then mark tracks. Use the top controls to select all, invert or exit. Play selected, Play selected next, queue append and export use the visible order; selected tracks hidden by a filter are excluded from that action.',
-    '曲のメニューで「複数選択」を選び、曲にチェックを付けます。上部で全選択・反転・終了できます。選択曲の再生、次の一組の再生、キュー末尾への追加、書き出しは現在の表示順に処理し、フィルターで隠れた選択項目は対象にしません。',
-    '곡 메뉴에서 다중 선택을 누른 뒤 곡을 표시합니다. 위쪽에서 전체 선택, 반전 또는 종료할 수 있습니다. 선택 재생, 다음 묶음 재생, 대기열 추가와 내보내기는 현재 보이는 순서대로 처리하며 필터로 숨겨진 선택 항목은 제외합니다.',
+    'Choose Select multiple in a track menu, then mark tracks. Use the top controls to select all, invert or exit. More can select one item and everything above or below in the current order, or the range between two selected items, including both ends. Actions use visible selections in display order. A successful action or leaving the page exits selection; cancel or failure keeps it for retry.',
+    '曲のメニューで「複数選択」を選び、曲にチェックを付けます。上部で全選択・反転・終了できます。その他から、現在の順序で1項目とその上または下のすべて、あるいは選択した2項目の間を両端も含めて選べます。操作は表示中の選択項目を表示順に処理します。成功またはページ移動で選択を終了し、取消や失敗では選択を保って再試行できます。',
+    '곡 메뉴에서 다중 선택을 누른 뒤 곡을 표시합니다. 위쪽에서 전체 선택, 반전 또는 종료할 수 있습니다. 더 보기에서 현재 정렬 순서로 한 항목과 그 위나 아래의 모든 항목, 또는 선택한 두 항목 사이를 양 끝과 함께 선택합니다. 작업은 표시된 선택 항목을 표시 순서대로 처리합니다. 성공하거나 화면을 떠나면 선택을 종료하고 취소하거나 실패하면 선택을 유지해 다시 시도할 수 있습니다.',
   ],
   '多选“更多”集中提供个人评分与标签、批量编辑标签、重新读取封面和复制信息。个人评分、标签和备注只存在播放器资料中；批量编辑歌曲标签会写入音频文件，先预览再确认，未启用的字段保持原值。':
       [

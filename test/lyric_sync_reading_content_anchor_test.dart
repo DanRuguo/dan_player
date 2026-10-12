@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
+import 'support/lyric_ink_matchers.dart';
 import 'support/playlist_feature_fixture.dart';
 
 Qrc _document() {
@@ -56,6 +57,14 @@ double _glyphY(WidgetTester tester, QrcLine line) {
       .first;
   final box = tester.renderObject<RenderBox>(_primary(line));
   return box.localToGlobal(Offset(0, first.top + painter.inkOffset.dy)).dy;
+}
+
+List<ReadingLyricGraphemeBounds> _graphemeBounds(
+    WidgetTester tester, QrcLine line) {
+  final painter = _painter(tester, line);
+  return readingLyricGraphemeBounds(
+      tester.renderObject<RenderBox>(_primary(line)), painter.text,
+      inkOffset: painter.inkOffset);
 }
 
 Future<Uint8List> _pixels(
@@ -127,6 +136,7 @@ void main() {
         settings.revealForReading(search);
         await tester.pumpAndSettle();
         final before = _glyphY(tester, target);
+        final glyphBounds = _graphemeBounds(tester, target);
         final painter = _painter(tester, target);
         final paragraph = painter.text;
         final geometry = painter.layoutIdentity;
@@ -149,29 +159,51 @@ void main() {
             settings.setShowTimestamps(true);
         }
         await tester.pump();
+        expectReadingLyricGraphemeBounds(
+            _graphemeBounds(tester, target), glyphBounds,
+            reason: 'The first layout keeps every timed grapheme in place');
+        late final Uint8List midPixels;
+        var geometryFrames = 0;
         for (var frame = 0; frame < 36; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
           expect(_glyphY(tester, target), closeTo(before, .05),
               reason: 'Reveal frame $frame keeps the actual primary glyph');
+          expectReadingLyricGraphemeBounds(
+              _graphemeBounds(tester, target), glyphBounds,
+              reason: 'Reveal frame $frame keeps every timed grapheme');
           final current = _painter(tester, target);
           expect(identical(current.text, paragraph), isTrue,
               reason: 'Reading anchors do not reshape the timed paragraph');
           expect(identical(current.layoutIdentity, geometry), isTrue,
               reason: 'Content reveal reuses the timed glyph geometry');
+          geometryFrames++;
           if (frame == 17) {
-            expect(await _pixels(tester, boundary, region),
-                orderedEquals(reference),
-                reason: 'The complete primary ink is stable mid-transition');
+            midPixels = await _pixels(tester, boundary, region);
           }
         }
         await tester.pumpAndSettle();
-        expect(
-            await _pixels(tester, boundary, region), orderedEquals(reference),
-            reason: 'The complete primary ink keeps its original location');
+        expectReadingLyricGraphemeBounds(
+            _graphemeBounds(tester, target), glyphBounds,
+            reason: 'The settled timed graphemes keep their world bounds');
+        final settledPixels = await _pixels(tester, boundary, region);
+        expect(geometryFrames, 36,
+            reason: 'Complete every geometry frame before the RGB oracle');
         expect(settings.readingTarget, same(search));
         expect(seeks, 0);
         expect(tester.binding.transientCallbackCount, 0);
         expect(tester.takeException(), isNull);
+        final label = 'QRC $change reduced=$reduced '
+            'geometryFrames=$geometryFrames graphemes=${glyphBounds.length}';
+        reportReadingLyricRgbaDifference(reference, reference, '$label before');
+        reportReadingLyricRgbaDifference(midPixels, reference, '$label mid');
+        reportReadingLyricRgbaDifference(
+            settledPixels, reference, '$label settled');
+        expect(midPixels, matchesReadingLyricRgba(reference),
+            reason: 'The complete primary ink stays in place mid-transition, '
+                'allowing at most two RGB quantization units and exact alpha');
+        expect(settledPixels, matchesReadingLyricRgba(reference),
+            reason: 'The complete primary ink keeps its location and exact '
+                'alpha with at most two RGB quantization units');
         await tester.pumpWidget(const SizedBox.shrink());
       });
     }

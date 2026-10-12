@@ -77,7 +77,49 @@ $desktopLyricMode = Get-ReleaseDesktopLyricMode $payload $receipt
 $sharedExecutable = $desktopLyricMode -eq 'shared-executable-v1'
 . (Join-Path $PSScriptRoot 'support\bundled_fonts.ps1')
 $bundledFontNotices = @(Get-BundledFontNotices -RepositoryRoot $repo)
+. (Join-Path $PSScriptRoot 'support\bundled_japanese_readings.ps1')
+$bundledJapaneseReadings = Get-BundledJapaneseReadings -RepositoryRoot $repo
+$bundledReadingNotices = @($bundledJapaneseReadings.Notices)
 $requiredEntries = @('Dan Player.exe', 'rust_lib_dan_player.dll', 'flutter_windows.dll', 'data/app.so', 'data/icudtl.dat', 'data/flutter_assets/FontManifest.json', 'FONT-INTEGRITY.json', 'BUILD-PROVENANCE.json') + @($bundledFontNotices.RelativePath)
+$requiredEntries += @($bundledReadingNotices.RelativePath)
+$readingBuildProvenance = Get-Content -LiteralPath (Join-Path $payload 'BUILD-PROVENANCE.json') -Raw | ConvertFrom-Json
+if (-not ($readingBuildProvenance.PSObject.Properties.Name -contains 'JapaneseReadings') -or
+    $readingBuildProvenance.JapaneseReadings.Engine -cne $bundledJapaneseReadings.Engine -or
+    $readingBuildProvenance.JapaneseReadings.DictionaryBytes -ne $bundledJapaneseReadings.DictionaryBytes -or
+    $readingBuildProvenance.JapaneseReadings.DictionarySha256 -cne $bundledJapaneseReadings.DictionarySha256 -or
+    $readingBuildProvenance.JapaneseReadings.Optional -ne $true -or
+    $readingBuildProvenance.JapaneseReadings.Bundled -isnot [bool] -or
+    $readingBuildProvenance.Ffmpeg.Bundled -ne $readingBuildProvenance.JapaneseReadings.Bundled) {
+    throw 'Japanese reading build provenance differs from the final pinned source.'
+}
+$optionalComponents = $readingBuildProvenance.JapaneseReadings.Bundled
+$optionalPairs = @()
+if ($optionalComponents) {
+    $ffmpegCatalog = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ffmpeg_runtime_manifest.json') -Raw | ConvertFrom-Json
+    foreach ($file in $ffmpegCatalog.Files) {
+        $relative = 'tool/ffmpeg/' + $file.Name
+        $requiredEntries += $relative
+        $optionalPairs += @{ Relative=$relative; Hash=$file.Sha256; Bytes=$file.Size }
+    }
+    $readingRelative = 'tool/japanese_readings/ipadic-reading.bin.gz'
+    $requiredEntries += $readingRelative
+    $optionalPairs += @{ Relative=$readingRelative; Hash=$bundledJapaneseReadings.DictionarySha256; Bytes=$bundledJapaneseReadings.DictionaryBytes }
+    foreach ($notice in $bundledReadingNotices) {
+        $relative = 'tool/japanese_readings/' + $notice.RelativePath
+        $requiredEntries += $relative
+        $optionalPairs += @{ Relative=$relative; Hash=$notice.Sha256; Bytes=(Get-Item -LiteralPath $notice.SourcePath).Length }
+    }
+    foreach ($pair in $optionalPairs) {
+        $componentFile = Join-Path $payload $pair.Relative
+        if ((Get-Item -LiteralPath $componentFile).Length -ne $pair.Bytes -or
+            (Get-FileHash -LiteralPath $componentFile -Algorithm SHA256).Hash -ine $pair.Hash) {
+            throw "Optional component differs from the pinned original: $($pair.Relative)"
+        }
+    }
+} elseif ((Test-Path -LiteralPath (Join-Path $payload 'tool/ffmpeg')) -or
+          (Test-Path -LiteralPath (Join-Path $payload 'tool/japanese_readings'))) {
+    throw 'Slim candidate unexpectedly contains optional components.'
+}
 $ownedBinaries = @('Dan Player.exe', 'rust_lib_dan_player.dll')
 if ($sharedExecutable) {
     . (Join-Path $PSScriptRoot 'support\release_version.ps1')
@@ -93,7 +135,7 @@ $sourcePairs = @{
     'rust_lib_dan_player.dll' = 'build\windows\x64\runner\Release\rust_lib_dan_player.dll'
     'data\app.so' = 'build\windows\x64\runner\Release\data\app.so'
 }
-foreach ($notice in $bundledFontNotices) {
+foreach ($notice in @($bundledFontNotices) + @($bundledReadingNotices)) {
     $sourcePairs[$notice.RelativePath] = $notice.RelativePath
 }
 if (-not $sharedExecutable) {

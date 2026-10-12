@@ -13,20 +13,28 @@ import 'package:path/path.dart' as path;
 /// The historical class/directory name remains compatible with existing data.
 /// Only raw timestamps are saved; each consumer receives a fresh lyric model.
 class OnlineLyricCache {
-  OnlineLyricCache({Future<Directory> Function()? directory})
-      : _directory = directory ??
+  OnlineLyricCache({
+    Future<Directory> Function()? directory,
+    int totalBytesLimit = maxTotalBytes,
+  })  : _totalBytesLimit = totalBytesLimit,
+        _directory = directory ??
             (() async => Directory(path.join(
                 (await getAppDataDir()).path, 'cache', 'online_lyrics')));
 
   static final instance = OnlineLyricCache();
   final Future<Directory> Function() _directory;
+  final int _totalBytesLimit;
 
   /// Committed identities; an empty set invalidates all entries after eviction.
   final changes = ValueNotifier<Set<String>>(const {});
   final _pending = <String, _PendingLyricLookup>{};
   static const maxEntryBytes = 2 * 1024 * 1024;
   static const maxTotalBytes = 64 * 1024 * 1024;
-  DateTime? _lastPrune;
+  Future<void> _pendingWrite = Future.value();
+  String? _inventoryDirectory;
+  DateTime? _lastReconcile;
+  int _knownTotalBytes = 0;
+  final _inventory = <String, (int, DateTime)>{};
 
   /// Read a saved result without starting or waiting for a provider request.
   /// Automatic playback must still reach local lyrics during a slow refresh.
@@ -113,61 +121,104 @@ class OnlineLyricCache {
     if (lyric == null || !hasLyricContent(lyric)) return null;
     if (shouldStore?.call() == false) return null;
     final snapshot = LyricSnapshot.capture(lyric);
-    if (file != null) {
-      File? temporary;
-      try {
-        final bytes = utf8.encode(jsonEncode(snapshot.toJson()));
-        if (bytes.length <= maxEntryBytes) {
-          if (await file.exists() &&
-              await file.length() == bytes.length &&
-              listEquals(await file.readAsBytes(), bytes)) {
-            return snapshot;
-          }
-          await file.parent.create(recursive: true);
-          temporary = File(
-              '${file.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp');
-          await temporary.writeAsBytes(bytes, flush: true);
-          if (shouldStore?.call() == false) return null;
-          await temporary.rename(file.path);
-          changes.value = {identity};
-          await _prune(file.parent, file.path);
-        }
-      } catch (_) {
-        // A read-only/full disk should still display the fetched lyrics.
-      } finally {
-        try {
-          if (temporary != null && await temporary.exists()) {
-            await temporary.delete();
-          }
-        } catch (_) {}
+    if (file == null) return snapshot;
+    // Provider work and saved reads stay concurrent. Only atomic commits and
+    // their shared byte inventory use the same order, as comments snapshots do.
+    final write = _pendingWrite
+        .then((_) => _write(file!, identity, snapshot, shouldStore));
+    _pendingWrite =
+        write.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return write;
+  }
+
+  Future<LyricSnapshot?> _write(File file, String identity,
+      LyricSnapshot snapshot, bool Function()? shouldStore) async {
+    File? temporary;
+    try {
+      // The owner was checked before enqueueing and is checked again after
+      // the temporary write, immediately before its atomic commit.
+      final bytes = utf8.encode(jsonEncode(snapshot.toJson()));
+      if (bytes.length > maxEntryBytes || bytes.length > _totalBytesLimit) {
+        return snapshot;
       }
+      final existed = await file.parent.exists();
+      await file.parent.create(recursive: true);
+      final now = DateTime.now();
+      if (!existed ||
+          _inventoryDirectory != file.parent.path ||
+          _lastReconcile == null ||
+          now.difference(_lastReconcile!) >= const Duration(minutes: 10)) {
+        await _reconcile(file.parent);
+      }
+      if (await file.exists() &&
+          await file.length() == bytes.length &&
+          listEquals(await file.readAsBytes(), bytes)) {
+        if (shouldStore?.call() == false) return null;
+        await _prune(file.path);
+        return snapshot;
+      }
+      temporary = File(
+          '${file.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp');
+      await temporary.writeAsBytes(bytes, flush: true);
+      if (shouldStore?.call() == false) return null;
+      await temporary.rename(file.path);
+      final committed = await file.stat();
+      if (committed.type != FileSystemEntityType.file) {
+        throw const FileSystemException('Lyric cache commit disappeared');
+      }
+      // Replace the recorded size, not an externally damaged old file's size.
+      // The inventory already counted the old snapshot at its previous length.
+      _knownTotalBytes += committed.size - (_inventory[file.path]?.$1 ?? 0);
+      _inventory[file.path] = (committed.size, committed.modified);
+      changes.value = {identity};
+      await _prune(file.path);
+    } catch (_) {
+      _inventoryDirectory = null;
+      _lastReconcile = null;
+      _inventory.clear();
+      _knownTotalBytes = 0;
+      // A read-only/full disk should still display the fetched lyrics.
+    } finally {
+      try {
+        if (temporary != null && await temporary.exists()) {
+          await temporary.delete();
+        }
+      } catch (_) {}
     }
     return snapshot;
   }
 
-  Future<void> _prune(Directory directory, String keep) async {
-    final now = DateTime.now();
-    if (_lastPrune != null &&
-        now.difference(_lastPrune!) < const Duration(minutes: 10)) {
-      return;
-    }
-    _lastPrune = now;
-    final entries = <(File, FileStat)>[];
+  Future<void> _reconcile(Directory directory) async {
+    final inventory = <String, (int, DateTime)>{};
     var size = 0;
     await for (final entry in directory.list(followLinks: false)) {
       if (entry is! File || !entry.path.endsWith('.json')) continue;
       final stat = await entry.stat();
+      if (stat.type != FileSystemEntityType.file) continue;
       size += stat.size;
-      entries.add((entry, stat));
+      inventory[entry.path] = (stat.size, stat.modified);
     }
-    entries.sort((a, b) => a.$2.modified.compareTo(b.$2.modified));
+    _inventory
+      ..clear()
+      ..addAll(inventory);
+    _knownTotalBytes = size;
+    _inventoryDirectory = directory.path;
+    _lastReconcile = DateTime.now();
+  }
+
+  Future<void> _prune(String keep) async {
+    if (_knownTotalBytes <= _totalBytesLimit) return;
+    final entries = _inventory.entries.toList()
+      ..sort((a, b) => a.value.$2.compareTo(b.value.$2));
     var removed = false;
-    for (final (file, stat) in entries) {
-      if (size <= maxTotalBytes) break;
-      if (file.path == keep) continue;
-      await file.delete();
+    for (final entry in entries) {
+      if (_knownTotalBytes <= _totalBytesLimit) break;
+      if (entry.key == keep) continue;
+      final file = File(entry.key);
+      if (await file.exists()) await file.delete();
+      _inventory.remove(entry.key);
+      _knownTotalBytes -= entry.value.$1;
       removed = true;
-      size -= stat.size;
     }
     if (removed) changes.value = <String>{};
   }

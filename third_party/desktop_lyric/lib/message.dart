@@ -3,6 +3,7 @@
 import 'dart:convert';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
 import 'package:desktop_lyric/font_policy.dart';
+import 'package:desktop_lyric/lyric_ruby.dart';
 
 import 'package:json_annotation/json_annotation.dart';
 
@@ -320,24 +321,48 @@ class DesktopLyricAppearanceSavedMessage extends Message {
 }
 
 /// Full current-line snapshot for line transitions and word-level highlighting.
+class DesktopJapaneseReadingSpan implements LyricRubySpan {
+  const DesktopJapaneseReadingSpan(
+      {required this.start, required this.end, required this.text});
+  @override
+  final int start;
+  @override
+  final int end;
+  @override
+  final String text;
+  Map<String, Object> toJson() => {'start': start, 'end': end, 'text': text};
+  factory DesktopJapaneseReadingSpan.fromJson(Map<String, dynamic> json) =>
+      DesktopJapaneseReadingSpan(
+          start: (json['start'] as num?)?.toInt() ?? 0,
+          end: (json['end'] as num?)?.toInt() ?? 0,
+          text: json['text'] as String? ?? '');
+}
+
 class LyricLineTimelineMessage extends Message {
   final int sequence;
+  /// Optional strict document owner, distinct from playback track sequence.
+  final int? lyricSourceGeneration;
   final int lineIndex;
   final int startMilliseconds;
   final int lengthMilliseconds;
   final String content;
   final String? translation;
   final String? romanization;
+  final String? japaneseReading;
+  final List<DesktopJapaneseReadingSpan> japaneseReadingSpans;
   final List<DesktopLyricWord> words;
 
   const LyricLineTimelineMessage({
     required this.sequence,
+    this.lyricSourceGeneration,
     required this.lineIndex,
     required this.startMilliseconds,
     required this.lengthMilliseconds,
     required this.content,
     required this.translation,
     this.romanization,
+    this.japaneseReading,
+    this.japaneseReadingSpans = const [],
     required this.words,
   });
 
@@ -345,12 +370,22 @@ class LyricLineTimelineMessage extends Message {
     final rawWords = json['words'];
     return LyricLineTimelineMessage(
       sequence: (json['sequence'] as num?)?.toInt() ?? 0,
+      lyricSourceGeneration: json['lyricSourceGeneration'] is int
+          ? json['lyricSourceGeneration'] as int
+          : null,
       lineIndex: (json['lineIndex'] as num?)?.toInt() ?? -1,
       startMilliseconds: (json['startMilliseconds'] as num?)?.toInt() ?? 0,
       lengthMilliseconds: (json['lengthMilliseconds'] as num?)?.toInt() ?? 0,
       content: json['content'] as String? ?? '',
       translation: json['translation'] as String?,
       romanization: json['romanization'] as String?,
+      japaneseReading: json['japaneseReading'] as String?,
+      japaneseReadingSpans: json['japaneseReadingSpans'] is List
+          ? List.unmodifiable((json['japaneseReadingSpans'] as List)
+              .whereType<Map>()
+              .map((span) => DesktopJapaneseReadingSpan.fromJson(
+                  Map<String, dynamic>.from(span))))
+          : const [],
       words: rawWords is List
           ? rawWords
               .whereType<Map>()
@@ -367,12 +402,18 @@ class LyricLineTimelineMessage extends Message {
   @override
   Map<String, dynamic> _toJson() => <String, dynamic>{
         'sequence': sequence,
+        if (lyricSourceGeneration != null)
+          'lyricSourceGeneration': lyricSourceGeneration,
         'lineIndex': lineIndex,
         'startMilliseconds': startMilliseconds,
         'lengthMilliseconds': lengthMilliseconds,
         'content': content,
         'translation': translation,
         'romanization': romanization,
+        'japaneseReading': japaneseReading,
+        'japaneseReadingSpans': japaneseReadingSpans
+            .map((span) => span.toJson())
+            .toList(growable: false),
         'words': words.map((word) => word.toJson()).toList(growable: false),
       };
 }

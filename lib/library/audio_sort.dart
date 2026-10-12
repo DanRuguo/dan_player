@@ -100,7 +100,9 @@ String? _fileFormat(Audio audio) {
       : name.substring(dot + 1).toLowerCase();
 }
 
-Object? _value(Audio? audio, AudioSortField field) {
+/// Immutable descriptor for one existing sort field. Capturing this value
+/// never transfers unrelated Audio state or resolves additional metadata.
+Object? audioSortKey(Audio? audio, AudioSortField field) {
   if (audio == null) return null;
   return switch (field) {
     AudioSortField.original => null,
@@ -138,7 +140,20 @@ int _compareValues(Object? a, Object? b, SortDirection direction) =>
 int compareAudioSort(Audio? a, Audio? b, AudioSortField field,
     {SortDirection direction = SortDirection.ascending}) {
   if (field == AudioSortField.original) return 0;
-  return _compareValues(_value(a, field), _value(b, field), direction);
+  return _compareValues(
+      audioSortKey(a, field), audioSortKey(b, field), direction);
+}
+
+/// Stable occurrence order for already captured scalar descriptors. Workers
+/// share the same missing-value, pinyin and direction rules as UI sorting.
+List<int> sortedAudioSortKeyIndices(List<Object?> keys,
+    {SortDirection direction = SortDirection.ascending}) {
+  final indices = List<int>.generate(keys.length, (index) => index);
+  indices.sort((a, b) {
+    final result = _compareValues(keys[a], keys[b], direction);
+    return result == 0 ? a.compareTo(b) : result;
+  });
+  return indices;
 }
 
 /// Returns a sorted copy. Decorations avoid repeated descriptor extraction and
@@ -149,7 +164,7 @@ List<Audio> sortedAudios(Iterable<Audio> audios, AudioSortField field,
   var index = 0;
   final rows = [
     for (final audio in audios)
-      (audio: audio, position: index++, value: _value(audio, field)),
+      (audio: audio, position: index++, value: audioSortKey(audio, field)),
   ];
   rows.sort((a, b) {
     final result = _compareValues(a.value, b.value, direction);

@@ -140,6 +140,29 @@ bool IsPrivateMetadata(const fs::path& relative) {
          name == L".dan-player-install/unins000.dat" ||
          name == L".dan-player-install/unins000.msg";
 }
+bool IsOptionalComponent(const fs::path& relative) {
+  const auto parent = Lower(relative.parent_path().generic_wstring());
+  const auto name = Lower(relative.filename().wstring());
+  if (parent == L"tool/ffmpeg" || parent == L"tools/ffmpeg") {
+    return name == L"ffmpeg.exe" || name == L"ffprobe.exe" || name == L"ffplay.exe" ||
+           name == L"avcodec-61.dll" || name == L"avdevice-61.dll" ||
+           name == L"avfilter-10.dll" || name == L"avformat-61.dll" ||
+           name == L"avutil-59.dll" || name == L"postproc-58.dll" ||
+           name == L"swresample-5.dll" || name == L"swscale-8.dll" ||
+           name == L"license" || name == L"readme.txt";
+  }
+  const auto path = Lower(relative.generic_wstring());
+  for (const auto* prefix : {L"tool/japanese_readings/", L"tools/japanese_readings/"}) {
+    const std::wstring root(prefix);
+    if (path.rfind(root, 0) != 0) continue;
+    const auto file = path.substr(root.size());
+    return file == L"ipadic-reading.bin.gz" || file == L"module.json" ||
+           file == L"readme.txt" || file == L"licenses/lindera/license" ||
+           file == L"licenses/ipadic/notice.txt" ||
+           file == L"licenses/ipadic/provenance.md";
+  }
+  return false;
+}
 bool IsPayloadNamespace(const fs::path& relative) {
   if (!IsSafeRelativePath(relative)) return false;
   const auto first = Lower(relative.begin()->wstring());
@@ -148,16 +171,7 @@ bool IsPayloadNamespace(const fs::path& relative) {
       extension == L".m4a" || extension == L".ogg" || extension == L".lrc") return false;
   if (first == L"data" || first == L"desktop_lyric" || first == L"bass" ||
       first == L"licenses") return true;
-  if (first == L"tools") {
-    if (Lower(relative.parent_path().generic_wstring()) != L"tools/ffmpeg") return false;
-    const auto name = Lower(relative.filename().wstring());
-    return name == L"ffmpeg.exe" || name == L"ffprobe.exe" || name == L"ffplay.exe" ||
-           name == L"avcodec-61.dll" || name == L"avdevice-61.dll" ||
-           name == L"avfilter-10.dll" || name == L"avformat-61.dll" ||
-           name == L"avutil-59.dll" || name == L"postproc-58.dll" ||
-           name == L"swresample-5.dll" || name == L"swscale-8.dll" ||
-           name == L"license" || name == L"readme.txt";
-  }
+  if (first == L"tool" || first == L"tools") return IsOptionalComponent(relative);
   if (first == L".dan-player-install") {
     return IsPrivateMetadata(relative) ||
            Lower(relative.filename().wstring()) == L"cleanup.exe";
@@ -234,6 +248,9 @@ Manifest ReadPortableManifest(const fs::path& target) {
     const fs::path relative = FromUtf8(line.substr(66));
     if (!IsPayloadNamespace(relative) || !unique.insert(Lower(relative.generic_wstring())).second ||
         unique.size() > kMaximumEntries) Fail("Invalid portable checksum path");
+    // Optional components are user-maintained after installation. Recognize
+    // their fixed paths without claiming ownership for a core-only upgrade.
+    if (IsOptionalComponent(relative)) continue;
     const auto file = target / relative;
     // A modified optional old file is not owned for retirement. Critical player
     // identity must match below; unknown side-by-side files remain untouched.
@@ -584,6 +601,7 @@ void Transaction::Begin(const Manifest& payload, const fs::path& manifest_source
     const auto previous = fs::exists(installed_manifest) ? ReadManifest(installed_manifest) : ReadPortableManifest(context_.target);
     if (CompareVersions(payload.version, previous.version) < 0) Fail("A newer version is already installed");
     for (const auto& file : previous.files) {
+      if (IsOptionalComponent(file.relative_path)) continue;
       // Unknown or user-modified obsolete files remain untouched.
       const auto old_path = context_.target / file.relative_path;
       if (fs::is_regular_file(old_path) && Sha256(old_path) == file.sha256) {

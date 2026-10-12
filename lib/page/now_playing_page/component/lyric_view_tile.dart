@@ -1,8 +1,12 @@
 import 'package:desktop_lyric/font_policy.dart';
+import 'package:desktop_lyric/lyric_ruby.dart';
+import 'package:desktop_lyric/lyric_glyph_morph.dart';
+
 import 'dart:ui' as drawing;
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
@@ -18,7 +22,7 @@ import 'package:flutter/semantics.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:desktop_lyric/lyric_word_effects.dart';
-import 'lyric_reading_tools.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_reading_tools.dart';
 
 class LyricViewTile extends StatelessWidget {
   const LyricViewTile({
@@ -28,6 +32,9 @@ class LyricViewTile extends StatelessWidget {
     required this.opacity,
     required this.reducedMotion,
     this.snapPresentation = false,
+    this.spacingSource,
+    this.sourceIdentity,
+    this.japaneseReadingTransitionIdentity,
     this.distance = 1,
     this.onTap,
     this.onPractice,
@@ -41,6 +48,9 @@ class LyricViewTile extends StatelessWidget {
   final int distance;
   final bool reducedMotion;
   final bool snapPresentation;
+  final Object? spacingSource;
+  final Object? sourceIdentity;
+  final Object? japaneseReadingTransitionIdentity;
   final VoidCallback? onTap;
   final VoidCallback? onPractice;
   final VoidCallback? onContentRevealEnd;
@@ -84,6 +94,9 @@ class LyricViewTile extends StatelessWidget {
     ];
     final romanization =
         line.romanization?.trim().isNotEmpty == true ? line.romanization : null;
+    final japaneseReading = line.japaneseReading?.trim().isNotEmpty == true
+        ? line.japaneseReading
+        : null;
     final blank = text.trim().isEmpty;
     final duration = switch (line) {
       LrcLine value => value.length,
@@ -95,10 +108,12 @@ class LyricViewTile extends StatelessWidget {
         : [
             if (controller.showRomanization && romanization != null)
               romanization,
+            if (controller.showJapaneseReading && japaneseReading != null)
+              japaneseReading,
             if (controller.showTimestamps && onTap != null)
               lyricReadingTimestamp(line.start),
             syncLine == null ? parts.first : text,
-            if (controller.showTranslation) ...translations
+            if (controller.showTranslation) ...translations,
           ].join('\n');
 
     // The hit region and semantics remain outside the smaller context-row
@@ -112,10 +127,13 @@ class LyricViewTile extends StatelessWidget {
         if (!blank && onPractice != null)
           CustomSemanticsAction(label: ui('练习这一句')): onPractice!,
         CustomSemanticsAction(label: ui('复制这一句歌词')): () => copyLyricReadingText(
-            context,
-            lyricReadingText(line,
+              context,
+              lyricReadingText(
+                line,
                 translation: controller.showTranslation,
-                romanization: controller.showRomanization)),
+                romanization: controller.showRomanization,
+              ),
+            ),
       },
       child: LyricLineReadingActions(
         line: line,
@@ -132,341 +150,574 @@ class LyricViewTile extends StatelessWidget {
               borderRadius: AppShape.controlRadius,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 48),
-                child: LyricLineMotion(
-                  opacity: highContrast ? 1 : opacity,
-                  scale: reducedMotion
-                      ? 1
-                      : LyricMotion.scaleForDistance(distance),
-                  activation: isMainLine ? 1 : 0,
-                  alignment: alignment,
-                  presentation: (
-                    fontSize: controller.lyricFontSize,
-                    translationFontSize: controller.translationFontSize,
-                    alignment: alignment,
-                  ),
-                  directFontSize: controller.directFontSize,
-                  reducedMotion: reducedMotion || snapPresentation,
-                  onEnd: notifyReadingSettingEnd ? onPresentationEnd : null,
-                  builder: (context, activation, presentation, fontTransition) {
-                    TextStyle primaryStyle(double size) =>
-                        DefaultTextStyle.of(context).style.copyWith(
-                              // Reserve the focused paragraph once. Context
-                              // rows use paint-only scale for emphasis.
-                              fontSize: size * LyricMotion.focusedFontScale,
-                              fontWeight: LyricMotion.focusedFontWeight,
-                              height: 1.3,
-                            );
-                    Widget aligned(Widget child) =>
-                        Align(alignment: presentation.alignment, child: child);
-                    Widget fontMorph({
-                      required double fromSize,
-                      required double toSize,
-                      required double currentSize,
-                      bool auxiliaryTrack = false,
-                      bool moveWrappedSuffix = false,
-                      String? flightText,
-                      double paragraphFontScale = 1,
-                      required Widget Function(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final features = WidgetsBinding
+                        .instance.platformDispatcher.accessibilityFeatures;
+                    return LyricSpacingRestore(
+                      source: spacingSource ?? line,
+                      identity: (
+                        constraints.maxWidth,
+                        controller.lyricFontSize,
+                        controller.translationFontSize,
+                        controller.lyricTextAlign,
+                        controller.showRomanization,
+                        controller.showJapaneseReading,
+                        controller.showTranslation,
+                        controller.showTimestamps,
+                        MediaQuery.textScalerOf(context),
+                        Localizations.maybeLocaleOf(context),
+                        Directionality.of(context),
+                        DefaultTextStyle.of(context).style,
+                        AppFontScope.of(context),
+                      ),
+                      spacing: controller.lyricLetterSpacing,
+                      visible: !reducedMotion,
+                      enabled: !features.disableAnimations &&
+                          !features.reduceMotion &&
+                          AppMotion.enabled(context, MotionKind.lyrics) &&
+                          AppMotion.enabled(context, MotionKind.layout),
+                      currentLine: isMainLine,
+                      builder: (context, restoration) => LyricLineMotion(
+                        opacity: highContrast ? 1 : opacity,
+                        scale: reducedMotion
+                            ? 1
+                            : LyricMotion.scaleForDistance(distance),
+                        activation: isMainLine ? 1 : 0,
+                        alignment: alignment,
+                        presentation: (
+                          fontSize: controller.lyricFontSize,
+                          translationFontSize: controller.translationFontSize,
+                          alignment: alignment,
+                        ),
+                        directFontSize: controller.directFontSize,
+                        letterSpacing: controller.lyricLetterSpacing,
+                        restoredLetterSpacing: restoration,
+                        animateLetterSpacing: !reducedMotion &&
+                            (!snapPresentation || restoration != null) &&
+                            !LyricMotion.reducedOf(context) &&
+                            AppMotion.enabled(context, MotionKind.layout),
+                        reducedMotion: reducedMotion || snapPresentation,
+                        onEnd:
+                            notifyReadingSettingEnd ? onPresentationEnd : null,
+                        builder: (context, activation, presentation,
+                            fontTransition) {
+                          TextStyle primaryStyle(double size, double spacing) =>
+                              DefaultTextStyle.of(context).style.copyWith(
+                                    // Reserve the focused paragraph once. Context
+                                    // rows use paint-only scale for emphasis.
+                                    fontSize:
+                                        size * LyricMotion.focusedFontScale,
+                                    letterSpacing: spacing == 0
+                                        ? DefaultTextStyle.of(context)
+                                            .style
+                                            .letterSpacing
+                                        : (DefaultTextStyle.of(context)
+                                                    .style
+                                                    .letterSpacing ??
+                                                0) +
+                                            spacing,
+                                    fontWeight: LyricMotion.focusedFontWeight,
+                                    height: 1.3,
+                                  );
+                          Widget aligned(Widget child) => Align(
+                                alignment: presentation.alignment,
+                                child: child,
+                              );
+                          Widget fontMorph({
+                            required double fromSize,
+                            required double toSize,
+                            required double currentSize,
+                            bool auxiliaryTrack = false,
+                            bool moveWrappedSuffix = false,
+                            String? flightText,
+                            double paragraphFontScale = 1,
+                            required Widget Function(
                               double size,
                               double? wrapTargetFontSize,
                               double wrapProgress,
-                              LyricWrapFlightStatus? wrapStatus)
-                          paragraph,
-                    }) {
-                      final direct = controller.directFontSize;
-                      final moving = !direct &&
-                          !reducedMotion &&
-                          (toSize - fromSize).abs() > .00001 &&
-                          fontTransition.progress < 1;
-                      final scaler = MediaQuery.textScalerOf(context);
-                      final scaledFrom =
-                          scaler.scale(fromSize * paragraphFontScale);
-                      final scaledTo =
-                          scaler.scale(toSize * paragraphFontScale);
-                      final directChanging = direct &&
-                          !reducedMotion &&
-                          (toSize - fromSize).abs() > .00001 &&
-                          fontTransition.visualProgress < 1;
-                      final directProgress =
-                          fontTransition.visualProgress.clamp(0.0, 1.0);
-                      final directScale = scaledTo == 0
-                          ? 1.0
-                          : scaledFrom / scaledTo +
-                              (1 - scaledFrom / scaledTo) * directProgress;
-                      final previewSize = auxiliaryTrack
-                          ? controller.translationDragPreviewSize
-                          : controller.fontDragPreviewSize;
-                      final originalSize = auxiliaryTrack
-                          ? controller.translationFontSize
-                          : controller.lyricFontSize;
-                      final previewScale =
-                          previewSize == null || originalSize == 0
-                              ? 1.0
-                              : previewSize / originalSize;
-                      final canFlySuffix = moveWrappedSuffix &&
-                          flightText != null &&
-                          flightText.length <= 256 &&
-                          !flightText.contains('\n') &&
-                          presentation.alignment.x <= -.999 &&
-                          Directionality.of(context) == TextDirection.ltr &&
-                          (scaledFrom / scaledTo - fromSize / toSize).abs() <
-                              .0001;
-                      final wrapStatus = moving && canFlySuffix
-                          ? LyricWrapFlightStatus()
-                          : null;
-                      Widget fixed(double size, {required bool outgoing}) {
-                        // The menu always keeps one target-size paragraph;
-                        // ordinary focus changes retain both fixed endpoints.
-                        return KeyedSubtree(
-                          key: direct
-                              ? const ValueKey('lyric-direct-paragraph')
-                              : ValueKey(size),
-                          // At rest this is an identity transform. The
-                          // paragraph owns the retained sampling boundary.
-                          child: Opacity(
-                            // The previous glyphs disappear when the target
-                            // changes; only the final-size paragraph fades in.
-                            opacity: directChanging ? directProgress : 1,
-                            child: Transform.scale(
-                              scale: previewScale *
-                                  (direct
-                                      ? directChanging
-                                          ? directScale
-                                          : 1
-                                      : moving
-                                          ? currentSize / size
-                                          : 1),
-                              // Paragraph height grows below its first baseline;
-                              // scaling around the vertical centre moves that
-                              // baseline in the opposite direction at the first
-                              // frame and makes the ink appear to jump.
-                              alignment:
-                                  Alignment(presentation.alignment.x, -1),
-                              filterQuality:
-                                  previewSize != null || directChanging
-                                      ? FilterQuality.low
-                                      : moving
-                                          ? FilterQuality.medium
+                              LyricWrapFlightStatus? wrapStatus,
+                              double spacing,
+                            ) paragraph,
+                          }) {
+                            final direct = controller.directFontSize;
+                            final spacingMoving = !reducedMotion &&
+                                (fontTransition.toLetterSpacing -
+                                            fontTransition.fromLetterSpacing)
+                                        .abs() >
+                                    .00001 &&
+                                fontTransition.visualProgress < 1;
+                            final reading = controller.readingMode
+                                ? controller.readingTarget
+                                : null;
+                            final alignReading = spacingMoving &&
+                                !auxiliaryTrack &&
+                                identical(reading?.line, line);
+                            double? readingY(RenderBox endpoint) {
+                              double? result;
+                              void visit(Element element) {
+                                if (result != null) return;
+                                if (element is StatefulElement &&
+                                    element.state is LyricTextReadingGeometry) {
+                                  final geometry =
+                                      element.state as LyricTextReadingGeometry;
+                                  final ownsPrimary = line is SyncLyricLine
+                                      ? geometry is TimedLyricReadingGeometry &&
+                                          identical(
+                                            geometry.readingLine,
+                                            line,
+                                          )
+                                      : geometry.readingText == text;
+                                  if (ownsPrimary) {
+                                    result = geometry.readingLayoutY(
+                                      reading!.textOffset ?? 0,
+                                      endpoint,
+                                    );
+                                  }
+                                }
+                                if (result == null) {
+                                  element.visitChildren(visit);
+                                }
+                              }
+
+                              visit(context as Element);
+                              return result;
+                            }
+
+                            final moving = !direct &&
+                                !reducedMotion &&
+                                (toSize - fromSize).abs() > .00001 &&
+                                fontTransition.progress < 1;
+                            final scaler = MediaQuery.textScalerOf(context);
+                            final scaledFrom = scaler.scale(
+                              fromSize * paragraphFontScale,
+                            );
+                            final scaledTo = scaler.scale(
+                              toSize * paragraphFontScale,
+                            );
+                            final directChanging = direct &&
+                                !reducedMotion &&
+                                (toSize - fromSize).abs() > .00001 &&
+                                fontTransition.visualProgress < 1;
+                            final directProgress =
+                                fontTransition.visualProgress.clamp(0.0, 1.0);
+                            final directScale = scaledTo == 0
+                                ? 1.0
+                                : scaledFrom / scaledTo +
+                                    (1 - scaledFrom / scaledTo) *
+                                        directProgress;
+                            final previewSize = auxiliaryTrack
+                                ? controller.translationDragPreviewSize
+                                : controller.fontDragPreviewSize;
+                            final originalSize = auxiliaryTrack
+                                ? controller.translationFontSize
+                                : controller.lyricFontSize;
+                            final previewScale =
+                                previewSize == null || originalSize == 0
+                                    ? 1.0
+                                    : previewSize / originalSize;
+                            final canFlySuffix = moveWrappedSuffix &&
+                                flightText != null &&
+                                flightText.length <= 256 &&
+                                !flightText.contains('\n') &&
+                                presentation.alignment.x <= -.999 &&
+                                Directionality.of(context) ==
+                                    TextDirection.ltr &&
+                                (scaledFrom / scaledTo - fromSize / toSize)
+                                        .abs() <
+                                    .0001;
+                            final wrapStatus = moving && canFlySuffix
+                                ? LyricWrapFlightStatus()
+                                : null;
+                            Widget fixed(
+                              double size, {
+                              required bool outgoing,
+                            }) {
+                              final spacing = outgoing
+                                  ? fontTransition.fromLetterSpacing
+                                  : fontTransition.toLetterSpacing;
+                              // The menu always keeps one target-size paragraph;
+                              // ordinary focus changes retain both fixed endpoints.
+                              return KeyedSubtree(
+                                key: direct
+                                    ? outgoing && spacingMoving
+                                        ? ValueKey((
+                                            'lyric-direct-paragraph',
+                                            spacing,
+                                          ))
+                                        : const ValueKey(
+                                            'lyric-direct-paragraph',
+                                          )
+                                    : ValueKey((size, spacing)),
+                                // At rest this is an identity transform. The
+                                // paragraph owns the retained sampling boundary.
+                                child: Opacity(
+                                  // The previous glyphs disappear when the target
+                                  // changes; only the final-size paragraph fades in.
+                                  opacity: directChanging ? directProgress : 1,
+                                  child: Transform.scale(
+                                    scale: previewScale *
+                                        (direct
+                                            ? directChanging
+                                                ? directScale
+                                                : 1
+                                            : moving
+                                                ? currentSize / size
+                                                : 1),
+                                    // Paragraph height grows below its first baseline;
+                                    // scaling around the vertical centre moves that
+                                    // baseline in the opposite direction at the first
+                                    // frame and makes the ink appear to jump.
+                                    alignment: Alignment(
+                                      presentation.alignment.x,
+                                      -1,
+                                    ),
+                                    filterQuality:
+                                        previewSize != null || directChanging
+                                            ? FilterQuality.low
+                                            : moving
+                                                ? FilterQuality.medium
+                                                : null,
+                                    child: paragraph(
+                                      size,
+                                      moving && outgoing && canFlySuffix
+                                          ? toSize * paragraphFontScale
                                           : null,
-                              child: paragraph(
-                                  size,
-                                  moving && outgoing && canFlySuffix
-                                      ? toSize * paragraphFontScale
-                                      : null,
-                                  fontTransition.progress,
-                                  outgoing ? wrapStatus : null),
-                            ),
-                          ),
-                        );
-                      }
+                                      fontTransition.progress,
+                                      outgoing ? wrapStatus : null,
+                                      spacing,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
 
-                      return LyricFontMorph(
-                        // The target glyph is shaped once, but its occupied
-                        // height must grow with the painted scale. Otherwise
-                        // the viewport recenters a full-size row on frame 0
-                        // and visibly shifts every paragraph around it.
-                        progress: directChanging
-                            ? directProgress
-                            : moving
-                                ? fontTransition.progress
-                                : 1,
-                        alignmentX: presentation.alignment.x,
-                        wrapStatus: wrapStatus,
-                        children: [
-                          if (moving) fixed(fromSize, outgoing: true),
-                          fixed(direct ? currentSize : toSize, outgoing: false),
-                        ],
-                      );
-                    }
+                            return LyricFontMorph(
+                              // The target glyph is shaped once, but its occupied
+                              // height must grow with the painted scale. Otherwise
+                              // the viewport recenters a full-size row on frame 0
+                              // and visibly shifts every paragraph around it.
+                              progress: directChanging
+                                  ? directProgress
+                                  : moving || spacingMoving
+                                      ? fontTransition.visualProgress
+                                      : 1,
+                              alignmentX: presentation.alignment.x,
+                              wrapStatus: wrapStatus,
+                              spacingTransition:
+                                  spacingMoving && !moving && !directChanging,
+                              readingIdentity: alignReading ? reading : null,
+                              readingAnchorY: alignReading ? readingY : null,
+                              children: [
+                                if (moving || spacingMoving)
+                                  fixed(fromSize, outgoing: true),
+                                fixed(
+                                  direct ? currentSize : toSize,
+                                  outgoing: false,
+                                ),
+                              ],
+                            );
+                          }
 
-                    final foreground = scheme.onSecondaryContainer;
-                    final primaryColor = Color.lerp(
-                      foreground,
-                      scheme.primary,
-                      activation,
-                    )!;
-                    Widget auxiliary(String text, {required bool above}) =>
-                        Padding(
-                          key: above
-                              ? const ValueKey('lyric-romanization')
-                              : null,
-                          padding: EdgeInsets.only(
-                              top: above ? 0 : 4, bottom: above ? 4 : 0),
-                          child: fontMorph(
-                            fromSize: fontTransition.fromTranslationFontSize,
-                            toSize: fontTransition.toTranslationFontSize,
-                            currentSize: presentation.translationFontSize,
-                            auxiliaryTrack: true,
-                            moveWrappedSuffix: true,
-                            flightText: text,
-                            paragraph: (size, wrapTargetFontSize, wrapProgress,
-                                    wrapStatus) =>
-                                _LyricParagraphSurface(
-                              child: BalancedLyricText(
-                                text,
-                                // Auxiliary tracks share the focus/return
-                                // effect but never acquire word timing.
-                                wordFollow: isMainLine && !reducedMotion,
-                                textAlign: textAlign,
-                                alignmentX: presentation.alignment.x,
-                                wrapTargetFontSize: wrapTargetFontSize,
-                                wrapProgress: wrapProgress,
-                                wrapStatus: wrapStatus,
-                                style:
-                                    DefaultTextStyle.of(context).style.copyWith(
-                                          color: foreground.withValues(
+                          final foreground = scheme.onSecondaryContainer;
+                          final primaryColor = Color.lerp(
+                            foreground,
+                            scheme.primary,
+                            activation,
+                          )!;
+                          Widget auxiliary(
+                            String text, {
+                            required bool above,
+                            String aboveId = 'lyric-romanization',
+                          }) =>
+                              Padding(
+                                key: above ? ValueKey(aboveId) : null,
+                                padding: EdgeInsets.only(
+                                  top: above ? 0 : 4,
+                                  bottom: above ? 4 : 0,
+                                ),
+                                child: fontMorph(
+                                  fromSize:
+                                      fontTransition.fromTranslationFontSize,
+                                  toSize: fontTransition.toTranslationFontSize,
+                                  currentSize: presentation.translationFontSize,
+                                  auxiliaryTrack: true,
+                                  moveWrappedSuffix: true,
+                                  flightText: text,
+                                  paragraph: (
+                                    size,
+                                    wrapTargetFontSize,
+                                    wrapProgress,
+                                    wrapStatus,
+                                    spacing,
+                                  ) =>
+                                      _LyricParagraphSurface(
+                                    child: BalancedLyricText(
+                                      text,
+                                      // Auxiliary tracks share the focus/return
+                                      // effect but never acquire word timing.
+                                      wordFollow: isMainLine && !reducedMotion,
+                                      textAlign: textAlign,
+                                      alignmentX: presentation.alignment.x,
+                                      wrapTargetFontSize: wrapTargetFontSize,
+                                      wrapProgress: wrapProgress,
+                                      wrapStatus: wrapStatus,
+                                      style: DefaultTextStyle.of(context)
+                                          .style
+                                          .copyWith(
+                                            color: foreground.withValues(
                                               alpha: highContrast
                                                   ? 1
-                                                  : .78 + .12 * activation),
-                                          fontSize: size,
-                                          height: 1.35,
-                                        ),
-                              ),
-                            ),
-                          ),
-                        );
-                    final contents = Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                      child: Align(
-                        alignment: presentation.alignment,
-                        child: blank
-                            ? LyricContentReveal(
-                                timestamp: controller.showTimestamps,
-                                romanization: controller.showRomanization,
-                                translation: controller.showTranslation,
-                                reducedMotion: reducedMotion,
-                                onEnd: notifyReadingSettingEnd
-                                    ? onContentRevealEnd
-                                    : null,
-                                builder: (context, _) => SizedBox(
-                                  // Keep blank-row choreography and let the
-                                  // current row signal the end of a setting
-                                  // transition even when its own text is blank.
-                                  height: 40,
-                                  child: duration > const Duration(seconds: 5)
-                                      ? LyricTransitionTile(
-                                          line: line,
-                                          length: duration,
-                                          position: position,
-                                          active: isMainLine,
-                                          reducedMotion: reducedMotion,
-                                          emphasisOpacity: activation,
-                                        )
-                                      : null,
-                                ),
-                              )
-                            : LyricContentReveal(
-                                timestamp: controller.showTimestamps,
-                                romanization: controller.showRomanization,
-                                translation: controller.showTranslation,
-                                reducedMotion: reducedMotion,
-                                onEnd: notifyReadingSettingEnd
-                                    ? onContentRevealEnd
-                                    : null,
-                                builder: (context, visibility) => Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    if (onTap != null)
-                                      LyricContentReveal.part(
-                                        visibility.timestamp,
-                                        Padding(
-                                          padding:
-                                              const EdgeInsets.only(bottom: 4),
-                                          child: _LyricParagraphSurface(
-                                            child: Text(
-                                              lyricReadingTimestamp(line.start),
-                                              key: const ValueKey(
-                                                  'lyric-line-timestamp'),
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .labelMedium
-                                                  ?.copyWith(
-                                                      color: scheme.primary),
+                                                  : .78 + .12 * activation,
                                             ),
+                                            fontSize: size,
+                                            letterSpacing: spacing == 0
+                                                ? DefaultTextStyle.of(context)
+                                                    .style
+                                                    .letterSpacing
+                                                : (DefaultTextStyle.of(context)
+                                                            .style
+                                                            .letterSpacing ??
+                                                        0) +
+                                                    spacing,
+                                            height: 1.35,
                                           ),
-                                        ),
-                                        alignment: presentation.alignment,
-                                      ),
-                                    if (romanization != null)
-                                      LyricContentReveal.part(
-                                        visibility.romanization,
-                                        auxiliary(romanization, above: true),
-                                        alignment: presentation.alignment,
-                                      ),
-                                    if (syncLine != null)
-                                      fontMorph(
-                                        fromSize: fontTransition.fromFontSize,
-                                        toSize: fontTransition.toFontSize,
-                                        currentSize: presentation.fontSize,
-                                        paragraph: (size, _, __, ___) =>
-                                            aligned(_LyricParagraphSurface(
-                                                child: _TimedLyricText(
-                                          line: syncLine,
-                                          position: position,
-                                          active: isMainLine,
-                                          activation: activation,
-                                          reducedMotion: reducedMotion,
-                                          style: primaryStyle(size),
-                                          textAlign: textAlign,
-                                          alignmentX: presentation.alignment.x,
-                                          baseColor: foreground.withValues(
-                                            alpha: highContrast || reducedMotion
-                                                ? foreground.a
-                                                : foreground.a *
-                                                    (1 - .58 * activation),
-                                          ),
-                                          playedColor: primaryColor,
-                                          glowAllowed: glowAllowed,
-                                        ))),
-                                      )
-                                    else
-                                      // LRC has line times only. A uniform focus
-                                      // transition does not invent word timing.
-                                      fontMorph(
-                                        fromSize: fontTransition.fromFontSize,
-                                        toSize: fontTransition.toFontSize,
-                                        currentSize: presentation.fontSize,
-                                        moveWrappedSuffix: true,
-                                        flightText: parts.first,
-                                        paragraphFontScale:
-                                            LyricMotion.focusedFontScale,
-                                        paragraph: (size, wrapTargetFontSize,
-                                                wrapProgress, wrapStatus) =>
-                                            aligned(_LyricParagraphSurface(
-                                                child: BalancedLyricText(
-                                          parts.first,
-                                          wordFollow:
-                                              isMainLine && !reducedMotion,
-                                          textAlign: textAlign,
-                                          alignmentX: presentation.alignment.x,
-                                          wrapTargetFontSize:
-                                              wrapTargetFontSize,
-                                          wrapProgress: wrapProgress,
-                                          wrapStatus: wrapStatus,
-                                          style: primaryStyle(size).copyWith(
-                                            color: primaryColor,
-                                          ),
-                                        ))),
-                                      ),
-                                    for (final translation in translations)
-                                      LyricContentReveal.part(
-                                        visibility.translation,
-                                        auxiliary(translation, above: false),
-                                        alignment: presentation.alignment,
-                                      ),
-                                  ],
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              );
+                          final contents = Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            child: Align(
+                              alignment: presentation.alignment,
+                              child: blank
+                                  ? LyricContentReveal(
+                                      japaneseReadingSource: sourceIdentity,
+                                      japaneseReadingSpans:
+                                          line.japaneseReadingSpans,
+                                      japaneseReadingTransitionIdentity:
+                                          japaneseReadingTransitionIdentity,
+                                      timestamp: controller.showTimestamps,
+                                      romanization: controller.showRomanization,
+                                      japaneseReading: controller
+                                              .showJapaneseReading &&
+                                          line.japaneseReadingSpans.isNotEmpty,
+                                      translation: controller.showTranslation,
+                                      reducedMotion: reducedMotion,
+                                      onEnd: notifyReadingSettingEnd
+                                          ? onContentRevealEnd
+                                          : null,
+                                      builder: (context, _) => SizedBox(
+                                        // Keep blank-row choreography and let the
+                                        // current row signal the end of a setting
+                                        // transition even when its own text is blank.
+                                        height: 40,
+                                        child: duration >
+                                                const Duration(seconds: 5)
+                                            ? LyricTransitionTile(
+                                                line: line,
+                                                length: duration,
+                                                position: position,
+                                                active: isMainLine,
+                                                reducedMotion: reducedMotion,
+                                                emphasisOpacity: activation,
+                                              )
+                                            : null,
+                                      ),
+                                    )
+                                  : LyricContentReveal(
+                                      japaneseReadingSource: sourceIdentity,
+                                      japaneseReadingSpans:
+                                          line.japaneseReadingSpans,
+                                      japaneseReadingTransitionIdentity:
+                                          japaneseReadingTransitionIdentity,
+                                      timestamp: controller.showTimestamps,
+                                      romanization: controller.showRomanization,
+                                      japaneseReading: controller
+                                              .showJapaneseReading &&
+                                          line.japaneseReadingSpans.isNotEmpty,
+                                      translation: controller.showTranslation,
+                                      reducedMotion: reducedMotion,
+                                      onEnd: notifyReadingSettingEnd
+                                          ? onContentRevealEnd
+                                          : null,
+                                      builder: (context, visibility) => Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          if (onTap != null)
+                                            LyricContentReveal.part(
+                                              visibility.timestamp,
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 4,
+                                                ),
+                                                child: _LyricParagraphSurface(
+                                                  child: Text(
+                                                    lyricReadingTimestamp(
+                                                      line.start,
+                                                    ),
+                                                    key: const ValueKey(
+                                                      'lyric-line-timestamp',
+                                                    ),
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .labelMedium
+                                                        ?.copyWith(
+                                                          color: scheme.primary,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ),
+                                              alignment: presentation.alignment,
+                                            ),
+                                          if (romanization != null)
+                                            LyricContentReveal.part(
+                                              visibility.romanization,
+                                              auxiliary(
+                                                romanization,
+                                                above: true,
+                                              ),
+                                              alignment: presentation.alignment,
+                                            ),
+                                          if (syncLine != null)
+                                            fontMorph(
+                                              fromSize:
+                                                  fontTransition.fromFontSize,
+                                              toSize: fontTransition.toFontSize,
+                                              currentSize:
+                                                  presentation.fontSize,
+                                              paragraph: (
+                                                size,
+                                                _,
+                                                __,
+                                                ___,
+                                                spacing,
+                                              ) =>
+                                                  aligned(
+                                                _LyricParagraphSurface(
+                                                  retainSourceBounds: visibility
+                                                              .japaneseReading >
+                                                          0 &&
+                                                      visibility
+                                                          .japaneseReadingSpans
+                                                          .isNotEmpty,
+                                                  child: _TimedLyricText(
+                                                    line: syncLine,
+                                                    rubySpans: visibility
+                                                        .japaneseReadingSpans,
+                                                    rubyVisibility: visibility
+                                                        .japaneseReading,
+                                                    position: position,
+                                                    active: isMainLine,
+                                                    activation: activation,
+                                                    reducedMotion:
+                                                        reducedMotion,
+                                                    style: primaryStyle(
+                                                      size,
+                                                      spacing,
+                                                    ),
+                                                    textAlign: textAlign,
+                                                    alignmentX: presentation
+                                                        .alignment.x,
+                                                    baseColor:
+                                                        foreground.withValues(
+                                                      alpha: highContrast ||
+                                                              reducedMotion
+                                                          ? foreground.a
+                                                          : foreground.a *
+                                                              (1 -
+                                                                  .58 *
+                                                                      activation),
+                                                    ),
+                                                    playedColor: primaryColor,
+                                                    glowAllowed: glowAllowed,
+                                                  ),
+                                                ),
+                                              ),
+                                            )
+                                          else
+                                            // LRC has line times only. A uniform focus
+                                            // transition does not invent word timing.
+                                            fontMorph(
+                                              fromSize:
+                                                  fontTransition.fromFontSize,
+                                              toSize: fontTransition.toFontSize,
+                                              currentSize:
+                                                  presentation.fontSize,
+                                              moveWrappedSuffix: true,
+                                              flightText: parts.first,
+                                              paragraphFontScale:
+                                                  LyricMotion.focusedFontScale,
+                                              paragraph: (
+                                                size,
+                                                wrapTargetFontSize,
+                                                wrapProgress,
+                                                wrapStatus,
+                                                spacing,
+                                              ) =>
+                                                  aligned(
+                                                _LyricParagraphSurface(
+                                                  retainSourceBounds: visibility
+                                                              .japaneseReading >
+                                                          0 &&
+                                                      visibility
+                                                          .japaneseReadingSpans
+                                                          .isNotEmpty,
+                                                  child: BalancedLyricText(
+                                                    parts.first,
+                                                    wordFollow: isMainLine &&
+                                                        !reducedMotion,
+                                                    textAlign: textAlign,
+                                                    alignmentX: presentation
+                                                        .alignment.x,
+                                                    wrapTargetFontSize:
+                                                        wrapTargetFontSize,
+                                                    wrapProgress: wrapProgress,
+                                                    wrapStatus: wrapStatus,
+                                                    rubySpans: visibility
+                                                                .japaneseReading >
+                                                            0
+                                                        ? visibility
+                                                            .japaneseReadingSpans
+                                                        : const [],
+                                                    rubyVisibility: visibility
+                                                        .japaneseReading,
+                                                    style: primaryStyle(
+                                                      size,
+                                                      spacing,
+                                                    ).copyWith(
+                                                      color: primaryColor,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          for (final translation
+                                              in translations)
+                                            LyricContentReveal.part(
+                                              visibility.translation,
+                                              auxiliary(
+                                                translation,
+                                                above: false,
+                                              ),
+                                              alignment: presentation.alignment,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                            ),
+                          );
+                          return blank
+                              ? _LyricParagraphSurface(child: contents)
+                              : contents;
+                        },
                       ),
                     );
-                    return blank
-                        ? _LyricParagraphSurface(child: contents)
-                        : contents;
                   },
                 ),
               ),
@@ -484,12 +735,20 @@ class LyricViewTile extends StatelessWidget {
 /// Keep the boundary OUTSIDE the filter: a composited child would bypass the
 /// filter's fractional-origin correction on Windows.
 class _LyricParagraphSurface extends StatelessWidget {
-  const _LyricParagraphSurface({required this.child});
+  const _LyricParagraphSurface({
+    required this.child,
+    this.retainSourceBounds = false,
+  });
   final Widget child;
+  final bool retainSourceBounds;
 
   @override
-  Widget build(BuildContext context) =>
-      RepaintBoundary(child: ScopedLyricFractionalFilter(child: child));
+  Widget build(BuildContext context) => RepaintBoundary(
+        child: ScopedLyricFractionalFilter(
+          retainSourceBounds: retainSourceBounds,
+          child: child,
+        ),
+      );
 }
 
 /// Both inactive and active timed lines use this exact paragraph layout.
@@ -498,6 +757,8 @@ class _LyricParagraphSurface extends StatelessWidget {
 class _TimedLyricText extends StatefulWidget {
   const _TimedLyricText({
     required this.line,
+    this.rubyVisibility = 1,
+    this.rubySpans,
     required this.position,
     required this.active,
     required this.activation,
@@ -511,6 +772,8 @@ class _TimedLyricText extends StatefulWidget {
   });
 
   final SyncLyricLine line;
+  final double rubyVisibility;
+  final List<LyricRubySpan>? rubySpans;
   final ValueListenable<Duration> position;
   final bool active;
   final double activation;
@@ -551,10 +814,14 @@ class _TimedLyricTextState extends State<_TimedLyricText>
 
   @override
   double? readingLayoutY(int offset, RenderBox ancestor) => _readingY(
-      offset, (box, point) => lyricReadingLayoutY(box, point, ancestor));
+        offset,
+        (box, point) => lyricReadingLayoutY(box, point, ancestor),
+      );
 
   double? _readingY(
-      int offset, double? Function(RenderBox box, Offset point) map) {
+    int offset,
+    double? Function(RenderBox box, Offset point) map,
+  ) {
     final layout = _layout;
     if (layout == null) return null;
     final glyphY = layout.readingGlyphY(offset);
@@ -567,7 +834,16 @@ class _TimedLyricTextState extends State<_TimedLyricText>
           object.painter is LyricWordHighlightPainter) {
         final painter = object.painter! as LyricWordHighlightPainter;
         if (identical(painter._layout, layout)) {
-          result = map(object, Offset(0, glyphY + painter.inkOffset.dy));
+          result = map(
+            object,
+            Offset(
+              0,
+              glyphY +
+                  painter.inkOffset.dy +
+                  (layout.ruby?.leadingForOffset(offset) ?? 0) *
+                      painter.rubyVisibility,
+            ),
+          );
         }
       }
       if (result == null) object.visitChildren(visit);
@@ -601,8 +877,11 @@ class _TimedLyricTextState extends State<_TimedLyricText>
         final width = constraints.hasBoundedWidth
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
-        final horizontalGuard =
-            lyricHorizontalInkGuard(widget.style, scaler, width);
+        final horizontalGuard = lyricHorizontalInkGuard(
+          widget.style,
+          scaler,
+          width,
+        );
         final textMaxWidth = math.max(1.0, width - horizontalGuard * 2);
         // Keep shaping fixed while the paragraph's lines travel horizontally.
         final paintAlign =
@@ -612,6 +891,9 @@ class _TimedLyricTextState extends State<_TimedLyricText>
           widget.line,
           widget.line.content,
           widget.style,
+          widget.rubyVisibility > 0
+              ? (widget.rubySpans ?? widget.line.japaneseReadingSpans)
+              : const [],
           paintAlign,
           direction,
           scaler,
@@ -624,7 +906,14 @@ class _TimedLyricTextState extends State<_TimedLyricText>
           _paragraph = _TimedLyricParagraph(
             policy: fontPolicy,
             line: widget.line,
-            style: widget.style,
+            rubySpans: widget.rubyVisibility > 0
+                ? (widget.rubySpans ?? widget.line.japaneseReadingSpans)
+                : const [],
+            style: lyricRubyPrimaryStyle(
+              widget.style,
+              (widget.rubySpans ?? widget.line.japaneseReadingSpans),
+            ),
+            rubyStyle: widget.style,
             textAlign: paintAlign,
             direction: direction,
             scaler: scaler,
@@ -646,7 +935,10 @@ class _TimedLyricTextState extends State<_TimedLyricText>
         final layout = _layout!;
         return SizedBox(
           width: layout.base.width + horizontalGuard * 2,
-          height: layout.base.height + lyricVerticalInkGuard * 2,
+          height: layout.base.height +
+              lyricVerticalInkGuard * 2 +
+              (layout.ruby?.insetAt(widget.rubyVisibility) ?? 0) +
+              (layout.ruby?.extraLeading ?? 0) * widget.rubyVisibility,
           child: CustomPaint(
             painter: LyricWordHighlightPainter._(
               layout: layout,
@@ -658,9 +950,14 @@ class _TimedLyricTextState extends State<_TimedLyricText>
               baseColor: widget.baseColor,
               playedColor: widget.playedColor,
               glowAllowed: widget.glowAllowed,
+              rubyVisibility: widget.rubyVisibility,
               follow: follow,
               alignmentX: widget.alignmentX,
-              inkOffset: Offset(horizontalGuard, lyricVerticalInkGuard),
+              inkOffset: Offset(
+                horizontalGuard,
+                lyricVerticalInkGuard +
+                    (layout.ruby?.insetAt(widget.rubyVisibility) ?? 0),
+              ),
             ),
             isComplex: true,
             willChange: widget.active && !widget.reducedMotion,
@@ -685,13 +982,18 @@ class _TimedLyricParagraph {
   _TimedLyricParagraph({
     required this.policy,
     required this.line,
+    required this.rubySpans,
     required this.style,
+    required TextStyle rubyStyle,
     required TextAlign textAlign,
     required TextDirection direction,
     required TextScaler scaler,
   })  : base = TextPainter(
-          text: appFontSpan(line.content,
-              style: style.copyWith(color: Colors.white), policy: policy),
+          text: appFontSpan(
+            line.content,
+            style: style.copyWith(color: Colors.white),
+            policy: policy,
+          ),
           textDirection: direction,
           textAlign: textAlign,
           textScaler: scaler,
@@ -699,16 +1001,30 @@ class _TimedLyricParagraph {
         fontSize = scaler.scale(style.fontSize ?? 14),
         _textAlign = textAlign,
         _direction = direction,
-        _scaler = scaler;
+        _scaler = scaler {
+    if (rubySpans.isNotEmpty) {
+      rubyShaping = LyricRubyShaping(
+        spans: rubySpans,
+        style: rubyStyle,
+        policy: policy,
+        direction: direction,
+        scaler: scaler,
+        locale: null,
+        vertical: false,
+      );
+    }
+  }
 
   final AppFontPolicy policy;
   final SyncLyricLine line;
+  final List<LyricRubySpan> rubySpans;
   final TextStyle style;
   final TextPainter base;
   final double fontSize;
   final TextAlign _textAlign;
   final TextDirection _direction;
   final TextScaler _scaler;
+  LyricRubyShaping? rubyShaping;
   TextPainter? _baseInk;
   TextPainter? _playedInk;
   TextPainter? _gradientInk;
@@ -747,20 +1063,25 @@ class _TimedLyricParagraph {
   }
 
   TextPainter gradientInk(drawing.Shader shader) {
-    final styleWithShader =
-        style.copyWith(foreground: Paint()..shader = shader);
+    final styleWithShader = style.copyWith(
+      foreground: Paint()..shader = shader,
+    );
     if (_gradientInk == null) {
       _gradientInk = _newInkPainter(styleWithShader);
     } else {
       _gradientInk!
-        ..text =
-            appFontSpan(line.content, style: styleWithShader, policy: policy)
+        ..text = appFontSpan(
+          line.content,
+          style: styleWithShader,
+          policy: policy,
+        )
         ..layout(maxWidth: base.width);
     }
     return _gradientInk!;
   }
 
   void dispose() {
+    rubyShaping?.dispose();
     _baseInk?.dispose();
     _playedInk?.dispose();
     _gradientInk?.dispose();
@@ -779,6 +1100,20 @@ class _TimedLyricLayout {
     // White shapes are laid out once; theme/focus colors are paint operations.
     // Sampling playback never rebuilds paragraphs or changes line breaks.
     paragraph.layout(maxWidth);
+    if (paragraph.rubySpans.isNotEmpty) {
+      ruby = LyricRubyLayout(
+        primary: base,
+        spans: paragraph.rubySpans,
+        style: style,
+        policy: paragraph.policy,
+        direction: paragraph._direction,
+        scaler: paragraph._scaler,
+        locale: null,
+        shaping: paragraph.rubyShaping,
+        width: base.width,
+        primaryInset: topInkGuard - lyricVerticalInkGuard,
+      );
+    }
 
     // Timing providers sometimes split a surrogate/ZWJ cluster into separate
     // words. Keep that grapheme in one mask with its actual combined interval.
@@ -807,8 +1142,9 @@ class _TimedLyricLayout {
         break;
       }
       final boxes = base.getBoxesForSelection(
-          TextSelection(baseOffset: startOffset, extentOffset: offset),
-          boxHeightStyle: drawing.BoxHeightStyle.includeLineSpacingMiddle);
+        TextSelection(baseOffset: startOffset, extentOffset: offset),
+        boxHeightStyle: drawing.BoxHeightStyle.includeLineSpacingMiddle,
+      );
       if (boxes.isEmpty) {
         if (line.content.substring(startOffset, offset).trim().isNotEmpty) {
           completeInkCoverage = false;
@@ -823,18 +1159,26 @@ class _TimedLyricLayout {
       if (characters.length > 1 &&
           characters.length <= 24 &&
           _independentCharacters.hasMatch(text)) {
-        final extent =
-            boxes.fold<double>(0, (sum, box) => sum + box.right - box.left);
+        final extent = boxes.fold<double>(
+          0,
+          (sum, box) => sum + box.right - box.left,
+        );
         var characterOffset = startOffset;
         var revealOffset = 0.0;
         for (var c = 0; c < characters.length; c++) {
           final nextOffset = characterOffset + characters[c].length;
           final pieces = base.getBoxesForSelection(
-              TextSelection(
-                  baseOffset: characterOffset, extentOffset: nextOffset),
-              boxHeightStyle: drawing.BoxHeightStyle.includeLineSpacingMiddle);
+            TextSelection(
+              baseOffset: characterOffset,
+              extentOffset: nextOffset,
+            ),
+            boxHeightStyle: drawing.BoxHeightStyle.includeLineSpacingMiddle,
+          );
           if (pieces.isNotEmpty) {
-            words.add(_TimedWordShape(
+            words.add(
+              _TimedWordShape(
+                sourceStart: characterOffset,
+                sourceEnd: nextOffset,
                 start: start,
                 length: end - start,
                 boxes: pieces,
@@ -844,9 +1188,13 @@ class _TimedLyricLayout {
                 revealOffset: revealOffset,
                 canLift: pieces.length == 1 &&
                     characters[c].trim().isNotEmpty &&
-                    pieces.single.direction == TextDirection.ltr));
+                    pieces.single.direction == TextDirection.ltr,
+              ),
+            );
             revealOffset += pieces.fold<double>(
-                0, (sum, box) => sum + box.right - box.left);
+              0,
+              (sum, box) => sum + box.right - box.left,
+            );
           } else if (characters[c].trim().isNotEmpty) {
             completeInkCoverage = false;
           }
@@ -859,24 +1207,30 @@ class _TimedLyricLayout {
       bool joinsAt(int position) =>
           position > 0 &&
           position < line.content.length &&
-          _joiningLetter
-              .hasMatch(line.content.substring(position - 1, position + 1));
-      words.add(_TimedWordShape(
-        start: start,
-        length: end - start,
-        boxes: boxes,
-        group: index,
-        canLift: boxes.length == 1 &&
-            text.trim().isNotEmpty &&
-            boxes.single.direction == TextDirection.ltr &&
-            !joinsAt(startOffset) &&
-            !joinsAt(offset) &&
-            !_joiningScript.hasMatch(text),
-      ));
+          _joiningLetter.hasMatch(
+            line.content.substring(position - 1, position + 1),
+          );
+      words.add(
+        _TimedWordShape(
+          sourceStart: startOffset,
+          sourceEnd: offset,
+          start: start,
+          length: end - start,
+          boxes: boxes,
+          group: index,
+          canLift: boxes.length == 1 &&
+              text.trim().isNotEmpty &&
+              boxes.single.direction == TextDirection.ltr &&
+              !joinsAt(startOffset) &&
+              !joinsAt(offset) &&
+              !_joiningScript.hasMatch(text),
+        ),
+      );
     }
     completeWordInk = completeInkCoverage && offset == line.content.length;
-    final lastGroup =
-        line.words.lastIndexWhere((word) => word.content.trim().isNotEmpty);
+    final lastGroup = line.words.lastIndexWhere(
+      (word) => word.content.trim().isNotEmpty,
+    );
     for (final word in words) {
       word.phraseEnd = word.group == lastGroup;
     }
@@ -897,13 +1251,49 @@ class _TimedLyricLayout {
         movingIndices.add(index);
         continue;
       }
-      final lane =
-          laneEnds.indexWhere((end) => end == null || end <= word.motionStart);
+      final lane = laneEnds.indexWhere(
+        (end) => end == null || end <= word.motionStart,
+      );
       if (lane < 0) continue;
       movingIndices.add(index);
       reservedGroups.add(word.group);
       laneEnds[lane] = word.motionEnd;
     }
+    ruby?.bindMotion(
+      phaseFor: (span) {
+        var phase = 0.0;
+        var count = 0;
+        for (final slot in followSlots) {
+          if (slot.end <= span.start || slot.start >= span.end) continue;
+          phase += slot.phase;
+          count++;
+        }
+        return count == 0 ? 1 : phase / count;
+      },
+      partsFor: (glyph) => [
+        for (final (index, word) in words.indexed)
+          for (final box in word.boxes)
+            if (box.toRect().overlaps(glyph.source))
+              (
+                index: index,
+                bounds: box.toRect().intersect(glyph.source),
+                phase: () {
+                  var phase = 0.0;
+                  var count = 0;
+                  for (final slot in followSlots) {
+                    if (!slot.boxes.any(
+                      (piece) => piece.toRect().overlaps(box.toRect()),
+                    )) {
+                      continue;
+                    }
+                    phase += slot.phase;
+                    count++;
+                  }
+                  return count == 0 ? 1.0 : phase / count;
+                }(),
+              ),
+      ],
+    );
   }
 
   final SyncLyricLine line;
@@ -911,8 +1301,10 @@ class _TimedLyricLayout {
   final double maxWidth;
   final double pixelRatio;
   final _TimedLyricParagraph paragraph;
+  LyricRubyLayout? ruby;
   TextPainter get base => paragraph.base;
   double get fontSize => paragraph.fontSize;
+  late final double topInkGuard = lyricTopInkGuard(base);
 
   /// Color is part of the paragraph's glyph draw, not an offscreen alpha mask.
   /// This keeps the shaped text in the same display list as the outer fractional
@@ -939,7 +1331,8 @@ class _TimedLyricLayout {
           continue;
         }
         final boxes = base.getBoxesForSelection(
-            TextSelection(baseOffset: start, extentOffset: end));
+          TextSelection(baseOffset: start, extentOffset: end),
+        );
         return boxes.isEmpty ? null : boxes.first.top;
       }
       return null;
@@ -949,18 +1342,24 @@ class _TimedLyricLayout {
   late final bool completeWordInk;
   late final Set<int> movingIndices;
   late final List<List<Rect>> wordInkClips = () {
-    final partitions = lyricFollowClipPartitions([
-      for (final word in words)
-        for (final box in word.boxes) box.toRect()
-    ], base.size, followLineMetrics);
+    final partitions = lyricFollowClipPartitions(
+      [
+        for (final word in words)
+          for (final box in word.boxes) box.toRect(),
+      ],
+      base.size,
+      followLineMetrics,
+    );
     var index = 0;
     return [
       for (final word in words)
         [for (final _ in word.boxes) partitions[index++]],
     ];
   }();
-  late final List<LyricFollowWordSlot> followSlots =
-      lyricFollowWordSlots(base, line.content);
+  late final List<LyricFollowWordSlot> followSlots = lyricFollowWordSlots(
+    base,
+    line.content,
+  );
   late final followLineMetrics = base.computeLineMetrics();
   late final List<({int word, int wordBox, int slot, Rect bounds})>
       followPieces = [
@@ -971,27 +1370,28 @@ class _TimedLyricLayout {
             // includeLineSpacingMiddle boxes of adjacent wrapped lines can
             // overlap by a fractional pixel. They are different glyph rows,
             // not fragments of the same visual word.
-            if (words[word]
-                    .boxes[wordBox]
-                    .toRect()
-                    .overlaps(slotBox.toRect()) &&
-                lyricFollowLineIndex(words[word].boxes[wordBox].toRect(),
-                        followLineMetrics) ==
+            if (words[word].boxes[wordBox].toRect().overlaps(
+                      slotBox.toRect(),
+                    ) &&
+                lyricFollowLineIndex(
+                      words[word].boxes[wordBox].toRect(),
+                      followLineMetrics,
+                    ) ==
                     lyricFollowLineIndex(slotBox.toRect(), followLineMetrics))
               (
                 word: word,
                 wordBox: wordBox,
                 slot: slot,
-                bounds: words[word]
-                    .boxes[wordBox]
-                    .toRect()
-                    .intersect(slotBox.toRect())
+                bounds: words[word].boxes[wordBox].toRect().intersect(
+                      slotBox.toRect(),
+                    ),
               ),
   ];
   late final followInkClips = lyricFollowClipPartitions(
-      [for (final piece in followPieces) piece.bounds],
-      base.size,
-      followLineMetrics);
+    [for (final piece in followPieces) piece.bounds],
+    base.size,
+    followLineMetrics,
+  );
   late final List<Rect> followGlowClips = () {
     final clips = List.filled(followPieces.length, Rect.zero);
     final groups = <int, List<int>>{};
@@ -1000,9 +1400,10 @@ class _TimedLyricLayout {
     }
     for (final indices in groups.values) {
       final partitions = lyricFollowClipPartitions(
-          [for (final index in indices) followPieces[index].bounds],
-          base.size,
-          followLineMetrics);
+        [for (final index in indices) followPieces[index].bounds],
+        base.size,
+        followLineMetrics,
+      );
       for (var i = 0; i < indices.length; i++) {
         clips[indices[i]] = partitions[i];
       }
@@ -1011,8 +1412,9 @@ class _TimedLyricLayout {
   }();
   static final _joiningLetter = RegExp(r'^[A-Za-z\u00c0-\u024f]{2}$');
   static final _joiningScript = RegExp(r'[\u0590-\u109f]');
-  static final _independentCharacters =
-      RegExp(r'^[\u2e80-\u9fff\uac00-\ud7af\s]+$');
+  static final _independentCharacters = RegExp(
+    r'^[\u2e80-\u9fff\uac00-\ud7af\s]+$',
+  );
 
   // Long-note glow is a static white mask: only its transform/tint changes.
   // Rasterize the tiny diffuse mask once instead of running a Gaussian pass
@@ -1036,9 +1438,9 @@ class _TimedLyricLayout {
       ..scale(ratio)
       ..translate(-bounds.left, -bounds.top);
     canvas.saveLayer(
-        bounds,
-        Paint()
-          ..imageFilter = drawing.ImageFilter.blur(sigmaX: 1.1, sigmaY: 1.1));
+      bounds,
+      Paint()..imageFilter = drawing.ImageFilter.blur(sigmaX: 1.1, sigmaY: 1.1),
+    );
     canvas.clipRect(word.bounds, doAntiAlias: false);
     base.paint(canvas, Offset.zero);
     canvas.restore();
@@ -1054,7 +1456,7 @@ class _TimedLyricLayout {
     }
     final mask = (
       image,
-      Rect.fromLTWH(bounds.left, bounds.top, width / ratio, height / ratio)
+      Rect.fromLTWH(bounds.left, bounds.top, width / ratio, height / ratio),
     );
     _glowMasks[index] = mask;
     _glowPixels += width * height;
@@ -1070,26 +1472,30 @@ class _TimedLyricLayout {
   }
 
   void dispose() {
+    ruby?.dispose();
     releaseGlowMasks();
   }
 }
 
 class _TimedWordShape {
-  _TimedWordShape(
-      {required this.start,
-      required this.length,
-      required this.boxes,
-      required this.group,
-      this.phase = 0,
-      double? revealExtent,
-      this.revealOffset = 0,
-      required this.canLift})
-      : extent = revealExtent ??
+  _TimedWordShape({
+    required this.sourceStart,
+    required this.sourceEnd,
+    required this.start,
+    required this.length,
+    required this.boxes,
+    required this.group,
+    this.phase = 0,
+    double? revealExtent,
+    this.revealOffset = 0,
+    required this.canLift,
+  })  : extent = revealExtent ??
             boxes.fold<double>(0, (sum, box) => sum + box.right - box.left),
         bounds = boxes
             .map((box) => box.toRect())
             .reduce((a, b) => a.expandToInclude(b));
   final Duration start;
+  final int sourceStart, sourceEnd;
   final Duration length;
   final int group;
   final double phase;
@@ -1102,23 +1508,38 @@ class _TimedWordShape {
   Duration get motionStart =>
       start -
       Duration(
-          microseconds: (LyricWordEffects.presentationLeadMs(
-                      length.inMilliseconds, phraseEnd) *
-                  1000)
-              .round());
+        microseconds: (LyricWordEffects.presentationLeadMs(
+                  length.inMilliseconds,
+                  phraseEnd,
+                ) *
+                1000)
+            .round(),
+      );
   Duration get motionEnd =>
       start +
       length +
       Duration(
-          microseconds: (LyricWordEffects.presentationTailMs(
-                      length.inMilliseconds, phraseEnd) *
-                  1000)
-              .round());
+        microseconds: (LyricWordEffects.presentationTailMs(
+                  length.inMilliseconds,
+                  phraseEnd,
+                ) *
+                1000)
+            .round(),
+      );
 }
+
+typedef _TimedLyricPose = ({
+  int index,
+  double lift,
+  double scale,
+  double scaleY,
+  double anchorX,
+});
 
 /// Paints only the actual timed words; updates repaint the active paragraph,
 /// rather than rebuilding every lyric row at the 33ms playback sampling rate.
-class LyricWordHighlightPainter extends CustomPainter {
+class LyricWordHighlightPainter extends CustomPainter
+    implements LyricGlyphMorphConsumer {
   LyricWordHighlightPainter._({
     required _TimedLyricLayout layout,
     required this.line,
@@ -1130,15 +1551,17 @@ class LyricWordHighlightPainter extends CustomPainter {
     required this.playedColor,
     required this.glowAllowed,
     required this.inkOffset,
+    this.rubyVisibility = 1,
     this.follow,
     this.alignmentX,
   })  : _layout = layout,
         _position = position,
         super(
-            repaint: Listenable.merge([
-          if (active && !reducedMotion) position,
-          if (follow != null) follow.clock,
-        ]));
+          repaint: Listenable.merge([
+            if (active && !reducedMotion) position,
+            if (follow != null) follow.clock,
+          ]),
+        );
 
   final _TimedLyricLayout _layout;
   final ValueListenable<Duration> _position;
@@ -1152,6 +1575,17 @@ class LyricWordHighlightPainter extends CustomPainter {
   final LyricWordFollow? follow;
   final double? alignmentX;
   final Offset inkOffset;
+  final double rubyVisibility;
+  @override
+  TextPainter get glyphParagraph => _layout.base;
+  @override
+  Object get glyphLayoutIdentity => _layout;
+  @override
+  double get glyphPixelRatio => _layout.pixelRatio;
+  @override
+  Offset get glyphInkOffset => inkOffset;
+  @override
+  LyricGlyphMorphFrame? glyphMorph;
 
   Duration get position => _position.value;
 
@@ -1165,6 +1599,8 @@ class LyricWordHighlightPainter extends CustomPainter {
 
   @visibleForTesting
   TextPainter get text => _layout.base;
+  @visibleForTesting
+  LyricRubyLayout? get rubyLayout => _layout.ruby;
 
   @visibleForTesting
   int get shapedWordCount => _layout.words.length;
@@ -1187,7 +1623,10 @@ class LyricWordHighlightPainter extends CustomPainter {
             (alignmentX == null
                 ? 0
                 : lyricAlignedOffset(
-                    _layout.base.width, line.width, alignmentX!)),
+                    _layout.base.width,
+                    line.width,
+                    alignmentX!,
+                  )),
         inkOffset.dy + line.baseline - line.ascent,
         line.width,
         line.height,
@@ -1211,30 +1650,25 @@ class LyricWordHighlightPainter extends CustomPainter {
       ];
 
   @visibleForTesting
-  List<double> get movingWordLifts =>
-      [for (final pose in _movingWords()) pose.lift];
+  List<double> get movingWordLifts => [
+        for (final pose in _movingWords()) pose.lift,
+      ];
 
-  List<({int index, double lift, double scale, double scaleY, double anchorX})>
-      _movingWords() {
+  List<_TimedLyricPose> _movingWords() {
     if (reducedMotion || activation <= 0) {
       return const [];
     }
-    final result = <({
-      int index,
-      double lift,
-      double scale,
-      double scaleY,
-      double anchorX
-    })>[];
+    final result = <_TimedLyricPose>[];
     for (var index = 0; index < _layout.words.length; index++) {
       final word = _layout.words[index];
       if (!_layout.movingIndices.contains(index)) continue;
       final pose = LyricWordEffects.timedPose(
-          elapsedMilliseconds: (position - word.start).inMicroseconds / 1000,
-          phase: word.phase,
-          phraseEnd: word.phraseEnd,
-          durationMilliseconds: word.length.inMilliseconds,
-          fontSize: _layout.fontSize);
+        elapsedMilliseconds: (position - word.start).inMicroseconds / 1000,
+        phase: word.phase,
+        phraseEnd: word.phraseEnd,
+        durationMilliseconds: word.length.inMilliseconds,
+        fontSize: _layout.fontSize,
+      );
       if (pose.lift <= .001) continue;
       // Edge words grow away from their neighbour. Inner words stretch only
       // vertically: they remain expressive without crossing adjacent glyphs.
@@ -1262,8 +1696,10 @@ class LyricWordHighlightPainter extends CustomPainter {
     final word = _layout.words[index];
     if (activation <= 0 || reducedMotion) {
       _layout
-          .ink(reducedMotion && activation > 0 ? playedColor : baseColor,
-              played: reducedMotion && activation > 0)
+          .ink(
+            reducedMotion && activation > 0 ? playedColor : baseColor,
+            played: reducedMotion && activation > 0,
+          )
           .paint(canvas, Offset.zero);
       return;
     }
@@ -1276,13 +1712,16 @@ class LyricWordHighlightPainter extends CustomPainter {
     }
     var offset = word.revealOffset;
     final softness = LyricWordEffects.softEdgeWidth(
-        fontSize: _layout.fontSize, extent: word.extent);
+      fontSize: _layout.fontSize,
+      extent: word.extent,
+    );
     for (var i = 0; i < boxIndex; i++) {
       offset += word.boxes[i].right - word.boxes[i].left;
     }
     final box = word.boxes[boxIndex];
     _layout
-        .gradientInk(LyricWordEffects.revealShader(
+        .gradientInk(
+          LyricWordEffects.revealShader(
             bounds: box.toRect(),
             progress: progress,
             extent: word.extent,
@@ -1290,7 +1729,9 @@ class LyricWordHighlightPainter extends CustomPainter {
             softness: softness,
             reverse: box.direction == TextDirection.rtl,
             leading: playedColor,
-            trailing: baseColor))
+            trailing: baseColor,
+          ),
+        )
         .paint(canvas, Offset.zero);
   }
 
@@ -1298,12 +1739,109 @@ class LyricWordHighlightPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.save();
     canvas.translate(inkOffset.dx, inkOffset.dy);
-    paintLyricAlignment(
-        canvas, _layout.base, alignmentX, () => _paintInk(canvas, size));
+    final ruby = _layout.ruby;
+    final poses = ruby == null
+        ? null
+        : {for (final pose in _movingWords()) pose.index: pose};
+    void primary() {
+      if (glyphMorph != null) {
+        _paintInk(canvas, size, poses: poses);
+      } else {
+        paintLyricAlignment(
+          canvas,
+          _layout.base,
+          alignmentX,
+          () => _paintInk(canvas, size, poses: poses),
+        );
+      }
+    }
+
+    if (ruby == null) {
+      primary();
+    } else {
+      ruby.paintPrimary(canvas, primary, visibility: rubyVisibility);
+    }
+    if (ruby != null) {
+      ruby.paint(
+        canvas,
+        tint: playedColor,
+        visibility: rubyVisibility,
+        displacement: (glyph) => _rubyDisplacement(glyph, poses!),
+      );
+    }
     canvas.restore();
   }
 
-  void _paintInk(Canvas canvas, Size size) {
+  Offset _rubyDisplacement(
+    LyricRubyGlyph glyph,
+    Map<int, _TimedLyricPose> poses,
+  ) {
+    Rect? presented;
+    final morph = glyphMorph;
+    if (morph != null && glyph.motionParts.isEmpty) {
+      presented = morph.geometry.bounds(
+        glyph.span.start,
+        glyph.span.end,
+        morph.progress,
+      );
+    }
+    for (final part in glyph.motionParts) {
+      var bounds = morph == null
+          ? part.bounds
+          : morph.geometry.bounds(
+                _layout.words[part.index].sourceStart,
+                _layout.words[part.index].sourceEnd,
+                morph.progress,
+              ) ??
+              part.bounds;
+      final pose = poses[part.index];
+      if (pose != null) {
+        final pivotY = _layout.words[part.index].bounds.center.dy;
+        bounds = Rect.fromLTRB(
+          pose.anchorX + (bounds.left - pose.anchorX) * pose.scale,
+          pivotY - pose.lift + (bounds.top - pivotY) * pose.scaleY,
+          pose.anchorX + (bounds.right - pose.anchorX) * pose.scale,
+          pivotY - pose.lift + (bounds.bottom - pivotY) * pose.scaleY,
+        );
+      }
+      bounds = bounds.shift(
+        Offset(0, follow?.offset(part.phase, _layout.fontSize) ?? 0),
+      );
+      presented =
+          presented == null ? bounds : presented.expandToInclude(bounds);
+    }
+    final alignedX = morph != null || alignmentX == null
+        ? 0.0
+        : lyricAlignedOffset(_layout.base.width, glyph.lineWidth, alignmentX!);
+    return Offset(
+      alignedX +
+          (presented?.center.dx ?? glyph.source.center.dx) -
+          glyph.source.center.dx,
+      (presented?.top ?? glyph.source.top) - glyph.source.top,
+    );
+  }
+
+  @visibleForTesting
+  List<Rect> get paintedRubyBounds {
+    final ruby = _layout.ruby;
+    if (ruby == null) return const [];
+    final poses = {for (final pose in _movingWords()) pose.index: pose};
+    return [
+      for (final glyph in ruby.glyphs)
+        (glyph.offset & glyph.painter.size).shift(
+          inkOffset +
+              _rubyDisplacement(glyph, poses) +
+              Offset(0, ruby.leadingForGlyph(glyph) * rubyVisibility),
+        ),
+    ];
+  }
+
+  void _paintInk(Canvas canvas, Size size, {Map<int, _TimedLyricPose>? poses}) {
+    final morph = glyphMorph;
+    if (morph != null) {
+      _paintMorphInk(canvas, morph, poses);
+      return;
+    }
     if (!_layout.completeWordInk) {
       // A malformed imported timing can leave a visible grapheme without a
       // selection box. Preserve the entire paragraph instead of dropping it.
@@ -1312,8 +1850,10 @@ class LyricWordHighlightPainter extends CustomPainter {
     }
     if (activation <= 0 || reducedMotion) {
       _layout
-          .ink(reducedMotion && activation > 0 ? playedColor : baseColor,
-              played: reducedMotion && activation > 0)
+          .ink(
+            reducedMotion && activation > 0 ? playedColor : baseColor,
+            played: reducedMotion && activation > 0,
+          )
           .paint(canvas, Offset.zero);
       return;
     }
@@ -1322,10 +1862,10 @@ class LyricWordHighlightPainter extends CustomPainter {
         wave.clock.value > 0 &&
         wave.clock.value < 1 &&
         _layout.followPieces.isNotEmpty) {
-      _paintFollowWords(canvas, size, wave);
+      _paintFollowWords(canvas, size, wave, poses: poses);
       return;
     }
-    final moving = _movingWords();
+    final moving = poses?.values.toList(growable: false) ?? _movingWords();
     if (glowAllowed) {
       for (final pose in moving) {
         final word = _layout.words[pose.index];
@@ -1336,23 +1876,32 @@ class LyricWordHighlightPainter extends CustomPainter {
         if (mask == null) continue;
         // One small diffuse mask per active long word, never the whole line.
         final intensity =
-            ((pose.scaleY - 1) / LyricWordEffects.maximumScaleExpansion)
-                .clamp(0.0, 1.0);
+            ((pose.scaleY - 1) / LyricWordEffects.maximumScaleExpansion).clamp(
+          0.0,
+          1.0,
+        );
         canvas.save();
         canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
         canvas.scale(pose.scale, pose.scaleY);
         canvas.translate(-pose.anchorX, -word.bounds.center.dy);
         canvas.drawImageRect(
-            mask.$1,
-            Rect.fromLTWH(
-                0, 0, mask.$1.width.toDouble(), mask.$1.height.toDouble()),
-            mask.$2,
-            Paint()
-              ..filterQuality = FilterQuality.low
-              ..colorFilter = ColorFilter.mode(
-                  playedColor.withValues(
-                      alpha: (word.phraseEnd ? .27 : .18) * intensity),
-                  BlendMode.srcIn));
+          mask.$1,
+          Rect.fromLTWH(
+            0,
+            0,
+            mask.$1.width.toDouble(),
+            mask.$1.height.toDouble(),
+          ),
+          mask.$2,
+          Paint()
+            ..filterQuality = FilterQuality.low
+            ..colorFilter = ColorFilter.mode(
+              playedColor.withValues(
+                alpha: (word.phraseEnd ? .27 : .18) * intensity,
+              ),
+              BlendMode.srcIn,
+            ),
+        );
         canvas.restore();
       }
     }
@@ -1360,12 +1909,12 @@ class LyricWordHighlightPainter extends CustomPainter {
       _layout.ink(baseColor, played: false).paint(canvas, Offset.zero);
       return;
     }
-    final poses = {for (final pose in moving) pose.index: pose};
+    final wordPoses = poses ?? {for (final pose in moving) pose.index: pose};
     for (var index = 0; index < _layout.words.length; index++) {
       final word = _layout.words[index];
       for (var box = 0; box < word.boxes.length; box++) {
         canvas.save();
-        final pose = poses[index];
+        final pose = wordPoses[index];
         if (pose != null) {
           canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
           canvas.scale(pose.scale, pose.scaleY);
@@ -1378,12 +1927,164 @@ class LyricWordHighlightPainter extends CustomPainter {
     }
   }
 
-  void _paintFollowWords(Canvas canvas, Size size, LyricWordFollow wave) {
-    final poses = {for (final pose in _movingWords()) pose.index: pose};
+  void _paintMorphInk(
+    Canvas canvas,
+    LyricGlyphMorphFrame morph,
+    Map<int, _TimedLyricPose>? poses,
+  ) {
+    final geometry = morph.geometry;
+    if (!_layout.completeWordInk ||
+        _layout.words.isEmpty ||
+        activation <= 0 ||
+        reducedMotion) {
+      geometry.paint(
+        canvas,
+        progress: morph.progress,
+        tint: reducedMotion && activation > 0 ? playedColor : baseColor,
+        colourParagraph: _layout.base,
+        colourLayoutIdentity: _layout,
+        colourPaint: (source) => _layout
+            .ink(
+              reducedMotion && activation > 0 ? playedColor : baseColor,
+              played: reducedMotion && activation > 0,
+            )
+            .paint(source, Offset.zero),
+      );
+      return;
+    }
+    final moving =
+        poses ?? {for (final pose in _movingWords()) pose.index: pose};
+    final wave = follow;
+    for (final (index, word) in _layout.words.indexed) {
+      final bounds = geometry.bounds(
+        word.sourceStart,
+        word.sourceEnd,
+        morph.progress,
+      );
+      if (bounds == null) continue;
+      final pose = moving[index];
+      final anchorX = pose == null
+          ? bounds.center.dx
+          : pose.anchorX == word.bounds.left
+              ? bounds.left
+              : pose.anchorX == word.bounds.right
+                  ? bounds.right
+                  : bounds.center.dx;
+      canvas.save();
+      if (pose != null) {
+        canvas.translate(anchorX, bounds.center.dy - pose.lift);
+        canvas.scale(pose.scale, pose.scaleY);
+        canvas.translate(-anchorX, -bounds.center.dy);
+      }
+      // The same cached long-note glow keeps its existing colour and pulse.
+      if (glowAllowed &&
+          pose != null &&
+          pose.scaleY > 1.00001 &&
+          word.length.inMilliseconds > 650) {
+        final mask = _layout.glowMask(index);
+        if (mask != null) {
+          final intensity =
+              ((pose.scaleY - 1) / LyricWordEffects.maximumScaleExpansion)
+                  .clamp(0.0, 1.0);
+          canvas.drawImageRect(
+            mask.$1,
+            Rect.fromLTWH(
+              0,
+              0,
+              mask.$1.width.toDouble(),
+              mask.$1.height.toDouble(),
+            ),
+            mask.$2.shift(bounds.center - word.bounds.center),
+            Paint()
+              ..filterQuality = FilterQuality.low
+              ..colorFilter = ColorFilter.mode(
+                playedColor.withValues(
+                  alpha: (word.phraseEnd ? .27 : .18) * intensity,
+                ),
+                BlendMode.srcIn,
+              ),
+          );
+        }
+      }
+      final progress = LyricMotion.progress(position, word.start, word.length);
+      final boxes = geometry.boxes(
+        word.sourceStart,
+        word.sourceEnd,
+        morph.progress,
+      );
+      final extent = boxes.fold<double>(0, (total, box) => total + box.width);
+      geometry.paint(
+        canvas,
+        progress: morph.progress,
+        start: word.sourceStart,
+        end: word.sourceEnd,
+        tint: progress >= 1 ? playedColor : baseColor,
+        colourParagraph: _layout.base,
+        colourLayoutIdentity: _layout,
+        colourPaint: (source) {
+          for (var box = 0; box < word.boxes.length; box++) {
+            source.save();
+            source.clipRect(
+              _layout.wordInkClips[index][box],
+              doAntiAlias: false,
+            );
+            _paintWordInk(source, index, box);
+            source.restore();
+          }
+        },
+        shader: progress <= 0 || progress >= 1
+            ? null
+            : LyricWordEffects.revealShader(
+                bounds: bounds,
+                progress: progress,
+                extent: word.revealOffset == 0 ? extent : word.extent,
+                offset: word.revealOffset,
+                softness: LyricWordEffects.softEdgeWidth(
+                  fontSize: _layout.fontSize,
+                  extent: extent,
+                ),
+                reverse: word.boxes.first.direction == TextDirection.rtl,
+                leading: playedColor,
+                trailing: baseColor,
+              ),
+        displacement: wave == null
+            ? null
+            : (cell, presented) {
+                final slots = _layout.followSlots;
+                var low = 0, high = slots.length;
+                while (low < high) {
+                  final middle = (low + high) ~/ 2;
+                  if (slots[middle].end <= cell.start) {
+                    low = middle + 1;
+                  } else {
+                    high = middle;
+                  }
+                }
+                return Offset(
+                  0,
+                  low < slots.length
+                      ? wave.offset(slots[low].phase, _layout.fontSize) /
+                          (pose?.scaleY ?? 1)
+                      : 0,
+                );
+              },
+      );
+      canvas.restore();
+    }
+  }
+
+  void _paintFollowWords(
+    Canvas canvas,
+    Size size,
+    LyricWordFollow wave, {
+    Map<int, _TimedLyricPose>? poses,
+  }) {
+    final wordPoses =
+        poses ?? {for (final pose in _movingWords()) pose.index: pose};
     void transform(int wordIndex, int slotIndex) {
       final slot = _layout.followSlots[slotIndex];
       canvas.translate(0, wave.offset(slot.phase, _layout.fontSize));
-      final pose = poses[wordIndex];
+      final pose = wordPoses[wordIndex];
       if (pose != null) {
         final word = _layout.words[wordIndex];
         canvas.translate(pose.anchorX, word.bounds.center.dy - pose.lift);
@@ -1397,7 +2098,7 @@ class LyricWordHighlightPainter extends CustomPainter {
       for (var index = 0; index < _layout.followPieces.length; index++) {
         final piece = _layout.followPieces[index];
         final word = _layout.words[piece.word];
-        final pose = poses[piece.word];
+        final pose = wordPoses[piece.word];
         if (pose == null ||
             pose.scaleY <= 1.00001 ||
             word.length.inMilliseconds <= 650) {
@@ -1406,22 +2107,31 @@ class LyricWordHighlightPainter extends CustomPainter {
         final mask = _layout.glowMask(piece.word);
         if (mask == null) continue;
         final intensity =
-            ((pose.scaleY - 1) / LyricWordEffects.maximumScaleExpansion)
-                .clamp(0.0, 1.0);
+            ((pose.scaleY - 1) / LyricWordEffects.maximumScaleExpansion).clamp(
+          0.0,
+          1.0,
+        );
         canvas.save();
         transform(piece.word, piece.slot);
         canvas.clipRect(_layout.followGlowClips[index], doAntiAlias: false);
         canvas.drawImageRect(
-            mask.$1,
-            Rect.fromLTWH(
-                0, 0, mask.$1.width.toDouble(), mask.$1.height.toDouble()),
-            mask.$2,
-            Paint()
-              ..filterQuality = FilterQuality.low
-              ..colorFilter = ColorFilter.mode(
-                  playedColor.withValues(
-                      alpha: (word.phraseEnd ? .27 : .18) * intensity),
-                  BlendMode.srcIn));
+          mask.$1,
+          Rect.fromLTWH(
+            0,
+            0,
+            mask.$1.width.toDouble(),
+            mask.$1.height.toDouble(),
+          ),
+          mask.$2,
+          Paint()
+            ..filterQuality = FilterQuality.low
+            ..colorFilter = ColorFilter.mode(
+              playedColor.withValues(
+                alpha: (word.phraseEnd ? .27 : .18) * intensity,
+              ),
+              BlendMode.srcIn,
+            ),
+        );
         canvas.restore();
       }
     }
@@ -1452,7 +2162,8 @@ class LyricWordHighlightPainter extends CustomPainter {
       follow?.curve != oldDelegate.follow?.curve ||
       follow?.distance != oldDelegate.follow?.distance ||
       alignmentX != oldDelegate.alignmentX ||
-      inkOffset != oldDelegate.inkOffset;
+      inkOffset != oldDelegate.inkOffset ||
+      rubyVisibility != oldDelegate.rubyVisibility;
 }
 
 /// The interlude occupies the same space before, during and after activation.
@@ -1515,8 +2226,11 @@ class _LyricInterludePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final pose = LyricMotion.interludePose(position.value - start, length,
-        reduced: reducedMotion);
+    final pose = LyricMotion.interludePose(
+      position.value - start,
+      length,
+      reduced: reducedMotion,
+    );
     final paint = Paint();
     final center = Offset(size.width / 2, size.height / 2);
     canvas.save();
@@ -1530,9 +2244,13 @@ class _LyricInterludePainter extends CustomPainter {
         _ => pose.dotOpacities.$3,
       };
       paint.color = color.withValues(
-          alpha: color.a * pose.opacity * dotOpacity * emphasisOpacity);
+        alpha: color.a * pose.opacity * dotOpacity * emphasisOpacity,
+      );
       canvas.drawCircle(
-          Offset(center.dx + 24.0 * (index - 1), center.dy), 4.2, paint);
+        Offset(center.dx + 24.0 * (index - 1), center.dy),
+        4.2,
+        paint,
+      );
     }
     canvas.restore();
   }

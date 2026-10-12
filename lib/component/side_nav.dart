@@ -9,6 +9,7 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_fonts.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/compact_process_resource_monitor.dart';
 import 'package:dan_player/component/frosted_surface.dart';
 import 'package:dan_player/component/responsive_builder.dart';
@@ -21,6 +22,7 @@ import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/process_resource_coordinator.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -298,7 +300,8 @@ class ResizableSideNav extends StatefulWidget {
   State<ResizableSideNav> createState() => _ResizableSideNavState();
 }
 
-class _ResizableSideNavState extends State<ResizableSideNav> {
+class _ResizableSideNavState extends State<ResizableSideNav>
+    with WidgetsBindingObserver {
   late ValueNotifier<PlayerExperiencePreferences> _preferences;
   late double _width;
   bool _dragging = false;
@@ -306,26 +309,80 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
   double _dragStartX = 0;
   double _dragStartWidth = 0;
   int? _resizePointer;
+  int? _retiredResizePointer;
+  bool _locked = false;
+  bool _treeVisible = true;
+  bool _reducedMotion = false;
+  late TextDirection _direction;
 
   @override
   void initState() {
     super.initState();
     _attachPreferences();
+    WidgetsBinding.instance.addObserver(this);
   }
 
   void _attachPreferences() {
     _preferences = widget.preferences ?? AppSettings.instance.experience;
     _width = PlayerExperiencePreferences.safeSidebarWidth(
         _preferences.value.sidebarWidth);
+    _locked = _preferences.value.sidebarLocked;
     _preferences.addListener(_preferenceChanged);
   }
 
   void _preferenceChanged() {
-    if (!mounted || _dragging) return;
+    if (!mounted) return;
+    if (_dragging && !_preferences.value.sidebarLocked) return;
     final next = PlayerExperiencePreferences.safeSidebarWidth(
         _preferences.value.sidebarWidth);
-    if (next != _width) setState(() => _width = next);
+    final locked = _preferences.value.sidebarLocked;
+    if (_dragging || next != _width || locked != _locked) {
+      setState(() {
+        if (_dragging) _retireDraft();
+        _width = next;
+        _locked = locked;
+      });
+    }
   }
+
+  void _retireDraft() {
+    // Its original grip still receives the physical sequence's up/cancel.
+    // Keep that ownership until then, so restoring width cannot introduce a
+    // fresh navigation hover under the still-pressed mouse in this frame.
+    _retiredResizePointer ??= _resizePointer;
+    _resizePointer = null;
+    _dragging = false;
+    _width = PlayerExperiencePreferences.safeSidebarWidth(
+        _preferences.value.sidebarWidth);
+  }
+
+  void _syncInputPolicy({bool notify = false}) {
+    final direction = Directionality.of(context);
+    final visible = TickerMode.valuesOf(context).enabled;
+    final reduced = appToolbarReduceMotion(context, kind: MotionKind.layout);
+    if (_dragging &&
+        (direction != _direction || !visible || (reduced && !_reducedMotion))) {
+      // Revoke the old physical sequence; restoring the surface never revives
+      // its late move/up. Reduced motion still permits a fresh manual resize.
+      if (notify) {
+        setState(_retireDraft);
+      } else {
+        _retireDraft();
+      }
+    }
+    _direction = direction;
+    _treeVisible = visible;
+    _reducedMotion = reduced;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncInputPolicy();
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() => _syncInputPolicy(notify: true);
 
   @override
   void didUpdateWidget(covariant ResizableSideNav oldWidget) {
@@ -333,6 +390,7 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
     final next = widget.preferences ?? AppSettings.instance.experience;
     if (!identical(next, _preferences)) {
       _preferences.removeListener(_preferenceChanged);
+      _retireDraft();
       _attachPreferences();
     }
   }
@@ -346,7 +404,10 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
   }
 
   void _pointerDown(PointerDownEvent event) {
-    if (_preferences.value.sidebarLocked || _resizePointer != null) return;
+    if (_preferences.value.sidebarLocked ||
+        !_treeVisible ||
+        _resizePointer != null ||
+        _retiredResizePointer != null) return;
     _resizePointer = event.pointer;
     _dragStartX = event.position.dx;
     _dragStartWidth = _width;
@@ -359,7 +420,9 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
         _preferences.value.sidebarLocked) {
       return;
     }
-    final next = (_dragStartWidth + event.position.dx - _dragStartX)
+    final delta = event.position.dx - _dragStartX;
+    final next = (_dragStartWidth +
+            (_direction == TextDirection.rtl ? -delta : delta))
         .clamp(
             PlayerExperiencePreferences.minSidebarWidth, _effectiveMax(context))
         .toDouble();
@@ -367,6 +430,10 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
   }
 
   void _pointerEnd(int pointer) {
+    if (_retiredResizePointer == pointer) {
+      setState(() => _retiredResizePointer = null);
+      return;
+    }
     if (!_dragging || pointer != _resizePointer) return;
     _resizePointer = null;
     setState(() => _dragging = false);
@@ -385,6 +452,7 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _preferences.removeListener(_preferenceChanged);
     super.dispose();
   }
@@ -404,10 +472,12 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          SideNav(
-              desktopWidth: effectiveWidth,
-              resizing: _dragging,
-              resourceCoordinator: widget.resourceCoordinator),
+          _RetiredResizeInput(
+              blocked: _retiredResizePointer != null,
+              child: SideNav(
+                  desktopWidth: effectiveWidth,
+                  resizing: _dragging,
+                  resourceCoordinator: widget.resourceCoordinator)),
           PositionedDirectional(
             top: 0,
             bottom: 0,
@@ -455,6 +525,36 @@ class _ResizableSideNavState extends State<ResizableSideNav> {
       ),
     );
   }
+}
+
+// Like PrimaryPointerInput, this affects physical hit testing only. Keyboard
+// focus, navigation semantics and the stable visual subtree remain available.
+class _RetiredResizeInput extends SingleChildRenderObjectWidget {
+  const _RetiredResizeInput({required this.blocked, required super.child});
+  final bool blocked;
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RetiredResizeInputBox(blocked);
+  @override
+  void updateRenderObject(BuildContext context,
+          covariant _RetiredResizeInputBox renderObject) =>
+      renderObject.blocked = blocked;
+}
+
+class _RetiredResizeInputBox extends RenderProxyBox {
+  _RetiredResizeInputBox(this._blocked);
+  bool _blocked;
+  set blocked(bool value) {
+    if (_blocked == value) return;
+    _blocked = value;
+    markNeedsPaint();
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      !_blocked && super.hitTestChildren(result, position: position);
+  @override
+  bool hitTestSelf(Offset position) => _blocked;
 }
 
 class _ContinuousNavigation extends StatelessWidget {
@@ -532,6 +632,11 @@ class _ContinuousNavigation extends StatelessWidget {
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(
                       key: ValueKey('continuous-nav-${destination.desPath}'),
+                      // Restoring a revoked resize can move this row beneath
+                      // the mouse. That fresh hover follows the feedback gate.
+                      hoverDuration: appToolbarReduceMotion(context)
+                          ? Duration.zero
+                          : null,
                       onTap: () => onDestinationSelected(index),
                       customBorder: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(radius)),

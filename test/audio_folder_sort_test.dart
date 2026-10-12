@@ -85,14 +85,14 @@ void main() {
         MaterialApp(home: FoldersPage(dataDirectory: Directory.systemTemp)));
     // The first frame exposes music-folder sorting before the async player-data
     // shortcut arrives; that separate pinned entry is covered by folder UI tests.
-    final page =
-        tester.widget<UniPage<AudioFolder>>(find.byType(UniPage<AudioFolder>));
-    expect(
-        page.sortMethods!.map((method) => method.name), ['路径', '修改日期', '歌曲数量']);
+    final control = tester.widget<SortMethodComboBox<AudioFolder>>(
+        find.byType(SortMethodComboBox<AudioFolder>));
+    expect(control.sortMethods.map((method) => method.name),
+        ['路径', '修改日期', '歌曲数量']);
     final unknown = _folder('D:/Unknown');
     final known = _folder('D:/Known', modified: 100);
     final result = [unknown, known];
-    page.sortMethods![1].method(result, SortOrder.decending);
+    control.sortMethods[1].method(result, SortOrder.decending);
     expect(result, [known, unknown]);
     expect(PlayService.isInitialized, isFalse);
     await tester.pumpAndSettle();

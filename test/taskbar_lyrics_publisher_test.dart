@@ -161,6 +161,54 @@ void main() {
     expect(writes.last['words'], isEmpty);
   });
 
+  test('paused untimed tail publishes a late duration without a new owner',
+      () async {
+    source.lyric = Future.value(PlainLyric('long current lyric'));
+    source.duration = 0;
+    source.position = 1;
+    source.playing = false;
+    start();
+    await _flush();
+    final original = writes.last;
+    final originalFuture = source.lyric;
+    final before = writes.length;
+    expect(original['lineEndMilliseconds'], 0);
+    source.duration = 20;
+    source.changed();
+    await _flush();
+    expect(writes.length, before + 1,
+        reason: 'The real end boundary must update even without clock ticks');
+    expect(writes.last['lineEndMilliseconds'], 20000);
+    expect(writes.last['positionMilliseconds'], 1000);
+    expect(writes.last['sourceIdentity'], original['sourceIdentity']);
+    expect(writes.last['lineIdentity'], original['lineIdentity']);
+    expect(writes.last['timelineRevision'], original['timelineRevision']);
+    expect(source.lyric, same(originalFuture));
+    source.changed();
+    await _flush();
+    expect(writes.length, before + 1,
+        reason: 'An unchanged duration must not restart publication');
+  });
+
+  test('duration changes retain authored word maps and their real end boundary',
+      () async {
+    source.lyric = Future.value(_Lyric([
+      _Line([_Word(0, 1200, 'first'), _Word(1200, 1800, 'second')])
+    ]));
+    source.playing = false;
+    start();
+    await _flush();
+    final before = writes.length;
+    final words = writes.last['words'];
+    source.duration = 20;
+    source.changed();
+    await _flush();
+    expect(writes.length, before,
+        reason: 'Authored timing does not depend on media duration');
+    expect(writes.last['lineEndMilliseconds'], 3000);
+    expect(writes.last['words'], same(words));
+  });
+
   test('late previous future and same-future new generation cannot publish old',
       () async {
     final old = Completer<Lyric?>();

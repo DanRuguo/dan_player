@@ -347,7 +347,14 @@ void main() {
             .widget<TextButton>(find.widgetWithText(TextButton, ui('取消')))
             .onPressed,
         isNull);
-    expect(tester.widget<PopScope>(find.byType(PopScope)).canPop, isFalse);
+    expect(
+        tester
+            .widget<PopScope>(find.descendant(
+                of: find.byType(FontManagementDialog),
+                matching:
+                    find.byWidgetPredicate((widget) => widget is PopScope)))
+            .canPop,
+        isFalse);
     expect(find.byKey(const ValueKey('font-management-error')), findsNothing);
     saved.complete();
     await tester.pumpAndSettle();

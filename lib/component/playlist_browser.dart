@@ -15,6 +15,7 @@ import 'package:dan_player/component/playlist_management_dialog.dart';
 import 'package:dan_player/component/audio_columns.dart';
 import 'dart:async';
 import 'package:dan_player/component/now_playing_bar_metrics.dart';
+import 'package:dan_player/component/multi_selection_lifecycle.dart';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
@@ -121,6 +122,8 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   PlaylistTree? _cachedTree;
   final _selectedEntries = <String>{};
   bool _selecting = false;
+  int _selectionSession = 0;
+  int? _selectionAwaitingSave;
   Set<String> _expandedTree = {};
   String _treeQuery = '';
   late PlaylistViewMode _rootView = widget.initialPlaylist == null
@@ -324,6 +327,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }
 
   void _clearSelection() {
+    if (!mounted || (!_selecting && _selectedEntries.isEmpty)) return;
+    _selectionSession++;
+    _selectionAwaitingSave = null;
     setState(() {
       _selectedEntries.clear();
       _selecting = false;
@@ -334,6 +340,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
   void _startSelection([_PlaylistRowData? row]) {
     _reorderController.cancel();
+    if (!_selecting) _selectionSession++;
     setState(() {
       if (row != null) _selectedEntries.add(row.id);
       _selecting = true;
@@ -367,6 +374,15 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
         if (!_selectedEntries.remove(row.id)) _selectedEntries.add(row.id);
       }
     });
+  }
+
+  VoidCallback? _rangeAction(
+      List<_PlaylistRowData> rows, MultiSelectRange kind) {
+    final scope = _selectionScope(rows).toList(growable: false);
+    final range = visibleSelectionRange(scope, _isSelected, kind);
+    if (range.isEmpty) return null;
+    return () =>
+        setState(() => _selectedEntries.addAll(range.map((row) => row.id)));
   }
 
   List<Audio> _selectedAudios(List<_PlaylistRowData> rows) => [
@@ -461,9 +477,13 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
   Future<void> _retrySave() async {
     if (_busy) return;
+    final selection = _selectionAwaitingSave;
     setState(() => _busy = true);
     try {
       await savePlaylistUiChanges(persist: widget.persist);
+      if (mounted && selection != null && selection == _selectionSession) {
+        _clearSelection();
+      }
     } catch (error) {
       _message(ui("保存仍未成功：{0}", [error]));
     } finally {
@@ -552,6 +572,18 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     }
   }
 
+  Future<void> _playSelected(List<Audio> queue, int session) async {
+    if (widget.onPlay != null) {
+      _play(queue);
+      return;
+    }
+    final committed = await PlayService.instance.playbackService
+        .playQueue(0, List<Audio>.unmodifiable(queue));
+    if (committed && mounted && _selecting && session == _selectionSession) {
+      _clearSelection();
+    }
+  }
+
   Future<void> _remove(_PlaylistRowData row, Playlist? parent) async {
     final folder = row.playlist;
     final descendants = folder == null
@@ -591,6 +623,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
   }
 
   Future<void> _removeSelected(Playlist? parent) async {
+    final session = _selectionSession;
     final nodes = _view == PlaylistViewMode.tree ? _treeNodes(_current) : null;
     final selected = _topSelected(
         nodes == null ? _rows(parent) : nodes.map((n) => n.value.row).toList());
@@ -625,7 +658,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    await _edit(() {
+    final committed = await _edit(() {
       if (nodes == null) {
         _tree.removeEntries(
             parent: parent, entryIds: selected.map((row) => row.id));
@@ -635,8 +668,16 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
           _tree.removeEntry(parent: parents[row.id], entryId: row.id);
         }
       }
-      _clearSelection();
     });
+    if (mounted && session == _selectionSession) {
+      if (committed) {
+        _clearSelection();
+      } else if (playlistUiSaveError.value != null) {
+        // The model keeps failed disk edits. Only a successful retry owned by
+        // this same batch session may subsequently end its selection mode.
+        _selectionAwaitingSave = session;
+      }
+    }
   }
 
   Future<void> _chooseDestination(
@@ -1945,159 +1986,168 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
       ));
 
   Widget _headerActions(Playlist? current, List<_PlaylistRowData> rows,
-          int selectedCount, List<Audio> queue) =>
-      PlaylistToolbar(
-        alignment: current == null ? WrapAlignment.end : WrapAlignment.start,
-        isRoot: current == null,
-        selecting: _selecting,
-        selectedCount: selectedCount,
-        hasItems: rows.isNotEmpty,
-        canPlay: queue.isNotEmpty,
-        editingEnabled: !_editingBlocked,
-        sortMode: _sortMode(current),
-        view: _requestedView ?? _view,
-        onCreate: () => unawaited(_create(current)),
-        onImportM3u: _importM3u,
-        onTrash: widget.tree != null
-            ? null
-            : () async {
-                await showPlaylistTrash(context);
-                if (mounted) setState(() {});
-              },
-        onPresentation: current == null || widget.tree != null
-            ? null
-            : () async {
-                await showPlaylistPresentation(context, current);
-                if (mounted) {
-                  setState(() {
-                    _view = PlaylistViewMode.values
-                            .where(
-                                (v) => v.name == current.presentation['view'])
-                            .firstOrNull ??
-                        widget.initialView ??
-                        PlaylistViewMode.list;
-                  });
-                }
-              },
-        onImportCue: _importCue,
-        onOpenSmartPlaylists: () => unawaited(showSmartPlaylists(context,
-            library: () => smartLibraryCandidates(
-                widget.library ?? AudioLibrary.instance.audioCollection,
-                tree: _tree),
-            libraryChanges: Listenable.merge([
-              AudioLibrary.changes,
-              playlistChanges,
-              playlistUiRevision,
-            ]))),
-        onExportM3u: current == null
-            ? null
-            : () => unawaited(
-                exportM3uPlaylist(context, List.of(queue), name: current.name)),
-        onExportFolder: current == null
-            ? null
-            : () => unawaited(exportMusicFolder(context, List.of(queue),
-                name: current.name, pickDirectory: widget.pickFolderDirectory)),
-        selectionTools: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              FilledButton(
-                  style: appToolbarControlStyle(context, primary: true),
-                  key: const ValueKey('playlist-play-selected'),
-                  onPressed: selectedCount > 0
-                      ? () => _play(_selectedAudios(rows))
-                      : null,
-                  child: AppToolbarLabel(
-                      label: ui('播放所选'), icon: Icons.play_arrow)),
-              AudioSelectionMenu(
-                  selected: _selectedAudios(rows),
-                  onInvert: () => _invertSelection(rows),
-                  onExport: (audios) => exportM3uPlaylist(context, audios,
-                      name: current?.name ?? 'Dan Player')),
-            ]),
-        onAddSongs:
-            current == null ? null : () => unawaited(_addSongs(current)),
-        onStartSelection: _startSelection,
-        onEndSelection: _clearSelection,
-        onSelectAll: () => _selectAll(rows),
-        onRemoveSelected: () => unawaited(_removeSelected(current)),
-        onSortChanged: (mode) => _sort(current, mode),
-        countChildren: _countChildren(current),
-        onToggleCountChildren: _view != PlaylistViewMode.tree &&
-                _view != PlaylistViewMode.grid &&
-                rows.any((row) => row.playlist != null)
-            ? () => _setTilePresentation(
-                current,
-                _tilePresentation(current).copyWith(playlistCountChildren: {
-                  ..._tilePresentation(current).playlistCountChildren,
-                  _view.name: !_countChildren(current),
-                }))
-            : null,
-        autoFill: _tilePresentation(current).autoFill,
-        showSongTitles: _tilePresentation(current).showTitle,
-        onToggleSongTitles: () => _setTilePresentation(
-            current,
-            _tilePresentation(current)
-                .copyWith(showTitle: !_tilePresentation(current).showTitle)),
-        artworkBackground: _tilePresentation(current).artworkBackground,
-        onToggleSongBackground: () => _setTilePresentation(
-            current,
-            _tilePresentation(current).copyWith(
-                artworkBackground:
-                    !_tilePresentation(current).artworkBackground)),
-        onAutoFillChanged: (value) => _setTilePresentation(
-            current, _tilePresentation(current).copyWith(autoFill: value)),
-        onViewChanged: (view) {
-          if ((_requestedView ?? _view) == view) return;
-          setState(() => _requestedView = view);
-          unawaited(_coverTransition.transition(() {
-            if (!mounted) return;
-            _reorderController.cancel();
-            setState(() {
-              _view = view;
-              _requestedView = null;
-              _selectedEntries.clear();
-              _selecting = false;
-            });
-            if (current != null) {
-              unawaited(_edit(
-                  () => current.presentation = {
-                        ...current.presentation,
-                        'view': view.name
-                      },
-                  preserveCoverTransition: true));
-            } else {
-              _rootView = view;
-              widget.onViewChanged?.call(view);
-              if (widget.tree == null) {
-                AppPreference.instance.unifiedPlaylistsLayout = view;
-                unawaited(
-                    AppPreference.instance.save().catchError((Object error) {
-                  _message(ui('无法更改歌单：{0}', [error]));
-                }));
+      int selectedCount, List<Audio> queue) {
+    final session = _selectionSession;
+    return PlaylistToolbar(
+      alignment: current == null ? WrapAlignment.end : WrapAlignment.start,
+      isRoot: current == null,
+      selecting: _selecting,
+      selectedCount: selectedCount,
+      hasItems: rows.isNotEmpty,
+      canPlay: queue.isNotEmpty,
+      editingEnabled: !_editingBlocked,
+      sortMode: _sortMode(current),
+      view: _requestedView ?? _view,
+      onCreate: () => unawaited(_create(current)),
+      onImportM3u: _importM3u,
+      onTrash: widget.tree != null
+          ? null
+          : () async {
+              await showPlaylistTrash(context);
+              if (mounted) setState(() {});
+            },
+      onPresentation: current == null || widget.tree != null
+          ? null
+          : () async {
+              await showPlaylistPresentation(context, current);
+              if (mounted) {
+                setState(() {
+                  _view = PlaylistViewMode.values
+                          .where((v) => v.name == current.presentation['view'])
+                          .firstOrNull ??
+                      widget.initialView ??
+                      PlaylistViewMode.list;
+                });
               }
+            },
+      onImportCue: _importCue,
+      onOpenSmartPlaylists: () => unawaited(showSmartPlaylists(context,
+          library: () => smartLibraryCandidates(
+              widget.library ?? AudioLibrary.instance.audioCollection,
+              tree: _tree),
+          libraryChanges: Listenable.merge([
+            AudioLibrary.changes,
+            playlistChanges,
+            playlistUiRevision,
+          ]))),
+      onExportM3u: current == null
+          ? null
+          : () => unawaited(
+              exportM3uPlaylist(context, List.of(queue), name: current.name)),
+      onExportFolder: current == null
+          ? null
+          : () => unawaited(exportMusicFolder(context, List.of(queue),
+              name: current.name, pickDirectory: widget.pickFolderDirectory)),
+      selectionTools: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            FilledButton(
+                style: appToolbarControlStyle(context, primary: true),
+                key: const ValueKey('playlist-play-selected'),
+                onPressed: selectedCount > 0
+                    ? () =>
+                        unawaited(_playSelected(_selectedAudios(rows), session))
+                    : null,
+                child:
+                    AppToolbarLabel(label: ui('播放所选'), icon: Icons.play_arrow)),
+            AudioSelectionMenu(
+                selected: _selectedAudios(rows),
+                onInvert: () => _invertSelection(rows),
+                onExportCommitted: (audios) => exportM3uPlaylist(
+                    context, audios, name: current?.name ?? 'Dan Player'),
+                onCommitted: _clearSelection,
+                isActionCurrent: () =>
+                    mounted && _selecting && session == _selectionSession,
+                includeRangeActions: true,
+                onSelectBetween: _rangeAction(rows, MultiSelectRange.between),
+                onSelectAbove: _rangeAction(rows, MultiSelectRange.above),
+                onSelectBelow: _rangeAction(rows, MultiSelectRange.below)),
+          ]),
+      onAddSongs: current == null ? null : () => unawaited(_addSongs(current)),
+      onStartSelection: _startSelection,
+      onEndSelection: _clearSelection,
+      onSelectAll: () => _selectAll(rows),
+      onRemoveSelected: () => unawaited(_removeSelected(current)),
+      onSortChanged: (mode) => _sort(current, mode),
+      countChildren: _countChildren(current),
+      onToggleCountChildren: _view != PlaylistViewMode.tree &&
+              _view != PlaylistViewMode.grid &&
+              rows.any((row) => row.playlist != null)
+          ? () => _setTilePresentation(
+              current,
+              _tilePresentation(current).copyWith(playlistCountChildren: {
+                ..._tilePresentation(current).playlistCountChildren,
+                _view.name: !_countChildren(current),
+              }))
+          : null,
+      autoFill: _tilePresentation(current).autoFill,
+      showSongTitles: _tilePresentation(current).showTitle,
+      onToggleSongTitles: () => _setTilePresentation(
+          current,
+          _tilePresentation(current)
+              .copyWith(showTitle: !_tilePresentation(current).showTitle)),
+      artworkBackground: _tilePresentation(current).artworkBackground,
+      onToggleSongBackground: () => _setTilePresentation(
+          current,
+          _tilePresentation(current).copyWith(
+              artworkBackground:
+                  !_tilePresentation(current).artworkBackground)),
+      onAutoFillChanged: (value) => _setTilePresentation(
+          current, _tilePresentation(current).copyWith(autoFill: value)),
+      onViewChanged: (view) {
+        if ((_requestedView ?? _view) == view) return;
+        setState(() => _requestedView = view);
+        unawaited(_coverTransition.transition(() {
+          if (!mounted) return;
+          _reorderController.cancel();
+          setState(() {
+            _view = view;
+            _requestedView = null;
+            _selectedEntries.clear();
+            _selecting = false;
+            _selectionSession++;
+          });
+          if (current != null) {
+            unawaited(_edit(
+                () => current.presentation = {
+                      ...current.presentation,
+                      'view': view.name
+                    },
+                preserveCoverTransition: true));
+          } else {
+            _rootView = view;
+            widget.onViewChanged?.call(view);
+            if (widget.tree == null) {
+              AppPreference.instance.unifiedPlaylistsLayout = view;
+              unawaited(
+                  AppPreference.instance.save().catchError((Object error) {
+                _message(ui('无法更改歌单：{0}', [error]));
+              }));
             }
-            if (current == null &&
-                (view == PlaylistViewMode.list ||
-                    view == PlaylistViewMode.grid)) {
-              widget.onContentViewChanged?.call(view == PlaylistViewMode.list
-                  ? ContentView.list
-                  : ContentView.table);
-            }
-          }));
-        },
-        onRename: current == null ? null : () => unawaited(_rename(current)),
-        onEditSongs:
-            current == null ? null : () => unawaited(_editSongs(current)),
-        onChangeCover:
-            current == null ? null : () => unawaited(_changeCover(current)),
-        onResetCover: current?.imagePath == null
-            ? null
-            : () => unawaited(_edit(() => _tree.setImagePath(current!, null))),
-        onOpenAlbums: current == null ? widget.onOpenAlbums : null,
-        albumCount: widget.albumCount,
-      );
+          }
+          if (current == null &&
+              (view == PlaylistViewMode.list ||
+                  view == PlaylistViewMode.grid)) {
+            widget.onContentViewChanged?.call(view == PlaylistViewMode.list
+                ? ContentView.list
+                : ContentView.table);
+          }
+        }));
+      },
+      onRename: current == null ? null : () => unawaited(_rename(current)),
+      onEditSongs:
+          current == null ? null : () => unawaited(_editSongs(current)),
+      onChangeCover:
+          current == null ? null : () => unawaited(_changeCover(current)),
+      onResetCover: current?.imagePath == null
+          ? null
+          : () => unawaited(_edit(() => _tree.setImagePath(current!, null))),
+      onOpenAlbums: current == null ? widget.onOpenAlbums : null,
+      albumCount: widget.albumCount,
+    );
+  }
 
   Future<void> _retryStorageRead() async {
     if (_busy) return;
@@ -2216,6 +2266,11 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
 
   @override
   Widget build(BuildContext context) {
+    return SelectionPageLifecycle(
+        onLeave: _clearSelection, child: _buildPage(context));
+  }
+
+  Widget _buildPage(BuildContext context) {
     UiLanguageScope.watch(context);
     return ListenableBuilder(
       listenable: _dataChanges,

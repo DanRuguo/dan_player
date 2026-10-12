@@ -1,6 +1,7 @@
 import 'package:dan_player/startup_progress.dart';
 import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_route_transition.dart';
+import 'package:dan_player/component/multi_selection_lifecycle.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -25,7 +26,6 @@ import 'package:dan_player/page/now_playing_audio_detail_page.dart';
 import 'package:dan_player/page/audios_page.dart';
 import 'package:dan_player/page/collection_detail_page.dart';
 import 'package:dan_player/page/collections_page.dart';
-import 'package:dan_player/page/folder_detail_page.dart';
 import 'package:dan_player/page/folders_page.dart';
 import 'package:dan_player/page/now_playing_page/page.dart';
 import 'package:dan_player/page/playlist_detail_page.dart';
@@ -279,10 +279,12 @@ class Entry extends StatelessWidget {
 
   late final GoRouter config = GoRouter(
     navigatorKey: ROUTER_KEY,
+    observers: [MultiSelectionRouteObserver()],
     initialLocation:
         welcome ? app_paths.WELCOMING_PAGE : app_paths.UPDATING_DIALOG,
     routes: [
       ShellRoute(
+        observers: [MultiSelectionRouteObserver()],
         pageBuilder: (context, state, page) => AppShellPage(
           key: state.pageKey,
           child: AppShell(page: page),
@@ -443,18 +445,24 @@ class Entry extends StatelessWidget {
             path: app_paths.FOLDERS_PAGE,
             pageBuilder: (context, state) => SlideTransitionPage(
               key: state.pageKey,
-              child: const FoldersPage(),
+              child: FoldersPage(
+                initialFolderPath: state.uri.queryParameters['folder'],
+              ),
             ),
             routes: [
-              /// folder detail page
+              // Old folder links now open the same in-place tree.
               GoRoute(
                 path: "detail",
-                pageBuilder: (context, state) {
-                  final folder = state.extra as AudioFolder;
-                  return SlideTransitionPage(
-                    key: state.pageKey,
-                    child: FolderDetailPage(folder: folder),
-                  );
+                redirect: (context, state) {
+                  final extra = state.extra;
+                  final folderPath = extra is AudioFolder
+                      ? extra.path
+                      : state.uri.queryParameters['folder'];
+                  return Uri(
+                    path: app_paths.FOLDERS_PAGE,
+                    queryParameters:
+                        folderPath == null ? null : {'folder': folderPath},
+                  ).toString();
                 },
               ),
             ],

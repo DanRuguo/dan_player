@@ -14,6 +14,7 @@ class TaskbarLyricAppearance {
     required this.fontFamily,
     required this.fontPath,
     this.fontPolicy,
+    this.lyricLetterSpacing = 0,
     this.animate = true,
     this.layoutAnimate = true,
     this.placement = 'auto',
@@ -29,6 +30,7 @@ class TaskbarLyricAppearance {
   final String fontFamily;
   final String fontPath;
   final AppFontPolicy? fontPolicy;
+  final double lyricLetterSpacing;
   final bool animate;
   final bool layoutAnimate;
   final String placement;
@@ -201,6 +203,18 @@ class TaskbarLyricsPublisher {
               'lineEndMilliseconds': 0,
             }
           : _projectLine(lines!, index);
+    } else if (index >= 0 && index == lines!.length - 1) {
+      final line = lines[index];
+      if (line is! SyncLyricLine &&
+          (line is! LrcLine || line.length <= Duration.zero)) {
+        // A decoder can learn the media duration after this same lyric has
+        // already resolved. Only an untimed tail depends on that duration;
+        // retain the authored words, document identity and clock ownership.
+        final end = _lineEnd(lines, index);
+        if (_line['lineEndMilliseconds'] != end) {
+          _line = {..._line, 'lineEndMilliseconds': end};
+        }
+      }
     }
     final intent = _source.intent;
     final nextTrackTitle = _source.nextTrackTitle;
@@ -219,6 +233,7 @@ class TaskbarLyricsPublisher {
       'accent': style.accent,
       'fontFamily': style.fontFamily,
       'fontPath': style.fontPath,
+      'lyricLetterSpacing': style.lyricLetterSpacing,
       if (_fontPolicyJson != null) 'fontPolicy': _fontPolicyJson!,
       'animate': style.animate,
       'animateLayout': style.layoutAnimate,

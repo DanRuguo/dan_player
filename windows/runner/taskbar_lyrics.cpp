@@ -221,6 +221,7 @@ struct TaskbarLyrics::Impl {
   std::vector<TaskbarLyricWord> words;
   double anchor_position = 0, playback_rate = 1, line_start = 0, line_end = 0;
   double correction = 0;
+  double lyric_letter_spacing = 0;
   ULONGLONG anchor_tick = 0;
   std::int64_t timeline_revision = 0;
   taskbar_lyrics::TextMask current_mask, next_mask, old_mask;
@@ -659,11 +660,11 @@ struct TaskbarLyrics::Impl {
       current=next_mask;
       taskbar_lyrics::MapWords(current,text,words);
     } else current=vertical ? taskbar_lyrics::RasterWrappedText(measuring,fonts,text,measuring_width,target_row_height,
-        dpi,words,Position(),line_start,line_end) : taskbar_lyrics::RasterText(measuring,fonts,text,measuring_width,target_row_height,
-        dpi,target_row_height<measuring_height || animate,words,16,false);
+        dpi,words,Position(),line_start,line_end,16,lyric_letter_spacing) : taskbar_lyrics::RasterText(measuring,fonts,text,measuring_width,target_row_height,
+        dpi,target_row_height<measuring_height || animate,words,16,false,std::nullopt,lyric_letter_spacing);
     auto next=target_row_height<measuring_height ? (vertical ?
-        taskbar_lyrics::RasterWrappedText(measuring,fonts,next_text,measuring_width,target_row_height,dpi,{},0,0,0) :
-        taskbar_lyrics::RasterText(measuring,fonts,next_text,measuring_width,target_row_height,dpi,true,{},16,false)) : taskbar_lyrics::TextMask{};
+        taskbar_lyrics::RasterWrappedText(measuring,fonts,next_text,measuring_width,target_row_height,dpi,{},0,0,0,16,lyric_letter_spacing) :
+        taskbar_lyrics::RasterText(measuring,fonts,next_text,measuring_width,target_row_height,dpi,true,{},16,false,std::nullopt,lyric_letter_spacing)) : taskbar_lyrics::TextMask{};
     DeleteDC(measuring);
     if (!current.shaping && current.pixels.empty()) return false;
     const int natural_width=current.long_text || next.long_text ? measuring_width :
@@ -878,7 +879,8 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
                        std::wstring placement, std::wstring next_track_text,
                        bool show_pause_indicator, bool stroke_enabled, unsigned area_selection, bool paused,
                        std::wstring color_scheme,bool show_next_button,bool next_button_enabled,bool animate_layout,bool show_next_lyric,bool playback_button_enabled,
-                       std::optional<desktop_integration::NativeFontPolicy> font_policy) {
+                       std::optional<desktop_integration::NativeFontPolicy> font_policy,
+                       double lyric_letter_spacing) {
   if (!enabled || text.empty()) { Close(); return true; }
   const auto parsed_placement = taskbar_lyrics::ParsePlacement(placement);
   const auto parsed_color=taskbar_lyrics::ParseColorScheme(color_scheme);
@@ -890,7 +892,8 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
   }
   auto& self = *impl_;
   if (!std::isfinite(position) || position < 0 || !std::isfinite(rate) || rate <= 0 || rate > 8 ||
-      !std::isfinite(line_start) || !std::isfinite(line_end)) return false;
+      !std::isfinite(line_start) || !std::isfinite(line_end) ||
+      !std::isfinite(lyric_letter_spacing) || lyric_letter_spacing < 0 || lyric_letter_spacing > 12) return false;
   const bool starting = !self.enabled;
   const bool source_changed = source != self.source_identity;
   const bool line_changed = line != self.line_identity || text != self.text;
@@ -910,13 +913,14 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
   }
   if(family_changed) self.metadata_read_offset=0;
   const bool row_mode_changed=self.show_next_lyric!=show_next_lyric;
+  const bool spacing_changed=self.lyric_letter_spacing!=lyric_letter_spacing;
   if((discontinuity && !transport_switch) || line_changed) {
     self.fallback_read_offset=0; self.scroll_elapsed=0;
     self.scrolling=false; self.scroll_start=0;
   }
-  if (row_mode_changed && animate_layout && !discontinuity && !family_changed && self.enabled && self.pixels &&
+  if ((row_mode_changed || spacing_changed) && animate_layout && !discontinuity && !family_changed && self.enabled && self.pixels &&
       IsWindowVisible(self.surface) && static_cast<size_t>(self.width)*self.height<=1024*1024) self.BeginLayout();
-  self.reuse_next = line_changed && !family_changed && self.next_text == text &&
+  self.reuse_next = line_changed && !family_changed && !spacing_changed && self.next_text == text &&
       !self.next_mask.pixels.empty() && text.size() <= 2048;
   if (line_changed && !discontinuity && !family_changed && self.animate && animate && playing && self.row_height) {
     self.old_mask = self.current_mask;
@@ -931,7 +935,7 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
       !std::equal(words.begin(), words.end(), self.words.begin(), self.words.end(), [](const auto& a, const auto& b) {
         return a.start == b.start && a.length == b.length && a.content == b.content;
       });
-  self.invalid |= line_changed || self.animate != animate || family_changed || next_text != self.next_text ||
+  self.invalid |= line_changed || self.animate != animate || family_changed || spacing_changed || next_text != self.next_text ||
       (words_changed && (text.size() > 2048 || self.vertical)) ||
       show_pause_indicator != self.show_pause_indicator || next_track_text.empty() != self.next_track_text.empty() || show_next_button!=self.show_next_button || row_mode_changed;
   self.metadata_invalid |= next_track_text != self.next_track_text || family_changed || show_pause_indicator != self.show_pause_indicator;
@@ -950,6 +954,7 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
   self.playback_button_enabled=playback_button_enabled;
   self.animate_layout=animate_layout;
   self.show_next_lyric=show_next_lyric;
+  self.lyric_letter_spacing=lyric_letter_spacing;
   if (!animate_layout || discontinuity || family_changed) self.FinishLayout();
   if (!show_next_button) self.next_button.Close();
   if(!show_pause_indicator) self.playback_button.Close();

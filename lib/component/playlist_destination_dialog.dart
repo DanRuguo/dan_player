@@ -533,14 +533,14 @@ class _EmptyPlaylistDestination extends StatelessWidget {
 
 /// Shared by local/online song menus and multi-select; only tree descriptors
 /// are copied. Remote streams are not downloaded and source files are untouched.
-Future<void> showAddAudiosToPlaylistDialog(
+Future<bool> showAddAudiosToPlaylistDialog(
   BuildContext context,
   Iterable<Audio> audios, {
   PlaylistTree? tree,
   Future<void> Function()? persist,
 }) async {
   final tracks = audios.toList(growable: false);
-  if (tracks.isEmpty) return;
+  if (tracks.isEmpty) return false;
   final targetTree = tree ?? playlistTree;
   if (identical(targetTree.roots, PLAYLISTS) && playlistsReadBlocked) {
     showAppNotice(
@@ -548,7 +548,7 @@ Future<void> showAddAudiosToPlaylistDialog(
       context: context,
       kind: AppNoticeKind.warning,
     );
-    return;
+    return false;
   }
   final destination = await showPlaylistDestinationDialog(
     context,
@@ -560,32 +560,40 @@ Future<void> showAddAudiosToPlaylistDialog(
     persist: persist,
   );
   final playlist = destination?.playlist;
-  if (playlist == null || !context.mounted) return;
+  if (playlist == null || !context.mounted) return false;
   var mutated = false;
   try {
     final added = targetTree.addAudios(playlist, tracks).length;
     if (added == 0) {
+      // A failed previous write leaves the addition in memory. Retrying the
+      // same selection must persist it before reporting a completed action.
+      if (playlistsHaveUnsavedChanges || playlistUiSaveError.value != null) {
+        await savePlaylistUiChanges(persist: persist);
+      }
+      if (!context.mounted) return true;
       showAppNotice(
         ui("所选歌曲已在“{0}”中", [playlist.name]),
         context: context,
         kind: AppNoticeKind.success,
       );
-      return;
+      return true;
     }
     mutated = true;
     await savePlaylistUiChanges(persist: persist);
-    if (!context.mounted) return;
+    if (!context.mounted) return true;
     showAppNotice(
       ui("已将 {0} 首歌曲加入“{1}”", [added, playlist.name]),
       context: context,
       kind: AppNoticeKind.success,
     );
+    return true;
   } catch (error) {
-    if (!context.mounted) return;
+    if (!context.mounted) return false;
     showAppNotice(
       mutated ? ui("更改已保留在当前会话，但保存失败：{0}", [error]) : ui("加入歌单失败：{0}", [error]),
       context: context,
       kind: AppNoticeKind.error,
     );
+    return false;
   }
 }

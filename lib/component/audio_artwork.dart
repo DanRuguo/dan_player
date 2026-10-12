@@ -22,6 +22,7 @@ class AudioArtwork extends StatefulWidget {
     this.revision,
     this.loadArtwork,
     this.retainWhileLoading = false,
+    this.animateFirstFrame = false,
   });
 
   final Audio audio;
@@ -37,6 +38,10 @@ class AudioArtwork extends StatefulWidget {
   /// Playback surfaces hand off between tracks; unrelated library rows must
   /// instead show their own placeholder when their source changes.
   final bool retainWhileLoading;
+
+  /// Newly expanded content can reveal a late first decoded cover with the
+  /// existing finite handoff, after its containing item's entrance finishes.
+  final bool animateFirstFrame;
 
   @override
   State<AudioArtwork> createState() => _AudioArtworkState();
@@ -123,6 +128,7 @@ class _AudioArtworkState extends State<AudioArtwork> {
           loadArtwork: () => _future!,
           placeholder: widget.placeholder,
           loading: widget.loading,
+          animateFirstFrame: widget.animateFirstFrame,
           imageBuilder: (provider) => Image(
             image: provider,
             fit: BoxFit.cover,

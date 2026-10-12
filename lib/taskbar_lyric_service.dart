@@ -48,12 +48,29 @@ class _PlayerTaskbarLyricSource extends TaskbarLyricSource {
   }
   final PlaybackService _playback;
   final LyricService _lyrics;
+  Lyric? _presentation;
+  Future<Lyric?>? _presentationFuture;
   late final StreamSubscription<double> _positions;
   late final StreamSubscription<PlayerState> _states;
   late final StreamSubscription<int> _lines;
   void _changed() => notifyListeners();
   @override
-  Future<Lyric?> get lyric => _lyrics.currLyricFuture;
+  Future<Lyric?> get lyric {
+    final presentation = _lyrics.currentPresentation;
+    if (presentation == null) {
+      _presentation = null;
+      _presentationFuture = null;
+      return _lyrics.currLyricFuture;
+    }
+    // Publisher ownership compares future identity. Reuse one resolved future
+    // until the available document changes instead of renewing it per tick.
+    if (!identical(presentation, _presentation)) {
+      _presentation = presentation;
+      _presentationFuture = Future.value(presentation);
+    }
+    return _presentationFuture!;
+  }
+
   @override
   int get generation => _lyrics.resolutionGeneration;
   @override
@@ -310,6 +327,7 @@ class TaskbarLyricService with WidgetsBindingObserver {
       fontFamily: style.fontFamily,
       fontPath: style.fontPath,
       fontPolicy: style.fontPolicy,
+      lyricLetterSpacing: style.lyricLetterSpacing,
       placement: style.placement,
       areaSelection: style.areaSelection,
       showNextTrack: style.showNextTrack,
@@ -343,6 +361,7 @@ class TaskbarLyricService with WidgetsBindingObserver {
       'accent': style.accent,
       'fontFamily': style.fontFamily,
       'fontPath': style.fontPath,
+      'lyricLetterSpacing': style.lyricLetterSpacing,
       if (style.fontPolicy != null) 'fontPolicy': style.fontPolicy!.toJson(),
       'animate': style.animate,
       'animateLayout': style.layoutAnimate,

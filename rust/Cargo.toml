@@ -31,6 +31,9 @@ ttf-parser = "0.24.1"
 image = "0.25.2"
 rayon = "1.10"
 sha2 = "0.10.9"
+flate2 = "1"
+lindera = { version = "=6.2.0", default-features = false }
+lindera-dictionary = { version = "=6.2.0", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

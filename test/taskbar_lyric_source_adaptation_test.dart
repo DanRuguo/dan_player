@@ -97,6 +97,8 @@ class _Playback extends ChangeNotifier implements PlaybackService {
 class _Lyrics extends ChangeNotifier implements LyricService {
   final lines = StreamController<int>.broadcast();
   @override
+  Lyric? get currentPresentation => null;
+  @override
   Future<Lyric?> currLyricFuture = Future.value(PlainLyric('a lyric'));
   @override
   int resolutionGeneration = 1;
