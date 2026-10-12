@@ -165,7 +165,9 @@ $totalBytes = [uint64]0
 foreach ($file in Get-ChildItem -LiteralPath $PayloadDirectory -Recurse -File -Force | Sort-Object FullName) {
     $relative = $file.FullName.Substring($payloadPrefix.Length).Replace('\', '/')
     if (Test-OptionalPlayerComponentPath $relative) { throw 'Slim installer contains an optional component.' }
-    $entries.Add([pscustomobject]@{ Relative=$relative; Source=$file.FullName; Hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); Length=$file.Length })
+    $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $entrySource = Get-InstallerPayloadSource -RelativePath $relative -SourcePath $file.FullName -Sha256 $hash -Bytes $file.Length -InstallerFont $installerFont
+    $entries.Add([pscustomobject]@{ Relative=$relative; Source=$entrySource; Hash=$hash; Length=$file.Length })
     $totalBytes += $file.Length
 }
 $totalBytes += (Get-Item -LiteralPath $cleanupFile).Length

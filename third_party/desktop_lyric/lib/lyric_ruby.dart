@@ -100,8 +100,14 @@ class _RubyShape {
 /// A shaped reading and the first actual source fragment that owns it.
 class LyricRubyGlyph {
   LyricRubyGlyph(this.span, this.painter, this.source, this.offset,
-      this.lineWidth, this.sourceInkTop, this.row);
+      this.lineWidth, this.sourceInkTop, this.row,
+      {int? sourceEnd})
+      : sourceStart = span.start,
+        sourceEnd = sourceEnd ?? span.end;
   final LyricRubySpan span;
+
+  /// UTF-16 bounds of the native first fragment carrying the full reading.
+  final int sourceStart, sourceEnd;
   final TextPainter painter;
   final Rect source;
   final Offset offset;
@@ -164,6 +170,7 @@ class LyricRubyLayout {
       }
       Rect? source;
       var row = 0;
+      var sourceEnd = span.end;
       if (vertical) {
         for (final unit
             in verticalUnits ?? const <({int start, int end, Rect bounds})>[]) {
@@ -175,9 +182,9 @@ class LyricRubyLayout {
       } else {
         row = _rowForOffset(span.start);
         final range = _rowRanges[row];
-        final boxes = primary!.getBoxesForSelection(TextSelection(
-            baseOffset: span.start,
-            extentOffset: math.min(span.end, range.end)));
+        sourceEnd = math.min(span.end, range.end);
+        final boxes = primary!.getBoxesForSelection(
+            TextSelection(baseOffset: span.start, extentOffset: sourceEnd));
         if (boxes.isEmpty) continue;
         for (final box in boxes) {
           source = source == null
@@ -216,7 +223,8 @@ class LyricRubyLayout {
       extent = math.max(
           extent, vertical ? painter.width + gap : math.max(0.0, -offset.dy));
       glyphs.add(LyricRubyGlyph(
-          span, painter, sourceBounds, offset, lineWidth, sourceTop, row));
+          span, painter, sourceBounds, offset, lineWidth, sourceTop, row,
+          sourceEnd: sourceEnd));
     }
     if (!vertical) {
       var leading = 0.0;
@@ -344,7 +352,9 @@ class LyricRubyLayout {
               (target.lineWidth - previous.lineWidth) * progress,
           previous.sourceInkTop +
               (target.sourceInkTop - previous.sourceInkTop) * progress,
-          target.row));
+          target.row,
+          sourceEnd:
+              retainSourcePainter ? previous.sourceEnd : target.sourceEnd));
     }
     _lines = to._lines;
     _rowRanges = to._rowRanges;
@@ -371,22 +381,36 @@ class LyricRubyLayout {
       double visibility = 1}) {
     if (visibility <= 0) return;
     if (glyphs.isEmpty) return;
+    final offsets = displacement == null
+        ? null
+        : [
+            for (final glyph in glyphs)
+              glyph.offset +
+                  Offset(0, leadingForGlyph(glyph) * visibility) +
+                  displacement(glyph)
+          ];
+    var coverage = paintBounds;
+    if (offsets != null) {
+      for (var index = 0; index < glyphs.length; index++) {
+        coverage = coverage
+            .expandToInclude(offsets[index] & glyphs[index].painter.size);
+      }
+    }
     // Tint one small cached reading layer, rather than rebuilding paragraphs
     // as the lyric's active/theme colour changes on presentation frames.
     canvas.saveLayer(
-        paintBounds.inflate(extent * 2 + 24),
+        coverage.inflate(extent * 2 + 24),
         Paint()
           ..colorFilter = ColorFilter.mode(
               (tint ?? color).withValues(alpha: (tint ?? color).a * visibility),
               BlendMode.srcIn));
-    for (final glyph in glyphs) {
+    for (final (index, glyph) in glyphs.indexed) {
       canvas.save();
       transform?.call(canvas, glyph);
       glyph.painter.paint(
           canvas,
-          glyph.offset +
-              Offset(0, leadingForGlyph(glyph) * visibility) +
-              (displacement?.call(glyph) ?? Offset.zero));
+          offsets?[index] ??
+              glyph.offset + Offset(0, leadingForGlyph(glyph) * visibility));
       canvas.restore();
     }
     canvas.restore();

@@ -198,7 +198,6 @@ void main() {
         }
         final shared = tester.widget<LyricLetterSpacingControl>(spacing);
         expect(shared.heading, isA<SettingsHeader>());
-        expect(shared.alignResetToEnd, isTrue);
         expect(shared.previewBuilder, isNotNull);
         final preview = tester.widget<LyricLetterSpacingPreview>(
             find.byType(LyricLetterSpacingPreview));
@@ -231,24 +230,7 @@ void main() {
         expect(_baseline(value), closeTo(_baseline(title), .01));
         final reset =
             find.byKey(const ValueKey('settings-lyric-letter-spacing-reset'));
-        final resetRect = tester.getRect(reset);
-        expect(resetRect.height, greaterThanOrEqualTo(44));
-        expect(resetRect.right,
-            closeTo(tester.getRect(lyricSurface).right - 16, .01));
-        final resetText =
-            find.descendant(of: reset, matching: find.byType(Text));
-        expect(tester.widget<Text>(resetText).textAlign, TextAlign.end);
-        final resetParagraph = find
-            .descendant(of: resetText, matching: find.byType(RichText))
-            .evaluate()
-            .single
-            .renderObject! as RenderParagraph;
-        for (final line in resetParagraph.getBoxesForSelection(TextSelection(
-            baseOffset: 0,
-            extentOffset: resetParagraph.text.toPlainText().length))) {
-          expect(line.right, closeTo(resetParagraph.size.width, .5),
-              reason: 'Every wrapped reset-label line follows the end edge.');
-        }
+        expect(reset, findsNothing);
         _expectTextPaint(tester, lyricSurface);
         for (final heading in find
             .descendant(

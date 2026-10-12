@@ -93,6 +93,9 @@ class DesktopLyricAppearanceOptions extends StatelessWidget {
               value: appearance.lyricLetterSpacing,
               primary: primary,
               foreground: foreground,
+              valueStyle: _sliderValueStyle(foreground),
+              sliderTheme: _sliderTheme(primary),
+              sliderPadding: _sliderPadding,
               onChanged: (value) =>
                   _change(appearance.copyWith(lyricLetterSpacing: value))),
           const SizedBox(height: 8),
@@ -181,6 +184,26 @@ class DesktopLyricAppearanceOptions extends StatelessWidget {
 String _colorLabel(int color) =>
     '#${color.toRadixString(16).padLeft(8, '0').toUpperCase()}';
 
+const _sliderPadding = EdgeInsets.symmetric(horizontal: 2);
+
+TextStyle _sliderValueStyle(Color foreground) =>
+    TextStyle(color: foreground.withValues(alpha: .72));
+
+SliderThemeData _sliderTheme(Color primary) => SliderThemeData(
+      thumbColor: primary,
+      overlayColor: primary.withValues(alpha: .08),
+      activeTrackColor: primary,
+      inactiveTrackColor: primary.withValues(alpha: .15),
+      valueIndicatorColor: primary,
+      valueIndicatorTextStyle: TextStyle(
+          color:
+              ThemeData.estimateBrightnessForColor(primary) == Brightness.dark
+                  ? Colors.white
+                  : Colors.black),
+      overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
+      trackHeight: 4,
+    );
+
 class _ValueSlider extends StatelessWidget {
   const _ValueSlider(
       {required this.id,
@@ -212,33 +235,19 @@ class _ValueSlider extends StatelessWidget {
         Expanded(child: Text(label, style: TextStyle(color: foreground))),
         const SizedBox(width: 8),
         Text(valueLabel,
-            key: ValueKey('$id-value'),
-            style: TextStyle(color: foreground.withValues(alpha: .72))),
+            key: ValueKey('$id-value'), style: _sliderValueStyle(foreground)),
       ]),
       Semantics(
         label: label,
         child: SliderTheme(
-          data: SliderThemeData(
-            thumbColor: primary,
-            overlayColor: primary.withValues(alpha: .08),
-            activeTrackColor: primary,
-            inactiveTrackColor: primary.withValues(alpha: .15),
-            valueIndicatorColor: primary,
-            valueIndicatorTextStyle: TextStyle(
-                color: ThemeData.estimateBrightnessForColor(primary) ==
-                        Brightness.dark
-                    ? Colors.white
-                    : Colors.black),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
-            trackHeight: 4,
-          ),
+          data: _sliderTheme(primary),
           child: Slider(
             key: ValueKey(id),
             min: min,
             max: max,
             divisions: divisions,
             label: valueLabel,
-            padding: const EdgeInsets.symmetric(horizontal: 2),
+            padding: _sliderPadding,
             value: value,
             onChanged: onChanged,
           ),

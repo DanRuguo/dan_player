@@ -83,7 +83,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(commits, hasLength(1));
     expect(value.value, commits.single);
-    await tester.tap(find.byKey(const ValueKey('fixture-spacing-reset')));
+    expect(find.byKey(const ValueKey('fixture-spacing-reset')), findsNothing);
+    final sliderRect = tester.getRect(find.byKey(_slider));
+    final committed = value.value;
+    final zero = await tester.startGesture(sliderRect.center);
+    await zero.moveTo(Offset(sliderRect.left, sliderRect.center.dy));
+    await tester.pump();
+    expect(value.value, committed);
+    expect(commits, hasLength(1));
+    await zero.up();
     await tester.pumpAndSettle();
     expect(value.value, 0);
     expect(commits, hasLength(2));
@@ -248,12 +256,15 @@ void main() {
               boundary: boundary,
               textScale: scale));
           await tester.pumpAndSettle();
-          final reset =
-              find.byKey(const ValueKey('settings-lyric-letter-spacing-reset'));
-          await tester.ensureVisible(reset);
+          final slider = find
+              .byKey(const ValueKey('settings-lyric-letter-spacing-slider'));
+          await tester.ensureVisible(slider);
           await tester.pumpAndSettle();
-          expect(tester.getRect(reset).left, greaterThanOrEqualTo(0));
-          expect(tester.getRect(reset).right, lessThanOrEqualTo(width));
+          expect(tester.getRect(slider).left, greaterThanOrEqualTo(0));
+          expect(tester.getRect(slider).right, lessThanOrEqualTo(width));
+          expect(
+              find.byKey(const ValueKey('settings-lyric-letter-spacing-reset')),
+              findsNothing);
           expect(find.text(ui('歌词字间距')), findsOneWidget);
           await capturePlaylistFeature(tester, boundary,
               'lyric-spacing-${language.code}-${width.toInt()}-${scale.toInt()}');
@@ -439,9 +450,8 @@ void main() {
       await tester.pumpAndSettle();
       final reset =
           find.byKey(const ValueKey('lyric-font-letter-spacing-reset'));
-      await tester.ensureVisible(reset);
-      await tester.pumpAndSettle();
-      for (final key in ['歌词字间距', '恢复默认字间距']) {
+      expect(reset, findsNothing);
+      for (final key in ['歌词字间距']) {
         final finder = find.text(ui(key));
         final text = tester.widget<Text>(finder);
         expect(text.maxLines, isNull);
@@ -462,7 +472,7 @@ void main() {
           expect(right, lessThanOrEqualTo(contentBounds.right));
         }
       }
-      expect(tester.getRect(reset).right, lessThanOrEqualTo(360));
+      expect(tester.getRect(slider).right, lessThanOrEqualTo(360));
       await capturePlaylistFeature(
           tester, boundary, 'font-spacing-${language.code}-360-2');
       final exact = find.byKey(const ValueKey('lyric-font-size-exact'));

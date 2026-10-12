@@ -153,7 +153,6 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
                               title: ui('歌词字间距'),
                               icon: Symbols.format_letter_spacing,
                               subtitle: ui('增加主歌词、桌面歌词和任务栏歌词的自然字距；0 保持原样。')),
-                          alignResetToEnd: true,
                           previewBuilder: (context, value) =>
                               LyricLetterSpacingPreview(
                                   value: value,

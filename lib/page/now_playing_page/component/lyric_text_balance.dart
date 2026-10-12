@@ -661,7 +661,7 @@ class PlainLyricWordFollowPainter extends CustomPainter
         displacement: (glyph) {
       final morph = glyphMorph;
       final bounds = morph?.geometry
-          .bounds(glyph.span.start, glyph.span.end, morph.progress);
+          .bounds(glyph.sourceStart, glyph.sourceEnd, morph.progress);
       return Offset(
         bounds == null && alignmentX == null
             ? 0

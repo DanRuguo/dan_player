@@ -1272,26 +1272,33 @@ class _TimedLyricLayout {
       },
       partsFor: (glyph) => [
         for (final (index, word) in words.indexed)
-          for (final box in word.boxes)
-            if (box.toRect().overlaps(glyph.source))
-              (
-                index: index,
-                bounds: box.toRect().intersect(glyph.source),
-                phase: () {
-                  var phase = 0.0;
-                  var count = 0;
-                  for (final slot in followSlots) {
-                    if (!slot.boxes.any(
-                      (piece) => piece.toRect().overlaps(box.toRect()),
-                    )) {
-                      continue;
+          if (word.sourceEnd > glyph.sourceStart &&
+              word.sourceStart < glyph.sourceEnd)
+            // Ruby and morph cells use native tight selection bounds. Word
+            // emphasis keeps its separate includeLineSpacingMiddle pivot.
+            for (final box in base.getBoxesForSelection(TextSelection(
+              baseOffset: math.max(word.sourceStart, glyph.sourceStart),
+              extentOffset: math.min(word.sourceEnd, glyph.sourceEnd),
+            )))
+              if (box.toRect().overlaps(glyph.source))
+                (
+                  index: index,
+                  bounds: box.toRect().intersect(glyph.source),
+                  phase: () {
+                    var phase = 0.0;
+                    var count = 0;
+                    for (final slot in followSlots) {
+                      if (!slot.boxes.any(
+                        (piece) => piece.toRect().overlaps(box.toRect()),
+                      )) {
+                        continue;
+                      }
+                      phase += slot.phase;
+                      count++;
                     }
-                    phase += slot.phase;
-                    count++;
-                  }
-                  return count == 0 ? 1.0 : phase / count;
-                }(),
-              ),
+                    return count == 0 ? 1.0 : phase / count;
+                  }(),
+                ),
       ],
     );
   }
@@ -1780,8 +1787,8 @@ class LyricWordHighlightPainter extends CustomPainter
     final morph = glyphMorph;
     if (morph != null && glyph.motionParts.isEmpty) {
       presented = morph.geometry.bounds(
-        glyph.span.start,
-        glyph.span.end,
+        glyph.sourceStart,
+        glyph.sourceEnd,
         morph.progress,
       );
     }
@@ -1789,18 +1796,30 @@ class LyricWordHighlightPainter extends CustomPainter
       var bounds = morph == null
           ? part.bounds
           : morph.geometry.bounds(
-                _layout.words[part.index].sourceStart,
-                _layout.words[part.index].sourceEnd,
+                math.max(
+                    _layout.words[part.index].sourceStart, glyph.sourceStart),
+                math.min(_layout.words[part.index].sourceEnd, glyph.sourceEnd),
                 morph.progress,
               ) ??
               part.bounds;
       final pose = poses[part.index];
       if (pose != null) {
-        final pivotY = _layout.words[part.index].bounds.center.dy;
+        final word = _layout.words[part.index];
+        final wholeWord = morph?.geometry
+                .bounds(word.sourceStart, word.sourceEnd, morph.progress) ??
+            word.bounds;
+        // The attachment uses only its native fragment, while emphasis uses
+        // the same current whole-word pivot and edge anchor as the primary.
+        final anchorX = pose.anchorX == word.bounds.left
+            ? wholeWord.left
+            : pose.anchorX == word.bounds.right
+                ? wholeWord.right
+                : wholeWord.center.dx;
+        final pivotY = wholeWord.center.dy;
         bounds = Rect.fromLTRB(
-          pose.anchorX + (bounds.left - pose.anchorX) * pose.scale,
+          anchorX + (bounds.left - anchorX) * pose.scale,
           pivotY - pose.lift + (bounds.top - pivotY) * pose.scaleY,
-          pose.anchorX + (bounds.right - pose.anchorX) * pose.scale,
+          anchorX + (bounds.right - anchorX) * pose.scale,
           pivotY - pose.lift + (bounds.bottom - pivotY) * pose.scaleY,
         );
       }

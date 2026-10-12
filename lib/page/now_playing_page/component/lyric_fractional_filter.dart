@@ -178,12 +178,7 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   }
 
   final _fallbackFilter = LayerHandle<ImageFilterLayer>();
-  final _gaussianFilter = LayerHandle<ImageFilterLayer>();
 
-  // Retain the Gaussian boundary through zero, as ImageFiltered does, so
-  // hover changes only the convolution of an unchanged clear sampler.
-  @override
-  bool get alwaysNeedsCompositing => child != null && _enabled;
   set sigma(double value) {
     if (_sigma == value) return;
     _sigma = value;
@@ -221,13 +216,11 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   void paint(PaintingContext context, Offset offset) {
     if (child == null || !_enabled) {
       _fallbackFilter.layer = null;
-      _gaussianFilter.layer = null;
       super.paint(context, offset);
       return;
     }
     final sigma = _sigma < .1 ? .1 : _sigma;
     if (child!.needsCompositing) {
-      _gaussianFilter.layer = null;
       // Interlude opacity can require its own layer. Its few geometric dots
       // need no high-resolution glyph sampling; never span canvas state across
       // independently recorded child layers.
@@ -250,33 +243,27 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
       0,
       lyricFilterRemainder(getTransformTo(null), _dpr).dy,
     );
-    final gaussian = _gaussianFilter.layer ??= ImageFilterLayer();
-    gaussian
-      ..imageFilter = ui.ImageFilter.blur(
-          sigmaX: _sigma == 0 ? 0 : sigma * 1.5,
-          sigmaY: _sigma == 0 ? 0 : sigma * 1.5)
-      ..offset = offset - remainder;
-    // Finish physical alignment at the outer layer. The sampler restores
-    // this remainder exactly once; its source stays in local coordinates.
-    context.pushLayer(gaussian, _paintSampler, remainder,
-        childPaintBounds: paintBounds.shift(remainder));
-  }
-
-  void _paintSampler(PaintingContext context, Offset remainder) {
+    final anchor = offset - remainder;
     final samplingScale = _samplingScale;
     final sampling = ui.ImageFilter.matrix(
         (Matrix4.translationValues(remainder.dx, remainder.dy, 0)
               ..scaleByDouble(1 / samplingScale, 1 / samplingScale, 1, 1))
             .storage,
         filterQuality: ui.FilterQuality.medium);
-    // Materialize the clear sampler before Gaussian convolution. Composing
-    // both filters changes the intermediate raster and the native diffusion.
-    // Keep the original 1.5x Gaussian radius independently of samplingScale.
+    // Restore v26.0.6's single display-list filter grouping. Keep the
+    // current source guard, 1.5x Gaussian radius and sampling density.
+    final filter = _sigma == 0
+        ? sampling
+        : ui.ImageFilter.compose(
+            outer: ui.ImageFilter.blur(
+                sigmaX: sigma * 1.5, sigmaY: sigma * 1.5),
+            inner: sampling);
     final canvas = context.canvas;
     canvas.save();
-    // Null bounds are intentional: explicit saveLayer bounds clip source input
-    // before its inverse matrix, while the child keeps its existing clip paths.
-    canvas.saveLayer(null, ui.Paint()..imageFilter = sampling);
+    canvas.translate(anchor.dx, anchor.dy);
+    // The child and matrix stay in one display list; explicit source bounds
+    // would clip supersampled input before its inverse projection.
+    canvas.saveLayer(null, ui.Paint()..imageFilter = filter);
     canvas.scale(samplingScale);
     if (_retainSourceBounds) {
       // Keep the offscreen source origin stable as ruby ink rises. This adds
@@ -292,7 +279,6 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   @override
   void dispose() {
     _fallbackFilter.layer = null;
-    _gaussianFilter.layer = null;
     super.dispose();
   }
 }

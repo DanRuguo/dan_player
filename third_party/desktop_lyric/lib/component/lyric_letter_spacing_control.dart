@@ -16,7 +16,9 @@ class LyricLetterSpacingControl extends StatefulWidget {
       this.foreground,
       this.heading,
       this.previewBuilder,
-      this.alignResetToEnd = false});
+      this.sliderTheme,
+      this.sliderPadding,
+      this.valueStyle});
   final double value;
   final ValueChanged<double> onChanged;
   final String id;
@@ -31,7 +33,9 @@ class LyricLetterSpacingControl extends StatefulWidget {
   /// Settings may supply their shared icon/title/subtitle header. The default
   /// desktop and lyric-popup label keeps its existing compact presentation.
   final Widget? heading;
-  final bool alignResetToEnd;
+  final SliderThemeData? sliderTheme;
+  final EdgeInsetsGeometry? sliderPadding;
+  final TextStyle? valueStyle;
 
   /// Builds only this control's local draft preview. Appearance and media
   /// consumers keep the committed value until the physical release.
@@ -119,12 +123,13 @@ class _LyricLetterSpacingControlState extends State<LyricLetterSpacingControl>
             const SizedBox(width: 8),
             Text(value.toStringAsFixed(1),
                 key: ValueKey('${widget.id}-value'),
-                style: widget.heading == null
-                    ? TextStyle(color: widget.foreground)
-                    : Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(color: widget.foreground)),
+                style: widget.valueStyle ??
+                    (widget.heading == null
+                        ? TextStyle(color: widget.foreground)
+                        : Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(color: widget.foreground))),
           ]),
       if (widget.heading != null) const SizedBox(height: 10),
       if (widget.previewBuilder != null) ...[
@@ -144,16 +149,19 @@ class _LyricLetterSpacingControlState extends State<LyricLetterSpacingControl>
           }
         },
         child: SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-              activeTrackColor: widget.primary ?? scheme.primary,
-              thumbColor: widget.primary ?? scheme.primary,
-              showValueIndicator: ShowValueIndicator.never),
+          data: widget.sliderTheme ??
+              SliderTheme.of(context).copyWith(
+                  activeTrackColor: widget.primary ?? scheme.primary,
+                  thumbColor: widget.primary ?? scheme.primary,
+                  showValueIndicator: ShowValueIndicator.never),
           child: Slider(
             key: ValueKey('${widget.id}-slider'),
             value: value.clamp(0.0, 12.0),
             min: 0,
             max: 12,
             divisions: 24,
+            label: value.toStringAsFixed(1),
+            padding: widget.sliderPadding,
             semanticFormatterCallback: (value) => value.toStringAsFixed(1),
             onChangeStart: (_) {
               if (_pointerCycle) {
@@ -190,26 +198,6 @@ class _LyricLetterSpacingControlState extends State<LyricLetterSpacingControl>
             },
           ),
         ),
-      ),
-      Align(
-        alignment: widget.alignResetToEnd
-            ? AlignmentDirectional.centerEnd
-            : Alignment.center,
-        child: TextButton(
-            key: ValueKey('${widget.id}-reset'),
-            style: widget.heading == null
-                ? null
-                : TextButton.styleFrom(
-                    minimumSize: const Size(44, 44),
-                    visualDensity: VisualDensity.standard,
-                    tapTargetSize: MaterialTapTargetSize.padded),
-            onPressed: () {
-              if (!_active) return;
-              setState(_discard);
-              widget.onChanged(0);
-            },
-            child: Text(ui('恢复默认字间距'),
-                textAlign: widget.alignResetToEnd ? TextAlign.end : null)),
       ),
     ]);
   }

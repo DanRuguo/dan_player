@@ -35,6 +35,7 @@ import 'package:dan_player/taskbar_lyrics_publisher.dart';
 import 'package:desktop_lyric/appearance_controller.dart';
 import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/component/desktop_lyric_appearance_options.dart';
+import 'package:desktop_lyric/component/lyric_letter_spacing_control.dart';
 import 'package:desktop_lyric/component/desktop_lyric_text.dart';
 import 'package:desktop_lyric/component/lyric_line_display_area.dart';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
@@ -54,7 +55,7 @@ import 'support/playlist_feature_fixture.dart'
     show capturePlaylistFeature, loadPlaylistFeatureFonts, sizePlaylistFeature;
 
 const _settingsSlider = ValueKey('settings-lyric-letter-spacing-slider');
-const _desktopReset = ValueKey('desktop-lyric-letter-spacing-reset');
+const _desktopSpacing = ValueKey('desktop-lyric-letter-spacing-slider');
 const _readingOpen = ValueKey('lyric-reading-tools');
 const _generate = ValueKey('lyric-show-japanese-reading');
 const _automatic = ValueKey('japanese-reading-auto-switch');
@@ -1488,7 +1489,7 @@ void main() {
   }
 
   testWidgets(
-      'settings spacing release and desktop reset reach all real consumers without touching media',
+      'settings spacing release and desktop zero input reach all real consumers without touching media',
       (tester) async {
     sizePlaylistFeature(tester, width: 1000, height: 900);
     final rig = (await tester.runAsync(() async => _Rig()))!;
@@ -1532,8 +1533,16 @@ void main() {
     expect(
         _mainPainters(tester, line.content).single.text!.style!.letterSpacing,
         naturalSpacing + spacing);
-    await tester.ensureVisible(find.byKey(_desktopReset));
-    await tester.tap(find.byKey(_desktopReset));
+    final desktopSpacing = find.byKey(_desktopSpacing);
+    await tester.ensureVisible(desktopSpacing);
+    await tester.pumpAndSettle();
+    final desktopRect = tester.getRect(desktopSpacing);
+    final zero = await tester.startGesture(desktopRect.center, pointer: 9);
+    await zero.moveTo(Offset(desktopRect.left, desktopRect.center.dy));
+    await tester.pump();
+    expect(rig.controller.lyricLetterSpacing, spacing);
+    expect(rig.writes, 1);
+    await zero.up();
     await _pumpTransport(tester);
     expect(AppSettings.instance.desktopLyricAppearance.value.lyricLetterSpacing,
         0);
@@ -1872,15 +1881,26 @@ void main() {
         expect(rig.manualResults, [JapaneseReadingResult.applied]);
         expect(rig.helper.detailedLyricLine.value!.japaneseReading,
             contains('よぞら'));
-        final reset = find.byKey(_desktopReset);
-        await tester.ensureVisible(reset);
+        final spacing = find.byKey(_desktopSpacing);
+        await tester.ensureVisible(spacing);
         await tester.pumpAndSettle();
-        expect(reset.hitTestable(), findsOneWidget);
-        _completeLabel(tester, reset, ui('恢复默认字间距'), width: width);
-        expect(tester.getRect(reset).right, lessThanOrEqualTo(width));
+        expect(spacing.hitTestable(), findsOneWidget);
+        final spacingControl = find.ancestor(
+            of: spacing, matching: find.byType(LyricLetterSpacingControl));
+        _completeLabel(tester, spacingControl, ui('歌词字间距'), width: width);
+        expect(find.byKey(const ValueKey('desktop-lyric-letter-spacing-reset')),
+            findsNothing);
+        expect(tester.getRect(spacing).right, lessThanOrEqualTo(width));
         await capturePlaylistFeature(tester, boundary,
             'lyric-linkage-${language.code}-${width.toInt()}-2-appearance');
-        await tester.tap(reset);
+        final sliderRect = tester.getRect(spacing);
+        final zero = await tester.startGesture(sliderRect.center);
+        await zero.moveTo(Offset(sliderRect.left, sliderRect.center.dy));
+        await tester.pump();
+        expect(rig.controller.lyricLetterSpacing, 6,
+            reason:
+                'The default-value draft publishes only at physical release');
+        await zero.up();
         await _pumpTransport(tester);
         expect(rig.controller.lyricLetterSpacing, 0);
         expect(rig.helper.appearance.lyricLetterSpacing, 0);
