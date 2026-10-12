@@ -34,6 +34,7 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'lyric_reading_tools.dart';
 import 'lyric_segment_practice_dialog.dart';
 import 'lyric_find_dialog.dart';
+import 'lyric_blur_dialog.dart';
 
 enum LyricTextAlign {
   left,
@@ -53,12 +54,15 @@ class LyricViewController extends ChangeNotifier {
       {NowPlayingPagePreference? preferences,
       ValueNotifier<DesktopLyricAppearance>? appearance,
       ValueNotifier<JapaneseReadingPreferences>? japaneseReadings,
-      Future<void> Function()? persistAppearance})
+      Future<void> Function()? persistAppearance,
+      Future<void> Function()? persistPreferences})
       : nowPlayingPagePref =
             preferences ?? AppPreference.instance.nowPlayingPagePref,
         _appearance = appearance ?? AppSettings.instance.desktopLyricAppearance,
         _japaneseReadings =
             japaneseReadings ?? AppSettings.instance.japaneseReadings,
+        _persistPreferences = persistPreferences ??
+            (() => AppPreference.instance.save(throwOnError: true)),
         _persistAppearance = persistAppearance ??
             (() => AppSettings.instance
                 .saveSettings(throwOnError: true, captureWindowSize: false)) {
@@ -70,7 +74,12 @@ class LyricViewController extends ChangeNotifier {
   final ValueNotifier<DesktopLyricAppearance> _appearance;
   final ValueNotifier<JapaneseReadingPreferences> _japaneseReadings;
   final Future<void> Function() _persistAppearance;
+  final Future<void> Function() _persistPreferences;
+  Future<void> _blurPreferenceWrite = Future<void>.value();
   Future<void> persistLetterSpacing() => _persistAppearance();
+  Future<void> persistBlurPreferences() => _blurPreferenceWrite =
+      _blurPreferenceWrite.then((_) => _persistPreferences(),
+          onError: (Object _, StackTrace __) => _persistPreferences());
   late double _letterSpacing;
   double get lyricLetterSpacing => _letterSpacing;
   late bool _showJapaneseReading;
@@ -129,6 +138,15 @@ class LyricViewController extends ChangeNotifier {
   late bool showTranslation = nowPlayingPagePref.showLyricTranslation;
   late bool showRomanization = nowPlayingPagePref.showLyricRomanization;
   late bool showTimestamps = nowPlayingPagePref.showLyricTimestamps;
+  bool get lyricBlurEnabled => nowPlayingPagePref.lyricBlurEnabled;
+  double get lyricBlurTopFraction =>
+      NowPlayingPagePreference.safeLyricBlurFraction(
+          nowPlayingPagePref.lyricBlurTopFraction,
+          fallback: .25);
+  double get lyricBlurBottomFraction =>
+      NowPlayingPagePreference.safeLyricBlurFraction(
+          nowPlayingPagePref.lyricBlurBottomFraction,
+          fallback: .22);
   bool readingMode = false;
   int returnRequest = 0;
   int readingRequest = 0;
@@ -189,6 +207,26 @@ class LyricViewController extends ChangeNotifier {
   void setShowTimestamps(bool value) {
     if (showTimestamps == value) return;
     nowPlayingPagePref.showLyricTimestamps = showTimestamps = value;
+    notifyListeners();
+  }
+
+  void setLyricBlurEnabled(bool value) {
+    if (_disposed || lyricBlurEnabled == value) return;
+    nowPlayingPagePref.lyricBlurEnabled = value;
+    notifyListeners();
+  }
+
+  /// Each range occupies its respective edge, leaving at least 10% clear.
+  void setLyricBlurRanges(double topFraction, double bottomFraction) {
+    if (_disposed || !topFraction.isFinite || !bottomFraction.isFinite) return;
+    final top = topFraction.clamp(0.0, .45);
+    final bottom = bottomFraction.clamp(0.0, .45);
+    if (lyricBlurTopFraction == top && lyricBlurBottomFraction == bottom) {
+      return;
+    }
+    nowPlayingPagePref
+      ..lyricBlurTopFraction = top
+      ..lyricBlurBottomFraction = bottom;
     notifyListeners();
   }
 
@@ -330,6 +368,8 @@ class LyricViewControls extends StatelessWidget {
           const _LyricReadingMenu(),
           const SizedBox(height: 8.0),
           LyricFontSizeMenu(hidden: hidden),
+          const SizedBox(height: 8.0),
+          const _LyricBlurBtn(),
         ],
       )),
     );
@@ -684,6 +724,23 @@ class _LyricAlignSwitchBtn extends StatelessWidget {
         LyricTextAlign.center => Symbols.format_align_center,
         LyricTextAlign.right => Symbols.format_align_right,
       }),
+    );
+  }
+}
+
+class _LyricBlurBtn extends StatelessWidget {
+  const _LyricBlurBtn();
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    final controller = context.read<LyricViewController>();
+    return IconButton(
+      key: const ValueKey('lyric-blur-open'),
+      tooltip: ui('调整模糊'),
+      color: Theme.of(context).colorScheme.primary,
+      icon: const Icon(Symbols.blur_on),
+      onPressed: () => showLyricBlurDialog(context, controller),
     );
   }
 }

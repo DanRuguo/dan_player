@@ -1,4 +1,17 @@
 const catalogLyricPlaybackTools = <String, List<String>>{
+  '调整模糊': ['Adjust blur', 'ぼかしの調整', '흐림 조정'],
+  '启用歌词模糊': ['Enable lyric blur', '歌詞のぼかしを有効にする', '가사 흐림 사용'],
+  '上方模糊范围': ['Top blur range', '上部のぼかし範囲', '위쪽 흐림 범위'],
+  '下方模糊范围': ['Bottom blur range', '下部のぼかし範囲', '아래쪽 흐림 범위'],
+  '清晰区域': ['Clear area', '鮮明な領域', '선명한 영역'],
+  '上方模糊区域': ['Top blurred area', '上部のぼかし領域', '위쪽 흐림 영역'],
+  '下方模糊区域': ['Bottom blurred area', '下部のぼかし領域', '아래쪽 흐림 영역'],
+  '模糊区域预览': ['Blur area preview', 'ぼかし領域のプレビュー', '흐림 영역 미리 보기'],
+  '拖动滑块调整上方和下方的模糊范围。': [
+    'Drag the sliders to adjust the top and bottom blur ranges.',
+    'スライダーを動かして上下のぼかし範囲を調整します。',
+    '슬라이더를 끌어 위쪽과 아래쪽의 흐림 범위를 조정하세요.'
+  ],
   '歌词字间距保存失败；本次会话仍然生效。': [
     'Could not save lyric letter spacing; it remains active for this session.',
     '歌詞の文字間隔を保存できませんでした。このセッションには適用されています。',

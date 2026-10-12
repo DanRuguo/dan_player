@@ -55,6 +55,7 @@ class _RubyShape {
   TextPainter? _fitted;
   double? _fitSize;
   double? _fitWidth;
+  final _rasters = <TextPainter, Map<double, _RubyRaster>>{};
 
   TextPainter _shape(double size) => TextPainter(
         text: appFontSpan(text,
@@ -82,6 +83,7 @@ class _RubyShape {
         ? math.max(1.0, available)
         : double.infinity;
     if (_fitted == null || _fitSize != size || _fitWidth != fitWidth) {
+      _releaseRasters(_fitted);
       _fitted?.dispose();
       _fitted = _shape(size);
       if (fitWidth.isFinite) _fitted!.layout(maxWidth: fitWidth);
@@ -91,9 +93,117 @@ class _RubyShape {
     return _fitted!;
   }
 
+  _RubyRaster? rasterFor(TextPainter painter, double ratio, double padding) {
+    final cached = _rasters[painter]?[ratio];
+    if (cached != null && cached.padding >= padding) {
+      final scales = _rasters[painter]!;
+      scales.remove(ratio);
+      scales[ratio] = cached;
+      cached.touch();
+      return cached;
+    }
+    cached?.dispose();
+    final bounds = (Offset.zero & painter.size).inflate(padding);
+    final pixelWidth = bounds.width * ratio;
+    final pixelHeight = bounds.height * ratio;
+    if (!pixelWidth.isFinite ||
+        !pixelHeight.isFinite ||
+        pixelWidth <= 0 ||
+        pixelHeight <= 0 ||
+        pixelWidth > 4096 ||
+        pixelHeight > 4096) {
+      return null;
+    }
+    final width = pixelWidth.ceil(), height = pixelHeight.ceil();
+    if (width * height > _RubyRaster.maximumImagePixels) return null;
+    final recorder = drawing.PictureRecorder();
+    final canvas = Canvas(recorder)
+      ..scale(ratio)
+      ..translate(-bounds.left, -bounds.top);
+    painter.paint(canvas, Offset.zero);
+    final picture = recorder.endRecording();
+    drawing.Image image;
+    try {
+      image = picture.toImageSync(width, height);
+    } catch (_) {
+      return null;
+    } finally {
+      picture.dispose();
+    }
+    final scales = _rasters.putIfAbsent(painter, () => {});
+    late final _RubyRaster raster;
+    raster = _RubyRaster(
+        image,
+        // Only allocation rounds up. Keep the native origin and texel scale;
+        // stretching the ceil-sized image back to bounds would move its ink.
+        Rect.fromLTWH(bounds.left, bounds.top, width / ratio, height / ratio),
+        padding, () {
+      if (identical(scales[ratio], raster)) scales.remove(ratio);
+      if (scales.isEmpty && identical(_rasters[painter], scales)) {
+        _rasters.remove(painter);
+      }
+    });
+    scales[ratio] = raster;
+    while (scales.length > 2) {
+      scales.values.first.dispose();
+    }
+    raster.register();
+    return raster;
+  }
+
+  void _releaseRasters(TextPainter? painter) {
+    if (painter == null) return;
+    final scales = _rasters.remove(painter);
+    for (final raster in scales?.values.toList() ?? const <_RubyRaster>[]) {
+      raster.dispose();
+    }
+  }
+
   void dispose() {
+    for (final painter in _rasters.keys.toList()) {
+      _releaseRasters(painter);
+    }
     natural.dispose();
     _fitted?.dispose();
+  }
+}
+
+/// Reuse the player's white-mask image/tint path without a nested saveLayer.
+/// Font shapes own entries; one global LRU also bounds long lyric documents.
+class _RubyRaster {
+  _RubyRaster(this.image, this.bounds, this.padding, this._onDispose);
+
+  static const maximumImagePixels = 1024 * 1024;
+  static const maximumPixels = 4 * 1024 * 1024;
+  static const maximumEntries = 96;
+  static final _lru = <_RubyRaster, bool>{};
+  static int _pixels = 0;
+
+  final drawing.Image image;
+  final Rect bounds;
+  final double padding;
+  final VoidCallback _onDispose;
+  bool _disposed = false;
+  int get pixels => image.width * image.height;
+
+  void register() {
+    _pixels += pixels;
+    _lru[this] = true;
+    while (_lru.length > maximumEntries || _pixels > maximumPixels) {
+      _lru.keys.first.dispose();
+    }
+  }
+
+  void touch() {
+    if (_lru.remove(this) != null) _lru[this] = true;
+  }
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    if (_lru.remove(this) != null) _pixels -= pixels;
+    _onDispose();
+    image.dispose();
   }
 }
 
@@ -119,6 +229,7 @@ class LyricRubyGlyph {
   final int row;
   double followPhase = 1;
   List<({int index, Rect bounds, double phase})> motionParts = const [];
+  _RubyShape? _rasterSource;
 }
 
 /// Geometry is computed at paragraph layout, never on a media-clock repaint.
@@ -224,7 +335,8 @@ class LyricRubyLayout {
           extent, vertical ? painter.width + gap : math.max(0.0, -offset.dy));
       glyphs.add(LyricRubyGlyph(
           span, painter, sourceBounds, offset, lineWidth, sourceTop, row,
-          sourceEnd: sourceEnd));
+          sourceEnd: sourceEnd)
+        .._rasterSource = _shaping!._shapes[index]);
     }
     if (!vertical) {
       var leading = 0.0;
@@ -354,7 +466,10 @@ class LyricRubyLayout {
               (target.sourceInkTop - previous.sourceInkTop) * progress,
           target.row,
           sourceEnd:
-              retainSourcePainter ? previous.sourceEnd : target.sourceEnd));
+              retainSourcePainter ? previous.sourceEnd : target.sourceEnd)
+        .._rasterSource = retainSourcePainter
+            ? previous._rasterSource
+            : target._rasterSource);
     }
     _lines = to._lines;
     _rowRanges = to._rowRanges;
@@ -374,11 +489,15 @@ class LyricRubyLayout {
                       glyph.painter.size)) ??
       Rect.zero;
 
+  /// Sampling parents may opt into cached native white snapshots with their
+  /// real device/sample scale. Null and excessive allocations retain native
+  /// paragraph painting; tint, visibility and displacement never reshape text.
   void paint(Canvas canvas,
       {Offset Function(LyricRubyGlyph)? displacement,
       void Function(Canvas, LyricRubyGlyph)? transform,
       Color? tint,
-      double visibility = 1}) {
+      double visibility = 1,
+      double? rasterScale}) {
     if (visibility <= 0) return;
     if (glyphs.isEmpty) return;
     final offsets = displacement == null
@@ -389,6 +508,15 @@ class LyricRubyLayout {
                   Offset(0, leadingForGlyph(glyph) * visibility) +
                   displacement(glyph)
           ];
+    final color = (tint ?? this.color)
+        .withValues(alpha: (tint ?? this.color).a * visibility);
+    if (rasterScale != null &&
+        rasterScale.isFinite &&
+        rasterScale > 0 &&
+        _paintRasters(
+            canvas, rasterScale, color, offsets, transform, visibility)) {
+      return;
+    }
     var coverage = paintBounds;
     if (offsets != null) {
       for (var index = 0; index < glyphs.length; index++) {
@@ -398,12 +526,8 @@ class LyricRubyLayout {
     }
     // Tint one small cached reading layer, rather than rebuilding paragraphs
     // as the lyric's active/theme colour changes on presentation frames.
-    canvas.saveLayer(
-        coverage.inflate(extent * 2 + 24),
-        Paint()
-          ..colorFilter = ColorFilter.mode(
-              (tint ?? color).withValues(alpha: (tint ?? color).a * visibility),
-              BlendMode.srcIn));
+    canvas.saveLayer(coverage.inflate(extent * 2 + 24),
+        Paint()..colorFilter = ColorFilter.mode(color, BlendMode.srcIn));
     for (final (index, glyph) in glyphs.indexed) {
       canvas.save();
       transform?.call(canvas, glyph);
@@ -414,6 +538,54 @@ class LyricRubyLayout {
       canvas.restore();
     }
     canvas.restore();
+  }
+
+  bool _paintRasters(
+      Canvas canvas,
+      double ratio,
+      Color color,
+      List<Offset>? offsets,
+      void Function(Canvas, LyricRubyGlyph)? transform,
+      double visibility) {
+    if (glyphs.length > _RubyRaster.maximumEntries) return false;
+    final snapshots = <({drawing.Image image, Rect bounds})>[];
+    var pixels = 0;
+    try {
+      for (final glyph in glyphs) {
+        final raster = glyph._rasterSource
+            ?.rasterFor(glyph.painter, ratio, extent * 2 + 24);
+        if (raster == null) return false;
+        pixels += raster.pixels;
+        if (pixels > _RubyRaster.maximumPixels) return false;
+        // Pin this frame's handles while later entries may evict from the LRU.
+        snapshots.add((image: raster.image.clone(), bounds: raster.bounds));
+      }
+      final paint = Paint()
+        ..filterQuality = FilterQuality.low
+        ..colorFilter = ColorFilter.mode(color, BlendMode.srcIn);
+      for (final (index, glyph) in glyphs.indexed) {
+        final snapshot = snapshots[index];
+        final offset = offsets?[index] ??
+            glyph.offset + Offset(0, leadingForGlyph(glyph) * visibility);
+        canvas.save();
+        try {
+          transform?.call(canvas, glyph);
+          canvas.drawImageRect(
+              snapshot.image,
+              Rect.fromLTWH(0, 0, snapshot.image.width.toDouble(),
+                  snapshot.image.height.toDouble()),
+              snapshot.bounds.shift(offset),
+              paint);
+        } finally {
+          canvas.restore();
+        }
+      }
+      return true;
+    } finally {
+      for (final snapshot in snapshots) {
+        snapshot.image.dispose();
+      }
+    }
   }
 
   void bindMotion(

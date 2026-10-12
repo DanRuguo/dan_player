@@ -202,6 +202,14 @@ class LyricViewTile extends StatelessWidget {
                             notifyReadingSettingEnd ? onPresentationEnd : null,
                         builder: (context, activation, presentation,
                             fontTransition) {
+                          final spacingMoving = !reducedMotion &&
+                              (fontTransition.toLetterSpacing -
+                                          fontTransition.fromLetterSpacing)
+                                      .abs() >
+                                  .00001 &&
+                              fontTransition.visualProgress < 1;
+                          final spacingProgress =
+                              fontTransition.visualProgress.clamp(0.0, 1.0);
                           TextStyle primaryStyle(double size, double spacing) =>
                               DefaultTextStyle.of(context).style.copyWith(
                                     // Reserve the focused paragraph once. Context
@@ -241,50 +249,8 @@ class LyricViewTile extends StatelessWidget {
                             ) paragraph,
                           }) {
                             final direct = controller.directFontSize;
-                            final spacingMoving = !reducedMotion &&
-                                (fontTransition.toLetterSpacing -
-                                            fontTransition.fromLetterSpacing)
-                                        .abs() >
-                                    .00001 &&
-                                fontTransition.visualProgress < 1;
-                            final reading = controller.readingMode
-                                ? controller.readingTarget
-                                : null;
-                            final alignReading = spacingMoving &&
-                                !auxiliaryTrack &&
-                                identical(reading?.line, line);
-                            double? readingY(RenderBox endpoint) {
-                              double? result;
-                              void visit(Element element) {
-                                if (result != null) return;
-                                if (element is StatefulElement &&
-                                    element.state is LyricTextReadingGeometry) {
-                                  final geometry =
-                                      element.state as LyricTextReadingGeometry;
-                                  final ownsPrimary = line is SyncLyricLine
-                                      ? geometry is TimedLyricReadingGeometry &&
-                                          identical(
-                                            geometry.readingLine,
-                                            line,
-                                          )
-                                      : geometry.readingText == text;
-                                  if (ownsPrimary) {
-                                    result = geometry.readingLayoutY(
-                                      reading!.textOffset ?? 0,
-                                      endpoint,
-                                    );
-                                  }
-                                }
-                                if (result == null) {
-                                  element.visitChildren(visit);
-                                }
-                              }
-
-                              visit(context as Element);
-                              return result;
-                            }
-
                             final moving = !direct &&
+                                !spacingMoving &&
                                 !reducedMotion &&
                                 (toSize - fromSize).abs() > .00001 &&
                                 fontTransition.progress < 1;
@@ -296,6 +262,7 @@ class LyricViewTile extends StatelessWidget {
                               toSize * paragraphFontScale,
                             );
                             final directChanging = direct &&
+                                !spacingMoving &&
                                 !reducedMotion &&
                                 (toSize - fromSize).abs() > .00001 &&
                                 fontTransition.visualProgress < 1;
@@ -340,14 +307,9 @@ class LyricViewTile extends StatelessWidget {
                               // ordinary focus changes retain both fixed endpoints.
                               return KeyedSubtree(
                                 key: direct
-                                    ? outgoing && spacingMoving
-                                        ? ValueKey((
-                                            'lyric-direct-paragraph',
-                                            spacing,
-                                          ))
-                                        : const ValueKey(
-                                            'lyric-direct-paragraph',
-                                          )
+                                    ? const ValueKey(
+                                        'lyric-direct-paragraph',
+                                      )
                                     : ValueKey((size, spacing)),
                                 // At rest this is an identity transform. The
                                 // paragraph owns the retained sampling boundary.
@@ -397,20 +359,19 @@ class LyricViewTile extends StatelessWidget {
                               // height must grow with the painted scale. Otherwise
                               // the viewport recenters a full-size row on frame 0
                               // and visibly shifts every paragraph around it.
-                              progress: directChanging
-                                  ? directProgress
-                                  : moving || spacingMoving
-                                      ? fontTransition.visualProgress
-                                      : 1,
+                              // Spacing starts with the complete target layout;
+                              // the shared group entrance owns its visual scale.
+                              progress: spacingMoving
+                                  ? 1
+                                  : directChanging
+                                      ? directProgress
+                                      : moving
+                                          ? fontTransition.visualProgress
+                                          : 1,
                               alignmentX: presentation.alignment.x,
                               wrapStatus: wrapStatus,
-                              spacingTransition:
-                                  spacingMoving && !moving && !directChanging,
-                              readingIdentity: alignReading ? reading : null,
-                              readingAnchorY: alignReading ? readingY : null,
                               children: [
-                                if (moving || spacingMoving)
-                                  fixed(fromSize, outgoing: true),
+                                if (moving) fixed(fromSize, outgoing: true),
                                 fixed(
                                   direct ? currentSize : toSize,
                                   outgoing: false,
@@ -608,6 +569,13 @@ class LyricViewTile extends StatelessWidget {
                                                           .isNotEmpty,
                                                   child: _TimedLyricText(
                                                     line: syncLine,
+                                                    rubyRasterScale:
+                                                        !reducedMotion &&
+                                                                glowAllowed
+                                                            ? View.of(context)
+                                                                    .devicePixelRatio *
+                                                                1.5
+                                                            : null,
                                                     rubySpans: visibility
                                                         .japaneseReadingSpans,
                                                     rubyVisibility: visibility
@@ -670,6 +638,13 @@ class LyricViewTile extends StatelessWidget {
                                                           .isNotEmpty,
                                                   child: BalancedLyricText(
                                                     parts.first,
+                                                    rubyRasterScale:
+                                                        !reducedMotion &&
+                                                                glowAllowed
+                                                            ? View.of(context)
+                                                                    .devicePixelRatio *
+                                                                1.5
+                                                            : null,
                                                     wordFollow: isMainLine &&
                                                         !reducedMotion,
                                                     textAlign: textAlign,
@@ -712,9 +687,28 @@ class LyricViewTile extends StatelessWidget {
                                     ),
                             ),
                           );
-                          return blank
+                          final target = blank
                               ? _LyricParagraphSurface(child: contents)
                               : contents;
+                          // Match the target-size preview: retire old spacing
+                          // immediately and enter all tracks together. Keep the
+                          // wrapper at rest so the target survives the last frame.
+                          return Opacity(
+                            opacity: spacingMoving ? spacingProgress : 1,
+                            alwaysIncludeSemantics: true,
+                            child: Transform.scale(
+                              scale: spacingMoving
+                                  ? .96 + .04 * spacingProgress
+                                  : 1,
+                              alignment: Alignment(
+                                presentation.alignment.x,
+                                -1,
+                              ),
+                              filterQuality:
+                                  spacingMoving ? FilterQuality.low : null,
+                              child: target,
+                            ),
+                          );
                         },
                       ),
                     );
@@ -758,6 +752,7 @@ class _TimedLyricText extends StatefulWidget {
   const _TimedLyricText({
     required this.line,
     this.rubyVisibility = 1,
+    this.rubyRasterScale,
     this.rubySpans,
     required this.position,
     required this.active,
@@ -773,6 +768,7 @@ class _TimedLyricText extends StatefulWidget {
 
   final SyncLyricLine line;
   final double rubyVisibility;
+  final double? rubyRasterScale;
   final List<LyricRubySpan>? rubySpans;
   final ValueListenable<Duration> position;
   final bool active;
@@ -951,6 +947,7 @@ class _TimedLyricTextState extends State<_TimedLyricText>
               playedColor: widget.playedColor,
               glowAllowed: widget.glowAllowed,
               rubyVisibility: widget.rubyVisibility,
+              rubyRasterScale: widget.rubyRasterScale,
               follow: follow,
               alignmentX: widget.alignmentX,
               inkOffset: Offset(
@@ -1559,6 +1556,7 @@ class LyricWordHighlightPainter extends CustomPainter
     required this.glowAllowed,
     required this.inkOffset,
     this.rubyVisibility = 1,
+    this.rubyRasterScale,
     this.follow,
     this.alignmentX,
   })  : _layout = layout,
@@ -1583,6 +1581,7 @@ class LyricWordHighlightPainter extends CustomPainter
   final double? alignmentX;
   final Offset inkOffset;
   final double rubyVisibility;
+  final double? rubyRasterScale;
   @override
   TextPainter get glyphParagraph => _layout.base;
   @override
@@ -1773,6 +1772,7 @@ class LyricWordHighlightPainter extends CustomPainter
         canvas,
         tint: playedColor,
         visibility: rubyVisibility,
+        rasterScale: rubyRasterScale,
         displacement: (glyph) => _rubyDisplacement(glyph, poses!),
       );
     }
@@ -2182,7 +2182,8 @@ class LyricWordHighlightPainter extends CustomPainter
       follow?.distance != oldDelegate.follow?.distance ||
       alignmentX != oldDelegate.alignmentX ||
       inkOffset != oldDelegate.inkOffset ||
-      rubyVisibility != oldDelegate.rubyVisibility;
+      rubyVisibility != oldDelegate.rubyVisibility ||
+      rubyRasterScale != oldDelegate.rubyRasterScale;
 }
 
 /// The interlude occupies the same space before, during and after activation.

@@ -19,6 +19,7 @@ import 'package:dan_player/lyric/lyric_text_search.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_reading_tools.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
@@ -187,9 +188,8 @@ class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
   }
 
   void _setMenuVisible(Object owner, bool visible) {
-    final changed = visible
-        ? _menuOwners.add(owner)
-        : _menuOwners.remove(owner);
+    final changed =
+        visible ? _menuOwners.add(owner) : _menuOwners.remove(owner);
     if (!changed || !mounted) return;
     // A child can close/unmount while this surface is being rebuilt. Keep the
     // ownership change immediate and defer only that frame's notification.
@@ -215,8 +215,7 @@ class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
 
   @override
   Widget build(BuildContext context) {
-    final visible =
-        _hovering ||
+    final visible = _hovering ||
         _controlsFocused ||
         _directControls ||
         _menuOwners.isNotEmpty;
@@ -396,7 +395,8 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
     UiLanguageScope.watch(context);
     final reduced =
         LyricMotion.reducedOf(context) || widget.hidden?.value == true;
-    final active = RenderingPreferencesScope.listenableOf(context).value
+    final active = RenderingPreferencesScope.listenableOf(context)
+        .value
         .allowsVisualUpdates(
           lifecycle: _lifecycle,
           treeVisible: TickerMode.valuesOf(context).enabled,
@@ -407,22 +407,20 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
       child: FutureBuilder<Lyric?>(
         future: widget.lyricFuture,
         builder: (context, snapshot) {
-          final waiting =
-              widget.lyricFuture != null &&
+          final waiting = widget.lyricFuture != null &&
               snapshot.connectionState != ConnectionState.done;
-          final retainPresentation =
-              waiting &&
+          final retainPresentation = waiting &&
               widget.sourceIdentity != null &&
               widget.sourceIdentity == _presentedSourceIdentity;
           final lyric = widget.lyricFuture == null
               ? null
               : waiting
-              ? retainPresentation
-                    ? _presentedLyric
-                    : widget.sourceIdentity == null
-                    ? null
-                    : widget.initialPresentation
-              : snapshot.data;
+                  ? retainPresentation
+                      ? _presentedLyric
+                      : widget.sourceIdentity == null
+                          ? null
+                          : widget.initialPresentation
+                  : snapshot.data;
           if (!waiting || lyric != null) {
             _presentedLyric = snapshot.hasError ? null : lyric;
             _presentedSourceIdentity = widget.sourceIdentity;
@@ -447,8 +445,8 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
             final label = waiting
                 ? ui("正在加载歌词")
                 : snapshot.hasError
-                ? ui(lyricLookupStatus(snapshot.error) ?? "歌词加载失败，请切换来源或重试")
-                : ui("无歌词");
+                    ? ui(lyricLookupStatus(snapshot.error) ?? "歌词加载失败，请切换来源或重试")
+                    : ui("无歌词");
             content = Center(
               key: ValueKey(label),
               child: waiting
@@ -462,9 +460,8 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 22,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSecondaryContainer,
+                        color:
+                            Theme.of(context).colorScheme.onSecondaryContainer,
                       ),
                     ),
             );
@@ -472,9 +469,8 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
           final firstPresentation = !_hasPresented;
           if (_entered) _hasPresented = true;
           return AnimatedSwitcher(
-            duration: reduced
-                ? Duration.zero
-                : const Duration(milliseconds: 320),
+            duration:
+                reduced ? Duration.zero : const Duration(milliseconds: 320),
             switchInCurve: firstPresentation
                 ? Curves.easeOutCubic
                 : const Interval(.5, 1, curve: Curves.easeOutCubic),
@@ -560,49 +556,48 @@ class _LyricLoadingStatusState extends State<_LyricLoadingStatus>
 
   @override
   Widget build(BuildContext context) => Semantics(
-    label: widget.label,
-    liveRegion: true,
-    child: ExcludeSemantics(
-      child: SizedBox(
-        height: 56,
-        child: Center(
-          child: AnimatedBuilder(
-            animation: _motion,
-            child: RepaintBoundary(
-              child: Text(
-                widget.label,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 22, color: widget.color),
+        label: widget.label,
+        liveRegion: true,
+        child: ExcludeSemantics(
+          child: SizedBox(
+            height: 56,
+            child: Center(
+              child: AnimatedBuilder(
+                animation: _motion,
+                child: RepaintBoundary(
+                  child: Text(
+                    widget.label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 22, color: widget.color),
+                  ),
+                ),
+                builder: (context, child) {
+                  if (!widget.animate) return child!;
+                  // sin² meets both ends at zero velocity: the loop never
+                  // snaps back, and the 6px travel reads clearly at high DPI.
+                  final wave =
+                      math.pow(math.sin(math.pi * _motion.value), 2).toDouble();
+                  final scale = 1 + .04 * wave;
+                  return Opacity(
+                    opacity: .80 + .20 * wave,
+                    child: Transform(
+                      // Sample one fixed paragraph. Rerasterizing text at
+                      // every tiny scale step changes glyph hinting instead
+                      // of moving its ink continuously. Include translation
+                      // in this matrix so it too uses fractional sampling.
+                      alignment: Alignment.center,
+                      transform: Matrix4.translationValues(0, -6 * wave, 0)
+                        ..scaleByDouble(scale, scale, 1, 1),
+                      filterQuality: FilterQuality.medium,
+                      child: child,
+                    ),
+                  );
+                },
               ),
             ),
-            builder: (context, child) {
-              if (!widget.animate) return child!;
-              // sin² meets both ends at zero velocity: the loop never
-              // snaps back, and the 6px travel reads clearly at high DPI.
-              final wave = math
-                  .pow(math.sin(math.pi * _motion.value), 2)
-                  .toDouble();
-              final scale = 1 + .04 * wave;
-              return Opacity(
-                opacity: .80 + .20 * wave,
-                child: Transform(
-                  // Sample one fixed paragraph. Rerasterizing text at
-                  // every tiny scale step changes glyph hinting instead
-                  // of moving its ink continuously. Include translation
-                  // in this matrix so it too uses fractional sampling.
-                  alignment: Alignment.center,
-                  transform: Matrix4.translationValues(0, -6 * wave, 0)
-                    ..scaleByDouble(scale, scale, 1, 1),
-                  filterQuality: FilterQuality.medium,
-                  child: child,
-                ),
-              );
-            },
           ),
         ),
-      ),
-    ),
-  );
+      );
 
   @override
   void dispose() {
@@ -691,32 +686,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     return (center: top + row.size.height / 2, bottom: top + row.size.height);
   }
 
-  double _blurForIndex(int index, double offset) {
-    if (_singingLines.contains(index) || index == _currentLine) return 0;
-    final ahead = index - _currentLine;
-    if (ahead > 0 && ahead <= 2) return 0;
-    if (!_scrollController.hasClients ||
-        !_scrollController.position.hasViewportDimension) {
-      return LyricMotion.blurForDistance(_visualDistance(index));
-    }
-    final row = _rowExtent(index);
-    final current = _rowExtent(_currentLine);
-    if (row == null || current == null) {
-      return LyricMotion.blurForDistance(_visualDistance(index));
-    }
-    final viewportBottom =
-        offset + _scrollController.position.viewportDimension;
-    final maximum = LyricMotion.blurForDistance(4);
-    if (ahead < 0) {
-      final span = math.max(1.0, current.center - offset);
-      return maximum * ((current.center - row.center) / span).clamp(0.0, 1.0);
-    }
-    final second = _rowExtent(_currentLine + 2);
-    if (second == null) return 0;
-    final span = math.max(1.0, viewportBottom - second.center);
-    return maximum * ((row.center - second.center) / span).clamp(0.0, 1.0);
-  }
-
   int _sourceGeneration = 0;
   int _followGeneration = 0;
   Timer? _manualScrollTimer;
@@ -765,9 +734,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   bool _treeVisible = false;
   ValueListenable<RenderingPreferences>? _preferences;
   bool _active = false;
-  bool? _blurWasAllowed;
   late final AnimationController _followClock;
-  late final AnimationController _voiceBlurClock;
   late final AnimationController _readingClock;
   late final Ticker _mediaTicker;
   bool _pointerReading = false;
@@ -788,9 +755,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   Map<int, LyricFollowTransition> _followTransitions = {};
-  Map<int, double> _restBlur = {};
-  Map<int, Animation<double>> _voiceBlurs = {};
-  bool _viewportBlurUpdateScheduled = false;
   double? _fontAnchorCenter;
   Object? _tileCacheIdentity;
   ValueChanged<LyricLine>? _tileCachePractice;
@@ -802,10 +766,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _lifecycle == AppLifecycleState.detached;
 
   Duration _safePosition(double seconds) => Duration(
-    milliseconds: seconds.isFinite && seconds > 0
-        ? (seconds * 1000).round()
-        : 0,
-  );
+        milliseconds:
+            seconds.isFinite && seconds > 0 ? (seconds * 1000).round() : 0,
+      );
 
   @override
   void initState() {
@@ -818,13 +781,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       }
     });
     _readingClock = AnimationController(vsync: this, value: 1);
-    _voiceBlurClock =
-        AnimationController(vsync: this, duration: LyricMotion.lineDuration)
-          ..addStatusListener((status) {
-            if (status == AnimationStatus.completed && _voiceBlurs.isNotEmpty) {
-              setState(() => _voiceBlurs = {});
-            }
-          });
     _followClock = AnimationController(vsync: this)
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed &&
@@ -851,8 +807,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     // TickerMode when an opaque route covers it; isCurrent would also stop
     // playback visuals behind ordinary dialogs and popup menus.
     _treeVisible = TickerMode.valuesOf(context).enabled;
-    _exiting =
-        context
+    _exiting = context
             .dependOnInheritedWidgetOfExactType<_LyricExitScope>()
             ?.exiting ??
         false;
@@ -877,7 +832,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _active = false;
       _mediaTicker.stop();
       _followClock.stop();
-      _voiceBlurClock.stop();
       _readingClock.stop();
       _sourceGeneration++;
       unawaited(_positionSubscription?.cancel());
@@ -891,27 +845,19 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       }
       return;
     }
-    final blurAllowed =
-        (_preferences?.value.surfaceBlur ?? true) &&
-        !(MediaQuery.maybeHighContrastOf(context) ?? false);
-    final restoreBlur = _blurWasAllowed == false && blurAllowed;
-    _blurWasAllowed = blurAllowed;
-    final active =
-        !widget.suspended &&
+    final active = !widget.suspended &&
         !_exiting &&
         (_preferences?.value ?? const RenderingPreferences())
             .allowsVisualUpdates(
-              lifecycle: _lifecycle,
-              treeVisible: _treeVisible,
-              nativeHidden: widget.hidden?.value ?? false,
-            );
+          lifecycle: _lifecycle,
+          treeVisible: _treeVisible,
+          nativeHidden: widget.hidden?.value ?? false,
+        );
     if (active == _active) {
       if (!active ||
           _motionHidden ||
           !(_preferences?.value.animations.allows(MotionKind.lyrics) ?? true)) {
         _cancelFollowEffects();
-      } else if (restoreBlur) {
-        _refreshVoiceBlur();
       }
       if (mounted) setState(() {});
       return;
@@ -1059,8 +1005,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     if (geometryChanged && settings.showJapaneseReading) {
       _captureReadingReflowAnchor(
         document: previous,
-        contentTransition:
-            availabilityChanged &&
+        contentTransition: availabilityChanged &&
             !_motionHidden &&
             !LyricMotion.reducedOf(context),
       );
@@ -1068,13 +1013,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     }
     LyricReadingTarget rebind(LyricReadingTarget target) =>
         target.belongsTo(previous)
-        ? LyricReadingTarget(
-            widget.lyric,
-            target.index,
-            widget.lyric.lines[target.index],
-            textOffset: target.textOffset,
-          )
-        : target;
+            ? LyricReadingTarget(
+                widget.lyric,
+                target.index,
+                widget.lyric.lines[target.index],
+                textOffset: target.textOffset,
+              )
+            : target;
     settings.rebindProjectedReadingTarget(previous, widget.lyric);
     if (_readDestination != null) _readDestination = rebind(_readDestination!);
     final anchor = _readingReflowAnchor;
@@ -1135,16 +1080,15 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       final row = rowContext?.findRenderObject();
       if (row is! RenderBox || !row.attached || !row.hasSize) return;
       final position = _scrollController.position;
-      var offset = RenderAbstractViewport.of(row)
-          .getOffsetToReveal(row, .2)
-          .offset;
+      var offset =
+          RenderAbstractViewport.of(row).getOffsetToReveal(row, .2).offset;
       final glyphY = _readingGlyphY(target);
       if (glyphY != null) {
         offset =
             RenderAbstractViewport.of(row).getOffsetToReveal(row, 0).offset +
-            glyphY -
-            row.localToGlobal(Offset.zero).dy -
-            position.viewportDimension * .2;
+                glyphY -
+                row.localToGlobal(Offset.zero).dy -
+                position.viewportDimension * .2;
       }
       offset = offset.clamp(position.minScrollExtent, position.maxScrollExtent);
       final reduced = _motionHidden || LyricMotion.reducedOf(context);
@@ -1184,7 +1128,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         final geometry = element.state as LyricTextReadingGeometry;
         final ownsPrimary = target.line is SyncLyricLine
             ? geometry is TimedLyricReadingGeometry &&
-                  identical(geometry.readingLine, target.line)
+                identical(geometry.readingLine, target.line)
             : geometry.readingText == text;
         if (ownsPrimary) {
           result = layoutAncestor == null
@@ -1249,7 +1193,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     if (row is! RenderBox || !row.attached || !row.hasSize) return;
     final localY =
         (_readingGlyphY(target) ?? row.localToGlobal(Offset.zero).dy) -
-        row.localToGlobal(Offset.zero).dy;
+            row.localToGlobal(Offset.zero).dy;
     final top = RenderAbstractViewport.of(row).getOffsetToReveal(row, 0).offset;
     _readingReflowAnchor = (
       target: target,
@@ -1297,9 +1241,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     );
     if (voicesChanged) {
       _releasingVoices.addAll(
-        _singingLines
-            .difference(singing)
-            .where(
+        _singingLines.difference(singing).where(
               (index) =>
                   widget.lyric.lines[index].start <= nextPosition &&
                   _presentationTimeline.endFor(index) > nextPosition,
@@ -1331,8 +1273,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     if (!_manualScrollActive) {
       if (anchorChanged || forceFollow) {
         _scheduleFollow(seek: seek || forceFollow, immediate: immediate);
-      } else if (voicesChanged) {
-        _refreshVoiceBlur();
       }
     }
   }
@@ -1341,8 +1281,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     bool rowNeedsFrames(int index) =>
         _presentationTimeline.needsFrames(index, _position.value) &&
         _presentationRowVisible(index);
-    final needsFrames =
-        _active &&
+    final needsFrames = _active &&
         _presentationEnabled &&
         (_singingLines.any(rowNeedsFrames) ||
             _releasingVoices.any(rowNeedsFrames));
@@ -1365,51 +1304,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     return row.bottom > offset &&
         row.center * 2 - row.bottom <
             offset + _scrollController.position.viewportDimension;
-  }
-
-  // A voice can finish (or rejoin after a short seek) while the scroll anchor
-  // stays on the same line. Fade only its focus blur: restarting the viewport
-  // or lag clock here interrupts an otherwise continuous spring return.
-  void _refreshVoiceBlur() {
-    if (_restBlur.isEmpty) return;
-    final animate =
-        !_motionHidden &&
-        !LyricMotion.reducedOf(context) &&
-        !(MediaQuery.maybeHighContrastOf(context) ?? false) &&
-        (_preferences?.value.surfaceBlur ?? true);
-    final next = <int, Animation<double>>{};
-    for (final index in _restBlur.keys.toList()) {
-      final target = _blurForIndex(index, _scrollController.offset);
-      final previousVoice = _voiceBlurs[index];
-      if (target == _restBlur[index] && previousVoice == null) continue;
-      final flight = _followTransitions[index];
-      final begin =
-          previousVoice?.value ??
-          flight?.sample(_followClock.value).blur ??
-          _restBlur[index]!;
-      _restBlur[index] = target;
-      if (flight != null) {
-        // Its offset still samples the original follow clock. The independent
-        // fade owns blur until completion, then hands off to this exact value.
-        _followTransitions[index] = LyricFollowTransition(
-          distance: flight.distance,
-          delay: flight.delay,
-          curve: flight.curve,
-          initialOffset: flight.initialOffset,
-          initialBlur: target,
-          finalBlur: target,
-        );
-      }
-      if (animate && begin != target) {
-        next[index] = Tween<double>(
-          begin: begin,
-          end: target,
-        ).chain(CurveTween(curve: LyricMotion.curve)).animate(_voiceBlurClock);
-      }
-    }
-    _voiceBlurClock.stop();
-    setState(() => _voiceBlurs = next);
-    if (next.isNotEmpty) _voiceBlurClock.forward(from: 0);
   }
 
   VoidCallback? _practiceLine(int index, ValueChanged<LyricLine>? callback) {
@@ -1438,7 +1332,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _finishContentSetting() {
-    _scheduleViewportBlurUpdate();
     _finishReadingSetting(_ReadingSetting.content);
     if (!_settingsAnchor || !_contentSettingPending) return;
     _contentSettingPending = false;
@@ -1475,7 +1368,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   }
 
   void _finishPresentationSetting() {
-    _scheduleViewportBlurUpdate();
     _finishReadingSetting(_ReadingSetting.presentation);
     if (_fontSettingActive) {
       _fontSettingActive = false;
@@ -1523,9 +1415,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     }
     final geometry = _anchorGeometry;
     if (geometry == null) return null;
-    final alignment = geometry.height > dimensions.viewportDimension * .7
-        ? 0.0
-        : .34;
+    final alignment =
+        geometry.height > dimensions.viewportDimension * .7 ? 0.0 : .34;
     if (setting && _fontAnchorCenter != null) {
       return (_anchorLeading +
               geometry.top +
@@ -1537,8 +1428,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       // The first visible line stays put as the paragraph gains or loses
       // wrapped lines. Re-anchoring at a percentage of the *new* row height
       // would move the whole sentence by that percentage in one frame.
-      final screenTop =
-          _resizeAnchorScreenTop +
+      final screenTop = _resizeAnchorScreenTop +
           (dimensions.viewportDimension - _resizeAnchorViewportHeight) *
               _resizeAnchorViewportFraction;
       return (_anchorLeading + geometry.top - screenTop).clamp(
@@ -1579,24 +1469,22 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       final target = _lineKeys[_currentLine].currentContext?.findRenderObject();
       if (target is! RenderBox || !target.attached || !target.hasSize) return;
       final position = _scrollController.position;
-      final alignment = target.size.height > position.viewportDimension * .7
-          ? 0.0
-          : .34;
+      final alignment =
+          target.size.height > position.viewportDimension * .7 ? 0.0 : .34;
       final viewport = RenderAbstractViewport.of(target);
-      final offset =
-          (_followTopInset == null
-                  ? viewport.getOffsetToReveal(target, alignment).offset
-                  : viewport.getOffsetToReveal(target, 0).offset -
-                        (position.viewportDimension * _followTopFraction +
-                            _followTopInset!))
-              .clamp(position.minScrollExtent, position.maxScrollExtent);
+      final offset = (_followTopInset == null
+              ? viewport.getOffsetToReveal(target, alignment).offset
+              : viewport.getOffsetToReveal(target, 0).offset -
+                  (position.viewportDimension * _followTopFraction +
+                      _followTopInset!))
+          .clamp(position.minScrollExtent, position.maxScrollExtent);
       final reduced = _motionHidden || LyricMotion.reducedOf(context);
       final spring = widget.springLyrics && !seek;
       final duration = seek
           ? LyricMotion.seekScrollDuration
           : spring
-          ? LyricMotion.springScrollDuration
-          : LyricMotion.scrollDuration;
+              ? LyricMotion.springScrollDuration
+              : LyricMotion.scrollDuration;
       final curve = LyricMotion.scrollCurveFor(
         spring: spring,
         distance: offset - position.pixels,
@@ -1682,11 +1570,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   void _cancelFollowEffects() {
     _mediaTicker.stop();
     _followClock.stop();
-    _voiceBlurClock.stop();
     _readingClock.value = _pointerReading ? 0 : 1;
     _followTransitions = {};
-    _restBlur = {};
-    _voiceBlurs = {};
     _releasingVoices.clear();
   }
 
@@ -1793,44 +1678,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       }
     }
     final rows = <int>[];
-    for (
-      var i = (low - 1).clamp(0, _lineKeys.length);
-      i < _lineKeys.length;
-      i++
-    ) {
+    for (var i = (low - 1).clamp(0, _lineKeys.length);
+        i < _lineKeys.length;
+        i++) {
       if (top(i) > offset + position.viewportDimension + 48) break;
       rows.add(i);
     }
     return rows;
-  }
-
-  void _scheduleViewportBlurUpdate() {
-    if (_viewportBlurUpdateScheduled || !_active) return;
-    _viewportBlurUpdateScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _viewportBlurUpdateScheduled = false;
-      if (!mounted ||
-          !_active ||
-          !_scrollController.hasClients ||
-          !_scrollController.position.hasViewportDimension ||
-          _manualScrollActive ||
-          _readingMode ||
-          _followClock.isAnimating) {
-        return;
-      }
-      final offset = _scrollController.offset;
-      final blur = <int, double>{
-        for (final index in _visibleFollowRows(offset))
-          index: _blurForIndex(index, offset),
-      };
-      if (!mapEquals(blur, _restBlur)) {
-        _voiceBlurClock.stop();
-        setState(() {
-          _voiceBlurs = {};
-          _restBlur = blur;
-        });
-      }
-    });
   }
 
   void _prepareFollowEffects({
@@ -1839,19 +1693,12 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     required Curve curve,
     required bool animate,
   }) {
-    final reduced = _motionHidden || LyricMotion.reducedOf(context);
-    final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
-    final blurAllowed =
-        !reduced && !highContrast && (_preferences?.value.surfaceBlur ?? true);
     final rows = <int>{
       ..._visibleFollowRows(offset),
       ..._visibleFollowRows(_scrollController.offset),
     }.toList();
     final transitions = <int, LyricFollowTransition>{};
-    final blur = <int, double>{};
     for (final index in rows) {
-      final targetBlur = blurAllowed ? _blurForIndex(index, offset) : 0.0;
-      blur[index] = targetBlur;
       if (animate && transitions.length < LyricMotion.maximumFollowRows) {
         final previous = _followTransitions[index]?.sample(_followClock.value);
         transitions[index] = LyricFollowTransition(
@@ -1859,21 +1706,14 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
           delay: ((index - _currentLine).abs() * .055).clamp(0, .26),
           curve: curve,
           initialOffset: previous?.offset ?? 0,
-          initialBlur:
-              _voiceBlurs[index]?.value ??
-              previous?.blur ??
-              _restBlur[index] ??
-              0,
-          finalBlur: targetBlur,
+          initialBlur: 0,
+          finalBlur: 0,
         );
       }
     }
     _followClock.stop();
-    _voiceBlurClock.stop();
     setState(() {
-      _voiceBlurs = {};
       _followTransitions = transitions;
-      _restBlur = blur;
     });
     if (transitions.isNotEmpty) {
       _followClock.duration = duration;
@@ -1884,8 +1724,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   bool _onScrollNotification(ScrollNotification notification) {
     if (notification.depth != 0) return false;
     _scheduleFontBandUpdate();
-    final directDrag =
-        notification is ScrollStartNotification &&
+    final directDrag = notification is ScrollStartNotification &&
             notification.dragDetails != null ||
         notification is ScrollUpdateNotification &&
             notification.dragDetails != null ||
@@ -1914,8 +1753,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     final interruptedReadingSettings = _readingSettingsPending.isEmpty
         ? const <_ReadingSetting>{}
         : Set.of(_readingSettingsPending);
-    final readingSettingsInterrupted =
-        interruptedReadingSettings.isNotEmpty ||
+    final readingSettingsInterrupted = interruptedReadingSettings.isNotEmpty ||
         _readingRevealAfterSettings ||
         _followAfterReadingSettings;
     if (_readingMode != settings.readingMode) {
@@ -1962,15 +1800,11 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _scheduleReadingReveal();
     }
     final followEnabled = !reduced && !_manualScrollActive && !_readingMode;
-    final blurEnabled =
-        followEnabled &&
+    final blurEnabled = followEnabled &&
+        settings.lyricBlurEnabled &&
         !highContrast &&
         (_preferences?.value.surfaceBlur ?? true);
     final visibleBlurEnabled = blurEnabled && !settings.fontSizeAdjusting;
-    if (!blurEnabled && _voiceBlurs.isNotEmpty) {
-      _voiceBlurClock.stop();
-      _voiceBlurs = {};
-    }
     if (_wasReduced != null && reduced != _wasReduced && reduced) {
       _cancelFollowEffects();
       _scheduleFollow(immediate: true);
@@ -1983,14 +1817,12 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       // A found word deep inside one plain paragraph is the reading anchor.
       // Commit its font endpoint before reflow: scaling a whole long paragraph
       // around its first baseline would pull that distant word out of view.
-      _snapFontOnLineChange =
-          _readingMode &&
+      _snapFontOnLineChange = _readingMode &&
           !_manualScrollActive &&
           widget.lyric is PlainLyric &&
           _readDestination?.textOffset != null &&
           _readDestination!.belongsTo(widget.lyric);
-      _fontSettingActive =
-          !reduced &&
+      _fontSettingActive = !reduced &&
           !settings.directFontSize &&
           !_manualScrollActive &&
           !_readingMode &&
@@ -2067,9 +1899,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               snapPresentation: _snapPresentationOnRestore,
               onContentRevealEnd: _finishContentSetting,
               onPresentationEnd: _finishPresentationSetting,
-              onTap: widget.lyric is PlainLyric
-                  ? null
-                  : () => _seekToLine(index),
+              onTap:
+                  widget.lyric is PlainLyric ? null : () => _seekToLine(index),
               onPractice: _practiceLine(index, practice),
             ),
       ];
@@ -2107,23 +1938,19 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         );
         final geometryChanged =
             _geometryIdentity != null && _geometryIdentity != geometryIdentity;
-        final presentationChanged =
-            _presentationIdentity != null &&
+        final presentationChanged = _presentationIdentity != null &&
             _presentationIdentity != presentationIdentity;
         final previousPresentation =
             _presentationIdentity as (double, double, LyricTextAlign, double)?;
-        final spacingOnlyChange =
-            previousPresentation != null &&
+        final spacingOnlyChange = previousPresentation != null &&
             previousPresentation.$1 == settings.lyricFontSize &&
             previousPresentation.$2 == settings.translationFontSize &&
             previousPresentation.$3 == settings.lyricTextAlign &&
             previousPresentation.$4 != settings.lyricLetterSpacing;
-        final animatePresentation =
-            !reduced &&
+        final animatePresentation = !reduced &&
             (!spacingOnlyChange ||
                 AppMotion.enabled(context, MotionKind.layout));
-        final directFontChange =
-            settings.directFontSize &&
+        final directFontChange = settings.directFontSize &&
             previousPresentation != null &&
             previousPresentation.$3 == settings.lyricTextAlign &&
             (previousPresentation.$1 != settings.lyricFontSize ||
@@ -2134,8 +1961,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
             _displayIdentity as (bool, bool, bool, bool, int)?;
         // A replacement reading with unchanged availability only reflows its
         // geometry. No reveal tween runs, so it must not wait for its onEnd.
-        final contentTransition =
-            displayChanged &&
+        final contentTransition = displayChanged &&
             !reduced &&
             (!_projectedReadingGeometryChanged ||
                 _projectedReadingAvailabilityChanged ||
@@ -2150,7 +1976,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         _projectedReadingGeometryChanged = false;
         _projectedReadingAvailabilityChanged = false;
         if (displayChanged || presentationChanged) {
-          _scheduleViewportBlurUpdate();
           // Row heights change during content reveals and font transitions.
           // ScrollPhysics corrects the
           // position during viewport layout, before the changed frame paints.
@@ -2166,8 +1991,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                 (!_settingsAnchor || _settingsAnchorLine != _currentLine)) {
               final geometry = _anchorGeometry;
               if (geometry != null) {
-                _fontAnchorCenter =
-                    _anchorLeading +
+                _fontAnchorCenter = _anchorLeading +
                     geometry.top +
                     geometry.height / 2 -
                     _scrollController.offset;
@@ -2189,7 +2013,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
             _settingsAnchor = false;
           }
         } else if (geometryChanged) {
-          _scheduleViewportBlurUpdate();
           // A narrower viewport can wrap an earlier, currently offscreen
           // lyric. Its new height moves every visible row before paint. Keep
           // the current line fixed in the same layout pass rather than
@@ -2200,34 +2023,31 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               _currentLine >= 0 &&
               _currentLine < _lineKeys.length &&
               _scrollController.hasClients) {
-            final previousGeometry =
-                _geometryIdentity
-                    as (
-                      double,
-                      double,
-                      double,
-                      double,
-                      LyricTextAlign,
-                      TextScaler,
-                      double,
-                    )?;
+            final previousGeometry = _geometryIdentity as (
+              double,
+              double,
+              double,
+              double,
+              LyricTextAlign,
+              TextScaler,
+              double,
+            )?;
             final previousAnchor = _anchorGeometry;
             final position = _scrollController.position;
             if (previousGeometry != null && previousAnchor != null) {
               if (_followTopInset == null) {
                 _followTopFraction =
                     previousAnchor.height > position.viewportDimension * .7
-                    ? 0.0
-                    : .34;
+                        ? 0.0
+                        : .34;
                 _followTopInset = -previousAnchor.height * _followTopFraction;
               }
               _resizeAnchorViewportFraction =
                   previousAnchor.height > position.viewportDimension * .7
-                  ? 0.0
-                  : .34;
+                      ? 0.0
+                      : .34;
               _resizeAnchorViewportHeight = position.viewportDimension;
-              _resizeAnchorScreenTop =
-                  previousGeometry.$2 * .34 +
+              _resizeAnchorScreenTop = previousGeometry.$2 * .34 +
                   previousAnchor.top -
                   position.pixels;
             } else {
@@ -2271,8 +2091,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               child: Listener(
                 onPointerDown: (event) {
                   if (const DanPlayerScrollBehavior().dragDevices.contains(
-                        event.kind,
-                      ) &&
+                            event.kind,
+                          ) &&
                       event.buttons == kPrimaryButton) {
                     _scrollPointers.add(event.pointer);
                   }
@@ -2296,98 +2116,91 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                       scrollbars: false,
                       overscroll: false,
                     ),
-                    child: LyricViewportFade(
-                      enabled: followEnabled && !highContrast,
-                      retainLayer: !reduced && !highContrast,
-                      child: CustomScrollView(
-                        key: const ValueKey('vertical-lyric-scroll'),
-                        physics: _LyricSettingsAnchorPhysics(
-                          anchor: _layoutAnchorOffset,
-                        ),
-                        controller: _scrollController,
-                        slivers: [
-                          SliverToBoxAdapter(
-                            child: SizedBox(height: height * .34),
+                    child: LyricViewportBlur(
+                      enabled: visibleBlurEnabled,
+                      topFraction: settings.lyricBlurTopFraction,
+                      bottomFraction: settings.lyricBlurBottomFraction,
+                      reading: _readingClock,
+                      child: LyricViewportFade(
+                        enabled: followEnabled && !highContrast,
+                        retainLayer: !reduced && !highContrast,
+                        child: CustomScrollView(
+                          key: const ValueKey('vertical-lyric-scroll'),
+                          physics: _LyricSettingsAnchorPhysics(
+                            anchor: _layoutAnchorOffset,
                           ),
-                          SliverPadding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            sliver: SliverToBoxAdapter(
-                              child: _LyricAnchorColumn(
-                                index:
-                                    _readingReflowAnchor?.target.index ??
-                                    _currentLine,
-                                onGeometry: (geometry) {
-                                  final reading = _readingReflowAnchor;
-                                  if (reading == null) {
-                                    _anchorGeometry = geometry;
-                                    return;
-                                  }
-                                  final row = _lineKeys[reading.target.index]
-                                      .currentContext
-                                      ?.findRenderObject();
-                                  if (row is RenderBox && row.hasSize) {
-                                    final glyphY = _readingGlyphY(
-                                      reading.target,
-                                      layoutAncestor: row,
-                                    );
-                                    _readingReflowTop =
-                                        geometry.top +
-                                        (glyphY == null
-                                            ? 0
-                                            : _readingPaintY(
-                                                reading.target,
-                                                glyphY,
-                                                geometry.height,
-                                              ));
-                                  }
-                                },
-                                children: [
-                                  for (
-                                    var index = 0;
-                                    index < widget.lyric.lines.length;
-                                    index++
-                                  )
-                                    SizedBox(
-                                      key: _lineKeys[index],
-                                      width: double.infinity,
-                                      child: LyricFollowEffects(
-                                        clock: _followClock,
-                                        transition: followEnabled
-                                            ? _followTransitions[index]
-                                            : null,
-                                        blur: visibleBlurEnabled
-                                            ? _restBlur[index] ?? 0
-                                            : 0,
-                                        blurAnimation: _voiceBlurs[index],
-                                        blurEnabled:
-                                            visibleBlurEnabled &&
-                                            _restBlur.containsKey(index),
-                                        // Keep clear and blurred lyric rows on
-                                        // the same supersampled paint path while
-                                        // font size and hover states change.
-                                        samplingEnabled:
-                                            !reduced &&
-                                            !highContrast &&
-                                            (_preferences?.value.surfaceBlur ??
-                                                true),
-                                        reading:
-                                            (_restBlur[index] ?? 0) > 0 ||
-                                                _followTransitions.containsKey(
-                                                  index,
-                                                )
-                                            ? _readingClock
-                                            : null,
-                                        child: _tileCache[index],
+                          controller: _scrollController,
+                          slivers: [
+                            SliverToBoxAdapter(
+                              child: SizedBox(height: height * .34),
+                            ),
+                            SliverPadding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              sliver: SliverToBoxAdapter(
+                                child: _LyricAnchorColumn(
+                                  index: _readingReflowAnchor?.target.index ??
+                                      _currentLine,
+                                  onGeometry: (geometry) {
+                                    final reading = _readingReflowAnchor;
+                                    if (reading == null) {
+                                      _anchorGeometry = geometry;
+                                      return;
+                                    }
+                                    final row = _lineKeys[reading.target.index]
+                                        .currentContext
+                                        ?.findRenderObject();
+                                    if (row is RenderBox && row.hasSize) {
+                                      final glyphY = _readingGlyphY(
+                                        reading.target,
+                                        layoutAncestor: row,
+                                      );
+                                      _readingReflowTop = geometry.top +
+                                          (glyphY == null
+                                              ? 0
+                                              : _readingPaintY(
+                                                  reading.target,
+                                                  glyphY,
+                                                  geometry.height,
+                                                ));
+                                    }
+                                  },
+                                  children: [
+                                    for (var index = 0;
+                                        index < widget.lyric.lines.length;
+                                        index++)
+                                      SizedBox(
+                                        key: _lineKeys[index],
+                                        width: double.infinity,
+                                        child: LyricFollowEffects(
+                                          clock: _followClock,
+                                          transition: followEnabled
+                                              ? _followTransitions[index]
+                                              : null,
+                                          // Fixed viewport overlays own all blur;
+                                          // paragraphs retain only clear sampling.
+                                          blur: 0,
+                                          blurEnabled: false,
+                                          // Keep clear and blurred lyric rows on
+                                          // the same supersampled paint path while
+                                          // font size and hover states change.
+                                          samplingEnabled: !reduced &&
+                                              !highContrast &&
+                                              (_preferences
+                                                      ?.value.surfaceBlur ??
+                                                  true),
+                                          child: _tileCache[index],
+                                        ),
                                       ),
-                                    ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          SliverToBoxAdapter(
-                            child: SizedBox(height: height * .75),
-                          ),
-                        ],
+                            SliverToBoxAdapter(
+                              child: SizedBox(height: height * .75),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -2427,7 +2240,6 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _readingClock.dispose();
     _mediaTicker.dispose();
     _followClock.dispose();
-    _voiceBlurClock.dispose();
     _scrollController.dispose();
     _position.dispose();
     super.dispose();
@@ -2499,11 +2311,11 @@ class _RenderLyricAnchorColumn extends RenderFlex {
     this.onGeometry,
     TextDirection direction,
   ) : super(
-        direction: Axis.vertical,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        textDirection: direction,
-      );
+          direction: Axis.vertical,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          textDirection: direction,
+        );
 
   int _index;
   ValueChanged<({double top, double height})> onGeometry;

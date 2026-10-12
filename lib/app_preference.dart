@@ -39,6 +39,9 @@ class NowPlayingPagePreference {
   bool showLyricTranslation;
   bool showLyricRomanization;
   bool showLyricTimestamps;
+  bool lyricBlurEnabled;
+  double lyricBlurTopFraction;
+  double lyricBlurBottomFraction;
 
   NowPlayingPagePreference(
     this.nowPlayingViewMode,
@@ -48,6 +51,9 @@ class NowPlayingPagePreference {
     this.showLyricTranslation = true,
     this.showLyricRomanization = true,
     this.showLyricTimestamps = false,
+    this.lyricBlurEnabled = true,
+    this.lyricBlurTopFraction = .25,
+    this.lyricBlurBottomFraction = .22,
   });
 
   Map toMap() => {
@@ -58,6 +64,9 @@ class NowPlayingPagePreference {
         'showLyricTranslation': showLyricTranslation,
         'showLyricRomanization': showLyricRomanization,
         'showLyricTimestamps': showLyricTimestamps,
+        'lyricBlurEnabled': lyricBlurEnabled,
+        'lyricBlurTopFraction': lyricBlurTopFraction,
+        'lyricBlurBottomFraction': lyricBlurBottomFraction,
       };
 
   factory NowPlayingPagePreference.fromMap(Map map) {
@@ -79,12 +88,25 @@ class NowPlayingPagePreference {
           ? map['showLyricRomanization'] as bool
           : true,
       showLyricTimestamps: map['showLyricTimestamps'] == true,
+      lyricBlurEnabled: map['lyricBlurEnabled'] is bool
+          ? map['lyricBlurEnabled'] as bool
+          : true,
+      lyricBlurTopFraction:
+          safeLyricBlurFraction(map['lyricBlurTopFraction'], fallback: .25),
+      lyricBlurBottomFraction:
+          safeLyricBlurFraction(map['lyricBlurBottomFraction'], fallback: .22),
     );
   }
 
   static double safeLyricFontSize(Object? value, {required double fallback}) =>
       value is num && value.isFinite
           ? value.toDouble().clamp(14, 64)
+          : fallback;
+
+  static double safeLyricBlurFraction(Object? value,
+          {required double fallback}) =>
+      value is num && value.isFinite
+          ? value.toDouble().clamp(0.0, .45)
           : fallback;
 }
 
@@ -192,7 +214,7 @@ class AppPreference {
   var nowPlayingPagePref = NowPlayingPagePreference(
       NowPlayingViewMode.withLyric, LyricTextAlign.left, 22.0, 18.0);
 
-  Future<void> save() async {
+  Future<void> save({bool throwOnError = false}) async {
     try {
       final supportPath = (await getAppDataDir()).path;
       final appPreferencePath = "$supportPath\\app_preference.json";
@@ -226,6 +248,7 @@ class AppPreference {
       await output.writeAsString(prefJson);
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
+      if (throwOnError) rethrow;
     }
   }
 

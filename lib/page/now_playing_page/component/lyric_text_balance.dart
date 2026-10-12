@@ -222,6 +222,7 @@ class BalancedLyricText extends StatefulWidget {
       this.wrapProgress = 0,
       this.wrapStatus,
       this.rubyVisibility = 1,
+      this.rubyRasterScale,
       this.rubySpans = const []});
   final String text;
   final TextStyle style;
@@ -233,6 +234,7 @@ class BalancedLyricText extends StatefulWidget {
   final LyricWrapFlightStatus? wrapStatus;
   final List<LyricRubySpan> rubySpans;
   final double rubyVisibility;
+  final double? rubyRasterScale;
 
   @override
   State<BalancedLyricText> createState() => _BalancedLyricTextState();
@@ -553,6 +555,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
                         lyricVerticalInkGuard +
                             (_ruby?.insetAt(widget.rubyVisibility) ?? 0)),
                     rubyVisibility: widget.rubyVisibility,
+                    rubyRasterScale: widget.rubyRasterScale,
                     pixelRatio: MediaQuery.devicePixelRatioOf(context),
                     ruby: _ruby,
                     alignmentX: widget.alignmentX,
@@ -601,6 +604,7 @@ class PlainLyricWordFollowPainter extends CustomPainter
       this.wrapFlight,
       this.ruby,
       this.rubyVisibility = 1,
+      this.rubyRasterScale,
       this.pixelRatio = 1,
       this.layoutIdentity})
       : super(repaint: follow?.clock);
@@ -615,6 +619,7 @@ class PlainLyricWordFollowPainter extends CustomPainter
   final Object? layoutIdentity;
   final LyricRubyLayout? ruby;
   final double rubyVisibility, pixelRatio;
+  final double? rubyRasterScale;
   @override
   TextPainter get glyphParagraph => text;
   @override
@@ -657,8 +662,10 @@ class PlainLyricWordFollowPainter extends CustomPainter
       _paintInk(canvas);
       canvas.restore();
     }
-    ruby?.paint(canvas, tint: color, visibility: rubyVisibility,
-        displacement: (glyph) {
+    ruby?.paint(canvas,
+        tint: color,
+        visibility: rubyVisibility,
+        rasterScale: rubyRasterScale, displacement: (glyph) {
       final morph = glyphMorph;
       final bounds = morph?.geometry
           .bounds(glyph.sourceStart, glyph.sourceEnd, morph.progress);
@@ -743,6 +750,7 @@ class PlainLyricWordFollowPainter extends CustomPainter
       alignmentX != oldDelegate.alignmentX ||
       wrapFlight != oldDelegate.wrapFlight ||
       rubyVisibility != oldDelegate.rubyVisibility ||
+      rubyRasterScale != oldDelegate.rubyRasterScale ||
       !identical(ruby, oldDelegate.ruby);
 }
 
