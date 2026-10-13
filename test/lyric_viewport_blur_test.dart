@@ -9,7 +9,9 @@ import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
+import 'package:desktop_lyric/ui_language.dart' as language;
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -209,6 +211,128 @@ class _Lyrics extends Lyric {
             LrcLine(Duration(seconds: index * 5), 'Held lyric $index',
                 isBlank: false, length: const Duration(seconds: 5)),
         ]);
+}
+
+class _ColourBackground extends CustomPainter {
+  const _ColourBackground();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..isAntiAlias = false;
+    for (var y = 0.0; y < size.height; y += 4) {
+      for (var x = 0.0; x < size.width; x += 4) {
+        paint.color = ((x ~/ 4 + y ~/ 4) % 2 == 0)
+            ? const Color(0xffe03030)
+            : const Color(0xff2060e8);
+        canvas.drawRect(Rect.fromLTWH(x, y, 4, 4), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ColourBackground oldDelegate) => false;
+}
+
+/// The real source-future consumer sits above a separate colourful player
+/// background. Empty probes lie in the blur bands and outside lyric ink.
+class _ContentSurface {
+  final boundary = GlobalKey();
+  final contentKey = GlobalKey();
+  final settings =
+      LyricViewController(preferences: NowPlayingPagePreference.fromMap({}));
+  final positions = StreamController<double>.broadcast(sync: true);
+  final hidden = ValueNotifier(false);
+  Future<Lyric?>? future;
+  Object source = Object();
+
+  Widget host({bool backgroundOnly = false, double opacity = 1}) => MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: RepaintBoundary(
+              key: boundary,
+              child: SizedBox(
+                width: 420,
+                height: 480,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    const CustomPaint(painter: _ColourBackground()),
+                    if (!backgroundOnly)
+                      Opacity(
+                        opacity: opacity,
+                        child: ChangeNotifierProvider.value(
+                          value: settings,
+                          child: VerticalLyricContent(
+                            key: contentKey,
+                            lyricFuture: future,
+                            sourceIdentity: source,
+                            positionStream: positions.stream,
+                            readPosition: () => 12,
+                            onSeek: (_) => fail('No seek is requested'),
+                            hidden: hidden,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+  List<RenderBackdropFilter> filters(WidgetTester tester) => tester
+      .renderObjectList<RenderBackdropFilter>(find.descendant(
+          of: find.byKey(contentKey), matching: find.byType(BackdropFilter)))
+      .toList(growable: false);
+
+  void dispose() {
+    settings.dispose();
+    positions.close();
+    hidden.dispose();
+  }
+}
+
+void _expectUnchangedBackground(
+    _Pixels actual, _Pixels background, String phase) {
+  expect((actual.width, actual.height), (background.width, background.height));
+  for (var offset = 3; offset < actual.bytes.length; offset += 4) {
+    if (actual.bytes[offset] != 255) {
+      fail('$phase erased the opaque player background at '
+          '(${offset ~/ 4 % actual.width},${offset ~/ 4 ~/ actual.width})');
+    }
+  }
+  // The visible labels are centred. These narrow side probes also avoid the
+  // actual source glyphs and their native Gaussian input halo in all states.
+  for (final row in [const (12, 18), const (455, 461)]) {
+    for (var y = row.$1; y < row.$2; y++) {
+      for (var x = 4; x < 8; x++) {
+        final offset = (y * actual.width + x) * 4;
+        for (var channel = 0; channel < 4; channel++) {
+          expect(actual.bytes[offset + channel],
+              background.bytes[offset + channel],
+              reason: '$phase: empty blur-band background at ($x,$y) '
+                  'channel=$channel must not acquire a rectangle tint');
+        }
+      }
+    }
+  }
+}
+
+void _expectRetainedMask(
+    WidgetTester tester,
+    _ContentSurface surface,
+    List<RenderBackdropFilter> original,
+    List<BackdropFilterLayer> layers,
+    String phase) {
+  final current = surface.filters(tester);
+  expect(current, hasLength(12), reason: '$phase keeps one fixed mask');
+  for (var index = 0; index < 12; index++) {
+    expect(current[index], same(original[index]),
+        reason: '$phase retains native band render ownership');
+    expect(current[index].layer, same(layers[index]),
+        reason: '$phase retains the painted native backdrop layer');
+  }
 }
 
 Future<void> _finish(WidgetTester tester) async {
@@ -448,6 +572,323 @@ void main() {
         .renderObjectList<RenderBackdropFilter>(find.byType(BackdropFilter));
     expect(filters.where((filter) => filter.enabled), hasLength(12));
     expect(positions.hasListener, isTrue);
+    await tester.pumpAndSettle();
+    await _finish(tester);
+  });
+
+  testWidgets(
+      'source changes retain one mask over a colourful player background',
+      (tester) async {
+    tester.view.physicalSize = const Size(640, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final surface = _ContentSurface();
+    addTearDown(surface.dispose);
+    await tester.pumpWidget(surface.host(backgroundOnly: true));
+    final background = await _capture(tester, surface.boundary);
+    surface.future = Future<Lyric?>.value(_Lyrics());
+    await tester.pumpWidget(surface.host());
+    await tester.pumpAndSettle();
+    final filters = surface.filters(tester);
+    expect(filters, hasLength(12));
+    final layers = [for (final filter in filters) filter.layer!];
+
+    // A full-opacity FadeTransition can elide its temporary buffer. The
+    // player's actual source consumer must retain the same backdrop scope.
+    for (final opacity in [254 / 255, 1.0]) {
+      await tester.pumpWidget(surface.host(opacity: opacity));
+      _expectRetainedMask(
+          tester, surface, filters, layers, 'ancestor opacity=$opacity');
+      _expectUnchangedBackground(await _capture(tester, surface.boundary),
+          background, 'ancestor opacity=$opacity');
+    }
+
+    Future<void> sample(String phase) async {
+      var previous = 0;
+      for (final elapsed in [16, 159, 160, 161, 319, 320]) {
+        await tester.pump(Duration(milliseconds: elapsed - previous));
+        previous = elapsed;
+        _expectRetainedMask(
+            tester, surface, filters, layers, '$phase at ${elapsed}ms');
+        _expectUnchangedBackground(await _capture(tester, surface.boundary),
+            background, '$phase at ${elapsed}ms');
+      }
+    }
+
+    final pending = Completer<Lyric?>();
+    surface.future = pending.future;
+    surface.source = Object();
+    await tester.pumpWidget(surface.host());
+    await sample('A to pending');
+    pending.complete(_Lyrics());
+    await tester.pump();
+    await sample('pending to B');
+
+    surface.future = Future<Lyric?>.value(null);
+    surface.source = Object();
+    await tester.pumpWidget(surface.host());
+    await sample('B to pure music');
+    surface.future = null;
+    surface.source = Object();
+    await tester.pumpWidget(surface.host());
+    await sample('pure music to no lyric source');
+
+    // Live frames subscribe in the engine's error Zone. An error Future
+    // created in the guarded test Zone cannot deliver onError across it.
+    // Create and complete this real failure in the same frame Zone as the
+    // FutureBuilder, without suppressing or replacing its error result.
+    late final Completer<Lyric?> failed;
+    tester.binding.addPostFrameCallback((_) => failed = Completer<Lyric?>());
+    tester.binding.scheduleFrame();
+    await tester.pump();
+    surface.future = failed.future;
+    surface.source = Object();
+    await tester.pumpWidget(surface.host());
+    await tester.pump();
+    tester.binding.addPostFrameCallback(
+        (_) => failed.completeError(StateError('fixture lookup failed')));
+    tester.binding.scheduleFrame();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(language.ui('歌词加载失败，请切换来源或重试')), findsOneWidget,
+        reason: 'The real failed future must display its error presentation');
+    await sample('lookup error');
+    await _finish(tester);
+  });
+
+  testWidgets(
+      'rapid sources ignore late results and release document manual mode',
+      (tester) async {
+    tester.view.physicalSize = const Size(640, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final surface = _ContentSurface();
+    addTearDown(surface.dispose);
+    await tester.pumpWidget(surface.host(backgroundOnly: true));
+    final background = await _capture(tester, surface.boundary);
+    surface.future = Future<Lyric?>.value(_Lyrics());
+    await tester.pumpWidget(surface.host());
+    await tester.pumpAndSettle();
+    final filters = surface.filters(tester);
+    expect(filters, hasLength(12));
+
+    await tester.sendEventToBinding(PointerScrollEvent(
+        position: tester.getCenter(find.byKey(surface.contentKey)),
+        scrollDelta: const Offset(0, 72)));
+    await tester.pump();
+    expect(
+        tester
+            .widget<LyricViewportBlur>(find.byType(LyricViewportBlur))
+            .enabled,
+        isFalse,
+        reason: 'Actual manual scrolling disables the fixed blur');
+    final manual = surface.filters(tester);
+    for (var index = 0; index < 12; index++) {
+      expect(manual[index], same(filters[index]));
+      expect(manual[index].enabled, isFalse);
+    }
+    _expectUnchangedBackground(
+        await _capture(tester, surface.boundary), background, 'manual reading');
+
+    final pending = Completer<Lyric?>();
+    surface.future = pending.future;
+    surface.source = Object();
+    await tester.pumpWidget(surface.host());
+    await tester.pump(const Duration(milliseconds: 16));
+    final mask =
+        tester.widget<LyricViewportBlur>(find.byType(LyricViewportBlur));
+    expect(mask.enabled, isTrue,
+        reason:
+            'The new source cannot inherit the outgoing document manual mode');
+    final current = surface.filters(tester);
+    for (var index = 0; index < 12; index++) {
+      expect(current[index], same(filters[index]));
+    }
+    // Enabling after deliberate manual-disable owns fresh native layers;
+    // future changes from this point must keep that exact ownership.
+    final layers = [for (final filter in current) filter.layer!];
+    final destination = _Lyrics();
+    surface.future = Future<Lyric?>.value(destination);
+    surface.source = Object();
+    await tester.pumpWidget(surface.host());
+    await tester.pump(const Duration(milliseconds: 16));
+    final late = _Lyrics();
+    pending.complete(late);
+    await tester.pump();
+    var previous = 16;
+    for (final elapsed in [16, 80, 159, 160, 161, 239, 319, 320]) {
+      await tester.pump(Duration(milliseconds: elapsed - previous));
+      previous = elapsed;
+      _expectRetainedMask(tester, surface, filters, layers,
+          'rapid replacement at ${elapsed}ms');
+      _expectUnchangedBackground(await _capture(tester, surface.boundary),
+          background, 'rapid replacement at ${elapsed}ms');
+      expect(
+          find.byWidgetPredicate((widget) =>
+              widget is VerticalLyricScrollView &&
+              identical(widget.lyric, late)),
+          findsNothing,
+          reason: 'An obsolete lookup cannot publish its lyric or blur owner');
+    }
+    expect(
+        find.byWidgetPredicate((widget) =>
+            widget is VerticalLyricScrollView &&
+            identical(widget.lyric, destination)),
+        findsOneWidget);
+    expect(
+        tester
+            .widget<LyricViewportBlur>(find.byType(LyricViewportBlur))
+            .reading,
+        same(mask.reading),
+        reason: 'Rapid source replacement keeps the original reading clock');
+
+    // A derived lookup for this same authored source retains its live scroll
+    // view and manual mode while pending. Its terminal empty result releases
+    // only that document ownership, leaving the host mask/clock in place.
+    final heldScroll = find.byWidgetPredicate((widget) =>
+        widget is VerticalLyricScrollView &&
+        identical(widget.lyric, destination));
+    final heldState = tester.state(heldScroll);
+    await tester.sendEventToBinding(PointerScrollEvent(
+        position: tester.getCenter(find.byKey(surface.contentKey)),
+        scrollDelta: const Offset(0, 72)));
+    await tester.pump();
+    expect(
+        tester
+            .widget<LyricViewportBlur>(find.byType(LyricViewportBlur))
+            .enabled,
+        isFalse);
+    final sameOwner = surface.source;
+    final sameSourcePending = Completer<Lyric?>();
+    surface.future = sameSourcePending.future;
+    await tester.pumpWidget(surface.host());
+    for (final duration in [16, 143, 161]) {
+      await tester.pump(Duration(milliseconds: duration));
+      expect(surface.source, same(sameOwner));
+      expect(tester.state(heldScroll), same(heldState));
+      final waitingMask =
+          tester.widget<LyricViewportBlur>(find.byType(LyricViewportBlur));
+      expect(waitingMask.enabled, isFalse,
+          reason: 'A pending same-source projection preserves manual reading');
+      expect(waitingMask.reading, same(mask.reading));
+      final waitingFilters = surface.filters(tester);
+      expect(waitingFilters, hasLength(12));
+      for (var index = 0; index < 12; index++) {
+        expect(waitingFilters[index], same(filters[index]));
+        expect(waitingFilters[index].enabled, isFalse);
+      }
+      _expectUnchangedBackground(await _capture(tester, surface.boundary),
+          background, 'same-source manual pending');
+    }
+    sameSourcePending.complete(null);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(language.ui('无歌词')), findsOneWidget,
+        reason:
+            'The completed null lookup reaches the real terminal presentation');
+    // The child commits its terminal snapshot before the deferred host
+    // notification can rebuild the already-built outer mask.
+    await tester.pump();
+    final terminalMask =
+        tester.widget<LyricViewportBlur>(find.byType(LyricViewportBlur));
+    expect(terminalMask.enabled, isTrue,
+        reason: 'A terminal empty source cannot keep an obsolete manual owner');
+    expect(terminalMask.reading, same(mask.reading));
+    final terminalFilters = surface.filters(tester);
+    expect(terminalFilters, hasLength(12));
+    for (var index = 0; index < 12; index++) {
+      expect(terminalFilters[index], same(filters[index]));
+      expect(terminalFilters[index].enabled, isTrue);
+      expect(terminalFilters[index].layer, isNotNull);
+    }
+    _expectUnchangedBackground(await _capture(tester, surface.boundary),
+        background, 'same-source terminal empty');
+    await tester.pumpAndSettle();
+    await _finish(tester);
+  });
+
+  testWidgets(
+      'hover continues across sources and hiding preserves its blur pose',
+      (tester) async {
+    tester.view.physicalSize = const Size(640, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final surface = _ContentSurface();
+    addTearDown(surface.dispose);
+    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(600, 550));
+    addTearDown(mouse.removePointer);
+    await tester.pumpWidget(surface.host(backgroundOnly: true));
+    final background = await _capture(tester, surface.boundary);
+    surface.future = Future<Lyric?>.value(_Lyrics());
+    await tester.pumpWidget(surface.host());
+    await tester.pumpAndSettle();
+    final filters = surface.filters(tester);
+    final layers = [for (final filter in filters) filter.layer!];
+    final reading = tester
+        .widget<LyricViewportBlur>(find.byType(LyricViewportBlur))
+        .reading;
+    expect(reading.value, 1);
+    await mouse.moveTo(tester.getCenter(find.byKey(surface.contentKey)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    final partial = reading.value;
+    expect(partial, inExclusiveRange(0.0, 1.0));
+
+    final pending = Completer<Lyric?>();
+    surface.future = pending.future;
+    surface.source = Object();
+    await tester.pumpWidget(surface.host());
+    expect(
+        tester
+            .widget<LyricViewportBlur>(find.byType(LyricViewportBlur))
+            .reading,
+        same(reading));
+    expect(reading.value, partial,
+        reason: 'The source switch cannot restart the in-flight hover clock');
+    pending.complete(_Lyrics());
+    await tester.pump();
+    expect(reading.value, partial);
+    await tester.pump(const Duration(milliseconds: 20));
+    final beforeHidden = reading.value;
+    expect(beforeHidden, greaterThan(0));
+    expect(beforeHidden, lessThan(partial),
+        reason:
+            'The original hover keeps advancing through loading/source arrival');
+    _expectRetainedMask(
+        tester, surface, filters, layers, 'source arrived mid-hover');
+    _expectUnchangedBackground(await _capture(tester, surface.boundary),
+        background, 'source arrived mid-hover');
+
+    surface.hidden.value = true;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(reading.value, beforeHidden,
+        reason: 'A hidden window freezes its already-painted fixed mask');
+    _expectRetainedMask(tester, surface, filters, layers, 'hidden hover');
+    expect(tester.binding.transientCallbackCount, 0);
+    surface.hidden.value = false;
+    await tester.pump();
+    expect(reading.value, beforeHidden,
+        reason: 'The first restored frame reuses the held blur pose');
+    expect(
+        tester
+            .widget<LyricViewportBlur>(find.byType(LyricViewportBlur))
+            .reading,
+        same(reading));
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(reading.value, 0);
+    expect(surface.filters(tester).every((filter) => !filter.enabled), isTrue);
+    _expectUnchangedBackground(await _capture(tester, surface.boundary),
+        background, 'completed hover after restore');
+    await mouse.moveTo(const Offset(600, 550));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(reading.value, 1);
+    expect(surface.filters(tester).every((filter) => filter.enabled), isTrue);
     await tester.pumpAndSettle();
     await _finish(tester);
   });

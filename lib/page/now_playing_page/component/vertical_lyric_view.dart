@@ -325,14 +325,102 @@ class VerticalLyricContent extends StatefulWidget {
   State<VerticalLyricContent> createState() => _VerticalLyricContentState();
 }
 
+// A neutral source surface uses the existing shader layer, independently of
+// the scroll view's visible edge fade.
+class _LyricViewportSurface extends LyricViewportFade {
+  const _LyricViewportSurface({required super.child})
+      : super(enabled: false, retainLayer: true);
+}
+
 class _VerticalLyricContentState extends State<VerticalLyricContent>
-    with WidgetsBindingObserver {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   AppLifecycleState? _lifecycle;
   bool _entered = false;
   bool _wasVisible = false;
   bool _hasPresented = false;
   Lyric? _presentedLyric;
   Object? _presentedSourceIdentity;
+  late final AnimationController _readingClock;
+  ValueListenable<RenderingPreferences>? _preferences;
+  bool _maskActive = false;
+  bool _pointerReading = false;
+  bool _manualReading = false;
+  Object _manualOwner = Object();
+  late ValueChanged<bool> _manualReadingChanged;
+  bool _manualUpdateQueued = false;
+  int? _maskReturnRequest;
+
+  void _bindManualOwner() {
+    final owner = _manualOwner = Object();
+    _manualReading = false;
+    _manualReadingChanged = (reading) {
+      if (!mounted ||
+          !identical(owner, _manualOwner) ||
+          reading == _manualReading) {
+        return;
+      }
+      _manualReading = reading;
+      // A same-source document update can end manual reading during its
+      // child's build. Preserve the immediate ownership change and defer only
+      // that notification; pointer input still updates the mask in this frame.
+      _notifyManualStateChanged();
+    };
+  }
+
+  void _notifyManualStateChanged() {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_manualUpdateQueued) return;
+      _manualUpdateQueued = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _manualUpdateQueued = false;
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
+  void _syncMaskActivity() {
+    final active = widget.hidden?.value != true &&
+        TickerMode.valuesOf(context).enabled &&
+        _lifecycle != AppLifecycleState.hidden &&
+        (_preferences?.value ?? const RenderingPreferences())
+            .allowsVisualUpdates(
+          lifecycle: _lifecycle,
+          treeVisible: TickerMode.valuesOf(context).enabled,
+          nativeHidden: widget.hidden?.value ?? false,
+        );
+    if (!active) {
+      _readingClock.stop();
+    } else if (LyricMotion.reducedOf(context)) {
+      _readingClock.value = _pointerReading ? 0 : 1;
+    } else if (!_maskActive) {
+      // Resume from the held surface on the first restored frame.
+      _readingClock.animateTo(
+        _pointerReading ? 0 : 1,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOutCubic,
+      );
+    }
+    _maskActive = active;
+  }
+
+  void _setPointerReading(bool reading) {
+    if (_pointerReading == reading) return;
+    _pointerReading = reading;
+    final target = reading ? 0.0 : 1.0;
+    if (!_maskActive) return;
+    if (LyricMotion.reducedOf(context)) {
+      _readingClock.value = target;
+    } else {
+      _readingClock.animateTo(
+        target,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
 
   void _syncEntrance() {
     final visible =
@@ -354,11 +442,18 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final preferences = RenderingPreferencesScope.listenableOf(context);
+    if (!identical(preferences, _preferences)) {
+      _preferences?.removeListener(_visibilityChanged);
+      _preferences = preferences..addListener(_visibilityChanged);
+    }
+    _syncMaskActivity();
     _syncEntrance();
   }
 
   void _visibilityChanged() {
     if (mounted) {
+      _syncMaskActivity();
       _syncEntrance();
       setState(() {});
     }
@@ -367,9 +462,16 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
   @override
   void didUpdateWidget(covariant VerticalLyricContent oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if ((widget.sourceIdentity ?? widget.lyricFuture) !=
+        (oldWidget.sourceIdentity ?? oldWidget.lyricFuture)) {
+      // Manual scrolling belongs to a document; the pointer and fixed mask do
+      // not. Outgoing scroll views cannot publish state into the new owner.
+      _bindManualOwner();
+    }
     if (oldWidget.hidden != widget.hidden) {
       oldWidget.hidden?.removeListener(_visibilityChanged);
       widget.hidden?.addListener(_visibilityChanged);
+      _syncMaskActivity();
       _syncEntrance();
     }
   }
@@ -383,6 +485,8 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
   @override
   void initState() {
     super.initState();
+    _readingClock = AnimationController(vsync: this, value: 1);
+    _bindManualOwner();
     WidgetsBinding.instance.addObserver(this);
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     widget.hidden?.addListener(_visibilityChanged);
@@ -390,7 +494,10 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
 
   @override
   void didChangeAccessibilityFeatures() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      _syncMaskActivity();
+      setState(() {});
+    }
   }
 
   @override
@@ -398,6 +505,18 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
     UiLanguageScope.watch(context);
     final reduced =
         LyricMotion.reducedOf(context) || widget.hidden?.value == true;
+    final settings = context.watch<LyricViewController?>();
+    if (_maskReturnRequest != settings?.returnRequest) {
+      _maskReturnRequest = settings?.returnRequest;
+      _manualReading = false;
+    }
+    final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
+    final blurEnabled = !_manualReading &&
+        !(settings?.readingMode ?? false) &&
+        !(settings?.fontSizeAdjusting ?? false) &&
+        (settings?.lyricBlurEnabled ?? true) &&
+        !highContrast &&
+        (_preferences?.value.surfaceBlur ?? true);
     final active = RenderingPreferencesScope.listenableOf(context)
         .value
         .allowsVisualUpdates(
@@ -407,103 +526,141 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
         );
     return TickerMode(
       enabled: active,
-      child: FutureBuilder<Lyric?>(
-        future: widget.lyricFuture,
-        builder: (context, snapshot) {
-          final waiting = widget.lyricFuture != null &&
-              snapshot.connectionState != ConnectionState.done;
-          final retainPresentation = waiting &&
-              widget.sourceIdentity != null &&
-              widget.sourceIdentity == _presentedSourceIdentity;
-          final lyric = widget.lyricFuture == null
-              ? null
-              : waiting
-                  ? retainPresentation
-                      ? _presentedLyric
-                      : widget.sourceIdentity == null
-                          ? null
-                          : widget.initialPresentation
-                  : snapshot.data;
-          if (!waiting || lyric != null) {
-            _presentedLyric = snapshot.hasError ? null : lyric;
-            _presentedSourceIdentity = widget.sourceIdentity;
-          }
-          Widget content;
-          if (lyric != null && lyric.lines.isNotEmpty && !snapshot.hasError) {
-            content = VerticalLyricScrollView(
-              key: widget.sourceIdentity == null
-                  ? ObjectKey(lyric)
-                  : ValueKey(widget.sourceIdentity),
-              lyric: lyric,
-              sourceIdentity: widget.sourceIdentity,
-              positionStream: widget.positionStream,
-              readPosition: widget.readPosition,
-              onSeek: widget.onSeek,
-              onPractice: widget.onPractice,
-              springLyrics: widget.springLyrics,
-              hidden: widget.hidden,
-              playing: widget.playing,
-            );
-          } else {
-            final label = waiting
-                ? ui("正在加载歌词")
-                : snapshot.hasError
-                    ? ui(lyricLookupStatus(snapshot.error) ?? "歌词加载失败，请切换来源或重试")
-                    : ui("无歌词");
-            content = Center(
-              key: ValueKey(label),
-              child: waiting
-                  ? _LyricLoadingStatus(
-                      label: label,
-                      color: Theme.of(context).colorScheme.onSecondaryContainer,
-                      animate: active && !reduced,
-                    )
-                  : Text(
-                      label,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 22,
-                        color:
-                            Theme.of(context).colorScheme.onSecondaryContainer,
-                      ),
-                    ),
-            );
-          }
-          final firstPresentation = !_hasPresented;
-          if (_entered) _hasPresented = true;
-          return AnimatedSwitcher(
-            duration:
-                reduced ? Duration.zero : const Duration(milliseconds: 320),
-            switchInCurve: firstPresentation
-                ? Curves.easeOutCubic
-                : const Interval(.5, 1, curve: Curves.easeOutCubic),
-            switchOutCurve: const Interval(.5, 1, curve: Curves.easeInCubic),
-            transitionBuilder: (child, animation) => AnimatedBuilder(
-              animation: animation,
-              child: child,
-              builder: (context, child) {
-                final leaving = animation.status == AnimationStatus.reverse;
-                return TickerMode(
-                  enabled: !leaving,
-                  child: IgnorePointer(
-                    ignoring: leaving,
-                    child: ExcludeSemantics(
-                      excluding: leaving,
-                      child: FadeTransition(
-                        opacity: animation,
-                        child: _LyricExitScope(
-                            exiting: leaving || !active, child: child!),
-                      ),
-                    ),
+      child: MouseRegion(
+        onEnter: (_) => _setPointerReading(true),
+        onExit: (_) => _setPointerReading(false),
+        // This retained, neutral surface keeps the backdrop source identical
+        // at every parent fade value, including alpha=1. The complete lyric
+        // source paints before the fixed bands in this same surface; the page
+        // background never enters the filter when a content fade finishes.
+        child: _LyricViewportSurface(
+          child: LyricViewportBlur(
+            enabled: blurEnabled,
+            topFraction: settings?.lyricBlurTopFraction ?? .25,
+            bottomFraction: settings?.lyricBlurBottomFraction ?? .22,
+            reading: _readingClock,
+            child: FutureBuilder<Lyric?>(
+              future: widget.lyricFuture,
+              builder: (context, snapshot) {
+                final waiting = widget.lyricFuture != null &&
+                    snapshot.connectionState != ConnectionState.done;
+                final retainPresentation = waiting &&
+                    widget.sourceIdentity != null &&
+                    widget.sourceIdentity == _presentedSourceIdentity;
+                final lyric = widget.lyricFuture == null
+                    ? null
+                    : waiting
+                        ? retainPresentation
+                            ? _presentedLyric
+                            : widget.sourceIdentity == null
+                                ? null
+                                : widget.initialPresentation
+                        : snapshot.data;
+                if (!waiting || lyric != null) {
+                  _presentedLyric = snapshot.hasError ? null : lyric;
+                  _presentedSourceIdentity = widget.sourceIdentity;
+                }
+                if (!waiting &&
+                    _manualReading &&
+                    (snapshot.hasError ||
+                        lyric == null ||
+                        lyric.lines.isEmpty)) {
+                  // A terminal empty/error result ends this document's manual
+                  // session even when a same-source projection kept its owner.
+                  // Waiting with retained lyrics still owns its reading pose.
+                  _bindManualOwner();
+                  _notifyManualStateChanged();
+                }
+                Widget content;
+                if (lyric != null &&
+                    lyric.lines.isNotEmpty &&
+                    !snapshot.hasError) {
+                  content = VerticalLyricScrollView(
+                    key: widget.sourceIdentity == null
+                        ? ObjectKey(lyric)
+                        : ValueKey(widget.sourceIdentity),
+                    lyric: lyric,
+                    sourceIdentity: widget.sourceIdentity,
+                    positionStream: widget.positionStream,
+                    readPosition: widget.readPosition,
+                    onSeek: widget.onSeek,
+                    onPractice: widget.onPractice,
+                    springLyrics: widget.springLyrics,
+                    hidden: widget.hidden,
+                    playing: widget.playing,
+                    viewportReadingClock: _readingClock,
+                    onManualReadingChanged: _manualReadingChanged,
+                  );
+                } else {
+                  final label = waiting
+                      ? ui("正在加载歌词")
+                      : snapshot.hasError
+                          ? ui(lyricLookupStatus(snapshot.error) ??
+                              "歌词加载失败，请切换来源或重试")
+                          : ui("无歌词");
+                  content = Center(
+                    key: ValueKey(label),
+                    child: waiting
+                        ? _LyricLoadingStatus(
+                            label: label,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSecondaryContainer,
+                            animate: active && !reduced,
+                          )
+                        : Text(
+                            label,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 22,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSecondaryContainer,
+                            ),
+                          ),
+                  );
+                }
+                final firstPresentation = !_hasPresented;
+                if (_entered) _hasPresented = true;
+                return AnimatedSwitcher(
+                  duration: reduced
+                      ? Duration.zero
+                      : const Duration(milliseconds: 320),
+                  switchInCurve: firstPresentation
+                      ? Curves.easeOutCubic
+                      : const Interval(.5, 1, curve: Curves.easeOutCubic),
+                  switchOutCurve:
+                      const Interval(.5, 1, curve: Curves.easeInCubic),
+                  transitionBuilder: (child, animation) => AnimatedBuilder(
+                    animation: animation,
+                    child: child,
+                    builder: (context, child) {
+                      final leaving =
+                          animation.status == AnimationStatus.reverse;
+                      return TickerMode(
+                        enabled: !leaving,
+                        child: IgnorePointer(
+                          ignoring: leaving,
+                          child: ExcludeSemantics(
+                            excluding: leaving,
+                            child: FadeTransition(
+                              opacity: animation,
+                              child: _LyricExitScope(
+                                  exiting: leaving || !active, child: child!),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
+                  child: _entered
+                      ? content
+                      : const SizedBox(key: ValueKey('lyric-entry')),
                 );
               },
             ),
-            child: _entered
-                ? content
-                : const SizedBox(key: ValueKey('lyric-entry')),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
@@ -511,7 +668,9 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
   @override
   void dispose() {
     widget.hidden?.removeListener(_visibilityChanged);
+    _preferences?.removeListener(_visibilityChanged);
     WidgetsBinding.instance.removeObserver(this);
+    _readingClock.dispose();
     super.dispose();
   }
 }
@@ -636,6 +795,8 @@ class VerticalLyricScrollView extends StatefulWidget {
     this.hidden,
     this.playing = false,
     this.suspended = false,
+    this.viewportReadingClock,
+    this.onManualReadingChanged,
   });
 
   final Lyric lyric;
@@ -648,6 +809,11 @@ class VerticalLyricScrollView extends StatefulWidget {
   final ValueListenable<bool>? hidden;
   final bool playing;
   final bool suspended;
+
+  /// A persistent surface owns this clock and the fixed mask when supplied.
+  /// Standalone scroll views retain their local hover clock and mask.
+  final AnimationController? viewportReadingClock;
+  final ValueChanged<bool>? onManualReadingChanged;
 
   @override
   State<VerticalLyricScrollView> createState() =>
@@ -739,11 +905,15 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   ValueListenable<RenderingPreferences>? _preferences;
   bool _active = false;
   late final AnimationController _followClock;
-  late final AnimationController _readingClock;
+  AnimationController? _localReadingClock;
+  AnimationController get _readingClock =>
+      widget.viewportReadingClock ?? _localReadingClock!;
+  bool get _ownsReadingClock => widget.viewportReadingClock == null;
   late final Ticker _mediaTicker;
   bool _pointerReading = false;
 
   void _setPointerReading(bool reading) {
+    if (!_ownsReadingClock) return;
     if (_pointerReading == reading) return;
     _pointerReading = reading;
     final target = reading ? 0.0 : 1.0;
@@ -757,6 +927,35 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       );
     }
   }
+
+  void _setManualScrollActive(bool active) {
+    if (_manualScrollActive == active) return;
+    _manualScrollActive = active;
+    if (!_exiting) widget.onManualReadingChanged?.call(active);
+  }
+
+  Widget _withLocalPointerReading({required Widget child}) => _ownsReadingClock
+      ? MouseRegion(
+          onEnter: (_) => _setPointerReading(true),
+          onExit: (_) => _setPointerReading(false),
+          child: child,
+        )
+      : child;
+
+  Widget _withLocalViewportMask({
+    required bool enabled,
+    required LyricViewController settings,
+    required Widget child,
+  }) =>
+      _ownsReadingClock
+          ? LyricViewportBlur(
+              enabled: enabled,
+              topFraction: settings.lyricBlurTopFraction,
+              bottomFraction: settings.lyricBlurBottomFraction,
+              reading: _readingClock,
+              child: child,
+            )
+          : child;
 
   Map<int, LyricFollowTransition> _followTransitions = {};
   double? _fontAnchorCenter;
@@ -784,7 +983,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         _receivePosition(widget.readPosition());
       }
     });
-    _readingClock = AnimationController(vsync: this, value: 1);
+    if (_ownsReadingClock) {
+      _localReadingClock = AnimationController(vsync: this, value: 1);
+    }
     _followClock = AnimationController(vsync: this)
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed &&
@@ -836,7 +1037,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _active = false;
       _mediaTicker.stop();
       _followClock.stop();
-      _readingClock.stop();
+      if (_ownsReadingClock) _readingClock.stop();
       _sourceGeneration++;
       unawaited(_positionSubscription?.cancel());
       _positionSubscription = null;
@@ -899,7 +1100,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _followGeneration++;
       _manualScrollTimer?.cancel();
       _manualScrollTimer = null;
-      _manualScrollActive = false;
+      _setManualScrollActive(false);
       _dragging = false;
       _scrollPointers.clear();
       if (_scrollController.hasClients &&
@@ -924,7 +1125,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _builtFontBand = null;
     _cancelFollowEffects();
     _manualScrollTimer?.cancel();
-    _manualScrollActive = false;
+    _setManualScrollActive(false);
     _dragging = false;
     _scrollPointers.clear();
     _followGeneration++;
@@ -962,6 +1163,16 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   @override
   void didUpdateWidget(VerticalLyricScrollView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(
+        oldWidget.viewportReadingClock, widget.viewportReadingClock)) {
+      final reading = oldWidget.viewportReadingClock?.value ??
+          _localReadingClock?.value ??
+          1.0;
+      _localReadingClock?.dispose();
+      _localReadingClock = _ownsReadingClock
+          ? AnimationController(vsync: this, value: reading)
+          : null;
+    }
     if (!widget.playing) _mediaTicker.stop();
     if (!identical(oldWidget.lyric, widget.lyric)) {
       if (widget.sourceIdentity != null &&
@@ -1328,7 +1539,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       return;
     }
     _manualScrollTimer?.cancel();
-    _manualScrollActive = false;
+    _setManualScrollActive(false);
     _dragging = false;
     // A successful native seek reports its real position immediately. Do not
     // display a guessed target if the source quantizes/limits seeking.
@@ -1527,7 +1738,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _settingsAnchor = false;
     _followGeneration++;
     final enteringManual = !_manualScrollActive;
-    _manualScrollActive = true;
+    _setManualScrollActive(true);
     if (enteringManual) {
       _cancelFollowEffects();
     }
@@ -1549,7 +1760,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _manualScrollTimer?.cancel();
     _manualScrollTimer = Timer(LyricMotion.manualScrollGrace, () {
       if (!mounted || !_active || _dragging || _readingMode) return;
-      _manualScrollActive = false;
+      _setManualScrollActive(false);
       setState(() {});
       _scheduleFollow();
       // Timer callbacks can arrive while paused, without a new position frame.
@@ -1574,7 +1785,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   void _cancelFollowEffects() {
     _mediaTicker.stop();
     _followClock.stop();
-    _readingClock.value = _pointerReading ? 0 : 1;
+    if (_ownsReadingClock) _readingClock.value = _pointerReading ? 0 : 1;
     _followTransitions = {};
     _releasingVoices.clear();
   }
@@ -1781,7 +1992,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     if (_returnRequest != settings.returnRequest) {
       _returnRequest = settings.returnRequest;
       _manualScrollTimer?.cancel();
-      _manualScrollActive = false;
+      _setManualScrollActive(false);
       _dragging = false;
       _readDestination = null;
       _readRevealGeneration++;
@@ -1798,7 +2009,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _readingSettingsPending.addAll(interruptedReadingSettings);
       _readingRevealAfterSettings = readingSettingsInterrupted;
       _manualScrollTimer?.cancel();
-      _manualScrollActive = false;
+      _setManualScrollActive(false);
       _settingsAnchor = false;
       _cancelFollowEffects();
       _scheduleReadingReveal();
@@ -2103,9 +2314,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
         _displayIdentity = displayIdentity;
         return Stack(
           children: [
-            MouseRegion(
-              onEnter: (_) => _setPointerReading(true),
-              onExit: (_) => _setPointerReading(false),
+            _withLocalPointerReading(
               child: Listener(
                 onPointerDown: (event) {
                   if (const DanPlayerScrollBehavior().dragDevices.contains(
@@ -2134,11 +2343,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                       scrollbars: false,
                       overscroll: false,
                     ),
-                    child: LyricViewportBlur(
+                    child: _withLocalViewportMask(
                       enabled: visibleBlurEnabled,
-                      topFraction: settings.lyricBlurTopFraction,
-                      bottomFraction: settings.lyricBlurBottomFraction,
-                      reading: _readingClock,
+                      settings: settings,
                       child: LyricViewportFade(
                         enabled: followEnabled && !highContrast,
                         retainLayer: !reduced && !highContrast,
@@ -2255,7 +2462,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _preferences?.removeListener(_syncActivity);
     _positionSubscription?.cancel();
     _manualScrollTimer?.cancel();
-    _readingClock.dispose();
+    _localReadingClock?.dispose();
     _mediaTicker.dispose();
     _followClock.dispose();
     _scrollController.dispose();

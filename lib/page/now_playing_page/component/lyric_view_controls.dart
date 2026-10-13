@@ -367,9 +367,9 @@ class LyricViewControls extends StatelessWidget {
           const SizedBox(height: 8.0),
           const _LyricReadingMenu(),
           const SizedBox(height: 8.0),
-          LyricFontSizeMenu(hidden: hidden),
-          const SizedBox(height: 8.0),
           const _LyricBlurBtn(),
+          const SizedBox(height: 8.0),
+          LyricFontSizeMenu(hidden: hidden),
         ],
       )),
     );
