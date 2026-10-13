@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
@@ -427,8 +428,7 @@ void main() {
   }
 
   for (final dpr in [1.0, 1.25, 1.5, 2.0]) {
-    testWidgets(
-        'physically ineffective blur preserves clear pixels at ${dpr}x',
+    testWidgets('physically ineffective blur preserves clear pixels at ${dpr}x',
         (tester) async {
       tester.view.devicePixelRatio = dpr;
       tester.view.physicalSize = Size(640 * dpr, 480 * dpr);
@@ -684,32 +684,37 @@ void main() {
     surface.future = Future<Lyric?>.value(null);
     surface.source = Object();
     await tester.pumpWidget(surface.host());
-    await sample('B to pure music');
+    await sample('B to empty lyric result');
     surface.future = null;
     surface.source = Object();
     await tester.pumpWidget(surface.host());
-    await sample('pure music to no lyric source');
+    await sample('empty result to no lyric source');
 
     // Live frames subscribe in the engine's error Zone. An error Future
     // created in the guarded test Zone cannot deliver onError across it.
     // Create and complete this real failure in the same frame Zone as the
     // FutureBuilder, without suppressing or replacing its error result.
-    late final Completer<Lyric?> failed;
-    tester.binding.addPostFrameCallback((_) => failed = Completer<Lyric?>());
-    tester.binding.scheduleFrame();
-    await tester.pump();
-    surface.future = failed.future;
-    surface.source = Object();
-    await tester.pumpWidget(surface.host());
-    await tester.pump();
-    tester.binding.addPostFrameCallback(
-        (_) => failed.completeError(StateError('fixture lookup failed')));
-    tester.binding.scheduleFrame();
-    await tester.pump();
-    await tester.pump();
-    expect(find.text(language.ui('歌词加载失败，请切换来源或重试')), findsOneWidget,
-        reason: 'The real failed future must display its error presentation');
-    await sample('lookup error');
+    for (final outcome in [
+      (StateError('fixture lookup failed'), '歌词加载失败，请切换来源或重试'),
+      (const InstrumentalLyric(), InstrumentalLyric.message),
+    ]) {
+      late final Completer<Lyric?> failed;
+      tester.binding.addPostFrameCallback((_) => failed = Completer<Lyric?>());
+      tester.binding.scheduleFrame();
+      await tester.pump();
+      surface.future = failed.future;
+      surface.source = Object();
+      await tester.pumpWidget(surface.host());
+      await tester.pump();
+      tester.binding
+          .addPostFrameCallback((_) => failed.completeError(outcome.$1));
+      tester.binding.scheduleFrame();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(language.ui(outcome.$2)), findsOneWidget,
+          reason: 'The real lookup outcome must display its own presentation');
+      await sample('lookup outcome: ${outcome.$2}');
+    }
     await _finish(tester);
   });
 
