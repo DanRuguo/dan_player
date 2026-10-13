@@ -114,6 +114,15 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                           : null;
                       return ArtworkHandoff(
                         artworkKey: (widget.artworkKey, size),
+                        hidden: widget.hidden,
+                        isVisible: widget.isVisible,
+                        presentationKey: (
+                          widget.blur,
+                          widget.opacity,
+                          widget.motion,
+                          widget.fluid,
+                          widget.displaySized
+                        ),
                         loadArtwork: () async {
                           final provider = await _artwork;
                           return provider == null

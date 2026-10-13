@@ -20,6 +20,7 @@ class DetailHeaderBackdrop extends StatelessWidget {
         ColoredBox(color: theme.colorScheme.surfaceContainerHighest),
         ArtworkHandoff(
           artworkKey: artwork,
+          presentationKey: blur,
           loadArtwork: () async {
             final image = await artwork;
             return image == null

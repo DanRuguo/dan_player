@@ -198,8 +198,8 @@ class _Rig {
 
   double sigma(WidgetTester tester) {
     final filters = viewportFilters(tester);
-    expect(filters, hasLength(12),
-        reason: 'Read the actual six-strip top and bottom viewport masks');
+    expect(filters, hasLength(24),
+        reason: 'Read the actual twelve-strip top and bottom viewport masks');
     for (final filter in filters.where((filter) => filter.enabled)) {
       // ignore: invalid_use_of_protected_member
       expect(filter.layer, isA<BackdropFilterLayer>(),
@@ -533,7 +533,7 @@ class _FrozenLayerView {
       expect(spec.sigma, 0,
           reason: 'Paragraph sampling stays clear beneath the viewport mask');
     }
-    expect(backdrops, hasLength(12));
+    expect(backdrops, hasLength(24));
     for (final backdrop in backdrops) {
       backdrop.updateKernel();
     }
@@ -578,7 +578,7 @@ class _FrozenNativeSources {
       for (final filter in rig.viewportFilters(tester))
         _FrozenViewportBand(filter, outer, maskOwner.clipRect!.topLeft),
     ];
-    expect(bands, hasLength(12));
+    expect(bands, hasLength(24));
     final sourceLayers = <ImageFilterLayer, _FrozenSource>{};
     final allSamplers = <ImageFilterLayer>{};
     for (final element in tester.elementList(find.descendant(
@@ -724,7 +724,7 @@ class _FrozenNativeSources {
     }
 
     final root = copy(original)! as OffsetLayer;
-    expect(backdrops, hasLength(12),
+    expect(backdrops, hasLength(24),
         reason: 'Every actual viewport strip belongs to the frozen scene');
     return _FrozenLayerView(root, filters, backdrops);
   }

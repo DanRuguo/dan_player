@@ -2,8 +2,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 
-import 'lyric_motion.dart';
-
 /// Fixed, progressively blurred bands above a composited lyric viewport.
 ///
 /// The viewport paints once. These overlays leave its clear centre untouched,
@@ -29,7 +27,8 @@ class LyricViewportBlur extends StatelessWidget {
   // Small, disjoint strips vary the actual Gaussian radius. A ShaderMask or
   // Opacity around a BackdropFilter would put the filter in a fresh, empty
   // surface, and cannot reliably mask the previously composited lyrics.
-  static const _gradientSteps = 6;
+  static const _gradientSteps = 12;
+  static const _maximumSigma = 8.0;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -54,8 +53,7 @@ class LyricViewportBlur extends StatelessWidget {
               child: child,
               builder: (context, child) {
                 final sigma = enabled
-                    ? LyricMotion.blurForDistance(2) *
-                        reading.value.clamp(0.0, 1.0)
+                    ? _maximumSigma * reading.value.clamp(0.0, 1.0)
                     : 0.0;
                 return Stack(
                   fit: StackFit.expand,
@@ -86,9 +84,9 @@ class LyricViewportBlur extends StatelessWidget {
       final near = extent * index / _gradientSteps;
       final far = extent * (index + 1) / _gradientSteps;
       final progress = (index + .5) / _gradientSteps;
-      // Reach full blur within the inner two thirds of the configured band.
-      // The clear boundary stays soft, with no output beyond that boundary.
-      final ramp = (progress * 1.5).clamp(0.0, 1.0);
+      // Use the whole band for the gradual increase, with a flat derivative
+      // at the clear boundary and outer edge. No output crosses the boundary.
+      final ramp = progress;
       final radius = sigma * ramp * ramp * (3 - 2 * ramp);
       yield Positioned(
         key: ValueKey((top, index)),

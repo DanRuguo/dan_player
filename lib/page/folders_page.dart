@@ -12,8 +12,6 @@ import 'package:dan_player/component/audio_tile.dart';
 import 'package:dan_player/component/folder_tree_pane.dart';
 import 'package:dan_player/component/playlist_tree_item.dart';
 import 'package:dan_player/component/multi_selection_lifecycle.dart';
-import 'package:dan_player/component/app_motion.dart';
-import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/library/audio_folder_sort.dart';
 import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -123,7 +121,11 @@ class _FoldersPageState extends State<FoldersPage> {
         }
       });
     }
-    if (changed || _songSort != songSort || _songOrder != songPref.sortOrder) {
+    // Reordering folder headers changes the tree presentation, not its song
+    // sources or keys. Keep completed queues and in-flight song sort ownership.
+    if (sourceChanged ||
+        _songSort != songSort ||
+        _songOrder != songPref.sortOrder) {
       ++_sortGeneration;
       _pendingSorts.clear();
       _sortingFolders.clear();
@@ -187,8 +189,11 @@ class _FoldersPageState extends State<FoldersPage> {
           _expanded.contains(id);
       List<Audio> sorted;
       try {
-        sorted = await (widget.sortLargeFolder ?? sortFolderTreeSongs)(
-            source, method.field, direction);
+        final sorter = widget.sortLargeFolder;
+        sorted = sorter == null
+            ? await sortFolderTreeSongs(source, method.field, direction,
+                isCancelled: () => !current())
+            : await sorter(source, method.field, direction);
       } catch (_) {
         if (!current()) continue;
         // Unsendable third-party Audio subclasses must retain the same sort
@@ -444,7 +449,7 @@ class AudioFolderTile extends StatelessWidget {
                           folderDisplayName(audioFolder.path),
                       folderPath: normalized,
                       summary: '${ui('音乐文件夹')} · $summary',
-                      textInset: onToggle != null || treeRow ? 176 : 140,
+                      textInset: 140,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Material(
@@ -462,28 +467,6 @@ class AudioFolderTile extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 8),
                               child: Row(children: [
-                                if (onToggle != null) ...[
-                                  IconButton(
-                                    key: ValueKey(
-                                        'folder-tree-toggle-${folderTreePathId(audioFolder.path)}'),
-                                    tooltip: ui(expanded ? '折叠文件夹' : '展开文件夹'),
-                                    onPressed: onToggle,
-                                    constraints: const BoxConstraints.tightFor(
-                                        width: 32, height: 40),
-                                    padding: EdgeInsets.zero,
-                                    icon: AnimatedRotation(
-                                        turns: expanded ? .25 : 0,
-                                        duration:
-                                            appToolbarReduceMotion(context)
-                                                ? Duration.zero
-                                                : AppMotion.quick,
-                                        child: const Icon(Symbols.chevron_right,
-                                            size: 20)),
-                                  ),
-                                  const SizedBox(width: 4),
-                                ] else if (treeRow)
-                                  const SizedBox(
-                                      width: folderTreeToggleSlotWidth),
                                 Container(
                                     key: ValueKey(
                                         'folder-artwork-${audioFolder.path}'),

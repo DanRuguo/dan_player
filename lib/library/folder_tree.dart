@@ -243,15 +243,26 @@ class FolderTreeAudioList extends ListBase<Audio> {
 typedef FolderTreeSongSorter = Future<List<Audio>> Function(
     List<Audio> songs, AudioSortField field, SortDirection direction);
 
+class FolderTreeSortCancelled implements Exception {
+  const FolderTreeSortCancelled();
+}
+
 /// Use the existing stable/missing-value/pinyin comparator in a worker. Only
 /// indices return: playback and selection retain the caller's Audio objects.
 Future<List<Audio>> sortFolderTreeSongs(
-    List<Audio> songs, AudioSortField field, SortDirection direction) async {
+    List<Audio> songs, AudioSortField field, SortDirection direction,
+    {bool Function()? isCancelled}) async {
+  void checkOwner() {
+    if (isCancelled?.call() == true) throw const FolderTreeSortCancelled();
+  }
+
+  checkOwner();
   final source = <Audio>[];
   final keys = <Object?>[];
   final length = songs.length;
   const batchSize = 512;
   for (var start = 0; start < length; start += batchSize) {
+    checkOwner();
     if (songs.length != length) throw ConcurrentModificationError(songs);
     final end = math.min(start + batchSize, length);
     for (var index = start; index < end; index++) {
@@ -261,6 +272,9 @@ Future<List<Audio>> sortFolderTreeSongs(
     }
     if (end < length) await Future<void>.delayed(Duration.zero);
   }
+  // Do not dispatch obsolete descriptors after collapse, replacement or a
+  // newer sort. A worker already running retains the existing result guard.
+  checkOwner();
   final indices = await _sortFolderKeys(keys, direction);
   return List<Audio>.unmodifiable(indices.map((index) => source[index]));
 }

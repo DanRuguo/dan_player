@@ -6,7 +6,6 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
-import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
@@ -16,6 +15,8 @@ import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+
+const _maximumSigma = 8.0;
 
 class _Pixels {
   const _Pixels(this.bytes, this.width, this.height);
@@ -99,8 +100,7 @@ class _Surface {
                       ? ClipRect(
                           child: ImageFiltered(
                             imageFilter: ui.ImageFilter.blur(
-                                sigmaX: LyricMotion.blurForDistance(2),
-                                sigmaY: LyricMotion.blurForDistance(2)),
+                                sigmaX: _maximumSigma, sigmaY: _maximumSigma),
                             child: CustomPaint(
                                 painter: _Strokes(opaque: opaqueSource)),
                           ),
@@ -132,7 +132,9 @@ class _Surface {
 double _paintedSigma(RenderBackdropFilter filter) {
   // These are public getters on this SDK's resolved Gaussian object. Profile
   // can omit dart:ui toString implementations, so text is not a kernel API.
-  final dynamic gaussian = filter.layer!.filter;
+  final resolved = filter.filterConfig
+      .resolve(ImageFilterContext(bounds: Offset.zero & filter.size));
+  final dynamic gaussian = filter.enabled ? filter.layer!.filter : resolved;
   final x = gaussian.sigmaX as double;
   final y = gaussian.sigmaY as double;
   final mode = gaussian.tileMode as ui.TileMode?;
@@ -140,11 +142,24 @@ double _paintedSigma(RenderBackdropFilter filter) {
   expect(gaussian.bounds, isNull,
       reason: 'The static Gaussian samples the source; its output clips own '
           'the clear boundary instead of bounding away the input halo');
-  expect(filter.layer!.filter,
-      ui.ImageFilter.blur(sigmaX: x, sigmaY: y, tileMode: mode),
+  expect(gaussian, ui.ImageFilter.blur(sigmaX: x, sigmaY: y, tileMode: mode),
       reason: 'The actual painted layer resolves the independent Gaussian '
           'kernel sigma=($x,$y)');
   return x;
+}
+
+void _expectPhysicalKernels(
+    Iterable<RenderBackdropFilter> filters, double dpr) {
+  for (final filter in filters) {
+    expect(filter.enabled, _paintedSigma(filter) * dpr >= .1,
+        reason: 'Only effective physical Gaussian kernels enter composition');
+    if (filter.enabled) {
+      expect(filter.layer, isA<BackdropFilterLayer>());
+      expect(filter.layer!.filter, isNotNull,
+          reason:
+              'Every enabled Gaussian is present in the actual painted layer');
+    }
+  }
 }
 
 void _expectBackdropAncestors(List<RenderBackdropFilter> filters) {
@@ -340,12 +355,12 @@ void _expectRetainedMask(
     WidgetTester tester,
     _ContentSurface surface,
     List<RenderBackdropFilter> original,
-    List<BackdropFilterLayer> layers,
+    List<BackdropFilterLayer?> layers,
     String phase) {
   final current = surface.filters(tester);
-  expect(current, hasLength(12), reason: '$phase keeps one fixed mask');
+  expect(current, hasLength(24), reason: '$phase keeps one fixed mask');
   _expectBackdropAncestors(current);
-  for (var index = 0; index < 12; index++) {
+  for (var index = 0; index < 24; index++) {
     expect(current[index], same(original[index]),
         reason: '$phase retains native band render ownership');
     expect(current[index].layer, same(layers[index]),
@@ -404,24 +419,17 @@ void main() {
             'The fixed ${top ? 'top' : 'bottom'} band diffuses original ink');
       }
       final filters = surface.filters(tester);
-      expect(filters, hasLength(12));
+      expect(filters, hasLength(24));
       _expectBackdropAncestors(filters);
-      for (final filter in filters) {
-        expect(filter.enabled, isTrue);
-        expect(filter.layer, isA<BackdropFilterLayer>());
-        expect(filter.layer!.filter, isNotNull,
-            reason: 'The rendered layer, rather than a widget-only setting, '
-                'must contain its Gaussian');
-      }
-      for (final band in [filters.take(6), filters.skip(6)]) {
+      _expectPhysicalKernels(filters, dpr);
+      for (final band in [filters.take(12), filters.skip(12)]) {
         final sigma = band.map(_paintedSigma).toList();
         expect(sigma.first, greaterThan(0));
-        for (var index = 1; index < 4; index++) {
+        for (var index = 1; index < sigma.length; index++) {
           expect(sigma[index], greaterThan(sigma[index - 1]));
         }
-        expect(sigma[4], LyricMotion.blurForDistance(2));
-        expect(sigma[5], LyricMotion.blurForDistance(2),
-            reason: 'The outer third already reaches the full configured blur');
+        expect(sigma.last, inExclusiveRange(7.9, _maximumSigma),
+            reason: 'The full band gradually approaches the stronger maximum');
       }
       await _finish(tester);
     });
@@ -440,17 +448,17 @@ void main() {
       final clear = await _capture(tester, surface.boundary, dpr: dpr);
       await tester.pumpWidget(surface.host());
       final original = surface.filters(tester);
-      expect(original, hasLength(12));
-      expect(original.every((filter) => filter.enabled), isTrue);
+      expect(original, hasLength(24));
+      _expectPhysicalKernels(original, dpr);
       _expectBackdropAncestors(original);
 
       // A native Gaussian smaller than .1 physical pixels can become an
       // identity/empty pass. Omit it before composition instead of replacing
       // the backdrop or painting the same translucent ink a second time.
-      surface.reading.value = .099 / (LyricMotion.blurForDistance(2) * dpr);
+      surface.reading.value = .099 / (_maximumSigma * dpr);
       await tester.pump();
       final current = surface.filters(tester);
-      expect(current, hasLength(12));
+      expect(current, hasLength(24));
       for (var index = 0; index < current.length; index++) {
         expect(current[index], same(original[index]),
             reason: 'Near-zero hover retains the fixed band ownership');
@@ -626,7 +634,8 @@ void main() {
     expect(blur.reading.value, 1);
     final filters = tester
         .renderObjectList<RenderBackdropFilter>(find.byType(BackdropFilter));
-    expect(filters.where((filter) => filter.enabled), hasLength(12));
+    expect(filters, hasLength(24));
+    _expectPhysicalKernels(filters, tester.view.devicePixelRatio);
     expect(positions.hasListener, isTrue);
     await tester.pumpAndSettle();
     await _finish(tester);
@@ -647,8 +656,8 @@ void main() {
     await tester.pumpWidget(surface.host());
     await tester.pumpAndSettle();
     final filters = surface.filters(tester);
-    expect(filters, hasLength(12));
-    final layers = [for (final filter in filters) filter.layer!];
+    expect(filters, hasLength(24));
+    final layers = [for (final filter in filters) filter.layer];
 
     // A full-opacity FadeTransition can elide its temporary buffer. The
     // player's actual source consumer must retain the same backdrop scope.
@@ -733,7 +742,7 @@ void main() {
     await tester.pumpWidget(surface.host());
     await tester.pumpAndSettle();
     final filters = surface.filters(tester);
-    expect(filters, hasLength(12));
+    expect(filters, hasLength(24));
 
     await tester.sendEventToBinding(PointerScrollEvent(
         position: tester.getCenter(find.byKey(surface.contentKey)),
@@ -746,7 +755,7 @@ void main() {
         isFalse,
         reason: 'Actual manual scrolling disables the fixed blur');
     final manual = surface.filters(tester);
-    for (var index = 0; index < 12; index++) {
+    for (var index = 0; index < 24; index++) {
       expect(manual[index], same(filters[index]));
       expect(manual[index].enabled, isFalse);
     }
@@ -764,12 +773,12 @@ void main() {
         reason:
             'The new source cannot inherit the outgoing document manual mode');
     final current = surface.filters(tester);
-    for (var index = 0; index < 12; index++) {
+    for (var index = 0; index < 24; index++) {
       expect(current[index], same(filters[index]));
     }
     // Enabling after deliberate manual-disable owns fresh native layers;
     // future changes from this point must keep that exact ownership.
-    final layers = [for (final filter in current) filter.layer!];
+    final layers = [for (final filter in current) filter.layer];
     final destination = _Lyrics();
     surface.future = Future<Lyric?>.value(destination);
     surface.source = Object();
@@ -835,8 +844,8 @@ void main() {
           reason: 'A pending same-source projection preserves manual reading');
       expect(waitingMask.reading, same(mask.reading));
       final waitingFilters = surface.filters(tester);
-      expect(waitingFilters, hasLength(12));
-      for (var index = 0; index < 12; index++) {
+      expect(waitingFilters, hasLength(24));
+      for (var index = 0; index < 24; index++) {
         expect(waitingFilters[index], same(filters[index]));
         expect(waitingFilters[index].enabled, isFalse);
       }
@@ -858,12 +867,11 @@ void main() {
         reason: 'A terminal empty source cannot keep an obsolete manual owner');
     expect(terminalMask.reading, same(mask.reading));
     final terminalFilters = surface.filters(tester);
-    expect(terminalFilters, hasLength(12));
-    for (var index = 0; index < 12; index++) {
+    expect(terminalFilters, hasLength(24));
+    for (var index = 0; index < 24; index++) {
       expect(terminalFilters[index], same(filters[index]));
-      expect(terminalFilters[index].enabled, isTrue);
-      expect(terminalFilters[index].layer, isNotNull);
     }
+    _expectPhysicalKernels(terminalFilters, tester.view.devicePixelRatio);
     _expectUnchangedBackground(await _capture(tester, surface.boundary),
         background, 'same-source terminal empty');
     await tester.pumpAndSettle();
@@ -888,7 +896,7 @@ void main() {
     await tester.pumpWidget(surface.host());
     await tester.pumpAndSettle();
     final filters = surface.filters(tester);
-    final layers = [for (final filter in filters) filter.layer!];
+    final layers = [for (final filter in filters) filter.layer];
     final reading = tester
         .widget<LyricViewportBlur>(find.byType(LyricViewportBlur))
         .reading;
@@ -949,7 +957,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
     expect(reading.value, 1);
-    expect(surface.filters(tester).every((filter) => filter.enabled), isTrue);
+    _expectPhysicalKernels(
+        surface.filters(tester), tester.view.devicePixelRatio);
     await tester.pumpAndSettle();
     await _finish(tester);
   });

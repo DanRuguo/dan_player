@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:dan_player/folder_note_preferences.dart';
 import 'package:dan_player/library/audio_library.dart';
-import 'package:dan_player/library/folder_tree.dart';
 import 'package:dan_player/page/folders_page.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/gestures.dart';
@@ -206,19 +205,36 @@ void main() {
           expect(find.byType(MenuItemButton), findsNothing);
           await menuMouse.removePointer();
           if (!cache) {
-            final toggle = find.byKey(
-                ValueKey('folder-tree-toggle-${folderTreePathId(longPath)}'));
-            expect(find.byTooltip(ui('展开文件夹')), findsOneWidget);
+            final toggle = find.byKey(ValueKey('folder-open-$longPath'));
+            final expansion = find.byWidgetPredicate((widget) =>
+                widget is Semantics && widget.properties.expanded != null);
             expect(
                 tester
-                    .getSemantics(find.byTooltip(ui('展开文件夹')))
+                    .getSemantics(expansion)
                     .getSemanticsData()
-                    .tooltip,
-                ui('展开文件夹'));
+                    .flagsCollection
+                    .isExpanded
+                    .toBoolOrNull(),
+                isNotNull);
+            expect(
+                tester
+                    .getSemantics(expansion)
+                    .getSemanticsData()
+                    .flagsCollection
+                    .isExpanded
+                    .toBoolOrNull(),
+                isFalse);
             await tester.tap(toggle);
             await tester.pumpAndSettle();
             expect(expansions, [true]);
-            expect(find.byTooltip(ui('折叠文件夹')), findsOneWidget);
+            expect(
+                tester
+                    .getSemantics(expansion)
+                    .getSemanticsData()
+                    .flagsCollection
+                    .isExpanded
+                    .toBoolOrNull(),
+                isTrue);
             await tester.tap(toggle);
             await tester.pumpAndSettle();
             expect(expansions, [true, false]);

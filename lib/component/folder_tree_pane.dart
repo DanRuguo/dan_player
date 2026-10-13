@@ -15,8 +15,7 @@ import 'app_shape.dart';
 import 'now_playing_bar_metrics.dart';
 import 'playlist_tree_pane.dart';
 
-const folderTreeToggleSlotWidth = 36.0;
-const folderTreeContentInset = 12.0 + folderTreeToggleSlotWidth;
+const folderTreeContentInset = 12.0;
 
 /// Like the playlist tree, deep paths share a smaller step instead of losing
 /// content width one indentation level at a time.
