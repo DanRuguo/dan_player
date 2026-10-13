@@ -12,6 +12,7 @@ class LyricViewportBlur extends StatelessWidget {
     required this.enabled,
     required this.reading,
     required this.child,
+    this.viewOpacity = const AlwaysStoppedAnimation<double>(1),
     this.topFraction = .25,
     this.bottomFraction = .22,
   });
@@ -22,6 +23,9 @@ class LyricViewportBlur extends StatelessWidget {
 
   /// The existing reading clock: one is blurred and zero is clear.
   final Animation<double> reading;
+
+  /// Fade the content below the filters, never the backdrop sampling surface.
+  final Animation<double> viewOpacity;
   final Widget child;
 
   // Small, disjoint strips vary the actual Gaussian radius. A ShaderMask or
@@ -39,7 +43,7 @@ class LyricViewportBlur extends StatelessWidget {
               !constraints.hasBoundedHeight ||
               constraints.maxWidth <= 0 ||
               constraints.maxHeight <= 0) {
-            return child;
+            return FadeTransition(opacity: viewOpacity, child: child);
           }
           final height = constraints.maxHeight;
           final identityRadius = .1 / View.of(context).devicePixelRatio;
@@ -48,12 +52,14 @@ class LyricViewportBlur extends StatelessWidget {
           return ClipRect(
             child: AnimatedBuilder(
               animation: enabled && (topFraction > 0 || bottomFraction > 0)
-                  ? reading
+                  ? Listenable.merge([reading, viewOpacity])
                   : const AlwaysStoppedAnimation<double>(0),
-              child: child,
+              child: FadeTransition(opacity: viewOpacity, child: child),
               builder: (context, child) {
                 final sigma = enabled
-                    ? _maximumSigma * reading.value.clamp(0.0, 1.0)
+                    ? _maximumSigma *
+                        reading.value.clamp(0.0, 1.0) *
+                        viewOpacity.value.clamp(0.0, 1.0)
                     : 0.0;
                 return Stack(
                   fit: StackFit.expand,
@@ -104,7 +110,8 @@ class LyricViewportBlur extends StatelessWidget {
                 // the lyrics with an identity backdrop during hover/entrance.
                 enabled: enabled && radius >= identityRadius,
                 filter: ui.ImageFilter.blur(sigmaX: radius, sigmaY: radius),
-                // Replace once in a parent entrance's transparent surface.
+                // Replace once in the already composited viewport. Mode fades
+                // belong to its content, outside this backdrop's ownership.
                 // Native identity kernels are disabled above, so they neither
                 // erase a backdrop nor paint the same translucent ink twice.
                 blendMode: BlendMode.src,

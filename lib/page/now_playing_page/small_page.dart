@@ -85,6 +85,7 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
                 child: AnimatedSwitcher(
                   duration: AppMotion.duration(
                       context, MotionKind.layout, AppMotion.standard),
+                  transitionBuilder: _nowPlayingViewTransition,
                   child: switch (views[1]) {
                     NowPlayingViewMode.onlyMain => _NowPlayingInfo(
                         key: ValueKey(_activeCoverGeneration.value),

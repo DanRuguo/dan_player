@@ -21,6 +21,7 @@ class _NowPlayingPage_Large extends StatelessWidget {
                   builder: (context, value, _) => AnimatedSwitcher(
                     duration: AppMotion.duration(
                         context, MotionKind.layout, AppMotion.standard),
+                    transitionBuilder: _nowPlayingViewTransition,
                     child: switch (value) {
                       NowPlayingViewMode.onlyMain => const VerticalLyricView(),
                       NowPlayingViewMode.withLyric => const VerticalLyricView(),

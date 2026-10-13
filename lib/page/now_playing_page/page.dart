@@ -35,6 +35,7 @@ import 'package:dan_player/page/now_playing_page/component/detail_playback_layou
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_view_transition.dart';
 import 'package:dan_player/page/settings_page/playback_settings.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/play_service/desktop_lyric_service.dart';
@@ -72,6 +73,10 @@ enum NowPlayingViewMode {
 final NOW_PLAYING_VIEW_MODE = ValueNotifier(
   AppPreference.instance.nowPlayingPagePref.nowPlayingViewMode,
 );
+
+Widget _nowPlayingViewTransition(Widget child, Animation<double> opacity) =>
+    LyricViewTransition.transition(child, opacity,
+        lyric: child is VerticalLyricView);
 
 class NowPlayingPage extends StatefulWidget {
   const NowPlayingPage({super.key});

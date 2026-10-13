@@ -20,6 +20,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_reading_tools.d
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_view_transition.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
@@ -250,11 +251,14 @@ class _LyricControlsSurfaceState extends State<LyricControlsSurface> {
                 child: Focus(
                   onFocusChange: (value) =>
                       setState(() => _controlsFocused = value),
-                  child: Opacity(
-                    opacity: visible ? 1 : 0,
-                    child: IgnorePointer(
-                      ignoring: !visible,
-                      child: widget.controls,
+                  child: FadeTransition(
+                    opacity: LyricViewTransition.opacityOf(context),
+                    child: Opacity(
+                      opacity: visible ? 1 : 0,
+                      child: IgnorePointer(
+                        ignoring: !visible,
+                        child: widget.controls,
+                      ),
                     ),
                   ),
                 ),
@@ -527,6 +531,7 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
           topFraction: settings?.lyricBlurTopFraction ?? .25,
           bottomFraction: settings?.lyricBlurBottomFraction ?? .22,
           reading: _readingClock,
+          viewOpacity: LyricViewTransition.opacityOf(context),
           child: FutureBuilder<Lyric?>(
             future: widget.lyricFuture,
             builder: (context, snapshot) {
