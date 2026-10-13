@@ -325,13 +325,6 @@ class VerticalLyricContent extends StatefulWidget {
   State<VerticalLyricContent> createState() => _VerticalLyricContentState();
 }
 
-// A neutral source surface uses the existing shader layer, independently of
-// the scroll view's visible edge fade.
-class _LyricViewportSurface extends LyricViewportFade {
-  const _LyricViewportSurface({required super.child})
-      : super(enabled: false, retainLayer: true);
-}
-
 class _VerticalLyricContentState extends State<VerticalLyricContent>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   AppLifecycleState? _lifecycle;
@@ -529,136 +522,126 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
       child: MouseRegion(
         onEnter: (_) => _setPointerReading(true),
         onExit: (_) => _setPointerReading(false),
-        // This retained, neutral surface keeps the backdrop source identical
-        // at every parent fade value, including alpha=1. The complete lyric
-        // source paints before the fixed bands in this same surface; the page
-        // background never enters the filter when a content fade finishes.
-        child: _LyricViewportSurface(
-          child: LyricViewportBlur(
-            enabled: blurEnabled,
-            topFraction: settings?.lyricBlurTopFraction ?? .25,
-            bottomFraction: settings?.lyricBlurBottomFraction ?? .22,
-            reading: _readingClock,
-            child: FutureBuilder<Lyric?>(
-              future: widget.lyricFuture,
-              builder: (context, snapshot) {
-                final waiting = widget.lyricFuture != null &&
-                    snapshot.connectionState != ConnectionState.done;
-                final retainPresentation = waiting &&
-                    widget.sourceIdentity != null &&
-                    widget.sourceIdentity == _presentedSourceIdentity;
-                final lyric = widget.lyricFuture == null
-                    ? null
-                    : waiting
-                        ? retainPresentation
-                            ? _presentedLyric
-                            : widget.sourceIdentity == null
-                                ? null
-                                : widget.initialPresentation
-                        : snapshot.data;
-                if (!waiting || lyric != null) {
-                  _presentedLyric = snapshot.hasError ? null : lyric;
-                  _presentedSourceIdentity = widget.sourceIdentity;
-                }
-                if (!waiting &&
-                    _manualReading &&
-                    (snapshot.hasError ||
-                        lyric == null ||
-                        lyric.lines.isEmpty)) {
-                  // A terminal empty/error result ends this document's manual
-                  // session even when a same-source projection kept its owner.
-                  // Waiting with retained lyrics still owns its reading pose.
-                  _bindManualOwner();
-                  _notifyManualStateChanged();
-                }
-                Widget content;
-                if (lyric != null &&
-                    lyric.lines.isNotEmpty &&
-                    !snapshot.hasError) {
-                  content = VerticalLyricScrollView(
-                    key: widget.sourceIdentity == null
-                        ? ObjectKey(lyric)
-                        : ValueKey(widget.sourceIdentity),
-                    lyric: lyric,
-                    sourceIdentity: widget.sourceIdentity,
-                    positionStream: widget.positionStream,
-                    readPosition: widget.readPosition,
-                    onSeek: widget.onSeek,
-                    onPractice: widget.onPractice,
-                    springLyrics: widget.springLyrics,
-                    hidden: widget.hidden,
-                    playing: widget.playing,
-                    viewportReadingClock: _readingClock,
-                    onManualReadingChanged: _manualReadingChanged,
-                  );
-                } else {
-                  final label = waiting
-                      ? ui("正在加载歌词")
-                      : snapshot.hasError
-                          ? ui(lyricLookupStatus(snapshot.error) ??
-                              "歌词加载失败，请切换来源或重试")
-                          : ui("无歌词");
-                  content = Center(
-                    key: ValueKey(label),
-                    child: waiting
-                        ? _LyricLoadingStatus(
-                            label: label,
+        child: LyricViewportBlur(
+          enabled: blurEnabled,
+          topFraction: settings?.lyricBlurTopFraction ?? .25,
+          bottomFraction: settings?.lyricBlurBottomFraction ?? .22,
+          reading: _readingClock,
+          child: FutureBuilder<Lyric?>(
+            future: widget.lyricFuture,
+            builder: (context, snapshot) {
+              final waiting = widget.lyricFuture != null &&
+                  snapshot.connectionState != ConnectionState.done;
+              final retainPresentation = waiting &&
+                  widget.sourceIdentity != null &&
+                  widget.sourceIdentity == _presentedSourceIdentity;
+              final lyric = widget.lyricFuture == null
+                  ? null
+                  : waiting
+                      ? retainPresentation
+                          ? _presentedLyric
+                          : widget.sourceIdentity == null
+                              ? null
+                              : widget.initialPresentation
+                      : snapshot.data;
+              if (!waiting || lyric != null) {
+                _presentedLyric = snapshot.hasError ? null : lyric;
+                _presentedSourceIdentity = widget.sourceIdentity;
+              }
+              if (!waiting &&
+                  _manualReading &&
+                  (snapshot.hasError || lyric == null || lyric.lines.isEmpty)) {
+                // A terminal empty/error result ends this document's manual
+                // session even when a same-source projection kept its owner.
+                // Waiting with retained lyrics still owns its reading pose.
+                _bindManualOwner();
+                _notifyManualStateChanged();
+              }
+              Widget content;
+              if (lyric != null &&
+                  lyric.lines.isNotEmpty &&
+                  !snapshot.hasError) {
+                content = VerticalLyricScrollView(
+                  key: widget.sourceIdentity == null
+                      ? ObjectKey(lyric)
+                      : ValueKey(widget.sourceIdentity),
+                  lyric: lyric,
+                  sourceIdentity: widget.sourceIdentity,
+                  positionStream: widget.positionStream,
+                  readPosition: widget.readPosition,
+                  onSeek: widget.onSeek,
+                  onPractice: widget.onPractice,
+                  springLyrics: widget.springLyrics,
+                  hidden: widget.hidden,
+                  playing: widget.playing,
+                  viewportReadingClock: _readingClock,
+                  onManualReadingChanged: _manualReadingChanged,
+                );
+              } else {
+                final label = waiting
+                    ? ui("正在加载歌词")
+                    : snapshot.hasError
+                        ? ui(lyricLookupStatus(snapshot.error) ??
+                            "歌词加载失败，请切换来源或重试")
+                        : ui("无歌词");
+                content = Center(
+                  key: ValueKey(label),
+                  child: waiting
+                      ? _LyricLoadingStatus(
+                          label: label,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSecondaryContainer,
+                          animate: active && !reduced,
+                        )
+                      : Text(
+                          label,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 22,
                             color: Theme.of(context)
                                 .colorScheme
                                 .onSecondaryContainer,
-                            animate: active && !reduced,
-                          )
-                        : Text(
-                            label,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 22,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSecondaryContainer,
-                            ),
-                          ),
-                  );
-                }
-                final firstPresentation = !_hasPresented;
-                if (_entered) _hasPresented = true;
-                return AnimatedSwitcher(
-                  duration: reduced
-                      ? Duration.zero
-                      : const Duration(milliseconds: 320),
-                  switchInCurve: firstPresentation
-                      ? Curves.easeOutCubic
-                      : const Interval(.5, 1, curve: Curves.easeOutCubic),
-                  switchOutCurve:
-                      const Interval(.5, 1, curve: Curves.easeInCubic),
-                  transitionBuilder: (child, animation) => AnimatedBuilder(
-                    animation: animation,
-                    child: child,
-                    builder: (context, child) {
-                      final leaving =
-                          animation.status == AnimationStatus.reverse;
-                      return TickerMode(
-                        enabled: !leaving,
-                        child: IgnorePointer(
-                          ignoring: leaving,
-                          child: ExcludeSemantics(
-                            excluding: leaving,
-                            child: FadeTransition(
-                              opacity: animation,
-                              child: _LyricExitScope(
-                                  exiting: leaving || !active, child: child!),
-                            ),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                  child: _entered
-                      ? content
-                      : const SizedBox(key: ValueKey('lyric-entry')),
                 );
-              },
-            ),
+              }
+              final firstPresentation = !_hasPresented;
+              if (_entered) _hasPresented = true;
+              return AnimatedSwitcher(
+                duration:
+                    reduced ? Duration.zero : const Duration(milliseconds: 320),
+                switchInCurve: firstPresentation
+                    ? Curves.easeOutCubic
+                    : const Interval(.5, 1, curve: Curves.easeOutCubic),
+                switchOutCurve:
+                    const Interval(.5, 1, curve: Curves.easeInCubic),
+                transitionBuilder: (child, animation) => AnimatedBuilder(
+                  animation: animation,
+                  child: child,
+                  builder: (context, child) {
+                    final leaving = animation.status == AnimationStatus.reverse;
+                    return TickerMode(
+                      enabled: !leaving,
+                      child: IgnorePointer(
+                        ignoring: leaving,
+                        child: ExcludeSemantics(
+                          excluding: leaving,
+                          child: FadeTransition(
+                            opacity: animation,
+                            child: _LyricExitScope(
+                                exiting: leaving || !active, child: child!),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                child: _entered
+                    ? content
+                    : const SizedBox(key: ValueKey('lyric-entry')),
+              );
+            },
           ),
         ),
       ),

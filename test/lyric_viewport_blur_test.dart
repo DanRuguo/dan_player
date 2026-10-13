@@ -302,17 +302,19 @@ void _expectUnchangedBackground(
           '(${offset ~/ 4 % actual.width},${offset ~/ 4 ~/ actual.width})');
     }
   }
-  // The visible labels are centred. These narrow side probes also avoid the
-  // actual source glyphs and their native Gaussian input halo in all states.
-  for (final row in [const (12, 18), const (455, 461)]) {
+  // Local glass deliberately filters everything below its top/bottom bands,
+  // including the checker background. Bare-background equality inside those
+  // bands incorrectly required the old shader isolation. The clear centre
+  // must remain exact; narrow side probes avoid source glyphs in every state.
+  for (final row in [const (210, 216), const (250, 256)]) {
     for (var y = row.$1; y < row.$2; y++) {
       for (var x = 4; x < 8; x++) {
         final offset = (y * actual.width + x) * 4;
         for (var channel = 0; channel < 4; channel++) {
           expect(actual.bytes[offset + channel],
               background.bytes[offset + channel],
-              reason: '$phase: empty blur-band background at ($x,$y) '
-                  'channel=$channel must not acquire a rectangle tint');
+              reason: '$phase: clear centre background at ($x,$y) '
+                  'channel=$channel must remain unchanged');
         }
       }
     }

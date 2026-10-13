@@ -43,8 +43,7 @@ class LyricViewportBlur extends StatelessWidget {
             return child;
           }
           final height = constraints.maxHeight;
-          final minimumReplacementRadius =
-              .1 / View.of(context).devicePixelRatio;
+          final identityRadius = .1 / View.of(context).devicePixelRatio;
           final topFraction = _fraction(this.topFraction, .25);
           final bottomFraction = _fraction(this.bottomFraction, .22);
           return ClipRect(
@@ -63,11 +62,9 @@ class LyricViewportBlur extends StatelessWidget {
                   children: [
                     child!,
                     ..._bands(height * topFraction, sigma,
-                        top: true,
-                        minimumReplacementRadius: minimumReplacementRadius),
+                        top: true, identityRadius: identityRadius),
                     ..._bands(height * bottomFraction, sigma,
-                        top: false,
-                        minimumReplacementRadius: minimumReplacementRadius),
+                        top: false, identityRadius: identityRadius),
                   ],
                 );
               },
@@ -80,7 +77,7 @@ class LyricViewportBlur extends StatelessWidget {
       value.isFinite ? value.clamp(0.0, .45).toDouble() : fallback;
 
   Iterable<Widget> _bands(double extent, double sigma,
-      {required bool top, required double minimumReplacementRadius}) sync* {
+      {required bool top, required double identityRadius}) sync* {
     if (extent <= 0) return;
     for (var index = 0; index < _gradientSteps; index++) {
       // Index zero is at the clear boundary; the radius only grows towards
@@ -107,18 +104,12 @@ class LyricViewportBlur extends StatelessWidget {
                 // No shared backdrop snapshot: each filter reads this region
                 // at its actual location. A zero-radius pass must not replace
                 // the lyrics with an identity backdrop during hover/entrance.
-                enabled: enabled && radius > 0,
+                enabled: enabled && radius >= identityRadius,
                 filter: ui.ImageFilter.blur(sigmaX: radius, sigmaY: radius),
-                // A page fade paints into a transparent surface. Replace its
-                // existing sharp pixels rather than keeping them below blur.
-                // Identity passes remain disabled, and snapshots are unshared.
-                // Native Gaussian kernels can become an empty backdrop at
-                // nearly-zero physical sigma. Source-over preserves the
-                // surface for those subpixel identity passes instead of
-                // replacing its text/background with transparent pixels.
-                blendMode: radius < minimumReplacementRadius
-                    ? BlendMode.srcOver
-                    : BlendMode.src,
+                // Replace once in a parent entrance's transparent surface.
+                // Native identity kernels are disabled above, so they neither
+                // erase a backdrop nor paint the same translucent ink twice.
+                blendMode: BlendMode.src,
                 child: const SizedBox.expand(),
               ),
             ),
