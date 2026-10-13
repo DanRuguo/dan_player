@@ -456,6 +456,7 @@ class LyricViewTile extends StatelessWidget {
                               alignment: presentation.alignment,
                               child: blank
                                   ? LyricContentReveal(
+                                      duration: AppMotion.emphasized,
                                       japaneseReadingSource: sourceIdentity,
                                       japaneseReadingSpans:
                                           line.japaneseReadingSpans,
@@ -490,6 +491,7 @@ class LyricViewTile extends StatelessWidget {
                                       ),
                                     )
                                   : LyricContentReveal(
+                                      duration: AppMotion.emphasized,
                                       japaneseReadingSource: sourceIdentity,
                                       japaneseReadingSpans:
                                           line.japaneseReadingSpans,
@@ -698,7 +700,7 @@ class LyricViewTile extends StatelessWidget {
                             alwaysIncludeSemantics: true,
                             child: Transform.scale(
                               scale: spacingMoving
-                                  ? .96 + .04 * spacingProgress
+                                  ? .99 + .01 * spacingProgress
                                   : 1,
                               alignment: Alignment(
                                 presentation.alignment.x,
@@ -882,14 +884,13 @@ class _TimedLyricTextState extends State<_TimedLyricText>
         // Keep shaping fixed while the paragraph's lines travel horizontally.
         final paintAlign =
             widget.alignmentX == null ? widget.textAlign : TextAlign.left;
+        final rubySpans = widget.rubyVisibility > 0
+            ? (widget.rubySpans ?? widget.line.japaneseReadingSpans)
+            : const <LyricRubySpan>[];
         final shapeIdentity = (
           fontPolicy,
-          widget.line,
           widget.line.content,
           widget.style,
-          widget.rubyVisibility > 0
-              ? (widget.rubySpans ?? widget.line.japaneseReadingSpans)
-              : const [],
           paintAlign,
           direction,
           scaler,
@@ -902,9 +903,7 @@ class _TimedLyricTextState extends State<_TimedLyricText>
           _paragraph = _TimedLyricParagraph(
             policy: fontPolicy,
             line: widget.line,
-            rubySpans: widget.rubyVisibility > 0
-                ? (widget.rubySpans ?? widget.line.japaneseReadingSpans)
-                : const [],
+            rubySpans: rubySpans,
             style: lyricRubyPrimaryStyle(
               widget.style,
               (widget.rubySpans ?? widget.line.japaneseReadingSpans),
@@ -916,9 +915,13 @@ class _TimedLyricTextState extends State<_TimedLyricText>
           );
           _shapeIdentity = shapeIdentity;
         }
-        final identity = (shapeIdentity, textMaxWidth);
+        // Reading projection replaces line objects, but only its attachments
+        // change. Keep the primary native paragraph while timing and ruby
+        // geometry continue to belong to the current authored line.
+        final identity = (shapeIdentity, widget.line, rubySpans, textMaxWidth);
         if (_layoutIdentity != identity) {
           _layout?.dispose();
+          _paragraph!.setRubySpans(rubySpans);
           _layout = _TimedLyricLayout(
             line: widget.line,
             style: widget.style,
@@ -978,14 +981,16 @@ class _TimedLyricTextState extends State<_TimedLyricText>
 class _TimedLyricParagraph {
   _TimedLyricParagraph({
     required this.policy,
-    required this.line,
-    required this.rubySpans,
+    required SyncLyricLine line,
+    required List<LyricRubySpan> rubySpans,
     required this.style,
     required TextStyle rubyStyle,
     required TextAlign textAlign,
     required TextDirection direction,
     required TextScaler scaler,
-  })  : base = TextPainter(
+  })  : text = line.content,
+        _rubyStyle = rubyStyle,
+        base = TextPainter(
           text: appFontSpan(
             line.content,
             style: style.copyWith(color: Colors.white),
@@ -999,23 +1004,14 @@ class _TimedLyricParagraph {
         _textAlign = textAlign,
         _direction = direction,
         _scaler = scaler {
-    if (rubySpans.isNotEmpty) {
-      rubyShaping = LyricRubyShaping(
-        spans: rubySpans,
-        style: rubyStyle,
-        policy: policy,
-        direction: direction,
-        scaler: scaler,
-        locale: null,
-        vertical: false,
-      );
-    }
+    setRubySpans(rubySpans);
   }
 
   final AppFontPolicy policy;
-  final SyncLyricLine line;
-  final List<LyricRubySpan> rubySpans;
+  final String text;
+  List<LyricRubySpan> rubySpans = const [];
   final TextStyle style;
+  final TextStyle _rubyStyle;
   final TextPainter base;
   final double fontSize;
   final TextAlign _textAlign;
@@ -1028,6 +1024,23 @@ class _TimedLyricParagraph {
   Color? _baseInkColor;
   Color? _playedInkColor;
 
+  void setRubySpans(List<LyricRubySpan> spans) {
+    if (identical(rubySpans, spans)) return;
+    rubyShaping?.dispose();
+    rubySpans = spans;
+    rubyShaping = spans.isEmpty
+        ? null
+        : LyricRubyShaping(
+            spans: spans,
+            style: _rubyStyle,
+            policy: policy,
+            direction: _direction,
+            scaler: _scaler,
+            locale: null,
+            vertical: false,
+          );
+  }
+
   void layout(double maxWidth) {
     layoutBalancedLyric(base, maxWidth);
     _baseInk?.layout(maxWidth: base.width);
@@ -1036,7 +1049,7 @@ class _TimedLyricParagraph {
   }
 
   TextPainter _newInkPainter(TextStyle inkStyle) => TextPainter(
-        text: appFontSpan(line.content, style: inkStyle, policy: policy),
+        text: appFontSpan(text, style: inkStyle, policy: policy),
         textDirection: _direction,
         textAlign: _textAlign,
         textScaler: _scaler,
@@ -1068,7 +1081,7 @@ class _TimedLyricParagraph {
     } else {
       _gradientInk!
         ..text = appFontSpan(
-          line.content,
+          text,
           style: styleWithShader,
           policy: policy,
         )

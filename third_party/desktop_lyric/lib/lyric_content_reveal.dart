@@ -26,10 +26,11 @@ class LyricContentReveal extends ImplicitlyAnimatedWidget {
     required this.translation,
     required this.builder,
     required bool reducedMotion,
+    Duration duration = AppMotion.lyricLine,
   }) : super(
-         duration: reducedMotion ? Duration.zero : AppMotion.lyricLine,
-         curve: const Cubic(.22, 0, .16, 1),
-       );
+          duration: reducedMotion ? Duration.zero : duration,
+          curve: const Cubic(.22, 0, .16, 1),
+        );
 
   final bool timestamp;
   final bool romanization;
@@ -113,10 +114,10 @@ class _LyricContentRevealState
   @override
   void forEachTween(TweenVisitor<dynamic> visitor) {
     Tween<double>? number(Tween<double>? tween, bool visible) => visitor(
-      tween,
-      visible ? 1.0 : 0.0,
-      (value) => Tween<double>(begin: value as double),
-    ) as Tween<double>?;
+          tween,
+          visible ? 1.0 : 0.0,
+          (value) => Tween<double>(begin: value as double),
+        ) as Tween<double>?;
     _timestamp = number(_timestamp, widget.timestamp);
     _romanization = number(_romanization, widget.romanization);
     _japaneseReading = number(_japaneseReading, widget.japaneseReading);
@@ -148,10 +149,10 @@ class _LyricContentRevealState
     final spans = reading == 0
         ? const <LyricRubySpan>[]
         : _acceptedSpans.isNotEmpty
-        ? _acceptedSpans
-        : widget.japaneseReadingSource != null
-        ? _outgoingSpans
-        : const <LyricRubySpan>[];
+            ? _acceptedSpans
+            : widget.japaneseReadingSource != null
+                ? _outgoingSpans
+                : const <LyricRubySpan>[];
     return widget.builder(context, (
       timestamp: _timestamp!.evaluate(animation),
       romanization: _romanization!.evaluate(animation),

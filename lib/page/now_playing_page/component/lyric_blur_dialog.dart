@@ -124,7 +124,15 @@ class LyricBlurDialog extends StatelessWidget {
                                   key: const ValueKey('lyric-blur-preview-top'),
                                   widthFactor: 1,
                                   heightFactor: enabled ? top : 0,
-                                  child: ColoredBox(color: colors.top),
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [colors.top, colors.clear],
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                               Align(
@@ -134,7 +142,15 @@ class LyricBlurDialog extends StatelessWidget {
                                       'lyric-blur-preview-bottom'),
                                   widthFactor: 1,
                                   heightFactor: enabled ? bottom : 0,
-                                  child: ColoredBox(color: colors.bottom),
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [colors.clear, colors.bottom],
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ]),

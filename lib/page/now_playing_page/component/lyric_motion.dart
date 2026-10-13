@@ -12,6 +12,7 @@ import 'lyric_follow_words.dart';
 /// word highlighting; these durations only describe presentation transitions.
 abstract final class LyricMotion {
   static const lineDuration = AppMotion.lyricLine;
+  static const spacingDuration = AppMotion.standard;
   static const scrollDuration = AppMotion.lyricScroll;
   static const seekScrollDuration = AppMotion.emphasized;
   static const springScrollDuration = AppMotion.lyricSpring;
@@ -557,7 +558,7 @@ class LyricLineMotion extends ImplicitlyAnimatedWidget {
     required bool reducedMotion,
   }) : super(
           duration: restoredLetterSpacing != null && animateLetterSpacing
-              ? LyricMotion.lineDuration
+              ? LyricMotion.spacingDuration
               : reducedMotion
                   ? Duration.zero
                   : LyricMotion.lineDuration,
@@ -630,7 +631,7 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion>
     _letterSpacing =
         Tween(begin: restoration.spacing, end: widget.letterSpacing);
     controller
-      ..duration = LyricMotion.lineDuration
+      ..duration = LyricMotion.spacingDuration
       ..forward(from: 0);
   }
 
@@ -656,26 +657,27 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion>
       _restoreSpacing();
       return;
     }
-    if (oldWidget.letterSpacing != widget.letterSpacing &&
-        widget.animateLetterSpacing &&
-        widget.duration != Duration.zero &&
-        oldWidget.presentation == widget.presentation &&
-        oldWidget.opacity == widget.opacity &&
-        oldWidget.scale == widget.scale &&
-        oldWidget.alignment == widget.alignment &&
-        oldWidget.activation == widget.activation) {
-      // The base state has already started its simulation with lineDuration.
-      // Restart only this settings handoff with the finite layout duration.
-      controller
-        ..duration = LyricMotion.lineDuration
-        ..forward(from: 0);
-    }
     final onlySpacing = _opacity?.begin == _opacity?.end &&
         _scale?.begin == _scale?.end &&
         _activation?.begin == _activation?.end &&
         _fontSize?.begin == _fontSize?.end &&
         _translationFontSize?.begin == _translationFontSize?.end &&
         _alignment?.begin == _alignment?.end;
+    if (oldWidget.letterSpacing != widget.letterSpacing &&
+        widget.animateLetterSpacing &&
+        widget.duration != Duration.zero &&
+        onlySpacing &&
+        oldWidget.presentation == widget.presentation &&
+        oldWidget.opacity == widget.opacity &&
+        oldWidget.scale == widget.scale &&
+        oldWidget.alignment == widget.alignment &&
+        oldWidget.activation == widget.activation) {
+      // Keep ongoing focus/font motion on its original clock. A spacing-only
+      // target entrance uses the shorter shared layout duration instead.
+      controller
+        ..duration = LyricMotion.spacingDuration
+        ..forward(from: 0);
+    }
     if ((widget.duration == Duration.zero &&
             widget.restoredLetterSpacing == null) ||
         (!widget.animateLetterSpacing && onlySpacing)) {

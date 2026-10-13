@@ -322,6 +322,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
 
   Object? _identity;
   Object? _shapeIdentity;
+  Object? _rubyIdentity;
   double? _width;
   TextPainter? _painter;
   LyricRubyLayout? _ruby;
@@ -377,14 +378,31 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
         direction,
         scaler,
         locale,
-        textHeightBehavior,
-        widget.rubySpans
+        textHeightBehavior
       );
-      final identity = (shapeIdentity, textMaxWidth);
+      final rubyIdentity = (shapeIdentity, widget.rubySpans);
+      final identity = (rubyIdentity, textMaxWidth);
       if (_identity != identity || (needsPainter && _painter == null)) {
         // Window resizing changes wrapping, not the glyph run. Keep the
         // native paragraph so its shaping cache survives the width sweep.
         if (_painter == null || _shapeIdentity != shapeIdentity) {
+          _painter?.dispose();
+          _painter = TextPainter(
+              text: appFontSpan(widget.text,
+                  style: glyphStyle, policy: fontPolicy),
+              textAlign: paintAlign,
+              textDirection: direction,
+              textScaler: scaler,
+              locale: locale,
+              textHeightBehavior: textHeightBehavior);
+          _shapeIdentity = shapeIdentity;
+        }
+        if (_rubyIdentity != rubyIdentity) {
+          // An optional reading is an attachment, not a new primary shape.
+          // In particular, retiring it at progress zero must not replace the
+          // native paragraph on the reveal's final frame.
+          _ruby?.dispose();
+          _ruby = null;
           _rubyShaping?.dispose();
           _rubyShaping = widget.rubySpans.isEmpty
               ? null
@@ -396,16 +414,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
                   scaler: scaler,
                   locale: locale,
                   vertical: false);
-          _painter?.dispose();
-          _painter = TextPainter(
-              text: appFontSpan(widget.text,
-                  style: glyphStyle, policy: fontPolicy),
-              textAlign: paintAlign,
-              textDirection: direction,
-              textScaler: scaler,
-              locale: locale,
-              textHeightBehavior: textHeightBehavior);
-          _shapeIdentity = shapeIdentity;
+          _rubyIdentity = rubyIdentity;
         }
         final painter = _painter!;
         _width = layoutBalancedLyric(painter, textMaxWidth);

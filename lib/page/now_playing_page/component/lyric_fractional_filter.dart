@@ -81,8 +81,8 @@ class LyricFractionalFilter extends SingleChildRenderObjectWidget {
   final Object? repaintToken;
   final Listenable? repaint;
 
-  /// Retain the source coverage while attached ruby strokes animate. The
-  /// transparent source guard is painted inside the isolated sampling layer.
+  /// Once readings use this paragraph, retain its source coverage until the
+  /// sampler is disposed. No reading text or shape is retained by this guard.
   final bool retainSourceBounds;
 
   @override
@@ -149,8 +149,10 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
     ..blendMode = ui.BlendMode.src;
 
   set retainSourceBounds(bool value) {
-    if (_retainSourceBounds == value) return;
-    _retainSourceBounds = value;
+    // Removing the guard on the last reveal frame changes the offscreen
+    // origin even though the remaining primary paragraph has not changed.
+    if (_retainSourceBounds || !value) return;
+    _retainSourceBounds = true;
     markNeedsPaint();
   }
 
