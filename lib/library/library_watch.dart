@@ -30,6 +30,8 @@ class LibraryWatch {
   final Duration quietPeriod, maximumDelay, recoveryPeriod, checkTimeout;
   final Set<void Function()> _cancelChecks = {};
   final Map<String, StreamSubscription<FileSystemEvent>> _subscriptions = {};
+  final Map<String, Object> _watchTokens = {};
+  final Set<String> _dirtyRoots = {};
   Map<String, String> _roots = {};
   Timer? _quiet, _deadline, _recovery;
   Future<void>? _running;
@@ -68,18 +70,36 @@ class LibraryWatch {
     }
     _enabled = enabled;
     _roots = next;
+    // Revoke removed streams in this synchronous turn. A remove/re-add pair
+    // before the configuration queue drains must create a fresh root session.
+    for (final root in _watchTokens.keys.toList()) {
+      if (!enabled || !next.containsKey(root)) _watchTokens.remove(root);
+    }
     final generation = ++_generation;
     _cancelTimers();
     _abortChecks();
-    _dirty = false;
+    _dirtyRoots.retainWhere((root) => enabled && next.containsKey(root));
+    _dirty = _dirtyRoots.isNotEmpty;
     _configuration = _configuration.then((_) async {
-      final previous = _subscriptions.values.toList();
-      _subscriptions.clear();
+      final removed = _subscriptions.keys
+          .where((root) =>
+              !_enabled ||
+              !_roots.containsKey(root) ||
+              !_watchTokens.containsKey(root))
+          .toList();
+      final previous = <StreamSubscription<FileSystemEvent>>[];
+      for (final root in removed) {
+        _watchTokens.remove(root);
+        previous.add(_subscriptions.remove(root)!);
+      }
       await Future.wait(previous.map(_cancelSubscription));
       if (!_current(generation)) return;
-      await _attach(generation, refreshOnRecovery: false);
-      // Reconcile changes in the gap before the event streams were attached.
-      if (_current(generation) && _roots.isNotEmpty) _request();
+      // Retained roots have no attachment gap. Removing another root must not
+      // restart their streams or schedule another traversal of their files.
+      await _attach(generation, refreshOnRecovery: true);
+      if (_current(generation) && _dirty && _quiet?.isActive != true) {
+        _request();
+      }
     }).catchError((Object error, StackTrace trace) {
       onError?.call(error, trace);
     });
@@ -89,26 +109,45 @@ class LibraryWatch {
   bool _current(int generation) =>
       !_disposed && _enabled && generation == _generation;
 
+  bool _watchCurrent(String root, Object token) =>
+      !_disposed &&
+      _enabled &&
+      _roots.containsKey(root) &&
+      identical(_watchTokens[root], token);
+
   Future<void> _attach(int generation,
       {required bool refreshOnRecovery}) async {
     var restored = false;
     for (final entry in Map<String, String>.of(_roots).entries) {
       if (!_current(generation)) return;
       if (_subscriptions.containsKey(entry.key)) continue;
+      Object? token;
       try {
         if (!await _checkRoot(entry.value) || !_current(generation)) continue;
+        token = Object();
+        final ownership = token;
+        _watchTokens[entry.key] = token;
         final subscription = _watch(entry.value).listen(
           (event) {
-            if (_current(generation) && _relevant(event)) _request();
+            if (_watchCurrent(entry.key, ownership) && _relevant(event)) {
+              _request(root: entry.key);
+            }
           },
           onError: (Object error, StackTrace trace) =>
-              _lost(entry.key, generation, error, trace),
-          onDone: () => _lost(entry.key, generation, null, null),
+              _lost(entry.key, ownership, error, trace),
+          onDone: () => _lost(entry.key, ownership, null, null),
           cancelOnError: true,
         );
+        if (!_watchCurrent(entry.key, ownership)) {
+          await _cancelSubscription(subscription);
+          continue;
+        }
         _subscriptions[entry.key] = subscription;
         restored = true;
       } catch (error, trace) {
+        if (token != null && identical(_watchTokens[entry.key], token)) {
+          _watchTokens.remove(entry.key);
+        }
         onError?.call(error, trace);
       }
     }
@@ -128,13 +167,15 @@ class LibraryWatch {
             isM3uLocalAudioPath(event.destination!));
   }
 
-  void _lost(String key, int generation, Object? error, StackTrace? trace) {
-    if (!_current(generation)) return;
+  void _lost(String key, Object token, Object? error, StackTrace? trace) {
+    if (!_watchCurrent(key, token)) return;
+    _watchTokens.remove(key);
     final subscription = _subscriptions.remove(key);
     if (subscription != null) unawaited(_cancelSubscription(subscription));
     if (error != null) onError?.call(error, trace ?? StackTrace.current);
     _dirty = true;
-    _scheduleRecovery(generation);
+    _dirtyRoots.add(key);
+    _scheduleRecovery(_generation);
   }
 
   void _scheduleRecovery(int generation) {
@@ -145,10 +186,15 @@ class LibraryWatch {
         () => unawaited(_attach(generation, refreshOnRecovery: true)));
   }
 
-  void _request({bool retry = false}) {
+  void _request({bool retry = false, String? root}) {
     if (_disposed || !_enabled || _roots.isEmpty) return;
     if (!retry) _failureRetried = false;
     _dirty = true;
+    if (root == null) {
+      _dirtyRoots.addAll(_roots.keys);
+    } else {
+      _dirtyRoots.add(root);
+    }
     _quiet?.cancel();
     _quiet = Timer(quietPeriod, _beginRefresh);
     if (_deadline?.isActive != true) {
@@ -165,25 +211,42 @@ class LibraryWatch {
       return;
     }
     final generation = _generation;
+    final requestedRoots = Set<String>.of(_dirtyRoots);
     _dirty = false;
-    _running = _refresh(generation).whenComplete(() {
+    _dirtyRoots.clear();
+    _running = _refresh(generation, requestedRoots).whenComplete(() {
       _running = null;
       if (!_disposed && _enabled && _dirty) _request();
     });
   }
 
-  Future<void> _refresh(int generation) async {
+  Future<void> _refresh(int generation, Set<String> requestedRoots) async {
+    bool currentBeforeScan() {
+      if (_current(generation)) return true;
+      // A reconfiguration can cancel access probes before a native scan has
+      // started. Carry observed changes only for roots that are still watched.
+      if (!_disposed && _enabled) {
+        _dirtyRoots.addAll(requestedRoots.where(_roots.containsKey));
+        _dirty = _dirtyRoots.isNotEmpty;
+      }
+      return false;
+    }
+
     try {
       for (final entry in Map<String, String>.of(_roots).entries) {
-        if (!_current(generation)) return;
-        if (!await _checkRoot(entry.value)) {
-          _lost(entry.key, generation, null, null);
+        if (!currentBeforeScan()) return;
+        final accessible = await _checkRoot(entry.value);
+        if (!currentBeforeScan()) return;
+        if (!accessible) {
+          final token = _watchTokens[entry.key];
+          if (token != null) _lost(entry.key, token, null, null);
           // No retry scan until this root becomes available again.
           _dirty = false;
+          _dirtyRoots.clear();
           return;
         }
       }
-      if (!_current(generation)) return;
+      if (!currentBeforeScan()) return;
       await refresh();
     } on LibraryMutationBusy {
       // A manual edit may acquire the gate during the asynchronous root check.
@@ -195,9 +258,15 @@ class LibraryWatch {
       if (_current(generation)) {
         _quiet?.cancel();
         _deadline?.cancel();
+        final failedRoots = <String>{...requestedRoots, ..._dirtyRoots};
         _dirty = false;
+        _dirtyRoots.clear();
         if (!_failureRetried) {
           _failureRetried = true;
+          // The finite retry still owns these observed changes while its
+          // timer waits. A root edit may discard A, but must not discard B's
+          // unfinished work merely because its subscription was retained.
+          _dirtyRoots.addAll(failedRoots);
           _quiet = Timer(recoveryPeriod, () => _request(retry: true));
         }
       }
@@ -258,6 +327,8 @@ class LibraryWatch {
     await _configuration;
     final subscriptions = _subscriptions.values.toList();
     _subscriptions.clear();
+    _watchTokens.clear();
+    _dirtyRoots.clear();
     await Future.wait(subscriptions.map(_cancelSubscription));
     final running = _running;
     if (running != null) await running;

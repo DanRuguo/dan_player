@@ -1,4 +1,10 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '试一试：收听趋势': ['Try it: listening trends', '試す：再生時間の推移', '체험: 감상 추이'],
+  '这里使用固定示例记录。可以切换范围和曲线，点按日期或用方向键查看；不会读取或保存你的听歌记录。': [
+    'This chart uses fixed sample records. Switch ranges and curves, tap a date or use the arrow keys to explore. Your listening records are neither read nor saved.',
+    '固定のサンプル記録を使っています。期間や曲線を切り替え、日付をタップしたり矢印キーで確認できます。あなたの再生記録の読み取りや保存は行いません。',
+    '고정된 예시 기록을 사용합니다. 기간과 곡선을 바꾸거나 날짜를 누르고 방향키로 살펴보세요. 사용자의 감상 기록을 읽거나 저장하지 않습니다.',
+  ],
   '试一试：歌曲过渡': ['Try it: track transitions', '試す：曲の切り替え', '체험: 곡 전환'],
   '演示歌曲过渡': ['Demonstrate transition', '切り替えを試す', '곡 전환 체험'],
   '下一首歌曲': ['Next track', '次の曲', '다음 곡'],

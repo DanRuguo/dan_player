@@ -81,6 +81,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
   final _demoLayoutChanges = ValueNotifier(0);
   late ValueListenable<bool> _demoHidden;
   int _commonRevealEpoch = 0;
+  bool _closing = false;
   ScrollPosition? _commonRevealPosition;
   final _chapterKeys = {
     for (final chapter in _guideChapters) chapter.$1: GlobalKey(),
@@ -89,7 +90,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
     'queue': false,
     'lyrics': false,
     'playlists': true,
-    'sound': false
+    'sound': false,
+    'statistics': false,
   };
   final _quickControllers = {
     for (final id in ['queue', 'lyrics', 'playlists', 'sound'])
@@ -119,6 +121,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
 
   bool get _canRevealCommon =>
       mounted &&
+      !_closing &&
       !_demoHidden.value &&
       TickerMode.valuesOf(context).enabled &&
       (ModalRoute.of(context)?.isCurrent ?? true);
@@ -219,14 +222,24 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
   }
 
   void _navigate(BuildContext context, String location) {
+    if (!_canRevealCommon) return;
     final navigate = widget.onNavigate;
     if (navigate != null) {
       navigate(location);
       return;
     }
     final router = GoRouter.of(context);
-    Navigator.of(context).pop();
+    _dismiss();
     router.go(location);
+  }
+
+  void _dismiss() {
+    if (!_canRevealCommon) return;
+    // The reverse route remains mounted for its animation. Revoke queued
+    // actions synchronously so another activation cannot pop the page below.
+    _closing = true;
+    _cancelCommonReveal();
+    Navigator.of(context).pop();
   }
 
   @override
@@ -644,6 +657,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '缺失日期按 0 绘图，不保证此前已经完整记录；前期没有时长时只比较差额，不计算增长百分比。趋势范围独立于上方日历范围，也不会筛选下方排行。先看日期和记录覆盖，再判断听歌习惯是否变化。'),
                           _text(
                               '时间范围菜单的“按严格一周”按本周周一至周日对照上一周；“近 7 天”是截至昨天的滚动区间。今天只计截至展示时间的记录，未来日期与缺失记录按 0 占位并提示；本周未结束时增减仍是暂时结果。曲线菜单可选择本期、前期或两期对比。'),
+                          _demo('statistics', PlayerGuideDemoKind.statistics),
                           _paragraph(context, '5. 排行：播放最多与收听最久'),
                           _text(
                               '在排行上方选择“歌曲”“艺术家”或“专辑”，两张排行分别显示累计播放次数与累计收听时长的前 10 项。听过几次与听了多久是不同指标；排行使用全部已保存历史，不随日历或趋势的范围改变。艺术家与专辑只汇总已明确归属的记录，同名专辑按艺术家区分；旧版未明确归属的总数仍保留并单独提示。排行用于查看，不会直接开始播放。'),
@@ -760,7 +774,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
               AppDialogActions(children: [
                 TextButton(
                     key: const ValueKey('close-player-feature-guide'),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: _dismiss,
                     child: Text(ui('关闭'))),
               ]),
             ],

@@ -54,6 +54,13 @@ enum PlayerState {
   unknown,
 }
 
+extension BassPlaybackIntent on PlayerState {
+  /// Starvation is temporary playback, while a paused/unavailable endpoint
+  /// requires an explicit transport command before it can resume.
+  bool get keepsPlaybackIntent =>
+      this == PlayerState.playing || this == PlayerState.stalled;
+}
+
 /// A seek invalidates the previous polling stamp. Preserve active playback's
 /// position and completion observation without starting a paused transport.
 /// A data stall retains playback intent and resumes natively after refill.
@@ -63,10 +70,7 @@ Timer? rearmBassPositionUpdaterAfterSeek(
   required Timer Function() create,
 }) {
   current?.cancel();
-  return stateBeforeSeek == PlayerState.playing ||
-          stateBeforeSeek == PlayerState.stalled
-      ? create()
-      : null;
+  return stateBeforeSeek.keepsPlaybackIntent ? create() : null;
 }
 
 enum BassNetworkConfigurationFailure { proxy, timeout }
@@ -814,17 +818,18 @@ class BassPlayer {
       case BASS.BASS_ACTIVE_STOPPED:
         return PlayerState.stopped;
       case BASS.BASS_ACTIVE_PLAYING:
+      case BASS.BASS_ACTIVE_STALLED:
         if (wasapiExclusive &&
             _bassWasapi.BASS_WASAPI_IsStarted() != BASS.TRUE) {
           return PlayerState.pausedDevice;
         }
-        return PlayerState.playing;
+        return active == BASS.BASS_ACTIVE_STALLED
+            ? PlayerState.stalled
+            : PlayerState.playing;
       case BASS.BASS_ACTIVE_PAUSED:
         return PlayerState.paused;
       case BASS.BASS_ACTIVE_PAUSED_DEVICE:
         return PlayerState.pausedDevice;
-      case BASS.BASS_ACTIVE_STALLED:
-        return PlayerState.stalled;
       default:
         return PlayerState.unknown;
     }
@@ -1402,7 +1407,7 @@ class BassPlayer {
     final sourceSegment = _segment;
     final previousMode = wasapiExclusive;
     var lastPos = position;
-    var wasPlaying = playerState == PlayerState.playing;
+    var wasPlaying = playerState.keepsPlaybackIntent;
     cancelPendingSource();
     final generation = _sourceGeneration;
     if (sourcePath == null) {
@@ -1434,7 +1439,7 @@ class BassPlayer {
         generation: generation,
         onBeforeCommit: () {
           lastPos = position;
-          wasPlaying = playerState == PlayerState.playing;
+          wasPlaying = playerState.keepsPlaybackIntent;
         },
       );
       if (!applied || !_isCurrentSource(generation)) return false;
@@ -2487,7 +2492,7 @@ class BassPlayer {
 
     if (wasapiExclusive && _wasapiInitialized) {
       seekWasapiOutput(
-        wasPlaying: stateBeforeSeek == PlayerState.playing,
+        wasPlaying: stateBeforeSeek.keepsPlaybackIntent,
         flush: () {
           // A paused mixer source leaves the resident endpoint running. Stop
           // only a currently started endpoint to flush pre-seek device data;
@@ -2507,8 +2512,7 @@ class BassPlayer {
       _seekNative(position);
       if (_streamUsesMixer &&
           _sharedMixer != null &&
-          (stateBeforeSeek == PlayerState.playing ||
-              stateBeforeSeek == PlayerState.stalled)) {
+          stateBeforeSeek.keepsPlaybackIntent) {
         if (_mix!.setChannelPaused(_fstream!, false) ==
             BassMixLibrary.errorValue) {
           throw _sourceOpenException(_bass.BASS_ErrorGetCode(),

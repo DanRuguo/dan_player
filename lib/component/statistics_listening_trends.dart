@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -29,7 +30,7 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
   bool _calendarWeek = false;
   var _series = _TrendSeries.both;
   var _period = 7;
-  int? _selection;
+  final _selection = ValueNotifier<int?>(null);
   (double, double)? _weekGeometry;
   bool _revealWeekSelection = false;
   bool _weekRevealScheduled = false;
@@ -38,7 +39,7 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
   ListeningTrendComparison get _data => _calendarWeek
       ? widget.snapshot.calendarWeek
       : widget.snapshot.comparisons[_period]!;
-  int get _index => (_selection ??
+  int get _index => (_selection.value ??
           (_calendarWeek
               ? localCalendarDate(widget.snapshot.capturedAt).weekday - 1
               : _period - 1))
@@ -57,14 +58,14 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
   void didUpdateWidget(StatisticsListeningTrends oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.snapshot, widget.snapshot)) {
-      _selection = null;
+      _selection.value = null;
       _revealWeekSelection = true;
     }
   }
 
   void _select(int index, {bool reveal = false}) {
     final next = index.clamp(0, _period - 1);
-    if (next != _index) setState(() => _selection = next);
+    if (next != _index) _selection.value = next;
     if (!reveal || !_calendarWeek || !_chartScroll.hasClients) return;
     final position = _chartScroll.position;
     final width = position.viewportDimension + position.maxScrollExtent;
@@ -125,7 +126,7 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                 setState(() {
                   _calendarWeek = true;
                   _period = 7;
-                  _selection = null;
+                  _selection.value = null;
                   _revealWeekSelection = true;
                 });
               },
@@ -143,7 +144,7 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                 setState(() {
                   _period = days;
                   _calendarWeek = false;
-                  _selection = null;
+                  _selection.value = null;
                 });
               },
               child: Text(ui('近 {0} 天', [days])),
@@ -264,7 +265,10 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                 data: current,
                 maximum: maximum,
                 geometry: _lineGeometry!,
-                selection: _index,
+                selectedDay: _selection,
+                defaultSelection: _calendarWeek
+                    ? localCalendarDate(widget.snapshot.capturedAt).weekday - 1
+                    : _period - 1,
                 showCurrent: _showCurrent,
                 showPrevious: _showPrevious,
                 calendarWeek: _calendarWeek,
@@ -309,36 +313,43 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: plot)))
             : plot;
-        return Semantics(
-            key: const ValueKey('statistics-trends-chart-semantics'),
-            label: ui('逐日对照'),
-            value: _detail(_index),
-            increasedValue: _index < _period - 1 ? _detail(_index + 1) : null,
-            decreasedValue: _index > 0 ? _detail(_index - 1) : null,
-            slider: true,
-            onIncrease: _index < _period - 1
-                ? () => _select(_index + 1, reveal: true)
-                : null,
-            onDecrease:
-                _index > 0 ? () => _select(_index - 1, reveal: true) : null,
-            child: Focus(
-                focusNode: _focus,
-                onKeyEvent: (_, event) {
-                  if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-                    return KeyEventResult.ignored;
-                  }
-                  final target = switch (event.logicalKey) {
-                    LogicalKeyboardKey.arrowLeft => _index - 1,
-                    LogicalKeyboardKey.arrowRight => _index + 1,
-                    LogicalKeyboardKey.home => 0,
-                    LogicalKeyboardKey.end => _period - 1,
-                    _ => null
-                  };
-                  if (target == null) return KeyEventResult.ignored;
-                  _select(target, reveal: true);
-                  return KeyEventResult.handled;
-                },
-                child: surface));
+        final focus = Focus(
+            focusNode: _focus,
+            onKeyEvent: (_, event) {
+              if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+                return KeyEventResult.ignored;
+              }
+              final target = switch (event.logicalKey) {
+                LogicalKeyboardKey.arrowLeft => _index - 1,
+                LogicalKeyboardKey.arrowRight => _index + 1,
+                LogicalKeyboardKey.home => 0,
+                LogicalKeyboardKey.end => _period - 1,
+                _ => null
+              };
+              if (target == null) return KeyEventResult.ignored;
+              _select(target, reveal: true);
+              return KeyEventResult.handled;
+            },
+            child: surface);
+        // Inspection changes only paint, accessibility and the date detail.
+        // Keep the menus, metrics and plot layout out of the pointer hot path.
+        return ValueListenableBuilder(
+            valueListenable: _selection,
+            child: focus,
+            builder: (context, _, child) => Semantics(
+                key: const ValueKey('statistics-trends-chart-semantics'),
+                label: ui('逐日对照'),
+                value: _detail(_index),
+                increasedValue:
+                    _index < _period - 1 ? _detail(_index + 1) : null,
+                decreasedValue: _index > 0 ? _detail(_index - 1) : null,
+                slider: true,
+                onIncrease: _index < _period - 1
+                    ? () => _select(_index + 1, reveal: true)
+                    : null,
+                onDecrease:
+                    _index > 0 ? () => _select(_index - 1, reveal: true) : null,
+                child: child));
       });
 
   @override
@@ -467,9 +478,11 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                       style: theme.textTheme.bodySmall),
                   _chart(context, current, scheme),
                   const SizedBox(height: 8),
-                  Text(_detail(_index),
-                      key: const ValueKey('statistics-trends-selected-day'),
-                      style: theme.textTheme.bodySmall),
+                  ValueListenableBuilder(
+                      valueListenable: _selection,
+                      builder: (context, _, child) => Text(_detail(_index),
+                          key: const ValueKey('statistics-trends-selected-day'),
+                          style: theme.textTheme.bodySmall)),
                   const SizedBox(height: 10),
                   Text(ui('悬停或点按查看日期；聚焦图表后可用方向键、Home 和 End。'),
                       style: theme.textTheme.bodySmall),
@@ -486,6 +499,7 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
   void dispose() {
     _focus.dispose();
     _chartScroll.dispose();
+    _selection.dispose();
     super.dispose();
   }
 }
@@ -498,13 +512,19 @@ class _TrendPainter extends CustomPainter {
       required this.showCurrent,
       required this.showPrevious,
       required this.calendarWeek,
-      required this.selection,
+      required ValueListenable<int?> selectedDay,
+      required this.defaultSelection,
       required this.currentColor,
       required this.previousColor,
-      required this.gridColor});
+      required this.gridColor})
+      : _selectedDay = selectedDay,
+        super(repaint: selectedDay);
   final ListeningTrendComparison data;
   final StatisticsComparisonLineGeometry geometry;
-  final int selection;
+  final ValueListenable<int?> _selectedDay;
+  final int defaultSelection;
+  int get selection =>
+      (_selectedDay.value ?? defaultSelection).clamp(0, data.periodDays - 1);
   final double maximum;
   final bool showCurrent, showPrevious, calendarWeek;
   final Color currentColor, previousColor, gridColor;

@@ -80,11 +80,16 @@ class LibraryRefreshTask extends ChangeNotifier {
   bool _started = false;
   bool _cancelRequested = false;
   bool _completionNoticeTaken = false;
+  bool _rootsOnly = false;
   TaskbarProgressTask? _taskbar;
   LibraryRefreshPhase phase = LibraryRefreshPhase.scanning;
   IndexActionState? lastAction;
   Object? error;
   int pendingMetadata = 0;
+
+  /// Native root pruning is acknowledged only after the scan stream completes
+  /// successfully; it never claims pending metadata was reread.
+  bool get rootsOnly => _rootsOnly;
   Stream<IndexActionState> get stream => _progress.stream;
   Future<void> get completed => _completed.future;
   bool get isTerminal => switch (phase) {
@@ -149,7 +154,12 @@ class LibraryRefreshTask extends ChangeNotifier {
         active.value = this;
         if (_cancelRequested) throw const LibraryScanCancelled();
         _taskbar = TaskbarProgress.instance.begin();
+        var rootsPruned = false;
         await for (final action in scan()) {
+          if (action.message == 'INDEX_ROOTS_PRUNED') {
+            rootsPruned = true;
+            continue;
+          }
           lastAction = action;
           if (action.message == 'INDEX_PHASE_COMMITTING') {
             _cancelRequested = false;
@@ -164,6 +174,7 @@ class LibraryRefreshTask extends ChangeNotifier {
         }
         // A successful native stream means its atomic commit finished. Do
         // not discard that result because a cancellation reply arrived late.
+        _rootsOnly = rootsPruned;
         _setPhase(LibraryRefreshPhase.committing);
         pendingMetadata = await commit();
         _setPhase(LibraryRefreshPhase.completed);
@@ -247,10 +258,12 @@ class LibraryRefreshSnapshot {
       LibraryRefreshSnapshot.fromIndex(
           jsonDecode(await file.readAsString()) as Map);
 
-  Set<String> changedPaths(LibraryRefreshSnapshot next) => {
+  Set<String> changedPaths(LibraryRefreshSnapshot next,
+          {bool retryPending = true}) =>
+      {
         for (final path in {..._entries.keys, ...next._entries.keys})
           if (_entries[path] != next._entries[path] ||
-              next._entries[path]?.pending == true)
+              (retryPending && next._entries[path]?.pending == true))
             path,
       };
 }
@@ -259,6 +272,7 @@ class LibraryRefreshSnapshot {
 /// before cache changes; native scan errors never reach this completion path.
 Future<int> completeLibraryRefresh({
   required bool incremental,
+  bool retryPending = true,
   required LibraryRefreshSnapshot before,
   required Future<LibraryRefreshSnapshot> Function() readCommitted,
   required Future<void> Function(String path) invalidateCover,
@@ -267,7 +281,7 @@ Future<int> completeLibraryRefresh({
 }) async {
   final after = await readCommitted();
   if (incremental) {
-    for (final path in before.changedPaths(after)) {
+    for (final path in before.changedPaths(after, retryPending: retryPending)) {
       await invalidateCover(path);
     }
   } else {

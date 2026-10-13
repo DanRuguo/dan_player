@@ -1953,23 +1953,32 @@ pub fn build_index_from_folders_recursively(
         .unwrap_or_else(|error| error.into_inner());
     let path = PathBuf::from(index_path).join("index.json");
     let previous = read_index_json(&path).ok();
-    let index = incremental_index::refresh_cancellable(
-        previous
-            .as_ref()
-            .map(|(index, _)| index)
-            .filter(|index| index["folders"].is_array()),
-        &folders,
-        true,
-        &|path| Audio::read_from_path(path).map(|audio| audio.to_json_value()),
-        &task.control,
-        |progress| {
-            let _ = sink.add(IndexActionState {
-                progress,
-                message: String::new(),
-            });
-        },
-    )
-    .map_err(io::Error::other)?;
+    let pruned = match previous.as_ref() {
+        Some((index, _)) => incremental_index::prune_removed_roots(index, &folders, &task.control)
+            .map_err(io::Error::other)?,
+        None => None,
+    };
+    let roots_only = pruned.is_some();
+    let index = match pruned {
+        Some(index) => index,
+        None => incremental_index::refresh_cancellable(
+            previous
+                .as_ref()
+                .map(|(index, _)| index)
+                .filter(|index| index["folders"].is_array()),
+            &folders,
+            true,
+            &|path| Audio::read_from_path(path).map(|audio| audio.to_json_value()),
+            &task.control,
+            |progress| {
+                let _ = sink.add(IndexActionState {
+                    progress,
+                    message: String::new(),
+                });
+            },
+        )
+        .map_err(io::Error::other)?,
+    };
     task.control.begin_commit().map_err(io::Error::other)?;
     let _ = sink.add(IndexActionState {
         progress: 1.0,
@@ -1979,7 +1988,16 @@ pub fn build_index_from_folders_recursively(
         &path,
         &index,
         previous.is_some_and(|(_, recovered)| recovered),
-    )
+    )?;
+    if roots_only {
+        // No metadata read was attempted. Emit this only after the atomic
+        // write succeeds, so failed/cancelled work cannot retire pending covers.
+        let _ = sink.add(IndexActionState {
+            progress: 1.0,
+            message: "INDEX_ROOTS_PRUNED".into(),
+        });
+    }
+    Ok(())
 }
 
 fn needs_classification_backfill(audio: &serde_json::Value) -> bool {

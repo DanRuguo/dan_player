@@ -90,6 +90,96 @@ pub(super) fn roots(index: &serde_json::Value) -> anyhow::Result<Vec<String>> {
     Ok(unique)
 }
 
+/// Removing registered coverage is a catalogue edit, not a disk refresh. The
+/// retained records are already committed and must survive an offline drive.
+/// Equivalent or expanded coverage still uses the caller's ordinary full scan.
+pub(super) fn prune_removed_roots(
+    previous: &serde_json::Value,
+    selected_roots: &[String],
+    control: &ScanControl,
+) -> anyhow::Result<Option<serde_json::Value>> {
+    control.check()?;
+    // A legacy index has no proof of its explicitly selected coverage. Do not
+    // claim a migration or repair malformed records without real discovery.
+    if previous["version"].as_u64() != Some(INDEX_VERSION) || !previous["roots"].is_array() {
+        return Ok(None);
+    }
+    let Ok(old_roots) = roots(previous) else {
+        return Ok(None);
+    };
+    let new_roots = roots(&serde_json::json!({"roots": selected_roots}))?;
+    let lexical_path = |value: &str| -> Option<PathBuf> {
+        let path = Path::new(value);
+        (path.is_absolute()
+            && !path
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir)))
+        .then(|| PathBuf::from(path_key(path)))
+    };
+    let Some(old_paths) = old_roots
+        .iter()
+        .map(|root| lexical_path(root))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Ok(None);
+    };
+    let Some(new_paths) = new_roots
+        .iter()
+        .map(|root| lexical_path(root))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Ok(None);
+    };
+    let covered = |path: &Path, roots: &[PathBuf]| roots.iter().any(|root| path.starts_with(root));
+    // A newly selected child is still an addition: it may now be a junction or
+    // contain files created since the old parent scan. Only remove old roots.
+    if new_paths.iter().any(|root| !old_paths.contains(root))
+        || old_paths.iter().all(|root| covered(root, &new_paths))
+    {
+        return Ok(None);
+    }
+    let Some(folders) = previous["folders"].as_array() else {
+        return Ok(None);
+    };
+    let mut retained = Vec::new();
+    for folder in folders {
+        control.check()?;
+        let Some(folder_path) = folder["path"].as_str().and_then(lexical_path) else {
+            return Ok(None);
+        };
+        let Some(audios) = folder["audios"].as_array() else {
+            return Ok(None);
+        };
+        if !covered(&folder_path, &old_paths) {
+            return Ok(None);
+        }
+        for audio in audios {
+            control.check()?;
+            let Some(audio_path) = audio["path"].as_str().and_then(lexical_path) else {
+                return Ok(None);
+            };
+            if audio_path.parent() != Some(folder_path.as_path()) {
+                return Ok(None);
+            }
+        }
+        if covered(&folder_path, &new_paths) {
+            retained.push(folder.clone());
+        }
+    }
+    control.check()?;
+    // Clone retained folders only once, and never duplicate the removed tree.
+    let mut output: serde_json::Map<String, serde_json::Value> = previous
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(key, _)| key.as_str() != "roots" && key.as_str() != "folders")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    output.insert("roots".into(), serde_json::json!(new_roots));
+    output.insert("folders".into(), serde_json::Value::Array(retained));
+    Ok(Some(serde_json::Value::Object(output)))
+}
+
 struct DiscoveredFile {
     path: PathBuf,
     fingerprint: Fingerprint,
@@ -1040,6 +1130,155 @@ mod tests {
         ] {
             assert!(roots(&index).is_err());
         }
+    }
+
+    #[test]
+    fn removed_root_retains_other_root_without_touching_its_offline_files() {
+        let f = Fixture::new();
+        f.file("a/song.mp3");
+        f.file("b/song.mp3");
+        let selected = vec![
+            f.0.join("a").to_string_lossy().into_owned(),
+            f.0.join("b").to_string_lossy().into_owned(),
+        ];
+        let mut previous =
+            refresh(None, &selected, true, &|path| Some(tags(path)), |_| {}).unwrap();
+        previous["extension"] = serde_json::json!({"preserve": true});
+        previous["folders"][1]["audios"][0]["metadata_pending"] = true.into();
+        previous["folders"][1]["audios"][0]["extension"] = "preserve audio".into();
+        let retained = previous["folders"][1].clone();
+        let original = previous.clone();
+        fs::remove_dir_all(f.0.join("b")).unwrap();
+        let result = prune_removed_roots(&previous, &selected[1..], &ScanControl::default())
+            .unwrap()
+            .expect("root removal must not enumerate the retained offline root");
+        assert_eq!(result["folders"], serde_json::json!([retained]));
+        assert_eq!(result["roots"], serde_json::json!(&selected[1..]));
+        assert_eq!(result["extension"], previous["extension"]);
+        assert_eq!(previous, original);
+    }
+
+    #[test]
+    fn newly_selected_child_requires_discovery_and_empty_selection_clears() {
+        let f = Fixture::new();
+        f.file("a/song.mp3");
+        f.file("a/nested/song.mp3");
+        f.file("b/song.mp3");
+        let previous = f.scan(None, true, &AtomicUsize::new(0));
+        let selected = vec![f.0.join("a").to_string_lossy().into_owned()];
+        assert!(
+            prune_removed_roots(&previous, &selected, &ScanControl::default())
+                .unwrap()
+                .is_none()
+        );
+        f.file("a/created-after-previous-scan.mp3");
+        let result = refresh(
+            Some(&previous),
+            &selected,
+            true,
+            &|path| Some(tags(path)),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(songs(&result).len(), 3);
+        let empty = prune_removed_roots(&previous, &[], &ScanControl::default())
+            .unwrap()
+            .unwrap();
+        assert_eq!(empty["folders"], serde_json::json!([]));
+        assert_eq!(empty["roots"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn equivalent_roots_preserve_explicit_full_refresh_and_added_roots_require_discovery() {
+        let f = Fixture::new();
+        f.file("nested/song.mp3");
+        let calls = AtomicUsize::new(0);
+        let previous = f.scan(None, true, &calls);
+        let selected = vec![
+            f.roots()[0].clone(),
+            f.roots()[0].clone(),
+            f.0.join("nested").to_string_lossy().into_owned(),
+        ];
+        assert!(
+            prune_removed_roots(&previous, &selected, &ScanControl::default())
+                .unwrap()
+                .is_none()
+        );
+        f.scan(Some(&previous), true, &calls);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            2,
+            "the full-refresh button must still reread an unchanged song"
+        );
+        let mut added = f.roots();
+        added.push(format!("{}-new", f.0.to_string_lossy()));
+        assert!(
+            prune_removed_roots(&previous, &added, &ScanControl::default())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn unproven_or_malformed_index_never_uses_root_pruning() {
+        let f = Fixture::new();
+        f.file("nested/song.mp3");
+        let previous = f.scan(None, true, &AtomicUsize::new(0));
+        let selected = vec![f.0.join("nested").to_string_lossy().into_owned()];
+        let mut legacy = previous.clone();
+        legacy.as_object_mut().unwrap().remove("roots");
+        let mut outdated = previous.clone();
+        outdated["version"] = (INDEX_VERSION - 1).into();
+        let mut malformed = previous.clone();
+        malformed["folders"][0]["audios"][0]["path"] = "relative.mp3".into();
+        let mut unrelated = previous.clone();
+        unrelated["folders"][0]["audios"][0]["path"] =
+            f.0.join("other/song.mp3")
+                .to_string_lossy()
+                .into_owned()
+                .into();
+        for index in [legacy, outdated, malformed, unrelated] {
+            assert!(
+                prune_removed_roots(&index, &selected, &ScanControl::default())
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let alias = vec![f.0.join("nested/../nested").to_string_lossy().into_owned()];
+        assert!(
+            prune_removed_roots(&previous, &alias, &ScanControl::default())
+                .unwrap()
+                .is_none(),
+            "an unresolved parent alias must use real discovery"
+        );
+    }
+
+    #[test]
+    fn cancelled_root_removal_cannot_produce_a_commit_snapshot() {
+        let f = Fixture::new();
+        let previous = f.scan(None, true, &AtomicUsize::new(0));
+        let id = crate::index_scan::create().unwrap();
+        let task = crate::index_scan::ScanLease::begin(Some(id.clone())).unwrap();
+        crate::index_scan::cancel(&id);
+        assert!(prune_removed_roots(&previous, &[], &task.control)
+            .unwrap_err()
+            .to_string()
+            .starts_with("INDEX_SCAN_CANCELLED|"));
+        assert!(task.control.begin_commit().is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_root_spelling_aliases_do_not_disable_full_refresh() {
+        let f = Fixture::new();
+        f.file("nested/song.mp3");
+        let previous = f.scan(None, true, &AtomicUsize::new(0));
+        let selected = vec![f.roots()[0].to_uppercase().replace('\\', "/")];
+        assert!(
+            prune_removed_roots(&previous, &selected, &ScanControl::default())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[cfg(windows)]

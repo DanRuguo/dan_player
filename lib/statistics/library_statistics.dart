@@ -1332,11 +1332,22 @@ class LibraryStatisticsScanner {
                   ifAbsent: () => info.bytes);
               formatCounts.update(format, (value) => value + 1,
                   ifAbsent: () => 1);
-              files.add(TrackStorageUsage(
-                title: track.title,
-                path: track.path,
-                bytes: info.bytes,
-              ));
+              // Only six files are displayed. Keep that bounded ranking
+              // while measuring, instead of allocating and sorting one
+              // presentation record for every song in a large library.
+              var rank = 0;
+              while (rank < files.length && files[rank].bytes >= info.bytes) {
+                rank++;
+              }
+              if (rank < 6) {
+                files.insert(
+                    rank,
+                    TrackStorageUsage(
+                        title: track.title,
+                        path: track.path,
+                        bytes: info.bytes));
+                if (files.length > 6) files.removeLast();
+              }
               final artist = _storageMetadata(track.artist);
               final album = _storageMetadata(track.album);
               albums.putIfAbsent((
@@ -1379,7 +1390,6 @@ class LibraryStatisticsScanner {
           bytes: entry.value,
         ),
     ]..sort((a, b) => b.bytes.compareTo(a.bytes));
-    files.sort((a, b) => b.bytes.compareTo(a.bytes));
     checkCancelled();
     return LibraryStatisticsSnapshot(
       localTracks: local,
@@ -1396,7 +1406,7 @@ class LibraryStatisticsScanner {
       formats: formats,
       folders: folderCounts.values.map((item) => item.snapshot()).toList()
         ..sort((a, b) => a.path.compareTo(b.path)),
-      largestFiles: files.take(6).toList(),
+      largestFiles: files,
       largestAlbums: _largestMetadataStorage(albums.values),
       largestArtists: _largestMetadataStorage(artists.values),
       scannedAt: DateTime.now(),

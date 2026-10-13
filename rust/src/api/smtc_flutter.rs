@@ -25,6 +25,9 @@ pub struct SMTCFlutter {
     _smtc: SystemMediaTransportControls,
     _player: MediaPlayer,
     button_pressed_token: Mutex<Option<EventRegistrationToken>>,
+    // The same short lock registers requests, commits metadata and closes the
+    // controls. Cover I/O happens outside it; None permanently revokes display.
+    display_revision: Mutex<Option<u64>>,
 }
 
 pub enum SMTCControlEvent {
@@ -48,41 +51,29 @@ impl SMTCFlutter {
     }
 
     pub fn subscribe_to_control_events(&self, sink: StreamSink<SMTCControlEvent>) {
-        let token = self
-            ._smtc
-            .ButtonPressed(&TypedEventHandler::<
-                SystemMediaTransportControls,
-                SystemMediaTransportControlsButtonPressedEventArgs,
-            >::new(move |_, event| {
-                let Some(event) = event else {
-                    return Ok(());
-                };
-                let Ok(button) = event.Button() else {
-                    return Ok(());
-                };
-                let event = match button {
-                    SystemMediaTransportControlsButton::Play => SMTCControlEvent::Play,
-                    SystemMediaTransportControlsButton::Pause => SMTCControlEvent::Pause,
-                    SystemMediaTransportControlsButton::Next => SMTCControlEvent::Next,
-                    SystemMediaTransportControlsButton::Previous => SMTCControlEvent::Previous,
-                    _ => SMTCControlEvent::Unknown,
-                };
-                let _ = sink.add(event);
+        let callback = TypedEventHandler::<
+            SystemMediaTransportControls,
+            SystemMediaTransportControlsButtonPressedEventArgs,
+        >::new(move |_, event| {
+            let Some(event) = event else {
+                return Ok(());
+            };
+            let Ok(button) = event.Button() else {
+                return Ok(());
+            };
+            let event = match button {
+                SystemMediaTransportControlsButton::Play => SMTCControlEvent::Play,
+                SystemMediaTransportControlsButton::Pause => SMTCControlEvent::Pause,
+                SystemMediaTransportControlsButton::Next => SMTCControlEvent::Next,
+                SystemMediaTransportControlsButton::Previous => SMTCControlEvent::Previous,
+                _ => SMTCControlEvent::Unknown,
+            };
+            let _ = sink.add(event);
 
-                Ok(())
-            }))
-            .unwrap();
-
-        match self.button_pressed_token.lock() {
-            Ok(mut stored_token) => {
-                if let Some(previous_token) = stored_token.replace(token) {
-                    let _ = self._smtc.RemoveButtonPressed(previous_token);
-                }
-            }
-            Err(_) => {
-                let _ = self._smtc.RemoveButtonPressed(token);
-                log_to_dart("fail to retain SMTC button event token".to_string());
-            }
+            Ok(())
+        });
+        if let Err(error) = self._register_button_handler(&callback) {
+            log_to_dart(format!("fail to subscribe SMTC controls: {}", error));
         }
     }
 
@@ -118,7 +109,25 @@ impl SMTCFlutter {
         }
     }
 
-    pub fn close(self) {
+    pub fn close(&self) {
+        self._close();
+    }
+}
+
+#[cfg(test)]
+#[path = "smtc_display_tests.rs"]
+mod display_tests;
+
+impl SMTCFlutter {
+    fn _close(&self) {
+        let mut revision = self
+            .display_revision
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if revision.is_none() {
+            return;
+        }
+        *revision = None;
         if let Ok(mut stored_token) = self.button_pressed_token.lock() {
             if let Some(token) = stored_token.take() {
                 let _ = self._smtc.RemoveButtonPressed(token);
@@ -129,9 +138,36 @@ impl SMTCFlutter {
             log_to_dart(format!("fail to close SMTC media player: {}", err));
         }
     }
-}
 
-impl SMTCFlutter {
+    fn _register_button_handler(
+        &self,
+        callback: &TypedEventHandler<
+            SystemMediaTransportControls,
+            SystemMediaTransportControlsButtonPressedEventArgs,
+        >,
+    ) -> Result<(), windows::core::Error> {
+        let current = self
+            .display_revision
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if current.is_none() {
+            return Ok(());
+        }
+        let token = self._smtc.ButtonPressed(callback)?;
+        match self.button_pressed_token.lock() {
+            Ok(mut stored_token) => {
+                if let Some(previous_token) = stored_token.replace(token) {
+                    let _ = self._smtc.RemoveButtonPressed(previous_token);
+                }
+            }
+            Err(_) => {
+                let _ = self._smtc.RemoveButtonPressed(token);
+                log_to_dart("fail to retain SMTC button event token".to_string());
+            }
+        }
+        Ok(())
+    }
+
     fn _init_controls(smtc: &SystemMediaTransportControls) -> Result<(), windows::core::Error> {
         // 下一首
         smtc.SetIsNextEnabled(true)?;
@@ -156,6 +192,7 @@ impl SMTCFlutter {
             _smtc,
             _player,
             button_pressed_token: Mutex::new(None),
+            display_revision: Mutex::new(Some(0)),
         })
     }
 
@@ -205,7 +242,75 @@ impl SMTCFlutter {
         duration: u32,
         path: HSTRING,
     ) -> Result<(), windows::core::Error> {
+        self._update_display_with_thumbnail(title, artist, album, duration, || {
+            Self::_thumbnail_for_path(&path)
+        })
+    }
+
+    fn _thumbnail_for_path(
+        path: &HSTRING,
+    ) -> Result<Option<RandomAccessStreamReference>, windows::core::Error> {
+        // Remote tracks have an online:// identity. A missing file or optional
+        // thumbnail must never leave another track's artwork or block its text.
+        if !std::path::Path::new(&path.to_string()).exists() {
+            return Ok(None);
+        }
+        let picture =
+            if let Some(pic_data) = tag_reader::get_picture_from_path(path.to_string(), 256, 256) {
+                Self::_ras_ref_from_pic_data(&pic_data)?
+            } else {
+                let file = StorageFile::GetFileFromPathAsync(&windows_storage_path(
+                    std::path::Path::new(&path.to_os_string()),
+                )?)?
+                .get()?;
+                let thumbnail = file
+                    .GetThumbnailAsyncOverloadDefaultSizeDefaultOptions(ThumbnailMode::MusicView)?
+                    .get()?;
+                RandomAccessStreamReference::CreateFromStream(&thumbnail)?
+            };
+        Ok(Some(picture))
+    }
+
+    fn _update_display_with_thumbnail(
+        &self,
+        title: HSTRING,
+        artist: HSTRING,
+        album: HSTRING,
+        duration: u32,
+        thumbnail: impl FnOnce() -> Result<Option<RandomAccessStreamReference>, windows::core::Error>,
+    ) -> Result<(), windows::core::Error> {
+        let requested = {
+            let mut owner = self
+                .display_revision
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(revision) = owner.as_mut() else {
+                return Ok(());
+            };
+            *revision = revision.wrapping_add(1);
+            *revision
+        };
+        // Reading a cloud-backed file, decoder or Shell thumbnail can finish
+        // after a newer track. No shared updater is changed during that wait.
+        let picture = match thumbnail() {
+            Ok(picture) => picture,
+            Err(error) => {
+                log_to_dart(format!("fail to read SMTC artwork: {}", error));
+                None
+            }
+        };
+        let current = self
+            .display_revision
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *current != Some(requested) {
+            return Ok(());
+        }
+
         let updater = self._smtc.DisplayUpdater()?;
+        // ClearAll also resets Type. Restore Music and the complete current
+        // metadata under the ownership lock before publishing a single update.
+        updater.ClearAll()?;
         updater.SetType(MediaPlaybackType::Music)?;
 
         let time_properties = SystemMediaTransportControlsTimelineProperties::new()?;
@@ -220,26 +325,12 @@ impl SMTCFlutter {
         music_properties.SetArtist(&artist)?;
         music_properties.SetAlbumTitle(&album)?;
 
-        // Remote tracks use a stable online:// identity rather than a local
-        // file. Text metadata should still reach SMTC even when no local
-        // thumbnail can be extracted.
-        if std::path::Path::new(&path.to_string()).exists() {
-            let pic_stream_ref = if let Some(pic_data) =
-                tag_reader::get_picture_from_path(path.to_string(), 256, 256)
-            {
-                Self::_ras_ref_from_pic_data(&pic_data)?
-            } else {
-                log_to_dart(format!("no embedded picture found for file: {}", path));
-                let file = StorageFile::GetFileFromPathAsync(&windows_storage_path(
-                    std::path::Path::new(&path.to_os_string()),
-                )?)?
-                .get()?;
-                let thumbnail = file
-                    .GetThumbnailAsyncOverloadDefaultSizeDefaultOptions(ThumbnailMode::MusicView)?
-                    .get()?;
-                RandomAccessStreamReference::CreateFromStream(&thumbnail)?
-            };
-            updater.SetThumbnail(&pic_stream_ref)?;
+        if let Some(picture) = picture {
+            // Artwork is optional; a rejected thumbnail still publishes the
+            // new title/artist/album after the old cover has been retired.
+            if let Err(error) = updater.SetThumbnail(&picture) {
+                log_to_dart(format!("fail to set SMTC artwork: {}", error));
+            }
         }
 
         updater.Update()?;

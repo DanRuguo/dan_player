@@ -844,6 +844,7 @@ void _reportRefreshOutcome(LibraryRefreshTask task) {
 
 Future<int> _reloadScannedLibrary({
   bool incremental = false,
+  bool retryPending = true,
   LibraryRefreshSnapshot? before,
   Directory? indexPath,
 }) async {
@@ -853,6 +854,7 @@ Future<int> _reloadScannedLibrary({
   try {
     final count = await completeLibraryRefresh(
       incremental: incremental,
+      retryPending: retryPending,
       before: previous,
       readCommitted: () =>
           LibraryRefreshSnapshot.read(File('${directory.path}/index.json')),
@@ -951,11 +953,18 @@ class _AudioLibraryEditorDialogState extends State<AudioLibraryEditorDialog> {
     try {
       final directory = await widget.loadIndexPath();
       if (!mounted) return;
-      final task = LibraryRefreshTask.native(
+      final before =
+          LibraryRefreshSnapshot.capture(AudioLibrary.instance.audioCollection);
+      late final LibraryRefreshTask task;
+      task = LibraryRefreshTask.native(
           folders: folders,
           indexPath: directory,
           incremental: false,
-          commit: () => _reloadScannedLibrary(indexPath: directory));
+          commit: () => _reloadScannedLibrary(
+              incremental: true,
+              retryPending: !task.rootsOnly,
+              before: before,
+              indexPath: directory));
       unawaited(task.completed.then((_) {
         if (!mounted) _reportRefreshOutcome(task);
       }));

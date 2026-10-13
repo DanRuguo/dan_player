@@ -6,11 +6,20 @@ import 'package:dan_player/component/player_guide_playlist_demo.dart';
 import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/play_service/playback_transition_preferences.dart';
+import 'package:dan_player/component/statistics_listening_trends.dart';
+import 'package:dan_player/statistics/listening_calendar.dart';
+import 'package:dan_player/statistics/listening_trends.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-enum PlayerGuideDemoKind { progress, lyrics, playlists, transitions }
+enum PlayerGuideDemoKind {
+  progress,
+  lyrics,
+  playlists,
+  transitions,
+  statistics
+}
 
 /// Small, local examples: no audio, network, library or preferences are changed.
 /// Animations start only after input and finish once; losing visibility settles
@@ -50,12 +59,21 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
       };
 
   static const _lyricLines = ['音乐|点亮|每一天', '下一句|轻轻|向上浮起'];
+  // A frozen local example uses the real chart without reading listening data.
+  static final _statisticsSnapshot = ListeningTrendsSnapshot.fromDaily(
+      capturedAt: DateTime(2026, 10, 7, 12),
+      dailyMilliseconds: {
+        for (var day = 1; day <= 180; day++)
+          listeningDayKey(DateTime(2026, 10, 7 - day)):
+              day % 6 == 0 ? 0 : (day % 9 + 1) * 600000,
+      });
 
   MotionKind get _motion => switch (widget.kind) {
         PlayerGuideDemoKind.progress => MotionKind.layout,
         PlayerGuideDemoKind.lyrics => MotionKind.lyrics,
         PlayerGuideDemoKind.playlists => MotionKind.tracking,
         PlayerGuideDemoKind.transitions => MotionKind.layout,
+        PlayerGuideDemoKind.statistics => MotionKind.layout,
       };
 
   @override
@@ -234,10 +252,14 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                             PlayerGuideDemoKind.lyrics => '试一试：歌词动效',
                             PlayerGuideDemoKind.playlists => '试一试：歌单视图',
                             PlayerGuideDemoKind.transitions => '试一试：歌曲过渡',
+                            PlayerGuideDemoKind.statistics => '试一试：收听趋势',
                           }),
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 6),
-                      Text(ui('仅本卡片演示，不播放声音、不联网，也不修改曲库或设置。'),
+                      Text(
+                          ui(widget.kind == PlayerGuideDemoKind.statistics
+                              ? '这里使用固定示例记录。可以切换范围和曲线，点按日期或用方向键查看；不会读取或保存你的听歌记录。'
+                              : '仅本卡片演示，不播放声音、不联网，也不修改曲库或设置。'),
                           style: Theme.of(context).textTheme.bodySmall),
                       const SizedBox(height: 12),
                       if (widget.kind == PlayerGuideDemoKind.playlists)
@@ -249,6 +271,8 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                                 TickerMode(enabled: enabled, child: child!))
                       else if (widget.kind == PlayerGuideDemoKind.transitions)
                         _transitions(context)
+                      else if (widget.kind == PlayerGuideDemoKind.statistics)
+                        StatisticsListeningTrends(snapshot: _statisticsSnapshot)
                       else
                         AnimatedBuilder(
                             animation: _animation,

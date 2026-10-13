@@ -4,6 +4,8 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/background_image_store.dart';
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/primary_pointer_input.dart';
+import 'package:dan_player/component/settings_section_visibility.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/page/settings_page/settings_busy_indicator.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
@@ -187,7 +189,15 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
     return ValueListenableBuilder<BackgroundPreferences>(
       valueListenable: _preferences,
       builder: (context, preferences, _) {
+        final scene = _scene;
+        final owner = _preferences;
         final value = preferences.forScene(_scene);
+        final source = value.source;
+        bool current() =>
+            mounted &&
+            scene == _scene &&
+            identical(owner, _preferences) &&
+            owner.value.forScene(scene).source == source;
         final enabled = value.source != BackgroundSource.solid;
         final scheme = Theme.of(context).colorScheme;
         return SettingsSurface(
@@ -252,21 +262,30 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                   name: ui("背景透明度"),
                   suffix: '${((1 - value.opacity) * 100).round()}%',
                   hint: ui("数值越大，背景越明显；文字和按钮本身不会变透明。"),
-                  slider: Slider(
-                    key: const ValueKey('background-opacity'),
-                    value: (1 - value.opacity).clamp(.05, .75),
-                    min: .05,
-                    max: .75,
-                    divisions: 70,
-                    label: '${((1 - value.opacity) * 100).round()}%',
-                    semanticFormatterCallback: (v) =>
-                        ui("背景透明度 {0}%", [(v * 100).round()]),
-                    onChanged: enabled
-                        ? (v) => _update(
-                            (current) => current.copyWith(opacity: 1 - v),
-                            save: false)
-                        : null,
-                    onChangeEnd: enabled ? (_) => unawaited(_save()) : null,
+                  slider: _BackgroundSliderInput(
+                    identity: (scene, owner, source),
+                    isCurrent: current,
+                    enabled: enabled,
+                    onChanged: (v) => _update(
+                        (current) => current.copyWith(opacity: 1 - v),
+                        save: false),
+                    onCancelled: (v) => _update(
+                        (current) => current.copyWith(opacity: 1 - v),
+                        save: false),
+                    onChangeEnd: (_) => unawaited(_save()),
+                    builder: (onChanged, onChangeStart, onChangeEnd) => Slider(
+                      key: const ValueKey('background-opacity'),
+                      value: (1 - value.opacity).clamp(.05, .75),
+                      min: .05,
+                      max: .75,
+                      divisions: 70,
+                      label: '${((1 - value.opacity) * 100).round()}%',
+                      semanticFormatterCallback: (v) =>
+                          ui("背景透明度 {0}%", [(v * 100).round()]),
+                      onChanged: enabled ? onChanged : null,
+                      onChangeStart: enabled ? onChangeStart : null,
+                      onChangeEnd: enabled ? onChangeEnd : null,
+                    ),
                   ),
                 ),
                 if (value.source.usesImage) ...[
@@ -278,20 +297,32 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
                         : ui("封面模糊强度"),
                     suffix: value.blur.round().toString(),
                     hint: ui("数值越大越柔和；调整不会降低前景专辑封面的清晰度。"),
-                    slider: Slider(
-                      key: const ValueKey('background-blur'),
-                      value: value.blur.clamp(BackgroundAppearance.minBlur,
-                          BackgroundAppearance.maxBlur),
-                      min: BackgroundAppearance.minBlur,
-                      max: BackgroundAppearance.maxBlur,
-                      divisions: 46,
-                      label: value.blur.round().toString(),
-                      semanticFormatterCallback: (v) =>
-                          ui("封面模糊强度 {0}", [v.round()]),
+                    slider: _BackgroundSliderInput(
+                      identity: (scene, owner, source),
+                      isCurrent: current,
+                      enabled: true,
                       onChanged: (v) => _update(
                           (current) => current.copyWith(blur: v),
                           save: false),
+                      onCancelled: (v) => _update(
+                          (current) => current.copyWith(blur: v),
+                          save: false),
                       onChangeEnd: (_) => unawaited(_save()),
+                      builder: (onChanged, onChangeStart, onChangeEnd) =>
+                          Slider(
+                        key: const ValueKey('background-blur'),
+                        value: value.blur.clamp(BackgroundAppearance.minBlur,
+                            BackgroundAppearance.maxBlur),
+                        min: BackgroundAppearance.minBlur,
+                        max: BackgroundAppearance.maxBlur,
+                        divisions: 46,
+                        label: value.blur.round().toString(),
+                        semanticFormatterCallback: (v) =>
+                            ui("封面模糊强度 {0}", [v.round()]),
+                        onChanged: onChanged,
+                        onChangeStart: onChangeStart,
+                        onChangeEnd: onChangeEnd,
+                      ),
                     ),
                   ),
                 ],
@@ -491,6 +522,192 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
           Text(hint, style: Theme.of(context).textTheme.bodySmall),
         ],
       );
+}
+
+/// A live background preview retains its scene and preference owner until the
+/// physical touch ends. Reuse the primary-pointer gate without replacing the
+/// Slider subtree, its focus or its keyboard/semantics adjustment path.
+class _BackgroundSliderInput extends StatefulWidget {
+  const _BackgroundSliderInput({
+    required this.identity,
+    required this.isCurrent,
+    required this.enabled,
+    required this.onChanged,
+    required this.onCancelled,
+    required this.onChangeEnd,
+    required this.builder,
+  });
+  final Object identity;
+  final bool Function() isCurrent;
+  final bool enabled;
+  final ValueChanged<double> onChanged, onCancelled, onChangeEnd;
+  final Widget Function(
+      ValueChanged<double>, ValueChanged<double>, ValueChanged<double>) builder;
+
+  @override
+  State<_BackgroundSliderInput> createState() => _BackgroundSliderInputState();
+}
+
+class _BackgroundSliderInputState extends State<_BackgroundSliderInput>
+    with WidgetsBindingObserver {
+  int _revision = 0;
+  int? _pointer;
+  Object? _owner;
+  double? _baseValue;
+  bool _physical = false, _started = false, _ignoreCycle = false;
+  bool _visible = true, _lifecycleVisible = true;
+
+  bool get _active =>
+      mounted && _visible && _lifecycleVisible && widget.enabled;
+
+  bool _current(Object identity, int revision) =>
+      _active &&
+      revision == _revision &&
+      identity == widget.identity &&
+      widget.isCurrent();
+
+  void _retire() {
+    _revision++;
+    _owner = null;
+    _baseValue = null;
+    _ignoreCycle = false;
+    // Keep the original physical cycle until its own up/cancel arrives.
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _lifecycleVisible = lifecycle == null ||
+        lifecycle == AppLifecycleState.resumed ||
+        lifecycle == AppLifecycleState.inactive;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final visible = SettingsSectionVisibility.isVisibleOf(context) &&
+        TickerMode.valuesOf(context).enabled;
+    if (_visible && !visible) _retire();
+    _visible = visible;
+  }
+
+  @override
+  void didUpdateWidget(_BackgroundSliderInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.identity != widget.identity ||
+        oldWidget.enabled && !widget.enabled) {
+      _retire();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final visible = state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
+    if (_lifecycleVisible && !visible) _retire();
+    if (_lifecycleVisible != visible) {
+      setState(() => _lifecycleVisible = visible);
+    }
+  }
+
+  void _start(double value, Object identity, int revision) {
+    if (!_current(identity, revision)) return;
+    if (_physical) {
+      if (_owner != identity) return;
+      if (_started) {
+        // Slider semantic start/change/end can be nested inside a held drag.
+        _ignoreCycle = true;
+        return;
+      }
+    } else {
+      _owner = identity;
+    }
+    _started = true;
+    _baseValue = value;
+  }
+
+  void _change(double value, Object identity, int revision) {
+    if (!_current(identity, revision) ||
+        _ignoreCycle ||
+        _physical && _owner != identity) {
+      return;
+    }
+    widget.onChanged(value);
+  }
+
+  void _end(double value, Object identity, int revision) {
+    if (!_current(identity, revision)) return;
+    if (_ignoreCycle) {
+      _ignoreCycle = false;
+      return;
+    }
+    if (_pointer != null) {
+      // Losing to page scrolling also ends Slider's recognizer. It does not
+      // release the physical pointer or authorize saving a cancelled preview.
+      if (_owner == identity) {
+        if (_baseValue case final original?) widget.onCancelled(original);
+      }
+      // A synchronous semantic cycle can end before the physical drag starts.
+      // Restore that short preview while keeping the original touch's owner.
+      _started = false;
+      _baseValue = null;
+      return;
+    }
+    final valid = !_physical || _owner == identity;
+    _physical = _started = false;
+    _owner = null;
+    _baseValue = null;
+    if (valid) widget.onChangeEnd(value);
+  }
+
+  void _release(PointerEvent event, {required bool cancelled}) {
+    if (!mounted || _pointer != event.pointer) return;
+    _pointer = null;
+    if (cancelled) setState(_retire);
+    final revision = _revision;
+    // Let Slider's synchronous end/cancel observe the retired owner first.
+    // This also releases a down which never won the gesture arena.
+    scheduleMicrotask(() {
+      if (!mounted || _pointer != null || revision != _revision) return;
+      _physical = _started = _ignoreCycle = false;
+      _owner = null;
+      _baseValue = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final identity = widget.identity;
+    final revision = _revision;
+    return Listener(
+      onPointerDown: (event) {
+        if (_pointer != null || !_current(identity, revision)) return;
+        _pointer = event.pointer;
+        _physical = true;
+        _started = _ignoreCycle = false;
+        _owner = identity;
+      },
+      onPointerUp: (event) => _release(event, cancelled: false),
+      onPointerCancel: (event) => _release(event, cancelled: true),
+      child: PrimaryPointerInput(
+        child: widget.builder(
+          (value) => _change(value, identity, revision),
+          (value) => _start(value, identity, revision),
+          (value) => _end(value, identity, revision),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _retire();
+    _pointer = null;
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 }
 
 class _BackgroundPreview extends StatefulWidget {
