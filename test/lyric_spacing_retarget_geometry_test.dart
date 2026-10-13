@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
@@ -16,6 +17,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'lyric_letter_spacing_render_test.dart' show loadLetterSpacingFonts;
+import 'lyric_letter_spacing_visible_feedback_test.dart'
+    show expectMainSpacingGroup;
 import 'support/playlist_feature_fixture.dart'
     show capturePlaylistFeature, sizePlaylistFeature;
 
@@ -153,6 +156,59 @@ double _movement(List<Rect> from, List<Rect> to) => [
         (to[index].center - from[index].center).distance,
     ].reduce(math.max);
 
+Finder _paragraph(_Consumer consumer) => find.byWidgetPredicate((widget) =>
+    widget is CustomPaint && identical(widget.painter, consumer.painter));
+
+/// Compare every native target glyph with an independently applied group scale,
+/// rather than expecting old-spacing geometry to survive a new target request.
+List<Rect> _scaledTarget(
+    WidgetTester tester, _Consumer consumer, String text, double progress) {
+  final group = find.ancestor(
+      of: _paragraph(consumer),
+      matching: find.byWidgetPredicate((widget) =>
+          widget is Transform && widget.filterQuality == FilterQuality.low));
+  final element = group.evaluate().single;
+  final widget = element.widget as Transform;
+  final render = element.renderObject! as RenderTransform;
+  final pivot = render.localToGlobal(widget.alignment!
+      .resolve(Directionality.of(element))
+      .alongSize(render.size));
+  final matrix = widget.transform.clone();
+  late List<Rect> native;
+  try {
+    render.transform = Matrix4.identity();
+    native = _viewportGlyphs(consumer, text);
+  } finally {
+    render.transform = matrix;
+    tester.binding.rootPipelineOwner.flushCompositingBits();
+    tester.binding.rootPipelineOwner.flushPaint();
+  }
+  final scale = .96 + .04 * progress;
+  return [
+    for (final rect in native)
+      Rect.fromLTRB(
+        pivot.dx + (rect.left - pivot.dx) * scale,
+        pivot.dy + (rect.top - pivot.dy) * scale,
+        pivot.dx + (rect.right - pivot.dx) * scale,
+        pivot.dy + (rect.bottom - pivot.dy) * scale,
+      )
+  ];
+}
+
+void _checkTarget(
+    WidgetTester tester, _Consumer consumer, String text, Duration elapsed) {
+  final progress = LyricMotion.curve.transform(
+      elapsed.inMicroseconds / LyricMotion.spacingDuration.inMicroseconds);
+  expect(consumer.painter.glyphMorph, isNull,
+      reason:
+          'Spacing enters the final native target, with no old glyph replay');
+  expectMainSpacingGroup(tester, _paragraph(consumer), progress);
+  _sameGlyphs(
+      _viewportGlyphs(consumer, text),
+      _scaledTarget(tester, consumer, text, progress),
+      'Every target glyph shares the independently scaled entrance');
+}
+
 Widget _host({
   required LyricViewController controller,
   required LyricLine line,
@@ -225,7 +281,7 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
     (true, LyricTextAlign.right),
   ]) {
     register(
-        'spacing retarget keeps viewport glyphs continuous '
+        'spacing retarget enters one final target in viewport '
         'timed=$timed align=${alignment.name}', (tester) async {
       sizePlaylistFeature(tester, width: 1000, height: 600);
       final appearance = ValueNotifier(DesktopLyricAppearance.defaults);
@@ -257,12 +313,21 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
       await tester.pumpWidget(build(const ValueKey('retained')));
       await tester.pumpAndSettle();
       final warm = _viewportGlyphs(_presented(tester, _shortText), _shortText);
+      final baseSpacing = _presented(tester, _shortText)
+              .painter
+              .glyphParagraph
+              .text!
+              .style!
+              .letterSpacing ??
+          0;
       controller.setLyricLetterSpacing(8);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 40));
       final presented = _presented(tester, _shortText);
-      expect(
-          presented.painter.glyphMorph!.progress, inExclusiveRange(0.0, 1.0));
+      _checkTarget(
+          tester, presented, _shortText, const Duration(milliseconds: 40));
+      final targetParagraph = presented.painter.glyphParagraph;
+      expect(targetParagraph.text!.style!.letterSpacing, baseSpacing + 8);
       final before = _viewportGlyphs(presented, _shortText);
       expect(_movement(warm, before), greaterThan(.2));
       await capturePlaylistFeature(
@@ -271,16 +336,22 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
       controller.setLyricLetterSpacing(2);
       await tester.pump(); // First presented frame, with no elapsed media time.
       final reversed = _presented(tester, _shortText);
-      expect(reversed.painter.glyphMorph!.progress, 0);
+      expect(reversed.painter.glyphParagraph, isNot(same(targetParagraph)));
+      expect(reversed.painter.glyphParagraph.text!.style!.letterSpacing,
+          baseSpacing + 2);
+      _checkTarget(tester, reversed, _shortText, Duration.zero);
       final first = _viewportGlyphs(reversed, _shortText);
-      _sameGlyphs(first, before, 'Rapid reversal starts at the visible glyphs');
       await capturePlaylistFeature(
           tester, boundary, 'retarget-$timed-${alignment.name}-first');
       await tester.pump(const Duration(milliseconds: 40));
-      final middle =
-          _viewportGlyphs(_presented(tester, _shortText), _shortText);
+      final current = _presented(tester, _shortText);
+      expect(current.painter.glyphParagraph,
+          same(reversed.painter.glyphParagraph));
+      _checkTarget(
+          tester, current, _shortText, const Duration(milliseconds: 40));
+      final middle = _viewportGlyphs(current, _shortText);
       expect(_movement(first, middle), greaterThan(.1),
-          reason: 'The reversed transition continues rather than snapping');
+          reason: 'The new target group has finite visible scale motion');
       await capturePlaylistFeature(
           tester, boundary, 'retarget-$timed-${alignment.name}-mid');
       await tester.pumpAndSettle();
@@ -304,7 +375,7 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
     });
   }
 
-  register('spacing flight resize refreshes retained target wrap geometry',
+  register('spacing entrance resize refreshes retained target wrap geometry',
       (tester) async {
     sizePlaylistFeature(tester, width: 1000, height: 600);
     final appearance = ValueNotifier(DesktopLyricAppearance.defaults);
@@ -334,32 +405,28 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
     controller.setLyricLetterSpacing(8);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 40));
-    final oldTarget = _consumers(tester, _wrapText)
-        .singleWhere((p) => p.painter.glyphMorph == null);
+    final oldTarget = _consumers(tester, _wrapText).single;
+    _checkTarget(
+        tester, oldTarget, _wrapText, const Duration(milliseconds: 40));
     final retainedParagraph = oldTarget.painter.glyphParagraph;
     final oldIdentity = oldTarget.painter.glyphLayoutIdentity;
     expect(retainedParagraph.computeLineMetrics(), hasLength(1));
 
     width.value = 300;
     await tester.pump();
-    final source = _presented(tester, _wrapText);
-    final target = _consumers(tester, _wrapText)
-        .singleWhere((p) => p.painter.glyphMorph == null);
+    final target = _consumers(tester, _wrapText).single;
     expect(target.painter.glyphParagraph, same(retainedParagraph),
         reason: 'The real width-only consumer retains native shaping');
     expect(target.painter.glyphLayoutIdentity, isNot(oldIdentity),
         reason: 'Mutable TextPainter identity cannot identify a wrap snapshot');
     expect(target.painter.glyphParagraph.computeLineMetrics().length,
         greaterThan(1));
-    final frame = source.painter.glyphMorph!;
-    expect(frame.progress, inExclusiveRange(0.0, 1.0));
-    _sameGlyphs(
-        _viewportGlyphs(source, _wrapText, progress: 1),
-        _viewportGlyphs(target, _wrapText),
-        'The ongoing glyph geometry targets the newly wrapped paragraph');
-    final resized = _viewportGlyphs(source, _wrapText);
+    _checkTarget(tester, target, _wrapText, const Duration(milliseconds: 40));
+    final resized = _viewportGlyphs(target, _wrapText);
     await capturePlaylistFeature(tester, boundary, 'retarget-resize-first');
     await tester.pump(const Duration(milliseconds: 40));
+    _checkTarget(tester, _presented(tester, _wrapText), _wrapText,
+        const Duration(milliseconds: 80));
     expect(
         _movement(
             resized, _viewportGlyphs(_presented(tester, _wrapText), _wrapText)),

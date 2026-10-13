@@ -8,10 +8,10 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filter.dart';
-import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
@@ -186,26 +186,35 @@ class _Rig {
   ScrollController scrollController(WidgetTester tester) =>
       tester.widget<CustomScrollView>(scroll).controller!;
 
+  Finder get viewportBlur =>
+      find.ancestor(of: scroll, matching: find.byType(LyricViewportBlur));
+
+  List<RenderBackdropFilter> viewportFilters(WidgetTester tester) => tester
+      .renderObjectList<RenderBackdropFilter>(find.descendant(
+        of: viewportBlur,
+        matching: find.byType(BackdropFilter),
+      ))
+      .toList();
+
   double sigma(WidgetTester tester) {
-    final filters = tester
-        .widgetList<LyricFractionalFilter>(find.descendant(
-          of: tile,
-          matching: find.byType(LyricFractionalFilter),
-        ))
-        .toList();
-    expect(filters, hasLength(3));
-    expect(filters.every((filter) => filter.enabled), isTrue);
-    expect(filters.map((filter) => filter.sigma).toSet(), hasLength(1));
-    return filters.first.sigma;
+    final filters = viewportFilters(tester);
+    expect(filters, hasLength(12),
+        reason: 'Read the actual six-strip top and bottom viewport masks');
+    for (final filter in filters.where((filter) => filter.enabled)) {
+      // ignore: invalid_use_of_protected_member
+      expect(filter.layer, isA<BackdropFilterLayer>(),
+          reason: 'A positive kernel must reach the actual native scene');
+    }
+    return filters.fold<double>(
+        0,
+        (maximum, filter) => math.max(maximum,
+            filter.enabled ? _gaussianSigma(filter.layer!.filter!).$1 : 0));
   }
 
   AnimationController readingClock(WidgetTester tester) {
-    final effects = tester.widget<LyricFollowEffects>(find.ancestor(
-      of: tile,
-      matching: find.byType(LyricFollowEffects),
-    ));
-    expect(effects.reading, isA<AnimationController>());
-    return effects.reading! as AnimationController;
+    final viewport = tester.widget<LyricViewportBlur>(viewportBlur);
+    expect(viewport.reading, isA<AnimationController>());
+    return viewport.reading as AnimationController;
   }
 
   Future<void> close(WidgetTester tester) async {
@@ -253,6 +262,8 @@ class _Track {
         .map((box) => MatrixUtils.transformRect(
             transform, box.toRect().shift(painter.inkOffset)))
         .reduce((a, b) => a.expandToInclude(b));
+    glyphBounds =
+        _glyphBounds(paragraph, _texts[name]!, transform, painter.inkOffset);
     expect(paragraph.computeLineMetrics(), hasLength(1));
     expect(paragraph.didExceedMaxLines, isFalse);
     Element? filter;
@@ -284,6 +295,7 @@ class _Track {
   late final Object? layout;
   late final Matrix4 transform;
   late final Rect bounds, crop;
+  late final List<Rect> glyphBounds;
   late final double scaleX, scaleY;
 
   void unchanged(WidgetTester tester, _Rig rig) {
@@ -303,6 +315,21 @@ class _Track {
         .map((box) => MatrixUtils.transformRect(
             next, box.toRect().shift(actual.inkOffset)))
         .reduce((a, b) => a.expandToInclude(b));
+    final nextGlyphs =
+        _glyphBounds(actual.text, _texts[name]!, next, actual.inkOffset);
+    expect(nextGlyphs, hasLength(glyphBounds.length));
+    for (var index = 0; index < glyphBounds.length; index++) {
+      final previous = glyphBounds[index], current = nextGlyphs[index];
+      for (final coordinate in [
+        (previous.left, current.left),
+        (previous.top, current.top),
+        (previous.right, current.right),
+        (previous.bottom, current.bottom),
+      ]) {
+        expect(coordinate.$2, closeTo(coordinate.$1, .05),
+            reason: '$name character $index must not move during hover');
+      }
+    }
     for (final coordinate in [
       (bounds.left, nextBounds.left),
       (bounds.top, nextBounds.top),
@@ -316,46 +343,199 @@ class _Track {
   }
 }
 
+List<Rect> _glyphBounds(
+    TextPainter paragraph, String text, Matrix4 transform, Offset inkOffset) {
+  final bounds = <Rect>[];
+  var offset = 0;
+  for (final rune in text.runes) {
+    final end = offset + (rune > 0xffff ? 2 : 1);
+    final boxes = paragraph.getBoxesForSelection(
+        TextSelection(baseOffset: offset, extentOffset: end));
+    if (boxes.isNotEmpty) {
+      bounds.add(boxes
+          .map((box) => MatrixUtils.transformRect(
+              transform, box.toRect().shift(inkOffset)))
+          .reduce((a, b) => a.expandToInclude(b)));
+    }
+    offset = end;
+  }
+  expect(bounds, isNotEmpty);
+  return bounds;
+}
+
 // Freeze this fixture's transparent sampler pictures and their real layer
 // transforms, clips and post-Gaussian opacity. Unknown layers fail explicitly.
 class _SnapshotPictureLayer extends Layer {
   _SnapshotPictureLayer(PictureLayer original)
-      : retained = LayerHandle<PictureLayer>(original);
-  final LayerHandle<PictureLayer> retained;
+      : picture = _freezePicture(original.picture!),
+        complex = original.isComplexHint,
+        changing = original.willChangeHint;
+  final ui.Picture picture;
+  final bool complex, changing;
+
+  static ui.Picture _freezePicture(ui.Picture original) {
+    final recorder = ui.PictureRecorder();
+    Canvas(recorder).drawPicture(original);
+    return recorder.endRecording();
+  }
 
   @override
   void addToScene(ui.SceneBuilder builder) {
-    final source = retained.layer!;
     builder.addPicture(
       Offset.zero,
-      source.picture!,
-      isComplexHint: source.isComplexHint,
-      willChangeHint: source.willChangeHint,
+      picture,
+      isComplexHint: complex,
+      willChangeHint: changing,
     );
   }
 
   @override
   void dispose() {
-    retained.layer = null;
+    picture.dispose();
     super.dispose();
   }
 }
 
+typedef _GaussianKernel = ({
+  double sigmaX,
+  double sigmaY,
+  ui.TileMode? tileMode,
+  Rect? bounds,
+});
+
+_GaussianKernel _gaussianKernel(ui.ImageFilter filter) {
+  // This SDK's real Gaussian has public value fields. Debug toString is
+  // stripped in Profile; inspect those fields and prove the complete type and
+  // value with an independently constructed official Gaussian equality check.
+  final dynamic native = filter;
+  late final Object? x, y, mode, bounds;
+  try {
+    x = native.sigmaX;
+    y = native.sigmaY;
+    mode = native.tileMode;
+    bounds = native.bounds;
+  } on NoSuchMethodError {
+    fail('The painted native viewport filter is not a Gaussian');
+  }
+  expect(x, isA<double>());
+  expect(y, isA<double>());
+  expect(mode == null || mode is ui.TileMode, isTrue);
+  expect(bounds == null || bounds is Rect, isTrue);
+  final kernel = (
+    sigmaX: x as double,
+    sigmaY: y as double,
+    tileMode: mode as ui.TileMode?,
+    bounds: bounds as Rect?,
+  );
+  expect(kernel.sigmaX.isFinite && kernel.sigmaX >= 0, isTrue);
+  expect(kernel.sigmaY, kernel.sigmaX);
+  expect(filter, _officialGaussian(kernel),
+      reason: 'Verify Gaussian type, both radii, tile mode and native bounds');
+  return kernel;
+}
+
+ui.ImageFilter _officialGaussian(_GaussianKernel kernel) => ui.ImageFilter.blur(
+    sigmaX: kernel.sigmaX,
+    sigmaY: kernel.sigmaY,
+    tileMode: kernel.tileMode,
+    bounds: kernel.bounds);
+
+(double, double) _gaussianSigma(ui.ImageFilter filter) {
+  final kernel = _gaussianKernel(filter);
+  return (kernel.sigmaX, kernel.sigmaY);
+}
+
+/// Capture the real fixed mask geometry, rather than deriving it again from
+/// fractions or adding a Gaussian to already flattened opaque RGB pixels.
+class _FrozenViewportBand {
+  _FrozenViewportBand(this.filter, this.outer, this.offset)
+      : clip = filter.parent! as RenderClipRect {
+    bounds = _bounds();
+    expect(filter.backdropKey, isNull,
+        reason: 'The production mask has independent backdrop snapshots');
+  }
+  final RenderBackdropFilter filter;
+  final RenderClipRect clip, outer;
+  final Offset offset;
+  late final Rect bounds;
+
+  ui.ImageFilter get nativeFilter {
+    final resolved =
+        filter.filterConfig.resolve(ImageFilterContext(bounds: bounds));
+    if (!filter.enabled) return resolved;
+    // Read the actual painted layer, including context-resolved bounded blur.
+    // Widget sigma/config alone cannot prove the kernel used by the scene.
+    // ignore: invalid_use_of_protected_member
+    final painted = filter.layer?.filter;
+    expect(painted, isNotNull,
+        reason: 'Every enabled native viewport strip has a painted filter');
+    expect(painted, resolved,
+        reason: 'The actual filter retains the real clip/paint-context bounds');
+    return painted!;
+  }
+
+  Rect _bounds() => MatrixUtils.transformRect(
+          clip.getTransformTo(outer), Offset.zero & clip.size)
+      .shift(offset);
+
+  void unchanged() {
+    expect(filter.attached && clip.attached && outer.attached, isTrue);
+    final current = _bounds();
+    for (final pair in [
+      (bounds.left, current.left),
+      (bounds.top, current.top),
+      (bounds.right, current.right),
+      (bounds.bottom, current.bottom),
+    ]) {
+      expect(pair.$2, closeTo(pair.$1, .05),
+          reason: 'Hover changes only the kernel, never the fixed mask');
+    }
+  }
+}
+
+/// An independent official native Gaussian with a true zero-radius bypass.
+/// Its clear branch is empty, as the disabled production BackdropFilter is.
+class _FrozenBackdropLayer extends ContainerLayer {
+  _FrozenBackdropLayer(this.band);
+  final _FrozenViewportBand band;
+  bool enabled = false;
+  ui.ImageFilter filter = ui.ImageFilter.blur();
+  BlendMode blendMode = BlendMode.src;
+
+  void updateKernel() {
+    band.unchanged();
+    enabled = band.filter.enabled;
+    // Tiny native no-op kernels use the live safe composition policy. Freeze
+    // source pictures and clip geometry, not a now-obsolete blend-mode choice.
+    blendMode = band.filter.blendMode;
+    filter = _officialGaussian(_gaussianKernel(band.nativeFilter));
+    markNeedsAddToScene();
+  }
+
+  @override
+  void addToScene(ui.SceneBuilder builder) {
+    if (enabled) builder.pushBackdropFilter(filter, blendMode: blendMode);
+    addChildrenToScene(builder);
+    if (enabled) builder.pop();
+  }
+}
+
 class _FrozenLayerView {
-  _FrozenLayerView(OffsetLayer root, this.filters)
+  _FrozenLayerView(OffsetLayer root, this.filters, this.backdrops)
       : root = LayerHandle<OffsetLayer>(root);
   final LayerHandle<OffsetLayer> root;
   final Map<ImageFilterLayer, _FrozenSource> filters;
+  final List<_FrozenBackdropLayer> backdrops;
 
   void updateKernels() {
     for (final entry in filters.entries) {
       final spec = entry.value.filter.widget as LyricFractionalFilter;
-      final sigma = !spec.enabled || spec.sigma == 0
-          ? 0.0
-          : math.max(.1, spec.sigma) * 1.5;
-      // New official Gaussian only: source pictures, matrix sampling commands,
-      // coordinates and the original alpha layers are frozen from clear.
-      entry.key.imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
+      expect(spec.sigma, 0,
+          reason: 'Paragraph sampling stays clear beneath the viewport mask');
+    }
+    expect(backdrops, hasLength(12));
+    for (final backdrop in backdrops) {
+      backdrop.updateKernel();
     }
   }
 
@@ -373,6 +553,7 @@ class _FrozenLayerView {
   void dispose() {
     root.layer = null;
     filters.clear();
+    backdrops.clear();
   }
 }
 
@@ -385,7 +566,29 @@ class _FrozenNativeSources {
     // ignore: invalid_use_of_protected_member
     final originalRoot = viewport.layer! as OffsetLayer;
     bounds = Offset.zero & viewport.size;
+    final outer = tester.renderObject<RenderClipRect>(find
+        .descendant(
+          of: rig.viewportBlur,
+          matching: find.byType(ClipRect),
+        )
+        .first);
+    // ignore: invalid_use_of_protected_member
+    final maskOwner = outer.layer! as ClipRectLayer;
+    final bands = [
+      for (final filter in rig.viewportFilters(tester))
+        _FrozenViewportBand(filter, outer, maskOwner.clipRect!.topLeft),
+    ];
+    expect(bands, hasLength(12));
     final sourceLayers = <ImageFilterLayer, _FrozenSource>{};
+    final allSamplers = <ImageFilterLayer>{};
+    for (final element in tester.elementList(find.descendant(
+        of: rig.scroll, matching: find.byType(LyricFractionalFilter)))) {
+      final owner = element.renderObject!.parent;
+      if (owner is! RenderRepaintBoundary) continue;
+      // ignore: invalid_use_of_protected_member
+      final sampler = (owner.layer as OffsetLayer?)?.firstChild;
+      if (sampler is ImageFilterLayer) allSamplers.add(sampler);
+    }
     for (final source in clear.sources) {
       final boundary = source.filter.renderObject!.parent;
       expect(boundary, isA<RenderRepaintBoundary>());
@@ -401,18 +604,23 @@ class _FrozenNativeSources {
       sourceLayers[gaussian as ImageFilterLayer] = source;
     }
     try {
-      full = _copyView(originalRoot, sourceLayers);
+      full = _copyView(originalRoot, sourceLayers, maskOwner, bands);
+      background = _copyView(originalRoot, sourceLayers, maskOwner, bands,
+          excludedSources: allSamplers);
       expect(full!.filters, hasLength(sourceLayers.length),
           reason: 'Every visible frozen source keeps its own native Gaussian');
       for (final entry in sourceLayers.entries) {
         isolated[entry.value] = _copyView(
           originalRoot,
           sourceLayers,
+          maskOwner,
+          bands,
           onlySource: entry.key,
         );
       }
     } catch (_) {
       full?.dispose();
+      background?.dispose();
       for (final view in isolated.values) {
         view.dispose();
       }
@@ -422,20 +630,27 @@ class _FrozenNativeSources {
 
   late final Rect bounds;
   _FrozenLayerView? full;
+  _FrozenLayerView? background;
+  bool _reportedUniformRounding = false;
   final isolated = <_FrozenSource, _FrozenLayerView>{};
 
   static _FrozenLayerView _copyView(
     OffsetLayer original,
-    Map<ImageFilterLayer, _FrozenSource> sources, {
+    Map<ImageFilterLayer, _FrozenSource> sources,
+    ClipRectLayer maskOwner,
+    List<_FrozenViewportBand> bands, {
     ImageFilterLayer? onlySource,
+    Set<ImageFilterLayer> excludedSources = const {},
   }) {
     final filters = <ImageFilterLayer, _FrozenSource>{};
+    final backdrops = <_FrozenBackdropLayer>[];
     Layer? copy(Layer layer) {
       if (layer is PictureLayer) return _SnapshotPictureLayer(layer);
       if (layer is ImageFilterLayer &&
-          sources.containsKey(layer) &&
-          onlySource != null &&
-          !identical(layer, onlySource)) {
+          (excludedSources.contains(layer) ||
+              (sources.containsKey(layer) &&
+                  onlySource != null &&
+                  !identical(layer, onlySource)))) {
         return null;
       }
       final ContainerLayer result;
@@ -446,6 +661,10 @@ class _FrozenNativeSources {
         );
         final source = sources[layer];
         if (source != null) filters[result as ImageFilterLayer] = source;
+      } else if (layer is BackdropFilterLayer) {
+        result = BackdropFilterLayer(
+            filter: layer.filter, blendMode: layer.blendMode)
+          ..backdropKey = layer.backdropKey;
       } else if (layer is OpacityLayer) {
         result = OpacityLayer(alpha: layer.alpha, offset: layer.offset);
       } else if (layer is TransformLayer) {
@@ -486,6 +705,17 @@ class _FrozenNativeSources {
           final cloned = copy(child);
           if (cloned != null) result.append(cloned);
         }
+        if (identical(layer, maskOwner)) {
+          // Clear disables the live backdrop layers, but the independently
+          // frozen clip geometry remains at this exact compositing level.
+          for (final band in bands) {
+            final backdrop = _FrozenBackdropLayer(band);
+            backdrops.add(backdrop);
+            result.append(ClipRectLayer(
+                clipRect: band.bounds, clipBehavior: band.clip.clipBehavior)
+              ..append(backdrop));
+          }
+        }
         return result;
       } catch (_) {
         result.dispose();
@@ -494,62 +724,121 @@ class _FrozenNativeSources {
     }
 
     final root = copy(original)! as OffsetLayer;
-    return _FrozenLayerView(root, filters);
+    expect(backdrops, hasLength(12),
+        reason: 'Every actual viewport strip belongs to the frozen scene');
+    return _FrozenLayerView(root, filters, backdrops);
   }
 
-  Future<_Frame> reference(_Rig rig, _Frame clear) async {
+  Future<_Frame> reference(_Rig rig, _Frame clear, _Frame actual) async {
     full!.updateKernels();
-    // Retain the complete Gaussian-tail assertion for each transparent source,
-    // now with its original transforms, clips, post-Gaussian alpha and backdrop.
-    for (final entry in isolated.entries) {
-      final source = entry.key;
-      final kernel = source.kernel(rig);
-      if (kernel == (0.0, 0.0)) continue;
-      entry.value.updateKernels();
-      final padding = (6 * math.max(kernel.$1, kernel.$2)).ceil() + 2;
-      final region = source.region.inflate(padding.toDouble()).intersect(
-            Rect.fromLTWH(
-              0,
-              0,
-              clear.image.width.toDouble(),
-              clear.image.height.toDouble(),
-            ),
-          );
-      final logical = Rect.fromLTRB(
-        region.left / rig.dpr,
-        region.top / rig.dpr,
-        region.right / rig.dpr,
-        region.bottom / rig.dpr,
-      );
-      final tail = await entry.value.capture(logical, rig.dpr);
-      try {
-        final rows = [
-          if (region.top > 0) 0,
-          if (region.bottom < clear.image.height) tail.image.height - 1,
-        ];
-        final columns = [
-          if (region.left > 0) 0,
-          if (region.right < clear.image.width) tail.image.width - 1,
-        ];
-        for (final y in rows) {
-          for (var x = 0; x < tail.image.width; x++) {
-            _expectBackgroundPixel(tail.rgba, (y * tail.image.width + x) * 4);
-          }
+    background!.updateKernels();
+    final nativeBackground = await background!.capture(bounds, rig.dpr);
+    try {
+      // Retain the complete Gaussian-tail assertion for each transparent source,
+      // now with its original transforms, clips, post-Gaussian alpha and backdrop.
+      for (final entry in isolated.entries) {
+        final source = entry.key;
+        if (entry.value.backdrops
+            .every((layer) => !layer.band.filter.enabled)) {
+          continue;
         }
-        for (final x in columns) {
-          for (var y = 0; y < tail.image.height; y++) {
-            _expectBackgroundPixel(tail.rgba, (y * tail.image.width + x) * 4);
+        entry.value.updateKernels();
+        // A backdrop strip may read a previous strip's filtered edge. Bound the
+        // complete composed tail, not the radius of one old paragraph filter.
+        final radii = entry.value.backdrops
+            .where((layer) => layer.band.filter.enabled)
+            .map((layer) =>
+                _gaussianSigma(layer.band.nativeFilter).$1 * rig.dpr);
+        final padding = math.max(
+            (24 * rig.dpr).ceil() + 2,
+            (6 * radii.fold<double>(0, (sum, radius) => sum + radius)).ceil() +
+                2);
+        final region = source.region.inflate(padding.toDouble()).intersect(
+              Rect.fromLTWH(
+                0,
+                0,
+                clear.image.width.toDouble(),
+                clear.image.height.toDouble(),
+              ),
+            );
+        // Re-rendering to a cropped target changes the backdrop input/culling
+        // and sampler origin. Keep the complete native viewport target, then
+        // inspect its already rendered bytes at the physical tail boundary.
+        final tail = await entry.value.capture(bounds, rig.dpr);
+        try {
+          final rows = [
+            if (region.top > 0) region.top.floor(),
+            if (region.bottom < clear.image.height) region.bottom.ceil() - 1,
+          ];
+          final columns = [
+            if (region.left > 0) region.left.floor(),
+            if (region.right < clear.image.width) region.right.ceil() - 1,
+          ];
+          for (final y in rows) {
+            for (var x = region.left.floor(); x < region.right.ceil(); x++) {
+              _expectTailBackground(
+                  tail, nativeBackground, actual, source, region, x, y, rig);
+            }
           }
+          for (final x in columns) {
+            for (var y = region.top.floor(); y < region.bottom.ceil(); y++) {
+              _expectTailBackground(
+                  tail, nativeBackground, actual, source, region, x, y, rig);
+            }
+          }
+        } finally {
+          tail.dispose();
         }
-      } finally {
-        tail.dispose();
       }
+      return await full!.capture(bounds, rig.dpr);
+    } finally {
+      nativeBackground.dispose();
     }
-    return full!.capture(bounds, rig.dpr);
+  }
+
+  void _expectTailBackground(
+      _Frame tail,
+      _Frame nativeBackground,
+      _Frame actual,
+      _FrozenSource source,
+      Rect region,
+      int x,
+      int y,
+      _Rig rig) {
+    final at = (y * tail.image.width + x) * 4;
+    final expected = nativeBackground.rgba.sublist(at, at + 4);
+    if (!_reportedUniformRounding &&
+        !listEquals(expected, const [0x62, 0x71, 0x72, 255])) {
+      _reportedUniformRounding = true;
+      debugPrintSynchronously('LYRIC_HOVER_UNIFORM_NATIVE_BACKGROUND '
+          '${jsonEncode({
+            'dpr': rig.dpr,
+            'source': source.text,
+            'pixel': [x, y],
+            'region': [region.left, region.top, region.right, region.bottom],
+            'nativeEmpty': expected,
+            'tail': tail.rgba.sublist(at, at + 4),
+            'actualViewport': actual.rgba.sublist(at, at + 4),
+            'radii': full!.backdrops
+                .map((layer) => _gaussianSigma(layer.band.nativeFilter).$1)
+                .toList(),
+          })}');
+    }
+    _expectBackgroundPixel(tail.rgba, at,
+        expected: expected,
+        diagnostic: 'source=${source.text} region=$region pixel=($x,$y) '
+            'dpr=${rig.dpr} nativeEmpty=$expected '
+            'tail=${tail.rgba.sublist(at, at + 4)} '
+            'actual=${actual.rgba.sublist(at, at + 4)}');
+    expect(actual.rgba[at + 3], 255,
+        reason: 'The real opaque lyric viewport must not be erased. '
+            'source=${source.text} region=$region pixel=($x,$y) '
+            'nativeEmpty=$expected actual=${actual.rgba.sublist(at, at + 4)}');
   }
 
   void dispose() {
     full?.dispose();
+    background?.dispose();
     for (final view in isolated.values) {
       view.dispose();
     }
@@ -639,13 +928,6 @@ class _FrozenSource {
   final double scaleX, scaleY;
   final Uint8List rgba;
   final ui.Image image;
-
-  (double, double) kernel(_Rig rig) {
-    expect(element.mounted && filter.mounted, isTrue);
-    final spec = filter.widget as LyricFractionalFilter;
-    final sigma = spec.enabled ? spec.sigma : 0;
-    return (sigma * 1.5 * scaleX * rig.dpr, sigma * 1.5 * scaleY * rig.dpr);
-  }
 
   void unchanged(_Rig rig) {
     final viewport =
@@ -906,23 +1188,23 @@ Future<_Frame> _capture(WidgetTester tester, _Rig rig, String label) async =>
       }
     }));
 
-void _expectBackgroundPixel(Uint8List rgba, int at) {
-  if (rgba[at] != 0x62 ||
-      rgba[at + 1] != 0x71 ||
-      rgba[at + 2] != 0x72 ||
-      rgba[at + 3] != 255) {
-    fail('The complete Gaussian tail must end in the fixed backdrop');
+void _expectBackgroundPixel(Uint8List rgba, int at,
+    {List<int> expected = const [0x62, 0x71, 0x72, 255],
+    String diagnostic = ''}) {
+  if (!listEquals(rgba.sublist(at, at + 4), expected)) {
+    fail('The complete Gaussian tail must end in the independent native '
+        'fixed backdrop exactly. $diagnostic');
   }
 }
 
 Future<_Frame> _gaussianReference(
-    WidgetTester tester, _Rig rig, _Frame clear) async {
+    WidgetTester tester, _Rig rig, _Frame clear, _Frame actual) async {
   expect(clear.sources, isNotEmpty);
   for (final source in clear.sources) {
     source.unchanged(rig);
   }
   return _runWithRealIo(
-      tester, () => clear.nativeSources!.reference(rig, clear));
+      tester, () => clear.nativeSources!.reference(rig, clear, actual));
 }
 
 class _HoverPose {
@@ -968,11 +1250,24 @@ Future<_HoverPose> _checkFrame(
   final centers = <String, Offset>{};
   _Frame? independent;
   try {
-    final allClear =
-        clear.sources.every((source) => source.kernel(rig) == (0.0, 0.0));
+    final allClear = sigma == 0;
     final reference = allClear
         ? clear
-        : independent = await _gaussianReference(tester, rig, clear);
+        : independent = await _gaussianReference(tester, rig, clear, frame);
+    expect(frame.rgba.length, reference.rgba.length);
+    for (var at = 0; at < frame.rgba.length; at++) {
+      if (at % 4 == 3 && frame.rgba[at] != 255) {
+        fail('Positive viewport blur erased opaque pixels: '
+            'sigma=$sigma pixel=(${at ~/ 4 % frame.image.width},'
+            '${at ~/ 4 ~/ frame.image.width}) '
+            'actualRGBA=${frame.rgba.sublist(at - 3, at + 1)}');
+      }
+      final delta = (frame.rgba[at] - reference.rgba[at]).abs();
+      if (delta > (at % 4 == 3 ? 0 : 2)) {
+        fail('The independent frozen viewport Gaussian differs at '
+            'byte $at by $delta (RGB tolerance 2, alpha exact)');
+      }
+    }
     for (final track in tracks) {
       track.unchanged(tester, rig);
       final bounds = frame.physical(track.crop, rig.dpr);
@@ -1039,6 +1334,18 @@ Future<_Frame> _clear(WidgetTester tester, _Rig rig, _Mouse pointer) async {
   try {
     await _freezeSources(tester, rig, clear);
     clear.nativeSources = _FrozenNativeSources(tester, rig, clear);
+    final empty = await _runWithRealIo(
+        tester,
+        () => clear.nativeSources!.background!
+            .capture(clear.nativeSources!.bounds, rig.dpr));
+    try {
+      for (var at = 0; at < empty.rgba.length; at += 4) {
+        _expectBackgroundPixel(empty.rgba, at,
+            diagnostic: 'The zero-kernel control must contain no lyric ink');
+      }
+    } finally {
+      empty.dispose();
+    }
     final replay = await _runWithRealIo(
         tester,
         () => clear.nativeSources!.full!
@@ -1080,7 +1387,7 @@ Future<void> _checkDirectionRetrace(
   // Reverse the real pointer-driven controller at its actual painted value:
   // its zero-elapsed first frame provides an exactly equal-sigma counterpart
   // without setting controller values or replacing the production curve.
-  for (final milliseconds in [16, 80, 176]) {
+  for (final milliseconds in [16, 40, 88]) {
     await pointer.moveTo(tester.getCenter(rig.scroll));
     await tester.pump();
     await tester.pump(Duration(milliseconds: milliseconds));
@@ -1132,9 +1439,9 @@ Future<void> _checkClearHandoff(WidgetTester tester, _Rig rig, _Mouse pointer,
     List<_Track> tracks, _Frame clear, double scrollOffset, int reads) async {
   await pointer.moveTo(tester.getCenter(rig.scroll));
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 239));
+  await tester.pump(const Duration(milliseconds: 119));
   expect(rig.readingClock(tester).lastElapsedDuration,
-      const Duration(milliseconds: 239));
+      const Duration(milliseconds: 119));
   final lastPositive = await _checkFrame(
       tester, rig, tracks, clear, 'handoff-last-positive', scrollOffset, reads);
   expect(lastPositive.sigma, greaterThan(0));
@@ -1215,6 +1522,10 @@ void main() {
                     orderedEquals(clear.pixels(bounds)));
               }
             }
+            if (outward) {
+              expect(endpoint.rgba, isNot(orderedEquals(clear.rgba)),
+                  reason: 'The actual fixed bands must blur visible lyric ink');
+            }
           } finally {
             endpoint.dispose();
           }
@@ -1262,7 +1573,7 @@ void main() {
       final fullBlur = rig.sigma(tester);
       await pointer.moveTo(tester.getCenter(rig.scroll));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 192));
+      await tester.pump(const Duration(milliseconds: 96));
       final beforeSigma = rig.sigma(tester);
       expect(beforeSigma, inExclusiveRange(0, fullBlur * .1));
       final before = await _capture(tester, rig, 'reverse-near-zero-before');
@@ -1346,6 +1657,10 @@ void main() {
       expect(filters, isNotEmpty);
       expect(filters.every((filter) => !filter.enabled && filter.sigma == 0),
           isTrue);
+      expect(tester.widget<LyricViewportBlur>(rig.viewportBlur).enabled,
+          !highContrast);
+      expect(rig.viewportFilters(tester).every((filter) => !filter.enabled),
+          isTrue);
       for (final name in _texts.keys) {
         final painter = tester
             .widget<CustomPaint>(_paint(rig, _texts[name]!))
@@ -1355,6 +1670,9 @@ void main() {
       }
       await pointer.moveTo(const Offset(5, 5));
       await _settled(tester, rig);
+      expect(rig.sigma(tester), highContrast ? 0 : greaterThan(0),
+          reason: 'Reduced motion retains configured static blur without '
+              'an animated reading clock; high contrast stays clear');
       await pointer.removePointer();
       await rig.close(tester);
       expect(tester.binding.transientCallbackCount, 0);

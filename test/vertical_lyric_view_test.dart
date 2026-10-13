@@ -14,6 +14,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filt
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/gestures.dart';
@@ -238,7 +239,8 @@ void main() {
   });
   setUpAll(() async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load(
+              'packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
   });
 
@@ -724,20 +726,28 @@ void main() {
             of: _row(index), matching: find.byType(LyricFollowEffects)))
         .blur;
     expect(visible, containsAll([0, 1, 2, 3, 4, 5]));
-    expect(blur(0), greaterThan(blur(1)));
-    expect(blur(1), greaterThan(0));
-    for (final index in [2, 3, 4]) {
-      expect(blur(index), 0, reason: 'current and next two rows stay clear');
+    for (final index in visible) {
+      expect(blur(index), 0,
+          reason: 'The composed viewport owns blur at every lyric font size');
     }
     final fading = visible.where((index) => index > 4).toList();
     expect(fading, isNotEmpty);
-    var last = 0.0;
-    for (final index in fading) {
-      final sigma = blur(index);
-      expect(sigma, greaterThan(last));
-      expect(sigma, lessThanOrEqualTo(LyricMotion.blurForDistance(4)));
-      last = sigma;
-    }
+    final mask =
+        tester.widget<LyricViewportBlur>(find.byType(LyricViewportBlur));
+    expect(mask.enabled, isTrue);
+    final bands = find.byType(BackdropFilter);
+    expect(bands, findsNWidgets(12));
+    final top = [for (var i = 0; i < 6; i++) tester.getRect(bands.at(i))]
+        .reduce((a, b) => a.expandToInclude(b));
+    final bottom = [for (var i = 6; i < 12; i++) tester.getRect(bands.at(i))]
+        .reduce((a, b) => a.expandToInclude(b));
+    expect(top.top, viewport.top);
+    expect(top.height, closeTo(viewport.height * mask.topFraction, .01));
+    expect(bottom.bottom, closeTo(viewport.bottom, .01));
+    expect(bottom.height, closeTo(viewport.height * mask.bottomFraction, .01));
+    expect(
+        tester.widgetList<BackdropFilter>(bands).every((band) => band.enabled),
+        isTrue);
   });
 
   testWidgets('timestamp shares the blurred lyric row filter', (tester) async {
@@ -751,7 +761,16 @@ void main() {
     final filter = find.ancestor(
         of: timestamp, matching: find.byType(LyricFractionalFilter));
     expect(filter, findsOneWidget);
-    expect(tester.widget<LyricFractionalFilter>(filter).sigma, greaterThan(0));
+    expect(tester.widget<LyricFractionalFilter>(filter).sigma, 0);
+    expect(
+        find.ancestor(of: timestamp, matching: find.byType(LyricViewportBlur)),
+        findsOneWidget,
+        reason: 'Timestamp and lyric body belong to the same composited mask');
+    expect(
+        tester
+            .widget<LyricViewportBlur>(find.byType(LyricViewportBlur))
+            .enabled,
+        isTrue);
   });
 
   testWidgets('slider size updates keep one paragraph and zero-blur sampling',
@@ -859,7 +878,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('click focus filters only moving glyphs and retains leaf sampling',
+  testWidgets(
+      'click focus filters only moving glyphs and retains leaf sampling',
       (tester) async {
     final harness = _Harness();
     await _mount(tester, harness);

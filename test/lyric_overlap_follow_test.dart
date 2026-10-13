@@ -4,11 +4,12 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
-import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
@@ -91,13 +92,52 @@ LyricFollowEffects _effect(WidgetTester tester, int index) => tester
     .widgetList<LyricFollowEffects>(find.byType(LyricFollowEffects))
     .elementAt(index);
 
-double _previousVoiceBlur(WidgetTester tester) {
-  final viewport = tester.getRect(_scroll);
-  final previous = tester.getRect(find.byType(LyricViewTile).at(0));
-  final current = tester.getRect(find.byType(LyricViewTile).at(1));
-  final span = (current.center.dy - viewport.top).clamp(1.0, double.infinity);
-  return LyricMotion.blurForDistance(4) *
-      ((current.center.dy - previous.center.dy) / span).clamp(0.0, 1.0);
+LyricViewportBlur _mask(WidgetTester tester) =>
+    tester.widget<LyricViewportBlur>(find.byType(LyricViewportBlur));
+
+List<({Rect bounds, Object filter, bool enabled})> _maskBands(
+        WidgetTester tester) =>
+    find
+        .descendant(
+            of: find.byType(LyricViewportBlur),
+            matching: find.byType(BackdropFilter))
+        .evaluate()
+        .map((element) {
+      final filter = element.widget as BackdropFilter;
+      final render =
+          tester.renderObject<RenderBackdropFilter>(find.byWidget(filter));
+      expect(render.filterConfig.filter, isNotNull,
+          reason: 'Each fixed band retains its real Gaussian filter');
+      return (
+        bounds: tester.getRect(find.byWidget(filter)),
+        filter: render.filterConfig.filter!,
+        enabled: render.enabled,
+      );
+    }).toList();
+
+void _expectNoVoiceBlur(WidgetTester tester) {
+  for (final effect in tester
+      .widgetList<LyricFollowEffects>(find.byType(LyricFollowEffects))) {
+    expect(effect.blur, 0);
+    expect(effect.blurEnabled, isFalse);
+    expect(effect.blurAnimation, isNull,
+        reason: 'Overlapping voices cannot acquire their own blur clocks');
+    if (effect.transition != null) {
+      expect(effect.transition!.sample(effect.clock.value).blur, 0);
+    }
+  }
+}
+
+void _expectFixedMask(WidgetTester tester, {bool enabled = true}) {
+  expect(
+      tester.getRect(find.byType(LyricViewportBlur)), tester.getRect(_scroll));
+  expect(_mask(tester).enabled, enabled);
+  expect(_mask(tester).reading.value, 1);
+  expect(_mask(tester).reading.isAnimating, isFalse);
+  final bands = _maskBands(tester);
+  expect(bands, hasLength(12));
+  expect(bands.every((band) => band.enabled == enabled), isTrue);
+  _expectNoVoiceBlur(tester);
 }
 
 void main() {
@@ -107,26 +147,29 @@ void main() {
     await tester.pumpWidget(fixture.app());
     await tester.pumpAndSettle();
     final controller = _controller(tester);
+    _expectFixedMask(tester);
+    final bands = _maskBands(tester);
+    final readingClock = _mask(tester).reading;
     await fixture.emit(tester, 5.08);
     await tester.pump(const Duration(milliseconds: 520));
     expect(controller.position.isScrollingNotifier.value, isTrue);
     final phase = _effect(tester, 1).clock.value;
     await fixture.emit(tester, 5.6);
-    final targetBlur = _effect(tester, 0).blur;
-    expect(targetBlur, greaterThan(0));
     expect(_effect(tester, 1).clock.value, phase,
         reason: 'The same anchor must retain its original lag trajectory');
-    expect(_effect(tester, 0).blurAnimation!.value, 0);
+    _expectFixedMask(tester);
+    expect(_maskBands(tester), bands,
+        reason: 'Ending a voice cannot move or retune fixed viewport bands');
+    expect(_mask(tester).reading, same(readingClock));
     await tester.pump(
         LyricMotion.springScrollDuration - const Duration(milliseconds: 519));
     expect(controller.position.isScrollingNotifier.value, isFalse,
         reason: 'The original scroll must finish on its original clock');
-    expect(_effect(tester, 0).blurAnimation!.value,
-        inExclusiveRange(0, targetBlur));
+    _expectFixedMask(tester);
+    expect(_maskBands(tester), bands);
     await tester.pumpAndSettle();
-    expect(_effect(tester, 0).blurAnimation, isNull);
-    expect(_effect(tester, 0).blur, closeTo(targetBlur, 1e-9),
-        reason: 'The original voice fade must hand off to its chosen target');
+    _expectFixedMask(tester);
+    expect(_maskBands(tester), bands);
     expect(tester.binding.transientCallbackCount, 0);
   });
 
@@ -137,37 +180,51 @@ void main() {
     await tester.pumpAndSettle();
     final controller = _controller(tester);
     final offset = controller.offset;
-    final previousBlur = _effect(tester, 0).blur;
-    expect(previousBlur, closeTo(_previousVoiceBlur(tester), .01));
+    _expectFixedMask(tester);
+    final bands = _maskBands(tester);
+    final readingClock = _mask(tester).reading;
     await fixture.emit(tester, 5.5);
-    expect(_effect(tester, 0).blurAnimation!.value, previousBlur);
+    _expectFixedMask(tester);
     expect(controller.position.isScrollingNotifier.value, isFalse);
     await tester.pump(const Duration(milliseconds: 120));
-    final blur = _effect(tester, 0).blurAnimation!.value;
-    expect(blur, inExclusiveRange(0, previousBlur));
+    expect(_maskBands(tester), bands);
     await fixture.emit(tester, 5.8);
-    expect(_effect(tester, 0).blurAnimation!.value, closeTo(blur, 1e-9),
-        reason: 'Rapid voice changes start at the currently painted blur');
+    _expectFixedMask(tester);
+    expect(_maskBands(tester), bands,
+        reason: 'Rapid overlap changes retain the same viewport surface');
+    expect(_mask(tester).reading, same(readingClock));
     await tester.pumpAndSettle();
     expect(controller.offset, offset);
-    expect(_effect(tester, 0).blurAnimation, isNull);
+    _expectFixedMask(tester);
     expect(tester.binding.transientCallbackCount, 0);
   });
 
-  testWidgets('a new line inherits the unfinished voice blur without snapping',
+  testWidgets('a new line keeps fixed blur and a continuous bounded lag',
       (tester) async {
     final fixture = _Fixture(position: 5.8);
     await tester.pumpWidget(fixture.app());
     await tester.pumpAndSettle();
     await fixture.emit(tester, 5.5);
     await tester.pump(const Duration(milliseconds: 120));
-    final blur = _effect(tester, 0).blurAnimation!.value;
+    final previous = _effect(tester, 0);
+    final lag = previous.transition?.sample(previous.clock.value).offset ?? 0;
+    final bands = _maskBands(tester);
     await fixture.emit(tester, 10.1);
     final effect = _effect(tester, 0);
-    expect(effect.blurAnimation, isNull);
-    expect(effect.transition!.sample(effect.clock.value).blur,
-        closeTo(blur, 1e-9));
+    expect(effect.transition, isNotNull);
+    expect(effect.transition!.sample(effect.clock.value).offset,
+        closeTo(lag, 1e-9));
+    _expectFixedMask(tester);
+    expect(_maskBands(tester), bands);
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(effect.clock.value, inExclusiveRange(0, 1));
+    expect(effect.transition!.sample(effect.clock.value).offset.abs(),
+        lessThanOrEqualTo(48));
     await tester.pumpAndSettle();
+    expect(effect.clock.isAnimating, isFalse);
+    expect(effect.transition!.sample(effect.clock.value).offset, 0);
+    expect(_maskBands(tester), bands);
+    expect(tester.binding.transientCallbackCount, 0);
   });
 
   testWidgets(
@@ -176,15 +233,17 @@ void main() {
     final fixture = _Fixture(position: 5.5);
     await tester.pumpWidget(fixture.app());
     await tester.pumpAndSettle();
+    final bands = _maskBands(tester);
     fixture.preferences.value =
         fixture.preferences.value.copyWith(surfaceBlur: false);
     await tester.pump();
     await fixture.emit(tester, 5.8);
-    expect(_effect(tester, 0).blurAnimation, isNull);
+    _expectFixedMask(tester, enabled: false);
     fixture.preferences.value =
         fixture.preferences.value.copyWith(surfaceBlur: true);
     await tester.pumpAndSettle();
-    expect(_effect(tester, 0).blur, closeTo(_previousVoiceBlur(tester), .01));
+    _expectFixedMask(tester);
+    expect(_maskBands(tester), bands);
     expect(tester.binding.transientCallbackCount, 0);
   });
 
@@ -200,20 +259,31 @@ void main() {
     fixture.preferences.value =
         fixture.preferences.value.copyWith(surfaceBlur: true);
     await tester.pumpAndSettle();
-    expect(_effect(tester, 0).blur, closeTo(_previousVoiceBlur(tester), .01));
+    _expectFixedMask(tester);
     expect(_controller(tester).offset, offset);
     expect(tester.binding.transientCallbackCount, 0);
   });
 
   for (final stop in ['hidden', 'animations', 'blur', 'manual', 'dispose']) {
-    testWidgets('voice blur releases its finite clock on $stop',
+    testWidgets('fixed viewport blur leaves no finite clock after $stop',
         (tester) async {
       final fixture = _Fixture(position: 5.8);
       await tester.pumpWidget(fixture.app());
       await tester.pumpAndSettle();
       await fixture.emit(tester, 5.5);
       await tester.pump(const Duration(milliseconds: 120));
-      expect(_effect(tester, 0).blurAnimation, isNotNull);
+      _expectFixedMask(tester);
+      final bands = _maskBands(tester).map((band) => band.bounds).toList();
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer();
+      await mouse.moveTo(tester.getCenter(_scroll));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 48));
+      final readingClock = _mask(tester).reading;
+      expect(readingClock.isAnimating, isTrue);
+      expect(readingClock.value, inExclusiveRange(0, 1),
+          reason: 'Exercise the real finite viewport hover clock');
+      _expectNoVoiceBlur(tester);
       switch (stop) {
         case 'hidden':
           fixture.hidden.value = true;
@@ -233,13 +303,48 @@ void main() {
       }
       await tester.pump();
       if (stop != 'dispose') {
-        expect(_effect(tester, 0).blurAnimation, isNull);
+        _expectNoVoiceBlur(tester);
+        expect(_mask(tester).reading, same(readingClock));
+        expect(_maskBands(tester).map((band) => band.bounds), bands,
+            reason: 'Activity changes cannot relocate the fixed blur bands');
+        expect(_mask(tester).enabled, stop != 'blur' && stop != 'manual');
+        if (stop == 'hidden' || stop == 'animations' || stop == 'manual') {
+          expect(readingClock.isAnimating, isFalse);
+        }
+      } else {
+        expect(find.byType(LyricViewportBlur), findsNothing);
       }
-      // Existing finite scale/focus animation may finish; the new blur clock
-      // must neither survive this boundary nor schedule work while idle.
+      // Existing finite focus/hover motion can finish. Voice membership owns
+      // no extra blur clock, and disabled/hidden surfaces must become idle.
       await tester.pump(const Duration(seconds: 1));
       await tester.pump();
+      expect(readingClock.isAnimating, isFalse);
+      if (stop == 'manual' && tester.binding.transientCallbackCount != 0) {
+        // A real wheel moves cards beneath the stationary mouse. The frame's
+        // hit-test update can start Material enter/exit feedback at its end;
+        // a zero-duration pump does not advance those newly started clocks.
+        // Keep the original idle oracle and stay within the four-second grace.
+        await tester.pumpAndSettle(const Duration(milliseconds: 16),
+            EnginePhase.sendSemanticsUpdate, const Duration(seconds: 1));
+        expect(readingClock.isAnimating, isFalse);
+        expect(_mask(tester).enabled, isFalse);
+        _expectNoVoiceBlur(tester);
+      }
       expect(tester.binding.transientCallbackCount, 0);
+      if (stop == 'hidden') {
+        await mouse.moveTo(Offset.zero);
+        await tester.pump();
+        _expectFixedMask(tester);
+        fixture.hidden.value = false;
+        await tester.pump();
+        _expectFixedMask(tester);
+        expect(_maskBands(tester).map((band) => band.bounds), bands,
+            reason:
+                'The first restored frame keeps its configured static mask');
+        await tester.pumpAndSettle();
+        expect(tester.binding.transientCallbackCount, 0);
+      }
+      await mouse.removePointer();
       await tester.pumpWidget(const SizedBox());
     });
   }

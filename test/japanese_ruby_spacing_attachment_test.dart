@@ -7,6 +7,7 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/lyric/japanese_reading_preferences.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
@@ -22,6 +23,8 @@ import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 
 import 'lyric_letter_spacing_render_test.dart' show loadLetterSpacingFonts;
+import 'lyric_letter_spacing_visible_feedback_test.dart'
+    show expectMainSpacingGroup;
 import 'support/playlist_feature_fixture.dart' show sizePlaylistFeature;
 
 // The user's recorded sentence, including its second-row Han readings.
@@ -172,9 +175,10 @@ List<Rect> _attachedReadings(_Consumer p) {
   ];
 }
 
-/// Replay the unchanged real primary painter and real, already-shaped native
-/// reading paragraphs. Only their attachment and finite tint-layer coverage
-/// are supplied independently. No raster tolerance or filter is introduced.
+/// Replay the unchanged primary with independently captured native reading ink.
+/// The main player now freezes kana at its declared sampling scale; retaining
+/// the old nested tint paragraph would compare two different raster sources.
+/// Attachment remains independent and the resulting RGBA remains byte exact.
 class _AttachedRubyReference extends CustomPainter {
   _AttachedRubyReference(this.source, this.readings);
   final _Consumer source;
@@ -206,6 +210,46 @@ class _AttachedRubyReference extends CustomPainter {
     };
     canvas.save();
     canvas.translate(origin.dx, origin.dy);
+    final ratio = switch (source.ink) {
+      LyricWordHighlightPainter() =>
+        (source.ink as LyricWordHighlightPainter).rubyRasterScale,
+      _ => (source.ink as PlainLyricWordFollowPainter).rubyRasterScale,
+    };
+    if (ratio != null) {
+      final paint = Paint()
+        ..filterQuality = FilterQuality.low
+        ..colorFilter = ColorFilter.mode(
+            tint.withValues(alpha: tint.a * _visibility(source)),
+            BlendMode.srcIn);
+      for (final (index, glyph) in retained.indexed) {
+        final inkBounds =
+            (Offset.zero & glyph.painter.size).inflate(ruby.extent * 2 + 24);
+        final recorder = drawing.PictureRecorder();
+        final sourceCanvas = Canvas(recorder)
+          ..scale(ratio)
+          ..translate(-inkBounds.left, -inkBounds.top);
+        glyph.painter.paint(sourceCanvas, Offset.zero);
+        final picture = recorder.endRecording();
+        final image = picture.toImageSync((inkBounds.width * ratio).ceil(),
+            (inkBounds.height * ratio).ceil());
+        try {
+          final destination = Rect.fromLTWH(inkBounds.left, inkBounds.top,
+                  image.width / ratio, image.height / ratio)
+              .shift(local[index].topLeft);
+          canvas.drawImageRect(
+              image,
+              Rect.fromLTWH(
+                  0, 0, image.width.toDouble(), image.height.toDouble()),
+              destination,
+              paint);
+        } finally {
+          image.dispose();
+          picture.dispose();
+        }
+      }
+      canvas.restore();
+      return;
+    }
     canvas.saveLayer(
         coverage,
         Paint()
@@ -403,17 +447,43 @@ void main() {
       await _checkInk(tester, boundary, before, '$kind-static');
       controller.setLyricLetterSpacing(grouped ? 8 : 0);
       await tester.pump();
+      final target = _presented(tester, text);
+      expect(target.ink.glyphMorph, isNull);
+      if (!grouped) {
+        expect(target.ink.glyphParagraph.computeLineMetrics(), hasLength(1),
+            reason:
+                'The final target wrapping is already active on frame zero');
+      }
+      Finder primary() => find.byWidgetPredicate((widget) =>
+          widget is CustomPaint &&
+          identical(widget.painter, _presented(tester, text).ink));
+      expectMainSpacingGroup(tester, primary(), 0);
       await tester.pump(const Duration(milliseconds: 96));
       final middle = _presented(tester, text);
-      expect(middle.ink.glyphMorph, isNotNull);
-      expect(middle.ink.glyphMorph!.progress, inExclusiveRange(0, 1));
+      expect(middle.ink.glyphMorph, isNull);
+      expect(middle.ink.glyphParagraph, same(target.ink.glyphParagraph));
+      expectMainSpacingGroup(
+          tester,
+          primary(),
+          LyricMotion.curve
+              .transform(96 / LyricMotion.spacingDuration.inMilliseconds));
       await _checkInk(tester, boundary, middle, '$kind-96ms');
-      await tester.pump(const Duration(milliseconds: 96));
+      await tester
+          .pump(LyricMotion.spacingDuration - const Duration(milliseconds: 97));
+      expectMainSpacingGroup(
+          tester,
+          primary(),
+          LyricMotion.curve.transform(
+              (LyricMotion.spacingDuration.inMilliseconds - 1) /
+                  LyricMotion.spacingDuration.inMilliseconds));
       await _checkInk(
-          tester, boundary, _presented(tester, text), '$kind-192ms');
+          tester, boundary, _presented(tester, text), '$kind-near-end');
+      await tester.pump(const Duration(milliseconds: 1));
+      expectMainSpacingGroup(tester, primary(), 1);
       await tester.pumpAndSettle();
       final settled = _presented(tester, text);
       expect(settled.ink.glyphMorph, isNull);
+      expect(settled.ink.glyphParagraph, same(target.ink.glyphParagraph));
       if (!grouped) {
         expect(settled.ink.glyphParagraph.computeLineMetrics(), hasLength(1));
       }

@@ -2,6 +2,7 @@ import 'package:dan_player/app_preference.dart';
 import 'dart:math' as math;
 import 'dart:io';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/component/folder_actions.dart';
 import 'package:dan_player/component/anchored_menu_action.dart';
 import 'package:dan_player/folder_note_preferences.dart';
@@ -28,6 +29,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:path/path.dart' as path;
 
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:desktop_lyric/font_policy.dart';
 
 class FoldersPage extends StatefulWidget {
   const FoldersPage(
@@ -301,6 +303,7 @@ class _FoldersPageState extends State<FoldersPage> {
                               songsByFolder: _songs,
                               sortingFolders: _sortingFolders,
                               controller: _scroll,
+                              hidden: DesktopIntegration.instance.isHidden,
                               footer: data.data == null
                                   ? const SizedBox.shrink()
                                   : PlayerDataFolderTile(directory: data.data!),
@@ -436,9 +439,12 @@ class AudioFolderTile extends StatelessWidget {
                 directory: Directory(audioFolder.path),
                 notes: notes,
                 saveNotes: saveNotes,
-                builder: (context, menu) => Tooltip(
-                      triggerMode: TooltipTriggerMode.manual,
-                      message: audioFolder.path,
+                builder: (context, menu) => _FolderTileTooltip(
+                      name: preferences.noteFor(audioFolder.path) ??
+                          folderDisplayName(audioFolder.path),
+                      folderPath: normalized,
+                      summary: '${ui('音乐文件夹')} · $summary',
+                      textInset: onToggle != null || treeRow ? 176 : 140,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Material(
@@ -516,18 +522,13 @@ class AudioFolderTile extends StatelessWidget {
                                               fontSize: 14,
                                               height: 1.25,
                                               color: scheme.onSurfaceVariant)),
-                                      Tooltip(
-                                          triggerMode:
-                                              TooltipTriggerMode.manual,
-                                          message: '${ui('音乐文件夹')} · $summary',
-                                          child: Text(
-                                              '${ui('音乐文件夹')} · $summary',
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                  fontSize: 14,
-                                                  height: 1.25,
-                                                  color: scheme.primary))),
+                                      Text('${ui('音乐文件夹')} · $summary',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                              fontSize: 14,
+                                              height: 1.25,
+                                              color: scheme.primary)),
                                     ])),
                                 const SizedBox(width: 8),
                                 Builder(
@@ -564,9 +565,12 @@ class PlayerDataFolderTile extends StatelessWidget {
             isPlayerData: true,
             notes: notes,
             saveNotes: saveNotes,
-            builder: (context, menu) => Tooltip(
-                triggerMode: TooltipTriggerMode.manual,
-                message: directory.path,
+            builder: (context, menu) => _FolderTileTooltip(
+                name: preferences.noteFor(directory.path) ??
+                    folderDisplayName(directory.path),
+                folderPath: directory.path,
+                summary: ui('缓存文件夹'),
+                textInset: 132,
                 child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Material(
@@ -612,18 +616,14 @@ class PlayerDataFolderTile extends StatelessWidget {
                                                 height: 1.25,
                                                 fontWeight: FontWeight.w600,
                                                 color: scheme.onSurface)),
-                                        Tooltip(
-                                            triggerMode:
-                                                TooltipTriggerMode.manual,
-                                            message: directory.path,
-                                            child: Text(directory.path,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                    fontSize: 14,
-                                                    height: 1.25,
-                                                    color: scheme
-                                                        .onSurfaceVariant))),
+                                        Text(directory.path,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                                fontSize: 14,
+                                                height: 1.25,
+                                                color:
+                                                    scheme.onSurfaceVariant)),
                                         Text(ui('缓存文件夹'),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
@@ -640,5 +640,65 @@ class PlayerDataFolderTile extends StatelessWidget {
                                           icon:
                                               const Icon(Symbols.more_horiz))),
                                 ]))))))));
+  }
+}
+
+/// Keep one full description for compact cards, without competing path and
+/// summary bubbles while the visible labels already have enough room.
+class _FolderTileTooltip extends StatelessWidget {
+  const _FolderTileTooltip({
+    required this.name,
+    required this.folderPath,
+    required this.summary,
+    required this.textInset,
+    required this.child,
+  });
+
+  final String name, folderPath, summary;
+  final double textInset;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scaler = MediaQuery.textScalerOf(context);
+    return LayoutBuilder(builder: (context, bounds) {
+      // The icon, menu and optional tree toggle keep their existing fixed slots.
+      // A long path alone does not enable a tooltip in an ordinary-width card.
+      final textWidth = math.max(0.0, bounds.maxWidth - textInset);
+      if (!textWidth.isFinite || textWidth > 180 * scaler.scale(14) / 14) {
+        return child;
+      }
+      final policy = AppFontScope.of(context);
+      final defaults = Theme.of(context).textTheme.bodyMedium!;
+      final painter = TextPainter(
+        textDirection: Directionality.of(context),
+        textScaler: scaler,
+        locale: Localizations.maybeLocaleOf(context),
+        maxLines: 1,
+      );
+      bool overflows(String value, TextStyle style) {
+        if (MediaQuery.boldTextOf(context)) {
+          style = style.merge(const TextStyle(fontWeight: FontWeight.bold));
+        }
+        painter.text = appFontSpan(value, style: style, policy: policy);
+        painter.layout();
+        return painter.didExceedMaxLines || painter.width > textWidth + .5;
+      }
+
+      final truncated = overflows(
+              name,
+              defaults.copyWith(
+                  fontSize: 16, height: 1.25, fontWeight: FontWeight.w600)) ||
+          overflows(
+              folderPath, defaults.copyWith(fontSize: 14, height: 1.25)) ||
+          overflows(summary, defaults.copyWith(fontSize: 14, height: 1.25));
+      painter.dispose();
+      if (!truncated) return child;
+      return Tooltip(
+          triggerMode: TooltipTriggerMode.manual,
+          excludeFromSemantics: true,
+          message: '$name\n$folderPath\n$summary',
+          child: child);
+    });
   }
 }

@@ -43,6 +43,8 @@ class LyricViewportBlur extends StatelessWidget {
             return child;
           }
           final height = constraints.maxHeight;
+          final minimumReplacementRadius =
+              .1 / View.of(context).devicePixelRatio;
           final topFraction = _fraction(this.topFraction, .25);
           final bottomFraction = _fraction(this.bottomFraction, .22);
           return ClipRect(
@@ -60,8 +62,12 @@ class LyricViewportBlur extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [
                     child!,
-                    ..._bands(height * topFraction, sigma, top: true),
-                    ..._bands(height * bottomFraction, sigma, top: false),
+                    ..._bands(height * topFraction, sigma,
+                        top: true,
+                        minimumReplacementRadius: minimumReplacementRadius),
+                    ..._bands(height * bottomFraction, sigma,
+                        top: false,
+                        minimumReplacementRadius: minimumReplacementRadius),
                   ],
                 );
               },
@@ -74,7 +80,7 @@ class LyricViewportBlur extends StatelessWidget {
       value.isFinite ? value.clamp(0.0, .45).toDouble() : fallback;
 
   Iterable<Widget> _bands(double extent, double sigma,
-      {required bool top}) sync* {
+      {required bool top, required double minimumReplacementRadius}) sync* {
     if (extent <= 0) return;
     for (var index = 0; index < _gradientSteps; index++) {
       // Index zero is at the clear boundary; the radius only grows towards
@@ -83,7 +89,10 @@ class LyricViewportBlur extends StatelessWidget {
       final near = extent * index / _gradientSteps;
       final far = extent * (index + 1) / _gradientSteps;
       final progress = (index + .5) / _gradientSteps;
-      final radius = sigma * progress * progress * (3 - 2 * progress);
+      // Reach full blur within the inner two thirds of the configured band.
+      // The clear boundary stays soft, with no output beyond that boundary.
+      final ramp = (progress * 1.5).clamp(0.0, 1.0);
+      final radius = sigma * ramp * ramp * (3 - 2 * ramp);
       yield Positioned(
         key: ValueKey((top, index)),
         left: 0,
@@ -100,7 +109,16 @@ class LyricViewportBlur extends StatelessWidget {
                 // the lyrics with an identity backdrop during hover/entrance.
                 enabled: enabled && radius > 0,
                 filter: ui.ImageFilter.blur(sigmaX: radius, sigmaY: radius),
-                blendMode: BlendMode.srcOver,
+                // A page fade paints into a transparent surface. Replace its
+                // existing sharp pixels rather than keeping them below blur.
+                // Identity passes remain disabled, and snapshots are unshared.
+                // Native Gaussian kernels can become an empty backdrop at
+                // nearly-zero physical sigma. Source-over preserves the
+                // surface for those subpixel identity passes instead of
+                // replacing its text/background with transparent pixels.
+                blendMode: radius < minimumReplacementRadius
+                    ? BlendMode.srcOver
+                    : BlendMode.src,
                 child: const SizedBox.expand(),
               ),
             ),

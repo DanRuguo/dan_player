@@ -308,7 +308,9 @@ void main({bool onlyRender = false, String? onlyCase}) {
     for (var i = 0; i < 300 && loading.evaluate().isNotEmpty; i++) {
       await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 10)));
-      await tester.pump();
+      // Key-snapshot yields use fake timers; the actual isolate uses real I/O.
+      // runAsync advances only the latter, while plain pump drains microtasks.
+      await tester.pump(Duration.zero);
     }
     await tester.pumpAndSettle();
     expect(loading, findsNothing, reason: 'The actual isolate must finish.');

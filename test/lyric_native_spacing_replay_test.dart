@@ -18,6 +18,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'lyric_letter_spacing_render_test.dart' show loadLetterSpacingFonts;
+import 'lyric_letter_spacing_visible_feedback_test.dart'
+    show expectMainSpacingGroup;
 import 'support/playlist_feature_fixture.dart'
     show capturePlaylistFeature, sizePlaylistFeature;
 
@@ -257,6 +259,7 @@ class _ReplayCanvas implements Canvas {
   _ReplayCanvas(this.delegate);
   final Canvas delegate;
   int pictures = 0;
+  int paragraphs = 0;
   @override
   void save() => delegate.save();
   @override
@@ -267,6 +270,11 @@ class _ReplayCanvas implements Canvas {
   void clipPath(Path path, {bool doAntiAlias = true}) =>
       delegate.clipPath(path, doAntiAlias: doAntiAlias);
   @override
+  void clipRect(Rect rect,
+          {drawing.ClipOp clipOp = drawing.ClipOp.intersect,
+          bool doAntiAlias = true}) =>
+      delegate.clipRect(rect, clipOp: clipOp, doAntiAlias: doAntiAlias);
+  @override
   Rect getLocalClipBounds() => delegate.getLocalClipBounds();
   @override
   void drawPicture(drawing.Picture picture) {
@@ -275,15 +283,22 @@ class _ReplayCanvas implements Canvas {
   }
 
   @override
+  void drawParagraph(drawing.Paragraph paragraph, Offset offset) {
+    paragraphs++;
+    delegate.drawParagraph(paragraph, offset);
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw StateError('Unexpected replay operation ${invocation.memberName}');
 }
 
-({int cells, int pictures, int sourceUnits, int microseconds}) _replayCost(
+({int paragraphs, int pictures, int sourceUnits, int microseconds}) _replayCost(
     _Panel panel) {
   final consumer = _presented(panel);
   final frame = consumer.painter.glyphMorph;
-  expect(frame, isNotNull);
+  expect(frame, isNull,
+      reason: 'The target entrance never records an old glyph replay atlas');
   final boundary =
       panel.boundary.currentContext!.findRenderObject()! as RenderBox;
   final localClip = MatrixUtils.transformRect(
@@ -298,11 +313,23 @@ class _ReplayCanvas implements Canvas {
   watch.stop();
   recorder.endRecording().dispose();
   return (
-    cells: frame!.geometry.cells.length,
+    paragraphs: canvas.paragraphs,
     pictures: canvas.pictures,
     sourceUnits: consumer.painter.text.text!.toPlainText().length,
     microseconds: watch.elapsedMicroseconds,
   );
+}
+
+void _entrance(WidgetTester tester, _Panel panel, Duration elapsed) {
+  final paragraph = find.descendant(
+      of: find.byKey(panel.boundary),
+      matching: find.byWidgetPredicate((widget) =>
+          widget is CustomPaint &&
+          widget.painter is PlainLyricWordFollowPainter));
+  final progress = LyricMotion.curve.transform(
+      elapsed.inMicroseconds / LyricMotion.spacingDuration.inMicroseconds);
+  expectMainSpacingGroup(tester, paragraph, progress);
+  expect(_presented(panel).painter.glyphMorph, isNull);
 }
 
 void main() {
@@ -330,7 +357,7 @@ void main() {
     ),
   ]) {
     testWidgets(
-        'native spacing replay preserves live palette and retarget $name',
+        'native spacing target preserves live palette and retarget $name',
         (tester) async {
       sizePlaylistFeature(tester, width: 1000, height: 600);
       final changed =
@@ -358,6 +385,8 @@ void main() {
       await tester.pumpWidget(_host([changed, reference], fontPolicy: policy));
       await tester.pumpAndSettle();
       final blueSource = await _rgba(tester, reference);
+      final baseSpacing =
+          _presented(reference).painter.text.text!.style!.letterSpacing ?? 0;
       if (name == 'COLR emoji') {
         var colouredInk = 0;
         for (var i = 0; i < blueSource.length; i += 4) {
@@ -372,12 +401,17 @@ void main() {
       changed.controller.setLyricLetterSpacing(8);
       reference.controller.setLyricLetterSpacing(8);
       await tester.pump();
-      expect(await _rgba(tester, reference), blueSource,
-          reason: 'Entering native replay preserves the exact original raster');
+      _entrance(tester, reference, Duration.zero);
+      expect(_presented(reference).painter.text.text!.style!.letterSpacing,
+          baseSpacing + 8);
+      expect(
+          (await _rgba(tester, reference)).every((channel) => channel == 255),
+          isTrue,
+          reason:
+              'The previous spacing disappears before its new target enters');
       await tester.pump(const Duration(milliseconds: 96));
-      final frame = _presented(changed).painter.glyphMorph;
-      expect(frame, isNotNull);
-      expect(frame!.progress, inExclusiveRange(0, 1));
+      _entrance(tester, changed, const Duration(milliseconds: 96));
+      final targetParagraph = _presented(changed).painter.text;
       final beforePalette = _glyphRects(changed);
       changed.color.value = _blue;
       await tester.pump();
@@ -388,25 +422,35 @@ void main() {
       await capturePlaylistFeature(
           tester, changed.boundary, 'native-replay-$name-palette');
 
-      final beforeReverse = _glyphRects(changed);
-      final reversePixels = await _rgba(tester, changed);
       changed.controller.setLyricLetterSpacing(2);
       reference.controller.setLyricLetterSpacing(2);
       await tester.pump();
-      _sameRects(_glyphRects(changed), beforeReverse,
-          'Reversal begins at the currently presented viewport glyphs');
-      expect(await _rgba(tester, changed), reversePixels,
-          reason: 'A retained source does not repaint at a different phase');
+      _entrance(tester, changed, Duration.zero);
+      expect(_presented(changed).painter.text, isNot(same(targetParagraph)));
+      expect(_presented(changed).painter.text.text!.style!.letterSpacing,
+          baseSpacing + 2);
+      _sameRects(_glyphRects(changed), _glyphRects(reference),
+          'Both independently shaped targets own every reversed glyph');
+      expect((await _rgba(tester, changed)).every((channel) => channel == 255),
+          isTrue,
+          reason: 'The superseded target cannot remain under the new group');
       await _sameInk(tester, changed, reference,
           'Palette ownership survives rapid retargeting');
       await tester.pump(const Duration(milliseconds: 48));
+      _entrance(tester, changed, const Duration(milliseconds: 48));
+      final retainedTarget = _presented(changed).painter.text;
       changed.width.value = 360;
       reference.width.value = 360;
       await tester.pump();
+      expect(_presented(changed).painter.text, same(retainedTarget),
+          reason:
+              'Width changes layout without reshaping the target font tree');
+      _sameRects(_glyphRects(changed), _glyphRects(reference),
+          'Width-retargeted glyphs share the independent native geometry');
       await _sameInk(tester, changed, reference,
           'Resizing retains the original font tree and live colour source');
       await tester
-          .pump(LyricMotion.lineDuration + const Duration(milliseconds: 1));
+          .pump(LyricMotion.spacingDuration + const Duration(milliseconds: 1));
       await tester.pumpAndSettle();
       expect(_presented(changed).painter.glyphMorph, isNull);
       expect(_presented(changed).painter.text.text!.toPlainText(), text);
@@ -420,8 +464,7 @@ void main() {
     });
   }
 
-  testWidgets(
-      'native spacing visible replay groups do not grow with hidden tail',
+  testWidgets('native spacing target paints once with any hidden tail',
       (tester) async {
     sizePlaylistFeature(tester, width: 1000, height: 600);
     // Both lengths bypass the short-line balance heuristic. They have the same
@@ -442,14 +485,14 @@ void main() {
         'Hidden tail does not alter visible source clips or glyph motion');
     final a = _replayCost(short), b = _replayCost(long);
     expect(b.sourceUnits, a.sourceUnits * 10);
-    expect(b.cells, greaterThan(a.cells * 9));
-    expect(a.pictures, greaterThan(0));
-    expect(b.pictures, a.pictures,
-        reason: 'Only groups intersecting the real viewport are replayed');
-    expect(b.pictures, lessThan(a.cells),
-        reason: 'The offscreen paragraph is not replayed once for every cell');
+    expect(a.paragraphs, 1);
+    expect(b.paragraphs, a.paragraphs,
+        reason:
+            'A complete native target paints once instead of replaying per cell');
+    expect(a.pictures, 0);
+    expect(b.pictures, 0, reason: 'No previous-spacing picture atlas remains');
     debugPrint('NATIVE_REPLAY_COST short=$a long=$b '
-        'full paragraph replays retain G x N source complexity; '
+        'one native paragraph preserves shaping and clipping; '
         'command counts do not prove bounded GPU cost');
     long.enabled.value = false;
     short.enabled.value = false;

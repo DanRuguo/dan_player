@@ -339,11 +339,14 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
         TickerMode.valuesOf(context).enabled && widget.hidden?.value != true;
     if (visible == _wasVisible) return;
     _wasVisible = visible;
-    _entered = false;
-    _hasPresented = false;
-    if (visible) {
+    // Native hiding stops the existing surface; it is not a new page entry.
+    // Keep its paragraph/filter owners mounted so restoration cannot expose
+    // a clear placeholder and replay the complete content fade.
+    if (visible && !_entered) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _wasVisible) setState(() => _entered = true);
+        if (mounted && _wasVisible && !_entered) {
+          setState(() => _entered = true);
+        }
       });
     }
   }
@@ -488,7 +491,8 @@ class _VerticalLyricContentState extends State<VerticalLyricContent>
                       excluding: leaving,
                       child: FadeTransition(
                         opacity: animation,
-                        child: _LyricExitScope(exiting: leaving, child: child!),
+                        child: _LyricExitScope(
+                            exiting: leaving || !active, child: child!),
                       ),
                     ),
                   ),
@@ -748,7 +752,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     } else {
       _readingClock.animateTo(
         target,
-        duration: const Duration(milliseconds: 240),
+        duration: const Duration(milliseconds: 120),
         curve: Curves.easeOutCubic,
       );
     }
@@ -1800,7 +1804,11 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       _scheduleReadingReveal();
     }
     final followEnabled = !reduced && !_manualScrollActive && !_readingMode;
-    final blurEnabled = followEnabled &&
+    // The fixed viewport mask is a static surface treatment, not a follow
+    // animation. Keep it in the first restored/entrance frame even while
+    // activity and lyric tickers are being synchronized.
+    final blurEnabled = !_manualScrollActive &&
+        !_readingMode &&
         settings.lyricBlurEnabled &&
         !highContrast &&
         (_preferences?.value.surfaceBlur ?? true);
@@ -1848,6 +1856,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       settings.showJapaneseReading && _hasJapaneseReadings,
       settings.showJapaneseReading ? _readingAvailabilityRevision : 0,
     );
+    final heldReading = _readingMode &&
+            !_manualScrollActive &&
+            (_readDestination?.belongsTo(widget.lyric) ?? false)
+        ? _readDestination
+        : null;
+    int? heldReadingOffsetAt(int index) =>
+        heldReading?.index == index ? heldReading!.textOffset ?? 0 : null;
     final tileIdentity = (
       widget.lyric,
       readingTransitionIdentity,
@@ -1858,6 +1873,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       widget.onPractice,
       _snapFontOnLineChange,
       _snapPresentationOnRestore,
+      (heldReading?.index, heldReading?.textOffset),
     );
     if (_tileCacheIdentity != tileIdentity) {
       final previous = _tileCache;
@@ -1881,7 +1897,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               (previous[index].onPractice != null) ==
                   (widget.onPractice != null && widget.lyric is! PlainLyric) &&
               previous[index].reducedMotion == reducedAt(index) &&
-              previous[index].snapPresentation == _snapPresentationOnRestore)
+              previous[index].snapPresentation == _snapPresentationOnRestore &&
+              previous[index].heldReadingOffset == heldReadingOffsetAt(index))
             previous[index]
           else
             LyricViewTile(
@@ -1897,6 +1914,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               opacity: LyricMotion.opacityForDistance(_visualDistance(index)),
               reducedMotion: reducedAt(index),
               snapPresentation: _snapPresentationOnRestore,
+              heldReadingOffset: heldReadingOffsetAt(index),
               onContentRevealEnd: _finishContentSetting,
               onPresentationEnd: _finishPresentationSetting,
               onTap:

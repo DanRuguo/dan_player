@@ -544,6 +544,39 @@ List<TextPainter> _mainPainters(WidgetTester tester, String text) => tester
     .where((painter) => painter.text?.toPlainText() == text)
     .toList();
 
+({double scale, double opacity}) _mainPresentationPose(
+    WidgetTester tester, String text) {
+  final root = tester.renderObject(find.byKey(_mainLine));
+  final paragraphs = find
+      .descendant(of: find.byKey(_mainLine), matching: find.byType(CustomPaint))
+      .evaluate()
+      .where((element) {
+    final painter = (element.widget as CustomPaint).painter;
+    return switch (painter) {
+      LyricWordHighlightPainter value =>
+        value.text.text?.toPlainText() == text,
+      PlainLyricWordFollowPainter value =>
+        value.text.text?.toPlainText() == text,
+      _ => false,
+    };
+  }).toList();
+  expect(paragraphs, hasLength(1),
+      reason: 'Spacing presents one already-shaped target paragraph');
+  final render = paragraphs.single.renderObject!;
+  var opacity = 1.0;
+  RenderObject? ancestor = render;
+  while (ancestor != null && !identical(ancestor, root)) {
+    if (ancestor is RenderOpacity) {
+      opacity *= ancestor.opacity;
+    } else if (ancestor is RenderAnimatedOpacity) {
+      opacity *= ancestor.opacity.value;
+    }
+    ancestor = ancestor.parent;
+  }
+  expect(ancestor, same(root));
+  return (scale: render.getTransformTo(root).storage[0], opacity: opacity);
+}
+
 DesktopLyricTextPainter _desktopPainter(WidgetTester tester) => tester
     .widget<CustomPaint>(find.descendant(
         of: find.byKey(const ValueKey('desktop-primary-lyric')),
@@ -1467,15 +1500,36 @@ void main() {
       await tester.pump();
       final endpoints = _mainPainters(tester, line.content);
       final restores = change.isEmpty || change == 'line advance';
-      expect(endpoints, hasLength(restores ? 2 : 1),
+      expect(endpoints, hasLength(1),
           reason:
-              'Returning to the real lyric surface must show the old and new '
-              'fixed glyph endpoints, not only the already-final hidden value');
+              'Old tracking retires immediately; the final target layout '
+              'owns the entire visible entrance, including its final wrapping');
       expect(endpoints.map((painter) => painter.text!.style!.letterSpacing),
-          [if (restores) naturalSpacing, naturalSpacing + target]);
+          [naturalSpacing + target]);
+      final initialPose = _mainPresentationPose(tester, line.content);
+      if (restores) {
+        expect(initialPose.scale, lessThan(1),
+            reason: 'The hidden wait must not consume the visible entrance');
+        expect(initialPose.opacity, lessThan(1));
+      } else {
+        expect(initialPose.scale, 1,
+            reason: 'An unrelated width, font or source cannot restore old tracking');
+        expect(initialPose.opacity, 1);
+      }
       await tester.pump(const Duration(milliseconds: 60));
       expect(_mainPainters(tester, line.content), endpoints);
+      final inFlightPose = _mainPresentationPose(tester, line.content);
+      if (restores) {
+        expect(inFlightPose.scale, greaterThan(initialPose.scale));
+        expect(inFlightPose.scale, lessThan(1));
+        expect(inFlightPose.opacity, greaterThan(initialPose.opacity));
+        expect(inFlightPose.opacity, lessThan(1));
+      }
       await tester.pumpAndSettle();
+      expect(_mainPainters(tester, line.content).single, same(endpoints.single),
+          reason: 'The entrance must not swap its raster source on the last frame');
+      expect(_mainPresentationPose(tester, line.content),
+          (scale: 1.0, opacity: 1.0));
       expect(
           _mainPainters(tester, line.content).single.text!.style!.letterSpacing,
           naturalSpacing + target);
@@ -1524,12 +1578,26 @@ void main() {
     expect(rig.controller.lyricLetterSpacing, spacing);
     expect(rig.helper.appearance.lyricLetterSpacing, spacing);
     expect(rig.packets.last['lyricLetterSpacing'], spacing);
-    expect(_mainPainters(tester, line.content), hasLength(2));
+    final mainTarget = _mainPainters(tester, line.content).single;
+    expect(mainTarget, isNot(same(oldMain)));
+    expect(mainTarget.text!.style!.letterSpacing, naturalSpacing + spacing);
+    final startPose = _mainPresentationPose(tester, line.content);
+    expect(startPose.scale, lessThan(1));
+    expect(startPose.opacity, lessThan(1));
     expect(_desktopPainter(tester).retainsPreviousLayout, isTrue);
     await tester.pump(const Duration(milliseconds: 90));
+    expect(_mainPainters(tester, line.content).single, same(mainTarget));
+    final inFlightPose = _mainPresentationPose(tester, line.content);
+    expect(inFlightPose.scale, greaterThan(startPose.scale));
+    expect(inFlightPose.scale, lessThan(1));
+    expect(inFlightPose.opacity, greaterThan(startPose.opacity));
+    expect(inFlightPose.opacity, lessThan(1));
     expect(_desktopPainter(tester).layoutProgress, greaterThan(0));
     expect(_desktopPainter(tester).layoutProgress, lessThan(1));
     await tester.pumpAndSettle();
+    expect(_mainPainters(tester, line.content).single, same(mainTarget));
+    expect(_mainPresentationPose(tester, line.content),
+        (scale: 1.0, opacity: 1.0));
     expect(
         _mainPainters(tester, line.content).single.text!.style!.letterSpacing,
         naturalSpacing + spacing);
@@ -1955,7 +2023,9 @@ void main() {
         reason: 'The service must retain its valid canonical OFF contract',
       );
       expect(rig.canonical.lines.single.japaneseReadingSpans, isEmpty);
-      await tester.pump(const Duration(milliseconds: 240));
+      // The main reveal is now 240 ms; this remains an actual in-flight frame
+      // for both it and the desktop consumer's unchanged 480 ms transition.
+      await tester.pump(const Duration(milliseconds: 120));
       final painter = _presentedTimedPainter(tester, rig, primary);
       final scalar = _mainRubyVisibility(tester, primary);
       debugPrint(
@@ -2183,7 +2253,7 @@ void main() {
       );
       expect(tester.state(find.byType(VerticalLyricScrollView)), same(state));
       expect(rig.controller.readingRequest, readingRequest);
-      await tester.pump(const Duration(milliseconds: 240));
+      await tester.pump(const Duration(milliseconds: 120));
       expect(_mainRubyVisibility(tester, primary), greaterThan(0));
       expect(_mainRubyVisibility(tester, primary), lessThan(1));
       await capturePlaylistFeature(

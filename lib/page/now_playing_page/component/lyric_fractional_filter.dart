@@ -3,6 +3,12 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
+/// Optional cached coverage of native reading snapshots inside this sampler.
+/// Bounds belong to primary shaping and width, rather than a media-time pose.
+abstract interface class LyricSamplingSource {
+  ({Object identity, Rect? bounds}) get samplingSource;
+}
+
 /// Per-row paint parameters. Only the leaf filter depends on this scope, so a
 /// follow tick does not rebuild or relayout the cached paragraph subtree.
 class LyricFractionalFilterScope extends InheritedWidget {
@@ -144,6 +150,11 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
   Object? _repaintToken;
   Listenable? _repaint;
   bool _retainSourceBounds;
+  RenderCustomPaint? _sourcePaint;
+  bool _sourceSearched = false;
+  Matrix4? _sourceTransform;
+  Object? _sourceIdentity;
+  Rect? _sourceCoverage;
   final _sourceGuard = ui.Paint()
     ..color = const ui.Color(0x00000000)
     ..blendMode = ui.BlendMode.src;
@@ -154,6 +165,51 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
     if (_retainSourceBounds || !value) return;
     _retainSourceBounds = true;
     markNeedsPaint();
+  }
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    _sourcePaint = null;
+    _sourceSearched = false;
+    _sourceTransform = null;
+  }
+
+  Rect _stableSourceGuard() {
+    var bounds = (Offset.zero & size).inflate(24);
+    if (!_sourceSearched) {
+      _sourceSearched = true;
+      void visit(RenderObject object) {
+        if (_sourcePaint != null) return;
+        if (object is RenderCustomPaint &&
+            object.painter is LyricSamplingSource) {
+          _sourcePaint = object;
+        } else {
+          object.visitChildren(visit);
+        }
+      }
+
+      if (child != null) visit(child!);
+    }
+    final paint = _sourcePaint;
+    final painter = paint?.painter;
+    if (painter is LyricSamplingSource) {
+      final source = (painter as LyricSamplingSource).samplingSource;
+      if (_sourceIdentity != source.identity) {
+        _sourceIdentity = source.identity;
+        _sourceCoverage = null;
+      }
+      // A hidden reading returns null. Keep its established source coverage
+      // until shaping/width changes; never accumulate old resize rectangles.
+      if (source.bounds != null) _sourceCoverage = source.bounds;
+      final coverage = _sourceCoverage;
+      if (coverage != null) {
+        _sourceTransform ??= paint!.getTransformTo(this);
+        bounds = bounds.expandToInclude(
+            MatrixUtils.transformRect(_sourceTransform!, coverage));
+      }
+    }
+    return bounds;
   }
 
   void _onAncestorMotion() {
@@ -284,7 +340,7 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
       // Keep the offscreen source origin stable as ruby ink rises. This adds
       // transparent coverage rather than clipping strokes; BlendMode.src is
       // confined to this empty sampling layer and cannot erase the backdrop.
-      canvas.drawRect((Offset.zero & size).inflate(24), _sourceGuard);
+      canvas.drawRect(_stableSourceGuard(), _sourceGuard);
     }
     super.paint(context, Offset.zero);
     canvas.restore();

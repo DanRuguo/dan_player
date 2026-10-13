@@ -204,6 +204,100 @@ void _expectSameInkRect(Rect actual, Rect expected, String reason) {
   expect(actual.bottom, closeTo(expected.bottom, .05), reason: reason);
 }
 
+/// A separately mounted resting native target. It has the final spacing from
+/// its first layout and never receives a spacing transition or glyph morph.
+/// Only the fixture applies the independently sampled group fade and scale.
+class _NativeSpacingReference {
+  _NativeSpacingReference(this.line, this.position, this.fontSize,
+      {this.whiteBackground = false});
+  final LyricLine line;
+  final ValueNotifier<Duration> position;
+  final double fontSize;
+  final bool whiteBackground;
+  final spacing = ValueNotifier(0.0), progress = ValueNotifier(1.0);
+  final boundary = GlobalKey();
+  final _targets = <double, LyricViewController>{};
+  final _appearances = <ValueNotifier<DesktopLyricAppearance>>[];
+
+  LyricViewController _target(double value) => _targets.putIfAbsent(value, () {
+        final appearance = ValueNotifier(DesktopLyricAppearance.defaults
+            .copyWith(lyricLetterSpacing: value));
+        _appearances.add(appearance);
+        return LyricViewController(
+            preferences: NowPlayingPagePreference.fromMap({}),
+            appearance: appearance,
+            persistAppearance: () async {})
+          ..lyricFontSize = fontSize
+          ..lyricTextAlign = LyricTextAlign.left;
+      });
+
+  Widget pane(double width) => RepaintBoundary(
+      key: boundary,
+      child: ValueListenableBuilder<double>(
+          valueListenable: spacing,
+          builder: (context, value, _) {
+            final target = ChangeNotifierProvider.value(
+                value: _target(value),
+                child: SizedBox(
+                    width: width,
+                    child: LyricViewTile(
+                        key: ValueKey(('native-spacing-target', value)),
+                        line: line,
+                        position: position,
+                        opacity: 1,
+                        distance: 0,
+                        reducedMotion: false)));
+            final group = ValueListenableBuilder<double>(
+                valueListenable: progress,
+                child: target,
+                builder: (context, progress, child) => Opacity(
+                    opacity: progress,
+                    child: Transform.scale(
+                        scale: .96 + .04 * progress,
+                        alignment: Alignment.topLeft,
+                        filterQuality: progress < 1 ? FilterQuality.low : null,
+                        child: child)));
+            return whiteBackground
+                ? ColoredBox(color: Colors.white, child: group)
+                : group;
+          }));
+
+  void target(double value) {
+    spacing.value = value;
+    progress.value = 0;
+  }
+
+  void at(int milliseconds) => progress.value = LyricMotion.curve
+      .transform(milliseconds / LyricMotion.spacingDuration.inMilliseconds);
+
+  void dispose() {
+    for (final target in _targets.values) {
+      target.dispose();
+    }
+    for (final appearance in _appearances) {
+      appearance.dispose();
+    }
+    spacing.dispose();
+    progress.dispose();
+  }
+}
+
+Future<_Raster> _expectNativeSpacing(WidgetTester tester, GlobalKey actual,
+    _NativeSpacingReference reference, String phase) async {
+  final pixels = await _rgba(tester, actual);
+  final expected = await _rgba(tester, reference.boundary);
+  expect((pixels.width, pixels.height), (expected.width, expected.height));
+  expect(pixels.rgba.length, expected.rgba.length);
+  for (var at = 0; at < pixels.rgba.length; at++) {
+    final delta = (pixels.rgba[at] - expected.rgba[at]).abs();
+    if (delta > (at % 4 == 3 ? 0 : 2)) {
+      fail('$phase differs from the fixed native target at byte $at: '
+          '$delta (RGB tolerance 2, alpha exact)');
+    }
+  }
+  return pixels;
+}
+
 void main({bool onlyRender = false, String onlyCase = ''}) {
   const cases = {
     'spacing keeps real colour emoji alpha and text variation ink',
@@ -211,6 +305,7 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
     'spacing keeps opaque glyph colour and moves early timed=true',
     'desktop spacing keeps opaque glyph colour through retarget',
     'playing ruby keeps the main viewport and stationary glyph ink',
+    'playing multiline ruby keeps centered and right stationary glyph ink',
     'playing ruby keeps desktop layout and stationary glyph ink',
   };
   if (onlyCase.isNotEmpty && !cases.contains(onlyCase)) {
@@ -255,56 +350,46 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
     final line = _Line([_Word(text, 9000, 2000)]);
     final position = ValueNotifier(Duration.zero);
     final appearance = ValueNotifier(DesktopLyricAppearance.defaults);
-    final targetAppearance = ValueNotifier(
-        DesktopLyricAppearance.defaults.copyWith(lyricLetterSpacing: 8));
-    LyricViewController control(ValueNotifier<DesktopLyricAppearance> source) =>
-        LyricViewController(
-            preferences: NowPlayingPagePreference.fromMap({}),
-            appearance: source)
-          ..lyricFontSize = 38
-          ..lyricTextAlign = LyricTextAlign.left;
-    final controller = control(appearance);
-    final targetController = control(targetAppearance);
+    final controller = LyricViewController(
+        preferences: NowPlayingPagePreference.fromMap({}),
+        appearance: appearance,
+        persistAppearance: () async {})
+      ..lyricFontSize = 38
+      ..lyricTextAlign = LyricTextAlign.left;
+    final reference = _NativeSpacingReference(line, position, 38);
     addTearDown(controller.dispose);
-    addTearDown(targetController.dispose);
+    addTearDown(reference.dispose);
     addTearDown(appearance.dispose);
-    addTearDown(targetAppearance.dispose);
     addTearDown(position.dispose);
-    final boundary = GlobalKey(), targetBoundary = GlobalKey();
-    Widget pane(GlobalKey key, LyricViewController controller) =>
-        ChangeNotifierProvider.value(
-            value: controller,
-            child: RepaintBoundary(
-                key: key,
-                child: SizedBox(
-                    width: 850,
-                    child: LyricViewTile(
-                        line: line,
-                        position: position,
-                        opacity: 1,
-                        distance: 0,
-                        reducedMotion: false))));
+    final boundary = GlobalKey();
+    final targetBoundary = reference.boundary;
+    final actual = ChangeNotifierProvider.value(
+        value: controller,
+        child: RepaintBoundary(
+            key: boundary,
+            child: SizedBox(
+                width: 850,
+                child: LyricViewTile(
+                    line: line,
+                    position: position,
+                    opacity: 1,
+                    distance: 0,
+                    reducedMotion: false))));
     await tester.pumpWidget(_host(
-        Column(mainAxisSize: MainAxisSize.min, children: [
-          pane(boundary, controller),
-          pane(targetBoundary, targetController)
-        ]),
+        Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [actual, reference.pane(850)]),
         fontPolicy: colourPolicy));
     await tester.pumpAndSettle();
-    Rect crop(GlobalKey key, String cluster, {bool presented = false}) {
+    Rect crop(GlobalKey key, String cluster) {
       final start = text.indexOf(cluster), end = start + cluster.length;
       expect(start, greaterThanOrEqualTo(0));
-      final paragraph = _main(tester, text, within: find.byKey(key)).first;
-      final painter = tester.widget<CustomPaint>(paragraph.finder).painter!
-          as LyricWordHighlightPainter;
-      final morph = painter.glyphMorph;
-      final bounds = presented
-          ? morph!.geometry.bounds(start, end, morph.progress)!
-          : paragraph.text
-              .getBoxesForSelection(
-                  TextSelection(baseOffset: start, extentOffset: end))
-              .map((box) => box.toRect())
-              .reduce((a, b) => a.expandToInclude(b));
+      final paragraph = _main(tester, text, within: find.byKey(key)).single;
+      final bounds = paragraph.text
+          .getBoxesForSelection(
+              TextSelection(baseOffset: start, extentOffset: end))
+          .map((box) => box.toRect())
+          .reduce((a, b) => a.expandToInclude(b));
       final render = tester.renderObject<RenderBox>(paragraph.finder);
       return MatrixUtils.transformRect(
           render.getTransformTo(key.currentContext!.findRenderObject()),
@@ -345,78 +430,74 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
       }
     }
 
-    final from = await _rgba(tester, boundary);
-    final to = await _rgba(tester, targetBoundary);
+    final originalTracking = _main(tester, text, within: find.byKey(boundary))
+        .single
+        .text
+        .text!
+        .style!
+        .letterSpacing;
+    final from = await _expectNativeSpacing(tester, boundary, reference,
+        'original native colour and text-variation source');
     const colouredClusters = ['❤\ufe0f', '👨‍👩‍👧‍👦'];
-    final endpoints = <String, (int, int)>{};
+    const textClusters = ['★', '☆', '♭', '❤\ufe0e'];
     for (final cluster in colouredClusters) {
-      final first = ink(from, crop(boundary, cluster));
-      final last = ink(to, crop(targetBoundary, cluster));
-      actualColours(cluster, first);
-      actualColours(cluster, last);
-      expect(first.alpha, greaterThan(0));
-      expect(last.alpha, greaterThan(0));
-      endpoints[cluster] = (first.alpha, last.alpha);
+      actualColours(cluster, ink(from, crop(boundary, cluster)));
+    }
+    for (final cluster in textClusters) {
+      expect(ink(from, crop(boundary, cluster)).alpha, greaterThan(0),
+          reason: 'The native text-variation source contains real glyph ink');
     }
     await capturePlaylistFeature(tester, boundary, 'colour-emoji-start');
-    controller.setLyricLetterSpacing(8);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 90));
-    final paragraphs = _main(tester, text, within: find.byKey(boundary));
-    expect(paragraphs, hasLength(2));
-    final live = tester.widget<CustomPaint>(paragraphs.first.finder).painter!
-        as LyricWordHighlightPainter;
-    final morph = live.glyphMorph!;
-    expect(morph.progress, inExclusiveRange(0, 1));
-    for (final cluster in ['★', '☆', '♭', '❤\ufe0e']) {
-      final start = text.indexOf(cluster);
-      expect(
-          morph.geometry.cells
-              .where((cell) => cell.start <= start && cell.end > start)
-              .single
-              .coloured,
-          isFalse);
-    }
-    final middle = await _rgba(tester, boundary);
-    await capturePlaylistFeature(tester, boundary, 'colour-emoji-mid');
-    for (final cluster in colouredClusters) {
-      final actual = ink(middle, crop(boundary, cluster, presented: true));
-      final (first, last) = endpoints[cluster]!;
-      debugPrint('colour emoji $cluster alpha from=$first '
-          'mid=${actual.alpha} to=$last coloured=${actual.coloured}');
-      actualColours(cluster, actual);
-      expect(
-          actual.alpha,
-          inInclusiveRange(
-              first < last ? first : last, first > last ? first : last),
-          reason:
-              'Spacing cannot make a fixed-media coloured glyph more opaque '
-              'or more transparent than either original endpoint');
-    }
-    // A new fixed source paragraph during a rapid reversal must use its own
-    // cached selection coordinates, while cells resume their displayed pose.
-    for (final spacing in [2.0, 6.0, 0.0]) {
-      final previousRects = {
-        for (final cluster in colouredClusters)
-          cluster: crop(boundary, cluster, presented: true)
-      };
+    for (final spacing in [8.0, 2.0, 6.0, 0.0]) {
+      reference.target(spacing);
       controller.setLyricLetterSpacing(spacing);
       await tester.pump();
-      final reversed = await _rgba(tester, boundary);
+      final paragraphs = _main(tester, text, within: find.byKey(boundary));
+      expect(paragraphs, hasLength(1),
+          reason: 'The old spacing disappears; one final target is retained');
+      final paragraph = paragraphs.single.text;
+      final painter = tester
+          .widget<CustomPaint>(paragraphs.single.finder)
+          .painter! as LyricWordHighlightPainter;
+      expect(painter.glyphMorph, isNull);
+      expect(paragraph.text!.style!.letterSpacing,
+          spacing == 0 ? originalTracking : (originalTracking ?? 0) + spacing);
+      final zero = await _expectNativeSpacing(tester, boundary, reference,
+          'new spacing $spacing starts without old emoji ink');
+      expect(zero.rgba, everyElement(0),
+          reason: 'At zero group opacity no old native glyph is left behind');
+      reference.at(90);
+      await tester.pump(const Duration(milliseconds: 90));
+      final middle = await _expectNativeSpacing(tester, boundary, reference,
+          'new spacing $spacing keeps native COLR alpha through the group fade');
+      final native = await _rgba(tester, targetBoundary);
       for (final cluster in colouredClusters) {
-        final bounds = crop(boundary, cluster, presented: true);
-        _expectSameInkRect(bounds, previousRects[cluster]!,
-            'A colour cell must resume its actual displayed geometry');
-        final actual = ink(reversed, bounds);
-        actualColours(cluster, actual);
-        expect(actual.alpha, endpoints[cluster]!.$1,
-            reason: 'Retargeting must preserve native per-layer opacity');
+        final actualInk = ink(middle, crop(boundary, cluster));
+        final targetInk = ink(native, crop(targetBoundary, cluster));
+        actualColours(cluster, actualInk);
+        expect(actualInk.alpha, targetInk.alpha,
+            reason: 'Only the shared group opacity changes native COLR alpha');
+        expect(actualInk.hues, targetInk.hues);
       }
-      await tester.pump(const Duration(milliseconds: 16));
+      for (final cluster in textClusters) {
+        final actualInk = ink(middle, crop(boundary, cluster));
+        final targetInk = ink(native, crop(targetBoundary, cluster));
+        expect(actualInk.alpha, targetInk.alpha);
+        expect(actualInk.red, targetInk.red);
+        expect(actualInk.hues, targetInk.hues,
+            reason: 'Text selectors must retain their real native variant ink');
+      }
+      expect(_main(tester, text, within: find.byKey(boundary)).single.text,
+          same(paragraph),
+          reason: 'Motion does not replace the native target');
     }
-    expect(position.value, Duration.zero);
+    reference.progress.value = 1;
     await tester.pumpAndSettle();
-    expect(_main(tester, text, within: find.byKey(boundary)), hasLength(1));
+    final end = await _expectNativeSpacing(
+        tester, boundary, reference, 'final native colour source');
+    expect(end.rgba, orderedEquals(from.rgba),
+        reason: 'Returning to zero spacing restores the original native alpha');
+    expect(position.value, Duration.zero);
     await capturePlaylistFeature(tester, boundary, 'colour-emoji-end');
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
@@ -431,18 +512,22 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
       final appearance = ValueNotifier(DesktopLyricAppearance.defaults);
       final controller = LyricViewController(
           preferences: NowPlayingPagePreference.fromMap({}),
-          appearance: appearance)
+          appearance: appearance,
+          persistAppearance: () async {})
         ..lyricFontSize = 32
         ..lyricTextAlign = LyricTextAlign.left;
       final position = ValueNotifier(const Duration(seconds: 20));
-      addTearDown(controller.dispose);
-      addTearDown(appearance.dispose);
-      addTearDown(position.dispose);
       final LyricLine line = timed
           ? _Line([_Word(_spacingText, 0, 4000)])
           : LrcLine(Duration.zero, _spacingText, isBlank: false);
+      final reference =
+          _NativeSpacingReference(line, position, 32, whiteBackground: true);
+      addTearDown(controller.dispose);
+      addTearDown(reference.dispose);
+      addTearDown(appearance.dispose);
+      addTearDown(position.dispose);
       final boundary = GlobalKey();
-      await tester.pumpWidget(_host(ChangeNotifierProvider.value(
+      final actual = ChangeNotifierProvider.value(
           value: controller,
           child: RepaintBoundary(
               key: boundary,
@@ -455,137 +540,77 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
                           position: position,
                           opacity: 1,
                           distance: 0,
-                          reducedMotion: false)))))));
+                          reducedMotion: false)))));
+      await tester.pumpWidget(_host(Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [actual, reference.pane(600)])));
       await tester.pumpAndSettle();
-      final start = await _rgba(tester, boundary);
-      Future<_Raster> Function(double)? nativeRgba;
-      if (!timed) {
-        final source = _main(tester, _spacingText).single;
-        final paragraph = source.text;
-        final input = (
-          text: paragraph.text!.toPlainText(),
-          style: paragraph.text!.style!,
-          width: paragraph.width,
-          align: paragraph.textAlign,
-          direction: paragraph.textDirection,
-          scaler: paragraph.textScaler,
-          locale: paragraph.locale,
-          strut: paragraph.strutStyle,
-          maxLines: paragraph.maxLines,
-          ellipsis: paragraph.ellipsis,
-          widthBasis: paragraph.textWidthBasis,
-          heightBehavior: paragraph.textHeightBehavior,
-        );
-        final policy = AppFontScope.of(tester.element(source.finder));
-        final render = tester.renderObject<RenderBox>(source.finder);
-        final target = boundary.currentContext!.findRenderObject()!;
-        final transform = render.getTransformTo(target).storage;
-        final inkOffset = source.ink;
-        // Independent native tracking is shaped only by the fixture. It never
-        // supplies the production morph's cells, source picture or endpoints.
-        nativeRgba = (progress) async {
-          final reference = TextPainter(
-              text: appFontSpan(input.text,
-                  style: input.style.copyWith(
-                      letterSpacing:
-                          (input.style.letterSpacing ?? 0) + 8 * progress),
-                  policy: policy),
-              textAlign: input.align,
-              textDirection: input.direction,
-              textScaler: input.scaler,
-              locale: input.locale,
-              strutStyle: input.strut,
-              maxLines: input.maxLines,
-              ellipsis: input.ellipsis,
-              textWidthBasis: input.widthBasis,
-              textHeightBehavior: input.heightBehavior)
-            ..layout(minWidth: input.width, maxWidth: input.width);
-          try {
-            return (await tester.runAsync(() async {
-              final recorder = drawing.PictureRecorder();
-              final canvas = Canvas(recorder)
-                ..drawColor(Colors.white, BlendMode.src)
-                ..clipRect(Rect.fromLTWH(
-                    0, 0, start.width.toDouble(), start.height.toDouble()))
-                ..transform(transform)
-                ..translate(inkOffset.dx, inkOffset.dy);
-              reference.paint(canvas, Offset.zero);
-              final picture = recorder.endRecording();
-              final image = picture.toImageSync(start.width, start.height);
-              try {
-                return (
-                  width: image.width,
-                  height: image.height,
-                  rgba: Uint8List.fromList((await image.toByteData(
-                          format: drawing.ImageByteFormat.rawRgba))!
-                      .buffer
-                      .asUint8List()),
-                );
-              } finally {
-                image.dispose();
-                picture.dispose();
-              }
-            }))!;
-          } finally {
-            reference.dispose();
-          }
-        };
-        expect((await nativeRgba(0)).rgba, start.rgba,
-            reason: 'The independent paragraph first reproduces the exact '
-                'original font, native glyph raster and paint origin');
-      }
+      final start = await _expectNativeSpacing(
+          tester, boundary, reference, 'original native source timed=$timed');
+      final originalTracking =
+          _main(tester, _spacingText, within: find.byKey(boundary))
+                  .single
+                  .text
+                  .text!
+                  .style!
+                  .letterSpacing ??
+              0;
+      expect(_solidInk(start), greaterThan(200));
       await capturePlaylistFeature(
           tester, boundary, 'opaque-main-$timed-start');
+      reference.target(8);
       controller.setLyricLetterSpacing(8);
       await tester.pump();
-      if (!timed) {
-        final zero = await _rgba(tester, boundary);
-        expect(zero.rgba, start.rgba,
-            reason: 'Entering plain spacing keeps the exact original ink');
+      final target =
+          _main(tester, _spacingText, within: find.byKey(boundary)).single;
+      final nativeParagraph = target.text;
+      expect(nativeParagraph.text!.style!.letterSpacing, originalTracking + 8);
+      final zero = await _expectNativeSpacing(
+          tester, boundary, reference, 'first new-spacing frame timed=$timed');
+      expect(_solidInk(zero), 0,
+          reason: 'Old spacing is removed before the final target fades in');
+      for (final (elapsed, step) in [(16, 16), (32, 16), (90, 58)]) {
+        reference.at(elapsed);
+        await tester.pump(Duration(milliseconds: step));
+        final pixels = await _expectNativeSpacing(tester, boundary, reference,
+            'target native spacing timed=$timed at ${elapsed}ms');
+        final next =
+            _main(tester, _spacingText, within: find.byKey(boundary)).single;
+        expect(next.text, same(nativeParagraph),
+            reason: 'The final paragraph is shaped once and reused in motion');
+        expect(next.text.text!.style!.letterSpacing, originalTracking + 8);
+        expect(_inkX(pixels), greaterThan(_inkX(start) + .2),
+            reason: 'Real target ink moves early in the requested direction');
       }
-      final endpoints = _main(tester, _spacingText).map((p) => p.text).toList();
-      expect(endpoints, hasLength(2));
-      await tester.pump(const Duration(milliseconds: 16));
-      final early = await _rgba(tester, boundary);
-      if (!timed) {
-        double progressAt(int milliseconds) => LyricMotion.curve.transform(
-            milliseconds * 1000 / LyricMotion.lineDuration.inMicroseconds);
-        final native16 = await nativeRgba!(progressAt(16));
-        expect(early.rgba, native16.rgba,
-            reason: 'The first plain motion frame uses exact native tracking');
-        expect(_inkX(early), greaterThan(_inkX(start)),
-            reason: 'Native ink already moves in the requested direction');
-        await tester.pump(const Duration(milliseconds: 16));
-        final early32 = await _rgba(tester, boundary);
-        final native32 = await nativeRgba(progressAt(32));
-        expect(early32.rgba, native32.rgba,
-            reason: 'The next early frame keeps exact independent native ink');
-        // This real font moves about .069px at 16ms and .619px at 32ms with
-        // the unchanged lyric curve. Retain the .2px movement gate at 32ms;
-        // exact native pixels also reject a source-raster jump at either frame.
-        expect(_inkX(native32), greaterThan(_inkX(start) + .2));
-        expect(_inkX(early32), greaterThan(_inkX(start) + .2));
-        expect(_main(tester, _spacingText).map((p) => p.text), endpoints,
-            reason: 'Early samples keep the same two shaped endpoints');
-      } else {
-        expect(_inkX(early), greaterThan(_inkX(start) + .2),
-            reason:
-                'The existing early actual-ink motion contract is preserved');
-      }
-      await tester.pump(Duration(milliseconds: timed ? 74 : 58));
-      final middle = await _rgba(tester, boundary);
       await capturePlaylistFeature(tester, boundary, 'opaque-main-$timed-mid');
-      expect(_main(tester, _spacingText).map((p) => p.text), endpoints,
-          reason: 'Motion frames reuse fixed shaped endpoints');
-      _checkColor(start, middle, 'spacing mid-frame');
+      reference.target(3);
       controller.setLyricLetterSpacing(3);
       await tester.pump();
+      await _expectNativeSpacing(tester, boundary, reference,
+          'rapid retarget first frame timed=$timed');
+      final retarget =
+          _main(tester, _spacingText, within: find.byKey(boundary)).single.text;
+      expect(retarget.text!.style!.letterSpacing, originalTracking + 3);
+      expect(retarget, isNot(same(nativeParagraph)));
+      reference.at(40);
       await tester.pump(const Duration(milliseconds: 40));
-      _checkColor(start, await _rgba(tester, boundary), 'rapid retarget');
+      await _expectNativeSpacing(
+          tester, boundary, reference, 'rapid native target fade timed=$timed');
+      reference.progress.value = 1;
       await tester.pumpAndSettle();
-      await capturePlaylistFeature(tester, boundary, 'opaque-main-$timed-end');
+      final end = await _expectNativeSpacing(
+          tester, boundary, reference, 'final native target timed=$timed');
+      _checkColor(start, end, 'final native target');
+      expect(
+          _main(tester, _spacingText, within: find.byKey(boundary)).single.text,
+          same(retarget));
+      final endpoint = end.rgba;
+      await tester.pump(const Duration(milliseconds: 240));
+      expect((await _rgba(tester, boundary)).rgba, orderedEquals(endpoint),
+          reason:
+              'After the fade the native target keeps every endpoint pixel');
       expect(position.value, const Duration(seconds: 20));
-      expect(_main(tester, _spacingText), hasLength(1));
+      await capturePlaylistFeature(tester, boundary, 'opaque-main-$timed-end');
       await tester.pumpWidget(const SizedBox.shrink());
       expect(tester.binding.transientCallbackCount, 0);
       expect(tester.takeException(), isNull);
@@ -827,6 +852,136 @@ void main({bool onlyRender = false, String onlyCase = ''}) {
     await tester.pump();
     expect(tester.binding.transientCallbackCount, 0);
     expect(tester.takeException(), isNull);
+  });
+
+  motionTest(
+      'playing multiline ruby keeps centered and right stationary glyph ink',
+      (tester) async {
+    sizePlaylistFeature(tester, width: 800, height: 600);
+    const prefix = '夜空の海を渡り続ける\n';
+    const suffix = '航海   点';
+    const text = '$prefix$suffix';
+    const lastOffset = text.length - 1;
+    for (final align in [LyricTextAlign.center, LyricTextAlign.right]) {
+      final line = _Line([
+        _Word(prefix, 9000, 2000),
+        _Word('航海   ', 0, 2500),
+        _Word('点', 9000, 2000),
+      ])
+        ..japaneseReading = '夜空の海を渡り続ける こうかい 点'
+        ..japaneseReadingSpans = const [
+          JapaneseLyricReadingSpan(
+              start: prefix.length, end: prefix.length + 2, text: 'こうかい'),
+        ];
+      final appearance = ValueNotifier(DesktopLyricAppearance.defaults);
+      final controller = LyricViewController(
+          preferences: NowPlayingPagePreference.fromMap({}),
+          appearance: appearance)
+        ..lyricFontSize = 32
+        ..lyricTextAlign = align;
+      final positions = StreamController<double>.broadcast(sync: true);
+      var seconds = .05;
+      addTearDown(controller.dispose);
+      addTearDown(appearance.dispose);
+      addTearDown(positions.close);
+      final boundary = GlobalKey();
+      await tester.pumpWidget(_host(ChangeNotifierProvider.value(
+          value: controller,
+          child: RepaintBoundary(
+              key: boundary,
+              child: ColoredBox(
+                  color: Colors.white,
+                  child: SizedBox(
+                      width: 600,
+                      height: 440,
+                      child: VerticalLyricScrollView(
+                          lyric: _Document([line]),
+                          positionStream: positions.stream,
+                          readPosition: () => seconds,
+                          onSeek: (_) => fail('No seek is requested'),
+                          playing: true)))))));
+      for (var frame = 0; frame < 60; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      final original = _main(tester, text, within: find.byKey(boundary)).single;
+      final originalPainter = tester
+          .widget<CustomPaint>(original.finder)
+          .painter! as LyricWordHighlightPainter;
+      final metrics = original.text.computeLineMetrics();
+      expect(metrics, hasLength(2));
+      expect(metrics.first.width - metrics.last.width, greaterThan(100),
+          reason:
+              'A short second row has a substantial native alignment shift');
+      expect(originalPainter.rubyLayout!.glyphs.single.row, 1,
+          reason: 'The moving snapshot belongs to the short second row');
+      final source = original.text
+          .getBoxesForSelection(const TextSelection(
+              baseOffset: lastOffset, extentOffset: text.length))
+          .single
+          .toRect();
+      final lineShift = lyricAlignedOffset(
+          original.text.width, metrics.last.width, originalPainter.alignmentX!);
+      final local = source.shift(original.ink +
+          Offset(lineShift,
+              originalPainter.rubyLayout!.leadingForOffset(lastOffset)));
+      final paint = tester.renderObject<RenderBox>(original.finder);
+      final matrix =
+          paint.getTransformTo(boundary.currentContext!.findRenderObject());
+      final crop = MatrixUtils.transformRect(matrix, local);
+      // Native selection height includes blank leading. The stationary ROI
+      // must not accidentally count the legally moving reading above it.
+      expect(
+          MatrixUtils.transformRect(
+                  matrix, originalPainter.paintedRubyBounds.single)
+              .inflate(2)
+              .overlaps(crop),
+          isFalse,
+          reason:
+              'The actual moving Ruby ink is separated from the last glyph');
+      final start = await _rgba(tester, boundary);
+      final core = _coreInkBounds(start, crop, originalPainter.baseColor);
+      final movingSnapshots = <double>{};
+      final changingPixels = <int>{};
+      for (final milliseconds in [200, 600, 1200, 2200, 2800, 3200, 4600]) {
+        seconds = milliseconds / 1000;
+        positions.add(seconds);
+        await tester.pump(const Duration(milliseconds: 16));
+        final current =
+            _main(tester, text, within: find.byKey(boundary)).single;
+        final live = tester.widget<CustomPaint>(current.finder).painter!
+            as LyricWordHighlightPainter;
+        expect(current.text, same(original.text));
+        expect(current.layout, same(original.layout));
+        expect(live.followWordOffsets.last, 0,
+            reason: 'The final glyph is the existing stationary follow slot');
+        final currentMatrix = tester
+            .renderObject<RenderBox>(current.finder)
+            .getTransformTo(boundary.currentContext!.findRenderObject());
+        final actual = MatrixUtils.transformRect(currentMatrix, local);
+        expect(
+            MatrixUtils.transformRect(
+                    currentMatrix, live.paintedRubyBounds.single)
+                .inflate(2)
+                .overlaps(crop),
+            isFalse,
+            reason: 'Media keeps the real Ruby ink outside the stationary ROI');
+        _expectSameInkRect(actual, crop,
+            'Media preserves the actual $align multiline glyph geometry');
+        final pixels = await _rgba(tester, boundary);
+        _expectSameInkRect(_coreInkBounds(pixels, crop, live.baseColor), core,
+            'Media preserves the actual $align stationary dense glyph strokes');
+        movingSnapshots.add(live.paintedRubyBounds.single.top);
+        changingPixels.add(Object.hashAll(pixels.rgba));
+      }
+      expect(movingSnapshots.length, greaterThan(3),
+          reason: 'The real second-row reading snapshot moves with playback');
+      expect(changingPixels.length, greaterThan(3),
+          reason: 'The original highlight and emphasis still animate');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(tester.binding.transientCallbackCount, 0);
+      expect(tester.takeException(), isNull);
+    }
   });
 
   motionTest('playing ruby keeps desktop layout and stationary glyph ink',

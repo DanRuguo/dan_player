@@ -10,6 +10,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filter.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/gestures.dart';
@@ -116,23 +117,6 @@ List<LyricFractionalFilter> _rowFilters(WidgetTester tester, int index) =>
             matching: find.byType(LyricFractionalFilter)))
         .toList();
 
-double _viewportBlurFor(WidgetTester tester, int index, int current) {
-  final viewport = tester.getRect(_scroll);
-  final row = tester.getRect(find.byType(LyricViewTile).at(index));
-  final focus = tester.getRect(find.byType(LyricViewTile).at(current));
-  if (index == current || (index > current && index <= current + 2)) return 0;
-  final maximum = LyricMotion.blurForDistance(4);
-  if (index < current) {
-    final span = (focus.center.dy - viewport.top).clamp(1.0, double.infinity);
-    return maximum * ((focus.center.dy - row.center.dy) / span).clamp(0.0, 1.0);
-  }
-  final clearEdge = tester.getRect(find.byType(LyricViewTile).at(current + 2));
-  final span =
-      (viewport.bottom - clearEdge.center.dy).clamp(1.0, double.infinity);
-  return maximum *
-      ((row.center.dy - clearEdge.center.dy) / span).clamp(0.0, 1.0);
-}
-
 Future<void> _advance(
     WidgetTester tester, _Fixture fixture, double value) async {
   fixture.emit(value);
@@ -169,10 +153,11 @@ void main() {
   });
 
   testWidgets(
-      'the next two lyric lines stay clear and context blurs across the viewport',
+      'fixed viewport blur keeps its boundaries when the current lyric advances',
       (tester) async {
     await (FontLoader(danEmbeddedFontFamily)
-          ..addFont(rootBundle.load('packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
+          ..addFont(rootBundle.load(
+              'packages/desktop_lyric/assets/fonts/PingFangSC-Regular.ttf')))
         .load();
     final fixture = _Fixture(chinese: true);
     tester.view.physicalSize = const Size(960, 800);
@@ -186,16 +171,27 @@ void main() {
     await tester.pumpAndSettle();
 
     var effects = _effects(tester);
-    expect(effects[99].blur, closeTo(_viewportBlurFor(tester, 99, 100), .01));
-    expect(effects[100].blur, 0);
-    for (final index in [101, 102]) {
-      expect(effects[index].blur, 0, reason: 'Upcoming line $index');
-    }
-    for (final index in [103, 104]) {
-      expect(effects[index].blur,
-          closeTo(_viewportBlurFor(tester, index, 100), .01));
-      expect(effects[index].blur, greaterThan(0));
-    }
+    expect(effects.every((effect) => effect.blur == 0), isTrue,
+        reason:
+            'Blur belongs to the composed viewport, rather than line count');
+    final viewport = tester.getRect(_scroll);
+    final mask =
+        tester.widget<LyricViewportBlur>(find.byType(LyricViewportBlur));
+    expect(mask.enabled, isTrue);
+    final bands = find.byType(BackdropFilter);
+    expect(bands, findsNWidgets(12));
+    final bounds = [for (var i = 0; i < 12; i++) tester.getRect(bands.at(i))];
+    final topBand = bounds.take(6).reduce((a, b) => a.expandToInclude(b));
+    final bottomBand = bounds.skip(6).reduce((a, b) => a.expandToInclude(b));
+    expect(
+        topBand,
+        Rect.fromLTWH(viewport.left, viewport.top, viewport.width,
+            viewport.height * mask.topFraction));
+    expect(bottomBand.top,
+        closeTo(viewport.bottom - viewport.height * mask.bottomFraction, .01));
+    expect(bottomBand.bottom, closeTo(viewport.bottom, .01));
+    expect(bottomBand.left, viewport.left);
+    expect(bottomBand.width, viewport.width);
     for (final index in [100, 101, 102]) {
       final filters = _rowFilters(tester, index);
       expect(filters, isNotEmpty);
@@ -226,11 +222,11 @@ void main() {
     await _advance(tester, fixture, 404.1);
     await tester.pumpAndSettle();
     effects = _effects(tester);
-    expect(effects[100].blur, closeTo(_viewportBlurFor(tester, 100, 101), .01));
-    for (final index in [102, 103]) {
-      expect(effects[index].blur, 0, reason: 'Upcoming line $index');
+    expect(effects.every((effect) => effect.blur == 0), isTrue);
+    for (var i = 0; i < bounds.length; i++) {
+      expect(tester.getRect(bands.at(i)), bounds[i],
+          reason: 'Advancing playback must not move a fixed blur boundary');
     }
-    expect(effects[104].blur, greaterThan(0));
     for (final index in [102, 103]) {
       final filters = _rowFilters(tester, index);
       expect(filters, isNotEmpty);

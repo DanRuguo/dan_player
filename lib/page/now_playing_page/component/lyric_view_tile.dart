@@ -40,6 +40,7 @@ class LyricViewTile extends StatelessWidget {
     this.onPractice,
     this.onContentRevealEnd,
     this.onPresentationEnd,
+    this.heldReadingOffset,
   });
 
   final LyricLine line;
@@ -55,6 +56,10 @@ class LyricViewTile extends StatelessWidget {
   final VoidCallback? onPractice;
   final VoidCallback? onContentRevealEnd;
   final VoidCallback? onPresentationEnd;
+
+  /// Supplied by the viewport only while a found glyph owns its position.
+  /// The controller may retain search metadata after direct scrolling takes over.
+  final int? heldReadingOffset;
 
   @override
   Widget build(BuildContext context) {
@@ -692,22 +697,55 @@ class LyricViewTile extends StatelessWidget {
                           final target = blank
                               ? _LyricParagraphSurface(child: contents)
                               : contents;
+                          final heldOffset = heldReadingOffset;
+                          double? Function(RenderBox)? readingY;
+                          if (heldOffset != null) {
+                            readingY = (ancestor) {
+                              double? result;
+                              void visit(Element element) {
+                                if (result != null) return;
+                                if (element is StatefulElement &&
+                                    element.state is LyricTextReadingGeometry) {
+                                  final geometry =
+                                      element.state as LyricTextReadingGeometry;
+                                  final ownsPrimary = syncLine == null
+                                      ? geometry.readingText == parts.first
+                                      : geometry is TimedLyricReadingGeometry &&
+                                          identical(geometry.readingLine, line);
+                                  if (ownsPrimary) {
+                                    result = geometry.readingLayoutY(
+                                        heldOffset, ancestor);
+                                  }
+                                }
+                                if (result == null) {
+                                  element.visitChildren(visit);
+                                }
+                              }
+
+                              visit(context as Element);
+                              return result;
+                            };
+                          }
+
                           // Match the target-size preview: retire old spacing
                           // immediately and enter all tracks together. Keep the
                           // wrapper at rest so the target survives the last frame.
                           return Opacity(
                             opacity: spacingMoving ? spacingProgress : 1,
                             alwaysIncludeSemantics: true,
-                            child: Transform.scale(
+                            child: LyricSpacingScale(
                               scale: spacingMoving
-                                  ? .99 + .01 * spacingProgress
+                                  ? LyricMotion.spacingScale(spacingProgress)
                                   : 1,
                               alignment: Alignment(
                                 presentation.alignment.x,
                                 -1,
                               ),
-                              filterQuality:
-                                  spacingMoving ? FilterQuality.low : null,
+                              moving: spacingMoving,
+                              readingIdentity: heldOffset == null
+                                  ? null
+                                  : (line, heldOffset),
+                              readingY: readingY,
                               child: target,
                             ),
                           );
@@ -1323,6 +1361,39 @@ class _TimedLyricLayout {
   double get fontSize => paragraph.fontSize;
   late final double topInkGuard = lyricTopInkGuard(base);
 
+  /// Native snapshot allocation includes transparent padding. Retain that
+  /// complete rectangle through the existing word and follow pose envelope,
+  /// so moving readings cannot shift an otherwise stationary source origin.
+  late final Rect? rubySamplingCoverage = () {
+    final reading = ruby;
+    if (reading == null || reading.glyphs.isEmpty) return null;
+    final padding = reading.extent * 2 + 24;
+    final maximumLift = math.min(6.0, fontSize * .10) * 1.6;
+    const maximumScale = LyricWordEffects.maximumScaleExpansion * 1.6;
+    final followOffset = math.min(10.0, fontSize * .22);
+    final verticalMotion =
+        maximumLift + base.height * maximumScale / 2 + followOffset;
+    Rect? coverage;
+    for (final glyph in reading.glyphs) {
+      final snapshot = (glyph.offset & glyph.painter.size).inflate(padding);
+      // Wrapped short rows can travel across the full paragraph width while
+      // alignment changes. Cover both endpoints once, including negative
+      // shifts from native overhang, instead of resampling at each alignment.
+      final alignmentShift = lyricAlignedOffset(base.width, glyph.lineWidth, 1);
+      final bounds = Rect.fromLTRB(
+        snapshot.left + math.min(0.0, alignmentShift) - 10,
+        snapshot.top - verticalMotion,
+        snapshot.right + math.max(0.0, alignmentShift) + 10,
+        snapshot.bottom +
+            verticalMotion +
+            reading.insetAt(1) +
+            reading.leadingForGlyph(glyph),
+      );
+      coverage = coverage == null ? bounds : coverage.expandToInclude(bounds);
+    }
+    return coverage;
+  }();
+
   /// Color is part of the paragraph's glyph draw, not an offscreen alpha mask.
   /// This keeps the shaped text in the same display list as the outer fractional
   /// filter, including when a timed line has independently moving characters.
@@ -1556,7 +1627,7 @@ typedef _TimedLyricPose = ({
 /// Paints only the actual timed words; updates repaint the active paragraph,
 /// rather than rebuilding every lyric row at the 33ms playback sampling rate.
 class LyricWordHighlightPainter extends CustomPainter
-    implements LyricGlyphMorphConsumer {
+    implements LyricGlyphMorphConsumer, LyricSamplingSource {
   LyricWordHighlightPainter._({
     required _TimedLyricLayout layout,
     required this.line,
@@ -1601,6 +1672,19 @@ class LyricWordHighlightPainter extends CustomPainter
   Object get glyphLayoutIdentity => _layout;
   @override
   double get glyphPixelRatio => _layout.pixelRatio;
+  @override
+  ({Object identity, Rect? bounds}) get samplingSource => (
+        identity: (
+          _layout.paragraph,
+          _layout.maxWidth,
+          _layout.pixelRatio,
+          rubyRasterScale,
+        ),
+        bounds: rubyRasterScale == null
+            ? null
+            : _layout.rubySamplingCoverage
+                ?.shift(Offset(inkOffset.dx, lyricVerticalInkGuard)),
+      );
   @override
   Offset get glyphInkOffset => inkOffset;
   @override

@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -7,8 +8,10 @@ import 'package:desktop_lyric/ui_language.dart';
 
 import '../library/audio_library.dart';
 import '../library/folder_tree.dart';
+import '../rendering_preferences.dart';
 import 'app_content_scrollbar.dart';
 import 'app_entrance.dart';
+import 'app_shape.dart';
 import 'now_playing_bar_metrics.dart';
 import 'playlist_tree_pane.dart';
 
@@ -37,6 +40,7 @@ class FolderTreePane extends StatefulWidget {
     required this.songBuilder,
     required this.footer,
     this.controller,
+    this.hidden,
     this.sortingFolders = const {},
   });
 
@@ -47,18 +51,132 @@ class FolderTreePane extends StatefulWidget {
   final FolderTreeSongBuilder songBuilder;
   final Widget footer;
   final ScrollController? controller;
+  final ValueListenable<bool>? hidden;
   final Set<String> sortingFolders;
 
   @override
   State<FolderTreePane> createState() => _FolderTreePaneState();
 }
 
-class _FolderTreePaneState extends State<FolderTreePane> {
+class _FolderTreePaneState extends State<FolderTreePane>
+    with WidgetsBindingObserver {
   FolderTree? _tree;
   Set<String> _expanded = {}, _sorting = {};
   Map<String, List<Audio>> _sources = {};
   double? _width;
   _FolderTreeRows? _rows;
+  final _pendingSongs = ListQueue<_FolderSongMountState>();
+  final _reservedSongs = <_FolderSongMountState>{};
+  final _mountedSongs = <(String, String)>{};
+  ValueListenable<RenderingPreferences>? _preferences;
+  AppLifecycleState? _lifecycle;
+  bool _treeVisible = true, _mountFrameScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = WidgetsBinding.instance.lifecycleState;
+    WidgetsBinding.instance.addObserver(this);
+    widget.hidden?.addListener(_scheduleSongMounts);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final preferences = RenderingPreferencesScope.listenableOf(context);
+    if (!identical(preferences, _preferences)) {
+      _preferences?.removeListener(_scheduleSongMounts);
+      _preferences = preferences..addListener(_scheduleSongMounts);
+    }
+    _treeVisible = TickerMode.valuesOf(context).enabled;
+    _scheduleSongMounts();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
+    _scheduleSongMounts();
+  }
+
+  @override
+  void didUpdateWidget(FolderTreePane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.hidden, widget.hidden)) {
+      oldWidget.hidden?.removeListener(_scheduleSongMounts);
+      widget.hidden?.addListener(_scheduleSongMounts);
+    }
+    _scheduleSongMounts();
+  }
+
+  bool get _canMountSongs =>
+      mounted &&
+      (_preferences?.value ?? const RenderingPreferences()).allowsVisualUpdates(
+        lifecycle: _lifecycle,
+        treeVisible: _treeVisible,
+        nativeHidden: widget.hidden?.value ?? false,
+      );
+
+  void _scheduleSongMounts() {
+    if (!_canMountSongs) {
+      // A post-frame reservation may precede native minimization. These cells
+      // are already dirty but have not built their card; return only that batch
+      // to the queue, leaving all displayed cards and their focus untouched.
+      for (final song in _reservedSongs.toList().reversed) {
+        song._ready = false;
+        _pendingSongs.addFirst(song);
+      }
+      _reservedSongs.clear();
+      return;
+    }
+    if (_mountFrameScheduled || _pendingSongs.isEmpty) return;
+    _mountFrameScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _mountFrameScheduled = false;
+      if (!_canMountSongs) return;
+      // The sliver already bounds this queue to mounted viewport/cache cells.
+      // Spread cold Text/AudioArtwork construction over frames, not just their
+      // opacity. Existing rows keep their final geometry and scroll extent.
+      for (var admitted = 0; admitted < 4 && _pendingSongs.isNotEmpty;) {
+        final song = _pendingSongs.removeFirst();
+        if (!song.mounted) continue;
+        _reservedSongs.add(song);
+        song.admit();
+        admitted++;
+      }
+      _scheduleSongMounts();
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _queueSong(_FolderSongMountState song) {
+    _pendingSongs.add(song);
+    _scheduleSongMounts();
+  }
+
+  void _songMounted(_FolderSongMountState song) {
+    _reservedSongs.remove(song);
+    _mountedSongs.remove(song.widget.identity);
+    _mountedSongs.add(song.widget.identity);
+    while (_mountedSongs.length > 4096) {
+      _mountedSongs.remove(_mountedSongs.first);
+    }
+  }
+
+  void _cancelSong(_FolderSongMountState song) {
+    _pendingSongs.remove(song);
+    _reservedSongs.remove(song);
+  }
+
+  @override
+  void dispose() {
+    _preferences?.removeListener(_scheduleSongMounts);
+    widget.hidden?.removeListener(_scheduleSongMounts);
+    WidgetsBinding.instance.removeObserver(this);
+    _pendingSongs.clear();
+    _reservedSongs.clear();
+    _mountedSongs.clear();
+    super.dispose();
+  }
 
   _FolderTreeRows _project(double width) {
     if (_rows != null &&
@@ -193,12 +311,7 @@ class _FolderTreePaneState extends State<FolderTreePane> {
                         SizedBox.square(
                           dimension: row.coverSize! + 6,
                           child: row.first! + column < row.songs!.length
-                              ? widget.songBuilder(
-                                  context,
-                                  node,
-                                  row.songs![row.first! + column],
-                                  row.first! + column,
-                                  row.coverSize!)
+                              ? _songCell(context, row, row.first! + column)
                               : null,
                         ),
                       ],
@@ -207,6 +320,94 @@ class _FolderTreePaneState extends State<FolderTreePane> {
                 },
               );
             }));
+  }
+
+  Widget _songCell(BuildContext context, _VisibleFolderRow row, int index) {
+    final audio = row.songs![index];
+    if (row.songs!.length <= 512) {
+      return widget.songBuilder(
+          context, row.node, audio, index, row.coverSize!);
+    }
+    final identity = (row.node.id, audio.path);
+    return _FolderSongMount(
+        key: ValueKey(identity),
+        owner: this,
+        identity: identity,
+        deferred: !_mountedSongs.contains(identity),
+        title: audio.displayTitle,
+        builder: (context) => widget.songBuilder(
+            context, row.node, audio, index, row.coverSize!));
+  }
+}
+
+/// A cheap, stationary slot until its bounded viewport batch is admitted.
+/// Only the actual card mounts later; its original gestures, focus, semantics,
+/// artwork loader and finite entrance remain owned by the normal song builder.
+class _FolderSongMount extends StatefulWidget {
+  const _FolderSongMount(
+      {super.key,
+      required this.owner,
+      required this.identity,
+      required this.deferred,
+      required this.title,
+      required this.builder});
+  final _FolderTreePaneState owner;
+  final (String, String) identity;
+  final bool deferred;
+  final String title;
+  final WidgetBuilder builder;
+
+  @override
+  State<_FolderSongMount> createState() => _FolderSongMountState();
+}
+
+class _FolderSongMountState extends State<_FolderSongMount> {
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ready = !widget.deferred;
+    if (!_ready) widget.owner._queueSong(this);
+  }
+
+  @override
+  void didUpdateWidget(_FolderSongMount oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_ready && !widget.deferred) {
+      widget.owner._cancelSong(this);
+      _ready = true;
+    }
+  }
+
+  void admit() {
+    if (!_ready) setState(() => _ready = true);
+  }
+
+  @override
+  void dispose() {
+    widget.owner._cancelSong(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_ready) {
+      widget.owner._songMounted(this);
+      return widget.builder(context);
+    }
+    return Semantics(
+        label: widget.title,
+        button: true,
+        enabled: false,
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: DecoratedBox(
+              decoration: BoxDecoration(
+                  borderRadius: AppShape.smallRadius,
+                  color:
+                      Theme.of(context).colorScheme.surfaceContainerHighest)),
+        ));
   }
 }
 

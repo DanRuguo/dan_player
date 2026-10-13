@@ -258,8 +258,8 @@ void main() {
     await mouse.moveTo(tester.getTopLeft(tile) + const Offset(28, 28));
     await tester.pump(const Duration(milliseconds: 800));
     await tester.pumpAndSettle();
-    expect(find.text(musicPath), findsNWidgets(2),
-        reason: 'Manual touch trigger keeps real mouse hover path tooltip');
+    expect(find.text(musicPath), findsOneWidget,
+        reason: 'An ordinary-width card keeps its path without a hover copy');
     await mouse.removePointer();
   });
 

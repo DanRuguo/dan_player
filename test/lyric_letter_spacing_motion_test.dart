@@ -23,6 +23,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'lyric_letter_spacing_render_test.dart' show loadLetterSpacingFonts;
+import 'lyric_letter_spacing_visible_feedback_test.dart'
+    show expectMainSpacingGroup;
 import 'support/playlist_feature_fixture.dart' show capturePlaylistFeature;
 
 const _parts = ['晨光かな ', 'Moonlight e\u0301 ', '👩🏽‍🚀 한글 ', 'שלום 終点'];
@@ -281,7 +283,7 @@ void main({bool onlyRender = false}) {
   for (final timed in nativeCase.isEmpty ? [false, true] : const <bool>[]) {
     for (final rtl in [false, true]) {
       testWidgets(
-          'spacing main ${timed ? 'timed' : 'plain'} endpoints stay shaped through wrap rtl=$rtl',
+          'spacing main ${timed ? 'timed' : 'plain'} target stays shaped through wrap rtl=$rtl',
           (tester) async {
         final appearance = ValueNotifier(DesktopLyricAppearance.defaults);
         final controller = LyricViewController(
@@ -346,16 +348,30 @@ void main({bool onlyRender = false}) {
         }
         controller.setLyricLetterSpacing(8);
         await tester.pump();
-        expect(
-            tester.getSize(find.byKey(tile)).height, closeTo(oldHeight, .01));
+        final targetHeight = tester.getSize(find.byKey(tile)).height;
+        expect(targetHeight, greaterThan(oldHeight),
+            reason: 'Wrapping uses the complete target spacing on frame zero');
         final endpoints = _mainPainters(tile);
-        expect(endpoints, hasLength(2));
+        expect(endpoints, hasLength(1));
         expect(endpoints.map((entry) => entry.text.text!.style!.letterSpacing),
-            [.5, 8.5]);
+            [8.5]);
+        final paragraph = find.descendant(
+            of: find.byKey(tile),
+            matching: find.byWidgetPredicate((widget) =>
+                widget is CustomPaint &&
+                (widget.painter is PlainLyricWordFollowPainter ||
+                    widget.painter is LyricWordHighlightPainter)));
+        expectMainSpacingGroup(tester, paragraph, 0);
         for (var frame = 0; frame < 5; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
+          final progress = LyricMotion.curve.transform(
+              (frame + 1) * 16 / LyricMotion.spacingDuration.inMilliseconds);
+          expectMainSpacingGroup(tester, paragraph, progress);
           expect(_mainPainters(tile).map((entry) => entry.text),
               endpoints.map((entry) => entry.text));
+          expect(tester.getSize(find.byKey(tile)).height, targetHeight,
+              reason:
+                  'Only the target ink moves; wrapping does not grow per frame');
           if (timed) {
             for (final entry in _mainPainters(tile)) {
               expect(
@@ -369,16 +385,27 @@ void main({bool onlyRender = false}) {
         final middle = await _rgba(tester, root);
         _expectGlyphInk(middle);
         expect(middle, isNot(initial));
-        expect(middleHeight, greaterThan(oldHeight));
+        expect(middleHeight, targetHeight);
         if (!timed && !rtl) {
           await capturePlaylistFeature(tester, root, 'spacing-motion-main-mid');
         }
-        final beforeReverse = middleHeight;
         controller.setLyricLetterSpacing(1);
         await tester.pump();
-        expect(tester.getSize(find.byKey(tile)).height,
-            closeTo(beforeReverse, .05));
+        final reversedHeight = tester.getSize(find.byKey(tile)).height;
+        expect(_mainPainters(tile), hasLength(1));
+        expect(_mainPainters(tile).single.text.text!.style!.letterSpacing, 1.5);
+        expectMainSpacingGroup(tester, paragraph, 0);
+        await tester.pump(const Duration(milliseconds: 32));
+        expectMainSpacingGroup(
+            tester,
+            paragraph,
+            LyricMotion.curve
+                .transform(32 / LyricMotion.spacingDuration.inMilliseconds));
+        expect(tester.getSize(find.byKey(tile)).height, reversedHeight);
+        _expectGlyphInk(await _rgba(tester, root));
         await tester.pumpAndSettle();
+        expectMainSpacingGroup(tester, paragraph, 1);
+        expect(tester.getSize(find.byKey(tile)).height, reversedHeight);
         expect(_mainPainters(tile), hasLength(1));
         final finalText = _mainPainters(tile).single.text;
         expect(finalText.text!.toPlainText(), _text);
@@ -491,10 +518,12 @@ void main({bool onlyRender = false}) {
             await _pumpFrameStamp(tester, () => tester.pumpWidget(host()));
         final targetSize =
             tester.getSize(find.byKey(naturalTarget, skipOffstage: false));
+        // Desktop spacing retains its 480ms lyric clock and existing curve.
+        // Only the main player's target-group entrance uses the shorter tier.
         final elapsed = (frame - spacingStart).inMicroseconds /
-            AppMotion.standard.inMicroseconds;
+            AppMotion.lyricLine.inMicroseconds;
         final expected = Size.lerp(before, targetSize,
-            AppMotion.standardCurve.transform(elapsed.clamp(0.0, 1.0)))!;
+            LyricMotion.curve.transform(elapsed.clamp(0.0, 1.0)))!;
         final actual = tester.getSize(find.byKey(boundary));
         expect(actual.width, closeTo(expected.width, .05));
         expect(actual.height, closeTo(expected.height, .05));

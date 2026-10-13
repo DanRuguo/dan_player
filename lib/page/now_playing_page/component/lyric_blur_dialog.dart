@@ -16,15 +16,15 @@ Future<void> showLyricBlurDialog(
   await showAppDialog<void>(
       context: context,
       builder: (_) => LyricBlurDialog(controller: controller));
-  await _persistBlur(context, controller);
+  await _persistBlur(context.mounted ? context : null, controller);
 }
 
 Future<void> _persistBlur(
-    BuildContext context, LyricViewController controller) async {
+    BuildContext? context, LyricViewController controller) async {
   try {
     await controller.persistBlurPreferences();
   } catch (_) {
-    if (context.mounted) {
+    if (context != null && context.mounted) {
       showAppNotice(ui('设置保存失败，请重试'),
           context: context, kind: AppNoticeKind.error);
     }
@@ -129,7 +129,12 @@ class LyricBlurDialog extends StatelessWidget {
                                       gradient: LinearGradient(
                                         begin: Alignment.topCenter,
                                         end: Alignment.bottomCenter,
-                                        colors: [colors.top, colors.clear],
+                                        colors: [
+                                          colors.top,
+                                          colors.top,
+                                          colors.clear
+                                        ],
+                                        stops: const [0, 1 / 3, 1],
                                       ),
                                     ),
                                   ),
@@ -147,7 +152,12 @@ class LyricBlurDialog extends StatelessWidget {
                                       gradient: LinearGradient(
                                         begin: Alignment.topCenter,
                                         end: Alignment.bottomCenter,
-                                        colors: [colors.clear, colors.bottom],
+                                        colors: [
+                                          colors.clear,
+                                          colors.bottom,
+                                          colors.bottom
+                                        ],
+                                        stops: const [0, 2 / 3, 1],
                                       ),
                                     ),
                                   ),

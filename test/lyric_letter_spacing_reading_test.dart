@@ -12,6 +12,7 @@ import 'package:dan_player/page/now_playing_page/component/lyric_view_tile.dart'
 import 'package:dan_player/page/now_playing_page/component/vertical_lyric_view.dart';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
 import 'package:desktop_lyric/font_policy.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -211,4 +212,122 @@ void main() {
       });
     }
   }
+
+  testWidgets('manual reading retires the found glyph scale origin',
+      (tester) async {
+    sizePlaylistFeature(tester, width: 800, height: 720);
+    final text = '${'雨に歌う reading é 밤의 노래 ' * 24}Needle 终点';
+    final actualDocument = PlainLyric(text);
+    final referenceDocument = PlainLyric(text);
+    final actualAppearance = ValueNotifier(DesktopLyricAppearance.defaults);
+    final referenceAppearance = ValueNotifier(DesktopLyricAppearance.defaults);
+    final actualSettings = LyricViewController(
+        preferences: NowPlayingPagePreference.fromMap({}),
+        appearance: actualAppearance)
+      ..lyricTextAlign = LyricTextAlign.left;
+    final referenceSettings = LyricViewController(
+        preferences: NowPlayingPagePreference.fromMap({}),
+        appearance: referenceAppearance)
+      ..lyricTextAlign = LyricTextAlign.left
+      ..setReadingMode(true);
+    final actual = GlobalKey(), reference = GlobalKey(), boundary = GlobalKey();
+    addTearDown(actualSettings.dispose);
+    addTearDown(referenceSettings.dispose);
+    addTearDown(actualAppearance.dispose);
+    addTearDown(referenceAppearance.dispose);
+    Widget surface(
+            GlobalKey key, Lyric document, LyricViewController settings) =>
+        SizedBox(
+          key: key,
+          width: 340,
+          height: 600,
+          child: ChangeNotifierProvider.value(
+            value: settings,
+            child: VerticalLyricScrollView(
+              lyric: document,
+              positionStream: const Stream<double>.empty(),
+              readPosition: () => 2.3,
+              onSeek: (_) =>
+                  fail('Changing a reading pose cannot seek playback'),
+              playing: false,
+              springLyrics: false,
+            ),
+          ),
+        );
+    await tester.pumpWidget(playlistFeatureHost(
+        AppFontScope(
+          policy: AppFontPolicy.defaults(),
+          child: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                surface(actual, actualDocument, actualSettings),
+                surface(reference, referenceDocument, referenceSettings),
+              ],
+            ),
+          ),
+        ),
+        boundary: boundary));
+    await tester.pumpAndSettle();
+    final target = LyricReadingTarget(
+        actualDocument, 0, actualDocument.lines.single,
+        textOffset: text.indexOf('Needle'));
+    actualSettings.revealForReading(target);
+    await tester.pumpAndSettle();
+    Finder scroll(GlobalKey key) => find.descendant(
+        of: find.byKey(key),
+        matching: find.byKey(const ValueKey('vertical-lyric-scroll')));
+    ScrollController controller(GlobalKey key) =>
+        tester.widget<CustomScrollView>(scroll(key)).controller!;
+    controller(reference).jumpTo(controller(actual).offset);
+    await tester.pump();
+
+    // Both receive the same actual wheel input. Only the left surface has
+    // stale search metadata, which must no longer select the scale pivot.
+    for (final key in [actual, reference]) {
+      tester.binding.handlePointerEvent(PointerScrollEvent(
+          position: tester.getCenter(scroll(key)),
+          scrollDelta: const Offset(0, -60)));
+    }
+    await tester.pumpAndSettle();
+    expect(actualSettings.readingTarget, same(target));
+    expect(referenceSettings.readingTarget, isNull);
+    expect(
+        controller(actual).offset, closeTo(controller(reference).offset, .1));
+    double glyphY(GlobalKey key, int offset) {
+      final finder = find.descendant(
+          of: find.byKey(key),
+          matching: find.byWidgetPredicate((widget) =>
+              widget is CustomPaint &&
+              widget.painter is PlainLyricWordFollowPainter));
+      final painter = tester.widget<CustomPaint>(finder).painter!
+          as PlainLyricWordFollowPainter;
+      final cluster = text.substring(offset).characters.first;
+      final box = painter.text
+          .getBoxesForSelection(TextSelection(
+              baseOffset: offset, extentOffset: offset + cluster.length))
+          .first;
+      return tester
+          .renderObject<RenderBox>(finder)
+          .localToGlobal(Offset(0, box.top + painter.inkOffset.dy))
+          .dy;
+    }
+
+    actualSettings.setLyricLetterSpacing(3);
+    referenceSettings.setLyricLetterSpacing(3);
+    await tester.pump();
+    for (var frame = 0; frame < 13; frame++) {
+      for (final offset in [0, text.indexOf('Needle')]) {
+        expect(glyphY(actual, offset), closeTo(glyphY(reference, offset), .1),
+            reason:
+                'Retired search metadata cannot move the scaled native glyph '
+                'at frame $frame, offset $offset');
+      }
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await _checkInk(tester, boundary, tester.getRect(scroll(actual)));
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
 }

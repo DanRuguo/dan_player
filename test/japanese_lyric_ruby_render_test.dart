@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_reading_tools.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
@@ -22,6 +23,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'lyric_letter_spacing_render_test.dart' show loadLetterSpacingFonts;
+import 'lyric_letter_spacing_visible_feedback_test.dart'
+    show expectMainSpacingGroup;
 import 'support/playlist_feature_fixture.dart'
     show capturePlaylistFeature, sizePlaylistFeature;
 
@@ -378,15 +381,61 @@ void main({bool onlyRender = false}) {
       controller.setLyricLetterSpacing(8);
       await tester.pump();
       final shapes = endpoints();
-      expect(shapes, hasLength(2));
+      expect(shapes, hasLength(1),
+          reason:
+              'Spacing enters the final primary and ruby layout immediately');
+      Finder primary() => find.descendant(
+          of: find.byKey(boundary),
+          matching: find.byWidgetPredicate((widget) =>
+              widget is CustomPaint &&
+              (widget.painter is LyricWordHighlightPainter ||
+                  (widget.painter is PlainLyricWordFollowPainter &&
+                      (widget.painter as PlainLyricWordFollowPainter)
+                              .text
+                              .text!
+                              .toPlainText() ==
+                          _text))));
+      expectMainSpacingGroup(tester, primary(), 0);
       for (final endpoint in shapes) {
         _horizontalRuby(endpoint.ruby, 33);
       }
       await tester.pump(const Duration(milliseconds: 32));
+      expectMainSpacingGroup(
+          tester,
+          primary(),
+          LyricMotion.curve
+              .transform(32 / LyricMotion.spacingDuration.inMilliseconds));
+      final group = find
+          .ancestor(
+              of: primary(),
+              matching: find.byWidgetPredicate((widget) =>
+                  widget is Transform &&
+                  widget.filterQuality == FilterQuality.low))
+          .evaluate()
+          .single;
+      for (final auxiliary in find
+          .descendant(
+              of: find.byKey(boundary),
+              matching: find.byWidgetPredicate((widget) =>
+                  widget is CustomPaint &&
+                  widget.painter is PlainLyricWordFollowPainter))
+          .evaluate()) {
+        final owner = find
+            .ancestor(
+                of: find.byWidget(auxiliary.widget),
+                matching: find.byWidgetPredicate((widget) =>
+                    widget is Transform &&
+                    widget.filterQuality == FilterQuality.low))
+            .evaluate()
+            .single;
+        expect(owner, same(group),
+            reason:
+                'Romanization and translation use the exact same group transform');
+      }
       expect(await _pixels(tester, boundary), isNot(before));
       expect(endpoints(), shapes,
           reason:
-              'Presentation frames reuse both fixed primary/ruby endpoints');
+              'Presentation frames reuse the fixed target primary/ruby shapes');
       await capturePlaylistFeature(
           tester, boundary, 'ruby-spacing-${timed ? 'timed' : 'plain'}-mid');
       await tester.pumpAndSettle();
