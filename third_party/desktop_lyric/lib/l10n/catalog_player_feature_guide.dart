@@ -1,4 +1,10 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '导出队列与搜索结果': ['Export the queue and search results', 'キューと検索結果の書き出し', '대기열과 검색 결과 내보내기'],
+  '在播放队列顶栏点“导出队列或搜索结果”图标，选择“导出队列为 M3U8”或“导出队列音乐文件夹”。输入搜索词后，菜单还可选择“导出搜索结果为 M3U8”或“导出搜索结果音乐文件夹”。文件选择窗口打开前会固定所选范围的歌曲与顺序，保留重复引用；之后切歌或修改搜索不会改变这次导出。': [
+    'On the queue toolbar, select the “Export queue or search results” icon, then choose “Export queue as M3U8” or “Export queue as music folder”. With a search term entered, the menu also offers “Export search results as M3U8” and “Export search results as music folder”. The selected tracks and their order are captured before the file picker opens, including repeated references. Changing tracks or the search afterward does not change this export.',
+    'キュー上部の「キューまたは検索結果を書き出す」アイコンから、「キューをM3U8に書き出す」または「キューを音楽フォルダーに書き出す」を選びます。検索語を入力すると、「検索結果をM3U8に書き出す」と「検索結果を音楽フォルダーに書き出す」も選べます。保存先の選択画面を開く前に、選んだ範囲の曲と順序を重複する参照も含めて固定します。その後に曲や検索語を変えても、今回の書き出し内容は変わりません。',
+    '대기열 위쪽의 “대기열 또는 검색 결과 내보내기” 아이콘에서 “대기열을 M3U8로 내보내기” 또는 “대기열을 음악 폴더로 내보내기”를 선택하세요. 검색어를 입력하면 “검색 결과를 M3U8로 내보내기”와 “검색 결과를 음악 폴더로 내보내기”도 선택할 수 있습니다. 저장 위치 선택 창이 열리기 전에 선택한 범위의 곡과 순서를 중복 참조까지 포함해 고정합니다. 이후 곡이나 검색어를 바꿔도 이번 내보내기 내용은 바뀌지 않습니다.',
+  ],
   '试一试：收听趋势': ['Try it: listening trends', '試す：再生時間の推移', '체험: 감상 추이'],
   '这里使用固定示例记录。可以切换范围和曲线，点按日期或用方向键查看；不会读取或保存你的听歌记录。': [
     'This chart uses fixed sample records. Switch ranges and curves, tap a date or use the arrow keys to explore. Your listening records are neither read nor saved.',

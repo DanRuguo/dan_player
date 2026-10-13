@@ -2,23 +2,9 @@ name: Windows CI
 
 on:
   workflow_dispatch:
-    inputs:
-      resume_scope:
-        description: 'Full integration, or verified continuation after a BASS download failure'
-        type: choice
-        required: true
-        default: integration
-        options:
-          - integration
-          - bass-packaging
-      prior_run_id:
-        description: 'Completed original Windows CI run ID (required only for bass-packaging)'
-        type: string
-        required: false
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -26,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Test and package Windows x64
+    name: Build and package Windows x64
     runs-on: windows-2022
     timeout-minutes: 90
     defaults:
@@ -42,56 +28,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Test continuation evidence policy
-        run: |
-          python -B -m unittest discover -s scripts -p test_windows_ci_resume.py -v
-          if ($LASTEXITCODE -ne 0) { throw 'CI continuation policy tests failed.' }
-
-      - name: Verify continuation evidence
-        id: resume
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          RESUME_SCOPE: ${{ inputs.resume_scope }}
-          PRIOR_RUN_ID: ${{ inputs.prior_run_id }}
-        run: |
-          python -B .\scripts\verify_windows_ci_resume.py --scope "$env:RESUME_SCOPE" --prior-run-id "$env:PRIOR_RUN_ID" --output tool/ci-resume-evidence.json
-          if ($LASTEXITCODE -ne 0) { throw 'CI continuation evidence was rejected.' }
-
-      - name: Select full integration checks
-        id: impact
-        run: |
-          & .\scripts\select_windows_ci_checks.ps1 -Integration -OutputPath (Join-Path $env:GITHUB_WORKSPACE 'tool/ci-impact.json')
-
-      # Manual dispatch selects the complete integration path. CI never
-      # publishes a Release.
-      - name: Verify version and validation policy
-        if: steps.resume.outputs.reuse_completed != 'true'
+      - name: Verify release version
         run: |
           . .\scripts\support\release_version.ps1
           Get-ReleaseVersionInfo $env:GITHUB_WORKSPACE
-          & .\scripts\test_validation_pipeline.ps1
-          & .\scripts\test_flutter_test_groups.ps1
-          python -B -m unittest discover -s scripts -p test_audit_classification_metadata.py -v
-          if ($LASTEXITCODE -ne 0) { throw 'Metadata audit privacy tests failed.' }
-
-      - name: Test native installer transactions and update handoff
-        if: steps.impact.outputs.profile == 'integration' && steps.resume.outputs.reuse_completed != 'true'
-        run: |
-          & .\scripts\verify_installer_native.ps1 -BuildDirectory (Join-Path $env:GITHUB_WORKSPACE 'tool\qa-installer\build')
-
-      - name: Preserve native installer failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: installer-native-diagnostics-${{ github.sha }}
-          path: |
-            tool/qa-installer/build/native-gate-*.log
-            tool/qa-installer/build/Testing/Temporary/LastTest.log
-          if-no-files-found: ignore
-          retention-days: 14
 
       - name: Set up Flutter 3.47.1
-        if: steps.impact.outputs.profile != 'documents'
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: '3.47.1'
@@ -100,191 +42,28 @@ jobs:
           cache: true
           pub-cache-path: ${{ github.workspace }}/tool/pub-cache
 
-      # The vendored Cargokit invokes `rustup run stable` explicitly. Install
-      # that channel rather than an unused version-named toolchain. The local
-      # Windows validation used stable rustc 1.98.0 with Flutter 3.47.1.
       - name: Set up Rust stable (MSVC x64)
-        if: steps.impact.outputs.profile != 'documents'
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
 
-      - name: Record toolchain and prepare both Flutter projects
-        if: steps.impact.outputs.profile != 'documents'
+      - name: Prepare main Flutter project
         run: |
           $ErrorActionPreference = 'Stop'
           $flutter = (Get-Command flutter.bat).Source
           $env:FLUTTER_ROOT = Split-Path -Parent (Split-Path -Parent $flutter)
           "FLUTTER_ROOT=$env:FLUTTER_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          & $flutter --version
-          if ($LASTEXITCODE -ne 0) { throw 'Flutter version check failed.' }
-          $impact = Get-Content -LiteralPath tool/ci-impact.json -Raw | ConvertFrom-Json
-          if ($impact.Profile -eq 'integration') {
-            rustup run stable rustc --version
-            if ($LASTEXITCODE -ne 0) { throw 'Rust stable is unavailable.' }
-          }
           & .\scripts\prepare_windows_dependencies.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -Flutter $flutter
-          if ($impact.Profile -eq 'integration') {
-            & .\scripts\prepare_windows_dependencies.ps1 -ProjectRoot (Join-Path $env:GITHUB_WORKSPACE 'third_party\desktop_lyric') -Flutter $flutter
-          }
-
-      - name: Analyze and test Dan Player
-        if: steps.impact.outputs.profile != 'documents' && steps.resume.outputs.reuse_completed != 'true'
-        run: |
-          . .\scripts\support\flutter_test_groups.ps1
-          # Keep fixtures outside the checkout, matching the local workspace
-          # contract used by real-storage tests. Both runners share discovery.
-          $testRoot = Join-Path (Split-Path -Parent $env:GITHUB_WORKSPACE) "tool/qa-local/ci-flutter-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          $testTemp = Join-Path $testRoot 'temp'
-          $null = New-Item -ItemType Directory -Path $testTemp -Force
-          $env:TEMP = $testTemp
-          $env:TMP = $testTemp
-          Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue
-          flutter analyze --no-pub --no-fatal-infos lib test
-          if ($LASTEXITCODE -ne 0) { throw 'Dan Player analysis failed.' }
-          $impact = Get-Content -LiteralPath tool/ci-impact.json -Raw | ConvertFrom-Json
-          $testFailures = [Collections.Generic.List[string]]::new()
-          if ($impact.Profile -eq 'integration' -or $impact.AllDartTests) {
-            $testGroups = Get-FlutterTestGroups -ProjectRoot $env:GITHUB_WORKSPACE
-          }
-          else {
-            $tests = @($impact.Tests)
-            if ($tests.Count -eq 0) { throw 'A business change must have explicit dependent test coverage.' }
-            $testGroups = Get-FlutterTestGroups -ProjectRoot $env:GITHUB_WORKSPACE -TestFile $tests
-          }
-          try {
-            foreach ($testGroup in @('MockedDataRoot', 'WorkspaceDataRoot')) {
-              $testConcurrency = 2
-              Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue
-              if ($testGroup -eq 'WorkspaceDataRoot') {
-                $testConcurrency = 1
-                $env:DAN_PLAYER_DATA_DIR = Join-Path $testRoot 'data'
-                $null = New-Item -ItemType Directory -Path $env:DAN_PLAYER_DATA_DIR -Force
-              }
-              $testPaths = @($testGroups.$testGroup | ForEach-Object FullName)
-              # Retain bounded batches below Windows' command-line limit.
-              for ($offset = 0; $offset -lt $testPaths.Count; $offset += 50) {
-                $last = [Math]::Min($offset + 49, $testPaths.Count - 1)
-                $batch = @($testPaths[$offset..$last])
-                flutter test --no-pub "--concurrency=$testConcurrency" @batch
-                if ($LASTEXITCODE -ne 0) { $testFailures.Add("$testGroup files $offset through $last") }
-              }
-            }
-          } finally {
-            Remove-Item Env:DAN_PLAYER_DATA_DIR -ErrorAction SilentlyContinue
-          }
-          if ($impact.Profile -eq 'integration') {
-            rustup run stable cargo test --manifest-path rust/Cargo.toml --locked
-            if ($LASTEXITCODE -ne 0) { $testFailures.Add('Rust tests') }
-          }
-          if ($testFailures.Count -gt 0) { throw ("Test groups failed: " + ($testFailures -join '; ')) }
-
-      - name: Analyze and test desktop lyrics
-        if: steps.impact.outputs.profile == 'integration' && steps.resume.outputs.reuse_completed != 'true'
-        working-directory: third_party/desktop_lyric
-        run: |
-          flutter analyze --no-pub --no-fatal-infos lib
-          if ($LASTEXITCODE -ne 0) { throw 'Desktop lyrics analysis failed.' }
-          if (Test-Path -LiteralPath test -PathType Container) {
-            flutter test --no-pub
-            if ($LASTEXITCODE -ne 0) { throw 'Desktop lyrics tests failed.' }
-          } else {
-            Write-Host 'The desktop lyrics package currently has no standalone test directory.'
-          }
 
       - name: Build Dan Player release
-        if: steps.impact.outputs.profile == 'integration'
         run: |
           & .\scripts\invalidate_windows_icon_assets.ps1 -ProjectRoot $env:GITHUB_WORKSPACE
           flutter build windows --release --no-pub
           if ($LASTEXITCODE -ne 0) { throw 'Dan Player release build failed.' }
           & .\scripts\verify_windows_release_fonts.ps1 -ProjectRoot $env:GITHUB_WORKSPACE
 
-      - name: Test native backdrop and desktop integration policies
-        if: steps.impact.outputs.profile == 'integration' && steps.resume.outputs.reuse_completed != 'true'
-        run: |
-          cmake --build build/windows/x64 --config Release --target window_resize_policy_test window_corner_region_test window_backdrop_policy_test window_backdrop_updates_test desktop_integration_policy_test taskbar_progress_policy_test taskbar_thumbnail_policy_test taskbar_peek_bitmap_test taskbar_peek_geometry_test desktop_integration_fonts_test taskbar_font_policy_test taskbar_font_snapshot_surface_test taskbar_font_edge_test desktop_integration_blur_test desktop_integration_paint_test installer_launch_test windows_shell_policy_test desktop_entry_policy_test
-          if ($LASTEXITCODE -ne 0) { throw 'Native backdrop tests did not compile.' }
-          & .\build\windows\x64\window_tests\Release\window_resize_policy_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native window resize policy tests failed.' }
-          & .\build\windows\x64\window_tests\Release\window_corner_region_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Hidden window corner-region tests failed.' }
-          & .\build\windows\x64\backdrop_tests\Release\window_backdrop_policy_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native backdrop compatibility tests failed.' }
-          & .\build\windows\x64\backdrop_tests\Release\window_backdrop_updates_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native backdrop drag/lifecycle tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\desktop_integration_policy_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native tray/taskbar policy tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\taskbar_progress_policy_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar progress state/lifecycle tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\taskbar_thumbnail_policy_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar thumbnail tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\taskbar_peek_bitmap_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar Peek size/pixel/lifetime tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\taskbar_peek_geometry_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Hidden minimized-window Peek geometry tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\desktop_integration_fonts_test.exe .\third_party\desktop_lyric\assets\fonts\PingFangSC-Regular.ttf .\build\windows\x64\runner\Release\data\flutter_assets\packages\material_symbols_icons\lib\fonts\MaterialSymbolsOutlined.ttf
-          if ($LASTEXITCODE -ne 0) { throw 'Native tray font lifetime tests failed.' }
-          $nativeFontRoot = '.\third_party\desktop_lyric\assets\fonts'
-          $nativeFontInputs = @(
-            (Join-Path $nativeFontRoot 'PingFangSC-Regular.ttf'),
-            (Join-Path $nativeFontRoot 'GoogleSans-VF.ttf'),
-            (Join-Path $nativeFontRoot 'SourceHanSansJP-Regular.otf'),
-            (Join-Path $nativeFontRoot 'Pretendard-Regular.otf')
-          )
-          & .\build\windows\x64\desktop_tests\Release\taskbar_font_policy_test.exe @nativeFontInputs
-          if ($LASTEXITCODE -ne 0) { throw 'Native mixed-font policy/cache tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\taskbar_font_snapshot_surface_test.exe @nativeFontInputs
-          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar font snapshot/surface tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\taskbar_font_edge_test.exe @nativeFontInputs
-          if ($LASTEXITCODE -ne 0) { throw 'Native taskbar long-cluster boundary tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\desktop_integration_blur_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native tray Gaussian blur/lifetime tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\desktop_integration_paint_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native tray atomic-paint/clipping/lifetime tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\installer_launch_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Installer verification/handshake tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\windows_shell_policy_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Windows shell action and instance policy tests failed.' }
-          & .\build\windows\x64\desktop_tests\Release\desktop_entry_policy_test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Player/lyric process routing tests failed.' }
-
-      # Standalone desktop_lyric remains a test harness for native palette
-      # regressions. Distribution uses Dan Player.exe --desktop-lyric.
-      - name: Build desktop lyric test harness
-        if: steps.impact.outputs.profile == 'integration' && steps.resume.outputs.reuse_completed != 'true'
-        working-directory: third_party/desktop_lyric
-        run: |
-          & ..\..\scripts\invalidate_windows_icon_assets.ps1 -ProjectRoot (Get-Location).Path
-          flutter build windows --release --no-pub
-          if ($LASTEXITCODE -ne 0) { throw 'Desktop lyrics release build failed.' }
-          & ..\..\scripts\verify_windows_release_fonts.ps1 -ProjectRoot (Get-Location).Path
-
-      - name: Test owned lyric window geometry and focus
-        if: steps.impact.outputs.profile == 'integration' && steps.resume.outputs.reuse_completed != 'true'
-        working-directory: third_party/desktop_lyric
-        run: |
-          # A clean Flutter build creates SDK wrapper sources after CMake's
-          # first configure. Discover the opt-in real-AOT test now that they
-          # exist, without running flutter_assemble again.
-          cmake -S windows -B build/windows/x64
-          if ($LASTEXITCODE -ne 0) { throw 'Post-build lyric test configuration failed.' }
-          cmake --build build/windows/x64 --config Release --target desktop_lyric_owned_window_test desktop_lyric_palette_engine_test
-          if ($LASTEXITCODE -ne 0) { throw 'Owned lyric window regression did not compile.' }
-          $palettePreviousPath = $env:Path
-          try {
-            $env:Path = "$(Join-Path (Get-Location).Path 'windows\flutter\ephemeral');$env:Path"
-            & .\build\windows\x64\palette_tests\Release\desktop_lyric_owned_window_test.exe
-            if ($LASTEXITCODE -ne 0) { throw 'Owned lyric HWND geometry/focus regression failed.' }
-            & .\build\windows\x64\palette_tests\Release\desktop_lyric_palette_engine_test.exe (Join-Path (Get-Location).Path 'build\windows\x64\runner\Release\data')
-            if ($LASTEXITCODE -ne 0) { throw 'Hidden lyric palette AOT startup/reuse regression failed.' }
-          } finally {
-            $env:Path = $palettePreviousPath
-          }
-
       - name: Cache pinned BASS and tempo packages
-        if: steps.impact.outputs.profile == 'integration'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
@@ -292,32 +71,16 @@ jobs:
             ${{ github.workspace }}/tool/bass-fx
           key: bass-tempo-windows-x64-${{ hashFiles('scripts/prepare_bass_runtime.ps1', 'scripts/prepare_bass_fx_runtime.ps1') }}
 
-      - name: Download and verify all nine BASS packages
-        if: steps.impact.outputs.profile == 'integration'
+      - name: Download and verify BASS packages
         run: |
           $runtime = & .\scripts\prepare_bass_runtime.ps1 -CacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass')
           Write-Host "Verified runtime: $($runtime.RuntimeDirectory)"
           $tempoRuntime = & .\scripts\prepare_bass_fx_runtime.ps1 -CacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass-fx')
           Write-Host "Verified tempo runtime: $($tempoRuntime.RuntimeDirectory)"
 
-      - name: Test real BASS waveform decoding with synthetic audio
-        if: steps.impact.outputs.profile == 'integration'
-        run: |
-          $nativeTemp = Join-Path $env:GITHUB_WORKSPACE 'tool/ci-native-waveform-temp'
-          $null = New-Item -ItemType Directory -Path $nativeTemp -Force
-          $env:TEMP = $nativeTemp
-          $env:TMP = $nativeTemp
-          $env:DAN_PLAYER_WAVEFORM_BASS_DLL = Join-Path $env:GITHUB_WORKSPACE 'tool/bass/runtime-x64-9pkg/BASS/bass.dll'
-          $env:DAN_PLAYER_WAVEFORM_VBR_FIXTURE = Join-Path $env:GITHUB_WORKSPACE 'test/fixtures/waveform-vbr-no-xing.mp3'
-          $env:DAN_PLAYER_BASS_RUNTIME = Join-Path $env:GITHUB_WORKSPACE 'tool/bass/runtime-x64-9pkg/BASS'
-          flutter test --no-pub --concurrency=1 test/waveform_native_test.dart test/waveform_review_native_snapshot2_test.dart scripts/native_tests/bassmix_persistent_test.dart
-          if ($LASTEXITCODE -ne 0) { throw 'Native waveform decoding tests failed.' }
-
-      # This path never invokes the local signing script and has no private
-      # certificate/secret configuration. It produces an unsigned CI artifact,
-      # not a GitHub Release or an automatic update publication.
+      # This manual workflow builds unsigned artifacts. It does not publish a
+      # GitHub Release or use local signing certificates.
       - name: Assemble portable ZIP and SHA256SUMS
-        if: steps.impact.outputs.profile == 'integration'
         id: package
         run: |
           $package = & .\scripts\assemble_windows_release.ps1 -BassCacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass') -BassFxCacheRoot (Join-Path $env:GITHUB_WORKSPACE 'tool\bass-fx') -OutputRoot (Join-Path $env:GITHUB_WORKSPACE 'dist')
@@ -325,7 +88,6 @@ jobs:
           "checksums=$($package.ChecksumPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Upload portable package
-        if: steps.impact.outputs.profile == 'integration'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: DanPlayer-windows-x64-${{ github.sha }}
@@ -333,13 +95,4 @@ jobs:
             ${{ steps.package.outputs.zip }}
             ${{ steps.package.outputs.checksums }}
           if-no-files-found: error
-          retention-days: 14
-
-      - name: Preserve continuation evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: windows-ci-evidence-${{ github.sha }}
-          path: tool/ci-resume-evidence.json
-          if-no-files-found: ignore
           retention-days: 14

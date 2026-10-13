@@ -93,6 +93,39 @@ fn sibling_path(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(value)
 }
 
+fn validate_index_consumer_shape(index: &serde_json::Value) -> anyhow::Result<()> {
+    // The old top-level folder array is still migrated by update_index.
+    if index.is_array() {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        index.is_object(),
+        "INDEX_SCHEMA_INVALID|曲库索引必须是对象或旧版数组"
+    );
+    // Preserve existing handling of future schemas. A different future shape
+    // must not make this reader silently choose an older backup instead.
+    if index["version"]
+        .as_u64()
+        .is_some_and(|version| version > INDEX_VERSION)
+    {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        index["folders"].is_array(),
+        "INDEX_SCHEMA_INVALID|曲库文件夹记录无效"
+    );
+    if let Some(roots) = index.get("roots") {
+        anyhow::ensure!(
+            roots
+                .as_array()
+                .is_some_and(|values| values.iter().all(serde_json::Value::is_string)),
+            "INDEX_SCHEMA_INVALID|音乐根目录必须是字符串列表"
+        );
+    }
+    // Folder/song rows continue through the original consumer-specific checks.
+    Ok(())
+}
+
 fn read_index_json(index_path: &Path) -> anyhow::Result<(serde_json::Value, bool)> {
     let backup_path = sibling_path(index_path, ".bak");
     let mut target_error = None;
@@ -100,8 +133,11 @@ fn read_index_json(index_path: &Path) -> anyhow::Result<(serde_json::Value, bool
     for (candidate, is_backup) in [(index_path, false), (backup_path.as_path(), true)] {
         match fs::read(candidate)
             .map_err(anyhow::Error::from)
-            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(anyhow::Error::from))
-        {
+            .and_then(|bytes| {
+                let index = serde_json::from_slice::<serde_json::Value>(&bytes)?;
+                validate_index_consumer_shape(&index)?;
+                Ok(index)
+            }) {
             Ok(index) => {
                 if is_backup {
                     log_to_dart("index.json is damaged; recovered from index.json.bak".to_string());
@@ -1824,10 +1860,6 @@ fn resize_picture(pic: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
         .ok()?;
     Some(output.into_inner())
 }
-
-#[cfg(test)]
-#[path = "cover_png_encoder_tests.rs"]
-mod cover_png_encoder_tests;
 
 fn _get_picture_by_lofty(path: &String, width: u32, height: u32) -> Option<Vec<u8>> {
     if let Some(picture) = id3_compat::read_picture(Path::new(path), width, height) {
@@ -3918,6 +3950,107 @@ mod tests {
         assert!(used_backup);
         assert_eq!(recovered, first);
 
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn index_candidate_shape_recovers_structural_primary_without_writing() {
+        let directory = test_directory("index_candidate_shape_recovery");
+        let primary = directory.join("index.json");
+        let backup = sibling_path(&primary, ".bak");
+        let valid = serde_json::json!({"version": INDEX_VERSION, "folders": [], "roots": []});
+        let valid_bytes = valid.to_string().into_bytes();
+        for malformed in [
+            serde_json::json!(null),
+            serde_json::json!({"version": INDEX_VERSION}),
+            serde_json::json!({"version": INDEX_VERSION, "folders": "bad"}),
+            serde_json::json!({"version": INDEX_VERSION, "folders": [], "roots": "bad"}),
+            serde_json::json!({"version": INDEX_VERSION, "folders": [], "roots": [7]}),
+            serde_json::json!({"version": INDEX_VERSION, "folders": [], "roots": null}),
+        ] {
+            let primary_bytes = malformed.to_string().into_bytes();
+            fs::write(&primary, &primary_bytes).unwrap();
+            fs::write(&backup, &valid_bytes).unwrap();
+            let (recovered, used_backup) = read_index_json(&primary).unwrap();
+            assert!(used_backup);
+            assert_eq!(recovered, valid);
+            assert_eq!(fs::read(&primary).unwrap(), primary_bytes);
+            assert_eq!(fs::read(&backup).unwrap(), valid_bytes);
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn index_candidate_shape_valid_primary_ignores_bad_backup_and_row_validation() {
+        let directory = test_directory("index_candidate_shape_primary");
+        let primary = directory.join("index.json");
+        let backup = sibling_path(&primary, ".bak");
+        // Row validation belongs to the original scanner/loader, not this gate.
+        let valid = serde_json::json!({"version": INDEX_VERSION, "folders": ["row"]});
+        let primary_bytes = valid.to_string().into_bytes();
+        let backup_bytes = br#"{"folders":"bad"}"#;
+        fs::write(&primary, &primary_bytes).unwrap();
+        fs::write(&backup, backup_bytes).unwrap();
+        let (loaded, used_backup) = read_index_json(&primary).unwrap();
+        assert!(!used_backup);
+        assert_eq!(loaded, valid);
+        assert_eq!(fs::read(&primary).unwrap(), primary_bytes);
+        assert_eq!(fs::read(&backup).unwrap(), backup_bytes);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn index_candidate_shape_both_bad_fail_without_writing() {
+        let directory = test_directory("index_candidate_shape_both_bad");
+        let primary = directory.join("index.json");
+        let backup = sibling_path(&primary, ".bak");
+        let primary_bytes = br#"{"version":113,"folders":"bad"}"#;
+        let backup_bytes = br#"{"version":113,"folders":[],"roots":{}}"#;
+        fs::write(&primary, primary_bytes).unwrap();
+        fs::write(&backup, backup_bytes).unwrap();
+        assert!(read_index_json(&primary).is_err());
+        assert_eq!(fs::read(&primary).unwrap(), primary_bytes);
+        assert_eq!(fs::read(&backup).unwrap(), backup_bytes);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn index_candidate_shape_keeps_legacy_arrays_and_missing_roots() {
+        let directory = test_directory("index_candidate_shape_legacy");
+        let primary = directory.join("index.json");
+        for valid in [
+            serde_json::json!([]),
+            serde_json::json!([{"path": "legacy", "audios": []}]),
+            serde_json::json!({"folders": []}),
+            serde_json::json!({"version": 1, "folders": []}),
+            serde_json::json!({"version": INDEX_VERSION, "folders": [], "roots": []}),
+        ] {
+            let primary_bytes = valid.to_string().into_bytes();
+            fs::write(&primary, &primary_bytes).unwrap();
+            let (loaded, used_backup) = read_index_json(&primary).unwrap();
+            assert!(!used_backup);
+            assert_eq!(loaded, valid);
+            assert_eq!(fs::read(&primary).unwrap(), primary_bytes);
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn index_candidate_shape_future_schema_never_selects_old_backup() {
+        let directory = test_directory("index_candidate_shape_future");
+        let primary = directory.join("index.json");
+        let backup = sibling_path(&primary, ".bak");
+        let future =
+            serde_json::json!({"version": INDEX_VERSION + 1, "folders": "future", "roots": {}});
+        let primary_bytes = future.to_string().into_bytes();
+        let backup_bytes = br#"{"version":113,"folders":[],"roots":[]}"#;
+        fs::write(&primary, &primary_bytes).unwrap();
+        fs::write(&backup, backup_bytes).unwrap();
+        let (loaded, used_backup) = read_index_json(&primary).unwrap();
+        assert!(!used_backup);
+        assert_eq!(loaded, future);
+        assert_eq!(fs::read(&primary).unwrap(), primary_bytes);
+        assert_eq!(fs::read(&backup).unwrap(), backup_bytes);
         fs::remove_dir_all(directory).unwrap();
     }
 

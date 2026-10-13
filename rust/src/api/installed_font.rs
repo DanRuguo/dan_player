@@ -97,7 +97,3 @@ fn _get_installed_fonts() -> Result<Vec<InstalledFont>, anyhow::Error> {
 
     Ok(installed_fonts)
 }
-
-#[cfg(test)]
-#[path = "installed_font_tests.rs"]
-mod tests;

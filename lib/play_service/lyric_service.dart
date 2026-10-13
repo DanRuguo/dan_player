@@ -76,6 +76,7 @@ class LyricService extends ChangeNotifier {
   final _japaneseReadingsBusy = ValueNotifier(false);
   ValueListenable<bool> get japaneseReadingsBusy => _japaneseReadingsBusy;
   bool _disposed = false;
+  LyricSearchCancellation? _automaticLookup;
 
   LyricService(PlayService playService)
       : this._(playService, null, LyricDocumentStore.instance, null, null, null,
@@ -418,6 +419,9 @@ class LyricService extends ChangeNotifier {
   }
 
   void _handleAutomaticOnlineChange() {
+    if (!AppSettings.instance.automaticOnlineLyrics.value) {
+      _automaticLookup?.cancel();
+    }
     // A remembered manual choice is not a new network authorization.
     _manualJapaneseMode = null;
     if (!_disposed &&
@@ -447,7 +451,15 @@ class LyricService extends ChangeNotifier {
   }
 
   void _useRawFuture(Future<Lyric?> raw,
-      {int offsetMs = 0, bool explicit = false}) {
+      {int offsetMs = 0,
+      bool explicit = false,
+      LyricSearchCancellation? automaticLookup}) {
+    // The caller constructs the next owner before its deferred lookup starts.
+    // Retire the previous source without cancelling this newly installed one.
+    if (!identical(_automaticLookup, automaticLookup)) {
+      _automaticLookup?.cancel();
+    }
+    _automaticLookup = automaticLookup;
     currLyricFuture.ignore();
     _japaneseProjector.cancel();
     _japaneseReadingsBusy.value = false;
@@ -652,8 +664,12 @@ class LyricService extends ChangeNotifier {
     LyricSource? source,
     bool refresh = true,
     bool Function()? stillCurrent,
+    LyricSearchCancellation? cancellation,
   }) async {
-    bool current() => _isPlaying(audio) && (stillCurrent?.call() ?? true);
+    bool current() =>
+        cancellation?.isCancelled != true &&
+        _isPlaying(audio) &&
+        (stillCurrent?.call() ?? true);
     if (!current()) return null;
     return (_onlineCacheForTesting ?? OnlineLyricCache.instance)
         .resolve(onlineLyricCacheIdentity(audio, source: source), () async {
@@ -668,9 +684,11 @@ class LyricService extends ChangeNotifier {
           neteaseSongId: source.neteaseSongId,
           lrclibId: source.lrclibId,
           stillCurrent: current,
+          cancellation: cancellation,
         );
       }
-      return getMostMatchedLyric(audio, stillCurrent: current);
+      return getMostMatchedLyric(audio,
+          stillCurrent: current, cancellation: cancellation);
     }, refresh: refresh, shouldStore: current);
   }
 
@@ -752,6 +770,7 @@ class LyricService extends ChangeNotifier {
     }
     final lyricSource = hasInvalidOnlineLocalSource ? null : configuredSource;
     final token = _lyricToken + 1;
+    final automaticLookup = LyricSearchCancellation();
     Future<Lyric?> raw;
     if (lyricSource == null) {
       raw = _getLyricDefault(AppSettings.instance.localLyricFirst);
@@ -764,6 +783,7 @@ class LyricService extends ChangeNotifier {
       }
     }
     bool allowed() =>
+        !automaticLookup.isCancelled &&
         _isCurrent(token) &&
         _isPlaying(nowPlaying) &&
         AppSettings.instance.automaticOnlineLyrics.value;
@@ -783,12 +803,15 @@ class LyricService extends ChangeNotifier {
               lyricSource?.source == LyricSourceType.local ? null : lyricSource,
           refresh: false,
           stillCurrent: allowed,
+          cancellation: automaticLookup,
         );
         if (result == null && allowed()) throw const NoMatchingOnlineLyric();
         return result;
       },
     );
-    _useRawFuture(raw, offsetMs: store?.forAudio(nowPlaying)?.offsetMs ?? 0);
+    _useRawFuture(raw,
+        offsetMs: store?.forAudio(nowPlaying)?.offsetMs ?? 0,
+        automaticLookup: automaticLookup);
   }
 
   void useLocalLyric() {
@@ -876,6 +899,8 @@ class LyricService extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _automaticLookup?.cancel();
+    _automaticLookup = null;
     _japanesePreferences.removeListener(_handleJapaneseReadingsChange);
     _japaneseProjector.dispose();
     _japaneseReadingsBusy.dispose();

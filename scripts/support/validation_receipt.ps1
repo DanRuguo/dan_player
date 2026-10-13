@@ -59,15 +59,6 @@ function Get-ValidationToolchain([string] $Flutter, [switch] $Native) {
     return [pscustomobject]@{ Hash = Get-TextSha256 ($tools | ConvertTo-Json -Compress); Details = $tools }
 }
 
-function Test-ValidationReceipt($Receipt, $Inputs, $Toolchain, [string[]] $RequiredTests) {
-    try {
-        if ($null -eq $Receipt -or $Receipt.Schema -ne 1 -or $Receipt.Passed -ne $true -or
-            $Receipt.Inputs.Hash -cne $Inputs.Hash -or $Receipt.Toolchain.Hash -cne $Toolchain.Hash) { return $false }
-        foreach ($test in $RequiredTests) { if ($test -cnotin $Receipt.Tests) { return $false } }
-        return $true
-    } catch { return $false }
-}
-
 function Read-LocalValidationReceipt([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     try { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json }
@@ -96,7 +87,9 @@ function Get-ArtifactContentRecords([string] $Directory) {
 
 function Test-ArtifactReceipt($Receipt, $Inputs, $Toolchain, [object[]] $Records) {
     try {
-        if (-not (Test-ValidationReceipt $Receipt $Inputs $Toolchain @()) -or $Records.Count -eq 0) { return $false }
+        if ($null -eq $Receipt -or $Receipt.Schema -ne 1 -or $Receipt.Passed -ne $true -or
+            $Receipt.Scope -cne 'WindowsReleasePayload' -or $Records.Count -eq 0 -or
+            $Receipt.Inputs.Hash -cne $Inputs.Hash -or $Receipt.Toolchain.Hash -cne $Toolchain.Hash) { return $false }
         return (Get-TextSha256 ($Records | ConvertTo-Json -Compress)) -ceq $Receipt.ArtifactHash
     } catch { return $false }
 }

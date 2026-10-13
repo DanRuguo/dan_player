@@ -283,6 +283,28 @@ class _RenderLyricFractionalFilter extends RenderProxyBox {
       super.paint(context, offset);
       return;
     }
+    if (_retainSourceBounds) {
+      // Every mounted paragraph listens to scrolling and owns a repaint
+      // boundary. The viewport clips only after those boundaries have painted,
+      // so offscreen readings would otherwise regenerate and evict native
+      // snapshots for the whole song on each scroll frame. Keep their layout
+      // and ownership, but paint only sources that can reach the viewport.
+      final viewport = RenderAbstractViewport.maybeOf(this);
+      final viewportBox = viewport is RenderBox ? viewport as RenderBox : null;
+      if (viewportBox != null &&
+          viewportBox.hasSize &&
+          viewportBox.size.height.isFinite &&
+          viewportBox.size.height > 0) {
+        final coverage = MatrixUtils.transformRect(
+          getTransformTo(viewportBox),
+          _stableSourceGuard(),
+        );
+        if (coverage.isFinite &&
+            (coverage.bottom < 0 || coverage.top > viewportBox.size.height)) {
+          return;
+        }
+      }
+    }
     final sigma = _sigma < .1 ? .1 : _sigma;
     if (child!.needsCompositing) {
       _gaussianFilter.layer = null;

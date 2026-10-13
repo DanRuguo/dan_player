@@ -341,6 +341,9 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           const SizedBox(height: 8),
                           _text(
                               '播放列表“整理队列”可去重、清理当前曲目前后或重排待播项，并保留当前播放。队列获得焦点时 Ctrl + Z 撤销，Ctrl + Y 或 Ctrl + Shift + Z 重做；替换播放来源或切换随机会结束这段整理历史。移除停止目标后再撤销整理，不会恢复停止目标。'),
+                          _paragraph(context, '导出队列与搜索结果'),
+                          _text(
+                              '在播放队列顶栏点“导出队列或搜索结果”图标，选择“导出队列为 M3U8”或“导出队列音乐文件夹”。输入搜索词后，菜单还可选择“导出搜索结果为 M3U8”或“导出搜索结果音乐文件夹”。文件选择窗口打开前会固定所选范围的歌曲与顺序，保留重复引用；之后切歌或修改搜索不会改变这次导出。'),
                           _paragraph(context, '倒计时与停止目标'),
                           const SizedBox(height: 8),
                           _text(

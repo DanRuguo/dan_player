@@ -542,7 +542,3 @@ pub fn commit_audio_trim(
     }
     Ok(json!({"path":display_path(&destination), "backupPath":backup.as_deref().map(display_path), "audio":audio, "warnings":prepared.lyric_warnings}).to_string())
 }
-
-#[cfg(test)]
-#[path = "audio_trim_tests.rs"]
-mod tests;

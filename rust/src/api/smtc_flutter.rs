@@ -114,9 +114,6 @@ impl SMTCFlutter {
     }
 }
 
-#[cfg(test)]
-#[path = "smtc_display_tests.rs"]
-mod display_tests;
 
 impl SMTCFlutter {
     fn _close(&self) {

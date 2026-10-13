@@ -70,6 +70,29 @@ abstract final class LyricWordEffects {
     ui.Color leading = const ui.Color(0xffffffff),
     ui.Color trailing = const ui.Color(0x00ffffff),
   }) {
+    final points = revealPoints(
+      bounds: bounds,
+      progress: progress,
+      extent: extent,
+      offset: offset,
+      softness: softness,
+      reverse: reverse,
+      vertical: vertical,
+    );
+    return ui.Gradient.linear(points.start, points.end, [leading, trailing]);
+  }
+
+  /// The final gradient coordinates identify identical paint across different
+  /// word slices without changing native shaping or quantizing playback.
+  static ({ui.Offset start, ui.Offset end}) revealPoints({
+    required ui.Rect bounds,
+    required double progress,
+    required double extent,
+    required double offset,
+    required double softness,
+    bool reverse = false,
+    bool vertical = false,
+  }) {
     final edges =
         revealEdges(progress: progress, extent: extent, softness: softness);
     ui.Offset point(double value) {
@@ -81,8 +104,7 @@ abstract final class LyricWordEffects {
               bounds.center.dy);
     }
 
-    return ui.Gradient.linear(
-        point(edges.start), point(edges.end), [leading, trailing]);
+    return (start: point(edges.start), end: point(edges.end));
   }
 
   /// Every timed syllable rises and settles with zero endpoint velocity.

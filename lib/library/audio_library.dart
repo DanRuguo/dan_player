@@ -26,7 +26,8 @@ class AudioLibrary {
   List<String>? _scanRoots;
   // A Dart-only save must not claim an older native index schema was fully
   // migrated. The checked-artist proof is independent of this schema number.
-  int _indexVersion = 113;
+  static const _supportedIndexVersion = 113;
+  int _indexVersion = _supportedIndexVersion;
 
   /// Selected roots, including empty roots. Legacy indexes retain their
   /// recorded folders until a full scan records the explicitly selected roots.
@@ -87,6 +88,7 @@ class AudioLibrary {
         if (decoded is! Map) {
           throw const FormatException("Audio index root must be an object");
         }
+        _validateIndexConsumerShape(decoded);
         if (candidate.path == backupFile.path) {
           LOGGER.w("[audio library] loaded backup index");
         }
@@ -98,6 +100,36 @@ class AudioLibrary {
     throw targetError ?? const FormatException("Audio index is unavailable");
   }
 
+  static void _validateIndexConsumerShape(Map index) {
+    final version = index['version'];
+    // A newer schema may use a different shape. Leave it to the existing
+    // consumer instead of silently selecting an older backup for that reason.
+    if (version is int && version > _supportedIndexVersion) return;
+    if (index['folders'] is! List) {
+      throw const FormatException("Audio index folders must be a list");
+    }
+    final roots = index['roots'];
+    if (roots != null &&
+        (roots is! List || roots.any((root) => root is! String))) {
+      throw const FormatException('Audio index roots must be strings');
+    }
+    // Individual folder/song records retain their existing skip-invalid path.
+  }
+
+  static Future<bool> _primaryIndexIsUsable(String targetPath) =>
+      Isolate.run(() {
+        // This worker captures only the path, constructs no application
+        // services, and returns no parsed document to the UI isolate.
+        try {
+          final previous = json.decode(File(targetPath).readAsStringSync());
+          if (previous is! Map) return false;
+          _validateIndexConsumerShape(previous);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      });
+
   static Future<void> _writeIndexAtomically(
     File target,
     String contents,
@@ -105,15 +137,29 @@ class AudioLibrary {
     await target.parent.create(recursive: true);
     final temporary = File("${target.path}.tmp");
     final backup = File("${target.path}.bak");
+    var preserveBackup = false;
+    if (await backup.exists()) {
+      // A recovered index's known-good backup must not be replaced by the
+      // unreadable primary (including a missing primary) on the next save.
+      preserveBackup = !await _primaryIndexIsUsable(target.path);
+    }
     await temporary.writeAsString(contents, flush: true);
 
     try {
-      if (await backup.exists()) await backup.delete();
-      if (await target.exists()) await target.rename(backup.path);
+      if (preserveBackup) {
+        if (await target.exists()) await target.delete();
+      } else {
+        if (await backup.exists()) await backup.delete();
+        if (await target.exists()) await target.rename(backup.path);
+      }
       await temporary.rename(target.path);
     } catch (_) {
       if (!await target.exists() && await backup.exists()) {
-        await backup.rename(target.path);
+        if (preserveBackup) {
+          await backup.copy(target.path);
+        } else {
+          await backup.rename(target.path);
+        }
       }
       rethrow;
     } finally {

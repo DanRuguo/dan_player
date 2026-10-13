@@ -1013,6 +1013,17 @@ class _TimedLyricTextState extends State<_TimedLyricText>
   }
 }
 
+typedef _LyricRevealInk = ({
+  Rect bounds,
+  double progress,
+  double extent,
+  double offset,
+  double softness,
+  bool reverse,
+  Color leading,
+  Color trailing,
+});
+
 /// Owns shaped paragraphs independently from the width-dependent word boxes.
 /// Resizing preserves their native shaping cache; every geometry snapshot still
 /// has a distinct identity so a changed wrap always invalidates its painter.
@@ -1059,6 +1070,7 @@ class _TimedLyricParagraph {
   TextPainter? _baseInk;
   TextPainter? _playedInk;
   TextPainter? _gradientInk;
+  ({Offset start, Offset end, Color leading, Color trailing})? _gradientInkKey;
   Color? _baseInkColor;
   Color? _playedInkColor;
 
@@ -1110,7 +1122,29 @@ class _TimedLyricParagraph {
     return _baseInk!;
   }
 
-  TextPainter gradientInk(drawing.Shader shader) {
+  TextPainter gradientInk(_LyricRevealInk key) {
+    // Follow pieces can replay the same word box for many shaped clusters.
+    // Reuse its native paragraph: changing even paint-only TextSpan data makes
+    // TextPainter.paint recreate and lay out the entire ui.Paragraph.
+    final points = LyricWordEffects.revealPoints(
+      bounds: key.bounds,
+      progress: key.progress,
+      extent: key.extent,
+      offset: key.offset,
+      softness: key.softness,
+      reverse: key.reverse,
+    );
+    final paintKey = (
+      start: points.start,
+      end: points.end,
+      leading: key.leading,
+      trailing: key.trailing,
+    );
+    if (_gradientInk != null && _gradientInkKey == paintKey) {
+      return _gradientInk!;
+    }
+    final shader = drawing.Gradient.linear(
+        points.start, points.end, [key.leading, key.trailing]);
     final styleWithShader = style.copyWith(
       foreground: Paint()..shader = shader,
     );
@@ -1125,6 +1159,7 @@ class _TimedLyricParagraph {
         )
         ..layout(maxWidth: base.width);
     }
+    _gradientInkKey = paintKey;
     return _gradientInk!;
   }
 
@@ -1146,7 +1181,8 @@ class _TimedLyricLayout {
     required this.maxWidth,
   }) {
     // White shapes are laid out once; theme/focus colors are paint operations.
-    // Sampling playback never rebuilds paragraphs or changes line breaks.
+    // Geometry stays shaped; a changed foreground gradient still needs a
+    // native paint paragraph, shared by all pieces of the same word box.
     paragraph.layout(maxWidth);
     if (paragraph.rubySpans.isNotEmpty) {
       ruby = LyricRubyLayout(
@@ -1400,8 +1436,7 @@ class _TimedLyricLayout {
   TextPainter ink(Color color, {required bool played}) =>
       paragraph.ink(color, played: played);
 
-  TextPainter gradientInk(drawing.Shader shader) =>
-      paragraph.gradientInk(shader);
+  TextPainter gradientInk(_LyricRevealInk key) => paragraph.gradientInk(key);
 
   late final List<_TimedWordShape> words;
   final _readingGlyphYs = <int, double?>{};
@@ -1822,20 +1857,18 @@ class LyricWordHighlightPainter extends CustomPainter
       offset += word.boxes[i].right - word.boxes[i].left;
     }
     final box = word.boxes[boxIndex];
-    _layout
-        .gradientInk(
-          LyricWordEffects.revealShader(
-            bounds: box.toRect(),
-            progress: progress,
-            extent: word.extent,
-            offset: offset,
-            softness: softness,
-            reverse: box.direction == TextDirection.rtl,
-            leading: playedColor,
-            trailing: baseColor,
-          ),
-        )
-        .paint(canvas, Offset.zero);
+    _layout.gradientInk(
+      (
+        bounds: box.toRect(),
+        progress: progress,
+        extent: word.extent,
+        offset: offset,
+        softness: softness,
+        reverse: box.direction == TextDirection.rtl,
+        leading: playedColor,
+        trailing: baseColor,
+      ),
+    ).paint(canvas, Offset.zero);
   }
 
   @override

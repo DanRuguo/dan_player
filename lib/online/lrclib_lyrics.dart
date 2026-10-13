@@ -96,10 +96,11 @@ class LrclibLyricsTransport {
     return parseLrclibSearchPayload(payload, limit: limit);
   }
 
-  Future<LrclibRecord?> getById(int id) async {
+  Future<LrclibRecord?> getById(int id,
+      {OnlineHttpCancellation? cancellation}) async {
     if (id <= 0) return null;
     final uri = Uri.https('lrclib.net', '/api/get/$id');
-    final payload = await _getJson(uri);
+    final payload = await _getJson(uri, cancellation: cancellation);
     if (payload == null) return null; // HTTP 404.
     final record = parseLrclibRecordPayload(payload);
     if (record == null) {

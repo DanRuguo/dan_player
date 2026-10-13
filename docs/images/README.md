@@ -31,12 +31,12 @@
 
 ## 更新预览
 
-说明书图片由 [player_guide_demo_test.dart](../../test/player_guide_demo_test.dart) 中的常用操作定向渲染生成；资源监控与缓存分类由 [recent_features_showcase_test.dart](../../test/recent_features_showcase_test.dart) 生成。使用 `DAN_PLAYLIST_FEATURE_RENDER_DIR` 指向隔离输出目录，加载产品字体，资源数值与目录为虚构示例；复用真实组件，无真实音乐、网络请求或进程采样。界面动效在说明书中可由用户主动试用，静态图仅展示某一状态，不作为播放、GPU 或动画性能验证。
+说明书图片展示播放器的真实组件与字体，资源数值、目录和曲目采用虚构示例。界面动效在说明书中可由用户主动试用，静态图仅展示某一状态，不作为播放、GPU 或动画性能验证。
 
-本轮搜索历史图片由 [search_history_render_test.dart](../../test/search_history_render_test.dart) 生成，使用 `--dart-define=DAN_SEARCH_RENDER=<输出目录>`。加载播放器字体与 Material Symbols 图标字体，展示搜索页内容区域、居中换行、超长文本省略和示例历史；中文图展示强调色删除状态，英文／日文使用浅色主题，中文／韩文使用深色主题。这些图片不包含原生窗口边框或底部播放条，不作为整窗或原生性能测试证据。
+搜索历史图片加载播放器字体与 Material Symbols 图标字体，展示内容区域、居中换行、超长文本省略和示例历史；中文图展示强调色删除状态，英文／日文使用浅色主题，中文／韩文使用深色主题。这些图片不包含原生窗口边框或底部播放条。
 
-歌词编辑的四张图由 [tap_lyric_editor_test.dart](../../test/tap_lyric_editor_test.dart) 与 [lyric_editor_formats_render_test.dart](../../test/lyric_editor_formats_render_test.dart) 的中文定向渲染生成，分别使用 `DAN_TAP_RENDER`、`DAN_EDITOR_RENDER` 编译期开关。使用虚构曲目和真实产品字体；宽窗、窄窗、正文、逐字与预览均是 Flutter 离屏控件图，不代表真实声卡试听。
+歌词编辑的四张图使用虚构曲目和真实产品字体，展示宽窗、窄窗、正文、逐字与预览状态，不代表真实声卡试听。
 
-在仓库运行 [render_public_ui.ps1](../../scripts/render_public_ui.ps1) 生成主要页面和功能预览，对应测试为 [public_ui_showcase_test.dart](../../test/public_ui_showcase_test.dart)。三栏排行由 [statistics_visualization_test.dart](../../test/statistics_visualization_test.dart) 渲染检查，使用 `DAN_STATISTICS_RENDER` 指定输出目录后，将需要展示的截图更新到本目录。
+更新主要页面、功能预览或三栏排行图片时，使用播放器当前界面与固定示例数据，将需要展示的截图更新到本目录。
 
 只保留当前功能需要的展示图片；更新或移除图片时，同步维护本索引和项目 README 的引用。本机调试日志、逐轮渲染结果和历史安装器截图不放入本目录。

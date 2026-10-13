@@ -16,7 +16,6 @@ import 'package:dan_player/library/library_mutation_gate.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/music_matcher.dart';
-import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/page/settings_page/settings_choice_persistence.dart';
 import 'package:dan_player/page/folders_page.dart' show folderDisplayName;
@@ -862,8 +861,8 @@ Future<int> _reloadScannedLibrary({
       clearCovers: CoverCache.instance.clear,
       reload: () async {
         await AudioLibrary.initFromIndex();
-        AudioLibrary.instance
-            .replaceOnlineAudios(OnlineLibrary.instance.audios);
+        // initFromIndex already preserves the live online collection and
+        // publishes the complete local/online projection once.
         // The progress dialog can be closed while scanning. Rebind live
         // objects so a late reload cannot replace playlist or lyric edits
         // that the user made while the native task was running.

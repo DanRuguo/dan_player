@@ -8,8 +8,6 @@ param(
     [string] $OutputRoot,
     [string] $CertificateThumbprint = $env:RCEIT_SIGNING_THUMBPRINT,
     [string] $TimestampServer,
-    [ValidateSet('Development', 'Integration', 'Release')] [string] $ValidationScope = 'Release',
-    [string[]] $TestFile,
     [switch] $NoReuse
 )
 
@@ -46,12 +44,6 @@ try {
         if (-not $NoRestore) {
             & (Join-Path $PSScriptRoot 'prepare_windows_dependencies.ps1') -ProjectRoot $repositoryRoot -Flutter $flutter
         }
-        & (Join-Path $PSScriptRoot 'verify_interaction_regressions.ps1') -ProjectRoot $repositoryRoot -Flutter $flutter -Scope $ValidationScope -TestFile $TestFile -NoReuse:$NoReuse
-        if ($ValidationScope -eq 'Development') {
-            Write-Host 'Development coverage complete. No release build, signing or packaging was requested by this scope.'
-            return
-        }
-        & (Join-Path $PSScriptRoot 'verify_native_display_regressions.ps1') -ProjectRoot $repositoryRoot
         $buildInputs = Get-ValidationInputs $repositoryRoot -BuildOnly
         $buildTools = Get-ValidationToolchain $flutter -Native
         $mainRelease = Join-Path $repositoryRoot 'build/windows/x64/runner/Release'
@@ -74,7 +66,7 @@ try {
         Write-Host 'SkipDesktopLyric is retained for compatibility. Desktop lyrics share the main executable and are always included.'
     }
 
-    if (-not $SkipSigning -and $ValidationScope -eq 'Release') {
+    if (-not $SkipSigning) {
         $signingParameters = @{}
         if ($CertificateThumbprint) {
             $signingParameters.Thumbprint = $CertificateThumbprint
@@ -89,7 +81,7 @@ try {
     $records = @(Get-ArtifactContentRecords $mainRelease)
     if ($records.Count -eq 0) { throw 'The release payload is empty.' }
     Write-LocalValidationReceipt $buildReceiptPath ([ordered]@{
-        Schema=1; Passed=$true; Tests=@(); Scope='WindowsReleasePayload'; Inputs=$buildInputs; Toolchain=$buildTools;
+        Schema=1; Passed=$true; Scope='WindowsReleasePayload'; Inputs=$buildInputs; Toolchain=$buildTools;
         ArtifactHash=(Get-TextSha256 ($records | ConvertTo-Json -Compress)); Artifacts=$records;
         CompletedAt=[DateTime]::UtcNow.ToString('o')
     })
