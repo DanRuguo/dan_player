@@ -146,6 +146,20 @@ double _paintedSigma(RenderBackdropFilter filter) {
   return x;
 }
 
+void _expectBackdropAncestors(List<RenderBackdropFilter> filters) {
+  for (final filter in filters.where((filter) => filter.enabled)) {
+    expect(filter.layer, isNotNull,
+        reason: 'An enabled local blur owns its actual painted layer');
+    for (Layer? ancestor = filter.layer!.parent;
+        ancestor != null;
+        ancestor = ancestor.parent) {
+      expect(ancestor, isNot(isA<ShaderMaskLayer>()),
+          reason: 'A ShaderMask ancestor isolates the local glass from the '
+              'composited lyric/background and changes live raster caching');
+    }
+  }
+}
+
 double _variance(_Pixels pixels, int start, int end, int y) {
   var mass = 0.0, moment = 0.0, squareMoment = 0.0;
   for (var x = start; x < end; x++) {
@@ -329,6 +343,7 @@ void _expectRetainedMask(
     String phase) {
   final current = surface.filters(tester);
   expect(current, hasLength(12), reason: '$phase keeps one fixed mask');
+  _expectBackdropAncestors(current);
   for (var index = 0; index < 12; index++) {
     expect(current[index], same(original[index]),
         reason: '$phase retains native band render ownership');
@@ -389,6 +404,7 @@ void main() {
       }
       final filters = surface.filters(tester);
       expect(filters, hasLength(12));
+      _expectBackdropAncestors(filters);
       for (final filter in filters) {
         expect(filter.enabled, isTrue);
         expect(filter.layer, isA<BackdropFilterLayer>());
@@ -406,6 +422,44 @@ void main() {
         expect(sigma[5], LyricMotion.blurForDistance(2),
             reason: 'The outer third already reaches the full configured blur');
       }
+      await _finish(tester);
+    });
+  }
+
+  for (final dpr in [1.0, 1.25, 1.5, 2.0]) {
+    testWidgets(
+        'physically ineffective blur preserves clear pixels at ${dpr}x',
+        (tester) async {
+      tester.view.devicePixelRatio = dpr;
+      tester.view.physicalSize = Size(640 * dpr, 480 * dpr);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final surface = _Surface(tester);
+      addTearDown(surface.reading.dispose);
+      await tester.pumpWidget(surface.host(enabled: false));
+      final clear = await _capture(tester, surface.boundary, dpr: dpr);
+      await tester.pumpWidget(surface.host());
+      final original = surface.filters(tester);
+      expect(original, hasLength(12));
+      expect(original.every((filter) => filter.enabled), isTrue);
+      _expectBackdropAncestors(original);
+
+      // A native Gaussian smaller than .1 physical pixels can become an
+      // identity/empty pass. Omit it before composition instead of replacing
+      // the backdrop or painting the same translucent ink a second time.
+      surface.reading.value = .099 / (LyricMotion.blurForDistance(2) * dpr);
+      await tester.pump();
+      final current = surface.filters(tester);
+      expect(current, hasLength(12));
+      for (var index = 0; index < current.length; index++) {
+        expect(current[index], same(original[index]),
+            reason: 'Near-zero hover retains the fixed band ownership');
+        expect(current[index].enabled, isFalse,
+            reason: 'No ineffective native kernel enters composition');
+      }
+      expect((await _capture(tester, surface.boundary, dpr: dpr)).bytes,
+          orderedEquals(clear.bytes),
+          reason: 'An omitted physical kernel keeps the complete clear image');
       await _finish(tester);
     });
   }

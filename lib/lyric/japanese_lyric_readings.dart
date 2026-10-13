@@ -108,25 +108,15 @@ List<JapaneseLyricReadingSpan> japaneseReadingWordSpans(
     String text, String reading,
     {int offset = 0}) {
   if (!_hasHan(text) || text == reading) return const [];
-  final groups = <({int start, int end, String text, bool han})>[];
+  final groups = <({int start, int end, bool han})>[];
   var position = 0;
   for (final cluster in text.characters) {
     final han = _hasHan(cluster);
     if (groups.isNotEmpty && groups.last.han == han) {
       final last = groups.removeLast();
-      groups.add((
-        start: last.start,
-        end: position + cluster.length,
-        text: last.text + cluster,
-        han: han
-      ));
+      groups.add((start: last.start, end: position + cluster.length, han: han));
     } else {
-      groups.add((
-        start: position,
-        end: position + cluster.length,
-        text: cluster,
-        han: han
-      ));
+      groups.add((start: position, end: position + cluster.length, han: han));
     }
     position += cluster.length;
   }
@@ -136,14 +126,15 @@ List<JapaneseLyricReadingSpan> japaneseReadingWordSpans(
   for (var index = 0; index < groups.length; index++) {
     final group = groups[index];
     if (!group.han) {
-      final anchor = _hiragana(group.text);
+      final anchor = _hiragana(text.substring(group.start, group.end));
       if (!normalized.startsWith(anchor, cursor)) return const [];
       cursor += anchor.length;
       continue;
     }
     var end = reading.length;
     if (index + 1 < groups.length) {
-      final anchor = _hiragana(groups[index + 1].text);
+      final next = groups[index + 1];
+      final anchor = _hiragana(text.substring(next.start, next.end));
       if (index + 2 == groups.length && normalized.endsWith(anchor)) {
         end = normalized.length - anchor.length;
       } else {
@@ -342,7 +333,7 @@ class JapaneseReadingProjector {
       return result(JapaneseReadingResult.unchanged);
     }
 
-    final plans = <int, List<JapaneseReadingChunk>>{};
+    final candidateTexts = <int, String>{};
     var inputUnits = 0;
     for (var index = 0; index < source.lines.length; index++) {
       final line = source.lines[index];
@@ -352,9 +343,9 @@ class JapaneseReadingProjector {
       if (inputUnits > maximumInputUnits) {
         return result(JapaneseReadingResult.tooLarge);
       }
-      plans[index] = japaneseReadingChunks(text);
+      candidateTexts[index] = text;
     }
-    if (plans.isEmpty) return result(JapaneseReadingResult.unchanged);
+    if (candidateTexts.isEmpty) return result(JapaneseReadingResult.unchanged);
     List<String> allowedNamespaces() =>
         _policy?.cacheNamespacesFor(requestMode) ?? _cacheNamespaces();
     final namespaces = List<String>.of(allowedNamespaces());
@@ -380,7 +371,7 @@ class JapaneseReadingProjector {
       if (!current()) return result(JapaneseReadingResult.stale);
       if (saved != null &&
           saved.entries.every((entry) =>
-              plans.containsKey(entry.key) &&
+              candidateTexts.containsKey(entry.key) &&
               _validSaved(_content(source.lines[entry.key]), entry.value))) {
         // Showing automatic readings prefers a valid saved projection over
         // starting another analysis. Explicit online generation retains its
@@ -395,6 +386,12 @@ class JapaneseReadingProjector {
         if (namespace == 'offline') offlineSaved = saved;
       }
     }
+    // A durable hit only validates its saved spans. Split source graphemes for
+    // native/memory lookup after that fast display path has missed.
+    final plans = <int, List<JapaneseReadingChunk>>{
+      for (final entry in candidateTexts.entries)
+        entry.key: japaneseReadingChunks(entry.value),
+    };
     var lookupNamespace = namespaces.first;
     final canAnalyze = !cachedOnly && _policy?.canAnalyze(requestMode) != false;
     if (requestMode != JapaneseReadingRequestMode.online || !canAnalyze) {

@@ -139,6 +139,24 @@ void main() {
     expect(chunks.last.text.endsWith('終'), isTrue);
   });
 
+  test('word spans retain whole Han runs and exact UTF16 anchored ranges', () {
+    final long = '${'漢' * 100}かな';
+    final longSpans = japaneseReadingWordSpans(long, 'かんかな', offset: 7);
+    expect(longSpans, hasLength(1));
+    expect(longSpans.single.start, 7);
+    expect(longSpans.single.end, 107);
+    expect(longSpans.single.text, 'かん');
+
+    final spans =
+        japaneseReadingWordSpans('𠀀\uFE0Fか\u3099夜', 'カンカ\u3099ヨル', offset: 7);
+    expect(spans.map((span) => (span.start, span.end, span.text)), [
+      (7, 10, 'カン'),
+      (12, 13, 'ヨル'),
+    ]);
+    expect(japaneseReadingWordSpans('夜かな空かな', 'ヨルカナソラカナ'), isEmpty,
+        reason: 'Repeated kana anchors must not invent per-Han readings');
+  });
+
   test('oversized single grapheme is retained verbatim between parsed chunks',
       () async {
     final giant = 'a${'\u0301' * 105}';

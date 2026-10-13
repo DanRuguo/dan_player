@@ -374,6 +374,37 @@ void main() {
         isFalse);
   });
 
+  test('replacing a cached reading releases its previous byte budget',
+      () async {
+    final firstKey = 'a' * 64, secondKey = 'b' * 64;
+    final firstFile = File(path.join(directory.path, '$firstKey.json'));
+    final secondFile = File(path.join(directory.path, '$secondKey.json'));
+    await cache.write(firstKey, {0: reading}, stillCurrent: () => true);
+    await cache.write(secondKey, {0: reading}, stillCurrent: () => true);
+    final budget = await firstFile.length() + await secondFile.length();
+    cache = JapaneseLyricReadingCache(
+        directory: () async => directory,
+        engine: 'fixture-v4',
+        maximumTotalBytes: budget);
+
+    await cache.write(firstKey, {0: reading}, stillCurrent: () => true);
+    expect(await firstFile.exists(), isTrue);
+    expect(await secondFile.exists(), isTrue,
+        reason: 'Replacing an equal-size entry must not evict its neighbour');
+    await cache.write(firstKey,
+        {0: JapaneseCachedReading('${reading.text}かな', reading.spans)},
+        stillCurrent: () => true);
+    expect(await firstFile.exists(), isTrue);
+    expect(await secondFile.exists(), isFalse,
+        reason: 'A larger replacement must still obey the total byte limit');
+    await cache.write(firstKey, {0: reading}, stillCurrent: () => true);
+    await cache.write(secondKey, {0: reading}, stillCurrent: () => true);
+    expect(await firstFile.exists(), isTrue);
+    expect(await secondFile.exists(), isTrue,
+        reason: 'Shrinking a replacement must release its old byte budget');
+    expect(await firstFile.length() + await secondFile.length(), budget);
+  });
+
   test('read-only cache restores Han-only lyrics without dictionary work',
       () async {
     final raw = source('日本語');

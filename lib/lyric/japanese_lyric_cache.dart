@@ -33,6 +33,7 @@ class JapaneseLyricReadingCache {
   String? _inventoryDirectory;
   DateTime? _inventoryReadAt;
   final _inventory = <String, (int, DateTime)>{};
+  var _inventoryTotalBytes = 0;
 
   String fingerprint(Lyric source, {String namespace = 'offline'}) => sha256
       .convert(utf8.encode(jsonEncode([
@@ -202,6 +203,8 @@ class JapaneseLyricReadingCache {
       _inventory
         ..clear()
         ..addAll(inventory);
+      _inventoryTotalBytes =
+          inventory.values.fold<int>(0, (sum, entry) => sum + entry.$1);
       _inventoryDirectory = directory.path;
       _inventoryReadAt = now;
     }
@@ -219,21 +222,27 @@ class JapaneseLyricReadingCache {
       }
       if (!next.current()) return;
       await temporary.rename(target.path);
+      _inventoryTotalBytes -= _inventory[target.path]?.$1 ?? 0;
       _inventory[target.path] = (bytes.length, now);
-      var total =
-          _inventory.values.fold<int>(0, (sum, entry) => sum + entry.$1);
+      _inventoryTotalBytes += bytes.length;
       var count = _inventory.length;
-      if (count <= maximumEntries && total <= maximumTotalBytes) return;
+      if (count <= maximumEntries &&
+          _inventoryTotalBytes <= maximumTotalBytes) {
+        return;
+      }
       final files = _inventory.entries
           .where((entry) => entry.key != target.path)
           .toList()
         ..sort((a, b) => a.value.$2.compareTo(b.value.$2));
       for (final entry in files) {
-        if (count <= maximumEntries && total <= maximumTotalBytes) break;
+        if (count <= maximumEntries &&
+            _inventoryTotalBytes <= maximumTotalBytes) {
+          break;
+        }
         final file = File(entry.key);
         if (await file.exists()) await file.delete();
         _inventory.remove(entry.key);
-        total -= entry.value.$1;
+        _inventoryTotalBytes -= entry.value.$1;
         count--;
       }
     } finally {

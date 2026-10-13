@@ -645,7 +645,7 @@ class PlayerDataFolderTile extends StatelessWidget {
 
 /// Keep one full description for compact cards, without competing path and
 /// summary bubbles while the visible labels already have enough room.
-class _FolderTileTooltip extends StatelessWidget {
+class _FolderTileTooltip extends StatefulWidget {
   const _FolderTileTooltip({
     required this.name,
     required this.folderPath,
@@ -659,46 +659,93 @@ class _FolderTileTooltip extends StatelessWidget {
   final Widget child;
 
   @override
+  State<_FolderTileTooltip> createState() => _FolderTileTooltipState();
+}
+
+class _FolderTileTooltipState extends State<_FolderTileTooltip> {
+  (
+    AppFontPolicy,
+    TextStyle,
+    TextScaler,
+    Locale?,
+    TextDirection,
+    bool,
+    String,
+    String,
+    String
+  )? _measuredInputs;
+  final List<({double width, bool multiline})?> _naturalWidths =
+      List.filled(3, null);
+
+  @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
     return LayoutBuilder(builder: (context, bounds) {
       // The icon, menu and optional tree toggle keep their existing fixed slots.
       // A long path alone does not enable a tooltip in an ordinary-width card.
-      final textWidth = math.max(0.0, bounds.maxWidth - textInset);
+      final textWidth = math.max(0.0, bounds.maxWidth - widget.textInset);
       if (!textWidth.isFinite || textWidth > 180 * scaler.scale(14) / 14) {
-        return child;
+        return widget.child;
       }
       final policy = AppFontScope.of(context);
       final defaults = Theme.of(context).textTheme.bodyMedium!;
-      final painter = TextPainter(
-        textDirection: Directionality.of(context),
-        textScaler: scaler,
-        locale: Localizations.maybeLocaleOf(context),
-        maxLines: 1,
+      final direction = Directionality.of(context);
+      final locale = Localizations.maybeLocaleOf(context);
+      final bold = MediaQuery.boldTextOf(context);
+      final inputs = (
+        policy,
+        defaults,
+        scaler,
+        locale,
+        direction,
+        bold,
+        widget.name,
+        widget.folderPath,
+        widget.summary
       );
-      bool overflows(String value, TextStyle style) {
-        if (MediaQuery.boldTextOf(context)) {
-          style = style.merge(const TextStyle(fontWeight: FontWeight.bold));
+      if (_measuredInputs != inputs) {
+        _measuredInputs = inputs;
+        _naturalWidths.fillRange(0, _naturalWidths.length, null);
+      }
+      // Natural widths are independent of the card width. Keep only the three
+      // current labels' numeric results, and measure later labels lazily just
+      // as before. Resize/parent rebuilds need no repeated paragraph shaping.
+      TextPainter? painter;
+      bool overflows(int index, String value, TextStyle style) {
+        var measured = _naturalWidths[index];
+        if (measured == null) {
+          if (bold) {
+            style = style.merge(const TextStyle(fontWeight: FontWeight.bold));
+          }
+          final text = painter ??= TextPainter(
+              textDirection: direction,
+              textScaler: scaler,
+              locale: locale,
+              maxLines: 1);
+          text.text = appFontSpan(value, style: style, policy: policy);
+          text.layout();
+          measured = (width: text.width, multiline: text.didExceedMaxLines);
+          _naturalWidths[index] = measured;
         }
-        painter.text = appFontSpan(value, style: style, policy: policy);
-        painter.layout();
-        return painter.didExceedMaxLines || painter.width > textWidth + .5;
+        return measured.multiline || measured.width > textWidth + .5;
       }
 
       final truncated = overflows(
-              name,
+              0,
+              widget.name,
               defaults.copyWith(
                   fontSize: 16, height: 1.25, fontWeight: FontWeight.w600)) ||
+          overflows(1, widget.folderPath,
+              defaults.copyWith(fontSize: 14, height: 1.25)) ||
           overflows(
-              folderPath, defaults.copyWith(fontSize: 14, height: 1.25)) ||
-          overflows(summary, defaults.copyWith(fontSize: 14, height: 1.25));
-      painter.dispose();
-      if (!truncated) return child;
+              2, widget.summary, defaults.copyWith(fontSize: 14, height: 1.25));
+      painter?.dispose();
+      if (!truncated) return widget.child;
       return Tooltip(
           triggerMode: TooltipTriggerMode.manual,
           excludeFromSemantics: true,
-          message: '$name\n$folderPath\n$summary',
-          child: child);
+          message: '${widget.name}\n${widget.folderPath}\n${widget.summary}',
+          child: widget.child);
     });
   }
 }
