@@ -1,4 +1,9 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '在“设置 → 界面与主题”开启“简易播放条播放列表”，播放条的列表按钮会向上展开封面和歌名，本地文件不显示后缀。滚轮、触控板或手指滑动浏览；停止滑动后自动对齐完整歌曲，新滑动可以随时接管。当前歌曲使用强调底色，点选歌曲后列表收回并开始播放。也可用上下键选择、Enter 播放、Esc 收回。': [
+    'Enable “Simple playback bar playlist” in Settings → Interface & Theme. The list button then expands covers and song names upward; local filenames omit their extensions. Browse with the mouse wheel, trackpad or a finger. When scrolling stops, whole songs align automatically; new input takes over immediately. The current song has a highlighted background. Selecting a song folds the list away and starts playback. You can also select with Up/Down, play with Enter, and close with Esc.',
+    '「設定 → インターフェースとテーマ」で「再生バーの簡易プレイリスト」をオンにすると、再生バーの一覧ボタンからカバーと曲名が上へ展開します。ローカルファイルの拡張子は表示しません。マウスホイール、トラックパッド、指のスワイプで閲覧でき、操作を止めると曲の項目全体が見える位置へ自動で揃います。新しい操作ですぐに引き継げます。再生中の曲は背景色で強調され、曲を選ぶと一覧を閉じて再生します。上下キーで選択、Enterで再生、Escで閉じることもできます。',
+    '설정 → 인터페이스와 테마에서 “재생 바 간편 재생 목록”을 켜면 목록 버튼을 눌러 표지와 곡 이름을 위로 펼칠 수 있습니다. 로컬 파일의 확장자는 표시하지 않습니다. 마우스 휠, 트랙패드 또는 손가락으로 탐색하며, 스크롤을 멈추면 곡 항목이 온전히 보이도록 자동 정렬됩니다. 새 입력은 즉시 이어받습니다. 현재 곡은 배경색으로 강조되며, 곡을 선택하면 목록을 접은 뒤 재생합니다. 위/아래 키로 선택하고 Enter로 재생하거나 Esc로 닫을 수도 있습니다.',
+  ],
   '导出队列与搜索结果': ['Export the queue and search results', 'キューと検索結果の書き出し', '대기열과 검색 결과 내보내기'],
   '在播放队列顶栏点“导出队列或搜索结果”图标，选择“导出队列为 M3U8”或“导出队列音乐文件夹”。输入搜索词后，菜单还可选择“导出搜索结果为 M3U8”或“导出搜索结果音乐文件夹”。文件选择窗口打开前会固定所选范围的歌曲与顺序，保留重复引用；之后切歌或修改搜索不会改变这次导出。': [
     'On the queue toolbar, select the “Export queue or search results” icon, then choose “Export queue as M3U8” or “Export queue as music folder”. With a search term entered, the menu also offers “Export search results as M3U8” and “Export search results as music folder”. The selected tracks and their order are captured before the file picker opens, including repeated references. Changing tracks or the search afterward does not change this export.',

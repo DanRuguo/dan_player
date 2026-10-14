@@ -3,6 +3,7 @@
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
+#include <flutter_windows.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <shobjidl.h>
@@ -24,6 +25,7 @@
 #include "desktop_integration_fonts.h"
 #include "desktop_integration_text.h"
 #include "desktop_integration_tray_style.h"
+#include "desktop_integration_tray_layout.h"
 #include "resource.h"
 #include "taskbar_peek_geometry.h"
 #include "taskbar_progress_policy.h"
@@ -360,8 +362,9 @@ struct DesktopIntegrationController::Impl
   bool custom_menu_paint_failed = false;
   policy::PopupPaintBuffer popup_paint;
   UINT menu_dpi = 96;
-  policy::PopupFonts popup_fonts;
-  policy::NativeTextCache popup_text;
+  POINT menu_anchor{};
+  policy::TrayPopupLayout menu_layout;
+  policy::PopupFonts popup_fonts{FW_SEMIBOLD, FW_NORMAL};
   std::array<wchar_t, 9> material_glyphs{};
   policy::PopupBlurImage popup_blur;
   policy::PopupEffectsPreference popup_effects;
@@ -557,18 +560,30 @@ struct DesktopIntegrationController::Impl
       int next_accent = static_cast<int>(accent);
       ReadBool(*args, "dark", &next_dark);
       ReadInt(*args, "accent", &next_accent);
-      std::wstring font_family;
-      std::wstring font_path;
       std::optional<policy::NativeFontPolicy> font_policy;
       if (!ReadFontPolicy(*args, &font_policy)) { result->Error("INVALID_ARGUMENT", "Invalid font snapshot"); return; }
-      const bool has_font = font_policy || (ReadWideString(*args, "fontFamily", 1024, &font_family) &&
-          ReadWideString(*args, "fontPath", 32768, &font_path));
-      const bool font_changed = has_font && (font_policy ? !popup_fonts.Matches(*font_policy) : !popup_fonts.Matches(font_family, font_path));
-      if (font_changed) {
-        popup_text.Clear();
-        if (font_policy) popup_fonts.Configure(*font_policy);
-        else popup_fonts.Configure(std::move(font_family), std::move(font_path));
+      bool labels_changed = false;
+      const auto labels_arg = args->find(EncodableValue("labels"));
+      if (labels_arg != args->end()) {
+        if (const auto* map = std::get_if<EncodableMap>(&labels_arg->second)) {
+          constexpr std::array<const char*, 8> keys{
+              "showMain", "showMini", "previous", "play", "pause", "next", "lyrics", "exit"};
+          for (size_t i = 0; i < keys.size(); ++i) {
+            std::wstring label;
+            if (ReadWideString(*map, keys[i], 96, &label) && !label.empty() && label != labels[i]) {
+              labels[i] = std::move(label);
+              labels_changed = true;
+            }
+          }
+        }
       }
+      // The tray is a Windows command menu: use its language's system UI face,
+      // rather than synthesizing bold application/music fonts at small sizes.
+      // The same ForText/DrawText path measures and paints all of its labels.
+      const std::wstring font_family = policy::TrayPopupFontFamily(
+          policy::TrayPopupLanguage(font_policy, labels));
+      const bool font_changed = !popup_fonts.Matches(font_family, L"");
+      if (font_changed) popup_fonts.Configure(font_family, L"");
       std::wstring icon_font_path;
       bool icons_changed = ReadWideString(*args, "trayIconFontPath", 32768, &icon_font_path) &&
                             popup_fonts.ConfigureIcons(std::move(icon_font_path));
@@ -585,21 +600,6 @@ struct DesktopIntegrationController::Impl
           if (valid) next[index] = static_cast<wchar_t>(point);
         }
         if (valid && next != material_glyphs) { material_glyphs = next; icons_changed = true; }
-      }
-      bool labels_changed = false;
-      const auto labels_arg = args->find(EncodableValue("labels"));
-      if (labels_arg != args->end()) {
-        if (const auto* map = std::get_if<EncodableMap>(&labels_arg->second)) {
-          constexpr std::array<const char*, 8> keys{
-              "showMain", "showMini", "previous", "play", "pause", "next", "lyrics", "exit"};
-          for (size_t i = 0; i < keys.size(); ++i) {
-            std::wstring label;
-            if (ReadWideString(*map, keys[i], 96, &label) && !label.empty() && label != labels[i]) {
-              labels[i] = std::move(label);
-              labels_changed = true;
-            }
-          }
-        }
       }
       const auto next_color = static_cast<COLORREF>(next_accent & 0x00ffffff);
       if(labels_changed) {
@@ -619,7 +619,8 @@ struct DesktopIntegrationController::Impl
       EnsureTaskbar();
       UpdateButtons();
       ApplyProgress();
-      if (theme_changed || font_changed || icons_changed || labels_changed || blur_changed) RefreshMenuAppearance();
+      if (theme_changed || font_changed || icons_changed || labels_changed || blur_changed)
+        RefreshMenuAppearance(font_changed || labels_changed);
       result->Success(Status());
     } else if (method == "setProgress") {
       const auto item = args ? args->find(EncodableValue("state"))
@@ -734,7 +735,8 @@ struct DesktopIntegrationController::Impl
       // State updates are infrequent and may change every row (enabled state,
       // toggle glyph, check mark) plus the title. Hover remains row-local.
       if (!disposed && menu_window && (playback_changed || title_changed)) {
-        InvalidateRect(menu_window, nullptr, FALSE);
+        if (title_changed) RefreshMenuAppearance(true);
+        else InvalidateRect(menu_window, nullptr, FALSE);
       }
       result->Success();
     } else if (method == "prepareHide") {
@@ -1164,19 +1166,12 @@ struct DesktopIntegrationController::Impl
     return MulDiv(value, static_cast<int>(menu_dpi), 96);
   }
 
-  int PopupHeight() const {
-    int result = Scale(62 + 16);
-    for (const auto& item : PopupItems()) {
-      result += Scale(item.separator ? 10 : 44);
-    }
-    return result;
-  }
-
   RECT PopupItemRect(int target, int width) const {
-    int top = Scale(62);
+    int top = menu_layout.header_height;
     const auto items = PopupItems();
     for (int index = 0; index < static_cast<int>(items.size()); ++index) {
-      const int height = Scale(items[index].separator ? 10 : 44);
+      const int height = items[index].separator ? menu_layout.separator_height
+                                               : menu_layout.row_height;
       if (index == target) {
         return RECT{Scale(8), top, width - Scale(8), top + height};
       }
@@ -1233,14 +1228,14 @@ struct DesktopIntegrationController::Impl
     popup_fonts.Ensure(menu_dpi);
     const auto old_font = SelectObject(dc, popup_fonts.ForText(dc, tooltip.c_str(), true));
     SetTextColor(dc, foreground);
-    RECT title{Scale(18), Scale(11), client.right - Scale(18), Scale(38)};
-    if (!popup_fonts.policy() || !popup_text.Draw(dc, popup_fonts, tooltip, title, menu_dpi, true))
-      DrawTextW(dc, tooltip.c_str(), -1, &title, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    RECT title{Scale(18), menu_layout.title_top, client.right - Scale(18),
+               menu_layout.title_top + menu_layout.title_height};
+    DrawTextW(dc, tooltip.c_str(), -1, &title, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
     SelectObject(dc, popup_fonts.ForText(dc, kPublisherCaption));
     SetTextColor(dc, secondary);
-    RECT caption{Scale(18), Scale(36), client.right - Scale(18), Scale(56)};
-    if (!popup_fonts.policy() || !popup_text.Draw(dc, popup_fonts, kPublisherCaption, caption, menu_dpi))
-      DrawTextW(dc, kPublisherCaption, -1, &caption, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    RECT caption{Scale(18), menu_layout.caption_top, client.right - Scale(18),
+                 menu_layout.caption_top + menu_layout.caption_height};
+    DrawTextW(dc, kPublisherCaption, -1, &caption, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
 
     const auto items = PopupItems();
     for (int index = 0; index < static_cast<int>(items.size()); ++index) {
@@ -1286,8 +1281,7 @@ struct DesktopIntegrationController::Impl
       SetTextColor(dc, item_color);
       RECT label{row.left + Scale(48), row.top,
                  row.right - Scale(34), row.bottom};
-      if (!popup_fonts.policy() || !popup_text.Draw(dc, popup_fonts, items[index].label, label, menu_dpi))
-        DrawTextW(dc, items[index].label, -1, &label, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+      DrawTextW(dc, items[index].label, -1, &label, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
       if (items[index].id == policy::kDesktopLyrics &&
           playback.desktop_lyrics) {
         if (popup_fonts.material_icons_loaded() && material_glyphs[8]) {
@@ -1299,9 +1293,10 @@ struct DesktopIntegrationController::Impl
         } else {
         const auto old_pen = SelectObject(dc, GetStockObject(DC_PEN));
         SetDCPenColor(dc, icon_color);
-        MoveToEx(dc, row.right - Scale(25), row.top + Scale(22), nullptr);
-        LineTo(dc, row.right - Scale(20), row.top + Scale(27));
-        LineTo(dc, row.right - Scale(12), row.top + Scale(17));
+        const int middle = (row.top + row.bottom) / 2;
+        MoveToEx(dc, row.right - Scale(25), middle, nullptr);
+        LineTo(dc, row.right - Scale(20), middle + Scale(5));
+        LineTo(dc, row.right - Scale(12), middle - Scale(5));
         SelectObject(dc, old_pen);
         }
       }
@@ -1455,13 +1450,15 @@ struct DesktopIntegrationController::Impl
                    GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
     });
     if (!registered) return false;
-    menu_dpi = GetDpiForWindow(window);
-    if (menu_dpi == 0) menu_dpi = 96;
-    const int width = Scale(292);
-    const int height = PopupHeight();
     MONITORINFO monitor{sizeof(monitor)};
     const HMONITOR target = MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST);
     if (!GetMonitorInfoW(target, &monitor)) return false;
+    menu_dpi = FlutterDesktopGetDpiForMonitor(target);
+    if (menu_dpi == 0) menu_dpi = 96;
+    if (!menu_layout.Measure(popup_fonts, menu_dpi, tooltip, kPublisherCaption,
+                             labels, monitor.rcWork.right - monitor.rcWork.left)) return false;
+    const int width = menu_layout.width, height = menu_layout.height;
+    menu_anchor = anchor;
     RECT bounds{};
     if (!policy::PlaceTrayPopup(anchor, width, height, monitor.rcWork, &bounds)) return false;
     // Allocate before showing anything; use the accessible native menu if a
@@ -1589,7 +1586,7 @@ struct DesktopIntegrationController::Impl
     popup_effects.Close();
   }
 
-  void RefreshMenuAppearance() {
+  void RefreshMenuAppearance(bool relayout = false) {
     if (!menu_window) return;
     const HWND current = menu_window;
     // A contrast-theme toggle can arrive while a custom popup is already open.
@@ -1597,6 +1594,41 @@ struct DesktopIntegrationController::Impl
     if (SystemHighContrast()) {
       DestroyWindow(current);
     } else {
+      if (relayout) {
+        MONITORINFO monitor{sizeof(monitor)};
+        const HMONITOR target = MonitorFromPoint(menu_anchor, MONITOR_DEFAULTTONEAREST);
+        UINT dpi = FlutterDesktopGetDpiForMonitor(target);
+        if (dpi == 0) dpi = 96;
+        policy::TrayPopupLayout next;
+        RECT bounds{}, previous{};
+        if (!GetMonitorInfoW(target, &monitor) ||
+            !next.Measure(popup_fonts, dpi, tooltip, kPublisherCaption, labels,
+                          monitor.rcWork.right - monitor.rcWork.left) ||
+            !policy::PlaceTrayPopup(menu_anchor, next.width, next.height,
+                                    monitor.rcWork, &bounds) ||
+            !popup_paint.Open(next.width, next.height)) {
+          DestroyWindow(current);
+          return;
+        }
+        GetWindowRect(current, &previous);
+        menu_dpi = dpi;
+        menu_layout = next;
+        if (!EqualRect(&bounds, &previous)) {
+          // A resized popup cannot reuse a desktop image captured for its old
+          // rectangle. Keep a solid theme background until the next opening.
+          ClearPopupBlur();
+          const int radius = Scale(16);
+          HRGN region = CreateRoundRectRgn(0, 0, next.width + 1, next.height + 1,
+                                           radius, radius);
+          if (region && !SetWindowRgn(current, region, TRUE)) DeleteObject(region);
+          if (!SetWindowPos(current, nullptr, bounds.left, bounds.top,
+                            next.width, next.height, SWP_NOACTIVATE | SWP_NOZORDER)) {
+            DestroyWindow(current);
+            return;
+          }
+          if (disposed || menu_window != current) return;
+        }
+      }
       // Never capture again over our own popup. A disabled effect retires the
       // static image immediately; re-enabling waits for the next menu opening.
       const bool allowed = policy::TrayBlurAllowed(false, popup_effects.enabled(),
@@ -1704,13 +1736,13 @@ struct DesktopIntegrationController::Impl
       peek_client_geometry.Observe(window, message == WM_SIZE && wparam == SIZE_MINIMIZED);
       QueueState();
     }
-    if (message == WM_DPICHANGED || message == WM_THEMECHANGED ||
+    if (message == WM_DPICHANGED || message == WM_DISPLAYCHANGE || message == WM_THEMECHANGED ||
         message == WM_SETTINGCHANGE || message == WM_POWERBROADCAST) {
       popup_fonts.ResetHandles();
       EnsureIcons(true);
       EnsureTray();
       UpdateButtons();
-      RefreshMenuAppearance();
+      RefreshMenuAppearance(true);
     }
     if (message == WM_DISPLAYCHANGE || message == WM_SETTINGCHANGE ||
         message == WM_THEMECHANGED || message == WM_DPICHANGED || message == WM_SYSCOLORCHANGE) {
@@ -1753,7 +1785,6 @@ struct DesktopIntegrationController::Impl
     if (menu_open) EndMenu();
     popup_paint.Clear();
     ClearPopupBlur();
-    popup_text.Clear();
     popup_fonts.Clear();
     if (old_taskbar) old_taskbar->SetProgressState(window, TBPF_NOPROGRESS);
     if (old_taskbar && had_buttons) {

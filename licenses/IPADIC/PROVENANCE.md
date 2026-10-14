@@ -3,7 +3,9 @@
 The native Japanese reading worker uses the Windows analyzer when it returns a
 complete result, and can fall back to Lindera 6.2.0 with the optional IPADIC
 dictionary module. The analyzer shares the existing Rust DLL; the dictionary is
-not embedded in the DLL. The complete portable package includes the data module;
+not embedded in the DLL. Additional lexical/character readings are separate
+files in the same optional module; see [EDRDG provenance](../EDRDG/PROVENANCE.md).
+The complete portable package includes the data module;
 the slim installer leaves it optional and preserves an existing copy. The verified compressed
 module is read into memory only on the first fallback request. Installation is
 explicit, supports a manual local copy, and does not install another executable.

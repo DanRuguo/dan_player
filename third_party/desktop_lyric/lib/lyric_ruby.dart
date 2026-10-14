@@ -12,6 +12,79 @@ abstract interface class LyricRubySpan {
   String get text;
 }
 
+/// Keep an indivisible contextual ruby word on one visual row when it fits the
+/// viewport. Mono-ruby spans need no change; irregular readings such as 今日
+/// remain intact instead of assigning arbitrary syllables to their characters.
+/// Layout changes only paragraph width, never source text/UTF-16 positions, and
+/// runs only when paragraph inputs change, not while playback is sampled.
+double layoutRubyWordSafe(TextPainter paragraph, List<LyricRubySpan> spans,
+    double maxWidth, double preferredWidth) {
+  final text = paragraph.text?.toPlainText() ?? '';
+  if (spans.isEmpty ||
+      !maxWidth.isFinite ||
+      maxWidth <= 0 ||
+      text.length > 512 ||
+      spans.length > 128 ||
+      text.contains('\n') ||
+      paragraph.textDirection != TextDirection.ltr) {
+    return preferredWidth;
+  }
+  final valid = spans
+      .where((span) =>
+          span.start >= 0 && span.end <= text.length && span.end > span.start)
+      .toList();
+  TextRange rangeFor(LyricRubySpan span) => paragraph.getLineBoundary(
+      TextPosition(offset: span.start + 1, affinity: TextAffinity.upstream));
+  bool crosses(LyricRubySpan span) => rangeFor(span).end < span.end;
+  if (!valid.any(crosses)) return preferredWidth;
+  // Balancing may have introduced a split that the available body width avoids.
+  paragraph.layout(maxWidth: maxWidth);
+  if (!valid.any(crosses)) return maxWidth;
+  var width = maxWidth;
+  var minimumWordWidth = 0.0;
+  for (final span in valid) {
+    final boxes = paragraph.getBoxesForSelection(
+        TextSelection(baseOffset: span.start, extentOffset: span.end));
+    final wordWidth = boxes.fold(
+        0.0, (double total, box) => total + (box.right - box.left).abs());
+    if (wordWidth <= maxWidth) {
+      minimumWordWidth = math.max(minimumWordWidth, wordWidth);
+    }
+  }
+  for (var attempt = 0; attempt < 16; attempt++) {
+    final rows = paragraph.computeLineMetrics();
+    final ranges = LyricRubyLayout._paragraphRows(paragraph, rows.length);
+    double? nextWidth;
+    for (final span in valid.where(crosses)) {
+      final range = rangeFor(span);
+      if (range.end <= span.start) continue;
+      final boxes = paragraph.getBoxesForSelection(
+          TextSelection(baseOffset: span.start, extentOffset: range.end));
+      if (boxes.isEmpty) continue;
+      final rowIndex = ranges
+          .indexWhere((row) => row.start <= span.start && span.start < row.end);
+      if (rowIndex < 0) continue;
+      final row = rows[rowIndex];
+      final prefix = boxes.map((box) => box.left).reduce(math.min) - row.left;
+      // A whole-word reading wider than the body cannot be forced onto a row.
+      // Never shrink below another word's measured full extent to fix this one.
+      final candidate = prefix - .1;
+      if (candidate >= minimumWordWidth &&
+          candidate >= 1 &&
+          candidate < width - .1) {
+        nextWidth = math.max(nextWidth ?? 0, candidate);
+      }
+    }
+    if (nextWidth == null) break;
+    width = nextWidth;
+    paragraph.layout(maxWidth: width);
+    if (!valid.any(crosses)) return width;
+  }
+  // Restore the maximum available width if no complete placement was found.
+  paragraph.layout(maxWidth: maxWidth);
+  return maxWidth;
+}
+
 /// Owned by one fixed primary paragraph. Width changes reuse its natural
 /// reading shapes; only a genuinely different fragment fit needs a new shape.
 class LyricRubyShaping {
@@ -294,6 +367,8 @@ class LyricRubyLayout {
         row = _rowForOffset(span.start);
         final range = _rowRanges[row];
         sourceEnd = math.min(span.end, range.end);
+        // Ellipsized paragraphs have no selection for hidden source words.
+        if (sourceEnd <= span.start) continue;
         final boxes = primary!.getBoxesForSelection(
             TextSelection(baseOffset: span.start, extentOffset: sourceEnd));
         if (boxes.isEmpty) continue;

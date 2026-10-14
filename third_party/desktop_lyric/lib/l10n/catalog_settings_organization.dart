@@ -1,5 +1,16 @@
 // Settings navigation and descriptions; media metadata is never translated.
 const catalogSettingsOrganization = <String, List<String>>{
+  '播放列表为空': ['The playlist is empty', 'プレイリストは空です', '재생 목록이 비어 있습니다'],
+  '简易播放条播放列表': [
+    'Simple playback bar playlist',
+    '再生バーの簡易プレイリスト',
+    '재생 바 간편 재생 목록',
+  ],
+  '从播放条向上展开歌曲封面和文件名，滚动浏览，点击播放后收回。': [
+    'Expand covers and filenames above the playback bar. Scroll to browse; select a song to play and close the list.',
+    '再生バーの上にカバーとファイル名を展開します。スクロールで曲を探し、選ぶと再生して閉じます。',
+    '재생 바 위로 커버와 파일 이름을 펼칩니다. 스크롤로 탐색하고 곡을 선택하면 재생 후 목록이 닫힙니다.',
+  ],
   '界面与主题': ['Interface & theme', 'インターフェースとテーマ', '인터페이스와 테마'],
   '背景与动效': ['Background & effects', '背景とエフェクト', '배경과 효과'],
   '选择喜欢的主色，按钮与高亮会统一使用；关闭动态配色后持续使用此颜色。': [

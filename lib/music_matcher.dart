@@ -135,6 +135,8 @@ final RegExp _trailingRoleMarker = RegExp(
   caseSensitive: false,
   unicode: true,
 );
+final RegExp _instrumentalVersionWord =
+    RegExp(r'\binst(?:rumental)?\b', caseSensitive: false);
 
 /// Removes only common trailing release descriptors for matching/search.
 /// The original title stored in the library is never changed.
@@ -1950,10 +1952,37 @@ String? _songVersionKind(String title) {
   return null;
 }
 
+/// Matching removes these release suffixes, but their instrumental evidence
+/// remains authoritative for automation. Ordinary title words such as Instinct
+/// or Live and Learn are not version labels, and manual choices keep all rows.
+bool _hasInstrumentalVersion(String value) {
+  var title = value.trim();
+  while (title.isNotEmpty) {
+    final before = title;
+    final suffix = _trailingBracketedVersion.firstMatch(title);
+    if (suffix != null && _instrumentalVersionWord.hasMatch(suffix[0]!)) {
+      return true;
+    }
+    title = title
+        .replaceFirst(_trailingBracketedVersion, '')
+        .replaceFirst(_trailingVersion, '')
+        .replaceFirst(_trailingRoleMarker, '')
+        .trim();
+    if (title == before) break;
+  }
+  return false;
+}
+
 /// Automatic matching must retain version evidence that the fuzzy text score
 /// deliberately ignores. Manual selection does not use this acceptance gate.
 bool isAutomaticLyricCandidateCompatible(
     Audio audio, SongSearchResult candidate) {
+  final sourceTitle =
+      _meaningfulMatchValue(audio.title) ? audio.title : audio.fileNameTitle;
+  if (_hasInstrumentalVersion(sourceTitle) !=
+      _hasInstrumentalVersion(candidate.title)) {
+    return false;
+  }
   final duration = candidate.durationSeconds ??
       _positiveSeconds(candidate.customAudio?.duration);
   final hasDurations = audio.duration > 0 && duration != null;
@@ -1961,7 +1990,7 @@ bool isAutomaticLyricCandidateCompatible(
       (audio.duration - duration).abs() > (audio.duration * .04).clamp(5, 12)) {
     return false;
   }
-  final localVersion = _songVersionKind(audio.title);
+  final localVersion = _songVersionKind(sourceTitle);
   final remoteVersion = _songVersionKind(candidate.title);
   if (localVersion != null &&
       remoteVersion != null &&

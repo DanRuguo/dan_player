@@ -66,6 +66,8 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("appearance", "layout", "界面布局",
       ["音乐列表样式", "紧凑歌单", "开屏底部内容", "加载进度", "经典列表", "资源管理器分栏"]),
   SettingsSearchEntry("appearance", "sidebar", "侧栏宽度", []),
+  SettingsSearchEntry("appearance", "simple-playback-bar-playlist", "简易播放条播放列表",
+      ["播放列表", "歌曲封面", "文件名", "Dock"]),
   SettingsSearchEntry("effects", "background", "背景与毛玻璃", ["轻缓动态背景", "低频律动背景"]),
   SettingsSearchEntry("effects", "rendering", "界面刷新率",
       ["频谱显示", "歌词页实时频谱", "播放条七音频谱", "界面面板毛玻璃", "不可见时暂停视觉更新"]),

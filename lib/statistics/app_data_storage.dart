@@ -9,10 +9,12 @@ export 'directory_storage_scan.dart'
 class AppDataStorageScanner {
   const AppDataStorageScanner({this.maximumEntries = 200000});
   final int maximumEntries;
-  Future<AppDataStorageSnapshot> scan(Directory directory) =>
+  Future<AppDataStorageSnapshot> scan(Directory directory,
+          {bool Function()? isCancelled}) =>
       DirectoryStorageScan(maximumEntries: maximumEntries).scan(directory,
           categories: categories,
           categoryFor: categoryFor,
+          isCancelled: isCancelled,
           locationFor: (file, relative) =>
               categoryFor(relative) == categories[2]
                   ? p.join(directory.path, p.joinAll(p.split(relative).take(2)))

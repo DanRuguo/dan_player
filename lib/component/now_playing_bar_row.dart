@@ -11,6 +11,7 @@ class NowPlayingBarRow extends StatelessWidget {
       required this.subtitle,
       required this.identity,
       required this.controlsBuilder,
+      this.forceShowQueue = false,
       this.spectrum});
 
   final Widget leading;
@@ -18,6 +19,7 @@ class NowPlayingBarRow extends StatelessWidget {
   final String subtitle;
   final Object identity;
   final Widget? spectrum;
+  final bool forceShowQueue;
   final Widget Function(bool showQueue) controlsBuilder;
 
   @override
@@ -27,8 +29,10 @@ class NowPlayingBarRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: LayoutBuilder(
           builder: (context, bounds) => Row(children: [
-                leading,
-                const SizedBox(width: 12),
+                if (!forceShowQueue || bounds.maxWidth >= 300) ...[
+                  leading,
+                  const SizedBox(width: 12),
+                ],
                 Expanded(
                     child: AnimatedSwitcher(
                   duration: appToolbarReduceMotion(context)
@@ -64,7 +68,7 @@ class NowPlayingBarRow extends StatelessWidget {
                   ),
                 )),
                 const SizedBox(width: 8),
-                controlsBuilder(bounds.maxWidth >= 520),
+                controlsBuilder(forceShowQueue || bounds.maxWidth >= 520),
               ])),
     );
   }

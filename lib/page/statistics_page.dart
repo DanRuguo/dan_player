@@ -88,7 +88,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     if (!mounted) throw StateError('Statistics page closed');
     final directory = await getAppDataDir();
     if (!mounted) throw StateError('Statistics page closed');
-    return widget.storageScanner.scan(directory);
+    return widget.storageScanner.scan(directory, isCancelled: () => !mounted);
   }
 
   Future<void> _refreshAll() async {

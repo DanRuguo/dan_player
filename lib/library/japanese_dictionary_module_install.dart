@@ -14,9 +14,9 @@ const japaneseDictionaryModuleName =
     'DanPlayer-JapaneseReadings-IPADIC-6.2.0.zip';
 const japaneseDictionaryModuleUrl =
     'https://github.com/DanRuguo/dan_player/releases/download/v26.1.1/$japaneseDictionaryModuleName';
-const japaneseDictionaryModuleBytes = 7188886;
+const japaneseDictionaryModuleBytes = 10952592;
 const japaneseDictionaryModuleSha256 =
-    '25a09382ee59293c3f213a6e06673fcdfe70c8f17d15a0b0429adf1018df6892';
+    '036bfd033ee99dbfd5f96e4ccc555d6370b9d9ef360392adb684ec12a93e84c5';
 
 typedef JapaneseDictionaryDownload = Future<void> Function(
     File destination, void Function(double?) progress, bool Function() active);
@@ -59,12 +59,16 @@ class JapaneseDictionaryModuleInstaller {
     Directory? target;
     try {
       target = await _runtime.installDirectory;
-      if (await FileSystemEntity.isLink(target.path) ||
-          await FileSystemEntity.isLink(target.parent.path)) {
+      if (!await isJapaneseDictionaryDirectoryPathSafe(target.path,
+          allowMissing: true)) {
         throw const FileSystemException(
-            'Dictionary installation path is a link');
+            'Unsafe dictionary installation directory');
       }
       await target.parent.create(recursive: true);
+      if (!await isJapaneseDictionaryDirectoryPathSafe(target.parent.path)) {
+        throw const FileSystemException(
+            'Unsafe dictionary installation directory');
+      }
       work = await target.parent.createTemp('.japanese-reading-install-');
       final archive = File(p.join(work.path, 'module.zip'));
       onStage?.call('正在下载日语假名字典…');
@@ -85,6 +89,11 @@ class JapaneseDictionaryModuleInstaller {
         throw const JapaneseDictionaryUnavailable();
       }
       _check();
+      if (!await isJapaneseDictionaryDirectoryPathSafe(target.path,
+          allowMissing: true)) {
+        throw const FileSystemException(
+            'Unsafe dictionary installation directory');
+      }
       if (await target.exists()) {
         previous = await target.rename(p.join(work.path, 'previous'));
       }
@@ -181,19 +190,32 @@ Future<void> _extractModuleOffThread(String archivePath, String destination) =>
 Future<void> extractJapaneseDictionaryModule(
     String archivePath, String destination) async {
   final file = File(archivePath);
-  if (await file.length() != japaneseDictionaryModuleBytes ||
+  if (await FileSystemEntity.type(archivePath, followLinks: false) !=
+          FileSystemEntityType.file ||
+      await file.length() != japaneseDictionaryModuleBytes ||
       (await sha256.bind(file.openRead()).first).toString() !=
           japaneseDictionaryModuleSha256) {
     throw const FormatException('Japanese dictionary module checksum mismatch');
   }
   const names = {
     japaneseDictionaryFileName,
+    'supplemental-reading-v1.json.gz',
+    'kanji-reading-v1.json.gz',
     'MODULE.json',
     'README.txt',
     'licenses/LINDERA/LICENSE',
     'licenses/IPADIC/NOTICE.txt',
     'licenses/IPADIC/PROVENANCE.md',
+    'licenses/EDRDG/LICENCE.html',
+    'licenses/EDRDG/CC-BY-SA-4.0.txt',
+    'licenses/EDRDG/PROVENANCE.md',
   };
+  if (!await isJapaneseDictionaryDirectoryPathSafe(destination,
+          allowMissing: true) ||
+      await FileSystemEntity.type(destination, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+    throw const FileSystemException('Unsafe dictionary extraction directory');
+  }
   final stream = InputFileStream(archivePath);
   try {
     final archive = ZipDecoder().decodeBuffer(stream, verify: true);
@@ -205,7 +227,7 @@ Future<void> extractJapaneseDictionaryModule(
           entry.isSymbolicLink ||
           !names.contains(entry.name) ||
           !seen.add(entry.name) ||
-          size > 8 * 1024 * 1024) {
+          size > 16 * 1024 * 1024) {
         throw const FormatException(
             'Invalid Japanese dictionary module layout');
       }

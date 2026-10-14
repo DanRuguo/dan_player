@@ -93,7 +93,8 @@ bool HasHan(const std::wstring& text) {
     if (scalar >= 0xd800 && scalar <= 0xdbff && index + 1 < text.size()) {
       scalar = 0x10000 + ((scalar - 0xd800) << 10) + (text[++index] - 0xdc00);
     }
-    if ((scalar >= 0x3400 && scalar <= 0x9fff) ||
+    if (scalar == 0x3005 || scalar == 0x303b ||
+        (scalar >= 0x3400 && scalar <= 0x9fff) ||
         (scalar >= 0xf900 && scalar <= 0xfaff) ||
         (scalar >= 0x20000 && scalar <= 0x323af)) return true;
   }
@@ -104,7 +105,7 @@ Chunk Analyze(Analyzer* analyzer, const std::wstring& text) {
   ComPtr<__FIVectorView_1_Windows__CGlobalization__CJapanesePhoneme> phonemes;
   if (FAILED(analyzer->GetWordsWithMonoRubyOption(
           HStringReference(text.c_str(), static_cast<unsigned int>(text.size())).Get(),
-          false, &phonemes)) || !phonemes) return std::nullopt;
+          true, &phonemes)) || !phonemes) return std::nullopt;
   UINT32 size = 0;
   if (FAILED(phonemes->get_Size(&size)) || size > 100) return std::nullopt;
   std::vector<Word> words;

@@ -1,4 +1,6 @@
 import 'package:dan_player/rendering_preferences.dart';
+import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/compact_playback_queue.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'dart:math' as math;
 
@@ -25,6 +27,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:path/path.dart' as path;
 
 class MiniNowPlaying extends StatelessWidget {
   const MiniNowPlaying({
@@ -160,75 +163,132 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
     final scheme = Theme.of(context).colorScheme;
     const borderRadius = AppShape.surfaceRadius;
 
-    return Material(
-      type: MaterialType.transparency,
-      borderRadius: borderRadius,
-      child: InkWell(
-        onTap: () => context.push(app_paths.NOW_PLAYING_PAGE),
-        borderRadius: borderRadius,
-        overlayColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.pressed)) {
-            return scheme.primary.withValues(alpha: 0.12);
+    final playbackService = PlayService.instance.playbackService;
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        playbackService,
+        playbackService.playlist,
+        AppSettings.instance.uiLayout,
+      ]),
+      builder: (context, _) {
+        final queue = playbackService.playlist.value;
+        final nowPlaying = playbackService.nowPlaying;
+        final simpleQueue =
+            AppSettings.instance.uiLayout.value.simplePlaybackBarPlaylist;
+        void selectQueueIndex(int index) {
+          if (mounted &&
+              identical(playbackService.playlist.value, queue) &&
+              playbackService.canEditQueue &&
+              index >= 0 &&
+              index < queue.length) {
+            playbackService.playIndexOfPlaylist(index);
           }
-          if (states.contains(WidgetState.hovered)) {
-            return scheme.primary.withValues(alpha: 0.06);
-          }
-          if (states.contains(WidgetState.focused)) {
-            return scheme.primary.withValues(alpha: 0.08);
-          }
-          return null;
-        }),
-        child: ListenableBuilder(
-          listenable: PlayService.instance.playbackService,
-          builder: (context, _) {
-            final playbackService = PlayService.instance.playbackService;
-            final nowPlaying = playbackService.nowPlaying;
-            return NowPlayingBarRow(
-              leading: _NowPlayingCover(nowPlaying: nowPlaying),
-              title: nowPlaying?.displayTitle ?? 'Dan Player',
-              subtitle: nowPlaying == null
-                  ? 'Enjoy music'
-                  : '${nowPlaying.artist} - ${nowPlaying.album}',
-              identity: nowPlaying?.path ?? 'idle',
-              spectrum: nowPlaying == null
-                  ? null
-                  : _NowPlayingSpectrum(color: scheme.primary),
-              controlsBuilder: (showQueue) => ValueListenableBuilder<bool>(
-                valueListenable: playbackService.isBuffering,
-                builder: (context, isBuffering, _) => StreamBuilder(
-                  stream: playbackService.playerStateStream,
-                  initialData: playbackService.playerState,
-                  builder: (context, snapshot) {
-                    late void Function() onPressed;
-                    if (snapshot.data! == PlayerState.playing) {
-                      onPressed = playbackService.pause;
-                    } else if (snapshot.data! == PlayerState.completed) {
-                      onPressed = playbackService.playAgain;
-                    } else {
-                      onPressed = playbackService.start;
-                    }
+        }
 
-                    final isPlaying = snapshot.data! == PlayerState.playing;
+        return CompactPlaybackQueue(
+          enabled: simpleQueue,
+          queueIdentity: queue,
+          itemCount: queue.length,
+          currentIndex: playbackService.playlistIndex,
+          itemLabel: (index) => queue[index].isOnline || queue[index].isCueTrack
+              ? queue[index].fileNameTitle
+              : path.basenameWithoutExtension(queue[index].localFilePath),
+          artworkBuilder: (context, index, size) => AudioArtwork(
+            audio: queue[index],
+            size: size,
+            placeholder: SizedBox.square(
+              dimension: size,
+              child: ColoredBox(
+                color: scheme.surfaceContainerHighest.withValues(alpha: .7),
+                child: Icon(Symbols.music_note,
+                    size: size * .55, color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ),
+          anchorKey: NextPlayAnimation.targetKey,
+          hidden: DesktopIntegration.instance.isHidden,
+          canSelect: playbackService.canEditQueue,
+          onSelected: selectQueueIndex,
+          prepareSelection: (index) {
+            // Capture on the real click, not a possibly older foreground build.
+            // A later transport action owns playback while this list retracts.
+            final intent = playbackService.playbackIntent.value;
+            return () {
+              if (playbackService.playbackIntent.value == intent) {
+                selectQueueIndex(index);
+              }
+            };
+          },
+          onTraditionalQueue: _openQueue,
+          builder: (context, onQueue, queueExpanded) => Material(
+            type: MaterialType.transparency,
+            borderRadius: borderRadius,
+            child: InkWell(
+              onTap: () => context.push(app_paths.NOW_PLAYING_PAGE),
+              borderRadius: borderRadius,
+              overlayColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.pressed)) {
+                  return scheme.primary.withValues(alpha: 0.12);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return scheme.primary.withValues(alpha: 0.06);
+                }
+                if (states.contains(WidgetState.focused)) {
+                  return scheme.primary.withValues(alpha: 0.08);
+                }
+                return null;
+              }),
+              child: NowPlayingBarRow(
+                leading: _NowPlayingCover(nowPlaying: nowPlaying),
+                title: nowPlaying?.displayTitle ?? 'Dan Player',
+                subtitle: nowPlaying == null
+                    ? 'Enjoy music'
+                    : '${nowPlaying.artist} - ${nowPlaying.album}',
+                identity: nowPlaying?.path ?? 'idle',
+                forceShowQueue: simpleQueue,
+                spectrum: nowPlaying == null
+                    ? null
+                    : _NowPlayingSpectrum(color: scheme.primary),
+                controlsBuilder: (showQueue) => ValueListenableBuilder<bool>(
+                  valueListenable: playbackService.isBuffering,
+                  builder: (context, isBuffering, _) => StreamBuilder(
+                    stream: playbackService.playerStateStream,
+                    initialData: playbackService.playerState,
+                    builder: (context, snapshot) {
+                      late void Function() onPressed;
+                      if (snapshot.data! == PlayerState.playing) {
+                        onPressed = playbackService.pause;
+                      } else if (snapshot.data! == PlayerState.completed) {
+                        onPressed = playbackService.playAgain;
+                      } else {
+                        onPressed = playbackService.start;
+                      }
 
-                    return NowPlayingBarControls(
-                      isPlaying: isPlaying,
-                      isBuffering: isBuffering,
-                      showQueue: showQueue,
-                      onPrevious:
-                          nowPlaying == null ? null : playbackService.lastAudio,
-                      onPlayPause: nowPlaying == null ? null : onPressed,
-                      onNext:
-                          nowPlaying == null ? null : playbackService.nextAudio,
-                      onQueue: _openQueue,
-                      queueTargetKey: NextPlayAnimation.targetKey,
-                    );
-                  },
+                      final isPlaying = snapshot.data! == PlayerState.playing;
+
+                      return NowPlayingBarControls(
+                        isPlaying: isPlaying,
+                        isBuffering: isBuffering,
+                        showQueue: showQueue,
+                        queueExpanded: queueExpanded,
+                        onPrevious: nowPlaying == null
+                            ? null
+                            : playbackService.lastAudio,
+                        onPlayPause: nowPlaying == null ? null : onPressed,
+                        onNext: nowPlaying == null
+                            ? null
+                            : playbackService.nextAudio,
+                        onQueue: onQueue,
+                        queueTargetKey: NextPlayAnimation.targetKey,
+                      );
+                    },
+                  ),
                 ),
               ),
-            );
-          },
-        ),
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

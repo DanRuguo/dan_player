@@ -13,6 +13,7 @@ class NowPlayingBarControls extends StatelessWidget {
       required this.isPlaying,
       this.isBuffering = false,
       this.showQueue = true,
+      this.queueExpanded = false,
       this.onPrevious,
       this.onPlayPause,
       this.onNext,
@@ -22,6 +23,7 @@ class NowPlayingBarControls extends StatelessWidget {
   final bool isPlaying;
   final bool isBuffering;
   final bool showQueue;
+  final bool queueExpanded;
   final VoidCallback? onPrevious;
   final VoidCallback? onPlayPause;
   final VoidCallback? onNext;
@@ -85,12 +87,19 @@ class NowPlayingBarControls extends StatelessWidget {
       if (showQueue)
         KeyedSubtree(
           key: queueTargetKey,
-          child: IconButton(
-              key: const ValueKey('bar-queue'),
-              tooltip: ui('播放列表'),
-              style: style,
-              onPressed: onQueue,
-              icon: const Icon(Symbols.queue_music)),
+          child: Semantics(
+            expanded: queueExpanded,
+            child: IconButton(
+                key: const ValueKey('bar-queue'),
+                tooltip: ui('播放列表'),
+                style: queueExpanded
+                    ? style.copyWith(
+                        backgroundColor: WidgetStatePropertyAll(
+                            scheme.primaryContainer.withValues(alpha: .6)))
+                    : style,
+                onPressed: onQueue,
+                icon: const Icon(Symbols.queue_music)),
+          ),
         ),
     ]);
   }

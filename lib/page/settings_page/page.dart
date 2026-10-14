@@ -27,6 +27,7 @@ import 'package:dan_player/page/settings_page/replay_gain_settings.dart';
 import 'package:dan_player/page/settings_page/track_resume_settings.dart';
 import 'package:dan_player/page/settings_page/shortcut_settings.dart';
 import 'package:dan_player/page/settings_page/sidebar_layout_settings.dart';
+import 'package:dan_player/page/settings_page/simple_playback_bar_playlist_settings.dart';
 import 'package:dan_player/page/settings_page/theme_settings.dart';
 import 'package:dan_player/page/settings_page/uninstall_settings.dart';
 import 'package:flutter/material.dart';
@@ -139,6 +140,9 @@ class SettingsPage extends StatelessWidget {
                     group: InterfaceSettingsGroup.layout),
                 const SidebarLayoutSettings(
                   key: ValueKey('setting-sidebar'),
+                ),
+                const SimplePlaybackBarPlaylistSettings(
+                  key: ValueKey('setting-simple-playback-bar-playlist'),
                 ),
               ],
             ),

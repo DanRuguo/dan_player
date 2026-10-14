@@ -16,6 +16,7 @@ import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/lyric/lyric_timeline.dart';
+import 'package:dan_player/lyric/lyric_primary_text.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/foundation.dart';
@@ -70,6 +71,9 @@ class LyricService extends ChangeNotifier {
   final OnlineLyricCache? _onlineCacheForTesting;
   final Future<Lyric?> Function(Audio, bool Function())?
       _onlineLookupForTesting;
+  final Future<Lyric?> Function(
+          Audio, bool Function(), LyricSearchCancellation?)?
+      _cancellableOnlineLookupForTesting;
   final LyricDocumentStore? documents;
   final JapaneseReadingProjector _japaneseProjector;
   final ValueListenable<JapaneseReadingPreferences> _japanesePreferences;
@@ -77,10 +81,11 @@ class LyricService extends ChangeNotifier {
   ValueListenable<bool> get japaneseReadingsBusy => _japaneseReadingsBusy;
   bool _disposed = false;
   LyricSearchCancellation? _automaticLookup;
+  LyricSearchCancellation? _manualLookup;
 
   LyricService(PlayService playService)
       : this._(playService, null, LyricDocumentStore.instance, null, null, null,
-            null);
+            null, null);
 
   @visibleForTesting
   LyricService.forTesting(
@@ -89,6 +94,8 @@ class LyricService extends ChangeNotifier {
     LyricDocumentStore? documents,
     OnlineLyricCache? onlineCache,
     Future<Lyric?> Function(Audio, bool Function())? onlineLookup,
+    Future<Lyric?> Function(Audio, bool Function(), LyricSearchCancellation?)?
+        cancellableOnlineLookup,
     JapaneseReadingProjector? japaneseProjector,
     ValueListenable<JapaneseReadingPreferences>? japanesePreferences,
   }) : this._(
@@ -99,6 +106,7 @@ class LyricService extends ChangeNotifier {
           onlineLookup,
           japaneseProjector,
           japanesePreferences,
+          cancellableOnlineLookup,
         );
 
   late final StreamSubscription<double> _positionStreamSubscription;
@@ -109,7 +117,8 @@ class LyricService extends ChangeNotifier {
       this._onlineCacheForTesting,
       this._onlineLookupForTesting,
       JapaneseReadingProjector? japaneseProjector,
-      ValueListenable<JapaneseReadingPreferences>? japanesePreferences)
+      ValueListenable<JapaneseReadingPreferences>? japanesePreferences,
+      this._cancellableOnlineLookupForTesting)
       : _japaneseProjector = japaneseProjector ?? JapaneseReadingProjector(),
         _japanesePreferences =
             japanesePreferences ?? AppSettings.instance.japaneseReadings {
@@ -190,7 +199,7 @@ class LyricService extends ChangeNotifier {
         previous.copyWith(enabled: true, offlineGenerationAllowed: true) ==
             next &&
         !_japaneseReadingsBusy.value &&
-        _hasJapaneseReadings(_resolvedLyric)) {
+        hasCompleteJapaneseReadings(_resolvedLyric)) {
       // The new continuous intent is already persisted in the preferences.
       // Reusing an available display preserves its future and reading owner;
       // subsequent sources will observe the newly enabled preference.
@@ -259,6 +268,7 @@ class LyricService extends ChangeNotifier {
           language: audio?.language,
           enabled: _japanesePreferences.value.enabled,
           force: _manualJapaneseReadings,
+          verifyCoverage: _manualJapaneseReadings,
           requestMode: _manualJapaneseMode ??
               (_japanesePreferences.value.enabled &&
                       _japanesePreferences.value.offlineGenerationAllowed &&
@@ -304,7 +314,7 @@ class LyricService extends ChangeNotifier {
     }
     // Visibility is independent of generation. Reopening a completed display
     // must not replace its lyric, line identities or current reading position.
-    if (_hasJapaneseReadings(_resolvedLyric)) {
+    if (hasCompleteJapaneseReadings(_resolvedLyric)) {
       return Future.value(JapaneseReadingResult.unchanged);
     }
     final projecting = _projectingReadings;
@@ -314,8 +324,9 @@ class LyricService extends ChangeNotifier {
         projecting.source == expectedGeneration &&
         projecting.presentation == _presentationToken) {
       // Enabling the menu and the settings switch starts the same source-owned
-      // projection. Its explicit current-track ensure joins that work.
-      return _joinJapaneseReadings(projecting);
+      // projection. Join it before checking its final coverage so a partial
+      // legacy cache cannot satisfy this explicit current-track check.
+      return _joinJapaneseReadings(projecting, mode: mode);
     }
     return generateJapaneseReadingsForCurrentTrack(
         expectedGeneration: expectedGeneration, mode: mode);
@@ -323,11 +334,7 @@ class LyricService extends ChangeNotifier {
 
   bool _hasJapaneseReadings(Lyric? lyric) =>
       lyric?.lines.any((line) {
-        final content = switch (line) {
-          UnsyncLyricLine() => line.content,
-          SyncLyricLine() => line.content,
-          _ => '',
-        };
+        final content = lyricPrimaryText(line);
         return line.japaneseReadingSpans.any((span) =>
             span.start >= 0 &&
             span.end > span.start &&
@@ -355,14 +362,21 @@ class LyricService extends ChangeNotifier {
         int source,
         int presentation,
         Future<JapaneseReadingProjection?> result
-      }) projecting) async {
+      }) projecting,
+      {required JapaneseReadingRequestMode mode}) async {
     bool current() =>
         _isPresentationCurrent(projecting.source, projecting.presentation);
     try {
       final result = await projecting.result;
-      return current()
-          ? result?.result ?? JapaneseReadingResult.unchanged
-          : JapaneseReadingResult.stale;
+      if (!current()) return JapaneseReadingResult.stale;
+      final reason = result?.result ?? JapaneseReadingResult.unchanged;
+      if ((reason == JapaneseReadingResult.applied ||
+              reason == JapaneseReadingResult.unchanged) &&
+          !hasCompleteJapaneseReadings(result?.lyric)) {
+        return await generateJapaneseReadingsForCurrentTrack(
+            expectedGeneration: projecting.source, mode: mode);
+      }
+      return reason;
     } catch (_) {
       return current()
           ? JapaneseReadingResult.unavailable
@@ -453,13 +467,18 @@ class LyricService extends ChangeNotifier {
   void _useRawFuture(Future<Lyric?> raw,
       {int offsetMs = 0,
       bool explicit = false,
-      LyricSearchCancellation? automaticLookup}) {
+      LyricSearchCancellation? automaticLookup,
+      LyricSearchCancellation? manualLookup}) {
     // The caller constructs the next owner before its deferred lookup starts.
     // Retire the previous source without cancelling this newly installed one.
     if (!identical(_automaticLookup, automaticLookup)) {
       _automaticLookup?.cancel();
     }
     _automaticLookup = automaticLookup;
+    if (!identical(_manualLookup, manualLookup)) {
+      _manualLookup?.cancel();
+    }
+    _manualLookup = manualLookup;
     currLyricFuture.ignore();
     _japaneseProjector.cancel();
     _japaneseReadingsBusy.value = false;
@@ -674,6 +693,10 @@ class LyricService extends ChangeNotifier {
     return (_onlineCacheForTesting ?? OnlineLyricCache.instance)
         .resolve(onlineLyricCacheIdentity(audio, source: source), () async {
       if (!current()) return null;
+      final cancellableLookup = _cancellableOnlineLookupForTesting;
+      if (cancellableLookup != null) {
+        return cancellableLookup(audio, current, cancellation);
+      }
       final testingLookup = _onlineLookupForTesting;
       if (testingLookup != null) return testingLookup(audio, current);
       if (source != null) {
@@ -846,18 +869,20 @@ class LyricService extends ChangeNotifier {
     // Begin the search after _useExplicitFuture has installed its generation.
     // A later choice on the same track must not commit this result to cache.
     final token = _lyricToken + 1;
+    final cancellation = LyricSearchCancellation();
     final raw = Future<Lyric?>.value().then((_) => _searchOnline(
           nowPlaying,
           stillCurrent: () => _isCurrent(token),
+          cancellation: cancellation,
         ));
-    _useExplicitFuture(nowPlaying, raw);
+    _useExplicitFuture(nowPlaying, raw, manualLookup: cancellation);
   }
 
   void _useExplicitFuture(Audio audio, Future<Lyric?> raw,
-      {LyricSource? source}) {
+      {LyricSource? source, LyricSearchCancellation? manualLookup}) {
     final store = documents;
     if (store == null) {
-      _useRawFuture(raw, explicit: true);
+      _useRawFuture(raw, explicit: true, manualLookup: manualLookup);
       return;
     }
     final revision = store.revisionFor(audio);
@@ -874,7 +899,9 @@ class LyricService extends ChangeNotifier {
       return value;
     });
     _useRawFuture(selected,
-        offsetMs: store.forAudio(audio)?.offsetMs ?? 0, explicit: true);
+        offsetMs: store.forAudio(audio)?.offsetMs ?? 0,
+        explicit: true,
+        manualLookup: manualLookup);
   }
 
   void useSpecificLyric(Lyric lyric) {
@@ -901,6 +928,8 @@ class LyricService extends ChangeNotifier {
     _disposed = true;
     _automaticLookup?.cancel();
     _automaticLookup = null;
+    _manualLookup?.cancel();
+    _manualLookup = null;
     _japanesePreferences.removeListener(_handleJapaneseReadingsChange);
     _japaneseProjector.dispose();
     _japaneseReadingsBusy.dispose();

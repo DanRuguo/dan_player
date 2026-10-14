@@ -21,6 +21,7 @@ param(
     [string] $OutputRoot,
     [string] $VcRuntimeDirectory,
     [switch] $IncludeOptionalComponents,
+    [switch] $IncludeJapaneseReadings = $true,
     [string] $FfmpegCacheRoot
 )
 
@@ -307,9 +308,14 @@ try {
         foreach ($file in $ffmpeg.Files) {
             Copy-FileUnchanged (Join-Path $ffmpeg.RuntimeDirectory $file.Name) (Join-Path $ffmpegTarget $file.Name)
         }
+    }
+    if ($IncludeJapaneseReadings) {
         $readingTarget = Join-Path $payloadDirectory 'tool\japanese_readings'
         $null = New-Item -ItemType Directory -Path $readingTarget
         Copy-FileUnchanged (Join-Path $repositoryRoot 'rust\assets\ipadic-reading.bin.gz') (Join-Path $readingTarget 'ipadic-reading.bin.gz')
+        foreach ($supplement in $bundledJapaneseReadings.Supplements) {
+            Copy-FileUnchanged (Join-Path $repositoryRoot $supplement.path) (Join-Path $readingTarget (Split-Path -Leaf $supplement.path))
+        }
         foreach ($notice in $bundledReadingNotices) {
             $target = Join-Path $readingTarget $notice.RelativePath
             $null = New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force
@@ -390,7 +396,8 @@ the verified Visual Studio runtime when rebuilding future application releases.
         Ffmpeg = @{ Optional = $true; Bundled = [bool]$IncludeOptionalComponents }
         JapaneseReadings = [ordered]@{
             Engine=$bundledJapaneseReadings.Engine; DictionaryBytes=$bundledJapaneseReadings.DictionaryBytes
-            DictionarySha256=$bundledJapaneseReadings.DictionarySha256; Optional=$true; Bundled=[bool]$IncludeOptionalComponents
+            DictionarySha256=$bundledJapaneseReadings.DictionarySha256; Optional=$true; Bundled=[bool]$IncludeJapaneseReadings
+            Supplements=$bundledJapaneseReadings.Supplements
         }
         MicrosoftCrt = $crtManifest
     }
@@ -403,7 +410,8 @@ Extract the entire ZIP into a writable folder, then run "Dan Player.exe".
 Keep BASS, data, and DESKTOP-LYRIC-MODE beside the main executable. Desktop lyrics
 run as a separate process using "Dan Player.exe --desktop-lyric", sharing the same
 Flutter assets and app-local Microsoft CRT DLLs with the player.
-Optional components bundled: $([bool]$IncludeOptionalComponents). When present,
+Japanese reading data bundled: $([bool]$IncludeJapaneseReadings).
+FFmpeg bundled: $([bool]$IncludeOptionalComponents). When present,
 tool/ffmpeg and tool/japanese_readings are ready after extracting the entire ZIP.
 The slim installer excludes them and preserves existing component directories.
 
@@ -459,9 +467,19 @@ Working tree modified: $workingTreeDirty
             foreach ($file in $ffmpeg.Files) {
                 Assert-ZipEntryHash $zip ($packageStem + '/tool/ffmpeg/' + $file.Name) $file.Sha256
             }
+        } elseif (@($zip.Entries | Where-Object { $_.FullName -match '/tools?/ffmpeg/' }).Count -gt 0) {
+            throw 'Candidate unexpectedly contains FFmpeg files.'
+        }
+        if ($IncludeJapaneseReadings) {
             Assert-ZipEntryHash $zip ($packageStem + '/tool/japanese_readings/ipadic-reading.bin.gz') $bundledJapaneseReadings.DictionarySha256
-        } elseif (@($zip.Entries | Where-Object { $_.FullName -match '/tools?/(ffmpeg|japanese_readings)/' }).Count -gt 0) {
-            throw 'A slim candidate contains optional component files.'
+            foreach ($supplement in $bundledJapaneseReadings.Supplements) {
+                Assert-ZipEntryHash $zip ($packageStem + '/tool/japanese_readings/' + (Split-Path -Leaf $supplement.path)) $supplement.sha256
+            }
+            foreach ($notice in $bundledReadingNotices) {
+                Assert-ZipEntryHash $zip ($packageStem + '/tool/japanese_readings/' + $notice.RelativePath) $notice.Sha256
+            }
+        } elseif (@($zip.Entries | Where-Object { $_.FullName -match '/tools?/japanese_readings/' }).Count -gt 0) {
+            throw 'Candidate unexpectedly contains Japanese reading data.'
         }
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx24-2.4.12.6.zip') $bassFx.Package.ArchiveSha256
         Assert-ZipEntryHash $zip ($packageStem + '/licenses/BASS_FX/bass_fx.txt') $bassFx.Package.NoticeSha256

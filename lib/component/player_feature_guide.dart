@@ -331,6 +331,15 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           _paragraph(context, '播放条、随机与循环'),
                           _text(
                               '播放条可上一首、播放／暂停、下一首和打开播放列表；点曲目信息进入歌词页。随机只切换队列播放顺序，不立刻换歌；循环按钮依次切换关闭、列表循环、单曲循环。歌词页可拖进度条定位，或用“更多 → 精确定位”输入时间；播放列表顶栏的“A-B 片段循环”标记区间，也可用歌词选段练习。'),
+                          _paragraph(context, '简易播放条播放列表'),
+                          _text(
+                              '在“设置 → 界面与主题”开启“简易播放条播放列表”，播放条的列表按钮会向上展开封面和歌名，本地文件不显示后缀。滚轮、触控板或手指滑动浏览；停止滑动后自动对齐完整歌曲，新滑动可以随时接管。当前歌曲使用强调底色，点选歌曲后列表收回并开始播放。也可用上下键选择、Enter 播放、Esc 收回。'),
+                          _link(
+                              context,
+                              'guide-simple-playback-bar-playlist',
+                              '简易播放条播放列表',
+                              () => _setting(context, 'appearance',
+                                  'simple-playback-bar-playlist')),
                           _paragraph(context, '定位进度与返回播放'),
                           _text(
                               '进度条用于定位当前歌曲，不重建播放队列。需要准确时间时用“精确定位”；定位到 A-B 区间外会退出片段循环。暂停只停止播放，仍可阅读歌词和整理队列；准备好后再次点播放。下面可试着拖动或点按进度，按钮只演示前后定位。'),

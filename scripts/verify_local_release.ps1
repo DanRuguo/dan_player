@@ -88,37 +88,55 @@ if (-not ($readingBuildProvenance.PSObject.Properties.Name -contains 'JapaneseRe
     $readingBuildProvenance.JapaneseReadings.DictionaryBytes -ne $bundledJapaneseReadings.DictionaryBytes -or
     $readingBuildProvenance.JapaneseReadings.DictionarySha256 -cne $bundledJapaneseReadings.DictionarySha256 -or
     $readingBuildProvenance.JapaneseReadings.Optional -ne $true -or
-    $readingBuildProvenance.JapaneseReadings.Bundled -isnot [bool] -or
-    $readingBuildProvenance.Ffmpeg.Bundled -ne $readingBuildProvenance.JapaneseReadings.Bundled) {
+    $readingBuildProvenance.JapaneseReadings.Bundled -isnot [bool]) {
     throw 'Japanese reading build provenance differs from the final pinned source.'
 }
-$optionalComponents = $readingBuildProvenance.JapaneseReadings.Bundled
+if (-not ($readingBuildProvenance.JapaneseReadings.PSObject.Properties.Name -contains 'Supplements') -or
+    @($readingBuildProvenance.JapaneseReadings.Supplements).Count -ne @($bundledJapaneseReadings.Supplements).Count) {
+    throw 'Missing supplemental Japanese reading provenance.'
+}
+foreach ($readingSupplement in $bundledJapaneseReadings.Supplements) {
+    $readingRecorded = @($readingBuildProvenance.JapaneseReadings.Supplements | Where-Object { $_.path -ceq $readingSupplement.path })
+    if ($readingRecorded.Count -ne 1 -or $readingRecorded[0].sha256 -cne $readingSupplement.sha256 -or
+        $readingRecorded[0].bytes -ne $readingSupplement.bytes -or $readingRecorded[0].entries -ne $readingSupplement.entries -or
+        $readingRecorded[0].embedded -ne $false) {
+        throw 'Supplemental Japanese reading provenance differs from final source.'
+    }
+}
 $optionalPairs = @()
-if ($optionalComponents) {
+if ($readingBuildProvenance.Ffmpeg.Bundled) {
     $ffmpegCatalog = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ffmpeg_runtime_manifest.json') -Raw | ConvertFrom-Json
     foreach ($file in $ffmpegCatalog.Files) {
         $relative = 'tool/ffmpeg/' + $file.Name
         $requiredEntries += $relative
         $optionalPairs += @{ Relative=$relative; Hash=$file.Sha256; Bytes=$file.Size }
     }
+} elseif (Test-Path -LiteralPath (Join-Path $payload 'tool/ffmpeg')) {
+    throw 'Candidate unexpectedly contains FFmpeg.'
+}
+if ($readingBuildProvenance.JapaneseReadings.Bundled) {
     $readingRelative = 'tool/japanese_readings/ipadic-reading.bin.gz'
     $requiredEntries += $readingRelative
     $optionalPairs += @{ Relative=$readingRelative; Hash=$bundledJapaneseReadings.DictionarySha256; Bytes=$bundledJapaneseReadings.DictionaryBytes }
+    foreach ($supplement in $bundledJapaneseReadings.Supplements) {
+        $relative = 'tool/japanese_readings/' + (Split-Path -Leaf $supplement.path)
+        $requiredEntries += $relative
+        $optionalPairs += @{ Relative=$relative; Hash=$supplement.sha256; Bytes=$supplement.bytes }
+    }
     foreach ($notice in $bundledReadingNotices) {
         $relative = 'tool/japanese_readings/' + $notice.RelativePath
         $requiredEntries += $relative
         $optionalPairs += @{ Relative=$relative; Hash=$notice.Sha256; Bytes=(Get-Item -LiteralPath $notice.SourcePath).Length }
     }
-    foreach ($pair in $optionalPairs) {
-        $componentFile = Join-Path $payload $pair.Relative
-        if ((Get-Item -LiteralPath $componentFile).Length -ne $pair.Bytes -or
-            (Get-FileHash -LiteralPath $componentFile -Algorithm SHA256).Hash -ine $pair.Hash) {
-            throw "Optional component differs from the pinned original: $($pair.Relative)"
-        }
+} elseif (Test-Path -LiteralPath (Join-Path $payload 'tool/japanese_readings')) {
+    throw 'Candidate unexpectedly contains Japanese reading data.'
+}
+foreach ($pair in $optionalPairs) {
+    $componentFile = Join-Path $payload $pair.Relative
+    if ((Get-Item -LiteralPath $componentFile).Length -ne $pair.Bytes -or
+        (Get-FileHash -LiteralPath $componentFile -Algorithm SHA256).Hash -ine $pair.Hash) {
+        throw "Optional component differs from the pinned original: $($pair.Relative)"
     }
-} elseif ((Test-Path -LiteralPath (Join-Path $payload 'tool/ffmpeg')) -or
-          (Test-Path -LiteralPath (Join-Path $payload 'tool/japanese_readings'))) {
-    throw 'Slim candidate unexpectedly contains optional components.'
 }
 $ownedBinaries = @('Dan Player.exe', 'rust_lib_dan_player.dll')
 if ($sharedExecutable) {

@@ -1,4 +1,5 @@
 import 'package:dan_player/library/personal_library.dart';
+import 'package:dan_player/library/audio_index_read.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:isolate';
@@ -26,7 +27,7 @@ class AudioLibrary {
   List<String>? _scanRoots;
   // A Dart-only save must not claim an older native index schema was fully
   // migrated. The checked-artist proof is independent of this schema number.
-  static const _supportedIndexVersion = 113;
+  static const _supportedIndexVersion = audioIndexSupportedVersion;
   int _indexVersion = _supportedIndexVersion;
 
   /// Selected roots, including empty roots. Legacy indexes retain their
@@ -77,43 +78,18 @@ class AudioLibrary {
   }
 
   static AudioLibrary? _instance;
+  static int _indexReadGeneration = 0;
 
   static Future<Map> _readIndexMap(File indexFile) async {
-    Object? targetError;
-    final backupFile = File("${indexFile.path}.bak");
-    for (final candidate in [indexFile, backupFile]) {
-      try {
-        if (!await candidate.exists()) continue;
-        final decoded = json.decode(await candidate.readAsString());
-        if (decoded is! Map) {
-          throw const FormatException("Audio index root must be an object");
-        }
-        _validateIndexConsumerShape(decoded);
-        if (candidate.path == backupFile.path) {
-          LOGGER.w("[audio library] loaded backup index");
-        }
-        return decoded;
-      } catch (error) {
-        targetError ??= error;
-      }
+    final read = await readAudioIndex(indexFile);
+    if (read.recovered) {
+      LOGGER.w("[audio library] loaded backup index");
     }
-    throw targetError ?? const FormatException("Audio index is unavailable");
+    return read.index;
   }
 
   static void _validateIndexConsumerShape(Map index) {
-    final version = index['version'];
-    // A newer schema may use a different shape. Leave it to the existing
-    // consumer instead of silently selecting an older backup for that reason.
-    if (version is int && version > _supportedIndexVersion) return;
-    if (index['folders'] is! List) {
-      throw const FormatException("Audio index folders must be a list");
-    }
-    final roots = index['roots'];
-    if (roots != null &&
-        (roots is! List || roots.any((root) => root is! String))) {
-      throw const FormatException('Audio index roots must be strings');
-    }
-    // Individual folder/song records retain their existing skip-invalid path.
+    validateAudioIndexConsumerShape(index);
   }
 
   static Future<bool> _primaryIndexIsUsable(String targetPath) =>
@@ -187,20 +163,32 @@ class AudioLibrary {
   ///     "version": 112
   /// }
   /// ```
-  static Future<void> initFromIndex() async {
+  static Future<void> initFromIndex({
+    Future<Map> Function(File)? readIndex,
+  }) async {
+    // The public entry is not coalesced: a newer committed index may be read
+    // while an older decode is awaiting its worker. Only the newest read may
+    // publish; existing mutation gates still serialize normal library edits.
+    final generation = ++_indexReadGeneration;
+    bool current() => generation == _indexReadGeneration;
     try {
       await TrackIdentityRegistry.instance.initialize();
+      if (!current()) return;
       final supportPath = (await getAppDataDir()).path;
       final indexPath = "$supportPath\\index.json";
       final indexFile = File(indexPath);
       if (!await indexFile.exists() && !await File("$indexPath.bak").exists()) {
+        if (!current()) return;
         _instance ??= AudioLibrary._([]);
-        await (await PersonalLibrary.instance)
-            .observeCommitted(const {}, DateTime.now().toUtc());
+        final personal = await PersonalLibrary.instance;
+        if (!current()) return;
+        await personal.observeCommitted(const {}, DateTime.now().toUtc());
         return;
       }
 
-      final indexJson = await _readIndexMap(indexFile);
+      if (!current()) return;
+      final indexJson = await (readIndex ?? _readIndexMap)(indexFile);
+      if (!current()) return;
       final foldersValue = indexJson["folders"];
       if (foldersValue is! List) {
         throw const FormatException("Audio index folders must be a list");
@@ -239,14 +227,18 @@ class AudioLibrary {
       }
       // Publish the new library only after the durable identities exist.
       await TrackIdentityRegistry.instance.flush();
-      await (await PersonalLibrary.instance).observeCommitted(
-          {
-            for (final a in folders.expand((f) => f.audios))
-              a.stableTrackId: a.created
-          },
-          await indexFile.exists()
-              ? await indexFile.lastModified()
-              : await File('$indexPath.bak').lastModified());
+      if (!current()) return;
+      final personal = await PersonalLibrary.instance;
+      if (!current()) return;
+      final modified = await indexFile.exists()
+          ? await indexFile.lastModified()
+          : await File('$indexPath.bak').lastModified();
+      if (!current()) return;
+      await personal.observeCommitted({
+        for (final a in folders.expand((f) => f.audios))
+          a.stableTrackId: a.created
+      }, modified);
+      if (!current()) return;
       // Online add/remove can publish while identity persistence is awaiting
       // I/O. Snapshot it in the same synchronous turn as replacing the library.
       final onlineAudios = List<Audio>.from(instance.onlineAudioCollection);
@@ -260,6 +252,7 @@ class AudioLibrary {
       instance.albumCollection.clear();
       instance._buildCollections();
     } catch (err, trace) {
+      if (!current()) return;
       LOGGER.e(err, stackTrace: trace);
       rethrow;
     }
@@ -717,10 +710,12 @@ class Audio {
     if (!isOnline) return false;
     final provider = onlineProvider;
     if (provider == null || !provider.startsWith('custom:')) return true;
-    return _currentCustomArtworkProfile != null;
+    return customArtworkProfile != null;
   }
 
-  CustomMusicSourceProfile? get _currentCustomArtworkProfile {
+  /// The exact enabled profile also owns visible artwork requests. Keep this
+  /// identity shared with the bounded loader instead of a whole-library clock.
+  CustomMusicSourceProfile? get customArtworkProfile {
     final provider = onlineProvider;
     final profileId = CustomMusicSourceProfile.profileIdFromProvider(provider);
     if (profileId == null) return null;
@@ -890,8 +885,7 @@ class Audio {
   Future<ImageProvider?> artworkForSize(ArtworkSize size) async {
     final remoteArtwork = artworkUrl;
     final isCustomProvider = onlineProvider?.startsWith('custom:') == true;
-    final customProfile =
-        isCustomProvider ? _currentCustomArtworkProfile : null;
+    final customProfile = isCustomProvider ? customArtworkProfile : null;
     final mayFetchRemoteArtwork =
         isOnline && (!isCustomProvider || customProfile != null);
     if (mayFetchRemoteArtwork &&

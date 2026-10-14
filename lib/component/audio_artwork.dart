@@ -56,6 +56,7 @@ class _AudioArtworkState extends State<AudioArtwork> {
     super.initState();
     CoverCache.instance.changes.addListener(_coverChanged);
     AppSettings.instance.networkProxy.addListener(_networkProxyChanged);
+    AppSettings.instance.customMusicSources.addListener(_customProfilesChanged);
   }
 
   void _coverChanged() {
@@ -75,10 +76,22 @@ class _AudioArtworkState extends State<AudioArtwork> {
     if (previous != _requestKey) setState(() {});
   }
 
+  void _customProfilesChanged() {
+    if (!mounted ||
+        widget.audio.onlineProvider?.startsWith('custom:') != true) {
+      return;
+    }
+    final previous = _requestKey;
+    _resolve();
+    if (previous != _requestKey) setState(() {});
+  }
+
   @override
   void dispose() {
     CoverCache.instance.changes.removeListener(_coverChanged);
     AppSettings.instance.networkProxy.removeListener(_networkProxyChanged);
+    AppSettings.instance.customMusicSources
+        .removeListener(_customProfilesChanged);
     super.dispose();
   }
 
@@ -107,8 +120,9 @@ class _AudioArtworkState extends State<AudioArtwork> {
       audio.coverFingerprint,
       audio.artworkUrl,
       audio.isOnline ? AppSettings.instance.networkProxy.value : null,
+      audio.customArtworkProfile,
+      CoverCache.instance.epoch,
       CoverCache.instance.generationFor(audio.localFilePath),
-      AudioLibrary.revision,
       widget.revision,
     );
     final request = (source, target);

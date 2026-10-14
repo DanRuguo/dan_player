@@ -90,6 +90,7 @@ class CoverCache {
   final ValueNotifier<int> changes = ValueNotifier(0);
   int generationFor(String audioPath) => _generations[audioPath] ?? 0;
   int _epoch = 0;
+  int get epoch => _epoch;
 
   int get cachedProviderCount => _ready.length;
   int get activeReadCount => _activeReads;
@@ -354,5 +355,6 @@ class CoverCache {
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
     }
+    changes.value++;
   }
 }

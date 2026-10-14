@@ -418,6 +418,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
         }
         final painter = _painter!;
         _width = layoutBalancedLyric(painter, textMaxWidth);
+        _width = layoutRubyWordSafe(
+            painter, widget.rubySpans, textMaxWidth, _width!);
         // The retained painter and its transparent Text child must use the
         // same paragraph width, otherwise short centered/right-aligned ink
         // paints at the paragraph's leading edge while the child is aligned.
@@ -494,7 +496,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
               locale: locale,
               textHeightBehavior: textHeightBehavior);
           try {
-            final balancedWidth = layoutBalancedLyric(target, targetMaxWidth);
+            final balancedWidth = layoutRubyWordSafe(target, widget.rubySpans,
+                targetMaxWidth, layoutBalancedLyric(target, targetMaxWidth));
             if (balancedWidth.isFinite) {
               target.layout(minWidth: balancedWidth, maxWidth: balancedWidth);
             }

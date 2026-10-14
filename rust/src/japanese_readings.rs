@@ -8,6 +8,7 @@ use lindera_dictionary::dictionary::{
     Dictionary,
 };
 use sha2::{Digest, Sha256};
+use crate::japanese_reading_lexicon::{enrich, hiragana, is_han};
 
 const MAX_PACK: usize = 32 * 1024 * 1024;
 const MAX_GZIP: usize = 8 * 1024 * 1024;
@@ -59,8 +60,7 @@ fn load(path: &Path) -> Result<Segmenter, String> {
 }
 
 fn has_han(text: &str) -> bool {
-    text.chars().any(|c| matches!(c as u32,
-        0x3400..=0x9fff | 0xf900..=0xfaff | 0x20000..=0x323af))
+    text.chars().any(is_han)
 }
 
 pub(crate) fn words(path: &Path, input: &str) -> Result<Vec<(String, String)>, String> {
@@ -85,15 +85,17 @@ pub(crate) fn words(path: &Path, input: &str) -> Result<Vec<(String, String)>, S
         let surface = token.surface.to_string();
         let yomi = if has_han(&surface) { token.get_detail(7) } else { None };
         let reading: String = if let Some(yomi) = yomi.filter(|v| !v.is_empty() && *v != "*" && *v != "UNK") {
-            yomi.chars().map(|c| match c as u32 {
-                0x30a1..=0x30f6 => char::from_u32(c as u32 - 0x60).unwrap(), _ => c,
-            }).collect()
+            hiragana(yomi)
         } else { surface.clone() };
         units += reading.encode_utf16().count();
         if units > 2000 { return Err("Oversized Japanese result".into()); }
         result.push((surface, reading));
     }
     if offset != input.len() || result.is_empty() { return Err("Incomplete Japanese result".into()); }
+    result = enrich(path, input, result);
+    if result.iter().map(|(_, reading)| reading.encode_utf16().count()).sum::<usize>() > 2000 {
+        return Err("Oversized Japanese result".into());
+    }
     Ok(result)
 }
 
@@ -141,13 +143,34 @@ mod tests {
             ("生きる希望と歌詞を読む", "いきるきぼうとかしをよむ"),
         ] { assert_eq!(reading(input), expected); }
         let tokens = words(&dictionary(), "明日また会えるかな").unwrap();
-        assert!(tokens.iter().any(|v| v.0 == "会える" && v.1 == "あえる"));
+        assert_eq!(tokens.iter().map(|v| v.0.as_str()).collect::<String>(), "明日また会えるかな");
+        assert!(tokens.iter().any(|v| v.0 == "会" && v.1 == "あ"));
     }
     #[test]
     fn mixed_unknowns_and_whitespace_are_preserved() {
         let input = "\t日本語 ＡＢＣ ① 👩‍👩‍👧‍👦 𱍐 尾\n";
         assert_eq!(reading(input), "\tにほんご ＡＢＣ ① 👩‍👩‍👧‍👦 𱍐 お\n");
         assert_eq!(reading("カタカナと日本語、ひらがな"), "カタカナとにほんご、ひらがな");
+    }
+    #[test]
+    fn full_pipeline_recovers_unknown_words_and_preserves_known_context_yomi() {
+        for (input, expected) in [
+            ("もう大丈夫涙は勇気に変えたよ", "もうだいじょうぶなみだはゆうきにかえたよ"),
+            ("奔る光の螺旋", "はしるひかりのらせん"),
+            ("奔って奔らない奔れば奔ろう", "はしってはしらないはしればはしろう"),
+            ("乞うた乞うて", "こうたこうて"),
+            ("吹き上がる音と言葉の即興劇", "ふきあがるおととことばのそっきょうげき"),
+            ("標本の蝶々", "ひょうほんのちょうちょう"),
+            ("出会い別れ 繰り返す", "であいわかれ くりかえす"),
+        ] {
+            let result = words(&dictionary(), input).unwrap();
+            assert_eq!(result.iter().map(|v| v.0.as_str()).collect::<String>(), input);
+            assert_eq!(result.iter().map(|v| v.1.as_str()).collect::<String>(), expected);
+        }
+        assert_eq!(reading("明日"), "あした");
+        assert_eq!(reading("今日"), "きょう");
+        assert!(words(&dictionary(), "勇気と言葉").unwrap().iter().any(|v| v.0 == "気" && v.1 == "き"));
+        assert!(words(&dictionary(), "蝶々").unwrap().iter().any(|v| v.0 == "々" && v.1 == "ちょう"));
     }
     #[test]
     fn ffi_rejects_invalid_input_missing_dictionary_and_small_output() {

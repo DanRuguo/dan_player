@@ -446,11 +446,16 @@ class PlaybackService extends ChangeNotifier {
     _loadingPlaylistIndex = _playlistIndex;
     isBuffering.value = current?.isOnline == true;
     resolvingAudioPath.value = current?.path;
+    // Publish after establishing this request's synchronous ownership. Older
+    // delayed selections/previews must retire even if reopening finishes fast.
+    _publishPlaybackIntent();
     unawaited(_useExclusiveModeResolved(token, exclusive));
   }
 
   Future<void> _useExclusiveModeResolved(int token, bool exclusive) async {
     try {
+      // A public intent listener may synchronously issue a newer source action.
+      if (!_isCurrentSourceRequest(token)) return;
       final applied = await _player.useExclusiveMode(exclusive);
       if (!_closed) _wasapiExclusive.value = _player.wasapiExclusive;
       if (applied && _isCurrentSourceRequest(token)) {
@@ -1306,6 +1311,7 @@ class PlaybackService extends ChangeNotifier {
         state == PlayerState.pausedDevice;
     final savedPosition = wasCurrent ? position : 0.0;
     final transportRevision = _transportCommandRevision;
+    var revokedSource = false;
     _deletingAudioPath = audioPath;
     if (wasCurrent) segmentLoop.clear();
 
@@ -1314,6 +1320,7 @@ class PlaybackService extends ChangeNotifier {
       // deletion owns only that decoder, never the unrelated pending request.
       if (!retainedNewerRequest) {
         _sourceRequestToken += 1;
+        revokedSource = true;
         OnlineMusicService.instance.cancelPendingStreamResolution();
         _player.cancelPendingSource();
         isBuffering.value = false;
@@ -1322,6 +1329,9 @@ class PlaybackService extends ChangeNotifier {
       }
     }
     final deletionToken = _sourceRequestToken;
+    // Capture the ticket before notifying: a listener's newer request must
+    // never become this deletion's restore owner.
+    if (revokedSource) _publishPlaybackIntent();
     if (wasCurrent) {
       PlaybackStatistics.instance.finish(markCompleted: false);
     }

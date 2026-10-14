@@ -1,11 +1,27 @@
 {
   "schemaVersion": 1,
-  "engine": "Lindera 6.2.0 / IPADIC reading v2",
+  "engine": "Lindera 6.2.0 / IPADIC reading v2 / EDRDG reading 2026-10-14",
   "resource": {
     "path": "rust/assets/ipadic-reading.bin.gz",
     "bytes": 7180257,
     "sha256": "a8acd8b6352774fe3f6ac3fdbec59313ce04b548dad84340c17f0ee4bfab6e43"
   },
+  "supplements": [
+    {
+      "path": "rust/assets/supplemental-reading-v1.json.gz",
+      "bytes": 3618558,
+      "sha256": "f4bf033fb622280875be6199d20d44fe2307310ea41b403a37f30c6b3a23a772",
+      "entries": 505327,
+      "embedded": false
+    },
+    {
+      "path": "rust/assets/kanji-reading-v1.json.gz",
+      "bytes": 106686,
+      "sha256": "18c12298210019c8b620287b0c995ca30d8fad73542ef46d395736f4e29e49d3",
+      "entries": 12356,
+      "embedded": false
+    }
+  ],
   "notices": [
     {
       "path": "licenses/LINDERA/LICENSE",
@@ -14,6 +30,14 @@
     {
       "path": "licenses/IPADIC/NOTICE.txt",
       "sha256": "2cf235bf0842d6d61eb0244fb22e645a321b12408a3cf75feb3a53577d885bde"
+    },
+    {
+      "path": "licenses/EDRDG/LICENCE.html",
+      "sha256": "52f60ea9ca68170a2f0663d7dba381ebf1bd57c17a3347dfe21153865c156692"
+    },
+    {
+      "path": "licenses/EDRDG/CC-BY-SA-4.0.txt",
+      "sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5"
     }
   ]
 }

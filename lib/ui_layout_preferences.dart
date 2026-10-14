@@ -10,27 +10,33 @@ class UiLayoutPreferences {
   const UiLayoutPreferences({
     this.libraryRowLayout = LibraryRowLayout.classic,
     this.compactPlaylists = true,
+    this.simplePlaybackBarPlaylist = false,
     this.startupFooter = StartupFooter.brand,
   });
 
   final LibraryRowLayout libraryRowLayout;
   final bool compactPlaylists;
+  final bool simplePlaybackBarPlaylist;
   final StartupFooter startupFooter;
 
   UiLayoutPreferences copyWith({
     LibraryRowLayout? libraryRowLayout,
     bool? compactPlaylists,
+    bool? simplePlaybackBarPlaylist,
     StartupFooter? startupFooter,
   }) =>
       UiLayoutPreferences(
         libraryRowLayout: libraryRowLayout ?? this.libraryRowLayout,
         compactPlaylists: compactPlaylists ?? this.compactPlaylists,
+        simplePlaybackBarPlaylist:
+            simplePlaybackBarPlaylist ?? this.simplePlaybackBarPlaylist,
         startupFooter: startupFooter ?? this.startupFooter,
       );
 
   Map<String, Object> toMap() => {
         'libraryRowLayout': libraryRowLayout.name,
         'compactPlaylists': compactPlaylists,
+        'simplePlaybackBarPlaylist': simplePlaybackBarPlaylist,
         'startupFooter': startupFooter.name,
       };
 
@@ -48,6 +54,9 @@ class UiLayoutPreferences {
       compactPlaylists: value['compactPlaylists'] is bool
           ? value['compactPlaylists'] as bool
           : true,
+      simplePlaybackBarPlaylist: value['simplePlaybackBarPlaylist'] is bool
+          ? value['simplePlaybackBarPlaylist'] as bool
+          : false,
     );
   }
 
@@ -56,10 +65,11 @@ class UiLayoutPreferences {
       other is UiLayoutPreferences &&
       libraryRowLayout == other.libraryRowLayout &&
       compactPlaylists == other.compactPlaylists &&
+      simplePlaybackBarPlaylist == other.simplePlaybackBarPlaylist &&
       startupFooter == other.startupFooter;
   @override
-  int get hashCode =>
-      Object.hash(libraryRowLayout, compactPlaylists, startupFooter);
+  int get hashCode => Object.hash(libraryRowLayout, compactPlaylists,
+      simplePlaybackBarPlaylist, startupFooter);
 }
 
 class UiLayoutScope extends InheritedWidget {

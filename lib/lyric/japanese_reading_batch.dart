@@ -92,6 +92,7 @@ class JapaneseReadingBatch extends ChangeNotifier {
             final projection = await _projector.project(source,
                 language: item.language,
                 enabled: true,
+                verifyCoverage: true,
                 requestMode: mode,
                 stillCurrent: () => _active);
             if (!_active) break;

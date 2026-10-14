@@ -352,7 +352,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
       widget.onSeek != null && _duration > 0 && !widget.isBuffering;
 
   KeyEventResult _handleSeekKey(FocusNode node, KeyEvent event) {
-    if ((_active && !_dragging) ||
+    if ((_active && !_dragging && _seekPointer == null) ||
         (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
       return KeyEventResult.ignored;
     }
@@ -390,7 +390,11 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
       _ignoreAdjustmentCycle = false;
       return;
     }
-    final shouldSeek = _active &&
+    // Slider also emits its end callback when it loses the gesture arena.
+    // Our outer raw listener sees a real up before recognizers dispatch end;
+    // a still-held primary pointer therefore owns a cancelled/semantic cycle.
+    final shouldSeek = _seekPointer == null &&
+        _active &&
         _dragging &&
         _canSeek &&
         _dragTrackIdentity == widget.trackIdentity;

@@ -107,11 +107,11 @@ class StatisticsDisplayService extends ChangeNotifier {
     _total = audios.length;
     final operation = Completer<void>();
     _pending = operation.future;
+    notifyListeners();
     // Reserve single-flight ownership before invoking a scanner: an injected
     // scanner may fail synchronously, without reaching its first await.
     final capture =
         _capture(audios, trackIds, playbackData, capturedAt, revision, warning);
-    if (_refreshing) notifyListeners();
     unawaited(capture.then<void>((_) => operation.complete()));
     return operation.future;
   }
@@ -142,14 +142,30 @@ class StatisticsDisplayService extends ChangeNotifier {
       DateTime capturedAt,
       int revision,
       String? warning) async {
+    final progressClock = Stopwatch()..start();
+    var lastProgressNotice = Duration.zero;
+    var acceptingProgress = true;
     try {
       final libraryReading = _scanner.scan(audios,
           isCancelled: () => _disposed,
           onProgress: (completed, total) {
-            if (_disposed) return;
+            if (_disposed ||
+                !acceptingProgress ||
+                (_completed == completed && _total == total)) {
+              return;
+            }
             _completed = completed;
             _total = total;
-            notifyListeners();
+            final elapsed = progressClock.elapsed;
+            // Every batch keeps the real progress. Only presentation notices
+            // are bounded; callbacks own this monotonic clock without a timer.
+            // Always show completion before a slower personal capture finishes.
+            if (completed == total ||
+                elapsed - lastProgressNotice >=
+                    const Duration(milliseconds: 100)) {
+              lastProgressNotice = elapsed;
+              notifyListeners();
+            }
           });
       final personalReading = _capturePersonal(trackIds);
       final library = await libraryReading;
@@ -168,6 +184,8 @@ class StatisticsDisplayService extends ChangeNotifier {
     } catch (error) {
       if (!_disposed) _failure = error;
     } finally {
+      acceptingProgress = false;
+      progressClock.stop();
       if (!_disposed) {
         _refreshing = false;
         _pending = null;

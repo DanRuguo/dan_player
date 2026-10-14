@@ -12,6 +12,7 @@ import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_motion.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_text_balance.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_follow_words.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_follow_geometry.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_fractional_filter.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -1484,32 +1485,11 @@ class _TimedLyricLayout {
     line.content,
   );
   late final followLineMetrics = base.computeLineMetrics();
-  late final List<({int word, int wordBox, int slot, Rect bounds})>
-      followPieces = [
-    for (var word = 0; word < words.length; word++)
-      for (var slot = 0; slot < followSlots.length; slot++)
-        for (var wordBox = 0; wordBox < words[word].boxes.length; wordBox++)
-          for (final slotBox in followSlots[slot].boxes)
-            // includeLineSpacingMiddle boxes of adjacent wrapped lines can
-            // overlap by a fractional pixel. They are different glyph rows,
-            // not fragments of the same visual word.
-            if (words[word].boxes[wordBox].toRect().overlaps(
-                      slotBox.toRect(),
-                    ) &&
-                lyricFollowLineIndex(
-                      words[word].boxes[wordBox].toRect(),
-                      followLineMetrics,
-                    ) ==
-                    lyricFollowLineIndex(slotBox.toRect(), followLineMetrics))
-              (
-                word: word,
-                wordBox: wordBox,
-                slot: slot,
-                bounds: words[word].boxes[wordBox].toRect().intersect(
-                      slotBox.toRect(),
-                    ),
-              ),
-  ];
+  late final List<LyricFollowPiece> followPieces = lyricFollowPieces(
+    [for (final word in words) word.boxes],
+    followSlots,
+    followLineMetrics,
+  );
   late final followInkClips = lyricFollowClipPartitions(
     [for (final piece in followPieces) piece.bounds],
     base.size,

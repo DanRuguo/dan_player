@@ -757,6 +757,17 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     };
     final field = method.audioField;
     final direction = method.direction!;
+    // Flattening validates the owning root and materializes occurrences. Do
+    // that at most once per row for this sort, rather than on every comparison.
+    // Keeping it local also makes the next sort observe changed descendants.
+    final songCounts = field == null && sorted.length > 1
+        ? {
+            for (final row in sorted)
+              row.id: row.playlist == null
+                  ? 1
+                  : _displaySongCount(row.playlist!, parent),
+          }
+        : const <String, int>{};
     sorted.sort((a, b) {
       // Display ordering never mutates the tree's mixed song/folder order.
       // Folders without a song-specific tag are unknown, not fake artists or
@@ -774,9 +785,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             b.modifiedAt > 0 ? b.modifiedAt : null,
             direction: direction,
           ),
-        null => compareSortNumbers(
-            a.playlist == null ? 1 : _displaySongCount(a.playlist!, parent),
-            b.playlist == null ? 1 : _displaySongCount(b.playlist!, parent),
+        null => compareSortNumbers(songCounts[a.id], songCounts[b.id],
             direction: direction),
         _ => compareAudioSort(a.audio, b.audio, field, direction: direction),
       };

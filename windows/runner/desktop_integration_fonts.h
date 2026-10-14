@@ -37,7 +37,8 @@ struct NativeFontPolicy {
 // paints. Nothing is installed into Windows or shared with other processes.
 class PopupFonts {
  public:
-  PopupFonts() {
+  PopupFonts(int title_weight = FW_BOLD, int row_weight = FW_BOLD)
+      : title_weight_(title_weight), row_weight_(row_weight) {
     Gdiplus::GdiplusStartupInput input;
     if (Gdiplus::GdiplusStartup(&gdiplus_, &input, nullptr) != Gdiplus::Ok) {
       gdiplus_ = 0;
@@ -130,9 +131,10 @@ class PopupFonts {
     font.lfQuality = CLEARTYPE_QUALITY;
     if (!face_.empty()) wcsncpy_s(font.lfFaceName, face_.c_str(), _TRUNCATE);
     font.lfHeight = -MulDiv(16, static_cast<int>(dpi), 96);
-    font.lfWeight = FW_BOLD;
+    font.lfWeight = title_weight_;
     title_ = CreateFontIndirectW(&font);
     font.lfHeight = -MulDiv(15, static_cast<int>(dpi), 96);
+    font.lfWeight = row_weight_;
     row_ = CreateFontIndirectW(&font);
     if (policy_) for (size_t index = 0; index < policy_faces_.size(); ++index) {
       auto script_font = font;
@@ -140,6 +142,7 @@ class PopupFonts {
         wcsncpy_s(script_font.lfFaceName, policy_faces_[index].c_str(), _TRUNCATE);
       policy_row_[index] = CreateFontIndirectW(&script_font);
       script_font.lfHeight = -MulDiv(16, static_cast<int>(dpi), 96);
+      script_font.lfWeight = title_weight_;
       policy_title_[index] = CreateFontIndirectW(&script_font);
     }
     // Explicit per-label fallback for scripts missing from the main face.
@@ -151,8 +154,10 @@ class PopupFonts {
       wcsncpy_s(font.lfFaceName, fallback[index], _TRUNCATE);
       fallback_row_[index] = CreateFontIndirectW(&font);
       font.lfHeight = -MulDiv(16, static_cast<int>(dpi), 96);
+      font.lfWeight = title_weight_;
       fallback_title_[index] = CreateFontIndirectW(&font);
       font.lfHeight = -MulDiv(15, static_cast<int>(dpi), 96);
+      font.lfWeight = row_weight_;
     }
     font.lfHeight = -MulDiv(20, static_cast<int>(dpi), 96);
     font.lfWeight = FW_NORMAL;
@@ -246,6 +251,10 @@ class PopupFonts {
   const std::wstring& icon_face() const { return icon_face_; }
 
  private:
+  // Per-instance roles. Shared lyric/font consumers retain their bold default;
+  // the Windows tray opts into native UI row weight without changing them.
+  int title_weight_ = FW_BOLD;
+  int row_weight_ = FW_BOLD;
   static HFONT OrSystem(HFONT font) {
     return font ? font : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
   }

@@ -7,3 +7,6 @@
 /licenses/GOOGLE-SANS/OFL.txt whitespace=cr-at-eol,-blank-at-eol
 /licenses/GOOGLE-SANS/TRADEMARKS.md whitespace=cr-at-eol,-blank-at-eol
 /licenses/PRETENDARD/OFL.txt whitespace=cr-at-eol,-blank-at-eol
+# Preserve these hash-pinned upstream dictionary notices, including whitespace.
+/licenses/EDRDG/LICENCE.html -text whitespace=cr-at-eol,-blank-at-eol
+/licenses/EDRDG/CC-BY-SA-4.0.txt -text whitespace=cr-at-eol,-blank-at-eol,-blank-at-eof

@@ -13,6 +13,7 @@ class JapaneseLyricReadingCache {
   JapaneseLyricReadingCache({
     Future<Directory> Function()? directory,
     String? engine,
+    String? legacyEngine,
     this.maximumEntries = 1024,
     this.maximumTotalBytes = 16 * 1024 * 1024,
     this.maximumEntryBytes = 512 * 1024,
@@ -20,13 +21,23 @@ class JapaneseLyricReadingCache {
             (() async => Directory(path.join(
                 (await getAppDataDir()).path, 'cache', 'japanese_readings'))),
         _engine = engine ??
-            'display-v4-han-spans/lindera-6.2.0/'
+            'display-v5-mono-han-spans/edrdg-2026-10-14/'
+                'f4bf033fb622280875be6199d20d44fe2307310ea41b403a37f30c6b3a23a772/'
+                '18c12298210019c8b620287b0c995ca30d8fad73542ef46d395736f4e29e49d3/'
+                'lindera-6.2.0/'
                 'a8acd8b6352774fe3f6ac3fdbec59313ce04b548dad84340c17f0ee4bfab6e43/'
-                '${Platform.operatingSystem}/${Platform.operatingSystemVersion}';
+                '${Platform.operatingSystem}/${Platform.operatingSystemVersion}',
+        _legacyEngine = legacyEngine ??
+            (engine == null
+                ? 'display-v4-han-spans/lindera-6.2.0/'
+                    'a8acd8b6352774fe3f6ac3fdbec59313ce04b548dad84340c17f0ee4bfab6e43/'
+                    '${Platform.operatingSystem}/${Platform.operatingSystemVersion}'
+                : null);
 
   static final instance = JapaneseLyricReadingCache();
   final Future<Directory> Function() _directory;
   final String _engine;
+  final String? _legacyEngine;
   final int maximumEntries, maximumTotalBytes, maximumEntryBytes;
   _ReadingWrite? _pending;
   Future<void>? _draining;
@@ -35,15 +46,55 @@ class JapaneseLyricReadingCache {
   final _inventory = <String, (int, DateTime)>{};
   var _inventoryTotalBytes = 0;
 
-  String fingerprint(Lyric source, {String namespace = 'offline'}) => sha256
-      .convert(utf8.encode(jsonEncode([
-        _engine,
-        namespace,
-        LyricSnapshot.capture(source).toJson(),
-      ])))
-      .toString();
+  String fingerprint(Lyric source, {String namespace = 'offline'}) =>
+      _fingerprint(source, namespace, _engine);
+
+  String _fingerprint(Lyric source, String namespace, String engine,
+          {bool includeSourceAlias = true}) =>
+      sha256
+          .convert(utf8.encode(jsonEncode([
+            engine,
+            namespace,
+            LyricSnapshot.capture(source).toJson(),
+            // Invalidate earlier incomplete 别 projections without discarding
+            // authorized cached readings for unrelated lyrics. The source remains
+            // unchanged and fingerprints without this spelling retain v4 identity.
+            if (includeSourceAlias &&
+                source.lines.any((line) => switch (line) {
+                      UnsyncLyricLine() => line.content.contains('别'),
+                      SyncLyricLine() => line.content.contains('别'),
+                      _ => false,
+                    }))
+              'source-alias-v1/betsu',
+          ])))
+          .toString();
 
   Future<Map<int, JapaneseCachedReading>?> read(String fingerprint,
+          {required bool Function() stillCurrent}) =>
+      _read(fingerprint, _engine, stillCurrent: stillCurrent);
+
+  /// An old, exact-source display remains readable without authorizing a new
+  /// analysis. The service skips this fallback when generation is allowed so
+  /// the new engine can replace a previously incomplete projection.
+  Future<Map<int, JapaneseCachedReading>?> readLegacy(Lyric source,
+      {required String namespace,
+      required bool Function() stillCurrent}) async {
+    final engine = _legacyEngine;
+    if (engine == null || !stillCurrent()) return null;
+    final fingerprint = _fingerprint(source, namespace, engine);
+    final saved = await _read(fingerprint, engine, stillCurrent: stillCurrent);
+    if (saved != null || !stillCurrent()) return saved;
+    // The signed v4 release predates the source-alias cache salt. Read its
+    // exact source as well; neither legacy path authorizes analysis or writes.
+    final original =
+        _fingerprint(source, namespace, engine, includeSourceAlias: false);
+    return original == fingerprint
+        ? null
+        : _read(original, engine, stillCurrent: stillCurrent);
+  }
+
+  Future<Map<int, JapaneseCachedReading>?> _read(
+      String fingerprint, String engine,
       {required bool Function() stillCurrent}) async {
     if (!stillCurrent() || !RegExp(r'^[a-f0-9]{64}$').hasMatch(fingerprint)) {
       return null;
@@ -62,7 +113,7 @@ class JapaneseLyricReadingCache {
       final value = jsonDecode(utf8.decode(bytes));
       if (value is! Map ||
           value['fingerprint'] != fingerprint ||
-          value['engine'] != _engine ||
+          value['engine'] != engine ||
           value['readings'] is! Map) {
         return null;
       }

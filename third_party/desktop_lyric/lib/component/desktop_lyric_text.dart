@@ -713,8 +713,10 @@ class _DesktopLyricTextLayout {
           ? double.infinity
           : math.max(0.0, maxHorizontalWidth);
       base!.layout(maxWidth: width);
-      highlight!.layout(maxWidth: width);
-      stroke?.layout(maxWidth: width);
+      final rubyWidth =
+          layoutRubyWordSafe(base!, shaping.rubySpans, width, width);
+      highlight!.layout(maxWidth: rubyWidth);
+      stroke?.layout(maxWidth: rubyWidth);
       if (shaping.rubySpans.isNotEmpty) {
         ruby = LyricRubyLayout(
             primary: base,

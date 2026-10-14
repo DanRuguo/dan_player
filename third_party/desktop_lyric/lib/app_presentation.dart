@@ -277,6 +277,27 @@ class _ContentRegionHandle {
 class AppContentRegion extends StatefulWidget {
   const AppContentRegion({super.key, required this.child});
   final Widget child;
+
+  /// The owning content panel in screen coordinates. Anchored overlays call
+  /// this after their anchor has been laid out, so a resize uses the panel's
+  /// current geometry rather than its previous painted rectangle.
+  static Rect? globalBoundsOf(BuildContext context) {
+    final state = context.findAncestorStateOfType<_AppContentRegionState>();
+    final box = state?.context.findRenderObject();
+    if (box is RenderBox && box.attached && box.hasSize) {
+      return box.localToGlobal(Offset.zero) & box.size;
+    }
+    final region =
+        context.getInheritedWidgetOfExactType<_DialogRegionScope>()?.region;
+    return region?.rect ??
+        AppPresentationHost.maybeOf(context)?._activeRegion?.rect;
+  }
+
+  /// Panel replacements and geometry changes notify once after painting;
+  /// consumers do not need an idle frame callback or polling clock.
+  static Listenable? geometryChangesOf(BuildContext context) =>
+      AppPresentationHost.maybeOf(context)?._changes;
+
   @override
   State<AppContentRegion> createState() => _AppContentRegionState();
 }
