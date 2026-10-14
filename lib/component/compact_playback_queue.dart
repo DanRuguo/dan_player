@@ -264,7 +264,7 @@ class _CompactPlaybackQueueState extends State<CompactPlaybackQueue>
             key: _fanKey,
             canOwnFocus: _canOwnFocus,
             tapGroup: _tapGroup,
-            veilHeight: (bar.top - bounds.top).clamp(0.0, bounds.height),
+            barRect: bar.shift(-bounds.topLeft),
             open: _open,
             queueIdentity: widget.queueIdentity,
             itemCount: widget.itemCount,
@@ -370,7 +370,7 @@ class _QueueFan extends StatefulWidget {
     required this.onDismiss,
     required this.onClosed,
     required this.tapGroup,
-    required this.veilHeight,
+    required this.barRect,
     required this.canOwnFocus,
   });
   final bool open;
@@ -385,7 +385,7 @@ class _QueueFan extends StatefulWidget {
   final VoidCallback onDismiss;
   final VoidCallback onClosed;
   final Object tapGroup;
-  final double veilHeight;
+  final Rect barRect;
   final bool Function() canOwnFocus;
 
   @override
@@ -935,17 +935,11 @@ class _QueueFanState extends State<_QueueFan>
         ),
       ),
       builder: (context, fan) => Stack(children: [
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          height: widget.veilHeight,
+        Positioned.fill(
           child: IgnorePointer(
             child: ExcludeSemantics(
-              child: ClipRRect(
-                borderRadius: BorderRadius.only(
-                    topLeft: AppShape.surfaceRadius.topLeft,
-                    topRight: AppShape.surfaceRadius.topRight),
+              child: ClipPath(
+                clipper: _QueueVeilClipper(widget.barRect),
                 child: ColoredBox(
                   key: const ValueKey('compact-queue-body-veil'),
                   color: surface.withValues(
@@ -960,6 +954,22 @@ class _QueueFanState extends State<_QueueFan>
       ]),
     );
   }
+}
+
+/// Fade the entire content background, including the floating bar's margins,
+/// while preserving the actual bar surface rather than a whole footer strip.
+class _QueueVeilClipper extends CustomClipper<Path> {
+  const _QueueVeilClipper(this.bar);
+  final Rect bar;
+
+  @override
+  Path getClip(Size size) => Path()
+    ..fillType = PathFillType.evenOdd
+    ..addRRect(AppShape.surfaceRadius.toRRect(Offset.zero & size))
+    ..addRRect(AppShape.surfaceRadius.toRRect(bar));
+
+  @override
+  bool shouldReclip(_QueueVeilClipper oldClipper) => bar != oldClipper.bar;
 }
 
 /// One retained row trades its two backgrounds without overlapping them or
