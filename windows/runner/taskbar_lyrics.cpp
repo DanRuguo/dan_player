@@ -184,6 +184,7 @@ struct TaskbarLyrics::Impl {
   const ULONG_PTR epoch = next_epoch.fetch_add(1);
   HWND controller = nullptr, surface = nullptr, bar = nullptr, shell_menu = nullptr;
   bool enabled = false, animate = false, playing = false, invalid = true;
+  bool playback_intended = false;
   bool force_probe = false, scrolling = false, word_sampling = false, entrance_pending = false, entering = false;
   bool roll_from_next = false;
   bool first_frame_pending = false, reuse_next = false;
@@ -584,8 +585,8 @@ struct TaskbarLyrics::Impl {
     } else next_button.Hide();
     if(show_pause_indicator && !(shell_menu && IsWindowVisible(shell_menu))) {
       RECT destination=playback_button_area; OffsetRect(&destination,area.left,area.top);
-      playback_button.SetSymbol(playing ? taskbar_lyrics::MediaSymbol::kPause : taskbar_lyrics::MediaSymbol::kPlay);
-      playback_button.SetLabel(playing ? pause_label : play_label);
+      playback_button.SetSymbol(playback_intended ? taskbar_lyrics::MediaSymbol::kPause : taskbar_lyrics::MediaSymbol::kPlay);
+      playback_button.SetLabel(playback_intended ? pause_label : play_label);
       playback_button.SetCallback([this] { if(enabled && show_pause_indicator && playback_button_enabled && playback_callback) playback_callback(); });
       playback_button.SetRestoreCallback([this] { if(enabled && controller) SetTimer(controller,kSettle,80,nullptr); });
       playback_button.Show(bar,destination,dpi,foreground,playback_button_enabled,stroke_enabled,stroke_color,stroke_opacity);
@@ -880,7 +881,7 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
                        bool show_pause_indicator, bool stroke_enabled, unsigned area_selection, bool paused,
                        std::wstring color_scheme,bool show_next_button,bool next_button_enabled,bool animate_layout,bool show_next_lyric,bool playback_button_enabled,
                        std::optional<desktop_integration::NativeFontPolicy> font_policy,
-                       double lyric_letter_spacing) {
+                       double lyric_letter_spacing, std::optional<bool> playback_intended) {
   if (!enabled || text.empty()) { Close(); return true; }
   const auto parsed_placement = taskbar_lyrics::ParsePlacement(placement);
   const auto parsed_color=taskbar_lyrics::ParseColorScheme(color_scheme);
@@ -952,6 +953,9 @@ bool TaskbarLyrics::Set(bool enabled, std::wstring text, unsigned accent,
   self.stroke_enabled = stroke_enabled; self.paused = paused;
   self.color_scheme=*parsed_color; self.show_next_button=show_next_button; self.next_button_enabled=next_button_enabled;
   self.playback_button_enabled=playback_button_enabled;
+  // Buffer starvation stops the lyric clock while retaining the user's play
+  // intent. Keep the transport button independent from clock extrapolation.
+  self.playback_intended=playback_intended.value_or(playing);
   self.animate_layout=animate_layout;
   self.show_next_lyric=show_next_lyric;
   self.lyric_letter_spacing=lyric_letter_spacing;

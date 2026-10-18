@@ -39,6 +39,8 @@ enum ControlEvent {
 @JsonSerializable()
 class InitArgsMessage {
   final bool isPlaying;
+  @JsonKey(includeIfNull: false)
+  final bool? playbackIntended;
 
   /// now playing
   final String title;
@@ -71,6 +73,7 @@ class InitArgsMessage {
   const InitArgsMessage(this.isPlaying, this.title, this.artist, this.album,
       this.darkMode, this.primary, this.surfaceContainer, this.onSurface,
       {this.vertical = false,
+      this.playbackIntended,
       this.playbackRate = 1.0,
       this.language = 'zh',
       this.fontPolicy,
@@ -94,8 +97,11 @@ class UiLanguageMessage extends Message {
 @JsonSerializable()
 class ControlEventMessage extends Message {
   final ControlEvent event;
+  // Retain pause/start event codes for older hosts; new hosts decide against
+  // current transport state rather than a delayed helper snapshot.
+  final bool togglePlayback;
 
-  const ControlEventMessage(this.event);
+  const ControlEventMessage(this.event, {this.togglePlayback = false});
 
   factory ControlEventMessage.fromJson(Map<String, dynamic> json) =>
       _$ControlEventMessageFromJson(json);
@@ -128,8 +134,10 @@ class PreferenceChangedMessage extends Message {
 @JsonSerializable()
 class PlayerStateChangedMessage extends Message {
   final bool playing;
+  @JsonKey(includeIfNull: false)
+  final bool? playbackIntended;
 
-  const PlayerStateChangedMessage(this.playing);
+  const PlayerStateChangedMessage(this.playing, {this.playbackIntended});
 
   factory PlayerStateChangedMessage.fromJson(Map<String, dynamic> json) =>
       _$PlayerStateChangedMessageFromJson(json);
@@ -211,17 +219,19 @@ class PlaybackTimelineMessage extends Message {
   final int sequence;
   final int positionMilliseconds;
   final bool playing;
+  final bool? playbackIntended;
   final double playbackRate;
 
   const PlaybackTimelineMessage(
       this.sequence, this.positionMilliseconds, this.playing,
-      {this.playbackRate = 1.0});
+      {this.playbackRate = 1.0, this.playbackIntended});
 
   factory PlaybackTimelineMessage.fromJson(Map<String, dynamic> json) {
     return PlaybackTimelineMessage(
       (json['sequence'] as num?)?.toInt() ?? 0,
       (json['positionMilliseconds'] as num?)?.toInt() ?? 0,
       json['playing'] as bool? ?? false,
+      playbackIntended: json['playbackIntended'] as bool?,
       playbackRate: safeDesktopPlaybackRate(json['playbackRate']),
     );
   }
@@ -231,6 +241,7 @@ class PlaybackTimelineMessage extends Message {
         'sequence': sequence,
         'positionMilliseconds': positionMilliseconds,
         'playing': playing,
+        if (playbackIntended != null) 'playbackIntended': playbackIntended,
         'playbackRate': safeDesktopPlaybackRate(playbackRate),
       };
 }
@@ -340,6 +351,7 @@ class DesktopJapaneseReadingSpan implements LyricRubySpan {
 
 class LyricLineTimelineMessage extends Message {
   final int sequence;
+
   /// Optional strict document owner, distinct from playback track sequence.
   final int? lyricSourceGeneration;
   final int lineIndex;

@@ -2548,6 +2548,22 @@ class PlaybackService extends ChangeNotifier {
     _loadAndPlay(newIndex, playlist.value);
   }
 
+  /// Toggle the current transport intent, including a source waiting for data.
+  /// A stalled source resumes by itself; its pause button must revoke that
+  /// intent instead of issuing another start. Read state when invoked so a
+  /// control built before the latest native event still performs one toggle.
+  void togglePlayback() {
+    if (_closed || nowPlaying == null || isBuffering.value) return;
+    final state = playerState;
+    if (state.keepsPlaybackIntent) {
+      pause();
+    } else if (state == PlayerState.completed) {
+      playAgain();
+    } else {
+      start();
+    }
+  }
+
   /// 暂停
   void pause({bool recordIntent = true}) {
     if (_closed) return;

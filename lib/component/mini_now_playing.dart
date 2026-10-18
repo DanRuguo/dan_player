@@ -255,16 +255,7 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
                     stream: playbackService.playerStateStream,
                     initialData: playbackService.playerState,
                     builder: (context, snapshot) {
-                      late void Function() onPressed;
-                      if (snapshot.data! == PlayerState.playing) {
-                        onPressed = playbackService.pause;
-                      } else if (snapshot.data! == PlayerState.completed) {
-                        onPressed = playbackService.playAgain;
-                      } else {
-                        onPressed = playbackService.start;
-                      }
-
-                      final isPlaying = snapshot.data! == PlayerState.playing;
+                      final isPlaying = snapshot.data!.keepsPlaybackIntent;
 
                       return NowPlayingBarControls(
                         isPlaying: isPlaying,
@@ -274,7 +265,9 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
                         onPrevious: nowPlaying == null
                             ? null
                             : playbackService.lastAudio,
-                        onPlayPause: nowPlaying == null ? null : onPressed,
+                        onPlayPause: nowPlaying == null
+                            ? null
+                            : playbackService.togglePlayback,
                         onNext: nowPlaying == null
                             ? null
                             : playbackService.nextAudio,

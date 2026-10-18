@@ -20,6 +20,7 @@ import 'package:dan_player/page/now_playing_page/component/segment_loop_dialog.d
 import 'package:dan_player/page/now_playing_page/component/queue_stop_status.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
+import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/play_service/queue_duration_summary.dart';
 import 'package:dan_player/play_service/queue_order.dart';
 import 'package:dan_player/online/online_library.dart';
@@ -80,25 +81,68 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   String _query = '';
   List<Audio>? _filteredQueue;
   List<int> _filteredIndices = const [];
+  List<Audio>? _searchQueue;
+  int _searchRevision = -1;
+  QueueSearchIndex? _queueSearch;
+  int _searchGeneration = 0;
+  bool _searchPending = false;
+  bool? _alignmentAfterSearch;
 
   List<int> _visibleIndices(List<Audio> queue) {
+    if (!identical(queue, _searchQueue) ||
+        _searchRevision != AudioLibrary.searchRevision) {
+      _searchQueue = queue;
+      _searchRevision = AudioLibrary.searchRevision;
+      _queueSearch = null;
+      _filteredQueue = null;
+      ++_searchGeneration;
+      _searchPending = false;
+    }
     if (identical(queue, _filteredQueue)) return _filteredIndices;
     _filteredQueue = queue;
-    final words = _query.toLowerCase().split(RegExp(r'\s+'))
-      ..removeWhere((word) => word.isEmpty);
-    return _filteredIndices = [
-      for (var i = 0; i < queue.length; i++)
-        if (words.isEmpty ||
-            words.every(('${queue[i].displayTitle}\n${queue[i].artist}\n'
-                    '${queue[i].album}')
-                .toLowerCase()
-                .contains))
-          i,
-    ];
+    if (_query.isEmpty) {
+      return _filteredIndices = List<int>.generate(queue.length, (i) => i);
+    }
+    if (queue.length > 128) {
+      final generation = ++_searchGeneration;
+      _searchPending = true;
+      _filteredIndices = const [];
+      unawaited(_filterLargeQueue(queue, _query, _searchRevision, generation));
+      return _filteredIndices;
+    }
+    return _filteredIndices =
+        (_queueSearch ??= QueueSearchIndex(queue)).matchingIndices(_query);
+  }
+
+  Future<void> _filterLargeQueue(
+      List<Audio> queue, String query, int revision, int generation) async {
+    bool cancelled() =>
+        !mounted ||
+        generation != _searchGeneration ||
+        !identical(queue, playbackService.playlist.value) ||
+        revision != AudioLibrary.searchRevision ||
+        query != _query;
+    final index = _queueSearch ??
+        await QueueSearchIndex.build(queue, shouldCancel: cancelled);
+    if (index == null || cancelled()) return;
+    _queueSearch = index;
+    final indices =
+        await index.matchingIndicesAsync(query, shouldCancel: cancelled);
+    if (indices == null || cancelled()) return;
+    setState(() {
+      _filteredIndices = indices;
+      _searchPending = false;
+    });
+    final align = _alignmentAfterSearch;
+    _alignmentAfterSearch = null;
+    if (align != null) _scheduleAlignment(animate: align, force: true);
   }
 
   void _updateQuery(String value) {
     setState(() {
+      ++_searchGeneration;
+      _searchPending = false;
+      _alignmentAfterSearch = null;
       _query = value.trim();
       _filteredQueue = null;
     });
@@ -467,9 +511,15 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     _lastIndex = index;
     if (_alignQueued) return;
     _alignQueued = true;
+    final alignmentQuery = _query;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _alignQueued = false;
-      if (!mounted || !scrollController.hasClients) return;
+      if (!mounted || alignmentQuery != _query) return;
+      if (_searchPending) {
+        _alignmentAfterSearch = animate;
+        return;
+      }
+      if (!scrollController.hasClients) return;
       final latestQueue = playbackService.playlist.value;
       if (latestQueue.isEmpty) return;
       final visibleIndex =
@@ -506,6 +556,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   void _toNowPlaying() => _scheduleAlignment();
 
   void _onQueueChanged() {
+    ++_searchGeneration;
+    _searchPending = false;
+    _alignmentAfterSearch = null;
+    _searchQueue = null;
     _filteredQueue = null;
     _scheduleAlignment();
   }
@@ -532,6 +586,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     playbackService = next;
     playbackService.addListener(_toNowPlaying);
     playbackService.playlist.addListener(_onQueueChanged);
+    ++_searchGeneration;
+    _searchPending = false;
+    _alignmentAfterSearch = null;
+    _searchQueue = null;
     _filteredQueue = null;
     _scheduleAlignment(animate: false, force: true);
   }
@@ -561,8 +619,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
           builder: (context, _) {
             final queue = playbackService.playlist.value;
             final visibleIndices = _visibleIndices(queue);
-            final searchSummary = ui('找到 {0} / {1} 首 · 搜索不改变队列',
-                [visibleIndices.length, queue.length]);
+            final searchSummary = _searchPending
+                ? ui('正在搜索队列…')
+                : ui('找到 {0} / {1} 首 · 搜索不改变队列',
+                    [visibleIndices.length, queue.length]);
             final nowPlaying = playbackService.nowPlaying;
             final candidateIndex = playbackService.playlistIndex;
             final currentIndex = nowPlaying != null &&
@@ -682,7 +742,10 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                       enabledBorder: widget.immersive ? InputBorder.none : null,
                       focusedBorder: widget.immersive ? InputBorder.none : null,
                       fillColor: scheme.surfaceContainerLow,
-                      prefixIcon: Icon(Symbols.search, color: scheme.primary),
+                      prefixIcon: Tooltip(
+                        message: ui('支持拼音、首字母、重音与全角匹配，以及英文拼写容错；多个词需同时匹配。'),
+                        child: Icon(Symbols.search, color: scheme.primary),
+                      ),
                       suffixIcon: _query.isEmpty
                           ? null
                           : IconButton(
@@ -746,7 +809,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                           heightFactor: 1,
                           child: Padding(
                               padding: const EdgeInsets.all(16),
-                              child: Text(ui('队列中没有匹配的歌曲'),
+                              child: Text(ui(_searchPending
+                                      ? '正在搜索队列…'
+                                      : '队列中没有匹配的歌曲'),
                                   textAlign: TextAlign.center)))
                       : _QueueScrollbar(
                           controller: scrollController,
@@ -816,6 +881,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
 
   @override
   void dispose() {
+    ++_searchGeneration;
     playbackService.removeListener(_toNowPlaying);
     playbackService.playlist.removeListener(_onQueueChanged);
     _searchController.dispose();

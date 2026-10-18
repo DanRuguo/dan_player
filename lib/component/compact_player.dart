@@ -131,7 +131,7 @@ class _CompactPlayerState extends State<CompactPlayer> {
                 stream: playback.playerStateStream,
                 initialData: playback.playerState,
                 builder: (context, state) {
-                  final playing = state.data == PlayerState.playing;
+                  final playing = state.data?.keepsPlaybackIntent ?? false;
                   return _view(
                     title: audio?.displayTitle ?? 'Dan Player',
                     artist: audio?.artist ?? ui("尚未选择歌曲"),
@@ -152,13 +152,7 @@ class _CompactPlayerState extends State<CompactPlayer> {
                     onPrevious: playback.playlist.value.isEmpty
                         ? null
                         : playback.lastAudio,
-                    onPlayPause: audio == null
-                        ? null
-                        : playing
-                            ? playback.pause
-                            : state.data == PlayerState.completed
-                                ? playback.playAgain
-                                : playback.start,
+                    onPlayPause: audio == null ? null : playback.togglePlayback,
                     onNext: playback.playlist.value.isEmpty
                         ? null
                         : playback.nextAudio,

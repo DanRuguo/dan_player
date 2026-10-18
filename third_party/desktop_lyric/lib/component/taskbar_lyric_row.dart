@@ -65,7 +65,7 @@ class _TaskbarLyricRowState extends State<TaskbarLyricRow> {
     return ListenableBuilder(
       listenable: Listenable.merge([
         controller.appearance,
-        controller.isPlaying,
+        controller.playbackIntended,
         controller.lyricLine,
         controller.detailedLyricLine,
         controller.nowPlaying
@@ -98,11 +98,16 @@ class _TaskbarLyricRowState extends State<TaskbarLyricRow> {
             button(ui("上一首"), Symbols.skip_previous,
                 () => send(ControlEvent.previousAudio)),
           button(
-              controller.isPlaying.value ? ui("暂停") : ui("播放"),
-              controller.isPlaying.value ? Symbols.pause : Symbols.play_arrow,
-              () => send(controller.isPlaying.value
-                  ? ControlEvent.pause
-                  : ControlEvent.start)),
+              controller.playbackIntended.value ? ui("暂停") : ui("播放"),
+              controller.playbackIntended.value
+                  ? Symbols.pause
+                  : Symbols.play_arrow,
+              () => (sendMessage ?? stdout.write)(ControlEventMessage(
+                      controller.playbackIntended.value
+                          ? ControlEvent.pause
+                          : ControlEvent.start,
+                      togglePlayback: true)
+                  .buildMessageJson())),
           if (!compact)
             button(ui("下一首"), Symbols.skip_next,
                 () => send(ControlEvent.nextAudio)),

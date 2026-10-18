@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/personal_library.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
+import 'package:dan_player/statistics/library_listening_coverage.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
 import 'package:flutter/foundation.dart';
 
@@ -25,6 +26,7 @@ class StatisticsDisplaySnapshot {
     required this.storageWarning,
     required this.personalSummary,
     required this.personalWarning,
+    required this.listeningCoverage,
   });
 
   final Map<String, Object?> playbackData;
@@ -34,6 +36,7 @@ class StatisticsDisplaySnapshot {
   final String? storageWarning;
   final PersonalOrganizationSummary? personalSummary;
   final Object? personalWarning;
+  final LibraryListeningCoverage listeningCoverage;
 }
 
 /// Application-session display cache. Neither library changes nor recording
@@ -98,6 +101,9 @@ class StatisticsDisplayService extends ChangeNotifier {
     final audios = List<Audio>.of(_readLibrary());
     final trackIds =
         List<String>.unmodifiable(audios.map((audio) => audio.stableTrackId));
+    final coverage = LibraryListeningCoverage.capture(
+        trackIds: audios.map(_statistics.identityFor),
+        playbackData: playbackData);
     final capturedAt = _clock();
     final revision = _readLibraryRevision();
     final warning = _statistics.storageWarning;
@@ -110,8 +116,8 @@ class StatisticsDisplayService extends ChangeNotifier {
     notifyListeners();
     // Reserve single-flight ownership before invoking a scanner: an injected
     // scanner may fail synchronously, without reaching its first await.
-    final capture =
-        _capture(audios, trackIds, playbackData, capturedAt, revision, warning);
+    final capture = _capture(audios, trackIds, playbackData, capturedAt,
+        revision, warning, coverage);
     unawaited(capture.then<void>((_) => operation.complete()));
     return operation.future;
   }
@@ -141,7 +147,8 @@ class StatisticsDisplayService extends ChangeNotifier {
       Map<String, Object?> playbackData,
       DateTime capturedAt,
       int revision,
-      String? warning) async {
+      String? warning,
+      LibraryListeningCoverage coverage) async {
     final progressClock = Stopwatch()..start();
     var lastProgressNotice = Duration.zero;
     var acceptingProgress = true;
@@ -178,7 +185,8 @@ class StatisticsDisplayService extends ChangeNotifier {
           libraryRevision: revision,
           storageWarning: warning,
           personalSummary: personalSummary,
-          personalWarning: personalWarning);
+          personalWarning: personalWarning,
+          listeningCoverage: coverage);
     } on LibraryScanCancelled {
       // Session disposal invalidates an in-flight capture, never a page exit.
     } catch (error) {

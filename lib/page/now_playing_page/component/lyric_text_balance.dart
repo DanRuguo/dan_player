@@ -744,7 +744,10 @@ class PlainLyricWordFollowPainter extends CustomPainter
       } else {
         canvas.clipPath(slot.paintPath, doAntiAlias: false);
       }
-      text.paint(canvas, Offset.zero);
+      // Row alignment and ruby bands can replay this slot with an empty clip.
+      if (!canvas.getLocalClipBounds().isEmpty) {
+        text.paint(canvas, Offset.zero);
+      }
       canvas.restore();
     }
   }

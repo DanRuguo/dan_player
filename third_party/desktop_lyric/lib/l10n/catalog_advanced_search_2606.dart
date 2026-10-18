@@ -30,9 +30,14 @@ const Map<String, List<String>> catalogAdvancedSearch2606 = {
     "語句・条件の除外、引用符でフレーズをそのまま検索",
     "단어나 조건 제외; 따옴표로 구문 그대로 검색"
   ],
-  "不加筛选语法时保留原有搜索；西文重音与全角字母自动兼容。": [
-    "Plain searches keep their existing behavior. Latin accents and fullwidth letters are matched automatically.",
-    "条件を付けない検索は従来どおりです。欧文のアクセントと全角英数字は自動で一致します。",
-    "일반 검색은 기존 방식으로 동작합니다. 로마자 악센트와 전각 문자를 자동으로 일치시킵니다."
+  "普通搜索支持拼音、首字母、西文重音与全角字母；拼写接近的结果排在直接匹配之后。": [
+    "Plain searches support pinyin, initials, Latin accents and fullwidth letters. Similar spellings appear after direct matches.",
+    "通常検索は拼音・頭文字・欧文のアクセント・全角英数字に対応しています。つづりが近い候補は直接一致した結果の後に表示されます。",
+    "일반 검색은 병음, 이니셜, 로마자 악센트와 전각 문자를 지원합니다. 철자가 비슷한 결과는 직접 일치한 결과 뒤에 표시됩니다."
+  ],
+  "4–64 位拉丁字母或数字词可容忍一次漏字、多字、错字或相邻字符颠倒；引号与筛选条件保持原有匹配规则。": [
+    "Words of 4–64 Latin letters or digits allow one missing, extra, wrong or transposed adjacent character. Quotes and filters keep their existing matching rules.",
+    "4～64 文字の英数字の語では、1 文字の不足・余分・誤り、または隣り合う文字の入れ替えを許容します。引用符と検索条件の照合規則は従来どおりです。",
+    "4~64자의 로마자나 숫자로 된 단어는 문자 하나의 누락, 추가, 오타 또는 인접 문자 바뀜을 허용합니다. 따옴표와 필터는 기존 일치 규칙을 유지합니다."
   ],
 };

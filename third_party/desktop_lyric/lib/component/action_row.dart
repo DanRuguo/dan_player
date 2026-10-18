@@ -42,7 +42,7 @@ class ActionRow extends StatelessWidget {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap),
             icon: Icon(icon));
     return ListenableBuilder(
-      listenable: Listenable.merge([source.isPlaying, source.vertical]),
+      listenable: Listenable.merge([source.playbackIntended, source.vertical]),
       builder: (context, _) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Wrap(
@@ -60,11 +60,15 @@ class ActionRow extends StatelessWidget {
                 () => send(
                     const ControlEventMessage(ControlEvent.previousAudio))),
             button(
-                source.isPlaying.value ? ui("暂停") : ui("播放"),
-                source.isPlaying.value ? Symbols.pause : Symbols.play_arrow,
-                () => send(ControlEventMessage(source.isPlaying.value
-                    ? ControlEvent.pause
-                    : ControlEvent.start))),
+                source.playbackIntended.value ? ui("暂停") : ui("播放"),
+                source.playbackIntended.value
+                    ? Symbols.pause
+                    : Symbols.play_arrow,
+                () => send(ControlEventMessage(
+                    source.playbackIntended.value
+                        ? ControlEvent.pause
+                        : ControlEvent.start,
+                    togglePlayback: true))),
             button(ui("下一首"), Symbols.skip_next,
                 () => send(const ControlEventMessage(ControlEvent.nextAudio))),
             DesktopLyricAppearanceButton(

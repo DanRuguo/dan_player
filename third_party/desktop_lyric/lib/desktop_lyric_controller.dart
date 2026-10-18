@@ -149,6 +149,7 @@ class DesktopLyricRenderingPolicy {
 class DesktopLyricController {
   final fontPolicy = ValueNotifier(AppFontPolicy.defaults());
   ValueNotifier<bool> isPlaying = ValueNotifier(false);
+  final playbackIntended = ValueNotifier(false);
   ValueNotifier<bool> isDarkMode = ValueNotifier(false);
   ValueNotifier<ThemeChangedMessage> theme = ValueNotifier(
     ThemeChangedMessage(
@@ -241,6 +242,7 @@ class DesktopLyricController {
   void applyInitialState(InitArgsMessage initArgs) {
     uiLanguage.value = UiLanguage.parse(initArgs.language);
     isPlaying.value = initArgs.isPlaying;
+    playbackIntended.value = initArgs.playbackIntended ?? initArgs.isPlaying;
     playbackClock.sync(PlaybackTimelineMessage(
       0,
       0,
@@ -356,6 +358,7 @@ class DesktopLyricController {
     if (_disposed || _inputClosed) return;
     _inputClosed = true;
     isPlaying.value = false;
+    playbackIntended.value = false;
     playbackClock.setPlaying(false);
     // The owning player's pipe is gone. A late Process.start result can no
     // longer be killed by a parent that has exited, so close this HWND here.
@@ -388,6 +391,8 @@ class DesktopLyricController {
       } else if (type == getMessageTypeName<PlayerStateChangedMessage>()) {
         final playerState = PlayerStateChangedMessage.fromJson(content);
         isPlaying.value = playerState.playing;
+        playbackIntended.value =
+            playerState.playbackIntended ?? playerState.playing;
         playbackClock.setPlaying(playerState.playing);
       } else if (type == getMessageTypeName<NowPlayingChangedMessage>()) {
         nowPlaying.value = NowPlayingChangedMessage.fromJson(content);
@@ -438,6 +443,7 @@ class DesktopLyricController {
     }
 
     isPlaying.value = message.playing;
+    playbackIntended.value = message.playbackIntended ?? message.playing;
     playbackClock.sync(message);
   }
 
@@ -472,6 +478,7 @@ class DesktopLyricController {
     unawaited(_inputSubscription?.cancel());
     playbackClock.dispose();
     isPlaying.dispose();
+    playbackIntended.dispose();
     isDarkMode.dispose();
     theme.dispose();
     fontPolicy.dispose();

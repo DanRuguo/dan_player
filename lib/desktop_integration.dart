@@ -234,7 +234,7 @@ class _DesktopPlaybackAdapter extends ValueNotifier<DesktopPlaybackSnapshot>
       ready: true,
       hasTrack: audio != null,
       hasQueue: playback.playlist.value.isNotEmpty,
-      playing: _progressState == PlayerState.playing,
+      playing: _progressState.keepsPlaybackIntent,
       buffering: playback.isBuffering.value,
       desktopLyrics: _lyrics!.isRunning || _lyrics!.isStarting,
       title: audio == null ? '' : '${audio.displayTitle} — ${audio.artist}',
@@ -248,13 +248,7 @@ class _DesktopPlaybackAdapter extends ValueNotifier<DesktopPlaybackSnapshot>
     if (playback == null || !value.allows(action)) return;
     switch (action) {
       case 'toggle':
-        if (playback.playerState == PlayerState.playing) {
-          playback.pause();
-        } else if (playback.playerState == PlayerState.completed) {
-          playback.playAgain();
-        } else {
-          playback.start();
-        }
+        playback.togglePlayback();
       case 'previous':
         playback.lastAudio();
       case 'next':

@@ -93,7 +93,13 @@ class DesktopLyricService extends ChangeNotifier {
   StreamSubscription<PlayerState>? _stateSubscription;
   PlaybackService? _observedPlayback;
   Duration? _lastTimelineAt;
-  ({int sequence, int position, bool playing, double rate})? _lastTimeline;
+  ({
+    int sequence,
+    int position,
+    bool playing,
+    bool playbackIntended,
+    double rate
+  })? _lastTimeline;
   Timer? _recoveryTimer;
   Timer? _recoveryBudgetResetTimer;
   Timer? _appearanceSaveTimer;
@@ -189,6 +195,8 @@ class DesktopLyricService extends ChangeNotifier {
             vertical:
                 AppSettings.instance.experience.value.desktopLyricVertical,
             playbackRate: playback?.playbackRate.value ?? 1.0,
+            playbackIntended:
+                playback?.playerState.keepsPlaybackIntent ?? false,
             appearance: AppSettings.instance.desktopLyricAppearance.value,
             language: uiLanguage.value.code,
             fontPolicy: _readFontPolicy(),
@@ -288,6 +296,12 @@ class DesktopLyricService extends ChangeNotifier {
         final controlEvent = msg.ControlEventMessage.fromJson(
           Map<String, dynamic>.from(rawContent),
         );
+        if (controlEvent.togglePlayback &&
+            (controlEvent.event == msg.ControlEvent.pause ||
+                controlEvent.event == msg.ControlEvent.start)) {
+          _playbackService.togglePlayback();
+          return;
+        }
         switch (controlEvent.event) {
           case msg.ControlEvent.pause:
             _playbackService.pause();
@@ -660,7 +674,9 @@ class DesktopLyricService extends ChangeNotifier {
   }
 
   void sendPlayerStateMessage(bool isPlaying) {
-    sendMessage(msg.PlayerStateChangedMessage(isPlaying));
+    sendMessage(msg.PlayerStateChangedMessage(isPlaying,
+        playbackIntended:
+            _readyPlayback?.playerState.keepsPlaybackIntent ?? isPlaying));
     sendPlaybackTimelineMessage();
   }
 
@@ -704,6 +720,7 @@ class DesktopLyricService extends ChangeNotifier {
       sequence: sequence,
       position: ((playback?.position ?? 0) * 1000).round(),
       playing: playback?.playerState == PlayerState.playing,
+      playbackIntended: playback?.playerState.keepsPlaybackIntent ?? false,
       rate: playback?.playbackRate.value ?? 1.0,
     );
     // Direct playback actions and source events can describe the same change.
@@ -717,6 +734,7 @@ class DesktopLyricService extends ChangeNotifier {
         snapshot.position,
         snapshot.playing,
         playbackRate: snapshot.rate,
+        playbackIntended: snapshot.playbackIntended,
       ),
     );
   }

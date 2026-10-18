@@ -1,11 +1,40 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
-  '在“设置 → 界面与主题”开启“简易播放条播放列表”，播放条的列表按钮会向上展开封面和歌名，本地文件不显示后缀。滚轮、触控板或手指滑动浏览；停止滑动后自动对齐完整歌曲，新滑动可以随时接管。当前歌曲使用强调底色，点选歌曲后列表收回并开始播放。也可用上下键选择、Enter 播放、Esc 收回。': [
+  '队列搜索支持多个词跨歌名、歌手和专辑匹配，也支持拼音、首字母、拉丁重音、全角文字及轻微误拼。筛选只改变显示，点结果仍选择原队列位置，重复曲目不会合并。清除搜索恢复完整队列；显示“正在搜索队列…”时，等待结果完成后再另存或导出。':
+      [
+    'Queue search matches multiple words across titles, artists and albums, with Pinyin, initials, Latin accent and character-width normalization, and minor typo tolerance. Filtering changes the display; selecting a result uses its original queue position and repeated tracks remain separate. Clear the search to restore the full queue. While “Searching the queue…” appears, wait for results before saving or exporting them.',
+    'キュー検索では複数の語を曲名・アーティスト・アルバムにまたがって検索でき、ピンイン、頭文字、ラテン文字のアクセント、全角・半角の違い、軽微な誤字にも対応します。絞り込みは表示だけを変え、結果を選ぶと元のキュー位置が選択され、重複曲も別々に残ります。検索を消すと全曲に戻ります。「キューを検索中…」の間は、結果が出てから保存・書き出しを行ってください。',
+    '대기열 검색은 곡명, 아티스트, 앨범에 걸쳐 여러 단어를 찾으며 병음, 이니셜, 라틴 문자 악센트, 전각·반각 차이와 가벼운 오타도 지원합니다. 필터는 표시만 바꾸며 결과를 선택하면 원래 대기열 위치가 선택되고 반복된 곡은 합쳐지지 않습니다. 검색을 지우면 전체 대기열로 돌아갑니다. “대기열 검색 중…”이 표시되면 결과가 나온 뒤 저장하거나 내보내세요.'
+  ],
+  '“曲库播放覆盖”显示当前曲库中有明确播放记录的歌曲比例，按歌曲身份去重，仅使用本机已保存的记录。尚无明确记录不代表从未听过；旧版记录的候选歌曲另列为归属待确认，已有明确新记录的歌曲计入已记录。移出曲库的历史不计入覆盖比例，历史总数仍保留；添加歌曲或继续听歌后，刷新统计更新此卡。':
+      [
+    '“Library listening coverage” shows the share of current library tracks with attributed playback history, deduplicated by track identity and based only on history saved on this device. No attributed history does not mean never heard. Candidates for ambiguous legacy records are shown separately; tracks with new attributed records count as having history. History for removed tracks is excluded from coverage while historical totals remain. Refresh statistics after adding or listening to tracks to update the card.',
+    '「ライブラリの再生記録」は、現在のライブラリで帰属が明確な再生記録がある曲の割合です。曲IDで重複を除き、この端末の保存済み記録だけを使います。記録なしは未聴を意味しません。帰属が不明な旧記録の候補曲は別に表示し、明確な新記録がある曲は記録ありに数えます。削除した曲の履歴は割合に含めず、履歴の合計は残ります。曲の追加や再生後に統計を更新してください。',
+    '“라이브러리 재생 기록”은 현재 라이브러리에서 명확한 재생 기록이 있는 곡의 비율입니다. 곡 ID로 중복을 제외하며 이 기기에 저장된 기록만 사용합니다. 명확한 기록이 없다고 한 번도 듣지 않은 것은 아닙니다. 귀속이 불명확한 이전 기록의 후보 곡은 별도로 표시하며 명확한 새 기록이 있는 곡은 기록 있음으로 집계합니다. 제거한 곡의 기록은 비율에서 제외하지만 누적 기록은 유지합니다. 곡을 추가하거나 들은 뒤 통계를 새로고침하세요.'
+  ],
+  '本地普通搜索可用空格组合多个词，所有词都要匹配，但可分别出现在歌名、歌手或专辑中。支持汉字拼音和首字母、忽略拉丁重音及全角差异；至少 4 个字符的拉丁字母或数字词还可容忍一处常见误拼。字段条件和引号短语不使用误拼容错；在线结果取决于歌源的搜索能力。':
+      [
+    'For ordinary local search, separate words with spaces. Every word must match, but words may occur in different fields of the same track: title, artist or album. Chinese Pinyin and initials are supported, and Latin accents and character width are normalized. Latin-letter or digit words of at least 4 characters also tolerate one common typo. Field conditions and quoted phrases do not use typo tolerance. Online results depend on the music source’s search capabilities.',
+    '通常のローカル検索では、空白で複数の語を組み合わせられます。すべての語が一致する必要がありますが、曲名・アーティスト・アルバムの別々の項目に含まれていても構いません。漢字のピンインと頭文字に対応し、ラテン文字のアクセントと全角・半角の違いを吸収します。4文字以上のラテン文字・数字の語は、よくある誤字1か所も許容します。項目条件と引用符付きの語句には誤字許容を適用しません。オンライン結果は配信元の検索機能に依存します。',
+    '일반 로컬 검색에서는 공백으로 여러 단어를 조합할 수 있습니다. 모든 단어가 일치해야 하지만 곡명, 아티스트, 앨범의 서로 다른 항목에 있어도 됩니다. 한자 병음과 이니셜을 지원하고 라틴 문자 악센트와 전각·반각 차이를 정규화합니다. 4자 이상의 라틴 문자·숫자 단어는 흔한 오타 한 곳도 허용합니다. 필드 조건과 따옴표 구문에는 오타 허용을 적용하지 않습니다. 온라인 결과는 음원의 검색 기능에 따라 다릅니다.'
+  ],
+  '多个词可跨字段匹配；例如用歌曲拼音与歌手首字母一起缩小本地结果。': [
+    'Words can match different fields, for example a title’s Pinyin with the artist’s initials to narrow local results.',
+    '複数の語を別の項目にまたがって照合できます。曲名のピンインとアーティストの頭文字を組み合わせると、ローカル結果を絞り込めます。',
+    '여러 단어를 서로 다른 필드에서 찾을 수 있습니다. 예를 들어 곡명의 병음과 아티스트의 이니셜을 조합해 로컬 결과를 좁힐 수 있습니다.'
+  ],
+  '在“设置 → 界面与主题”开启“简易播放条播放列表”，播放条的列表按钮会向上展开封面和歌名，本地文件不显示后缀。滚轮、触控板或手指滑动浏览；停止滑动后自动对齐完整歌曲，新滑动可以随时接管。当前歌曲使用强调底色，点选歌曲后列表收回并开始播放。也可用上下键选择、Enter 播放、Esc 收回。':
+      [
     'Enable “Simple playback bar playlist” in Settings → Interface & Theme. The list button then expands covers and song names upward; local filenames omit their extensions. Browse with the mouse wheel, trackpad or a finger. When scrolling stops, whole songs align automatically; new input takes over immediately. The current song has a highlighted background. Selecting a song folds the list away and starts playback. You can also select with Up/Down, play with Enter, and close with Esc.',
     '「設定 → インターフェースとテーマ」で「再生バーの簡易プレイリスト」をオンにすると、再生バーの一覧ボタンからカバーと曲名が上へ展開します。ローカルファイルの拡張子は表示しません。マウスホイール、トラックパッド、指のスワイプで閲覧でき、操作を止めると曲の項目全体が見える位置へ自動で揃います。新しい操作ですぐに引き継げます。再生中の曲は背景色で強調され、曲を選ぶと一覧を閉じて再生します。上下キーで選択、Enterで再生、Escで閉じることもできます。',
     '설정 → 인터페이스와 테마에서 “재생 바 간편 재생 목록”을 켜면 목록 버튼을 눌러 표지와 곡 이름을 위로 펼칠 수 있습니다. 로컬 파일의 확장자는 표시하지 않습니다. 마우스 휠, 트랙패드 또는 손가락으로 탐색하며, 스크롤을 멈추면 곡 항목이 온전히 보이도록 자동 정렬됩니다. 새 입력은 즉시 이어받습니다. 현재 곡은 배경색으로 강조되며, 곡을 선택하면 목록을 접은 뒤 재생합니다. 위/아래 키로 선택하고 Enter로 재생하거나 Esc로 닫을 수도 있습니다.',
   ],
-  '导出队列与搜索结果': ['Export the queue and search results', 'キューと検索結果の書き出し', '대기열과 검색 결과 내보내기'],
-  '在播放队列顶栏点“导出队列或搜索结果”图标，选择“导出队列为 M3U8”或“导出队列音乐文件夹”。输入搜索词后，菜单还可选择“导出搜索结果为 M3U8”或“导出搜索结果音乐文件夹”。文件选择窗口打开前会固定所选范围的歌曲与顺序，保留重复引用；之后切歌或修改搜索不会改变这次导出。': [
+  '导出队列与搜索结果': [
+    'Export the queue and search results',
+    'キューと検索結果の書き出し',
+    '대기열과 검색 결과 내보내기'
+  ],
+  '在播放队列顶栏点“导出队列或搜索结果”图标，选择“导出队列为 M3U8”或“导出队列音乐文件夹”。输入搜索词后，菜单还可选择“导出搜索结果为 M3U8”或“导出搜索结果音乐文件夹”。文件选择窗口打开前会固定所选范围的歌曲与顺序，保留重复引用；之后切歌或修改搜索不会改变这次导出。':
+      [
     'On the queue toolbar, select the “Export queue or search results” icon, then choose “Export queue as M3U8” or “Export queue as music folder”. With a search term entered, the menu also offers “Export search results as M3U8” and “Export search results as music folder”. The selected tracks and their order are captured before the file picker opens, including repeated references. Changing tracks or the search afterward does not change this export.',
     'キュー上部の「キューまたは検索結果を書き出す」アイコンから、「キューをM3U8に書き出す」または「キューを音楽フォルダーに書き出す」を選びます。検索語を入力すると、「検索結果をM3U8に書き出す」と「検索結果を音楽フォルダーに書き出す」も選べます。保存先の選択画面を開く前に、選んだ範囲の曲と順序を重複する参照も含めて固定します。その後に曲や検索語を変えても、今回の書き出し内容は変わりません。',
     '대기열 위쪽의 “대기열 또는 검색 결과 내보내기” 아이콘에서 “대기열을 M3U8로 내보내기” 또는 “대기열을 음악 폴더로 내보내기”를 선택하세요. 검색어를 입력하면 “검색 결과를 M3U8로 내보내기”와 “검색 결과를 음악 폴더로 내보내기”도 선택할 수 있습니다. 저장 위치 선택 창이 열리기 전에 선택한 범위의 곡과 순서를 중복 참조까지 포함해 고정합니다. 이후 곡이나 검색어를 바꿔도 이번 내보내기 내용은 바뀌지 않습니다.',

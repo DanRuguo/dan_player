@@ -29,7 +29,8 @@ class TaskbarLyrics {
            std::wstring color_scheme = L"player", bool show_next_button = false, bool next_button_enabled = false,
            bool animate_layout = false,bool show_next_lyric = true,bool playback_button_enabled = false,
            std::optional<desktop_integration::NativeFontPolicy> font_policy = std::nullopt,
-           double lyric_letter_spacing = 0);
+           double lyric_letter_spacing = 0,
+           std::optional<bool> playback_intended = std::nullopt);
   static bool IsVerticalLayout();
   TaskbarLyricsLayout GetLayout() const;
   void SetLayoutCallback(std::function<void(const TaskbarLyricsLayout&)> callback);

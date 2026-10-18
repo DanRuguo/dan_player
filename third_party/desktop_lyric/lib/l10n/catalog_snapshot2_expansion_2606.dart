@@ -1,4 +1,29 @@
 const Map<String, List<String>> catalogSnapshot2Expansion2606 = {
+  '曲库播放覆盖': ['Library listening coverage', 'ライブラリの再生記録', '라이브러리 재생 기록'],
+  '有明确播放记录': ['Attributed playback history', '帰属が明確な再生記録あり', '명확한 재생 기록 있음'],
+  '尚无明确记录': ['No attributed history yet', '明確な記録なし', '아직 명확한 기록 없음'],
+  '旧版记录归属待确认': ['Uncertain legacy ownership', '旧記録の帰属が未確定', '이전 기록의 귀속 미확정'],
+  '有明确记录': ['With history', '記録あり', '기록 있음'],
+  '当前曲库 {0} 首，有明确播放记录 {1} 首': [
+    '{1} of {0} current library tracks have attributed playback history',
+    '現在のライブラリ {0} 曲中、帰属が明確な再生記録は {1} 曲',
+    '현재 라이브러리 {0}곡 중 명확한 재생 기록이 있는 곡은 {1}곡'
+  ],
+  '曲库为空，添加歌曲后刷新统计即可查看播放覆盖。': [
+    'The library is empty. Add tracks and refresh statistics to see listening coverage.',
+    'ライブラリは空です。曲を追加して統計を更新すると、再生記録の割合を確認できます。',
+    '라이브러리가 비어 있습니다. 곡을 추가하고 통계를 새로고침하면 재생 기록 비율을 볼 수 있습니다.'
+  ],
+  '按当前曲库的歌曲身份去重，仅统计本机有明确归属的记录；尚无明确记录不代表从未听过。移出曲库的历史不计入。': [
+    'Counts distinct track identities in the current library using attributed history saved on this device. No attributed history does not mean never heard. History for removed tracks is excluded.',
+    '現在のライブラリの曲IDで重複を除き、この端末に保存された帰属が明確な記録だけを集計します。記録がない曲も、未聴とは限りません。ライブラリから削除した曲の履歴は含めません。',
+    '현재 라이브러리의 곡 ID로 중복을 제외하고 이 기기에 저장된 귀속이 명확한 기록만 집계합니다. 명확한 기록이 없다고 한 번도 듣지 않은 것은 아닙니다. 라이브러리에서 제거한 곡의 기록은 제외합니다.'
+  ],
+  '另有 {0} 项旧版记录无法明确归属；候选歌曲单列，不推断是否听过。': [
+    '{0} legacy records have uncertain ownership. Candidate tracks are shown separately without assuming whether they were heard.',
+    'ほかに帰属が不明な旧記録が {0} 件あります。候補の曲は別に表示し、聴いたことがあるかは推定しません。',
+    '귀속이 불명확한 이전 기록이 {0}개 있습니다. 후보 곡은 별도로 표시하며 들었는지 추정하지 않습니다.'
+  ],
   '试听原设置 A': ['Preview original A', '元の設定 A を試聴', '원래 설정 A 미리 듣기'],
   '试听当前调节 B': ['Preview changes B', '調整後 B を試聴', '조정 설정 B 미리 듣기'],
   '滚轮或横向滑动查看全部 24 个时段': [

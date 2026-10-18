@@ -7,7 +7,7 @@ import 'package:dan_player/search/audio_search_query.dart';
 import 'package:dan_player/search/audio_search_snapshot.dart';
 import 'package:dan_player/library/personal_library.dart';
 import 'package:dan_player/statistics/playback_statistics.dart';
-import 'package:pinyin/pinyin.dart';
+import 'package:dan_player/search/search_text_matcher.dart';
 
 /// A revision-aware search index for raw text, full pinyin and initials.
 class AudioSearchIndex {
@@ -89,12 +89,12 @@ class AudioSearchIndex {
     _builtRevision = revision;
     // Entries retain the shared keys they need. The interning map exists only
     // to avoid repeating pinyin work while a snapshot is being assembled.
-    _SearchKeys.clearCache();
+    SearchTextKeys.clearCache();
   }
 
-  int get debugCachedSearchKeyCount => _SearchKeys.cachedCount;
+  int get debugCachedSearchKeyCount => SearchTextKeys.cachedCount;
 
-  int get debugSearchKeyCacheLimit => _SearchKeys.cacheLimit;
+  int get debugSearchKeyCacheLimit => SearchTextKeys.cacheLimit;
 
   void _buildSync() {
     final library = AudioLibrary.instance;
@@ -257,6 +257,9 @@ class AudioSearchIndex {
       void Function() checkCurrent,
       AudioSearchSnapshot snapshot) async {
     if (query.text.isEmpty || limit <= 0 || entries.isEmpty) return [];
+    final plain = query.hasStructuredSyntax
+        ? null
+        : PlainSearchQuery.normalized(query.text);
     final best = _SearchCandidates<T>(min(limit, entries.length));
     // Even a warm index must return to the event loop before scoring starts.
     await Future<void>.delayed(Duration.zero);
@@ -265,7 +268,7 @@ class AudioSearchIndex {
       checkCurrent();
       final end = min(start + batchSize, entries.length);
       for (var i = start; i < end; i++) {
-        final score = entries[i].scoreQuery(query, snapshot);
+        final score = entries[i].scoreQuery(query, snapshot, plain);
         if (score > 0) best.add(score, entries[i], i);
       }
       if (end < entries.length) await Future<void>.delayed(Duration.zero);
@@ -281,16 +284,108 @@ class AudioSearchIndex {
   ) {
     final parsed = AudioSearchQuery.parse(query);
     if (parsed.text.isEmpty || limit <= 0) return [];
+    final plain = parsed.hasStructuredSyntax
+        ? null
+        : PlainSearchQuery.normalized(parsed.text);
     final scored = _SearchCandidates<T>(min(limit, entries.length));
     final snapshot = AudioSearchSnapshot.capture(parsed,
         audios: entries.whereType<_AudioEntry>().map((entry) => entry.audio));
 
     for (var i = 0; i < entries.length; i++) {
       final entry = entries[i];
-      final score = entry.scoreQuery(parsed, snapshot);
+      final score = entry.scoreQuery(parsed, snapshot, plain);
       if (score > 0) scored.add(score, entry, i);
     }
     return scored.sorted();
+  }
+}
+
+/// A queue-owned text snapshot. Rebuild on queue or searchable metadata changes;
+/// each lookup normalizes its query once and preserves occurrence positions.
+class QueueSearchIndex {
+  QueueSearchIndex(Iterable<Audio> audios) {
+    final shared = HashMap<Audio, List<SearchTextKeys>>.identity();
+    _entries = [
+      for (final audio in audios) _keysFor(audio, shared),
+    ];
+    SearchTextKeys.clearCache();
+  }
+
+  QueueSearchIndex._(this._entries);
+
+  static List<SearchTextKeys> _keysFor(
+          Audio audio, Map<Audio, List<SearchTextKeys>> shared) =>
+      shared.putIfAbsent(
+          audio,
+          () => [
+                SearchTextKeys.of(audio.displayTitle),
+                if (audio.title != audio.displayTitle)
+                  SearchTextKeys.of(audio.title),
+                SearchTextKeys.of(audio.artist),
+                SearchTextKeys.of(audio.album),
+              ]);
+
+  /// The owner checks its queue/metadata generation through shouldCancel. No
+  /// obsolete partial snapshot is published, and expensive pinyin work yields
+  /// before the first batch and between every 128 occurrences.
+  static Future<QueueSearchIndex?> build(Iterable<Audio> audios,
+      {bool Function()? shouldCancel}) async {
+    await Future<void>.delayed(Duration.zero);
+    if (shouldCancel?.call() ?? false) return null;
+    final snapshot = List<Audio>.of(audios);
+    final shared = HashMap<Audio, List<SearchTextKeys>>.identity();
+    final entries = <List<SearchTextKeys>>[];
+    try {
+      for (var start = 0; start < snapshot.length; start += 128) {
+        if (shouldCancel?.call() ?? false) return null;
+        final end = min(start + 128, snapshot.length);
+        for (var i = start; i < end; i++) {
+          entries.add(_keysFor(snapshot[i], shared));
+        }
+        if (end < snapshot.length) await Future<void>.delayed(Duration.zero);
+      }
+      return (shouldCancel?.call() ?? false)
+          ? null
+          : QueueSearchIndex._(entries);
+    } finally {
+      SearchTextKeys.clearCache();
+    }
+  }
+
+  late final List<List<SearchTextKeys>> _entries;
+
+  bool _matches(int index, PlainSearchQuery query) =>
+      query.text.isEmpty ||
+      _entries[index]
+          .any((keys) => keys.score(query.text, query.compact) > 0) ||
+      query.scoreWords(_entries[index]) > 0;
+
+  List<int> matchingIndices(String query) {
+    final prepared = PlainSearchQuery(query);
+    if (prepared.text.isEmpty) {
+      return List<int>.generate(_entries.length, (index) => index);
+    }
+    return [
+      for (var index = 0; index < _entries.length; index++)
+        if (_matches(index, prepared)) index,
+    ];
+  }
+
+  Future<List<int>?> matchingIndicesAsync(String query,
+      {bool Function()? shouldCancel}) async {
+    await Future<void>.delayed(Duration.zero);
+    if (shouldCancel?.call() ?? false) return null;
+    final prepared = PlainSearchQuery(query);
+    final matches = <int>[];
+    for (var start = 0; start < _entries.length; start += 128) {
+      if (shouldCancel?.call() ?? false) return null;
+      final end = min(start + 128, _entries.length);
+      for (var index = start; index < end; index++) {
+        if (_matches(index, prepared)) matches.add(index);
+      }
+      if (end < _entries.length) await Future<void>.delayed(Duration.zero);
+    }
+    return (shouldCancel?.call() ?? false) ? null : matches;
   }
 }
 
@@ -368,11 +463,14 @@ class _SearchCandidates<T extends _Scorable> {
 abstract class _Scorable {
   int score(String rawQuery, String compactQuery);
 
+  int scorePlain(PlainSearchQuery query);
+
   int? scoreTerm(AudioSearchTerm term, AudioSearchSnapshot snapshot);
 
-  int scoreQuery(AudioSearchQuery query, AudioSearchSnapshot snapshot) {
+  int scoreQuery(AudioSearchQuery query, AudioSearchSnapshot snapshot,
+      PlainSearchQuery? plain) {
     if (!query.hasStructuredSyntax) {
-      return score(query.text, query.compact);
+      return scorePlain(plain!);
     }
     return query.expression!.evaluate((term) => scoreTerm(term, snapshot)) ?? 0;
   }
@@ -383,38 +481,41 @@ abstract class _Scorable {
 class _AudioEntry extends _Scorable {
   _AudioEntry(this.audio)
       : sortText = audio.displayTitle,
-        _display = _SearchKeys.of(audio.displayTitle),
+        _display = SearchTextKeys.of(audio.displayTitle),
         _tagTitle =
             audio.title.toLowerCase() == audio.displayTitle.toLowerCase()
                 ? null
-                : _SearchKeys.of(audio.title),
-        _artist = _SearchKeys.of(audio.artist),
-        _album = _SearchKeys.of(audio.album),
+                : SearchTextKeys.of(audio.title),
+        _artist = SearchTextKeys.of(audio.artist),
+        _album = SearchTextKeys.of(audio.album),
         _composer = _knownKeys(audio.composer),
         _albumArtist = _knownKeys(audio.albumArtist),
         _language = _knownKeys(audio.language),
         _titleExists = _knownText(audio.title),
         _artistExists = _knownText(audio.artist),
         _albumExists = _knownText(audio.album),
-        _filename = _SearchKeys.of(
+        _filename = SearchTextKeys.of(
             audio.localFilePath.replaceAll('\\', '/').split('/').last),
         _pendingMetadata = audio.metadataReadPending,
         _classificationRead = audio.classificationTagsRead,
-        _path = normalizeSearchText(audio.localFilePath).replaceAll('\\', '/');
+        _path = normalizeSearchText(audio.localFilePath).replaceAll('\\', '/') {
+    _plainKeys = [_display, if (_tagTitle != null) _tagTitle!, _artist, _album];
+  }
 
   final Audio audio;
-  final _SearchKeys _display;
-  final _SearchKeys? _tagTitle;
-  final _SearchKeys _artist;
-  final _SearchKeys _album;
+  final SearchTextKeys _display;
+  final SearchTextKeys? _tagTitle;
+  final SearchTextKeys _artist;
+  final SearchTextKeys _album;
   final String _path;
-  final _SearchKeys? _composer, _albumArtist, _language;
-  final _SearchKeys _filename;
+  final SearchTextKeys? _composer, _albumArtist, _language;
+  final SearchTextKeys _filename;
   final bool _titleExists, _artistExists, _albumExists;
   final bool _pendingMetadata, _classificationRead;
+  late final List<SearchTextKeys> _plainKeys;
   static bool _knownText(String? value) => normalizedMusicTag(value) != null;
-  static _SearchKeys? _knownKeys(String? value) =>
-      _knownText(value) ? _SearchKeys.of(value!) : null;
+  static SearchTextKeys? _knownKeys(String? value) =>
+      _knownText(value) ? SearchTextKeys.of(value!) : null;
 
   @override
   int? scoreTerm(AudioSearchTerm term, AudioSearchSnapshot snapshot) {
@@ -574,6 +675,12 @@ class _AudioEntry extends _Scorable {
   }
 
   @override
+  int scorePlain(PlainSearchQuery query) {
+    final exact = score(query.text, query.compact);
+    return exact > 0 ? exact : query.scoreWords(_plainKeys);
+  }
+
+  @override
   int score(String rawQuery, String compactQuery) {
     final titleScore = max(
       _display.score(rawQuery, compactQuery),
@@ -592,11 +699,11 @@ class _AudioEntry extends _Scorable {
 }
 
 class _NameEntry<T> extends _Scorable {
-  _NameEntry(this.value, this.name) : _keys = _SearchKeys.of(name);
+  _NameEntry(this.value, this.name) : _keys = SearchTextKeys.of(name);
 
   final T value;
   final String name;
-  final _SearchKeys _keys;
+  final SearchTextKeys _keys;
 
   @override
   int? scoreTerm(AudioSearchTerm term, AudioSearchSnapshot snapshot) =>
@@ -610,144 +717,11 @@ class _NameEntry<T> extends _Scorable {
       _keys.score(rawQuery, compactQuery);
 
   @override
+  int scorePlain(PlainSearchQuery query) {
+    final exact = score(query.text, query.compact);
+    return exact > 0 ? exact : query.scoreWords([_keys]);
+  }
+
+  @override
   String get sortText => name;
-}
-
-class _SearchKeys {
-  const _SearchKeys._(
-    this.raw,
-    this.rawCompact,
-    this.fullPinyin,
-    this.initials,
-  );
-
-  final String raw;
-  final String rawCompact;
-  final String fullPinyin;
-  final String initials;
-
-  static const int cacheLimit = 8192;
-  static final HashMap<String, _SearchKeyCacheEntry> _cache = HashMap();
-  static final LinkedList<_SearchKeyCacheEntry> _recency = LinkedList();
-  static final RegExp _nonAlphanumeric = RegExp(r"[^a-z0-9]");
-
-  factory _SearchKeys.of(String text) {
-    final cached = _cache[text];
-    if (cached != null) {
-      cached.unlink();
-      _recency.add(cached);
-      return cached.value;
-    }
-
-    final created = _SearchKeys._fromText(text);
-    final entry = _SearchKeyCacheEntry(text, created);
-    _cache[text] = entry;
-    _recency.add(entry);
-    if (_cache.length > cacheLimit) {
-      // LinkedHashMap.keys.first starts its iterator at the backing array's
-      // beginning. Repeated LRU remove/reinsert operations leave tombstones,
-      // turning each eviction into another scan over the deleted prefix.
-      // Keep the eviction head explicitly so churn beyond 8192 unique keys
-      // remains constant work per lookup without changing the LRU policy.
-      final oldest = _recency.first;
-      oldest.unlink();
-      _cache.remove(oldest.key);
-    }
-    return created;
-  }
-
-  factory _SearchKeys._fromText(String text) {
-    final raw = normalizeSearchText(text);
-    final compact = raw.replaceAll(RegExp(r"\s+"), "");
-    return _SearchKeys._(
-      raw,
-      compact,
-      _toFullPinyin(raw, compact),
-      _toInitials(raw),
-    );
-  }
-
-  static int get cachedCount => _cache.length;
-
-  static void clearCache() {
-    _cache.clear();
-    _recency.clear();
-  }
-
-  static String _toFullPinyin(String text, String compact) {
-    if (text.isEmpty || !ChineseHelper.containsChinese(text)) return "";
-    final value = PinyinHelper.getPinyin(
-      text,
-      separator: "",
-      format: PinyinFormat.WITHOUT_TONE,
-    ).toLowerCase().replaceAll(_nonAlphanumeric, "");
-    return value == compact.replaceAll(_nonAlphanumeric, "") ? "" : value;
-  }
-
-  static bool _isHan(int rune) =>
-      (rune >= 0x4E00 && rune <= 0x9FFF) || (rune >= 0x3400 && rune <= 0x4DBF);
-
-  static String _toInitials(String text) {
-    final result = StringBuffer();
-    for (final word in text.split(RegExp(r"\s+"))) {
-      if (word.isEmpty) continue;
-      var containsHan = false;
-      for (final rune in word.runes) {
-        if (!_isHan(rune)) continue;
-        containsHan = true;
-        final pinyin = PinyinHelper.getPinyin(
-          String.fromCharCode(rune),
-          separator: "",
-          format: PinyinFormat.WITHOUT_TONE,
-        );
-        if (pinyin.isNotEmpty) result.write(pinyin[0].toLowerCase());
-      }
-      if (!containsHan) result.write(word[0].toLowerCase());
-    }
-    return result.toString().replaceAll(_nonAlphanumeric, "");
-  }
-
-  int score(String rawQuery, String compactQuery) {
-    var value = 0;
-    if (raw == rawQuery) {
-      value += 100;
-    } else if (raw.startsWith(rawQuery)) {
-      value += 60;
-    } else if (raw.contains(rawQuery)) {
-      value += 30;
-    } else if (rawCompact.contains(compactQuery)) {
-      value += 25;
-    }
-
-    if (initials == compactQuery) {
-      value += 70;
-    } else if (initials.startsWith(compactQuery)) {
-      value += 50;
-    } else if (initials.contains(compactQuery)) {
-      value += 20;
-    }
-
-    if (fullPinyin == compactQuery) {
-      value += 80;
-    } else if (fullPinyin.startsWith(compactQuery)) {
-      value += 45;
-    } else if (fullPinyin.contains(compactQuery)) {
-      value += 18;
-    }
-    return value;
-  }
-
-  int scoreTerm(AudioSearchTerm term) => term.literal
-      ? (raw == term.value
-          ? 100
-          : raw.contains(term.value)
-              ? 30
-              : 0)
-      : score(term.value, term.compact);
-}
-
-final class _SearchKeyCacheEntry extends LinkedListEntry<_SearchKeyCacheEntry> {
-  _SearchKeyCacheEntry(this.key, this.value);
-  final String key;
-  final _SearchKeys value;
 }

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as path;
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/directory_storage_card.dart';
 import 'package:dan_player/component/personal_annotations_card.dart';
+import 'package:dan_player/component/library_listening_coverage_card.dart';
 import 'package:dan_player/component/statistics_distribution_view.dart';
 import 'package:dan_player/component/statistics_card_header.dart';
 import 'package:dan_player/component/statistics_resize.dart';
@@ -412,6 +413,21 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           ),
                       ],
                     )),
+                  ),
+                ),
+                SliverPadding(
+                  key: const ValueKey('statistics-listening-coverage-section'),
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                  sliver: SliverToBoxAdapter(
+                    child: StatisticsResize(
+                      child: AppEntrance(
+                        identity: 'statistics-listening-coverage',
+                        order: 3,
+                        child: LibraryListeningCoverageCard(
+                          snapshot: _displaySnapshot?.listeningCoverage,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 SliverPadding(

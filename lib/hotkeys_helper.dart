@@ -5,7 +5,6 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_window_mode_host.dart';
 import 'package:dan_player/player_shortcut_preferences.dart';
 import 'package:dan_player/play_service/play_service.dart';
-import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/window_mode_controller.dart';
 import 'package:flutter/material.dart';
@@ -165,14 +164,7 @@ class HotkeysHelper {
         if (playback.nowPlaying == null) return;
         switch (command) {
           case PlayerCommand.togglePlayback:
-            if (playback.isBuffering.value) return;
-            if (playback.playerState == PlayerState.playing) {
-              playback.pause();
-            } else if (playback.playerState == PlayerState.completed) {
-              playback.playAgain();
-            } else {
-              playback.start();
-            }
+            playback.togglePlayback();
           case PlayerCommand.previous:
             playback.lastAudio();
           case PlayerCommand.next:

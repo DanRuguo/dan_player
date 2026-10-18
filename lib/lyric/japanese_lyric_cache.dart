@@ -39,7 +39,10 @@ class JapaneseLyricReadingCache {
   final String _engine;
   final String? _legacyEngine;
   final int maximumEntries, maximumTotalBytes, maximumEntryBytes;
-  _ReadingWrite? _pending;
+  final _pending = <String, _ReadingWrite>{};
+  final _latestWrites = <String, Object>{};
+  final _acceptedWrites = <Future<void>>{};
+  static const _maximumPendingWrites = 8;
   Future<void>? _draining;
   String? _inventoryDirectory;
   DateTime? _inventoryReadAt;
@@ -156,8 +159,9 @@ class JapaneseLyricReadingCache {
     }
   }
 
-  /// At most one writer and one latest pending result. A stale owner never
-  /// replaces a newer entry, including after an asynchronous temporary write.
+  /// One writer, with independent fingerprints retained in arrival order.
+  /// Only another accepted result for the same source can replace a snapshot;
+  /// foreground work must not silently discard an awaited background write.
   Future<void> write(
       String fingerprint, Map<int, JapaneseCachedReading> readings,
       {required bool Function() stillCurrent}) {
@@ -166,6 +170,7 @@ class JapaneseLyricReadingCache {
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(fingerprint)) {
       return Future.value();
     }
+    final identity = Object();
     final next = _ReadingWrite(
         fingerprint,
         Map.unmodifiable({
@@ -173,16 +178,47 @@ class JapaneseLyricReadingCache {
             entry.key: JapaneseCachedReading(
                 entry.value.text, List.unmodifiable(entry.value.spans)),
         }),
-        stillCurrent);
-    _pending?.done.complete();
-    _pending = next;
+        () =>
+            identical(_latestWrites[fingerprint], identity) && stillCurrent());
+    // This also retires an older snapshot waiting for capacity. Checking only
+    // the ready queue lets that snapshot overwrite a later accepted result.
+    _latestWrites[fingerprint] = identity;
+    late final Future<void> accepted;
+    accepted = _enqueue(next).whenComplete(() {
+      _acceptedWrites.remove(accepted);
+      if (identical(_latestWrites[fingerprint], identity)) {
+        _latestWrites.remove(fingerprint);
+      }
+    });
+    _acceptedWrites.add(accepted);
+    return accepted;
+  }
+
+  Future<void> _enqueue(_ReadingWrite next) {
+    if (!next.current()) return Future.value();
+    _pending.removeWhere((_, previous) {
+      if (previous.current()) return false;
+      previous.done.complete();
+      return true;
+    });
+    final previous = _pending[next.fingerprint];
+    if (previous == null && _pending.length >= _maximumPendingWrites) {
+      // Apply backpressure instead of dropping a different song. Callers that
+      // await writes (the batch projector) do not advance until their snapshot
+      // has actually reached the writer. Recheck owners after this wait.
+      return _draining!.then((_) => _enqueue(next));
+    }
+    previous?.done.complete();
+    _pending[next.fingerprint] = next;
     _draining ??= _drain();
     return next.done.future;
   }
 
   Future<void> flush() async {
-    while (_draining != null) {
-      await _draining;
+    // Capacity waiters can enqueue after a drain completes. Wait for accepted
+    // operations rather than relying on the order of those continuations.
+    while (_acceptedWrites.isNotEmpty) {
+      await Future.wait(_acceptedWrites.toList());
     }
   }
 
@@ -190,9 +226,8 @@ class JapaneseLyricReadingCache {
     // Start after write() has published _draining, including synchronous misses.
     await Future<void>.value();
     try {
-      while (_pending != null) {
-        final next = _pending!;
-        _pending = null;
+      while (_pending.isNotEmpty) {
+        final next = _pending.remove(_pending.keys.first)!;
         try {
           await _write(next);
         } catch (_) {

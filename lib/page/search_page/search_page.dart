@@ -418,7 +418,9 @@ class LocalSearchHelpDialog extends StatelessWidget {
           const SizedBox(height: 12),
           Text(ui('入库日沿用个人乐库记录，旧曲目可能保留创建日期回填；文件大小是扫描快照，搜索不会重新读取音乐文件。')),
           const SizedBox(height: 12),
-          Text(ui('不加筛选语法时保留原有搜索；西文重音与全角字母自动兼容。')),
+          Text(ui('普通搜索支持拼音、首字母、西文重音与全角字母；拼写接近的结果排在直接匹配之后。')),
+          const SizedBox(height: 12),
+          Text(ui('4–64 位拉丁字母或数字词可容忍一次漏字、多字、错字或相邻字符颠倒；引号与筛选条件保持原有匹配规则。')),
         ],
       );
 }

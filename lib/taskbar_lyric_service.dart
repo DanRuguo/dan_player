@@ -84,6 +84,8 @@ class _PlayerTaskbarLyricSource extends TaskbarLyricSource {
   @override
   bool get playing => _playback.playerState == PlayerState.playing;
   @override
+  bool get playbackIntended => _playback.playerState.keepsPlaybackIntent;
+  @override
   bool get paused =>
       _playback.playerState == PlayerState.paused ||
       _playback.playerState == PlayerState.pausedDevice;
@@ -111,12 +113,13 @@ class _PlayerTaskbarLyricSource extends TaskbarLyricSource {
       !_playback.isChangingOutput.value &&
       switch (_playback.playerState) {
         PlayerState.playing ||
+        PlayerState.stalled ||
         PlayerState.paused ||
         PlayerState.pausedDevice ||
         PlayerState.stopped ||
         PlayerState.completed =>
           true,
-        PlayerState.stalled || PlayerState.unknown => false,
+        PlayerState.unknown => false,
       };
   @override
   void dispose() {
@@ -366,6 +369,7 @@ class TaskbarLyricService with WidgetsBindingObserver {
       'animate': style.animate,
       'animateLayout': style.layoutAnimate,
       'playing': false,
+      'playbackIntended': false,
       'paused': false,
       'nextText': '',
       'words': <Object>[],

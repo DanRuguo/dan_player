@@ -1,4 +1,4 @@
-/// Parsed local-library filters. Plain words retain legacy whole-query scoring.
+/// Parsed local-library filters with exact structured-expression semantics.
 class AudioSearchQuery {
   AudioSearchQuery._(
       this.text, this.terms, this.hasStructuredSyntax, this.expression)
@@ -535,11 +535,18 @@ final _latinSearchFolds = <String, String>{
 
 String normalizeSearchText(String text) {
   final result = StringBuffer();
+  var latinBase = false;
   for (var rune in text.runes) {
     if (rune >= 0xff01 && rune <= 0xff5e) rune -= 0xfee0;
     if (rune == 0x3000) rune = 0x20;
-    if (rune >= 0x0300 && rune <= 0x036f) continue;
+    if (rune >= 0x0300 && rune <= 0x036f) {
+      if (!latinBase) result.writeCharCode(rune);
+      continue;
+    }
     final character = String.fromCharCode(rune).toLowerCase();
+    latinBase = (rune >= 0x41 && rune <= 0x5a) ||
+        (rune >= 0x61 && rune <= 0x7a) ||
+        _latinSearchFolds.containsKey(character);
     result.write(_latinSearchFolds[character] ?? character);
   }
   return result.toString();

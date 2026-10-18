@@ -462,7 +462,7 @@ class _NowPlayingMainControls extends StatelessWidget {
           initialData: playbackService.playerState,
           builder: (context, snapshot) {
             final playerState = snapshot.data!;
-            final playing = playerState == PlayerState.playing;
+            final playing = playerState.keepsPlaybackIntent;
             return DetailTransportButton(
               primary: true,
               buffering: buffering,
@@ -471,11 +471,7 @@ class _NowPlayingMainControls extends StatelessWidget {
                   : playing
                       ? ui("暂停")
                       : ui("播放"),
-              onPressed: playing
-                  ? playbackService.pause
-                  : playerState == PlayerState.completed
-                      ? playbackService.playAgain
-                      : playbackService.start,
+              onPressed: playbackService.togglePlayback,
               icon: playing ? Symbols.pause : Symbols.play_arrow,
             );
           },

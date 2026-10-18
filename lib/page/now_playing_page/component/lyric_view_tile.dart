@@ -1811,6 +1811,11 @@ class LyricWordHighlightPainter extends CustomPainter
   }
 
   void _paintWordInk(Canvas canvas, int index, int boxIndex) {
+    // Alignment replays the paragraph once per wrapped row. The word/follow
+    // clip has already intersected that row (and any ruby band) here. Avoid
+    // shaping a new gradient paragraph for ink that cannot reach the canvas.
+    // These bounds are conservative, including transformed antialias padding.
+    if (canvas.getLocalClipBounds().isEmpty) return;
     final word = _layout.words[index];
     if (activation <= 0 || reducedMotion) {
       _layout

@@ -17,6 +17,7 @@ InitArgsMessage _$InitArgsMessageFromJson(Map<String, dynamic> json) =>
       (json['surfaceContainer'] as num).toInt(),
       (json['onSurface'] as num).toInt(),
       vertical: json['vertical'] as bool? ?? false,
+      playbackIntended: json['playbackIntended'] as bool?,
       playbackRate: safeDesktopPlaybackRate(json['playbackRate']),
       language: json['language'] is String ? json['language'] as String : 'zh',
       fontPolicy: _fontPolicyFromJson(json['fontPolicy']),
@@ -26,6 +27,8 @@ InitArgsMessage _$InitArgsMessageFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$InitArgsMessageToJson(InitArgsMessage instance) =>
     <String, dynamic>{
       'isPlaying': instance.isPlaying,
+      if (instance.playbackIntended != null)
+        'playbackIntended': instance.playbackIntended,
       'title': instance.title,
       'artist': instance.artist,
       'album': instance.album,
@@ -43,12 +46,14 @@ Map<String, dynamic> _$InitArgsMessageToJson(InitArgsMessage instance) =>
 ControlEventMessage _$ControlEventMessageFromJson(Map<String, dynamic> json) =>
     ControlEventMessage(
       $enumDecode(_$ControlEventEnumMap, json['event']),
+      togglePlayback: json['togglePlayback'] as bool? ?? false,
     );
 
 Map<String, dynamic> _$ControlEventMessageToJson(
         ControlEventMessage instance) =>
     <String, dynamic>{
       'event': _$ControlEventEnumMap[instance.event]!,
+      'togglePlayback': instance.togglePlayback,
     };
 
 const _$ControlEventEnumMap = {
@@ -81,12 +86,15 @@ PlayerStateChangedMessage _$PlayerStateChangedMessageFromJson(
         Map<String, dynamic> json) =>
     PlayerStateChangedMessage(
       json['playing'] as bool,
+      playbackIntended: json['playbackIntended'] as bool?,
     );
 
 Map<String, dynamic> _$PlayerStateChangedMessageToJson(
         PlayerStateChangedMessage instance) =>
     <String, dynamic>{
       'playing': instance.playing,
+      if (instance.playbackIntended != null)
+        'playbackIntended': instance.playbackIntended,
     };
 
 NowPlayingChangedMessage _$NowPlayingChangedMessageFromJson(

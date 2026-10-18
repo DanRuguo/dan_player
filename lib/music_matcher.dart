@@ -1879,58 +1879,75 @@ Future<Lyric?> getMostMatchedLyric(
           isAutomaticLyricCandidateCompatible(audio, candidate))
       .toList()
     ..sort(compareLyricCandidates);
-  for (var start = 0; start < candidates.length;) {
-    var end = start + 1;
-    while (end < candidates.length &&
-        candidates[end].matchPercent == candidates[start].matchPercent) {
-      end++;
-    }
-    Lyric? fallback;
-    var instrumental = false;
-    // Preserve manual-list order, retry failures, and prefer timed words only
-    // within this displayed percentage. Never let a lower match displace valid lyrics.
-    for (final candidate in candidates.sublist(start, end)) {
-      if (!current()) return null;
-      var loading = true;
-      final requestCancellation = LyricSearchCancellation();
-      final unlink = cancellation?.onCancel(requestCancellation.cancel);
-      var expired = false;
-      final deadline = Timer(_providerTimeout, () {
-        expired = true;
-        requestCancellation.cancel();
-      });
-      try {
-        final operation = (candidateLyricLoader?.call(candidate) ??
-                getLyricForCandidate(candidate,
-                    stillCurrent: () => loading && current(),
-                    cancellation: requestCancellation))
-            .timeout(_providerTimeout);
-        final lyric = await requestCancellation.race(operation);
-        if (!current()) return null;
-        if (lyric == null || !hasLyricContent(lyric)) continue;
-        if (hasWordTiming(lyric)) return lyric;
-        fallback ??= lyric;
-      } on InstrumentalLyric {
-        instrumental = true;
-      } catch (err, trace) {
-        if (!current()) return null;
-        LOGGER.w('[lyric/${candidate.source.name}] 候选歌词读取失败',
-            stackTrace: expired ? null : trace);
-      } finally {
-        // Timeout does not cancel a Future. Retire the pipeline so its late
-        // response cannot start another provider step after this candidate ends.
-        loading = false;
-        deadline.cancel();
-        unlink?.call();
-        requestCancellation.cancel();
+  // Candidate search has its own provider budgets. Once those finish, the
+  // complete automatic loading phase gets one deadline, not twelve seconds
+  // multiplied by every matching row. Explicit row selection does not use it.
+  final loadingBudget = Stopwatch()..start();
+  var expired = false;
+  LyricSearchCancellation? activeCandidate;
+  final deadline = Timer(_providerTimeout, () {
+    expired = true;
+    activeCandidate?.cancel();
+  });
+  bool outOfTime() => expired || loadingBudget.elapsed >= _providerTimeout;
+  try {
+    for (var start = 0; start < candidates.length;) {
+      var end = start + 1;
+      while (end < candidates.length &&
+          candidates[end].matchPercent == candidates[start].matchPercent) {
+        end++;
       }
+      Lyric? fallback;
+      var instrumental = false;
+      // Preserve manual-list order, retry failures, and prefer timed words only
+      // within this displayed percentage. Never let a lower match displace valid lyrics.
+      for (final candidate in candidates.sublist(start, end)) {
+        if (!current()) return null;
+        if (outOfTime()) break;
+        final remaining = _providerTimeout - loadingBudget.elapsed;
+        if (remaining <= Duration.zero) break;
+        var loading = true;
+        final requestCancellation = LyricSearchCancellation();
+        activeCandidate = requestCancellation;
+        final unlink = cancellation?.onCancel(requestCancellation.cancel);
+        try {
+          final operation = (candidateLyricLoader?.call(candidate) ??
+                  getLyricForCandidate(candidate,
+                      stillCurrent: () => loading && current(),
+                      cancellation: requestCancellation))
+              .timeout(remaining);
+          final lyric = await requestCancellation.race(operation);
+          if (!current()) return null;
+          if (outOfTime()) break;
+          if (lyric == null || !hasLyricContent(lyric)) continue;
+          if (hasWordTiming(lyric)) return lyric;
+          fallback ??= lyric;
+        } on InstrumentalLyric {
+          instrumental = true;
+        } catch (err, trace) {
+          if (!current()) return null;
+          LOGGER.w('[lyric/${candidate.source.name}] 候选歌词读取失败',
+              stackTrace: expired ? null : trace);
+        } finally {
+          // Timeout does not cancel a Future. Retire the pipeline so its late
+          // response cannot start another provider step after this candidate ends.
+          loading = false;
+          activeCandidate = null;
+          unlink?.call();
+          requestCancellation.cancel();
+        }
+      }
+      // A failed/instrumental last candidate crosses the same async boundary as
+      // a successful load. It cannot release a fallback owned by an old choice.
+      if (!current()) return null;
+      if (fallback != null) return fallback;
+      if (instrumental && current()) throw const InstrumentalLyric();
+      if (outOfTime()) break;
+      start = end;
     }
-    // A failed/instrumental last candidate crosses the same async boundary as
-    // a successful load. It cannot release a fallback owned by an old choice.
-    if (!current()) return null;
-    if (fallback != null) return fallback;
-    if (instrumental && current()) throw const InstrumentalLyric();
-    start = end;
+  } finally {
+    deadline.cancel();
+    activeCandidate?.cancel();
   }
   if (!current()) return null;
   // Metadata-only endpoints cannot prove a >=60% match. They remain manual

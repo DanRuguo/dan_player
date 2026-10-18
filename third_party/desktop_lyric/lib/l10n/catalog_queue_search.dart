@@ -1,4 +1,14 @@
 const Map<String, List<String>> catalogQueueSearch = {
+  '正在搜索队列…': [
+    'Searching the queue…',
+    'キューを検索中…',
+    '대기열 검색 중…'
+  ],
+  '支持拼音、首字母、重音与全角匹配，以及英文拼写容错；多个词需同时匹配。': [
+    'Supports pinyin, initials, accents, fullwidth text and English spelling tolerance. All words must match.',
+    '拼音・頭文字・アクセント・全角文字と英単語のつづり違いに対応。すべての語に一致する曲を表示します。',
+    '병음, 이니셜, 악센트, 전각 문자 및 영어 오타를 지원합니다. 모든 단어가 일치해야 합니다.'
+  ],
   '搜索队列：歌曲、歌手或专辑': [
     'Search queue: title, artist or album',
     'キュー内の曲名・アーティスト・アルバムを検索',

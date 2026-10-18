@@ -51,6 +51,7 @@ abstract class TaskbarLyricSource extends ChangeNotifier {
   bool get hasTrack;
   double get position;
   bool get playing;
+  bool get playbackIntended => playing;
   bool get paused => !playing;
   double get playbackRate => 1;
   Object? get intent => null;
@@ -62,11 +63,11 @@ abstract class TaskbarLyricSource extends ChangeNotifier {
 
 String taskbarLyricText(LyricLine line) {
   final content = switch (line) {
-    UnsyncLyricLine() => line.content,
+    UnsyncLyricLine() => line.content.split('┃').first,
     SyncLyricLine() => line.content,
     _ => '',
   };
-  return content.split('┃').first.replaceAll(RegExp(r'\r\n?|\n'), ' ').trim();
+  return content.replaceAll(RegExp(r'\r\n?|\n'), ' ').trim();
 }
 
 /// Event-driven lyric publishing. No timer, network lookup or frame work.
@@ -238,6 +239,7 @@ class TaskbarLyricsPublisher {
       'animate': style.animate,
       'animateLayout': style.layoutAnimate,
       'playing': _source.playing,
+      'playbackIntended': _source.playbackIntended,
       'paused': _source.paused,
       'playbackRate': _source.playbackRate,
       'placement': style.placement,
