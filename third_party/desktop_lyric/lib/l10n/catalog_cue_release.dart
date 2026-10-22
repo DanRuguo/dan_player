@@ -21,6 +21,11 @@ const Map<String, List<String>> catalogCueRelease = {
     'CUE または音声を読めません。場所とアクセス権を確認してください。',
     'CUE 또는 오디오 파일을 읽을 수 없습니다. 위치와 접근 권한을 확인하세요.'
   ],
+  'CUE 文件已改变，请关闭后重新导入以更新预览。': [
+    'The CUE file changed. Close this dialog and import it again to refresh the preview.',
+    'CUE ファイルが変更されました。この画面を閉じて再読み込みし、プレビューを更新してください。',
+    'CUE 파일이 변경되었습니다. 이 창을 닫고 다시 가져와 미리보기를 갱신하세요.'
+  ],
   'CUE 文件超过 1 MiB，无法导入。': [
     'The CUE exceeds 1 MiB and cannot be imported.',
     'CUE が 1 MiB を超えているため読み込めません。',

@@ -9,7 +9,13 @@ import 'package:dan_player/taskbar_progress.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/foundation.dart';
 
-typedef _Stamp = ({int modified, String? nanos, int? size, bool pending});
+typedef _Stamp = ({
+  int modified,
+  String? nanos,
+  int? size,
+  bool pending,
+  String? cover
+});
 
 enum LibraryRefreshPhase {
   scanning,
@@ -225,7 +231,8 @@ class LibraryRefreshSnapshot {
               modified: audio.modified,
               nanos: audio.modifiedNanos,
               size: audio.fileSizeBytes,
-              pending: audio.metadataReadPending
+              pending: audio.metadataReadPending,
+              cover: audio.folderCoverStamp,
             ),
       });
 
@@ -248,6 +255,7 @@ class LibraryRefreshSnapshot {
           nanos: audio['modified_ns'] as String?,
           size: (audio['file_size'] as num?)?.toInt(),
           pending: audio['metadata_pending'] == true,
+          cover: audio['folder_cover_stamp'] as String?,
         );
       }
     }

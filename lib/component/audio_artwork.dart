@@ -1,5 +1,8 @@
 import 'package:dan_player/app_settings.dart';
+import 'dart:ui' as ui;
 import 'package:dan_player/component/artwork_handoff.dart';
+import 'package:dan_player/component/animated_artwork.dart';
+import 'package:dan_player/library/artwork_animation_provider.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:dan_player/library/audio_library.dart';
@@ -23,6 +26,7 @@ class AudioArtwork extends StatefulWidget {
     this.loadArtwork,
     this.retainWhileLoading = false,
     this.animateFirstFrame = false,
+    this.artworkDecorator,
   });
 
   final Audio audio;
@@ -42,6 +46,8 @@ class AudioArtwork extends StatefulWidget {
   /// Newly expanded content can reveal a late first decoded cover with the
   /// existing finite handoff, after its containing item's entrance finishes.
   final bool animateFirstFrame;
+  final Widget Function(BuildContext, ImageProvider, ui.Image?, Widget)?
+      artworkDecorator;
 
   @override
   State<AudioArtwork> createState() => _AudioArtworkState();
@@ -139,17 +145,36 @@ class _AudioArtworkState extends State<AudioArtwork> {
         child: ArtworkHandoff(
           key: ValueKey(widget.retainWhileLoading ? null : widget.audio.path),
           artworkKey: _requestKey!,
-          loadArtwork: () => _future!,
+          loadArtwork: () async {
+            final provider = await _future!;
+            return provider != null && mayAnimateArtwork(provider)
+                ? FirstFrameArtworkProvider(provider)
+                : provider;
+          },
           placeholder: widget.placeholder,
           loading: widget.loading,
           animateFirstFrame: widget.animateFirstFrame,
-          imageBuilder: (provider) => Image(
-            image: provider,
-            fit: BoxFit.cover,
-            filterQuality: FilterQuality.high,
-            gaplessPlayback: true,
-            errorBuilder: (_, __, ___) => widget.placeholder,
-          ),
+          imageBuilder: (provider) {
+            final actual = provider is FirstFrameArtworkProvider
+                ? provider.source
+                : provider;
+            final Widget child = mayAnimateArtwork(actual) ||
+                    widget.artworkDecorator != null
+                ? AnimatedArtwork(
+                    image: actual,
+                    errorBuilder: (_, __, ___) => widget.placeholder,
+                    frameDecorator: widget.artworkDecorator == null
+                        ? null
+                        : (context, frame, child) => widget.artworkDecorator!(
+                            context, actual, frame, child))
+                : Image(
+                    image: actual,
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.high,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, __, ___) => widget.placeholder);
+            return child;
+          },
         ),
       );
 }
@@ -174,20 +199,34 @@ class ArtworkImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox.square(
         dimension: size,
-        child: Image(
-          image: ArtworkImageProvider(
-            image,
-            ArtworkSize.forDisplay(
-              logicalWidth: size,
-              logicalHeight: size,
-              devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
-            ),
-            revision: revision,
-          ),
-          fit: BoxFit.cover,
-          filterQuality: FilterQuality.high,
-          gaplessPlayback: true,
-          errorBuilder: errorBuilder,
-        ),
+        child: mayAnimateArtwork(image)
+            ? AnimatedArtwork(
+                image: AnimatedArtworkSource(ArtworkImageProvider(
+                    image is AnimatedArtworkSource
+                        ? (image as AnimatedArtworkSource).source
+                        : image,
+                    ArtworkSize.forDisplay(
+                        logicalWidth: size,
+                        logicalHeight: size,
+                        devicePixelRatio:
+                            MediaQuery.devicePixelRatioOf(context)),
+                    revision: revision)),
+                errorBuilder: errorBuilder,
+              )
+            : Image(
+                image: ArtworkImageProvider(
+                  image,
+                  ArtworkSize.forDisplay(
+                    logicalWidth: size,
+                    logicalHeight: size,
+                    devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+                  ),
+                  revision: revision,
+                ),
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
+                gaplessPlayback: true,
+                errorBuilder: errorBuilder,
+              ),
       );
 }

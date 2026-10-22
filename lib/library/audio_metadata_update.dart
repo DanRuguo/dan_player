@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/library/audio_library.dart';
@@ -17,6 +18,7 @@ import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/waveform_service.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
+import 'package:dan_player/src/rust/api/metadata_preflight.dart';
 import 'package:path/path.dart' as path_util;
 
 class AudioMetadataEdit {
@@ -41,7 +43,7 @@ class AudioMetadataEdit {
 
 class AudioMetadataEditException implements Exception {
   const AudioMetadataEditException(this.code, this.message,
-      {this.fileWasUpdated = false});
+      {this.fileWasUpdated = false, this.committedProof});
 
   factory AudioMetadataEditException.fromNative(Object error) {
     if (error is AudioMetadataEditException) return error;
@@ -69,12 +71,14 @@ class AudioMetadataEditException implements Exception {
   final String code;
   final String message;
   final bool fileWasUpdated;
+  final AudioMetadataCommitProof? committedProof;
 
   String get userMessage => switch (code) {
         'TAG_LIBRARY_SYNC_FAILED' =>
           '歌曲文件已保存，但曲库同步未完成。再次点击保存将先重试同步，不会重复写入相同修改。',
         'TAG_FILE_BUSY' => '文件正在被占用。请先切换当前歌曲并关闭其他占用程序后重试。',
         'TAG_SOURCE_READ_ONLY' => '文件为只读。播放器不会自动修改文件属性。',
+        'TAG_SOURCE_CHANGED' => '歌曲文件在编辑期间已改变，请关闭后重新打开编辑。',
         'TAG_ACCESS_DENIED' => '没有文件或所在文件夹的写入权限。播放器不会自动修改权限。',
         'TAG_NO_SPACE' => '磁盘空间不足，无法创建安全写入副本。',
         'TAG_FORMAT_UNSUPPORTED' => '当前实际音频容器暂不支持安全编辑标签；这不代表文件无法播放。原文件未被修改。',
@@ -91,6 +95,40 @@ class AudioMetadataEditException implements Exception {
   String toString() => message;
 }
 
+/// Evidence captured immediately after a native commit, before retryable app
+/// synchronization. A later draft must not silently adopt external edits as
+/// its baseline. The proof is in memory only; journal recovery never rewrites
+/// media and does not need it.
+class AudioMetadataCommitProof {
+  const AudioMetadataCommitProof(
+      {required this.path,
+      required this.fingerprint,
+      required this.title,
+      required this.artist,
+      required this.album,
+      this.sourceKey,
+      this.supported = true});
+  final String path, fingerprint, title, artist, album;
+  final String? sourceKey;
+  final bool supported;
+
+  static Future<AudioMetadataCommitProof> read(String path) async {
+    final value = jsonDecode(await preflightAudioMetadata(path: path)) as Map;
+    return AudioMetadataCommitProof(
+        path: path,
+        fingerprint: value['fingerprint'] as String,
+        sourceKey: value['sourceKey'] as String?,
+        title: value['title'] as String? ?? '',
+        artist: value['artist'] as String? ?? '',
+        album: value['album'] as String? ?? '',
+        supported: value['supported'] == true);
+  }
+
+  bool agreesWith(AudioMetadataEdit edit) =>
+      !supported ||
+      (title == edit.title && artist == edit.artist && album == edit.album);
+}
+
 /// Records a successful native commit separately from its retryable app sync.
 /// It never represents an uncommitted/native-failed edit.
 class AudioMetadataCommittedEdit {
@@ -101,6 +139,7 @@ class AudioMetadataCommittedEdit {
   final AudioMetadataEdit edit;
   bool customOrderNeedsSave = false;
   bool playlistsNeedSave = false;
+  AudioMetadataCommitProof? proof;
 }
 
 typedef AudioMetadataWriter = Future<String> Function(
@@ -118,11 +157,13 @@ class AudioMetadataEditCoordinator {
     Future<void> Function(AudioMetadataCommittedEdit)? recordCommit,
     Future<void> Function()? clearCommit,
     Audio? Function(String path)? currentAudio,
+    Future<AudioMetadataCommitProof> Function(String)? inspectCommit,
     WaveformService? waveforms,
   })  : _write = write,
         _synchronize = synchronize,
         _waveforms = waveforms ?? WaveformService.shared,
         _currentAudio = currentAudio,
+        _inspectCommit = inspectCommit,
         _recordCommit = recordCommit,
         _clearCommit = clearCommit;
 
@@ -130,6 +171,7 @@ class AudioMetadataEditCoordinator {
   final AudioMetadataSynchronizer _synchronize;
   final WaveformService _waveforms;
   final Audio? Function(String path)? _currentAudio;
+  final Future<AudioMetadataCommitProof> Function(String)? _inspectCommit;
   final Future<void> Function(AudioMetadataCommittedEdit)? _recordCommit;
   final Future<void> Function()? _clearCommit;
   final _pending = Expando<AudioMetadataCommittedEdit>();
@@ -233,6 +275,15 @@ class AudioMetadataEditCoordinator {
       }
       final commit = AudioMetadataCommittedEdit(oldPath, newPath, edit);
       _pending[audio] = commit;
+      try {
+        final proof = await _inspectCommit?.call(newPath);
+        if (proof != null && proof.path == newPath && proof.agreesWith(edit)) {
+          commit.proof = proof;
+        }
+      } catch (_) {
+        // A missing proof cannot undo a completed native write or block its
+        // journal/index repair. It only prevents a further unreviewed write.
+      }
       final newKey = _pathKey(newPath);
       lockPath(newKey);
       await _sync(audio, commit);
@@ -268,10 +319,11 @@ class AudioMetadataEditCoordinator {
       await _clearCommit?.call();
       _pending[audio] = null;
     } catch (_) {
-      throw const AudioMetadataEditException(
+      throw AudioMetadataEditException(
         'TAG_LIBRARY_SYNC_FAILED',
         '歌曲文件已保存，但曲库同步未完成。再次点击保存将先重试同步，不会重复写入相同修改。',
         fileWasUpdated: true,
+        committedProof: commit.proof,
       );
     }
   }
@@ -285,6 +337,7 @@ class AudioMetadataEditCoordinator {
 }
 
 final _metadataEdits = AudioMetadataEditCoordinator(
+  inspectCommit: AudioMetadataCommitProof.read,
   write: (path, edit) async {
     final journal = AudioMetadataJournal(await getAppDataDir());
     if (await journal.hasPending) {

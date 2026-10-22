@@ -1,5 +1,10 @@
 // Application status messages only; never music/tag contents.
 const Map<String, List<String>> catalogMetadataEditor = {
+  '歌曲文件在编辑期间已改变，请关闭后重新打开编辑。': [
+    'The audio file changed while you were editing. Close and reopen the editor.',
+    '編集中に音声ファイルが変更されました。エディターを閉じて開き直してください。',
+    '편집 중에 오디오 파일이 변경되었습니다. 편집기를 닫은 후 다시 여세요.',
+  ],
   '歌曲文件已保存，但曲库同步未完成。再次点击保存将先重试同步，不会重复写入相同修改。': [
     'The audio file was saved, but library sync is incomplete. Save again to retry sync without rewriting the same changes.',
     '音声ファイルは保存されましたが、ライブラリの同期は未完了です。再度保存すると、同じ変更を書き直さずに同期を再試行します。',

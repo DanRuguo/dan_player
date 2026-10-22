@@ -92,6 +92,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
     'playlists': true,
     'sound': false,
     'statistics': false,
+    'appearance': false,
   };
   final _quickControllers = {
     for (final id in ['queue', 'lyrics', 'playlists', 'sound'])
@@ -406,6 +407,10 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                                   '点击歌单或箭头展开、折叠；单击歌曲播放。同一歌单的歌曲按窗口宽度紧凑排列。\n\n右键、长按或 Shift + F10 打开项目菜单；自定义排序下按住卡片拖动，可调整顺序或移入歌单。\n\n方向键浏览层级，Home / End 跳到首尾；搜索保留所属歌单，清除搜索恢复展开状态。'),
                               _paragraph(context, '当前队列与筛选结果'),
                               _text(
+                                  '当前队列可折叠连续的同专辑歌曲，搜索与定位当前曲目时会展开相关组；折叠不改变播放顺序。待播预览先显示 4 首，宽窗双栏、窄窗单栏，展开最多查看 10 首；按当前播放模式显示已确定的接续歌曲，不提前生成新一轮随机队列。'),
+                              _text(
+                                  '歌词页的待播预览可在“界面与主题”的“显示待播预览”关闭；播放条弹出的列表始终不显示预览。点击预览歌曲只定位队列，不会立即切歌。'),
+                              _text(
                                   '歌曲菜单可插入下一首或加入队尾；队列中的移动、移除和排序不会改动原歌单。队列搜索结果可另存歌单或导出，保存的是点按时可见的顺序，重复引用也会保留。'),
                             ],
                             expanded: true),
@@ -432,6 +437,10 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '多选“更多”集中提供个人评分与标签、批量编辑标签、重新读取封面和复制信息。个人评分、标签和备注只存在播放器资料中；批量编辑歌曲标签会写入音频文件，先预览再确认，未启用的字段保持原值。'),
                           _link(context, 'guide-batch-music-page', '打开音乐页',
                               () => _navigate(context, app_paths.AUDIOS_PAGE)),
+                          _text(
+                              '没有可读取的内嵌封面时，会尝试歌曲同目录的 cover、folder、front、album 或 albumart 图片，支持 JPG、JPEG、PNG、WebP、BMP 和 GIF。添加或更换图片后可刷新曲库或重新读取封面；开启自动刷新后会跟随文件变化，不改写音乐文件。'),
+                          _text(
+                              '多碟专辑可使用“音轨”排序，先按碟号、再按音轨排列；智能歌单和待播队列的专辑音轨排序也遵循此顺序。旧曲库首次刷新会补读支持格式的碟号标签，未填写的编号排在最后，不从文件名猜测。'),
                         ]),
                         _section(context, 'storage', '文件夹与缓存管理',
                             Icons.folder_copy_outlined, [
@@ -571,6 +580,10 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           _text(
                               '在“曲库与播放 → 歌曲过渡”选择常规切换、连续输出或交叉淡入淡出，下次加载歌曲生效。连续输出预备已有的下一首本地歌曲；淡入淡出仅在共享输出混合两曲。暂停、定位、循环与停止目标优先，未能预备时沿用常规切换。'),
                           _demo('sound', PlayerGuideDemoKind.transitions),
+                          _text(
+                              '“跳过头尾静音”默认关闭，在下次加载本地歌曲时生效，可设置静音阈值和每端检测时长。启用后使用常规切换，保留原文件和完整时间轴；手动定位、A-B 循环或切换输出会恢复本曲完整范围。无法确认精确定位的格式保留原样。'),
+                          _text(
+                              '选择交叉淡入淡出后，可开启“同专辑保持连续输出”。自动接续同一明确专辑的歌曲时不混叠两曲，跨专辑仍使用设定的淡化时长；专辑或归属信息缺失时不会猜测。此开关默认关闭。'),
                           const SizedBox(height: 8),
                           _text(
                               '歌词页“更多 → 均衡器”调整频段；ReplayGain 在设置中读取已有响度标签，可按曲目或专辑均衡。已有响度分析与文件校验说明见“导出与音频检查”。'),
@@ -588,6 +601,9 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                         _section(context, 'files', '导出与音频检查',
                             Icons.drive_file_move_outlined, [
                           _text(
+                              '“导入本地歌单”支持 M3U、M3U8、PLS 和 XSPF。先预览可导入与缺失歌曲，再确认加入；保留原顺序和重复次数，跳过网络地址。预览期间文件变化时需重新读取，避免导入过时内容。'),
+                          const SizedBox(height: 8),
+                          _text(
                               'M3U8 导出保存歌曲路径引用；“导出音乐文件夹”会复制本地音频并生成相对路径歌单，适合搬到另一台设备。在线歌曲与 CUE 分轨会明确跳过；同一源文件只复制一次，歌单仍保留顺序和重复引用。原文件不移动、不转码。'),
                           const SizedBox(height: 8),
                           _text(
@@ -597,6 +613,15 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                             '主题、窗口和歌词显示沿用同一套外观设置；减少动画、隐藏停钟等选项用于按设备能力调整体验。'),
                         _section(context, 'appearance', '主题、桌面与任务栏',
                             Icons.palette_outlined, [
+                          _text(
+                              '频谱显示可选择圆头音柱或像素音柱，适用于播放条上方与封面四周。像素样式沿用主题渐变与音柱密度；关闭频谱、减少动画或隐藏窗口时，仍遵循原有停止绘制设置。'),
+                          _text(
+                              '像素音柱会平滑亮起和熄灭，受“交互反馈动画”控制。下方示例可比较两种样式；真实频谱随当前音频变化。'),
+                          _demo('appearance', PlayerGuideDemoKind.spectrum),
+                          _text(
+                              '播放页大封面支持鼠标附近的细线辉光和水滴折射，可在“背景与动效”关闭“封面轮廓辉光”；它们与分类页流光一起受“交互反馈动画”控制。减少动画或隐藏窗口时停止效果，鼠标移开后恢复原图。'),
+                          _text(
+                              '歌单与歌曲封面可使用 GIF，导入上限为 1024 × 1024、120 帧，复杂动画可能达到解码预算。动态封面受“动态 GIF 封面”和“主题与封面渐变”控制；关闭或减少动画时显示首帧，隐藏时暂停。背景图片仍使用静态图。'),
                           _text(
                               '主题、桌面歌词、任务栏歌词和性能选项已有各自说明；下面直接定位到对应设置。桌面歌词与任务栏歌词互斥，任务栏空区不足时会隐藏显示。'),
                           _link(context, 'guide-theme-settings', '打开主题设置',

@@ -1,10 +1,10 @@
 const catalogLocalLyrics2606 = <String, List<String>>{
   '待播排序': ['Sort upcoming tracks', '待機中の曲を並べ替え', '대기 중인 곡 정렬'],
   '滚动边缘拉伸': ['Scroll edge stretch', 'スクロール端の伸縮', '스크롤 가장자리 늘어남'],
-  '悬停光效、水波纹、按钮、滚动边缘拉伸和进度柄的状态过渡。': [
-    'Hover glow, ripples, button transitions, scroll edge stretch and progress thumb feedback.',
-    'ホバーの光、波紋、ボタンの遷移、スクロール端の伸縮とシークつまみの反応。',
-    '호버 발광, 물결 효과, 버튼 전환, 스크롤 가장자리 늘어남과 진행 핸들의 반응.'
+  '悬停光效、像素音柱、水波纹、按钮、滚动边缘拉伸和进度柄的状态过渡。': [
+    'Hover glow, pixel spectrum fades, ripples, button transitions, scroll edge stretch and progress thumb feedback.',
+    'ホバーの光、ピクセル音柱のフェード、波紋、ボタンの遷移、スクロール端の伸縮とシークつまみの反応。',
+    '호버 발광, 픽셀 스펙트럼 페이드, 물결 효과, 버튼 전환, 스크롤 가장자리 늘어남과 진행 핸들의 반응.'
   ],
   '波形音柱密度': ['Waveform bar density', '波形バーの密度', '파형 막대 밀도'],
   '自适应': ['Adaptive', '自動調整', '자동 조절'],

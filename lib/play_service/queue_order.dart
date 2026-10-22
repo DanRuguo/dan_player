@@ -60,8 +60,7 @@ int _compare(Audio a, Audio b, UpcomingQueueOrder order) {
       final artist = compareSortText(
           _known(a.albumArtist) ?? a.artist, _known(b.albumArtist) ?? b.artist);
       if (artist != 0) return artist;
-      return compareSortNumbers(_positive(a.cueTrack?.number ?? a.track),
-          _positive(b.cueTrack?.number ?? b.track));
+      return compareAudioSort(a, b, AudioSortField.track);
     case UpcomingQueueOrder.format:
       return compareSortText(_format(a), _format(b));
     case UpcomingQueueOrder.bitrate:

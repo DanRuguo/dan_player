@@ -141,3 +141,45 @@ class ShuffleQueueCycle<T> {
     return true;
   }
 }
+
+/// Adjacent shuffled rounds already heard by the user. Moving back across a
+/// round boundary must not select the arbitrary last item of the newer round;
+/// moving forward again reuses that newer order instead of rolling it again.
+/// Queue edits invalidate these orders. Both count and retained entries are
+/// bounded so large libraries do not accumulate unbounded playback history.
+class ShuffleQueueHistory<T> {
+  ShuffleQueueHistory({this.maximumRounds = 8, this.maximumEntries = 100000});
+
+  final int maximumRounds, maximumEntries;
+  final List<List<T>> _previous = [], _next = [];
+
+  void clear() {
+    _previous.clear();
+    _next.clear();
+  }
+
+  void advanced(List<T> previous) {
+    _next.clear();
+    if (previous.isEmpty || previous.length > maximumEntries) {
+      clear();
+      return;
+    }
+    _previous.add(List<T>.unmodifiable(previous));
+    var entries = _previous.fold<int>(0, (sum, round) => sum + round.length);
+    while (_previous.length > maximumRounds || entries > maximumEntries) {
+      entries -= _previous.removeAt(0).length;
+    }
+  }
+
+  List<T>? previous(List<T> current) {
+    if (_previous.isEmpty) return null;
+    _next.add(List<T>.unmodifiable(current));
+    return _previous.removeLast();
+  }
+
+  List<T>? next(List<T> current) {
+    if (_next.isEmpty) return null;
+    _previous.add(List<T>.unmodifiable(current));
+    return _next.removeLast();
+  }
+}

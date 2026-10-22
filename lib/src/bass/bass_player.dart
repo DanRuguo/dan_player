@@ -18,6 +18,8 @@ import 'package:dan_player/src/bass/bass_replay_gain.dart';
 import 'package:dan_player/src/bass/bass_mix.dart';
 import 'package:dan_player/src/bass/bass_transition_mixer.dart';
 import 'package:dan_player/play_service/playback_transition_preferences.dart';
+import 'package:dan_player/play_service/silence_skip_preferences.dart';
+import 'package:dan_player/src/bass/bass_silence_analysis.dart';
 import 'package:dan_player/src/bass/bass_tempo.dart';
 import 'package:dan_player/src/bass/bass_volume.dart';
 import 'package:dan_player/src/bass/bass_equalizer.dart';
@@ -532,6 +534,10 @@ class BassPlayer {
   bool _streamUsesMixer = false;
   PlaybackTransitionPreferences _transitions =
       const PlaybackTransitionPreferences();
+  SilenceSkipPreferences _silenceSkipping = const SilenceSkipPreferences();
+  BassSilenceBounds? _silenceBounds;
+  int? _silenceDecoder;
+  final _silenceScans = <BassSilenceScan>{};
   BassTransitionMixer? _transitionMixer;
   _PreparedBassSource? _preparedSource;
   _PreparedBassSource? _transitionTail;
@@ -543,6 +549,30 @@ class BassPlayer {
   int? get nativeMixerHandle => _activeMixer;
   bool get supportsTransitions => !_freed && _mix != null;
   Object? get preparedSourceIdentity => _preparedSource?.identity;
+
+  /// A source's effective natural end, while [length] remains its original
+  /// metadata/seek duration. Only the decoder enforces this boundary.
+  double get naturalEndPosition => _silenceBounds?.end ?? length;
+  BassSilenceBounds? get silenceBounds => _silenceBounds;
+
+  void configureSilenceSkipping(SilenceSkipPreferences preferences) {
+    if (preferences == _silenceSkipping) return;
+    _silenceSkipping = preferences;
+    for (final scan in _silenceScans) scan.cancel();
+    cancelPreparedSource();
+  }
+
+  /// Explicit seek and practice take precedence over edge trimming for the
+  /// rest of this source. The caller's subsequent seek flushes decoded buffers.
+  void restoreFullSilenceRange() {
+    final decoder = _silenceDecoder;
+    if (_silenceBounds == null || decoder == null) return;
+    if (_bass.BASS_ChannelSetPosition(decoder, 0, 0x10) == 0) {
+      throw FormatException('无法恢复原始音频范围（BASS ${_bass.BASS_ErrorGetCode()}）');
+    }
+    _silenceBounds = null;
+    _silenceDecoder = null;
+  }
 
   /// A changed preference applies at the next explicit source load. Native
   /// source/output handles are never rebuilt by opening a settings surface.
@@ -653,6 +683,9 @@ class BassPlayer {
       'transitionRequested': _transitions.mode.name,
       'continuousMixerActive': _streamUsesMixer && _transitions.enabled,
       'nextSourcePrepared': _preparedSource != null,
+      'silenceSkippingRequested': _silenceSkipping.enabled,
+      'silenceStart': _silenceBounds?.start,
+      'silenceEnd': _silenceBounds?.end,
     };
   }
 
@@ -739,7 +772,7 @@ class BassPlayer {
   double get position {
     final event = _lastEvent;
     if (event != null && event.completed && _eventBoundary.accepts(event.stamp))
-      return length;
+      return naturalEndPosition;
     return _readPosition(decoding: false) ?? 0.0;
   }
 
@@ -749,7 +782,7 @@ class BassPlayer {
     if (!decoding) {
       final remaining = _sharedDrainRemainingSeconds;
       if (remaining != null) {
-        return math.max(0.0, length - remaining * _playbackRate);
+        return math.max(0.0, naturalEndPosition - remaining * _playbackRate);
       }
     }
     // BASS_POS_DECODE bypasses the tempo/output playback buffer. Only the UI
@@ -999,7 +1032,7 @@ class BassPlayer {
                 nativeError != BASS.BASS_ERROR_HANDLE,
             deviceAvailable: observed != PlayerState.pausedDevice,
             position: _boundaryPosition,
-            duration: length,
+            duration: naturalEndPosition,
             segment: _segment != null,
           );
           if (!_eventBoundary.settle(stamp)) return;
@@ -1285,8 +1318,9 @@ class BassPlayer {
     if (!_eqEnabled) return;
     final available = _equalizer.availableBands;
     final applied = _equalizer.appliedGains;
-    if (Iterable<int>.generate(eqBandCenters.length).every(
-        (band) => !available[band] || applied[band] == _eqGains[band])) return;
+    if (Iterable<int>.generate(eqBandCenters.length)
+        .every((band) => !available[band] || applied[band] == _eqGains[band]))
+      return;
     cancelPreparedSource();
     _retireTransitionTail();
 
@@ -1445,7 +1479,7 @@ class BassPlayer {
       if (!applied || !_isCurrentSource(generation)) return false;
 
       if (exclusive) _bassWasapiInit();
-      if (lastPos > 0) {
+      if (lastPos > 0 || _silenceBounds != null) {
         try {
           seek(lastPos);
         } catch (err, trace) {
@@ -1475,7 +1509,7 @@ class BassPlayer {
               exclusive: previousMode,
               generation: generation);
           if (!restored || !_isCurrentSource(generation)) return false;
-          if (lastPos > 0) seek(lastPos);
+          if (lastPos > 0 || _silenceBounds != null) seek(lastPos);
           // Reopening the original URL can take time. A pause/play received
           // during that await must win over the pre-failure playback snapshot.
           if (transport.resolve(wasPlaying)) _resumeCurrentOutput();
@@ -1514,6 +1548,7 @@ class BassPlayer {
     cancelPreparedSource();
     _retireTransitionTail();
     _sourceGeneration += 1;
+    for (final scan in _silenceScans) scan.cancel();
     _urlOpenGate.cancelStaleWaiters();
     // Discard events already queued by the previous explicit source request.
     // The retained stream may keep playing while another file opens, using a
@@ -1547,8 +1582,11 @@ class BassPlayer {
       {required Object identity,
       required double rate,
       required double pitch,
+      bool allowCrossfade = true,
       required bool Function() stillCurrent}) async {
     if (!supportsTransitions ||
+        _silenceSkipping.enabled ||
+        _silenceBounds != null ||
         !_transitions.enabled ||
         !_streamUsesMixer ||
         _fstream == null ||
@@ -1630,7 +1668,8 @@ class BassPlayer {
           current: currentHandle,
           next: handle,
           remainingSeconds: () => (length - _boundaryPosition) / _playbackRate,
-          fadeSeconds: !wasapiExclusive &&
+          fadeSeconds: allowCrossfade &&
+                  !wasapiExclusive &&
                   _transitions.mode == PlaybackTransitionMode.crossfade
               ? PlaybackTransitionPreferences.safeSeconds(
                   _transitions.crossfadeSeconds)
@@ -1761,7 +1800,7 @@ class BassPlayer {
         mixer, math.max(0, prepared.schedule.endByte - played));
     if (!remaining.isFinite || remaining < 0 || !length.isFinite) return null;
     return bassSeekPositionBytes(_bass, current,
-        (length - remaining * _playbackRate).clamp(0.0, length));
+        (naturalEndPosition - remaining * _playbackRate).clamp(0.0, length));
   }
 
   /// Called only by the owner of the already-determined automatic next
@@ -1806,6 +1845,8 @@ class BassPlayer {
     _sourceIsUrl = false;
     _segment = null;
     _segmentLength = null;
+    _silenceBounds = null;
+    _silenceDecoder = null;
     _replayGainTags = next.replayGain;
     _volumeDspBase = next.dspBase;
     _sourceFormat = next.format;
@@ -1878,11 +1919,19 @@ class BassPlayer {
       if (isUrl) throw const FormatException('CUE 分轨仅支持本地音频文件。');
       flags |= 0x20000; // BASS_STREAM_PRESCAN: accurate MP3 source positions.
     }
-    final useMixer = exclusive || (_transitions.enabled && _mix != null);
+    final silencePreferences = _silenceSkipping;
+    final analyseSilence = silencePreferences.enabled &&
+        !isUrl &&
+        segment == null &&
+        (_mix != null || _tempo != null);
+    final useMixer =
+        exclusive || ((_transitions.enabled || analyseSilence) && _mix != null);
     if (useMixer || _tempo != null) flags |= BASS.BASS_STREAM_DECODE;
 
     var uncommittedHandle = 0;
     var openedReplayGain = const ReplayGainTags();
+    BassSilenceBounds? openedSilence;
+    int? silenceDecoder;
     var uncommittedInMixer = false;
     _PendingBassUrlOpen? pending;
     _PendingBassFileOpen? pendingFile;
@@ -1980,6 +2029,55 @@ class BassPlayer {
           throw _sourceOpenException(result.errorCode, isUrl: false);
         }
         openedReplayGain = result.replayGain;
+        if (analyseSilence) {
+          final scan = BassSilenceScan(
+              _bassLibraryPath, uncommittedHandle, silencePreferences);
+          _silenceScans.add(scan);
+          try {
+            openedSilence = await scan.result;
+          } finally {
+            _silenceScans.remove(scan);
+          }
+          if (!_isCurrentSource(generation)) return false;
+          // Analysis leaves the uncommitted decoder at an edge. Always rewind,
+          // including timeout, cancellation or unsupported analysis results.
+          if (_bass.BASS_ChannelSetPosition(
+                  uncommittedHandle, 0, BASS.BASS_POS_BYTE) ==
+              0) {
+            throw _sourceOpenException(_bass.BASS_ErrorGetCode(), isUrl: false);
+          }
+          if (silencePreferences != _silenceSkipping) openedSilence = null;
+          final bounds = openedSilence;
+          if (bounds != null) {
+            final ended = bounds.end >= bounds.duration ||
+                _bass.BASS_ChannelSetPosition(
+                        uncommittedHandle,
+                        _bass.BASS_ChannelSeconds2Bytes(
+                            uncommittedHandle, bounds.end),
+                        0x10) !=
+                    0;
+            final moved = ended &&
+                _bass.BASS_ChannelSetPosition(
+                        uncommittedHandle,
+                        _bass.BASS_ChannelSeconds2Bytes(
+                            uncommittedHandle, bounds.start),
+                        BASS.BASS_POS_BYTE) !=
+                    0;
+            if (moved) {
+              silenceDecoder = uncommittedHandle;
+            } else {
+              if (_bass.BASS_ChannelSetPosition(uncommittedHandle, 0, 0x10) ==
+                      0 ||
+                  _bass.BASS_ChannelSetPosition(
+                          uncommittedHandle, 0, BASS.BASS_POS_BYTE) ==
+                      0) {
+                throw _sourceOpenException(_bass.BASS_ErrorGetCode(),
+                    isUrl: false);
+              }
+              openedSilence = null;
+            }
+          }
+        }
       }
 
       if (!_isCurrentSource(generation)) return false;
@@ -2043,6 +2141,8 @@ class BassPlayer {
       _sourceIsUrl = isUrl;
       _segment = segment;
       _segmentLength = segmentLength;
+      _silenceBounds = openedSilence;
+      _silenceDecoder = silenceDecoder;
       _replayGainTags = openedReplayGain;
       _volumeDspBase = openedDspBase;
       _sourceFormat = openedFormat;
@@ -2050,6 +2150,9 @@ class BassPlayer {
       _eventBoundary.replace();
       _lastEvent = null;
       _deviceInterrupted = false;
+      if (openedSilence != null && openedSilence.start > 0) {
+        _seekNative(openedSilence.start);
+      }
       if (_eqEnabled) _applyEqToStream();
       return true;
     } catch (_) {
@@ -2386,13 +2489,13 @@ class BassPlayer {
                               validHandle: true,
                               deviceAvailable: true,
                               position: _boundaryPosition,
-                              duration: duration,
+                              duration: _silenceBounds?.end ?? duration,
                               segment: true,
                             ) ==
                             PlaybackEndReason.segmentEnd))));
     _eventBoundary.command(rearm: true);
 
-    if (restartSource) _seekNative(0);
+    if (restartSource) _seekNative(_silenceBounds?.start ?? 0);
 
     _positionUpdater?.cancel();
 
@@ -2486,6 +2589,7 @@ class BassPlayer {
   /// do nothing if [setSource] hasn't been called
   void seek(double position) {
     if (_fstream == null) return;
+    restoreFullSilenceRange();
     _cancelPreparedSource(restoreSharedBuffer: false);
     _retireTransitionTail();
     final stateBeforeSeek = playerState;
@@ -2619,6 +2723,8 @@ class BassPlayer {
     _sourceIsUrl = false;
     _segment = null;
     _segmentLength = null;
+    _silenceBounds = null;
+    _silenceDecoder = null;
     _replayGainTags = const ReplayGainTags();
     _sourceFormat = null;
     _deviceInterrupted = false;

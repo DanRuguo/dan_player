@@ -47,9 +47,16 @@ class AudioLibrary {
   Map<String, Album> albumCollection = {};
 
   Map<String, Audio>? _audioByPath;
+  Map<String, Audio>? _audioByNormalizedPath;
 
   Map<String, Audio> get audioByPath =>
       _audioByPath ??= {for (final audio in audioCollection) audio.path: audio};
+
+  Audio? localAudioForPath(String path) => (_audioByNormalizedPath ??= {
+        for (final audio in audioCollection)
+          if (audio.isLocal && !audio.isCueTrack)
+            TrackIdentityRegistry.normalizePath(audio.path): audio,
+      })[TrackIdentityRegistry.normalizePath(path)];
 
   static int revision = 0;
 
@@ -260,6 +267,7 @@ class AudioLibrary {
 
   void _buildCollections() {
     _audioByPath = null;
+    _audioByNormalizedPath = null;
     revision++;
     sortRevision++;
     searchRevision++;
@@ -533,8 +541,35 @@ class Audio {
   /// Earlier 26.0.5 builds ignore this optional field.
   final Object? id3TextChecked;
 
-  String? get coverFingerprint =>
-      modifiedNanos == null ? null : '${modifiedNanos}_s${fileSizeBytes ?? 0}';
+  /// Named sidecar artwork observed by the last successful library scan.
+  final String? folderCoverStamp;
+
+  /// Explicit disc tag; a missing value is never guessed from names.
+  final int? _discNumber;
+  int? get discNumber {
+    final source = _indexedSource;
+    return source == null ? _discNumber : source._discNumber;
+  }
+
+  final bool discNumberRead;
+
+  Audio? get _indexedSource => isCueTrack
+      ? AudioLibrary.instance.localAudioForPath(localFilePath)
+      : null;
+
+  String? get coverFingerprint {
+    final fileStamp = modifiedNanos == null
+        ? null
+        : '${modifiedNanos}_s${fileSizeBytes ?? 0}';
+    // A CUE slice shares the current source artwork, including sidecar edits.
+    final indexedSource = _indexedSource;
+    final folderStamp = indexedSource == null
+        ? folderCoverStamp
+        : indexedSource.folderCoverStamp;
+    return folderStamp == null
+        ? fileStamp
+        : '${fileStamp ?? modified}_c$folderStamp';
+  }
 
   final CueTrackReference? cueTrack;
   bool get isCueTrack => cueTrack != null;
@@ -590,6 +625,9 @@ class Audio {
     this.modifiedNanos,
     this.metadataReadPending = false,
     this.id3TextChecked,
+    this.folderCoverStamp,
+    int? discNumber,
+    this.discNumberRead = false,
     this.cueTrack,
     this.durationVersion = 1,
     this.onlineProvider,
@@ -600,7 +638,8 @@ class Audio {
     this.onlinePlayable,
     this.onlineDownloadAllowed,
     String? stableTrackId,
-  })  : _identityHint = stableTrackId,
+  })  : _discNumber = discNumber,
+        _identityHint = stableTrackId,
         splitedArtists = artist.split(
           RegExp(AppSettings.instance.artistSplitPattern),
         );
@@ -822,6 +861,13 @@ class Audio {
       modifiedNanos: map['modified_ns'] is String ? map['modified_ns'] : null,
       metadataReadPending: map['metadata_pending'] == true,
       id3TextChecked: map['id3_text_checked'],
+      folderCoverStamp: map['folder_cover_stamp'] is String
+          ? map['folder_cover_stamp']
+          : null,
+      discNumber: map['disc_number'] is num && map['disc_number'] > 0
+          ? (map['disc_number'] as num).toInt()
+          : null,
+      discNumberRead: map.containsKey('disc_number'),
       cueTrack: cue,
       durationVersion: (map['duration_version'] as num?)?.toInt() ?? 0,
       stableTrackId: map['track_id'] is String ? map['track_id'] : null,
@@ -846,6 +892,8 @@ class Audio {
         "modified_ns": modifiedNanos,
         "metadata_pending": metadataReadPending,
         if (id3TextChecked != null) "id3_text_checked": id3TextChecked,
+        if (folderCoverStamp != null) "folder_cover_stamp": folderCoverStamp,
+        if (discNumberRead || discNumber != null) "disc_number": discNumber,
         "path": path,
         if (cueTrack != null) 'cue_track': cueTrack!.toMap(),
         "modified": modified,

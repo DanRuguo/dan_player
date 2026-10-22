@@ -1238,6 +1238,7 @@ class LibraryStatisticsScanner {
         composer: audio.composer,
         artist: audio.artist,
         album: audio.album,
+        albumOwner: audio.albumIdentity.owner ?? '',
         language: audio.language,
         online: online,
       ));
@@ -1350,11 +1351,10 @@ class LibraryStatisticsScanner {
               }
               final artist = _storageMetadata(track.artist);
               final album = _storageMetadata(track.album);
-              albums.putIfAbsent((
-                artist,
-                album
-              ), () => _MetadataStorageAccumulator(album, artist)).add(
-                  info.bytes);
+              albums.putIfAbsent(
+                  (track.albumOwner, album),
+                  () => _MetadataStorageAccumulator(
+                      album, track.albumOwner)).add(info.bytes);
               artists
                   .putIfAbsent(
                       artist, () => _MetadataStorageAccumulator(artist, ''))
@@ -1523,6 +1523,7 @@ class _StatisticsTrack {
     required this.composer,
     required this.artist,
     required this.album,
+    required this.albumOwner,
     required this.language,
     required this.online,
   });
@@ -1532,6 +1533,9 @@ class _StatisticsTrack {
   final String? composer;
   final String artist;
   final String album;
+  // Freeze the same owner used by album categories before filesystem awaits.
+  // Track artist remains independent for performer rankings and classification.
+  final String albumOwner;
   final String? language;
   final bool online;
 }

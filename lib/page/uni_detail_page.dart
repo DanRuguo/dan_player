@@ -1,5 +1,7 @@
 import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/artwork_handoff.dart';
+import 'package:dan_player/component/animated_artwork.dart';
+import 'package:dan_player/library/artwork_animation_provider.dart';
 import 'package:dan_player/component/category_cover_flight.dart';
 import 'package:dan_player/component/multi_selection_lifecycle.dart';
 import 'package:dan_player/component/detail_header_backdrop.dart';
@@ -642,15 +644,19 @@ class _UniDetailPageHeader extends StatelessWidget {
                   size: coverSize, color: scheme.onSurface),
               loading: const Center(child: CircularProgressIndicator()),
               imageBuilder: (provider) {
-                final image = Image(
-                    image: provider,
-                    gaplessPlayback: true,
-                    width: coverSize,
-                    height: coverSize,
-                    fit: BoxFit.cover,
-                    filterQuality: FilterQuality.high,
-                    errorBuilder: (_, __, ___) => Icon(Symbols.broken_image,
-                        size: coverSize, color: scheme.onSurface));
+                Widget error(BuildContext _, Object __, StackTrace? ___) =>
+                    Icon(Symbols.broken_image,
+                        size: coverSize, color: scheme.onSurface);
+                final image = mayAnimateArtwork(provider)
+                    ? AnimatedArtwork(image: provider, errorBuilder: error)
+                    : Image(
+                        image: provider,
+                        gaplessPlayback: true,
+                        width: coverSize,
+                        height: coverSize,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: error);
                 return picShape == PicShape.oval
                     ? ClipOval(child: image)
                     : ClipRRect(

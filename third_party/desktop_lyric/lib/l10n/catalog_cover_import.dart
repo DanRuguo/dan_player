@@ -1,4 +1,29 @@
 const Map<String, List<String>> catalogCoverImport = {
+  '封面支持 PNG、JPEG、WebP、BMP 和 GIF 图片。': [
+    'Covers support PNG, JPEG, WebP, BMP and GIF images.',
+    'カバーは PNG、JPEG、WebP、BMP、GIF に対応します。',
+    '표지는 PNG, JPEG, WebP, BMP 및 GIF를 지원합니다.'
+  ],
+  '非 GIF 动图暂不支持，请选择 GIF 或静态图片。': [
+    'For animation, choose GIF. Other formats must be still images.',
+    'アニメーションには GIF を選んでください。他の形式は静止画に対応します。',
+    '애니메이션은 GIF를 선택하세요. 다른 형식은 정적 이미지만 지원합니다.'
+  ],
+  'GIF 封面长边最多 1024 像素，请先缩小动图。': [
+    'GIF covers must be at most 1024 pixels on either side. Resize the animation first.',
+    'GIF カバーの各辺は最大 1024 ピクセルです。先に縮小してください。',
+    'GIF 표지의 각 변은 최대 1024픽셀입니다. 먼저 크기를 줄여 주세요.'
+  ],
+  'GIF 封面最多 120 帧且累计不超过 3200 万像素。': [
+    'GIF covers allow up to 120 frames and 32 million pixels across all frames.',
+    'GIF カバーは最大 120 フレーム、全フレーム合計 3200 万画素まで対応します。',
+    'GIF 표지는 최대 120프레임, 전체 프레임 합계 3,200만 픽셀까지 지원합니다.'
+  ],
+  'GIF 封面处理超时，请减少尺寸或帧数。': [
+    'GIF processing timed out. Reduce its dimensions or frame count.',
+    'GIF の処理がタイムアウトしました。サイズまたはフレーム数を減らしてください。',
+    'GIF 처리 시간이 초과되었습니다. 크기나 프레임 수를 줄여 주세요.'
+  ],
   '正在处理其他封面，请稍后重试。': [
     'Other covers are being processed. Please try again shortly.',
     '他のカバーを処理中です。しばらくしてから再試行してください。',

@@ -136,6 +136,7 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
                 child: CurrentPlaylistView(
                   showTitle: false,
                   shrinkWrap: true,
+                  showUpcomingPreviewAllowed: false,
                   onOpenDetails: (audio) => Navigator.pop(context, audio),
                 ),
               ),

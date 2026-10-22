@@ -319,7 +319,7 @@ class _PlaylistToolbarState extends State<PlaylistToolbar>
           _ToolbarMenuItem(
               value: _PlaylistToolbarAction.importM3u,
               key: const ValueKey('playlist-import-m3u'),
-              label: ui('导入 M3U8 歌单'),
+              label: ui('导入本地歌单'),
               icon: Icons.file_open_outlined,
               onSelected: widget.editingEnabled ? widget.onImportM3u : null),
         if (widget.onImportCue != null)

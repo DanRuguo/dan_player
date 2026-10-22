@@ -23,7 +23,19 @@ Object queueTrackIdentity(Audio audio) {
   if (audio.isOnline) {
     return ('online', audio.onlineProvider, audio.onlineId);
   }
-  if (audio.cueTrack != null) return ('cue', audio.cueTrack!.identity);
+  final cue = audio.cueTrack;
+  if (cue != null) {
+    // Reimporting an edited sheet can retain its path/track number while
+    // referring to a different source or segment. Match the stable identity
+    // registry's segment contract without loading or mutating that registry.
+    return (
+      'cue',
+      cue.identity,
+      p.windows.normalize(cue.sourcePath.replaceAll('/', r'\')).toLowerCase(),
+      cue.startFrame,
+      cue.endFrame,
+    );
+  }
   final path = audio.path;
   if (p.windows.isAbsolute(path)) {
     return (

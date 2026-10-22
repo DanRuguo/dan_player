@@ -210,7 +210,8 @@ Future<void> _copyReferencedCacheAssets(Object? value, Directory source,
     if (background != null) {
       final sourceFile = File(path.join(source.path, background));
       if (!await sourceFile.exists() ||
-          await _fileDigest(sourceFile) != _backgroundAssetId(background)) {
+          await _fileDigest(sourceFile, control: control) !=
+              _backgroundAssetId(background)) {
         throw const CacheBackupException(
             'Custom background is missing or damaged');
       }

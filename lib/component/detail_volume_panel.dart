@@ -12,10 +12,12 @@ class DetailVolumeButton extends StatefulWidget {
       {super.key,
       required this.readVolume,
       required this.onChanged,
+      this.onToggleMute,
       this.changes,
       this.compact = false});
   final double Function() readVolume;
   final ValueChanged<double> onChanged;
+  final VoidCallback? onToggleMute;
   final Listenable? changes;
   final bool compact;
 
@@ -44,12 +46,24 @@ class _DetailVolumeButtonState extends State<DetailVolumeButton> {
   }
 
   void _change(double value) {
+    // Commit the native change first. A rejected volume must not leave a
+    // misleading local value or replace the last successful audible level.
+    widget.onChanged(value);
     setState(() {
       if (_value > 0) _lastAudible = _value;
       _value = value;
       if (value > 0) _lastAudible = value;
     });
-    widget.onChanged(value);
+  }
+
+  void _toggleMute() {
+    final toggle = widget.onToggleMute;
+    if (toggle == null) {
+      _change(_value > 0 ? 0 : _lastAudible);
+      return;
+    }
+    toggle();
+    _sync();
   }
 
   @override
@@ -85,7 +99,7 @@ class _DetailVolumeButtonState extends State<DetailVolumeButton> {
       menuChildren: [
         DetailVolumePanel(
             value: _value,
-            onToggleMute: () => _change(_value > 0 ? 0 : _lastAudible),
+            onToggleMute: _toggleMute,
             onChanged: _change)
       ],
       builder: (context, controller, _) => IconButton(

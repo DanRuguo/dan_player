@@ -14,6 +14,8 @@ enum SpectrumDensity {
 
 enum LyricSpectrumPlacement { progress, cover }
 
+enum SpectrumStyle { rounded, pixel }
+
 /// Visual preferences; audio clocks and accessibility remain independent.
 @immutable
 class RenderingPreferences {
@@ -22,8 +24,11 @@ class RenderingPreferences {
       this.lyricSpectrum = true,
       this.compactSpectrum = true,
       this.surfaceBlur = true,
+      this.animatedArtwork = true,
+      this.coverContourGlow = true,
       this.animations = const MotionPreferences(),
       this.spectrumDensity = SpectrumDensity.high,
+      this.spectrumStyle = SpectrumStyle.rounded,
       this.lyricSpectrumPlacement = LyricSpectrumPlacement.progress,
       this.frameRate = const FrameRatePreference()});
 
@@ -31,7 +36,10 @@ class RenderingPreferences {
   final bool lyricSpectrum;
   final bool compactSpectrum;
   final bool surfaceBlur;
+  final bool animatedArtwork;
+  final bool coverContourGlow;
   final SpectrumDensity spectrumDensity;
+  final SpectrumStyle spectrumStyle;
   final LyricSpectrumPlacement lyricSpectrumPlacement;
   final FrameRatePreference frameRate;
   final MotionPreferences animations;
@@ -41,7 +49,10 @@ class RenderingPreferences {
           bool? lyricSpectrum,
           bool? compactSpectrum,
           bool? surfaceBlur,
+          bool? animatedArtwork,
+          bool? coverContourGlow,
           SpectrumDensity? spectrumDensity,
+          SpectrumStyle? spectrumStyle,
           LyricSpectrumPlacement? lyricSpectrumPlacement,
           FrameRatePreference? frameRate,
           MotionPreferences? animations}) =>
@@ -50,7 +61,10 @@ class RenderingPreferences {
         lyricSpectrum: lyricSpectrum ?? this.lyricSpectrum,
         compactSpectrum: compactSpectrum ?? this.compactSpectrum,
         surfaceBlur: surfaceBlur ?? this.surfaceBlur,
+        animatedArtwork: animatedArtwork ?? this.animatedArtwork,
+        coverContourGlow: coverContourGlow ?? this.coverContourGlow,
         spectrumDensity: spectrumDensity ?? this.spectrumDensity,
+        spectrumStyle: spectrumStyle ?? this.spectrumStyle,
         lyricSpectrumPlacement:
             lyricSpectrumPlacement ?? this.lyricSpectrumPlacement,
         frameRate: frameRate ?? this.frameRate,
@@ -62,7 +76,10 @@ class RenderingPreferences {
         'lyricSpectrum': lyricSpectrum,
         'compactSpectrum': compactSpectrum,
         'surfaceBlur': surfaceBlur,
+        'animatedArtwork': animatedArtwork,
+        'coverContourGlow': coverContourGlow,
         'spectrumDensity': spectrumDensity.name,
+        'spectrumStyle': spectrumStyle.name,
         'lyricSpectrumPlacement': lyricSpectrumPlacement.name,
         'frameRate': frameRate.toMap(),
         'animations': animations.toMap()
@@ -77,9 +94,18 @@ class RenderingPreferences {
         surfaceBlur: value is Map && value['surfaceBlur'] is bool
             ? value['surfaceBlur']
             : true,
+        animatedArtwork: value is Map && value['animatedArtwork'] is bool
+            ? value['animatedArtwork'] as bool
+            : true,
+        coverContourGlow: value is Map && value['coverContourGlow'] is bool
+            ? value['coverContourGlow'] as bool
+            : true,
         spectrumDensity: SpectrumDensity.values.firstWhere(
             (v) => value is Map && value['spectrumDensity'] == v.name,
             orElse: () => SpectrumDensity.high),
+        spectrumStyle: SpectrumStyle.values.firstWhere(
+            (v) => value is Map && value['spectrumStyle'] == v.name,
+            orElse: () => SpectrumStyle.rounded),
         lyricSpectrumPlacement: LyricSpectrumPlacement.values.firstWhere(
             (v) => value is Map && value['lyricSpectrumPlacement'] == v.name,
             orElse: () => LyricSpectrumPlacement.progress),
@@ -121,8 +147,11 @@ class RenderingPreferences {
       lyricSpectrum == other.lyricSpectrum &&
       compactSpectrum == other.compactSpectrum &&
       surfaceBlur == other.surfaceBlur &&
+      animatedArtwork == other.animatedArtwork &&
+      coverContourGlow == other.coverContourGlow &&
       animations == other.animations &&
       spectrumDensity == other.spectrumDensity &&
+      spectrumStyle == other.spectrumStyle &&
       lyricSpectrumPlacement == other.lyricSpectrumPlacement &&
       frameRate == other.frameRate;
 
@@ -132,7 +161,10 @@ class RenderingPreferences {
       lyricSpectrum,
       compactSpectrum,
       surfaceBlur,
+      animatedArtwork,
+      coverContourGlow,
       spectrumDensity,
+      spectrumStyle,
       lyricSpectrumPlacement,
       frameRate,
       animations);

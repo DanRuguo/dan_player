@@ -11,6 +11,7 @@ import 'package:dan_player/component/scene_background.dart';
 import 'package:dan_player/component/song_comments_dialog.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/audio_artwork.dart';
+import 'package:dan_player/component/cover_contour_glow.dart';
 import 'package:dan_player/component/title_bar.dart';
 import 'package:dan_player/component/touch_gestures.dart';
 import 'package:dan_player/component/full_width_spectrum.dart';
@@ -435,6 +436,7 @@ class _NowPlayingVolDspSlider extends StatelessWidget {
       compact: true,
       readVolume: () => playback.volumeDsp,
       onChanged: playback.setVolumeDsp,
+      onToggleMute: playback.toggleVolumeMute,
       changes: playback.diagnosticsRevision,
     );
   }
@@ -596,6 +598,22 @@ class __NowPlayingInfoState extends State<_NowPlayingInfo> {
                           borderRadius: AppShape.surfaceRadius,
                           child: AudioArtwork(
                             audio: nowPlaying,
+                            artworkDecorator: (_, provider, frame, child) =>
+                                CoverContourGlow(
+                              image: provider,
+                              currentFrame: frame,
+                              hidden: DesktopIntegration.instance.isHidden,
+                              activity: Listenable.merge([
+                                widget.coverVisible,
+                                widget.activeCoverGeneration
+                              ]),
+                              isActive: () =>
+                                  (widget.coverVisible?.value ?? true) &&
+                                  (widget.activeCoverGeneration == null ||
+                                      widget.activeCoverGeneration!.value ==
+                                          widget.coverGeneration),
+                              child: child,
+                            ),
                             retainWhileLoading: true,
                             size: size,
                             placeholder: placeholder,

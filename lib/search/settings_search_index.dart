@@ -27,7 +27,9 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("library", "session", "恢复上次播放会话", []),
   SettingsSearchEntry(
       "library", "playback", "播放速度", ["WASAPI 独占输出", "升降调", "原调"]),
-  SettingsSearchEntry("library", "transition", "歌曲过渡", ["连续输出", "交叉淡入淡出"]),
+  SettingsSearchEntry(
+      "library", "transition", "歌曲过渡", ["连续输出", "交叉淡入淡出", "同专辑保持连续输出"]),
+  SettingsSearchEntry("library", "silence", "跳过头尾静音", ["静音阈值", "每端最多分析"]),
   SettingsSearchEntry(
       "library", "resume", "按曲记忆播放位置", ["仅长音频", "长音频最短时长", "清除自动记忆位置"]),
   SettingsSearchEntry("library", "gain", "ReplayGain 音量均衡",
@@ -68,9 +70,22 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("appearance", "sidebar", "侧栏宽度", []),
   SettingsSearchEntry("appearance", "simple-playback-bar-playlist", "简易播放条播放列表",
       ["播放列表", "歌曲封面", "文件名", "Dock"]),
+  SettingsSearchEntry("appearance", "queue-upcoming", "显示待播预览",
+      ["接下来", "待播歌曲", "播放队列", "自动播放顺序"]),
   SettingsSearchEntry("effects", "background", "背景与毛玻璃", ["轻缓动态背景", "低频律动背景"]),
-  SettingsSearchEntry("effects", "rendering", "界面刷新率",
-      ["频谱显示", "歌词页实时频谱", "播放条七音频谱", "界面面板毛玻璃", "不可见时暂停视觉更新"]),
+  SettingsSearchEntry("effects", "rendering", "界面刷新率", [
+    "频谱显示",
+    "频谱样式",
+    "像素音柱",
+    "圆头音柱",
+    "动态 GIF 封面",
+    "封面轮廓辉光",
+    "水滴折射",
+    "歌词页实时频谱",
+    "播放条七音频谱",
+    "界面面板毛玻璃",
+    "不可见时暂停视觉更新"
+  ]),
   SettingsSearchEntry("effects", "animation", "动画管理", [
     "开屏动画",
     "下一首动画",

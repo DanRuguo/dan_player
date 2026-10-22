@@ -90,6 +90,26 @@ class RenderingSettings extends StatelessWidget {
             _update((current) => current.copyWith(surfaceBlur: v)),
       ),
       const SizedBox(height: 16),
+      SettingsSwitchTile(
+        controlKey: const ValueKey('animated-artwork'),
+        icon: Icons.gif_box_outlined,
+        title: Text(ui('动态 GIF 封面')),
+        subtitle: Text(ui('播放已导入的 GIF 封面；减少动画或关闭封面动画时显示首帧。')),
+        value: value.animatedArtwork,
+        onChanged: (v) =>
+            _update((current) => current.copyWith(animatedArtwork: v)),
+      ),
+      const SizedBox(height: 16),
+      SettingsSwitchTile(
+        controlKey: const ValueKey('cover-contour-glow'),
+        icon: Icons.auto_awesome_outlined,
+        title: Text(ui('封面轮廓辉光')),
+        subtitle: Text(ui('播放页大封面随鼠标局部折射并亮起细线；与分类流光共用交互反馈动画开关，减少动画时停用。')),
+        value: value.coverContourGlow,
+        onChanged: (v) =>
+            _update((current) => current.copyWith(coverContourGlow: v)),
+      ),
+      const SizedBox(height: 16),
       _FrameRateSettings(value: value, update: _update),
       const SizedBox(height: 16),
       SettingsSurface(
@@ -139,6 +159,38 @@ class RenderingSettings extends StatelessWidget {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      AppSegmentedControl<SpectrumStyle>(
+                        key: const ValueKey('spectrum-style'),
+                        semanticLabel: ui('频谱样式'),
+                        wrapCompactLabel: true,
+                        value: value.spectrumStyle,
+                        onChanged: value.lyricSpectrum
+                            ? (style) => _update((current) =>
+                                current.copyWith(spectrumStyle: style))
+                            : null,
+                        options: [
+                          AppSegmentOption(
+                            value: SpectrumStyle.rounded,
+                            label: ui('圆头音柱'),
+                            icon: Icons.equalizer,
+                          ),
+                          AppSegmentOption(
+                            value: SpectrumStyle.pixel,
+                            label: ui('像素音柱'),
+                            icon: Icons.grid_view,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(ui('样式同时用于播放条上方与封面四周。'),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant)),
                       const SizedBox(height: 12),
                       AppSegmentedControl<SpectrumDensity>(
                         key: const ValueKey('spectrum-density'),

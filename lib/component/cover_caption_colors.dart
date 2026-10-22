@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:ui' as ui;
 import 'package:dan_player/library/artwork_image_provider.dart';
+import 'package:dan_player/library/artwork_animation_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:flutter/material.dart';
 
@@ -50,12 +51,23 @@ class CoverCaptionCache {
     final result = Completer<CoverCaptionColors>();
     var source = provider;
     var sampleRevision = revision;
-    while (source is ArtworkImageProvider) {
+    var firstFrame = false;
+    while (source is ArtworkImageProvider ||
+        source is AnimatedArtworkSource ||
+        source is FirstFrameArtworkProvider) {
       // Preserve a managed file/provider revision when replacing its decode
       // size with the bounded sample size. Explicit callers own precedence.
-      sampleRevision ??= source.revision;
-      source = source.source;
+      if (source is ArtworkImageProvider) {
+        sampleRevision ??= source.revision;
+        source = source.source;
+      } else {
+        firstFrame = true;
+        source = source is AnimatedArtworkSource
+            ? source.source
+            : (source as FirstFrameArtworkProvider).source;
+      }
     }
+    if (firstFrame) source = FirstFrameArtworkProvider(source);
     final stream = ArtworkImageProvider(source, const ArtworkSize(48, 48),
             revision: sampleRevision)
         .resolve(ImageConfiguration.empty);

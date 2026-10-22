@@ -1,4 +1,33 @@
 const Map<String, List<String>> catalogQueueTools = {
+  '显示待播预览': ['Show upcoming tracks', '次の曲のプレビューを表示', '다음 재생 곡 미리보기 표시'],
+  '在歌词页的队列上方显示接下来播放的歌曲，可展开查看最多 10 项。播放条弹出列表不显示。': [
+    'Show upcoming tracks above the queue on the lyrics page. Expand to view up to 10 items. The playback bar’s popup queue does not show this preview.',
+    '歌詞画面のキュー上部に次に再生する曲を表示します。展開すると最大 10 曲を確認できます。再生バーから開くキューには表示しません。',
+    '가사 화면의 대기열 위에 다음 재생 곡을 표시합니다. 펼치면 최대 10곡을 볼 수 있습니다. 재생 바의 팝업 대기열에는 표시하지 않습니다.'
+  ],
+  '待播歌曲': ['Upcoming tracks', '次に再生する曲', '다음 재생 곡'],
+  '自动播放顺序': ['Automatic playback order', '自動再生順', '자동 재생 순서'],
+  '第 {0} 项 · 定位到队列': [
+    'Item {0} · Locate in queue',
+    '{0} 曲目 · キュー内の位置へ移動',
+    '{0}번째 항목 · 대기열에서 찾기'
+  ],
+  '未知专辑艺术家': ['Unknown album artist', '不明なアルバムアーティスト', '알 수 없는 앨범 아티스트'],
+  '{0} 首歌曲': ['{0} tracks', '{0} 曲', '{0}곡'],
+  '按专辑折叠队列': ['Group queue by album', 'キューをアルバムごとに折りたたむ', '앨범별로 대기열 접기'],
+  '显示逐首队列': ['Show individual queue tracks', '曲ごとのキューを表示', '대기열 곡을 개별 표시'],
+  '接下来': ['Up next', 'このあと', '다음 재생'],
+  '查看全部 {0} 项': ['View all {0} items', '{0} 件すべて表示', '{0}개 모두 보기'],
+  '当前没有已确定的待播歌曲。': [
+    'No upcoming tracks are determined yet.',
+    '次に再生する曲はまだ確定していません。',
+    '아직 다음 재생 곡이 정해지지 않았습니다.'
+  ],
+  '仅显示已确定的自动播放顺序，点击歌曲可定位到队列。': [
+    'Shows the determined automatic playback order. Select a track to locate it in the queue.',
+    '確定済みの自動再生順を表示します。曲を選ぶとキュー内の位置へ移動します。',
+    '정해진 자동 재생 순서를 표시합니다. 곡을 선택하면 대기열의 해당 위치로 이동합니다.'
+  ],
   '将队列保存为歌单': ['Save queue as playlist', 'キューをプレイリストに保存', '대기열을 재생목록으로 저장'],
   '播放队列 {0}': ['Play queue {0}', '再生キュー {0}', '재생 대기열 {0}'],
   '已保存 {0} 首歌曲到“{1}”': [

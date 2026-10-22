@@ -192,6 +192,7 @@ class CacheBackupService {
         sourceRoot: source,
         libraryRoots: _libraryRoots(index),
         payloadRoot: payload,
+        control: control,
       );
       encoder.collectSongReferences(index);
       final music = await _MusicInventory.read(index);
@@ -278,7 +279,7 @@ class CacheBackupService {
         payloadFiles.add(<String, Object?>{
           'path': relative,
           'size': await entity.length(),
-          'sha256': await _fileDigest(entity),
+          'sha256': await _fileDigest(entity, control: control),
         });
       }
       payloadFiles
@@ -366,6 +367,11 @@ class CacheBackupService {
         taskbar.update(null);
         try {
           final staged = Directory(transaction['staged'] as String);
+          // Cancellation can arrive while the worker finishes verification or
+          // hands its prepared directory back. Do not activate that snapshot.
+          if (operation?.isCancelled ?? false) {
+            throw const CacheBackupCancelled();
+          }
           if (activateLocation != null) {
             await activateLocation(destination, staged);
           }
@@ -432,7 +438,8 @@ class CacheBackupService {
           (manifest['files'] as List)
               .where((item) => (manifest['_extracted'] as Set<String>)
                   .contains((item as Map)['path']))
-              .toList());
+              .toList(),
+          control);
       final contents = _contentsFromManifest(manifest);
       final requested = options == null
           ? BackupSelection(components: contents.components, includeMusic: true)
@@ -478,6 +485,7 @@ class CacheBackupService {
       final payloadEntries =
           await payload.list(recursive: true, followLinks: false).toList();
       for (final entity in payloadEntries.whereType<File>()) {
+        await control.check('restore');
         final relative =
             _portableRelative(path.relative(entity.path, from: payload.path));
         if (_looksLikeJson(relative) &&
@@ -497,6 +505,7 @@ class CacheBackupService {
           restoredMusic: restoredMusic,
           cacheOverrides: cacheOverrides);
       for (final entity in payloadEntries.whereType<File>()) {
+        await control.check('restore');
         final relative = path.relative(entity.path, from: payload.path);
         if (_isMusicPayload(relative)) {
           final targetRelative = path.join('restored-music', musicBatch,
@@ -563,6 +572,7 @@ class CacheBackupService {
                 path.relative(value, from: destination.path),
             });
       }
+      await control.check('restore');
       await File(path.join(payload.path, appDataReadyMarkerName)).writeAsString(
         json.encode(<String, Object?>{
           'format': _backupFormat,
@@ -572,6 +582,7 @@ class CacheBackupService {
         flush: true,
       );
 
+      await control.check('restore');
       await payload.rename(staged.path);
       return <String, Object?>{
         'destination': destination.path,
@@ -779,6 +790,7 @@ class _PortablePathEncoder {
     required this.sourceRoot,
     required List<String> libraryRoots,
     required this.payloadRoot,
+    required this.control,
   }) : roots = <_SourceRoot>[
           for (var i = 0; i < libraryRoots.length; i++)
             _SourceRoot('r$i', path.normalize(libraryRoots[i])),
@@ -786,11 +798,13 @@ class _PortablePathEncoder {
 
   final Directory sourceRoot;
   final Directory payloadRoot;
+  final _BackupWorkerControl control;
   final List<_SourceRoot> roots;
   final Map<String, Map<String, Object?>> songManifest = {};
   final Map<String, String> _songTokensByPath = {};
   final Map<String, String> _externalAssets = {};
   int _externalCounter = 0;
+  int _convertedValues = 0;
 
   List<Map<String, Object?>> get rootManifest => <Map<String, Object?>>[
         for (final root in roots)
@@ -839,12 +853,18 @@ class _PortablePathEncoder {
 
   Future<Object?> convert(Object? value,
       {bool aliasOnly = false, bool folderNotes = false}) async {
+    if (++_convertedValues % 64 == 0) await control.check('collect');
     if (value is String) return _convertString(value, aliasOnly: aliasOnly);
     if (value is List) {
-      return Future.wait<Object?>([
-        for (final item in value)
-          convert(item, aliasOnly: aliasOnly, folderNotes: folderNotes)
-      ]);
+      // Token allocation and external-asset copies share mutable maps. Await
+      // each item so repeated paths reuse one committed token/copy, and a
+      // large playlist cannot enqueue every filesystem operation at once.
+      final result = <Object?>[];
+      for (final item in value) {
+        result.add(await convert(item,
+            aliasOnly: aliasOnly, folderNotes: folderNotes));
+      }
+      return result;
     }
     if (value is Map) {
       final result = <String, Object?>{};
@@ -986,14 +1006,7 @@ class _PortablePathEncoder {
       final relative = _portableRelative(
           path.join('imported-assets', '${_externalCounter++}-$safeName'));
       final output = File(path.join(payloadRoot.path, relative));
-      await output.parent.create(recursive: true);
-      final before = await file.stat();
-      await file.copy(output.path);
-      final after = await file.stat();
-      if (before.size != after.size || before.modified != after.modified) {
-        throw const CacheBackupException(
-            'A referenced asset changed during backup; please retry');
-      }
+      await _checkedCopy(file, output, control);
       final token = '${_tokenPrefix}cache/${Uri.encodeComponent(relative)}';
       _externalAssets[normalized.toLowerCase()] = token;
       return token;
@@ -1624,8 +1637,18 @@ bool _containsAbsolutePath(Object? value, {bool folderNotes = false}) {
   return false;
 }
 
-Future<String> _fileDigest(File file) async =>
-    (await sha256.bind(file.openRead()).first).toString();
+Future<String> _fileDigest(File file, {_BackupWorkerControl? control}) async {
+  Stream<List<int>> input() async* {
+    await for (final chunk in file.openRead()) {
+      await control?.check('verify');
+      yield chunk;
+    }
+  }
+
+  final digest = await sha256.bind(input()).first;
+  await control?.check('verify');
+  return digest.toString();
+}
 
 Future<void> _atomicReplaceFile(File temporary, File destination) async {
   final nonce = '${pid}_${DateTime.now().microsecondsSinceEpoch}';
@@ -1656,12 +1679,14 @@ Future<void> _atomicReplaceFile(File temporary, File destination) async {
   }
 }
 
-Future<int> _verifyPayload(Directory payload, Object? rawFiles) async {
+Future<int> _verifyPayload(
+    Directory payload, Object? rawFiles, _BackupWorkerControl control) async {
   if (rawFiles is! List) {
     throw const CacheBackupException('Backup file list is missing');
   }
   final expected = <String, Map>{};
   for (final raw in rawFiles) {
+    await control.check('verify');
     if (raw is! Map || raw['path'] is! String || raw['sha256'] is! String) {
       throw const CacheBackupException('Backup file list is damaged');
     }
@@ -1675,12 +1700,13 @@ Future<int> _verifyPayload(Directory payload, Object? rawFiles) async {
   await for (final entity
       in payload.list(recursive: true, followLinks: false)) {
     if (entity is! File) continue;
+    await control.check('verify');
     final relative =
         _portableRelative(path.relative(entity.path, from: payload.path));
     final descriptor = expected[relative];
     if (descriptor == null ||
         descriptor['size'] != await entity.length() ||
-        descriptor['sha256'] != await _fileDigest(entity) ||
+        descriptor['sha256'] != await _fileDigest(entity, control: control) ||
         (_backgroundAssetId(relative) != null &&
             _backgroundAssetId(relative) != descriptor['sha256'])) {
       throw const CacheBackupException('Backup payload verification failed');

@@ -225,6 +225,24 @@ const catalogLyricPlaybackTools = <String, List<String>>{
     '가사가 너무 길어 한 번에 일본어 읽기를 생성할 수 없습니다'
   ],
   '歌曲过渡': ['Track transitions', '曲の切り替え', '곡 전환'],
+  '跳过头尾静音': [
+    'Skip leading and trailing silence',
+    '曲の前後の無音をスキップ',
+    '곡 앞뒤 무음 건너뛰기'
+  ],
+  '下次加载本地歌曲生效；仅分析头尾，保留声音边缘，不改原文件或总时长。': [
+    'Applies to the next local track load. Analyses only the edges, preserves sound boundaries, and keeps the file and total duration unchanged.',
+    '次のローカル曲の読み込みから適用します。曲の前後だけを解析し、音の端を残します。元ファイルと総時間は変更しません。',
+    '다음 로컬 곡을 불러올 때 적용됩니다. 곡의 앞뒤만 분석하고 소리의 경계를 보존하며, 원본 파일과 전체 길이는 변경하지 않습니다.'
+  ],
+  '静音阈值': ['Silence threshold', '無音のしきい値', '무음 기준값'],
+  '每端最多分析': ['Maximum scan per edge', '前後それぞれの解析上限', '각 끝의 최대 분석 시간'],
+  '手动定位、A–B 练习或切换输出后，本曲恢复完整范围。在线音频、CUE、短曲、无法精确定位的格式和无法确认的静音边界保持原样；分析超时会回退。启用时自动过渡采用常规切换。':
+      [
+    'Seeking, A–B practice or changing the output restores the full track. Online audio, CUE segments, short tracks, formats without precise seeking and uncertain boundaries stay unchanged; analysis timeouts fall back. Automatic transitions use Standard while enabled.',
+    '手動シーク・A–B 練習・出力の切り替え後は、この曲の再生範囲を元に戻します。オンライン音源・CUE 分割曲・短い曲・正確にシークできない形式・不確かな境界は変更せず、解析タイムアウト時も通常再生します。有効時の自動切り替えは通常方式です。',
+    '수동 탐색, A–B 연습 또는 출력 변경 후 현재 곡의 전체 범위를 복원합니다. 온라인 음원, CUE 분할 곡, 짧은 곡, 정확한 탐색이 불가능한 형식과 불확실한 경계는 그대로 유지하며 분석 시간 초과 시 일반 재생합니다. 활성화하면 자동 전환은 일반 방식을 사용합니다.'
+  ],
   '无法将音频接入输出（BASS 错误码 {0}）': [
     'Could not connect audio to the output (BASS error {0})',
     '音声を出力に接続できませんでした（BASS エラー {0}）',
@@ -233,6 +251,12 @@ const catalogLyricPlaybackTools = <String, List<String>>{
   '常规切换': ['Standard', '通常', '일반 전환'],
   '连续输出': ['Continuous output', '連続出力', '연속 출력'],
   '交叉淡入淡出': ['Crossfade', 'クロスフェード', '크로스페이드'],
+  '同专辑保持连续输出': ['Keep album tracks continuous', '同じアルバムは連続再生', '같은 앨범은 연속 재생'],
+  '自动播放同一专辑时保留曲目衔接，跨专辑仍淡入淡出。专辑名或艺术家信息不完整时沿用淡入淡出。': [
+    'Preserve transitions within an album during automatic playback, while crossfading between albums. Crossfade still applies when the album title or artist is missing.',
+    '自動再生で同じアルバムの曲のつながりを保ち、別のアルバムへはクロスフェードします。アルバム名またはアーティストが不明な場合もクロスフェードします。',
+    '자동 재생 시 같은 앨범 안에서는 곡 사이의 연결을 유지하고, 다른 앨범으로 넘어갈 때는 크로스페이드합니다. 앨범명이나 아티스트 정보가 없으면 크로스페이드를 유지합니다.'
+  ],
   '下次加载歌曲生效。连续输出预先准备当前队列的下一首本地歌曲；手动切歌、定位、A–B 循环和停止目标沿用原行为。': [
     'Applies when a track is next loaded. Continuous output prepares the next local track in the queue. Manual changes, seeking, A–B loops and stop targets retain their behavior.',
     '次の曲の読み込みから適用します。連続出力はキュー内の次のローカル曲を準備します。手動切り替え・シーク・A–B リピート・停止指定は従来どおりです。',

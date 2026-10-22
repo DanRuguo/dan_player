@@ -37,6 +37,8 @@ use crate::index_scan::ScanLease;
 
 use super::{logger::log_to_dart, utils::windows_storage_path};
 
+#[path = "folder_cover.rs"]
+mod folder_cover;
 #[path = "metadata_id3_compat.rs"]
 pub(crate) mod id3_compat;
 #[path = "incremental_index.rs"]
@@ -81,7 +83,8 @@ static SUPPORT_FORMAT: phf::Map<&'static str, bool> = phf::phf_map! {
 };
 
 const INDEX_VERSION: u64 = 113;
-const CLASSIFICATION_VERSION: u64 = 1;
+// v2 recognizes the Vorbis ALBUM ARTIST alias on the next library refresh.
+const CLASSIFICATION_VERSION: u64 = 2;
 const DURATION_VERSION: u64 = 1;
 static METADATA_TRANSACTION_ID: AtomicU64 = AtomicU64::new(0);
 static METADATA_EDIT_LOCK: Mutex<()> = Mutex::new(());
@@ -1284,13 +1287,30 @@ fn first_tag_text_with_source(tags: &[&Tag], key: &ItemKey) -> Option<(String, T
         .find_map(|tag| text_from_tag(tag, key).map(|value| (value, tag.tag_type())))
 }
 
+fn album_artist_from_tags(tags: &[&Tag]) -> Option<(String, TagType)> {
+    first_tag_text_with_source(tags, &ItemKey::AlbumArtist).or_else(|| {
+        tags.iter().filter(|tag| tag.tag_type() == TagType::VorbisComments).find_map(|tag| {
+            let mut values = Vec::new();
+            for item in tag.items() {
+                if !matches!(item.key(), ItemKey::Unknown(key) if key.eq_ignore_ascii_case("ALBUM ARTIST")) {
+                    continue;
+                }
+                if let Some(value) = item.value().text().map(str::trim).filter(|value| !value.is_empty()) {
+                    if !values.contains(&value) { values.push(value); }
+                }
+            }
+            (!values.is_empty()).then(|| (values.join("/"), tag.tag_type()))
+        })
+    })
+}
+
 pub(crate) fn has_indexed_title(file: &TaggedFile) -> bool {
     first_tag_text_with_source(&ordered_tags(file), &ItemKey::TrackTitle).is_some()
 }
 
 fn artist_from_tags_with_source(tags: &[&Tag]) -> (String, Option<TagType>) {
     first_tag_text_with_source(tags, &ItemKey::TrackArtist)
-        .or_else(|| first_tag_text_with_source(tags, &ItemKey::AlbumArtist))
+        .or_else(|| album_artist_from_tags(tags))
         .or_else(|| first_tag_text_with_source(tags, &ItemKey::Composer))
         .map_or_else(
             || ("UNKNOWN".to_string(), None),
@@ -1341,6 +1361,7 @@ pub(crate) struct Audio {
     album_artist: Option<String>,
     classification_version: u64,
     track: Option<u32>,
+    disc_number: Option<u32>,
     /// in secs
     duration: u64,
     /// Successful duration-reader algorithm version. Missing old values are
@@ -1424,6 +1445,7 @@ impl Audio {
             // Filename-only recovery has not successfully read these tags.
             classification_version: 0,
             track: None,
+            disc_number: None,
             duration: 0,
             duration_version: 0,
             bitrate: None,
@@ -1447,6 +1469,7 @@ impl Audio {
             "album_artist": self.album_artist,
             "classification_version": self.classification_version,
             "track": self.track,
+            "disc_number": self.disc_number,
             "duration": self.duration,
             "duration_version": self.duration_version,
             "bitrate": self.bitrate,
@@ -1611,6 +1634,9 @@ impl Audio {
                 |(value, source)| (value, Some(source)),
             );
         let track = tags.iter().find_map(|tag| tag.track());
+        let disc_number = tags
+            .iter()
+            .find_map(|tag| tag.disk().filter(|value| *value > 0));
         let uses_id3v1 = [title_source, artist_source, album_source]
             .into_iter()
             .flatten()
@@ -1625,10 +1651,10 @@ impl Audio {
             artist,
             album,
             composer: first_tag_text_with_source(&tags, &ItemKey::Composer).map(|(value, _)| value),
-            album_artist: first_tag_text_with_source(&tags, &ItemKey::AlbumArtist)
-                .map(|(value, _)| value),
+            album_artist: album_artist_from_tags(&tags).map(|(value, _)| value),
             classification_version: CLASSIFICATION_VERSION,
             track,
+            disc_number,
             duration: properties.duration().as_secs(),
             duration_version: DURATION_VERSION,
             bitrate: properties.audio_bitrate(),
@@ -1712,6 +1738,8 @@ impl Audio {
             album_artist: album_artist.ok().flatten(),
             classification_version,
             track: Some(music_properties.TrackNumber()?),
+            // MusicProperties has no disc accessor; unknown stays unknown.
+            disc_number: None,
             duration: duration.as_secs(),
             duration_version: DURATION_VERSION,
             bitrate: Some(music_properties.Bitrate()? / 1000),
@@ -1832,6 +1860,13 @@ fn cover_decode_dimensions(
 }
 
 fn resize_picture(pic: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
+    if pic.starts_with(b"GIF87a") || pic.starts_with(b"GIF89a") {
+        if let Ok(image) = super::cover_image::normalize_gif(pic, Some((width, height))) {
+            return Some(image.bytes);
+        }
+        // Existing embedded artwork can exceed the new animation budget.
+        // Preserve its bounded static first-frame rendering in that case.
+    }
     let mut reader = image::ImageReader::new(Cursor::new(pic))
         .with_guessed_format()
         .ok()?;
@@ -1885,21 +1920,24 @@ fn _get_picture_by_lofty(path: &String, width: u32, height: u32) -> Option<Vec<u
     None
 }
 
-/// for Flutter  
-/// 如果无法通过 Lofty 获取则通过 Windows 获取
+/// Keep embedded readers (including Windows-only formats) ahead of sidecars.
 pub fn get_picture_from_path(path: String, width: u32, height: u32) -> Option<Vec<u8>> {
     if let Some(pic) = _get_picture_by_lofty(&path, width, height) {
         return Some(pic);
     }
 
     match _get_picture_by_windows(&path, width.max(height)) {
-        Ok(Some(pic)) => resize_picture(&pic, width, height),
-        Ok(None) => None,
+        Ok(Some(pic)) => {
+            if let Some(decoded) = resize_picture(&pic, width, height) {
+                return Some(decoded);
+            }
+        }
+        Ok(None) => {}
         Err(err) => {
             log_to_dart(format!("fail to get pic: {}", err));
-            None
         }
     }
+    folder_cover::picture(Path::new(&path), width, height)
 }
 
 const MAX_LOCAL_LYRIC_BYTES: usize = 2 * 1024 * 1024;
@@ -3373,8 +3411,50 @@ mod tests {
         let json = audio.to_json_value();
         assert_eq!(json["composer"], "坂本龍一");
         assert_eq!(json["album_artist"], "Original Soundtrack");
-        assert_eq!(json["classification_version"], 1);
+        assert_eq!(json["classification_version"], CLASSIFICATION_VERSION);
         assert_eq!(INDEX_VERSION, 113);
+    }
+
+    #[test]
+    fn vorbis_album_artist_alias_is_read_without_overriding_standard_tags() {
+        let mut comments = lofty::ogg::VorbisComments::default();
+        comments.insert("Album Artist".into(), " Various Artists ".into());
+        let mut tag: Tag = comments.into();
+        tag.insert_text(ItemKey::TrackArtist, "Performer".into());
+        assert_eq!(
+            album_artist_from_tags(&[&tag]).unwrap().0,
+            "Various Artists"
+        );
+        assert_eq!(artist_from_tags_with_source(&[&tag]).0, "Performer");
+        tag.insert_text(ItemKey::AlbumArtist, "Canonical owner".into());
+        assert_eq!(
+            album_artist_from_tags(&[&tag]).unwrap().0,
+            "Canonical owner"
+        );
+        tag.remove_key(&ItemKey::AlbumArtist);
+        let mut standard = Tag::new(TagType::Id3v2);
+        standard.insert_text(ItemKey::AlbumArtist, "Standard other tag".into());
+        assert_eq!(
+            album_artist_from_tags(&[&tag, &standard]).unwrap().0,
+            "Standard other tag"
+        );
+        let mut unrelated = Tag::new(TagType::Id3v2);
+        unrelated.insert_unchecked(TagItem::new(
+            ItemKey::Unknown("ALBUM ARTIST".into()),
+            lofty::tag::ItemValue::Text("Not a Vorbis alias".into()),
+        ));
+        assert!(album_artist_from_tags(&[&unrelated]).is_none());
+    }
+
+    #[test]
+    fn vorbis_album_artist_alias_preserves_multiple_values_and_ignores_blanks() {
+        let mut comments = lofty::ogg::VorbisComments::default();
+        for value in [" First ", "Second", "First", " "] {
+            comments.push("aLbUm ArTiSt".into(), value.into());
+        }
+        let tag: Tag = comments.into();
+        assert_eq!(album_artist_from_tags(&[&tag]).unwrap().0, "First/Second");
+        assert_eq!(artist_from_tags_with_source(&[&tag]).0, "First/Second");
     }
 
     #[test]
@@ -3442,6 +3522,7 @@ mod tests {
             serde_json::json!("1"),
             serde_json::json!(1.5),
             serde_json::json!(0),
+            serde_json::json!(1),
         ] {
             assert!(needs_classification_backfill(
                 &serde_json::json!({"classification_version": marker})
@@ -3450,7 +3531,7 @@ mod tests {
         assert!(needs_classification_backfill(
             &serde_json::json!({"composer": "Old"})
         ));
-        for marker in [1, 2] {
+        for marker in [CLASSIFICATION_VERSION, CLASSIFICATION_VERSION + 1] {
             assert!(!needs_classification_backfill(
                 &serde_json::json!({"classification_version": marker, "composer": null, "album_artist": null})
             ));
@@ -3470,7 +3551,7 @@ mod tests {
         assert!(apply_audio_index_update(&mut previous, Some(read), true));
         expected["composer"] = serde_json::json!("Composer");
         expected["album_artist"] = serde_json::json!("Album Artist");
-        expected["classification_version"] = serde_json::json!(1);
+        expected["classification_version"] = serde_json::json!(CLASSIFICATION_VERSION);
         assert_eq!(previous, expected);
     }
 
@@ -3896,6 +3977,130 @@ mod tests {
     #[test]
     fn cover_resize_invalid_image_is_a_safe_miss() {
         assert!(resize_picture(b"not an image", 48, 48).is_none());
+    }
+
+    #[test]
+    fn gif_artwork_over_animation_budget_keeps_static_fallback() {
+        for (width, frames, animated) in [(12, 2, true), (12, 121, false), (1025, 1, false)] {
+            let mut bytes = Vec::new();
+            {
+                let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+                for _ in 0..frames {
+                    encoder
+                        .encode_frame(image::Frame::new(image::RgbaImage::from_pixel(
+                            width,
+                            8,
+                            image::Rgba([70, 90, 210, 255]),
+                        )))
+                        .unwrap();
+                }
+            }
+            let decoded = resize_picture(&bytes, 16, 16).unwrap();
+            assert_eq!(
+                image::guess_format(&decoded).unwrap(),
+                if animated {
+                    image::ImageFormat::Gif
+                } else {
+                    image::ImageFormat::Png
+                }
+            );
+            assert!(image::load_from_memory(&decoded).is_ok());
+        }
+    }
+
+    #[test]
+    fn folder_cover_fallback_is_bounded_ordered_and_read_only() {
+        let directory = test_directory("folder_cover_fallback");
+        let source = directory.join("song.wav");
+        write_minimal_wav(&source);
+        let original_audio = fs::read(&source).unwrap();
+        let image = |color| {
+            let pixels = image::RgbaImage::from_pixel(8, 4, image::Rgba(color));
+            let mut output = Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(pixels)
+                .write_to(&mut output, image::ImageFormat::Png)
+                .unwrap();
+            output.into_inner()
+        };
+        let red = image([255, 0, 0, 255]);
+        let blue = image([0, 0, 255, 255]);
+        fs::write(directory.join("folder.png"), &blue).unwrap();
+        fs::write(directory.join("cover.png"), &red).unwrap();
+        let selected = folder_cover::picture(&source, 32, 32).unwrap();
+        assert_eq!(
+            image::load_from_memory(&selected)
+                .unwrap()
+                .to_rgba8()
+                .get_pixel(0, 0)
+                .0,
+            [255, 0, 0, 255]
+        );
+        // A damaged first candidate must not suppress the usable second one.
+        fs::write(directory.join("cover.png"), b"damaged image").unwrap();
+        let selected = folder_cover::picture(&source, 32, 32).unwrap();
+        assert_eq!(
+            image::load_from_memory(&selected)
+                .unwrap()
+                .to_rgba8()
+                .get_pixel(0, 0)
+                .0,
+            [0, 0, 255, 255]
+        );
+        let oversized = fs::File::create(directory.join("cover.jpg")).unwrap();
+        oversized.set_len(20 * 1024 * 1024 + 1).unwrap();
+        assert!(folder_cover::picture(&source, 32, 32).is_some());
+        drop(oversized);
+        assert!(folder_cover::picture(&directory.join("missing.wav"), 32, 32).is_none());
+        assert_eq!(fs::read(&source).unwrap(), original_audio);
+        assert_eq!(fs::read(directory.join("folder.png")).unwrap(), blue);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn folder_cover_never_overrides_embedded_artwork() {
+        let directory = test_directory("folder_cover_embedded");
+        let source = directory.join("song.wav");
+        write_minimal_wav(&source);
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(7, 3)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.push_picture(Picture::new_unchecked(
+            PictureType::CoverFront,
+            Some(lofty::picture::MimeType::Png),
+            None,
+            encoded.into_inner(),
+        ));
+        tag.save_to_path(&source, WriteOptions::default()).unwrap();
+        let before = fs::read(&source).unwrap();
+        image::DynamicImage::new_rgb8(9, 5)
+            .save(directory.join("cover.png"))
+            .unwrap();
+        let result = get_picture_from_path(source.to_string_lossy().into_owned(), 32, 32).unwrap();
+        let decoded = image::load_from_memory(&result).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (7, 3));
+        assert_eq!(fs::read(source).unwrap(), before);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn disc_number_is_read_without_modifying_audio() {
+        let directory = test_directory("disc_number_read");
+        let source = directory.join("disc-two.wav");
+        write_minimal_wav(&source);
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.set_title("Disc two".into());
+        tag.set_disk(2);
+        tag.set_track(1);
+        tag.save_to_path(&source, WriteOptions::default()).unwrap();
+        let before = fs::read(&source).unwrap();
+        let audio = Audio::read_from_path(&source).unwrap();
+        assert_eq!(audio.disc_number, Some(2));
+        assert_eq!(audio.to_json_value()["disc_number"], 2);
+        assert_eq!(audio.track, Some(1));
+        assert_eq!(fs::read(source).unwrap(), before);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

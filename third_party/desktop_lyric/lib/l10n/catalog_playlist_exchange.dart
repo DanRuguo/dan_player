@@ -1,4 +1,45 @@
 const Map<String, List<String>> catalogPlaylistExchange = {
+  '导入本地歌单': ['Import local playlist', 'ローカルプレイリストを読み込む', '로컬 재생목록 가져오기'],
+  '支持 M3U、M3U8、PLS 和 XSPF；仅导入本地音频引用。': [
+    'Supports M3U, M3U8, PLS and XSPF. Imports local audio references only.',
+    'M3U、M3U8、PLS、XSPF に対応。ローカル音声ファイルの参照を読み込みます。',
+    'M3U, M3U8, PLS, XSPF를 지원하며 로컬 오디오 참조만 가져옵니다.'
+  ],
+  '请选择 M3U、M3U8、PLS 或 XSPF 歌单。': [
+    'Choose an M3U, M3U8, PLS or XSPF playlist.',
+    'M3U、M3U8、PLS、XSPF のプレイリストを選択してください。',
+    'M3U, M3U8, PLS 또는 XSPF 재생목록을 선택해 주세요.'
+  ],
+  'PLS 歌单格式无效。': [
+    'Invalid PLS playlist format.',
+    'PLS プレイリストの形式が無効です。',
+    'PLS 재생목록 형식이 잘못되었습니다.'
+  ],
+  'XSPF 歌单格式无效或包含不支持的 XML 结构。': [
+    'Invalid XSPF playlist or unsupported XML structure.',
+    'XSPF プレイリストが無効か、未対応の XML 構造を含んでいます。',
+    'XSPF 재생목록이 잘못되었거나 지원되지 않는 XML 구조가 포함되어 있습니다.'
+  ],
+  'XSPF 编码无效，请使用 UTF-8 或带 BOM 的 UTF-16。': [
+    'Invalid XSPF encoding. Use UTF-8 or UTF-16 with a BOM.',
+    'XSPF の文字コードが無効です。UTF-8 または BOM 付き UTF-16 を使用してください。',
+    'XSPF 인코딩이 잘못되었습니다. UTF-8 또는 BOM이 있는 UTF-16을 사용해 주세요.'
+  ],
+  'PLS 编码无效，请使用 UTF-8 或带 BOM 的 UTF-16。': [
+    'Invalid PLS encoding. Use UTF-8 or UTF-16 with a BOM.',
+    'PLS の文字コードが無効です。UTF-8 または BOM 付き UTF-16 を使用してください。',
+    'PLS 인코딩이 잘못되었습니다. UTF-8 또는 BOM이 있는 UTF-16을 사용해 주세요.'
+  ],
+  '歌单文件已改变，请关闭后重新导入以更新预览。': [
+    'The playlist file changed. Close this dialog and import it again to refresh the preview.',
+    'プレイリストファイルが変更されました。この画面を閉じて再読み込みし、プレビューを更新してください。',
+    '재생목록 파일이 변경되었습니다. 이 창을 닫고 다시 가져와 미리보기를 갱신하세요.'
+  ],
+  '目标歌单已改变，请重新选择目标以更新预览。': [
+    'The destination playlist changed. Select it again to refresh the preview.',
+    '読み込み先のプレイリストが変更されました。選び直してプレビューを更新してください。',
+    '대상 재생목록이 변경되었습니다. 다시 선택하여 미리보기를 갱신하세요.'
+  ],
   '此文件是 HLS 流媒体清单，不能作为本地歌单导入。': [
     'This file is an HLS stream manifest and cannot be imported as a local playlist.',
     'このファイルは HLS ストリーム一覧のため、ローカルプレイリストとして読み込めません。',

@@ -26,7 +26,8 @@ class _NowPlayingPage_Large extends StatelessWidget {
                       NowPlayingViewMode.onlyMain => const VerticalLyricView(),
                       NowPlayingViewMode.withLyric => const VerticalLyricView(),
                       NowPlayingViewMode.withPlaylist =>
-                        const CurrentPlaylistView(immersive: true),
+                        const CurrentPlaylistView(
+                            immersive: true, showUpcomingPreviewAllowed: true),
                     },
                   ),
                 ),

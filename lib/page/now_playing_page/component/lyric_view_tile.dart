@@ -1348,42 +1348,39 @@ class _TimedLyricLayout {
       phaseFor: (span) {
         var phase = 0.0;
         var count = 0;
-        for (final slot in followSlots) {
-          if (slot.end <= span.start || slot.start >= span.end) continue;
-          phase += slot.phase;
+        for (final index
+            in followSourceIndex.overlapping(span.start, span.end)) {
+          phase += followSlots[index].phase;
           count++;
         }
         return count == 0 ? 1 : phase / count;
       },
       partsFor: (glyph) => [
-        for (final (index, word) in words.indexed)
-          if (word.sourceEnd > glyph.sourceStart &&
-              word.sourceStart < glyph.sourceEnd)
-            // Ruby and morph cells use native tight selection bounds. Word
-            // emphasis keeps its separate includeLineSpacingMiddle pivot.
-            for (final box in base.getBoxesForSelection(TextSelection(
-              baseOffset: math.max(word.sourceStart, glyph.sourceStart),
-              extentOffset: math.min(word.sourceEnd, glyph.sourceEnd),
-            )))
-              if (box.toRect().overlaps(glyph.source))
-                (
-                  index: index,
-                  bounds: box.toRect().intersect(glyph.source),
-                  phase: () {
-                    var phase = 0.0;
-                    var count = 0;
-                    for (final slot in followSlots) {
-                      if (!slot.boxes.any(
-                        (piece) => piece.toRect().overlaps(box.toRect()),
-                      )) {
-                        continue;
-                      }
-                      phase += slot.phase;
-                      count++;
-                    }
-                    return count == 0 ? 1.0 : phase / count;
-                  }(),
-                ),
+        for (final index in wordSourceIndex.overlapping(
+          glyph.sourceStart,
+          glyph.sourceEnd,
+        ))
+          // Ruby and morph cells use native tight selection bounds. Word
+          // emphasis keeps its separate includeLineSpacingMiddle pivot.
+          for (final box in base.getBoxesForSelection(TextSelection(
+            baseOffset: math.max(words[index].sourceStart, glyph.sourceStart),
+            extentOffset: math.min(words[index].sourceEnd, glyph.sourceEnd),
+          )))
+            if (box.toRect().overlaps(glyph.source))
+              (
+                index: index,
+                bounds: box.toRect().intersect(glyph.source),
+                phase: () {
+                  var phase = 0.0;
+                  var count = 0;
+                  for (final slotIndex
+                      in followBoxIndex.overlapping(box.toRect())) {
+                    phase += followSlots[slotIndex].phase;
+                    count++;
+                  }
+                  return count == 0 ? 1.0 : phase / count;
+                }(),
+              ),
       ],
     );
   }
@@ -1484,6 +1481,13 @@ class _TimedLyricLayout {
     base,
     line.content,
   );
+  late final wordSourceIndex = LyricSourceRangeIndex([
+    for (final word in words) (start: word.sourceStart, end: word.sourceEnd),
+  ]);
+  late final followSourceIndex = LyricSourceRangeIndex([
+    for (final slot in followSlots) (start: slot.start, end: slot.end),
+  ]);
+  late final followBoxIndex = LyricFollowBoxIndex(followSlots);
   late final followLineMetrics = base.computeLineMetrics();
   late final List<LyricFollowPiece> followPieces = lyricFollowPieces(
     [for (final word in words) word.boxes],

@@ -161,11 +161,23 @@ class LibraryWatch {
     if (event is FileSystemModifyEvent && !event.contentChanged) {
       return false;
     }
-    return isM3uLocalAudioPath(event.path) ||
+    return _mediaOrArtwork(event.path) ||
         (event is FileSystemMoveEvent &&
             event.destination != null &&
-            isM3uLocalAudioPath(event.destination!));
+            _mediaOrArtwork(event.destination!));
   }
+
+  static bool _mediaOrArtwork(String path) =>
+      isM3uLocalAudioPath(path) ||
+      (const {
+            'cover',
+            'folder',
+            'front',
+            'album',
+            'albumart'
+          }.contains(p.windows.basenameWithoutExtension(path).toLowerCase()) &&
+          const {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'}
+              .contains(p.windows.extension(path).toLowerCase()));
 
   void _lost(String key, Object token, Object? error, StackTrace? trace) {
     if (!_watchCurrent(key, token)) return;

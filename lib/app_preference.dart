@@ -10,6 +10,7 @@ import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
+import 'package:flutter/foundation.dart';
 
 class PagePreference {
   int sortMethod;
@@ -116,6 +117,9 @@ class PlaybackPreference {
   /// Null lets a legacy playback_state.json supply its last shuffle choice.
   bool? shuffle;
   double volumeDsp;
+  // Owned by playback rather than a volume panel's short-lived widget state.
+  // Keeping zero separate preserves mute across source changes and restarts.
+  double lastAudibleVolumeDsp;
   bool eqEnabled;
   List<double> eqGains;
 
@@ -123,14 +127,23 @@ class PlaybackPreference {
     this.playMode,
     this.volumeDsp, {
     this.shuffle,
+    double? lastAudibleVolumeDsp,
     this.eqEnabled = false,
     List<double>? eqGains,
-  }) : eqGains = eqGains ?? List.filled(BassPlayer.eqBandCenters.length, 0.0);
+  })  : lastAudibleVolumeDsp = volumeDsp.isFinite && volumeDsp > 0
+            ? volumeDsp
+            : lastAudibleVolumeDsp != null &&
+                    lastAudibleVolumeDsp.isFinite &&
+                    lastAudibleVolumeDsp > 0
+                ? lastAudibleVolumeDsp
+                : .5,
+        eqGains = eqGains ?? List.filled(BassPlayer.eqBandCenters.length, 0.0);
 
   Map toMap() => {
         "playMode": playMode.name,
         if (shuffle != null) "shuffle": shuffle,
         "volumeDsp": volumeDsp,
+        "lastAudibleVolumeDsp": lastAudibleVolumeDsp,
         "eqEnabled": eqEnabled,
         "eqGains": eqGains,
       };
@@ -153,6 +166,9 @@ class PlaybackPreference {
       PlayMode.fromString(map["playMode"]) ?? PlayMode.forward,
       volume,
       shuffle: map["shuffle"] is bool ? map["shuffle"] as bool : null,
+      lastAudibleVolumeDsp: map['lastAudibleVolumeDsp'] is num
+          ? (map['lastAudibleVolumeDsp'] as num).toDouble()
+          : null,
       eqEnabled: map["eqEnabled"] == true,
       eqGains: gains,
     );
@@ -160,6 +176,8 @@ class PlaybackPreference {
 }
 
 class AppPreference {
+  // A display choice only: hiding the preview never changes transport state.
+  final showQueueUpcoming = ValueNotifier<bool>(true);
   var categoryPresentation = const CategoryPresentation();
   var playlistTilePresentation = const CategoryPresentation();
   var audiosPagePref = PagePreference(0, SortOrder.ascending, ContentView.list);
@@ -241,6 +259,7 @@ class AppPreference {
         "startPage": startPage,
         "playbackPref": playbackPref.toMap(),
         "nowPlayingPagePref": nowPlayingPagePref.toMap(),
+        "showQueueUpcoming": showQueueUpcoming.value,
       };
 
       final prefJson = json.encode(prefMap);
@@ -259,6 +278,9 @@ class AppPreference {
 
       final prefJson = await File(appPreferencePath).readAsString();
       final Map prefMap = json.decode(prefJson);
+      instance.showQueueUpcoming.value = prefMap['showQueueUpcoming'] is bool
+          ? prefMap['showQueueUpcoming'] as bool
+          : true;
 
       instance.playlistTilePresentation =
           CategoryPresentation.fromMap(prefMap["playlistTilePresentation"]);

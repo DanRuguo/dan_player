@@ -1,4 +1,25 @@
 const Map<String, List<String>> catalogRendering = {
+  '水滴折射': ['Water drop refraction', '水滴の屈折', '물방울 굴절'],
+  '动态 GIF 封面': ['Animated GIF covers', 'GIF ジャケットのアニメーション', 'GIF 표지 애니메이션'],
+  '播放已导入的 GIF 封面；减少动画或关闭封面动画时显示首帧。': [
+    'Animate imported GIF covers. Show the first frame when motion is reduced or artwork animation is off.',
+    '読み込んだ GIF ジャケットを再生します。動きを減らす設定やジャケットのアニメーションがオフの場合は最初のフレームを表示します。',
+    '가져온 GIF 표지를 재생합니다. 동작 줄이기 또는 표지 애니메이션이 꺼져 있으면 첫 프레임을 표시합니다.'
+  ],
+  '封面轮廓辉光': ['Cover contour glow', 'ジャケットの輪郭の輝き', '표지 윤곽 빛 효과'],
+  '播放页大封面随鼠标局部折射并亮起细线；与分类流光共用交互反馈动画开关，减少动画时停用。': [
+    'Refract the large player cover and light up fine contours near the pointer. Shares Interaction feedback with category glow; disabled with reduced motion.',
+    '再生画面の大きなジャケットで、ポインター付近が屈折し細い輪郭が光ります。分類画面の光と同じ操作フィードバック設定を使い、動きを減らす設定では無効になります。',
+    '재생 화면의 큰 표지에서 포인터 근처가 굴절되고 가는 윤곽이 빛납니다. 분류 화면의 빛 효과와 조작 피드백 설정을 공유하며, 동작 줄이기에서는 꺼집니다.'
+  ],
+  '频谱样式': ['Spectrum style', 'スペクトラムのスタイル', '스펙트럼 스타일'],
+  '圆头音柱': ['Rounded bars', '丸いバー', '둥근 막대'],
+  '像素音柱': ['Pixel bars', 'ピクセルバー', '픽셀 막대'],
+  '样式同时用于播放条上方与封面四周。': [
+    'Use this style above the progress bar and around the cover.',
+    'シークバーの上とジャケットの周囲に同じスタイルを使います。',
+    '진행 막대 위와 표지 둘레에 같은 스타일을 사용합니다.'
+  ],
   '不可见时暂停视觉更新': [
     'Pause visual updates when hidden',
     '非表示時に表示の更新を一時停止',

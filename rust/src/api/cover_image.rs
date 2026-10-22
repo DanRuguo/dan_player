@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use anyhow::{bail, ensure, Context};
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use image::{DynamicImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader};
+use image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader};
 
 const MAX_INPUT_BYTES: usize = 20 * 1024 * 1024;
 const MAX_INPUT_PIXELS: u64 = 40_000_000;
@@ -50,16 +50,19 @@ fn normalize(data: &[u8]) -> anyhow::Result<ImportedCoverImage> {
         "封面图片不能超过 20 MiB，请先缩小原图后重试。"
     );
     let format = image::guess_format(data).context("封面图片已损坏或格式不受支持。")?;
+    if format == ImageFormat::Gif {
+        return normalize_gif(data, None);
+    }
     let extension = match format {
         ImageFormat::Jpeg => "jpg",
         ImageFormat::Png => "png",
         ImageFormat::WebP => "webp",
         ImageFormat::Bmp => "bmp",
-        _ => bail!("封面仅支持静态 PNG、JPEG、WebP 和 BMP 图片。"),
+        _ => bail!("封面支持 PNG、JPEG、WebP、BMP 和 GIF 图片。"),
     };
     ensure!(
         !animated(data, format)?,
-        "封面暂不支持动图，请选择静态图片。"
+        "非 GIF 动图暂不支持，请选择 GIF 或静态图片。"
     );
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(32768);
@@ -163,6 +166,101 @@ fn normalize(data: &[u8]) -> anyhow::Result<ImportedCoverImage> {
     bail!("无法将封面压缩到 2 MiB，请选择其他图片。")
 }
 
+/// Preserve GIF motion, with bounded sequential decoding and finite frame work.
+/// Normalized delays prevent zero-delay files from requesting a busy frame loop.
+pub(crate) fn normalize_gif(
+    data: &[u8],
+    target: Option<(u32, u32)>,
+) -> anyhow::Result<ImportedCoverImage> {
+    use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
+    ensure!(
+        data.len() <= MAX_INPUT_BYTES,
+        "封面图片不能超过 20 MiB，请先缩小原图后重试。"
+    );
+    let mut decoder = GifDecoder::new(Cursor::new(data)).context("封面图片已损坏或无法解码。")?;
+    let (width, height) = decoder.dimensions();
+    ensure!(
+        width > 0 && height > 0 && width <= 1024 && height <= 1024,
+        "GIF 封面长边最多 1024 像素，请先缩小动图。"
+    );
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(32 * 1024 * 1024);
+    decoder.set_limits(limits)?;
+    let (output_width, output_height) = target.map_or((width, height), |(w, h)| {
+        let scale = (w.max(1) as f64 / width as f64)
+            .max(h.max(1) as f64 / height as f64)
+            .min(1.0);
+        (
+            ((width as f64 * scale).ceil() as u32).max(1),
+            ((height as f64 * scale).ceil() as u32).max(1),
+        )
+    });
+    struct BoundedOutput(Vec<u8>);
+    impl std::io::Write for BoundedOutput {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.0.len() + bytes.len() > MAX_OUTPUT_BYTES {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "无法将封面压缩到 2 MiB，请选择其他图片。",
+                ));
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut output = BoundedOutput(Vec::new());
+    let started = std::time::Instant::now();
+    let mut count = 0usize;
+    {
+        let mut encoder = GifEncoder::new_with_speed(&mut output, 10);
+        encoder.set_repeat(Repeat::Infinite)?;
+        for frame in decoder.into_frames() {
+            ensure!(
+                started.elapsed() < std::time::Duration::from_secs(8),
+                "GIF 封面处理超时，请减少尺寸或帧数。"
+            );
+            count += 1;
+            ensure!(
+                count <= 120 && count as u64 * width as u64 * height as u64 <= 32_000_000,
+                "GIF 封面最多 120 帧且累计不超过 3200 万像素。"
+            );
+            let frame = frame.context("封面图片已损坏或无法解码。")?;
+            let (numerator, denominator) = frame.delay().numer_denom_ms();
+            let delay = (numerator / denominator.max(1)).clamp(40, 60_000);
+            let pixels = if (output_width, output_height) == (width, height) {
+                frame.into_buffer()
+            } else {
+                image::imageops::resize(
+                    frame.buffer(),
+                    output_width,
+                    output_height,
+                    image::imageops::FilterType::Triangle,
+                )
+            };
+            encoder.encode_frame(image::Frame::from_parts(
+                pixels,
+                0,
+                0,
+                image::Delay::from_numer_denom_ms(delay, 1),
+            ))?;
+        }
+    }
+    ensure!(count > 0, "封面图片为空或无法读取。");
+    ensure!(
+        output.0.len() <= MAX_OUTPUT_BYTES,
+        "无法将封面压缩到 2 MiB，请选择其他图片。"
+    );
+    Ok(ImportedCoverImage {
+        bytes: output.0,
+        extension: "gif".into(),
+        width: output_width,
+        height: output_height,
+    })
+}
+
 fn animated(data: &[u8], format: ImageFormat) -> anyhow::Result<bool> {
     if format != ImageFormat::Png && format != ImageFormat::WebP {
         return Ok(false);
@@ -203,6 +301,55 @@ fn animated(data: &[u8], format: ImageFormat) -> anyhow::Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    fn gif_fixture(width: u32, height: u32, count: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            for index in 0..count {
+                let color = if index % 2 == 0 {
+                    [255, 0, 0, 255]
+                } else {
+                    [0, 0, 255, 255]
+                };
+                encoder
+                    .encode_frame(image::Frame::from_parts(
+                        image::RgbaImage::from_pixel(width, height, image::Rgba(color)),
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(0, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn gif_cover_preserves_motion_and_bounds_delay_and_resolution() {
+        let input = gif_fixture(24, 12, 2);
+        let result = normalize_cover_image(input.clone()).unwrap();
+        assert_eq!(result.extension, "gif");
+        let frames: Vec<_> = image::codecs::gif::GifDecoder::new(Cursor::new(result.bytes))
+            .unwrap()
+            .into_frames()
+            .collect_frames()
+            .unwrap();
+        assert_eq!(frames.len(), 2);
+        assert_ne!(frames[0].buffer(), frames[1].buffer());
+        assert_eq!(frames[0].delay().numer_denom_ms(), (40, 1));
+        let small = normalize_gif(&input, Some((6, 6))).unwrap();
+        assert_eq!((small.width, small.height), (12, 6));
+    }
+
+    #[test]
+    fn gif_cover_rejects_excessive_frames_dimensions_and_truncated_pixels() {
+        assert!(normalize_cover_image(gif_fixture(2, 2, 121)).is_err());
+        let mut too_wide = gif_fixture(2, 2, 1);
+        too_wide[6..8].copy_from_slice(&1025u16.to_le_bytes());
+        assert!(normalize_cover_image(too_wide).is_err());
+        let valid = gif_fixture(16, 16, 2);
+        assert!(normalize_cover_image(valid[..valid.len() / 2].to_vec()).is_err());
+    }
     use super::*;
     fn encoded(image: &DynamicImage, format: ImageFormat) -> Vec<u8> {
         let mut output = Cursor::new(Vec::new());

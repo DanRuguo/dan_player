@@ -13,6 +13,8 @@ class SavedPlaybackState {
     required this.position,
     required this.shuffle,
     this.cueTracks = const [],
+    this.queueCueTracks = const {},
+    this.backupCueTracks = const {},
   });
 
   final List<String> queuePaths;
@@ -25,6 +27,12 @@ class SavedPlaybackState {
   /// their independent source coordinates without adding them to the scanner.
   final List<Audio> cueTracks;
 
+  /// The same CUE path/track number can occur with different source ranges
+  /// after a sheet is edited. Preserve the segment selected for each slot.
+  /// The path-only descriptors above remain available to older versions.
+  final Map<int, Audio> queueCueTracks;
+  final Map<int, Audio> backupCueTracks;
+
   Map<String, Object> toMap() => {
         "version": 1,
         "queuePaths": queuePaths,
@@ -34,6 +42,16 @@ class SavedPlaybackState {
         "shuffle": shuffle,
         if (cueTracks.isNotEmpty)
           'cueTracks': [for (final audio in cueTracks) audio.toMap()],
+        if (queueCueTracks.isNotEmpty)
+          'queueCueTracks': {
+            for (final entry in queueCueTracks.entries)
+              entry.key.toString(): entry.value.toMap(),
+          },
+        if (backupCueTracks.isNotEmpty)
+          'backupCueTracks': {
+            for (final entry in backupCueTracks.entries)
+              entry.key.toString(): entry.value.toMap(),
+          },
       };
 
   static SavedPlaybackState? fromMap(Map map) {
@@ -41,6 +59,7 @@ class SavedPlaybackState {
     if (rawQueue is! List || rawQueue.isEmpty) return null;
     final savedIndex = map["index"] is int ? map["index"] as int : 0;
     final queue = <String>[];
+    final queueIndices = <int, int>{};
     var currentIndex = -1;
     for (var i = 0; i < rawQueue.length; i++) {
       final path = rawQueue[i];
@@ -49,17 +68,28 @@ class SavedPlaybackState {
       // an invalid prefix must not attach its successor's position to a
       // different track, or silently select the first duplicate instead.
       if (i == savedIndex) currentIndex = queue.length;
+      queueIndices[i] = queue.length;
       queue.add(path);
     }
     if (queue.isEmpty) return null;
 
     final rawBackup = map["backupPaths"];
-    final backup = rawBackup is List
-        ? rawBackup
-            .whereType<String>()
-            .where((path) => path.isNotEmpty)
-            .toList()
-        : queue;
+    final backup = <String>[];
+    final backupIndices = <int, int>{};
+    if (rawBackup is List) {
+      for (var i = 0; i < rawBackup.length; i++) {
+        final path = rawBackup[i];
+        if (path is! String || path.isEmpty) continue;
+        backupIndices[i] = backup.length;
+        backup.add(path);
+      }
+    }
+    final queueCueTracks =
+        _cueTracksByIndex(map['queueCueTracks'], rawQueue, queueIndices);
+    final backupCueTracks = backup.isEmpty
+        ? queueCueTracks
+        : _cueTracksByIndex(
+            map['backupCueTracks'], rawBackup as List, backupIndices);
     final cueTracks = <Audio>[];
     final rawCue = map['cueTracks'];
     if (rawCue is List) {
@@ -71,19 +101,56 @@ class SavedPlaybackState {
           // A broken optional descriptor must not discard the surviving queue.
         } on TypeError {
           // Old/corrupt optional metadata can contain an unexpected value type.
+        } on UnsupportedError {
+          // JSON exponents can overflow to infinity, which cannot become int.
         }
       }
     }
+    final rawPosition = map['position'];
     return SavedPlaybackState(
       queuePaths: queue,
       backupPaths: backup.isEmpty ? queue : backup,
       index: currentIndex,
-      position: currentIndex >= 0 && map["position"] is num
-          ? (map["position"] as num).toDouble()
+      position: currentIndex >= 0 &&
+              rawPosition is num &&
+              rawPosition.isFinite &&
+              rawPosition >= 0
+          ? rawPosition.toDouble()
           : 0,
       shuffle: map["shuffle"] == true,
       cueTracks: List.unmodifiable(cueTracks),
+      queueCueTracks: queueCueTracks,
+      backupCueTracks: backupCueTracks,
     );
+  }
+
+  static Map<int, Audio> _cueTracksByIndex(
+      Object? raw, List paths, Map<int, int> filteredIndices) {
+    final result = <int, Audio>{};
+    if (raw is! Map) return result;
+    for (final entry in raw.entries) {
+      final key = entry.key;
+      final index = key is String ? int.tryParse(key) : null;
+      final filteredIndex = filteredIndices[index];
+      if (index == null || filteredIndex == null || entry.value is! Map) {
+        continue;
+      }
+      try {
+        final audio = Audio.fromMap(entry.value as Map);
+        if (audio.isCueTrack &&
+            audio.path == paths[index] &&
+            audio.path == audio.cueTrack!.identity) {
+          result[filteredIndex] = audio;
+        }
+      } on FormatException {
+        // Ignore only this optional slot and retain the legacy path fallback.
+      } on TypeError {
+        // Malformed optional metadata must not discard other queue entries.
+      } on UnsupportedError {
+        // A non-finite numeric tag cannot be converted to an integer.
+      }
+    }
+    return Map.unmodifiable(result);
   }
 }
 

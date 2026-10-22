@@ -16,6 +16,7 @@ import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/play_service/replay_gain.dart';
 import 'package:dan_player/play_service/track_resume_preferences.dart';
 import 'package:dan_player/play_service/playback_transition_preferences.dart';
+import 'package:dan_player/play_service/silence_skip_preferences.dart';
 import 'package:dan_player/lyric/japanese_reading_preferences.dart';
 import 'package:dan_player/player_shortcut_preferences.dart';
 import 'package:dan_player/src/rust/api/system_theme.dart';
@@ -285,6 +286,7 @@ class AppSettings {
   final trackResume = ValueNotifier(const TrackResumePreferences());
   final playbackTransitions =
       ValueNotifier(const PlaybackTransitionPreferences());
+  final silenceSkipping = ValueNotifier(const SilenceSkipPreferences());
   final japaneseReadings = ValueNotifier(const JapaneseReadingPreferences());
 
   /// 每 24 小时最多自动检查一次所选通道；不自动下载。
@@ -411,6 +413,8 @@ class AppSettings {
     _instance.playbackTransitions.value =
         PlaybackTransitionPreferences.fromJson(
             settingsMap['PlaybackTransitions']);
+    _instance.silenceSkipping.value =
+        SilenceSkipPreferences.fromJson(settingsMap['SilenceSkipping']);
     _instance.japaneseReadings.value =
         JapaneseReadingPreferences.fromJson(settingsMap['japaneseReadings']);
     _instance.backgrounds.value =
@@ -625,6 +629,7 @@ class AppSettings {
         "ReplayGain": replayGain.value.toJson(),
         "TrackResume": trackResume.value.toJson(),
         "PlaybackTransitions": playbackTransitions.value.toJson(),
+        "SilenceSkipping": silenceSkipping.value.toJson(),
         "japaneseReadings": japaneseReadings.value.toJson(),
         "AutoCheckUpdates": autoCheckUpdates,
         ...updateChannel.toMap(),

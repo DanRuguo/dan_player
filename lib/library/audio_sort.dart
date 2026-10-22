@@ -35,6 +35,7 @@ enum AudioSortField {
         format => '使用本地文件扩展名；未提供格式的联网曲目排在最后。',
         language => '只使用已有语言标签，不根据名称猜测语言。',
         original => '保留原有乐库顺序。',
+        track => '先按碟号，再按音轨排序；未填写的编号排在最后。',
         _ => null,
       };
 }
@@ -93,7 +94,7 @@ num? _positive(num? number) => number != null && number > 0 ? number : null;
 
 String? _fileFormat(Audio audio) {
   if (audio.isOnline) return null;
-  final name = audio.path.replaceAll('\\', '/').split('/').last;
+  final name = audio.localFilePath.replaceAll('\\', '/').split('/').last;
   final dot = name.lastIndexOf('.');
   return dot <= 0 || dot == name.length - 1
       ? null
@@ -116,7 +117,12 @@ Object? audioSortKey(Audio? audio, AudioSortField field) {
     AudioSortField.added => _positive(audio.created),
     AudioSortField.modified =>
       audio.isOnline ? null : _positive(audio.modified),
-    AudioSortField.track => _positive(audio.track),
+    AudioSortField.track => audio.discNumber == null && audio.track <= 0
+        ? null
+        : (
+            _positive(audio.discNumber),
+            _positive(audio.cueTrack?.number ?? audio.track)
+          ),
     AudioSortField.bitrate => _positive(audio.bitrate),
     AudioSortField.sampleRate => _positive(audio.sampleRate),
     AudioSortField.fileSize =>
@@ -129,11 +135,18 @@ Object? audioSortKey(Audio? audio, AudioSortField field) {
   };
 }
 
-int _compareValues(Object? a, Object? b, SortDirection direction) =>
-    _compareKnown(a, b, (left, right) {
-      if (left is num && right is num) return left.compareTo(right);
-      return (left as String).localeCompareTo(right as String);
-    }, direction);
+int _compareValues(Object? a, Object? b, SortDirection direction) {
+  if (a is (num?, num?) && b is (num?, num?)) {
+    final disc = compareSortNumbers(a.$1, b.$1, direction: direction);
+    return disc != 0
+        ? disc
+        : compareSortNumbers(a.$2, b.$2, direction: direction);
+  }
+  return _compareKnown(a, b, (left, right) {
+    if (left is num && right is num) return left.compareTo(right);
+    return (left as String).localeCompareTo(right as String);
+  }, direction);
+}
 
 /// Null audio is an entry without song-specific information, e.g. a child
 /// playlist. Its position remains stable among other unknown entries.

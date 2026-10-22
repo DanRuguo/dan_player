@@ -132,6 +132,7 @@ class PlaybackService extends ChangeNotifier {
     segmentLoop.addListener(_practiceChanged);
     AppSettings.instance.playbackTransitions
         .addListener(_onTransitionPreferences);
+    AppSettings.instance.silenceSkipping.addListener(_onSilencePreferences);
     stopAfterCurrent.addListener(_invalidatePreparedTransitions);
     playMode.addListener(_invalidatePreparedTransitions);
     shuffle.addListener(_invalidatePreparedTransitions);
@@ -240,6 +241,7 @@ class PlaybackService extends ChangeNotifier {
       ..setEqGains(AppPreference.instance.playbackPref.eqGains)
       ..setEqEnabled(AppPreference.instance.playbackPref.eqEnabled);
     player.configureTransitions(AppSettings.instance.playbackTransitions.value);
+    player.configureSilenceSkipping(AppSettings.instance.silenceSkipping.value);
     if (player.supportsPlaybackRate) {
       player.setPlaybackRate(features.playbackRate);
     }
@@ -645,6 +647,7 @@ class PlaybackService extends ChangeNotifier {
   ValueListenable<Object> get playbackIntent => _playbackIntent;
 
   _NextTransitionPlan? _nextTransitionPlan;
+  bool _silenceWasEnabled = AppSettings.instance.silenceSkipping.value.enabled;
   int? _preparingOccurrence;
   int _transitionRevision = 0;
   DateTime? _transitionRetryAfter;
@@ -654,6 +657,15 @@ class PlaybackService extends ChangeNotifier {
     if (!_closed) {
       _player
           .configureTransitions(AppSettings.instance.playbackTransitions.value);
+    }
+  }
+
+  void _onSilencePreferences() {
+    _silenceWasEnabled |= AppSettings.instance.silenceSkipping.value.enabled;
+    _invalidatePreparedTransitions();
+    if (!_closed) {
+      _player
+          .configureSilenceSkipping(AppSettings.instance.silenceSkipping.value);
     }
   }
 
@@ -669,14 +681,16 @@ class PlaybackService extends ChangeNotifier {
 
   void _considerPreparingNext() {
     final preferences = AppSettings.instance.playbackTransitions.value;
+    final currentAudio = nowPlaying;
     if (_closed ||
         !preferences.enabled ||
+        AppSettings.instance.silenceSkipping.value.enabled ||
         !_player.supportsTransitions ||
         isChangingOutput.value ||
         resolvingAudioPath.value != null ||
         playerState != PlayerState.playing ||
-        nowPlaying?.isLocal != true ||
-        nowPlaying?.isCueTrack == true ||
+        currentAudio?.isLocal != true ||
+        currentAudio?.isCueTrack == true ||
         segmentLoop.enabled) {
       return;
     }
@@ -731,6 +745,8 @@ class PlaybackService extends ChangeNotifier {
             identity: occurrence,
             rate: settings.rate,
             pitch: settings.pitch,
+            allowCrossfade: preferences.allowsCrossfade(
+                currentAudio!.albumIdentity, next.albumIdentity),
             stillCurrent: current);
         if (!current()) return;
         if (prepared) {
@@ -773,6 +789,36 @@ class PlaybackService extends ChangeNotifier {
     return index == null ? null : playlist.value[index];
   }
 
+  /// A bounded read of the known queue order. It never creates a shuffle
+  /// round, advances history or resolves a source. Distinct duplicate rows
+  /// retain their own occurrence IDs; a repeated cycle is shown only once.
+  List<({int index, int occurrenceId, Audio audio})> automaticQueuePreview(
+      {int limit = 3}) {
+    if (_closed || resolvingAudioPath.value != null || limit <= 0) return [];
+    final result = <({int index, int occurrenceId, Audio audio})>[];
+    final seen = <int>{};
+    var current = _currentQueueIndex;
+    for (var i = 0; i < limit.clamp(0, 20); i++) {
+      final next = knownNextQueueIndex(
+          length: _queueOccurrences.length,
+          currentIndex: current,
+          playMode: playMode.value,
+          shuffle: shuffle.value,
+          canAdvance: queueStopBoundary.canAdvanceAutomatically,
+          stopAtCurrent: stopAfterCurrent.value ||
+              (queueStopBoundary.active &&
+                  queueStopBoundary.target == queueOccurrenceId(current)),
+          repeatingSegment: segmentLoop.enabled);
+      if (next == null) break;
+      final occurrence = _queueOccurrences[next];
+      if (!seen.add(occurrence.id)) break;
+      result.add(
+          (index: next, occurrenceId: occurrence.id, audio: occurrence.item));
+      current = next;
+    }
+    return result;
+  }
+
   void _publishPlaybackIntent({bool transportCommand = false}) {
     _invalidatePreparedTransitions();
     if (transportCommand) _transportCommandRevision++;
@@ -797,6 +843,7 @@ class PlaybackService extends ChangeNotifier {
 
   int? _playlistIndex;
   int? _loadingPlaylistIndex;
+  int? _failedNavigationOccurrence;
   String? _deletingAudioPath;
   int get playlistIndex {
     final index = queueIndexForTrack(playlist.value, nowPlaying?.path,
@@ -806,6 +853,11 @@ class PlaybackService extends ChangeNotifier {
 
   int get _navigationIndex {
     final pending = resolvingAudioPath.value;
+    if (pending == null && _failedNavigationOccurrence != null) {
+      final failed = _queueOccurrences
+          .indexWhere((entry) => entry.id == _failedNavigationOccurrence);
+      if (failed >= 0) return failed;
+    }
     return queueIndexForTrack(playlist.value, pending ?? nowPlaying?.path,
         preferredIndex:
             pending == null ? _playlistIndex : _loadingPlaylistIndex);
@@ -814,6 +866,7 @@ class PlaybackService extends ChangeNotifier {
   final ValueNotifier<List<Audio>> playlist = ValueNotifier([]);
   List<Audio> _playlistBackup = [];
   ShuffleQueueCycle<Audio>? _shuffleCycle;
+  final _shuffleHistory = ShuffleQueueHistory<QueueOccurrence<Audio>>();
   final _queueEditHistory = QueueEditHistory<QueueOccurrence<Audio>>();
   List<QueueOccurrence<Audio>> _queueOccurrences = [];
   List<QueueOccurrence<Audio>> _backupOccurrences = [];
@@ -942,6 +995,8 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _replaceQueue(List<Audio> items, {List<Audio>? backup}) {
+    _failedNavigationOccurrence = null;
+    _shuffleHistory.clear();
     _queueEditHistory.clear(QueueHistoryInvalidation.queueReplaced);
     queueStopBoundary.cancel(QueueStopCancelReason.sourceReplaced);
     _queueOccurrences = [for (final item in items) QueueOccurrence(item)];
@@ -1007,6 +1062,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _applyQueueSnapshot(QueueSnapshot<QueueOccurrence<Audio>> snapshot) {
+    _shuffleHistory.clear();
     final sourceToken = _sourceRequestToken;
     _playlistIndex = snapshot.currentIndex < 0 ? null : snapshot.currentIndex;
     _backupOccurrences = snapshot.backup;
@@ -1063,6 +1119,17 @@ class PlaybackService extends ChangeNotifier {
   int? _practiceToken;
   void _practiceChanged() {
     _invalidatePreparedTransitions();
+    if (segmentLoop.enabled &&
+        _silenceWasEnabled &&
+        _player.silenceBounds != null) {
+      // Explicit practice restores the full file and flushes any trimmed tail
+      // already buffered by the decoder, preserving its current transport state.
+      try {
+        _player.seek(position);
+      } catch (error, trace) {
+        LOGGER.w('[restore full practice range] $error', stackTrace: trace);
+      }
+    }
     if (!segmentLoop.enabled) {
       _practiceTimer?.cancel();
       _practiceTimer = null;
@@ -1239,6 +1306,7 @@ class PlaybackService extends ChangeNotifier {
   Future<void>? _sessionRestoreFuture;
 
   void replaceAudioReference(String oldPath, Audio audio) {
+    _shuffleHistory.clear();
     QueueOccurrence<Audio> replace(QueueOccurrence<Audio> entry) =>
         entry.item.path == oldPath ? entry.withItem(audio) : entry;
     _queueEditHistory.mapItems(replace);
@@ -1254,6 +1322,7 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void refreshAudioReferences(Map<String, Audio> audioByPath) {
+    _shuffleHistory.clear();
     QueueOccurrence<Audio> refresh(QueueOccurrence<Audio> entry) =>
         entry.withItem(audioByPath[entry.item.path] ?? entry.item);
     _queueEditHistory.mapItems(refresh);
@@ -1361,6 +1430,7 @@ class PlaybackService extends ChangeNotifier {
   /// deleted song was active, keep the queue moving at the same logical slot.
   void commitAudioDeletion(PlaybackAudioDeletionTicket ticket) {
     if (ticket._resolved) return;
+    _shuffleHistory.clear();
     _queueEditHistory.clear(QueueHistoryInvalidation.physicalDeletion);
     ticket._resolved = true;
     if (_sameAudioPath(_deletingAudioPath, ticket.path)) {
@@ -1567,9 +1637,19 @@ class PlaybackService extends ChangeNotifier {
 
   /// 修改解码时的音量（不影响 Windows 系统音量）
   void setVolumeDsp(double volume) {
+    if (_closed) return;
     _player.setVolumeDsp(volume);
     _pref.volumeDsp = volume;
+    if (volume > 0) _pref.lastAudibleVolumeDsp = volume;
     diagnosticsRevision.value++;
+  }
+
+  /// Reuse the latest successful audible level even after the panel is
+  /// recreated or a muted session is restored. Moving the slider above zero
+  /// remains an explicit unmute, as before.
+  void toggleVolumeMute() {
+    if (_closed) return;
+    setVolumeDsp(volumeDsp > 0 ? 0 : _pref.lastAudibleVolumeDsp);
   }
 
   Stream<double> get positionStream => _player.positionStream;
@@ -1648,6 +1728,7 @@ class PlaybackService extends ChangeNotifier {
       TrackPlaybackSettings? preparedSettings,
       bool Function()? stillCurrent}) async {
     if (_closed || stillCurrent?.call() == false) return false;
+    _failedNavigationOccurrence = null;
     // Automatic handoff already captured the completed predecessor before
     // adopting the next native handle. Its new clock belongs to the next song.
     if (!preparedApplied) unawaited(_captureTrackResume(force: true));
@@ -1688,6 +1769,7 @@ class PlaybackService extends ChangeNotifier {
     TrackPlaybackSettings? preparedSettings,
     bool Function()? stillCurrent,
   }) async {
+    final targetOccurrence = queueOccurrenceId(audioIndex);
     try {
       if (audioIndex < 0 || audioIndex >= playlist.length) {
         throw RangeError.index(audioIndex, playlist, "audioIndex");
@@ -1820,8 +1902,15 @@ class PlaybackService extends ChangeNotifier {
       LOGGER.e("[load and play] $err");
       LOGGER.d("[load and play] trace", stackTrace: trace);
       if (_isCurrentSourceRequest(token)) {
-        final occurrence = queueOccurrenceId(audioIndex);
-        if (occurrence != null) queueStopBoundary.failed(occurrence, token);
+        // The retained decoder still belongs to the preceding song. Keep the
+        // failed selection only as a navigation cursor so a second Next can
+        // reach the following row instead of retrying one missing file forever.
+        // Occurrence identity survives shuffle/reorder and avoids duplicate
+        // paths taking over each other's position.
+        _failedNavigationOccurrence = targetOccurrence;
+        if (targetOccurrence != null) {
+          queueStopBoundary.failed(targetOccurrence, token);
+        }
         _recordProblem(err);
         showAppNotice(
             err is BassNetworkConfigurationException
@@ -1849,7 +1938,14 @@ class PlaybackService extends ChangeNotifier {
         preferredIndex: _playlistIndex);
     // A newly selected queue may be visible while its first track is opening.
     // Never persist the old track's position against an unrelated queue entry.
-    if (currentIndex < 0) return null;
+    if (currentIndex < 0 ||
+        queueTrackIdentity(playlist.value[currentIndex]) !=
+            queueTrackIdentity(nowPlaying!)) {
+      // A reimported CUE can share the same path/number while pointing at a
+      // different segment. If opening it failed, the retained native clock
+      // still belongs to the preceding segment; preserve the last good save.
+      return null;
+    }
     return SavedPlaybackState(
       queuePaths: [for (final audio in playlist.value) audio.path],
       backupPaths: [for (final audio in _playlistBackup) audio.path],
@@ -1860,6 +1956,14 @@ class PlaybackService extends ChangeNotifier {
         for (final audio in [...playlist.value, ..._playlistBackup])
           if (audio.isCueTrack) audio.path: audio,
       }.values.toList(growable: false),
+      queueCueTracks: {
+        for (final entry in playlist.value.asMap().entries)
+          if (entry.value.isCueTrack) entry.key: entry.value,
+      },
+      backupCueTracks: {
+        for (final entry in _playlistBackup.asMap().entries)
+          if (entry.value.isCueTrack) entry.key: entry.value,
+      },
     );
   }
 
@@ -1968,6 +2072,7 @@ class PlaybackService extends ChangeNotifier {
     cancelSleepTimer();
     cancelQueueStop();
     segmentLoop.clear();
+    _shuffleHistory.clear();
     _queueOccurrences = [for (final id in queue) occurrences[id]!];
     _backupOccurrences = [
       for (final id in snapshot['backup'] as List)
@@ -2034,20 +2139,20 @@ class PlaybackService extends ChangeNotifier {
         for (final audio in list.flattenAudios())
           if (audio.isCueTrack) audio.path: audio,
     };
-    List<Audio> resolve(List<String> paths) => [
-          for (final path in paths)
-            if (byPath[path] != null) byPath[path]!,
-        ];
-
-    final queue = resolve(saved.queuePaths);
+    final queue = <Audio>[];
+    var restoredIndex = -1;
+    for (var i = 0; i < saved.queuePaths.length; i++) {
+      final audio = saved.queueCueTracks[i] ?? byPath[saved.queuePaths[i]];
+      if (audio == null) continue;
+      if (i == saved.index) restoredIndex = queue.length;
+      queue.add(audio);
+    }
     if (queue.isEmpty) return;
-    final backup = resolve(saved.backupPaths);
-
-    final restoredIndex = queueIndexAfterFiltering(
-      saved.queuePaths,
-      saved.index,
-      keepPath: byPath.containsKey,
-    );
+    final backup = <Audio>[];
+    for (var i = 0; i < saved.backupPaths.length; i++) {
+      final audio = saved.backupCueTracks[i] ?? byPath[saved.backupPaths[i]];
+      if (audio != null) backup.add(audio);
+    }
     final hasSavedOccurrence = restoredIndex >= 0;
     // If that occurrence disappeared, start the first surviving item from the
     // beginning, never apply another song's saved progress to it.
@@ -2058,7 +2163,7 @@ class PlaybackService extends ChangeNotifier {
     var restoredQueue = queue;
     if (saved.shuffle && !desiredShuffle) {
       index = queueOccurrenceIndex(queue, index, _playlistBackup,
-          keyOf: (audio) => audio.path);
+          keyOf: queueTrackIdentity);
       // A corrupt legacy backup must never discard the saved active entry.
       if (index >= 0) {
         restoredQueue = List.of(_playlistBackup);
@@ -2079,11 +2184,13 @@ class PlaybackService extends ChangeNotifier {
     var canRestorePosition = hasSavedOccurrence;
     final restoredTrack = restoredQueue[index];
     if (restoredTrack.isCueTrack) {
-      Audio? originalCue;
-      for (final audio in saved.cueTracks) {
-        if (audio.path == restoredTrack.path) {
-          originalCue = audio;
-          break;
+      Audio? originalCue = saved.queueCueTracks[saved.index];
+      if (originalCue == null) {
+        for (final audio in saved.cueTracks) {
+          if (audio.path == restoredTrack.path) {
+            originalCue = audio;
+            break;
+          }
         }
       }
       canRestorePosition = canRestorePosition &&
@@ -2100,6 +2207,7 @@ class PlaybackService extends ChangeNotifier {
     bool resumeAfterLoad = false,
   }) {
     if (_closed) return Future.value();
+    _failedNavigationOccurrence = null;
     unawaited(_captureTrackResume(force: true));
     _queueEditHistory.clear(QueueHistoryInvalidation.sourceChanged);
     segmentLoop.clear();
@@ -2126,6 +2234,7 @@ class PlaybackService extends ChangeNotifier {
     double savedPosition,
     TrackPlaybackRevision soundRevision,
   ) async {
+    final targetOccurrence = queueOccurrenceId(audioIndex);
     try {
       if (audioIndex < 0 || audioIndex >= playlist.length) {
         throw RangeError.index(audioIndex, playlist, 'audioIndex');
@@ -2178,6 +2287,10 @@ class PlaybackService extends ChangeNotifier {
             .start(nowPlaying!, playbackRate: _player.playbackRate);
       }
 
+      // Optional edge trimming and decoder sample alignment can move the
+      // source even when the requested saved position was zero. Publish and
+      // persist its actual media clock, including a paused restore.
+      restoredPosition = position;
       notifyListeners();
       (_applyAudioTheme ??
           ThemeProvider.instance.applyThemeFromAudio)(nowPlaying!);
@@ -2203,6 +2316,7 @@ class PlaybackService extends ChangeNotifier {
       });
     } catch (err, trace) {
       if (!_isCurrentSourceRequest(token)) return;
+      _failedNavigationOccurrence = targetOccurrence;
       _recordProblem(err);
       // A failed/stale restore must never clear a successfully opened newer
       // song. Native source replacement itself is transactional as well.
@@ -2309,19 +2423,20 @@ class PlaybackService extends ChangeNotifier {
     }
 
     if (shuffle.value) {
-      if (sameQueuePool(_playlistBackup, playlist,
-          keyOf: (audio) => audio.path)) {
+      if (sameQueuePool(_playlistBackup, playlist, keyOf: queueTrackIdentity)) {
         final backupIndex = queueOccurrenceIndex(
             playlist, audioIndex, _playlistBackup,
-            keyOf: (audio) => audio.path);
+            keyOf: queueTrackIdentity);
         final cycle = _shuffleCycle;
         final indexInCycle = cycle?.appliesTo(
                     this.playlist.value, _playlistBackup,
-                    sameItem: (left, right) => left.path == right.path) ==
+                    sameItem: (left, right) =>
+                        queueTrackIdentity(left) ==
+                        queueTrackIdentity(right)) ==
                 true
             ? cycle!.queueIndex(backupIndex)
             : queueOccurrenceIndex(playlist, audioIndex, this.playlist.value,
-                keyOf: (audio) => audio.path);
+                keyOf: queueTrackIdentity);
         if (indexInCycle >= 0) {
           queueStopBoundary.manualJump(
               _queueOccurrences.map((e) => e.id).toList(),
@@ -2371,9 +2486,15 @@ class PlaybackService extends ChangeNotifier {
       play(0, audios);
       return true;
     }
-    final edit = QueueEdit.insert(
+    final insertion = QueueEdit.insert(
         _queueOccurrences, _navigationIndex, additions,
         next: next);
+    // A failed selection is a navigation anchor only. Inserting after it must
+    // not promote it to the current decoder, especially when that decoder's
+    // path occurs more than once in the queue.
+    final currentId = _currentOccurrence?.id;
+    final edit = QueueEdit(insertion.items,
+        insertion.items.indexWhere((entry) => entry.id == currentId));
     final backup = shuffle.value
         ? [..._backupOccurrences, ...additions]
         : List<QueueOccurrence<Audio>>.of(edit.items);
@@ -2388,6 +2509,7 @@ class PlaybackService extends ChangeNotifier {
     _pref.shuffle = flag;
     _scheduleModePreferenceSave();
     if (flag == shuffle.value) return;
+    _shuffleHistory.clear();
     _queueEditHistory.clear(QueueHistoryInvalidation.shuffleChanged);
 
     if (flag) {
@@ -2427,17 +2549,22 @@ class PlaybackService extends ChangeNotifier {
     }
     final cycle = _shuffleCycle;
     if (cycle?.appliesTo(playlist.value, source,
-            sameItem: (left, right) => left.path == right.path) ==
+            sameItem: (left, right) =>
+                queueTrackIdentity(left) == queueTrackIdentity(right)) ==
         true) {
       return cycle!.sourceIndex(index);
     }
     return queueOccurrenceIndex(playlist.value, index, source,
-        keyOf: (audio) => audio.path);
+        keyOf: queueTrackIdentity);
   }
 
   void _buildShuffleCycle(List<Audio> source,
-      {int? startIndex, String? avoidFirstPath, bool replaceQueue = false}) {
+      {int? startIndex,
+      String? avoidFirstPath,
+      bool replaceQueue = false,
+      bool retainHistory = false}) {
     if (source.isEmpty) return;
+    if (!retainHistory) _shuffleHistory.clear();
     if (replaceQueue) _replaceQueue(source);
     _queueEditHistory.clear(QueueHistoryInvalidation.shuffleChanged);
     final sourceOccurrences = identical(source, _playlistBackup)
@@ -2467,8 +2594,23 @@ class PlaybackService extends ChangeNotifier {
     _publishQueue();
   }
 
+  void _restoreShuffleOrder(List<QueueOccurrence<Audio>> order) {
+    final current = _currentOccurrence?.id;
+    final pending = queueOccurrenceId(_navigationIndex);
+    _queueEditHistory.clear(QueueHistoryInvalidation.shuffleChanged);
+    _shuffleCycle = null;
+    _queueOccurrences = order;
+    final currentIndex = order.indexWhere((entry) => entry.id == current);
+    _playlistIndex = currentIndex < 0 ? null : currentIndex;
+    if (resolvingAudioPath.value != null) {
+      final pendingIndex = order.indexWhere((entry) => entry.id == pending);
+      _loadingPlaylistIndex = pendingIndex < 0 ? null : pendingIndex;
+    }
+    _publishQueue();
+  }
+
   bool _advanceQueue({required bool automatic}) {
-    final currentIndex = _navigationIndex;
+    final currentIndex = automatic ? _currentQueueIndex : _navigationIndex;
     final step = nextQueueAdvance(
         length: playlist.value.length,
         currentIndex: currentIndex,
@@ -2482,12 +2624,21 @@ class PlaybackService extends ChangeNotifier {
           adjacent: true);
     }
     if (step.newShuffleCycle) {
-      final currentPath =
-          currentIndex >= 0 && currentIndex < playlist.value.length
-              ? playlist.value[currentIndex].path
-              : null;
-      final source = _playlistBackup.isEmpty ? playlist.value : _playlistBackup;
-      _buildShuffleCycle(source, avoidFirstPath: currentPath);
+      final previousOrder = _queueOccurrences;
+      final knownOrder = _shuffleHistory.next(previousOrder);
+      if (knownOrder != null) {
+        _restoreShuffleOrder(knownOrder);
+      } else {
+        final currentPath =
+            currentIndex >= 0 && currentIndex < playlist.value.length
+                ? playlist.value[currentIndex].path
+                : null;
+        final source =
+            _playlistBackup.isEmpty ? playlist.value : _playlistBackup;
+        _buildShuffleCycle(source,
+            avoidFirstPath: currentPath, retainHistory: true);
+        _shuffleHistory.advanced(previousOrder);
+      }
     }
     final prepared = _nextTransitionPlan;
     if (automatic &&
@@ -2539,6 +2690,10 @@ class PlaybackService extends ChangeNotifier {
 
     int newIndex = _navigationIndex - 1;
     if (newIndex < 0) {
+      if (shuffle.value) {
+        final previous = _shuffleHistory.previous(_queueOccurrences);
+        if (previous != null) _restoreShuffleOrder(previous);
+      }
       newIndex = playlist.value.length - 1;
     }
 
@@ -2758,6 +2913,7 @@ class PlaybackService extends ChangeNotifier {
     queueStopBoundary.removeListener(_onQueueStopChanged);
     AppSettings.instance.playbackTransitions
         .removeListener(_onTransitionPreferences);
+    AppSettings.instance.silenceSkipping.removeListener(_onSilencePreferences);
     stopAfterCurrent.removeListener(_invalidatePreparedTransitions);
     playMode.removeListener(_invalidatePreparedTransitions);
     shuffle.removeListener(_invalidatePreparedTransitions);

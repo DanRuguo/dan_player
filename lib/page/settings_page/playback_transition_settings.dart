@@ -146,6 +146,24 @@ class _PlaybackTransitionSettingsState extends State<PlaybackTransitionSettings>
                     const Padding(
                         padding: EdgeInsets.symmetric(vertical: 12),
                         child: Divider(height: 1)),
+                    SettingsSwitchTile(
+                        controlKey:
+                            const ValueKey('playback-same-album-gapless'),
+                        surface: false,
+                        contentPadding: EdgeInsets.zero,
+                        icon: Icons.album_outlined,
+                        title: Text(ui('同专辑保持连续输出')),
+                        subtitle: Text(ui(
+                            '自动播放同一专辑时保留曲目衔接，跨专辑仍淡入淡出。专辑名或艺术家信息不完整时沿用淡入淡出。')),
+                        value: preferences.skipSameAlbumCrossfade,
+                        onChanged: (skip) {
+                          if (!_sectionVisible) return;
+                          _discardDraft();
+                          _preferences.value = _preferences.value
+                              .copyWith(skipSameAlbumCrossfade: skip);
+                          unawaited(_save());
+                        }),
+                    const SizedBox(height: 16),
                     SettingsHeader(
                         icon: Icons.timer_outlined,
                         title: ui('淡入淡出时长：{0} 秒', [

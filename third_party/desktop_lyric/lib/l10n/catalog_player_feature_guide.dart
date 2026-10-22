@@ -1,4 +1,67 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '试一试：频谱动效': [
+    'Try it: spectrum animation',
+    '試してみる：スペクトラムの動き',
+    '체험: 스펙트럼 애니메이션'
+  ],
+  '频谱显隐示意': [
+    'Spectrum appearance demonstration',
+    'スペクトラムの表示・消去デモ',
+    '스펙트럼 표시와 사라짐 시연'
+  ],
+  '演示音柱显隐': ['Preview bar fading', '音柱のフェードを試す', '막대 페이드 시연'],
+  '歌词页的待播预览可在“界面与主题”的“显示待播预览”关闭；播放条弹出的列表始终不显示预览。点击预览歌曲只定位队列，不会立即切歌。': [
+    'Turn off Show upcoming preview under Interface & theme to hide it on the lyrics page. The playback bar popup never shows previews. Selecting a preview track locates it in the queue without switching playback.',
+    '歌詞ページのプレビューは「画面とテーマ」の「次の曲のプレビューを表示」で非表示にできます。再生バーのポップアップには表示しません。曲を押すとキュー内の位置に移動し、再生曲は変わりません。',
+    '인터페이스 및 테마의 다음 곡 미리보기 표시를 끄면 가사 화면에서 숨길 수 있습니다. 재생 막대의 팝업 목록에는 항상 표시하지 않습니다. 미리보기 곡을 누르면 대기열 위치로 이동하며 재생 곡은 바뀌지 않습니다.'
+  ],
+  '像素音柱会平滑亮起和熄灭，受“交互反馈动画”控制。下方示例可比较两种样式；真实频谱随当前音频变化。': [
+    'Pixel bars fade in and out under Interaction feedback animation. Compare both styles below; the real spectrum follows the current audio.',
+    'ピクセル音柱は「操作フィードバックのアニメーション」に従い滑らかに点灯・消灯します。下の例で2種類を比較できます。実際のスペクトラムは再生音声に従います。',
+    '픽셀 막대는 상호작용 피드백 애니메이션 설정에 따라 부드럽게 밝아지고 사라집니다. 아래에서 두 스타일을 비교할 수 있으며 실제 스펙트럼은 재생 중인 오디오를 따릅니다.'
+  ],
+  '当前队列可折叠连续的同专辑歌曲，搜索与定位当前曲目时会展开相关组；折叠不改变播放顺序。待播预览先显示 4 首，宽窗双栏、窄窗单栏，展开最多查看 10 首；按当前播放模式显示已确定的接续歌曲，不提前生成新一轮随机队列。':
+      [
+    'Collapse consecutive tracks from the same album in the current queue. Searching or locating the current track reveals its group without changing playback order. Preview 4 upcoming tracks in two columns when wide or one when narrow, and expand to at most 10. Only the determined order for the current mode is shown; another shuffle round is not generated.',
+    'キューでは同じアルバムの連続した曲を折りたためます。検索や再生中の曲への移動では該当グループが開き、再生順は変わりません。次の4曲を広い画面では2列、狭い画面では1列で表示し、展開すると最大10曲まで確認できます。現在のモードで確定した順序を使い、次のシャッフルを先に生成しません。',
+    '현재 대기열에서 같은 앨범의 연속된 곡을 접을 수 있습니다. 검색하거나 현재 곡으로 이동하면 해당 그룹이 펼쳐지며 재생 순서는 바뀌지 않습니다. 다음 4곡을 넓은 화면에서는 두 열, 좁은 화면에서는 한 열로 표시하며 최대 10곡까지 펼칠 수 있습니다. 현재 모드에서 확정된 순서만 표시하며 다음 무작위 순서를 미리 만들지 않습니다.'
+  ],
+  '“跳过头尾静音”默认关闭，在下次加载本地歌曲时生效，可设置静音阈值和每端检测时长。启用后使用常规切换，保留原文件和完整时间轴；手动定位、A-B 循环或切换输出会恢复本曲完整范围。无法确认精确定位的格式保留原样。':
+      [
+    'Skip leading and trailing silence is off by default and applies when the next local track loads. Set the silence threshold and scan duration for each end. Enabling it uses regular track transitions and preserves the file and full timeline. Seeking, A–B looping or changing output restores the full range of the current track. Formats without confirmed accurate seeking remain unchanged.',
+    '曲の前後の無音スキップは初期設定でオフです。次にローカル曲を読み込む際に適用され、しきい値と両端の解析時間を設定できます。有効時は通常の曲切り替えを使い、元のファイルと時間軸を保持します。シーク、A–Bリピート、出力の変更では現在の曲の全範囲に戻ります。正確なシークを確認できない形式は変更しません。',
+    '곡 앞뒤 무음 건너뛰기는 기본적으로 꺼져 있으며 다음 로컬 곡을 불러올 때 적용됩니다. 무음 기준과 각 끝의 분석 시간을 설정할 수 있습니다. 켜면 일반 곡 전환을 사용하며 원본 파일과 전체 시간축을 유지합니다. 탐색, A–B 반복 또는 출력 변경 시 현재 곡의 전체 범위가 복원됩니다. 정확한 탐색을 확인할 수 없는 형식은 그대로 재생합니다.'
+  ],
+  '播放页大封面支持鼠标附近的细线辉光和水滴折射，可在“背景与动效”关闭“封面轮廓辉光”；它们与分类页流光一起受“交互反馈动画”控制。减少动画或隐藏窗口时停止效果，鼠标移开后恢复原图。':
+      [
+    'The large playback cover highlights fine edges and adds gentle water-drop refraction near the pointer. Turn off Cover contour glow in Background and effects to disable it. Interaction feedback animations also controls it alongside the category glow. Reduced motion or hiding the window stops the effect; moving the pointer away restores the image.',
+    '再生画面の大きなカバーでは、ポインター付近の細い輪郭が光り、水滴のような屈折が加わります。「背景と効果」の「カバーの輪郭発光」で無効にできます。分類画面の光と同じく「操作フィードバックアニメーション」に従います。動きを減らす設定やウィンドウ非表示で停止し、ポインターを離すと元の画像に戻ります。',
+    '재생 화면의 큰 커버는 포인터 주변의 가는 윤곽을 밝히고 물방울처럼 살짝 굴절시킵니다. 배경 및 효과에서 커버 윤곽 발광을 끌 수 있습니다. 분류 화면의 빛 효과와 함께 상호작용 피드백 애니메이션 설정을 따릅니다. 동작 줄이기나 창 숨김 시 멈추며 포인터를 치우면 원래 이미지로 돌아옵니다.'
+  ],
+  '歌单与歌曲封面可使用 GIF，导入上限为 1024 × 1024、120 帧，复杂动画可能达到解码预算。动态封面受“动态 GIF 封面”和“主题与封面渐变”控制；关闭或减少动画时显示首帧，隐藏时暂停。背景图片仍使用静态图。':
+      [
+    'Playlist and track artwork supports GIF imports up to 1024 × 1024 and 120 frames; complex animations may reach the decoding limit. Animated GIF artwork and Theme and cover transitions control playback. Disabling motion shows the first frame, and hiding pauses playback. Background images remain static.',
+    'プレイリストと曲のカバーには、最大1024 × 1024、120フレームのGIFを読み込めます。複雑なアニメーションはデコードの上限に達する場合があります。「GIFカバーのアニメーション」と「テーマとカバーの遷移」で制御し、無効化や動きの軽減時は先頭フレーム、非表示時は一時停止します。背景には静止画を使用します。',
+    '재생목록과 곡 커버는 최대 1024 × 1024, 120프레임의 GIF를 가져올 수 있으며 복잡한 애니메이션은 디코딩 한도에 도달할 수 있습니다. 동적 GIF 커버와 테마 및 커버 전환 설정이 재생을 제어합니다. 동작을 끄거나 줄이면 첫 프레임을 표시하고 숨기면 일시정지합니다. 배경 이미지는 정지 이미지를 사용합니다.'
+  ],
+  '选择交叉淡入淡出后，可开启“同专辑保持连续输出”。自动接续同一明确专辑的歌曲时不混叠两曲，跨专辑仍使用设定的淡化时长；专辑或归属信息缺失时不会猜测。此开关默认关闭。':
+      [
+    'With crossfade selected, enable gapless playback within albums to avoid overlapping tracks when automatically advancing within the same identified album. Other albums still use the configured fade duration. Missing album or owner information is not guessed. This option is off by default.',
+    'クロスフェードを選択すると、同じアルバム内での連続出力を有効にできます。同一と確認できるアルバムの曲へ自動で進む際は音を重ねず、別アルバムでは設定したフェード時間を使います。アルバムや帰属情報が不足している場合は推測しません。初期設定はオフです。',
+    '크로스페이드를 선택한 뒤 같은 앨범에서 연속 출력을 켤 수 있습니다. 동일한 앨범으로 확인된 곡으로 자동 전환할 때 두 곡을 겹치지 않으며 다른 앨범에서는 설정된 페이드 시간을 사용합니다. 앨범이나 소유 아티스트 정보가 없으면 추측하지 않습니다. 기본값은 꺼짐입니다.'
+  ],
+  '“导入本地歌单”支持 M3U、M3U8、PLS 和 XSPF。先预览可导入与缺失歌曲，再确认加入；保留原顺序和重复次数，跳过网络地址。预览期间文件变化时需重新读取，避免导入过时内容。':
+      [
+    'Import local playlist supports M3U, M3U8, PLS and XSPF. Preview available and missing tracks before adding them. Order and repeated entries are preserved; network addresses are skipped. If the file changes during the preview, reload it before importing.',
+    '「ローカルプレイリストを読み込む」は M3U、M3U8、PLS、XSPF に対応します。読み込み可能な曲と見つからない曲を確認してから追加できます。順序と重複を保持し、ネットワークアドレスは除外します。プレビュー中にファイルが変わった場合は再読み込みしてください。',
+    '로컬 재생목록 가져오기는 M3U, M3U8, PLS, XSPF를 지원합니다. 추가하기 전에 사용 가능한 곡과 누락된 곡을 확인하세요. 순서와 반복 항목을 유지하고 네트워크 주소는 건너뜁니다. 미리 보는 동안 파일이 바뀌면 다시 읽어야 합니다.'
+  ],
+  '频谱显示可选择圆头音柱或像素音柱，适用于播放条上方与封面四周。像素样式沿用主题渐变与音柱密度；关闭频谱、减少动画或隐藏窗口时，仍遵循原有停止绘制设置。':
+      [
+    'Choose rounded bars or pixels for the spectrum above the progress bar or around the cover. Pixels use the current theme gradient and bar density. Spectrum, reduced-motion and hidden-window settings continue to control visual updates.',
+    '進捗バー上部やカバー周囲のスペクトラムは、丸いバーとピクセルから選べます。ピクセルもテーマのグラデーションとバー密度を使います。スペクトラムの無効化、アニメーションの軽減、非表示ウィンドウの設定は引き続き描画更新に適用されます。',
+    '진행 막대 위나 커버 주변의 스펙트럼을 둥근 막대 또는 픽셀로 표시할 수 있습니다. 픽셀도 테마 그라데이션과 막대 밀도를 사용합니다. 스펙트럼 끄기, 동작 줄이기, 숨겨진 창 설정은 계속 시각 업데이트를 제어합니다.'
+  ],
   '队列搜索支持多个词跨歌名、歌手和专辑匹配，也支持拼音、首字母、拉丁重音、全角文字及轻微误拼。筛选只改变显示，点结果仍选择原队列位置，重复曲目不会合并。清除搜索恢复完整队列；显示“正在搜索队列…”时，等待结果完成后再另存或导出。':
       [
     'Queue search matches multiple words across titles, artists and albums, with Pinyin, initials, Latin accent and character-width normalization, and minor typo tolerance. Filtering changes the display; selecting a result uses its original queue position and repeated tracks remain separate. Clear the search to restore the full queue. While “Searching the queue…” appears, wait for results before saving or exporting them.',
@@ -288,6 +351,23 @@ const Map<String, List<String>> catalogPlayerFeatureGuide = {
     '선택 모드의 더 보기에서 개인 평점과 태그, 일괄 태그 편집, 표지 다시 읽기와 정보 복사를 엽니다. 개인 평점, 태그와 메모는 플레이어 데이터에만 저장됩니다. 일괄 곡 태그 편집은 오디오 파일에 쓰므로 미리 확인한 뒤 적용하며 켜지 않은 필드는 그대로 둡니다.',
   ],
   '选择歌曲': ['Select tracks', '曲を選択', '곡 선택'],
+  '没有可读取的内嵌封面时，会尝试歌曲同目录的 cover、folder、front、album 或 albumart 图片，支持 JPG、JPEG、PNG、WebP、BMP 和 GIF。添加或更换图片后可刷新曲库或重新读取封面；开启自动刷新后会跟随文件变化，不改写音乐文件。':
+      [
+    'If no readable embedded artwork is available, the player checks cover, folder, front, album or albumart images beside the song, supporting JPG, JPEG, PNG, WebP, BMP and GIF. Refresh the library or reread artwork after adding or replacing images. Automatic refresh follows file changes without modifying audio files.',
+    '読み取れる埋め込み画像がない場合、曲と同じフォルダーの cover、folder、front、album、albumart 画像を探します。JPG、JPEG、PNG、WebP、BMP、GIF に対応します。追加や変更後はライブラリ更新またはジャケット再読込を行ってください。自動更新が有効ならファイルの変更に追従し、音声ファイルは書き換えません。',
+    '읽을 수 있는 내장 표지가 없으면 곡과 같은 폴더의 cover, folder, front, album 또는 albumart 이미지를 찾습니다. JPG, JPEG, PNG, WebP, BMP, GIF를 지원합니다. 이미지를 추가하거나 바꾼 뒤 라이브러리를 새로 고치거나 표지를 다시 읽으세요. 자동 새로 고침을 켜면 파일 변경을 반영하며 오디오 파일은 수정하지 않습니다.',
+  ],
+  '多碟专辑可使用“音轨”排序，先按碟号、再按音轨排列；智能歌单和待播队列的专辑音轨排序也遵循此顺序。旧曲库首次刷新会补读支持格式的碟号标签，未填写的编号排在最后，不从文件名猜测。':
+      [
+    'For multi-disc albums, Track sorting uses disc number before track number. Smart playlists and upcoming-queue album/track sorting use the same order. The first refresh of an older library reads disc tags in supported formats. Missing numbers stay last and are never inferred from filenames.',
+    '複数枚組アルバムの「トラック」ソートはディスク番号、トラック番号の順に並べます。スマートプレイリストや次の再生キューのアルバム・トラック順も同様です。旧ライブラリは最初の更新で対応形式のディスク番号タグを読み直します。未設定の番号は最後に並び、ファイル名から推測しません。',
+    '여러 디스크로 된 앨범의 트랙 정렬은 디스크 번호 다음 트랙 번호 순서입니다. 스마트 재생목록과 대기열의 앨범·트랙 정렬도 같습니다. 기존 라이브러리를 처음 새로 고칠 때 지원 형식의 디스크 번호 태그를 읽습니다. 없는 번호는 끝에 두며 파일명으로 추측하지 않습니다.',
+  ],
+  '先按碟号，再按音轨排序；未填写的编号排在最后。': [
+    'Sort by disc, then track number; missing numbers stay last.',
+    'ディスク番号、トラック番号の順に並べ、未設定の番号は最後にします。',
+    '디스크 번호 다음 트랙 번호 순으로 정렬하며 없는 번호는 끝에 둡니다.',
+  ],
   '操作顺序：{0}': ['Steps: {0}', '操作の順序：{0}', '작업 순서: {0}'],
   '打开音乐页': ['Open music', '音楽ページを開く', '음악 화면 열기'],
   '本地歌词与离线准备': [

@@ -3,21 +3,40 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
+import 'package:dan_player/component/animated_artwork.dart';
+import 'package:dan_player/library/artwork_animation_provider.dart';
 import 'package:flutter/material.dart';
 import 'cover_image_readiness.dart';
 import 'cover_route_landing.dart';
 
-drawing.Image? _flightSourceImage(
+@visibleForTesting
+drawing.Image? categoryFlightSourceImage(
     BuildContext context, ImageProvider? provider) {
   if (provider == null) {
     final render = context.findRenderObject();
     return render == null ? null : firstDecodedCoverImage(render);
   }
+  ImageProvider sourceIdentity(ImageProvider image) {
+    while (
+        image is AnimatedArtworkSource || image is FirstFrameArtworkProvider) {
+      image = image is AnimatedArtworkSource
+          ? image.source
+          : (image as FirstFrameArtworkProvider).source;
+    }
+    return image;
+  }
+
+  final expected = sourceIdentity(provider);
   drawing.Image? image;
   void visit(Element element) {
     if (image != null) return;
     final widget = element.widget;
-    if (widget is Image && widget.image == provider) {
+    final candidate = widget is Image
+        ? widget.image
+        : widget is AnimatedArtwork
+            ? widget.image
+            : null;
+    if (candidate != null && sourceIdentity(candidate) == expected) {
       final render = element.findRenderObject();
       if (render != null) image = firstDecodedCoverImage(render);
     }
@@ -171,7 +190,8 @@ class _CategoryCoverFlightState extends State<CategoryCoverFlight>
           final a = (from.widget as Hero).child as _FlightContent;
           final b = (to.widget as Hero).child as _FlightContent;
           final provider = a.image ?? b.image;
-          b.owner._landing.acceptSource(_flightSourceImage(from, provider));
+          b.owner._landing
+              .acceptSource(categoryFlightSourceImage(from, provider));
           return CoverFlightMotionGate(
               child: AnimatedBuilder(
                   animation: animation,

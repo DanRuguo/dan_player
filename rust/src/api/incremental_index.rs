@@ -183,6 +183,7 @@ pub(super) fn prune_removed_roots(
 struct DiscoveredFile {
     path: PathBuf,
     fingerprint: Fingerprint,
+    folder_cover_stamp: Option<String>,
 }
 
 fn collect(
@@ -216,6 +217,7 @@ fn collect(
         .unwrap_or_default()
         .as_secs();
     directories.insert(directory.to_string_lossy().into_owned(), modified);
+    let folder_cover_stamp = folder_cover::stamp(&entries);
     for entry in entries {
         control.check()?;
         let kind = entry.file_type()?;
@@ -232,6 +234,7 @@ fn collect(
             files.push(DiscoveredFile {
                 fingerprint: Fingerprint::read(&entry.path())?,
                 path: entry.path(),
+                folder_cover_stamp: folder_cover_stamp.clone(),
             });
         }
     }
@@ -331,6 +334,7 @@ pub(super) fn refresh_cancellable(
                     && value["metadata_pending"] != true
                     && !needs_classification_backfill(value)
                     && !needs_duration_backfill(value)
+                    && value.get("disc_number").is_some()
             }) {
                 let check = legacy_id3_text_check(&file.path, previous);
                 if check != LegacyId3TextCheck::ReRead {
@@ -379,7 +383,12 @@ pub(super) fn refresh_cancellable(
     let mut grouped = BTreeMap::<String, Vec<serde_json::Value>>::new();
     for (index, (file, result)) in files.iter().zip(results).enumerate() {
         control.check()?;
-        let audio = result?;
+        let mut audio = result?;
+        if let Some(stamp) = &file.folder_cover_stamp {
+            audio["folder_cover_stamp"] = stamp.clone().into();
+        } else {
+            audio.as_object_mut().unwrap().remove("folder_cover_stamp");
+        }
         let folder = file.path.parent().unwrap().to_string_lossy().into_owned();
         grouped.entry(folder).or_default().push(audio);
         progress(0.15 + 0.8 * (index + 1) as f64 / files.len().max(1) as f64);
@@ -646,7 +655,7 @@ mod tests {
         serde_json::json!({"path": path.to_string_lossy(), "title": "Synthetic title",
             "artist": "Fixture", "album": "Synthetic", "by": "Test", "created": 0,
             "classification_version": CLASSIFICATION_VERSION,
-            "duration_version": DURATION_VERSION})
+            "duration_version": DURATION_VERSION, "disc_number": null})
     }
     fn songs(index: &serde_json::Value) -> Vec<&serde_json::Value> {
         index["folders"]
@@ -655,6 +664,66 @@ mod tests {
             .iter()
             .flat_map(|folder| folder["audios"].as_array().unwrap())
             .collect()
+    }
+
+    #[test]
+    fn folder_cover_add_replace_remove_does_not_reread_tags_or_other_folders() {
+        let f = Fixture::new();
+        let a = f.file("album/song.mp3");
+        f.file("other/song.mp3");
+        let calls = AtomicUsize::new(0);
+        let initial = f.scan(None, true, &calls);
+        calls.store(0, Ordering::Relaxed);
+        let cover = a.parent().unwrap().join("COVER.PNG");
+        fs::write(&cover, b"first image").unwrap();
+        let added = f.scan(Some(&initial), false, &calls);
+        let row = |index: &serde_json::Value| {
+            songs(index)
+                .into_iter()
+                .find(|row| path_key(Path::new(row["path"].as_str().unwrap())) == path_key(&a))
+                .unwrap()
+                .clone()
+        };
+        assert!(row(&added)["folder_cover_stamp"].is_string());
+        assert_eq!(f.scan(Some(&added), false, &calls), added);
+        fs::write(&cover, b"replacement with a different size").unwrap();
+        let replaced = f.scan(Some(&added), false, &calls);
+        assert_ne!(
+            row(&added)["folder_cover_stamp"],
+            row(&replaced)["folder_cover_stamp"]
+        );
+        let other = |index: &serde_json::Value| {
+            songs(index)
+                .into_iter()
+                .find(|row| path_key(Path::new(row["path"].as_str().unwrap())) != path_key(&a))
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(other(&initial), other(&replaced));
+        fs::remove_file(cover).unwrap();
+        let removed = f.scan(Some(&replaced), false, &calls);
+        assert!(row(&removed).get("folder_cover_stamp").is_none());
+        assert_eq!(row(&initial), row(&removed));
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn disc_number_legacy_index_backfills_once_and_keeps_extensions() {
+        let f = Fixture::new();
+        f.file("song.mp3");
+        let calls = AtomicUsize::new(0);
+        let mut old = f.scan(None, true, &calls);
+        let row = old["folders"][0]["audios"][0].as_object_mut().unwrap();
+        row.remove("disc_number");
+        row.insert("user_extension".into(), "keep".into());
+        calls.store(0, Ordering::Relaxed);
+        let next = f.scan(Some(&old), false, &calls);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert!(songs(&next)[0].get("disc_number").unwrap().is_null());
+        assert_eq!(songs(&next)[0]["user_extension"], "keep");
+        let stable = f.scan(Some(&next), false, &calls);
+        assert_eq!(stable, next);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
     #[test]
     fn unchanged_refresh_reuses_exact_json_without_metadata_reads() {

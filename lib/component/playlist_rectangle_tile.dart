@@ -1,5 +1,7 @@
 import 'package:desktop_lyric/font_policy.dart';
 import 'dart:io';
+import 'package:dan_player/component/animated_artwork.dart';
+import 'package:dan_player/library/artwork_animation_provider.dart';
 
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_motion.dart';
@@ -80,8 +82,12 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
   Future<ImageProvider?> _load(ArtworkSize target) async {
     final customPath = widget.imagePath;
     if (customPath != null && customPath.isNotEmpty) {
-      final image = ArtworkImageProvider(FileImage(File(customPath)), target,
+      final ImageProvider resized = ArtworkImageProvider(
+          FileImage(File(customPath)), target,
           revision: widget.revision);
+      final ImageProvider image = customPath.toLowerCase().endsWith('.gif')
+          ? AnimatedArtworkSource(resized)
+          : resized;
       var failed = false;
       await precacheImage(image, context, onError: (_, __) => failed = true);
       if (!failed) return image;
@@ -146,12 +152,16 @@ class _PlaylistRectangleTileState extends State<PlaylistRectangleTile> {
                         artworkKey: request,
                         loadArtwork: () => _image!,
                         placeholder: placeholder,
-                        imageBuilder: (image) => Image(
-                            image: image,
-                            fit: BoxFit.cover,
-                            gaplessPlayback: true,
-                            filterQuality: FilterQuality.medium,
-                            errorBuilder: (_, __, ___) => placeholder))),
+                        imageBuilder: (image) => mayAnimateArtwork(image)
+                            ? AnimatedArtwork(
+                                image: image,
+                                errorBuilder: (_, __, ___) => placeholder)
+                            : Image(
+                                image: image,
+                                fit: BoxFit.cover,
+                                gaplessPlayback: true,
+                                filterQuality: FilterQuality.medium,
+                                errorBuilder: (_, __, ___) => placeholder))),
                     Positioned(
                         left: 4,
                         right: 4,

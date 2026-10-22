@@ -1,4 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/full_width_spectrum.dart';
+import 'package:dan_player/rendering_preferences.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/viewport_visibility.dart';
@@ -18,7 +22,8 @@ enum PlayerGuideDemoKind {
   lyrics,
   playlists,
   transitions,
-  statistics
+  statistics,
+  spectrum
 }
 
 /// Small, local examples: no audio, network, library or preferences are changed.
@@ -51,10 +56,12 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
   int _line = 0;
   late double _target = _initialValue(widget.kind);
   PlaybackTransitionMode _transition = PlaybackTransitionMode.crossfade;
+  SpectrumStyle _spectrumStyle = SpectrumStyle.pixel;
 
   static double _initialValue(PlayerGuideDemoKind kind) => switch (kind) {
         PlayerGuideDemoKind.progress => .32,
         PlayerGuideDemoKind.transitions => 0,
+        PlayerGuideDemoKind.spectrum => 0,
         _ => 1,
       };
 
@@ -74,6 +81,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
         PlayerGuideDemoKind.playlists => MotionKind.tracking,
         PlayerGuideDemoKind.transitions => MotionKind.layout,
         PlayerGuideDemoKind.statistics => MotionKind.layout,
+        PlayerGuideDemoKind.spectrum => MotionKind.feedback,
       };
 
   @override
@@ -253,6 +261,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                             PlayerGuideDemoKind.playlists => '试一试：歌单视图',
                             PlayerGuideDemoKind.transitions => '试一试：歌曲过渡',
                             PlayerGuideDemoKind.statistics => '试一试：收听趋势',
+                            PlayerGuideDemoKind.spectrum => '试一试：频谱动效',
                           }),
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 6),
@@ -273,6 +282,8 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                         _transitions(context)
                       else if (widget.kind == PlayerGuideDemoKind.statistics)
                         StatisticsListeningTrends(snapshot: _statisticsSnapshot)
+                      else if (widget.kind == PlayerGuideDemoKind.spectrum)
+                        _spectrum(context)
                       else
                         AnimatedBuilder(
                             animation: _animation,
@@ -281,6 +292,71 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                                     ? _progress(context)
                                     : _lyrics(context)),
                     ]))));
+  }
+
+  Widget _spectrum(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      AppSegmentedControl<SpectrumStyle>(
+          key: const ValueKey('guide-demo-spectrum-style'),
+          value: _spectrumStyle,
+          options: [
+            AppSegmentOption(
+                value: SpectrumStyle.rounded,
+                label: ui('圆头音柱'),
+                icon: Icons.equalizer_rounded),
+            AppSegmentOption(
+                value: SpectrumStyle.pixel,
+                label: ui('像素音柱'),
+                icon: Icons.grid_view_rounded),
+          ],
+          onChanged: (style) => setState(() => _spectrumStyle = style)),
+      const SizedBox(height: 12),
+      Semantics(
+          label: ui('频谱显隐示意'),
+          excludeSemantics: true,
+          child: RepaintBoundary(
+              child: AnimatedBuilder(
+                  animation: _animation,
+                  builder: (context, _) {
+                    final envelope = math.sin(_animation.value * math.pi);
+                    return SizedBox(
+                        height: 72,
+                        child: CustomPaint(
+                            painter: FrequencySpectrumPainter(
+                                levels: AlwaysStoppedAnimation(
+                                    List<double>.generate(
+                                        36,
+                                        (i) =>
+                                            envelope *
+                                            envelope *
+                                            (.35 +
+                                                .65 *
+                                                    math
+                                                        .sin(i * .4 +
+                                                            _animation.value *
+                                                                6)
+                                                        .abs()),
+                                        growable: false)),
+                                maximumBars: 36,
+                                style: _spectrumStyle,
+                                pixelRatio:
+                                    MediaQuery.devicePixelRatioOf(context),
+                                startColor: colors.primary,
+                                endColor: colors.tertiary)));
+                  }))),
+      const SizedBox(height: 8),
+      Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: OutlinedButton.icon(
+              key: const ValueKey('guide-demo-spectrum-start'),
+              onPressed: () {
+                _animation.value = 0;
+                _animate(1, const Duration(milliseconds: 1800));
+              },
+              icon: const Icon(Icons.play_arrow_rounded, size: 18),
+              label: Text(ui('演示音柱显隐')))),
+    ]);
   }
 
   String _stamp(double value) {

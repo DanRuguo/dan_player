@@ -15,7 +15,7 @@ typedef PlaylistImagePicker = FutureOr<String?> Function();
 String? pickPlaylistImage() => (OpenFilePicker()
       ..title = ui("选择歌单封面")
       ..filterSpecification = {
-        ui("图片文件"): '*.jpg;*.jpeg;*.png;*.webp;*.bmp',
+        ui("图片文件"): '*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.gif',
         ui("所有文件"): '*.*',
       })
     .getFile()

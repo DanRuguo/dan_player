@@ -95,7 +95,8 @@ class _NowPlayingPage_SmallState extends State<_NowPlayingPage_Small> {
                       ),
                     NowPlayingViewMode.withLyric => const VerticalLyricView(),
                     NowPlayingViewMode.withPlaylist =>
-                      const CurrentPlaylistView(immersive: true),
+                      const CurrentPlaylistView(
+                          immersive: true, showUpcomingPreviewAllowed: true),
                   },
                 ),
               ),

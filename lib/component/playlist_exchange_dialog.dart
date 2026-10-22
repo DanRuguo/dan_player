@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:crypto/crypto.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'dart:async';
 import 'dart:io';
@@ -33,8 +32,10 @@ Future<PlaylistImportDetails?> importM3uPlaylist(BuildContext context,
   try {
     location = await (pickFile ??
         () => (OpenFilePicker()
-              ..title = ui('导入 M3U8 歌单')
-              ..filterSpecification = {'M3U / M3U8': '*.m3u;*.m3u8'})
+              ..title = ui('导入本地歌单')
+              ..filterSpecification = {
+                'M3U / M3U8 / PLS / XSPF': '*.m3u;*.m3u8;*.pls;*.xspf'
+              })
             .getFile()
             ?.path)();
   } catch (_) {
@@ -92,19 +93,14 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
 
   Future<void> _load() async {
     try {
-      if (widget.readFile == null &&
-          await widget.file.length() > 2 * 1024 * 1024) {
-        throw const FormatException('歌单文件超过 2 MiB');
-      }
-      final sourceHash = widget.readFile == null
-          ? sha256.convert(await widget.file.readAsBytes()).toString()
-          : null;
-      final document = await (widget.readFile ?? readM3uFile)(widget.file);
+      final document =
+          await (widget.readFile ?? readLocalPlaylistFile)(widget.file);
+      final sourceHash = document.sourceFingerprint;
       final audios = await resolveM3uEntries(document, widget.library);
       if (sourceHash != null &&
-          sourceHash !=
-              sha256.convert(await widget.file.readAsBytes()).toString())
-        throw const FormatException('源文件已改变，请重新预览。');
+          sourceHash != await readPlaylistSourceFingerprint(widget.file)) {
+        throw const FormatException('歌单文件已改变，请关闭后重新导入以更新预览。');
+      }
       var missing = 0;
       for (var i = 0; i < audios.length; i += 64) {
         final end = (i + 64).clamp(0, audios.length);
@@ -138,20 +134,26 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
     setState(() => _submitting = true);
     try {
       if (_sourceHash != null &&
-          _sourceHash !=
-              sha256.convert(await widget.file.readAsBytes()).toString())
-        throw StateError('源文件已改变，请重新打开预览');
+          _sourceHash != await readPlaylistSourceFingerprint(widget.file)) {
+        throw const FormatException('歌单文件已改变，请关闭后重新导入以更新预览。');
+      }
       if (_targetId != null) {
         final current = playlistTree.findPlaylist(_targetId!);
-        if (current == null || jsonEncode(current.toMap()) != _targetSnapshot)
-          throw StateError('目标歌单已改变，请重新选择目标以更新预览');
+        if (current == null || jsonEncode(current.toMap()) != _targetSnapshot) {
+          throw const FormatException('目标歌单已改变，请重新选择目标以更新预览。');
+        }
       }
-      if (mounted)
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
         Navigator.of(context).pop(PlaylistImportDetails(
             name, List.unmodifiable(_additions),
             targetId: _targetId, expectedSnapshot: _targetSnapshot));
+      }
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) {
+        setState(() => _error = e is FormatException
+            ? ui(e.message)
+            : ui('无法读取歌单文件，请检查文件位置与访问权限。'));
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -168,13 +170,15 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
     UiLanguageScope.watch(context);
     return AlertDialog(
       scrollable: true,
-      title: AppDialogTitle(ui('导入 M3U8 歌单')),
+      title: AppDialogTitle(ui('导入本地歌单')),
       content: SizedBox(
           width: 400,
           child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(ui('支持 M3U、M3U8、PLS 和 XSPF；仅导入本地音频引用。')),
+                const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                     borderRadius: AppShape.controlRadius,
                     elevation: 3,
@@ -223,6 +227,7 @@ class _M3uImportDialogState extends State<M3uImportDialog> {
                     child: TextField(
                       key: const ValueKey('m3u-import-name'),
                       controller: _name,
+                      enabled: !_submitting,
                       maxLength: 120,
                       autofocus: true,
                       onChanged: (_) => setState(() {}),

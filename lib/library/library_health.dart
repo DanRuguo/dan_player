@@ -216,7 +216,7 @@ class LibraryHealthService {
         pendingMetadata: audios.where((a) => a.metadataReadPending).length,
         withoutCover: audios
             .where((a) => missingCoverHashes
-                .contains(CoverCache.stableHash(a.localFilePath)))
+                .contains(CoverCache.audioPathHash(a.localFilePath)))
             .length,
         examples: examples);
   }

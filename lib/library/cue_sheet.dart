@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:crypto/crypto.dart';
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 import 'audio_library.dart';
@@ -23,9 +24,12 @@ class CueEntry {
 }
 
 class CueDocument {
-  const CueDocument(this.entries, this.title);
+  const CueDocument(this.entries, this.title, {this.sourceFingerprint});
   final List<CueEntry> entries;
   final String title;
+
+  /// Identifies the exact bounded bytes parsed by [readCueFile].
+  final String? sourceFingerprint;
 }
 
 class _PendingTrack {
@@ -209,7 +213,7 @@ String decodeCueText(List<int> bytes) {
   }
 }
 
-Future<CueDocument> readCueFile(File file) async {
+Future<List<int>> _readCueBytes(File file) async {
   final handle = await file.open();
   late final List<int> bytes;
   try {
@@ -220,8 +224,20 @@ Future<CueDocument> readCueFile(File file) async {
   if (bytes.length > cueMaxBytes) {
     throw const FormatException('CUE 文件超过 1 MiB，无法导入。');
   }
+  return bytes;
+}
+
+Future<String> readCueSourceFingerprint(File file) async =>
+    sha256.convert(await _readCueBytes(file)).toString();
+
+Future<CueDocument> readCueFile(File file) async {
+  final bytes = await _readCueBytes(file);
   final location = file.absolute.path;
-  return Isolate.run(() => parseCue(decodeCueText(bytes), cuePath: location));
+  return Isolate.run(() {
+    final document = parseCue(decodeCueText(bytes), cuePath: location);
+    return CueDocument(document.entries, document.title,
+        sourceFingerprint: sha256.convert(bytes).toString());
+  });
 }
 
 Future<List<Audio>> resolveCueEntries(
@@ -257,6 +273,9 @@ Future<List<Audio>> resolveCueEntries(
         stat.changed.millisecondsSinceEpoch ~/ 1000,
         'CUE',
         cueTrack: ref,
+        discNumber: original?.discNumber,
+        discNumberRead: original?.discNumberRead ?? false,
+        folderCoverStamp: original?.folderCoverStamp,
         albumArtist: entry.albumArtist.isEmpty
             ? original?.albumArtist
             : entry.albumArtist,

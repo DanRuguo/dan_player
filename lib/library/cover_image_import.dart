@@ -16,7 +16,7 @@ const maxCoverOutputEdge = 1600;
 
 bool isImportedCoverId(Object? value) =>
     value is String &&
-    RegExp(r'^[a-f0-9]{64}\.(png|jpg|webp)$').hasMatch(value);
+    RegExp(r'^[a-f0-9]{64}\.(png|jpg|webp|gif)$').hasMatch(value);
 
 class CoverImageException extends FormatException {
   const CoverImageException(super.message);
@@ -34,7 +34,8 @@ class PreparedCoverImage {
 
 /// One import at a time bounds decode/encode memory. Small, static images are
 /// decoded once for validation and retained byte-for-byte. Native workers do
-/// resizing/compression only when necessary; no per-frame processing exists.
+/// resizing/compression only when necessary. GIF normalization also runs in
+/// the bounded native worker, never frame-by-frame on the UI isolate.
 class CoverImageImporter {
   CoverImageImporter({
     Future<PreparedCoverImage> Function(Uint8List)? normalizeLarge,
@@ -96,10 +97,23 @@ class CoverImageImporter {
   Future<PreparedCoverImage> _prepare(Uint8List bytes) async {
     final extension = _extension(bytes);
     if (extension == null) {
-      throw const CoverImageException('封面仅支持静态 PNG、JPEG、WebP 和 BMP 图片。');
+      throw const CoverImageException('封面支持 PNG、JPEG、WebP、BMP 和 GIF 图片。');
+    }
+    if (extension == 'gif') {
+      final result = await _normalizeLarge(bytes);
+      if (result.extension != 'gif' ||
+          result.bytes.isEmpty ||
+          result.bytes.length > maxCoverOutputBytes ||
+          result.width <= 0 ||
+          result.height <= 0 ||
+          result.width > 1024 ||
+          result.height > 1024) {
+        throw const CoverImageException('无法将封面压缩到 2 MiB，请选择其他图片。');
+      }
+      return result;
     }
     if (_animated(bytes, extension)) {
-      throw const CoverImageException('封面暂不支持动图，请选择静态图片。');
+      throw const CoverImageException('非 GIF 动图暂不支持，请选择 GIF 或静态图片。');
     }
     ui.ImmutableBuffer? buffer;
     ui.ImageDescriptor? descriptor;
@@ -123,7 +137,7 @@ class CoverImageImporter {
           extension != 'bmp') {
         codec = await descriptor.instantiateCodec();
         if (codec.frameCount != 1) {
-          throw const CoverImageException('封面暂不支持动图，请选择静态图片。');
+          throw const CoverImageException('非 GIF 动图暂不支持，请选择 GIF 或静态图片。');
         }
         decoded = (await codec.getNextFrame()).image;
         return PreparedCoverImage(bytes, extension, width, height);
@@ -153,6 +167,8 @@ class CoverImageImporter {
 
   static String? _extension(Uint8List data) {
     if (data.length < 12) return null;
+    if (String.fromCharCodes(data.sublist(0, 6)) == 'GIF87a' ||
+        String.fromCharCodes(data.sublist(0, 6)) == 'GIF89a') return 'gif';
     if (data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff) return 'jpg';
     if (data[0] == 137 && String.fromCharCodes(data.sublist(1, 4)) == 'PNG') {
       return 'png';
@@ -212,7 +228,7 @@ Future<String> savePreparedPlaylistCover(PreparedCoverImage cover,
       cover.width > maxCoverOutputEdge ||
       cover.height <= 0 ||
       cover.height > maxCoverOutputEdge ||
-      !const ['png', 'jpg', 'webp'].contains(cover.extension)) {
+      !const ['png', 'jpg', 'webp', 'gif'].contains(cover.extension)) {
     throw const CoverImageException('无法将封面压缩到 2 MiB，请选择其他图片。');
   }
   final directory = Directory(path.join(

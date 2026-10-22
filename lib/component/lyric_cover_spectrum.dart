@@ -101,6 +101,7 @@ class LyricCoverSpectrum extends StatelessWidget {
           height: size.height,
           coverRect: coverRect,
           maximumBars: preferences.spectrumDensity.maximumBars,
+          style: preferences.spectrumStyle,
           samples: playback.frequencySpectrumStream,
           readLevels: () => playback.frequencySpectrumLevels,
           hidden: DesktopIntegration.instance.isHidden,

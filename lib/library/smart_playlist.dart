@@ -303,6 +303,7 @@ class SmartPlaylist {
       final playback = playbackOf(audio);
       keys.add((
         index: index,
+        disc: audio.discNumber,
         text: switch (sort) {
           SmartPlaylistSort.name => audio.displayTitle.toLowerCase(),
           SmartPlaylistSort.artist => audio.artist.toLowerCase(),
@@ -341,7 +342,13 @@ class SmartPlaylist {
   }
 }
 
-typedef _SmartSortKey = ({int index, String text, int number, String tie});
+typedef _SmartSortKey = ({
+  int index,
+  String text,
+  int number,
+  String tie,
+  int? disc
+});
 typedef _SmartPlayback = ({int count, int last});
 
 // Keep the worker closure outside evaluate: only scalar arguments cross the
@@ -377,6 +384,10 @@ List<int> _sortSmartKeys(List<_SmartSortKey> keys, bool numeric,
         numeric ? a.number.compareTo(b.number) : a.text.compareTo(b.text);
     if (value != 0) return value;
     if (albumTrack) {
+      final disc = a.disc == null
+          ? (b.disc == null ? 0 : 1)
+          : (b.disc == null ? -1 : a.disc!.compareTo(b.disc!));
+      if (disc != 0) return disc;
       final track = a.number.compareTo(b.number);
       if (track != 0) return track;
     }

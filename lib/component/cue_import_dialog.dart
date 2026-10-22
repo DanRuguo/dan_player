@@ -64,7 +64,8 @@ class _CueImportDialogState extends State<CueImportDialog> {
   late final _name = TextEditingController(
       text: p.windows.basenameWithoutExtension(widget.file.path));
   List<Audio>? _audios;
-  String? _error;
+  String? _error, _sourceFingerprint;
+  bool _submitting = false;
   @override
   void initState() {
     super.initState();
@@ -76,9 +77,15 @@ class _CueImportDialogState extends State<CueImportDialog> {
       final document = await (widget.readFile ?? readCueFile)(widget.file);
       final audios = await (widget.resolveEntries ?? resolveCueEntries)(
           document, widget.library);
+      final fingerprint = document.sourceFingerprint;
+      if (fingerprint != null &&
+          fingerprint != await readCueSourceFingerprint(widget.file)) {
+        throw const FormatException('CUE 文件已改变，请关闭后重新导入以更新预览。');
+      }
       if (mounted) {
         setState(() {
           _audios = audios;
+          _sourceFingerprint = fingerprint;
         });
       }
     } catch (error) {
@@ -90,12 +97,32 @@ class _CueImportDialogState extends State<CueImportDialog> {
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final name = _name.text.trim();
-    if (name.isEmpty || name.length > 120 || _audios?.isNotEmpty != true) {
+    if (_submitting ||
+        name.isEmpty ||
+        name.length > 120 ||
+        _audios?.isNotEmpty != true) {
       return;
     }
-    Navigator.of(context).pop(PlaylistImportDetails(name, _audios!));
+    setState(() => _submitting = true);
+    try {
+      if (_sourceFingerprint != null &&
+          _sourceFingerprint != await readCueSourceFingerprint(widget.file)) {
+        throw const FormatException('CUE 文件已改变，请关闭后重新导入以更新预览。');
+      }
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        Navigator.of(context).pop(PlaylistImportDetails(name, _audios!));
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error is FormatException
+            ? ui(error.message.toString())
+            : ui('无法读取 CUE 或其音频文件，请检查位置与访问权限。'));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
@@ -120,6 +147,7 @@ class _CueImportDialogState extends State<CueImportDialog> {
                     onFocusChange: HotkeysHelper.onFocusChanges,
                     child: TextField(
                         controller: _name,
+                        enabled: !_submitting,
                         maxLength: 120,
                         onChanged: (_) => setState(() {}),
                         onSubmitted: (_) => _submit(),
@@ -140,24 +168,26 @@ class _CueImportDialogState extends State<CueImportDialog> {
                   const SizedBox(height: 8),
                   ConstrainedBox(
                       constraints: const BoxConstraints(maxHeight: 230),
-                      child: ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: _audios!.length,
-                          itemBuilder: (_, i) {
-                            final audio = _audios![i];
-                            return ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                leading: const Icon(Symbols.album),
-                                title: Text(audio.displayTitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis),
-                                subtitle: Text(
-                                    ui('第 {0} 轨 · {1}',
-                                        [audio.track, audio.artist]),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis));
-                          })),
+                      // CUE has at most 99 tracks. A bounded eager column can
+                      // answer AlertDialog's intrinsic queries while retaining
+                      // natural row heights and scrolling for longer sheets.
+                      child: SingleChildScrollView(
+                          key: const ValueKey('cue-track-preview-scroll'),
+                          child: Column(children: [
+                            for (final audio in _audios!)
+                              ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(Symbols.album),
+                                  title: Text(audio.displayTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                  subtitle: Text(
+                                      ui('第 {0} 轨 · {1}',
+                                          [audio.track, audio.artist]),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis)),
+                          ]))),
                 ],
               ])),
       actions: [
@@ -165,7 +195,8 @@ class _CueImportDialogState extends State<CueImportDialog> {
             onPressed: () => Navigator.of(context).pop(),
             child: Text(ui('取消'))),
         FilledButton(
-            onPressed: _audios?.isNotEmpty == true &&
+            onPressed: !_submitting &&
+                    _audios?.isNotEmpty == true &&
                     _name.text.trim().isNotEmpty &&
                     _name.text.trim().length <= 120
                 ? _submit

@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/artwork_animation_provider.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/foundation.dart';
@@ -20,7 +21,7 @@ class CoverCacheEntry {
 class CoverCache {
   /// A recent attempted lookup, not a guess based on missing metadata tags.
   bool hasRecentArtworkMiss(String audioPath) {
-    final hash = stableHash(audioPath);
+    final hash = audioPathHash(audioPath);
     final now = _clock();
     return _negativeUntil.entries.any(
         (entry) => entry.key.contains('_${hash}_') && entry.value.isAfter(now));
@@ -69,9 +70,8 @@ class CoverCache {
           clock: clock);
 
   static final CoverCache instance = CoverCache._();
-  // v4 rejects Windows file-type icons and recovers independently readable
-  // ID3 artwork. Old thumbnails may contain an application icon as false art.
-  static const int _schemaVersion = 4;
+  // v6 retains bounded GIF animation as well as named folder artwork.
+  static const int _schemaVersion = 6;
 
   final int maxEntries;
   final int maxConcurrentReads;
@@ -88,7 +88,8 @@ class CoverCache {
   int _activeReads = 0;
   final Map<String, int> _generations = {};
   final ValueNotifier<int> changes = ValueNotifier(0);
-  int generationFor(String audioPath) => _generations[audioPath] ?? 0;
+  int generationFor(String audioPath) =>
+      _generations[_normalizedPath(audioPath)] ?? 0;
   int _epoch = 0;
   int get epoch => _epoch;
 
@@ -136,6 +137,10 @@ class CoverCache {
     return hash.toRadixString(16);
   }
 
+  static String _normalizedPath(String value) =>
+      path_util.windows.normalize(value.replaceAll('/', '\\')).toLowerCase();
+  static String audioPathHash(String path) => stableHash(_normalizedPath(path));
+
   String _fileName(
     String audioPath,
     int modified,
@@ -143,8 +148,8 @@ class CoverCache {
     int height,
     String? fingerprint,
   ) {
-    final generation = _generations[audioPath] ?? 0;
-    return "v${_schemaVersion}_${stableHash(audioPath)}_${_stamp(modified, fingerprint)}_"
+    final generation = generationFor(audioPath);
+    return "v${_schemaVersion}_${audioPathHash(audioPath)}_${_stamp(modified, fingerprint)}_"
         "e${_epoch}g${generation}_${width}x$height.png";
   }
 
@@ -183,7 +188,9 @@ class CoverCache {
       _inflight.remove(key);
       // FileImage keeps no decoded/source bytes alive. A disk-write fallback
       // MemoryImage belongs only to its current widget / Flutter ImageCache.
-      if (image != null && image is! MemoryImage) {
+      if (image != null &&
+          image is! MemoryImage &&
+          !(image is AnimatedArtworkSource && image.source is MemoryImage)) {
         _negativeUntil.remove(key);
         _ready[key] = request;
         while (_ready.length > maxEntries) {
@@ -214,14 +221,24 @@ class CoverCache {
       final dir = await _cacheDir();
       final file = File(path_util.join(dir.path, key));
       if (await file.exists()) {
-        if (await file.length() > 0) return FileImage(file);
+        if (await file.length() > 0) {
+          final header = await file
+              .openRead(0, 6)
+              .fold<List<int>>([], (a, b) => a..addAll(b));
+          final ImageProvider image = FileImage(file);
+          return isGifArtworkBytes(header)
+              ? AnimatedArtworkSource(image)
+              : image;
+        }
         await file.delete();
       }
 
       final bytes = await _produceBounded(key, produce);
       if (bytes == null || bytes.isEmpty) return null;
+      ImageProvider tagged(ImageProvider source) =>
+          isGifArtworkBytes(bytes) ? AnimatedArtworkSource(source) : source;
       if (!_inflight.containsKey(key)) {
-        return MemoryImage(bytes);
+        return tagged(MemoryImage(bytes));
       }
 
       final temporary = File("${file.path}.tmp");
@@ -229,13 +246,13 @@ class CoverCache {
         await temporary.writeAsBytes(bytes, flush: true);
         if (await file.exists()) await file.delete();
         await temporary.rename(file.path);
-        return FileImage(file);
+        return tagged(FileImage(file));
       } catch (err) {
         LOGGER.w("[cover cache] write failed: $err");
         if (await temporary.exists()) {
           unawaited(temporary.delete().catchError((_) => temporary));
         }
-        return MemoryImage(bytes);
+        return tagged(MemoryImage(bytes));
       }
     } catch (err, trace) {
       LOGGER.e(err, stackTrace: trace);
@@ -247,7 +264,7 @@ class CoverCache {
     try {
       final validPrefixes = <String>{
         for (final entry in validEntries)
-          "v${_schemaVersion}_${stableHash(entry.path)}_${_stamp(entry.modified, entry.fingerprint)}_",
+          "v${_schemaVersion}_${audioPathHash(entry.path)}_${_stamp(entry.modified, entry.fingerprint)}_",
       };
       final dir = await _cacheDir();
       var removed = 0;
@@ -300,8 +317,9 @@ class CoverCache {
   }
 
   Future<void> invalidate(String audioPath) async {
+    audioPath = _normalizedPath(audioPath);
     _generations[audioPath] = (_generations[audioPath] ?? 0) + 1;
-    final hash = stableHash(audioPath);
+    final hash = audioPathHash(audioPath);
     _inflight.removeWhere((key, _) => key.contains("_${hash}_"));
     final evicted = <Future<ImageProvider?>>[
       for (final entry in _ready.entries)

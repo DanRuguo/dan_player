@@ -21,6 +21,7 @@ import 'package:dan_player/page/settings_page/japanese_reading_batch_settings.da
 import 'package:dan_player/page/settings_page/japanese_online_reading_settings.dart';
 import 'package:dan_player/page/settings_page/playback_settings.dart';
 import 'package:dan_player/page/settings_page/playback_transition_settings.dart';
+import 'package:dan_player/page/settings_page/silence_skip_settings.dart';
 import 'package:dan_player/page/settings_page/library_watch_settings.dart';
 import 'package:dan_player/page/settings_page/library_health_settings.dart';
 import 'package:dan_player/page/settings_page/replay_gain_settings.dart';
@@ -28,6 +29,7 @@ import 'package:dan_player/page/settings_page/track_resume_settings.dart';
 import 'package:dan_player/page/settings_page/shortcut_settings.dart';
 import 'package:dan_player/page/settings_page/sidebar_layout_settings.dart';
 import 'package:dan_player/page/settings_page/simple_playback_bar_playlist_settings.dart';
+import 'package:dan_player/page/settings_page/queue_display_settings.dart';
 import 'package:dan_player/page/settings_page/theme_settings.dart';
 import 'package:dan_player/page/settings_page/uninstall_settings.dart';
 import 'package:flutter/material.dart';
@@ -69,6 +71,9 @@ class SettingsPage extends StatelessWidget {
                 ),
                 const PlaybackTransitionSettings(
                   key: ValueKey('setting-transition'),
+                ),
+                const SilenceSkipSettings(
+                  key: ValueKey('setting-silence'),
                 ),
                 const TrackResumeSettings(
                   key: ValueKey('setting-resume'),
@@ -143,6 +148,9 @@ class SettingsPage extends StatelessWidget {
                 ),
                 const SimplePlaybackBarPlaylistSettings(
                   key: ValueKey('setting-simple-playback-bar-playlist'),
+                ),
+                const QueueDisplaySettings(
+                  key: ValueKey('setting-queue-upcoming'),
                 ),
               ],
             ),

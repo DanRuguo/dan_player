@@ -7,6 +7,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/online_metadata_lookup_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_metadata_update.dart';
+import 'package:dan_player/library/batch_audio_metadata.dart';
 import 'package:dan_player/library/cover_image_import.dart';
 import 'package:dan_player/utils.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
@@ -23,6 +24,7 @@ Future<bool> showEditAudioMetadataDialog(
   Audio audio, {
   Future<Audio> Function(Audio, AudioMetadataEdit) saveMetadata =
       applyAudioMetadataEdit,
+  Future<MetadataFileSnapshot> Function(String)? inspect,
 }) async {
   if (audio.isCueTrack) {
     showAppNotice(ui('CUE 分轨信息由 CUE 文件提供，不能修改整轨音频。'),
@@ -33,20 +35,52 @@ Future<bool> showEditAudioMetadataDialog(
     showAppNotice(ui("联网歌曲信息由来源提供，不能修改其标签"), kind: AppNoticeKind.warning);
     return false;
   }
+  final inspectFile = inspect ?? MetadataFileSnapshot.read;
+  final openingPath = audio.path;
+  late final MetadataFileSnapshot snapshot;
+  try {
+    snapshot = await inspectFile(openingPath);
+    if (audio.path != openingPath) {
+      throw const AudioMetadataEditException('TAG_SOURCE_CHANGED', '');
+    }
+    if (snapshot.readOnly) {
+      throw const AudioMetadataEditException('TAG_SOURCE_READ_ONLY', '');
+    }
+  } catch (error) {
+    if (context.mounted) {
+      final failure = AudioMetadataEditException.fromNative(error);
+      showAppNotice(ui('准备歌曲信息失败：{0}', [ui(failure.userMessage)]),
+          kind: AppNoticeKind.error);
+    }
+    return false;
+  }
+  if (!context.mounted) return false;
   final result = await showAppDialog<bool>(
     context: context,
     barrierDismissible: false,
-    builder: (context) =>
-        _AudioMetadataDialog(audio: audio, saveMetadata: saveMetadata),
+    builder: (context) => _AudioMetadataDialog(
+        audio: audio,
+        saveMetadata: saveMetadata,
+        openingPath: openingPath,
+        snapshot: snapshot,
+        inspect: inspectFile),
   );
   return result == true;
 }
 
 class _AudioMetadataDialog extends StatefulWidget {
-  const _AudioMetadataDialog({required this.audio, required this.saveMetadata});
+  const _AudioMetadataDialog(
+      {required this.audio,
+      required this.saveMetadata,
+      required this.openingPath,
+      required this.snapshot,
+      required this.inspect});
 
   final Audio audio;
   final Future<Audio> Function(Audio, AudioMetadataEdit) saveMetadata;
+  final String openingPath;
+  final MetadataFileSnapshot snapshot;
+  final Future<MetadataFileSnapshot> Function(String) inspect;
 
   @override
   State<_AudioMetadataDialog> createState() => _AudioMetadataDialogState();
@@ -54,18 +88,32 @@ class _AudioMetadataDialog extends StatefulWidget {
 
 class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
   late final fileNameController = TextEditingController(
-    text: path_util.basename(widget.audio.path),
+    text: path_util.basename(widget.openingPath),
   );
-  late final titleController = TextEditingController(text: widget.audio.title);
-  late final artistController =
-      TextEditingController(text: widget.audio.artist);
-  late final albumController = TextEditingController(text: widget.audio.album);
+  late final titleController = TextEditingController(
+      text: widget.snapshot.supported && widget.snapshot.title.isNotEmpty
+          ? widget.snapshot.title
+          : widget.audio.title);
+  late final artistController = TextEditingController(
+      text: widget.snapshot.supported
+          ? widget.snapshot.artist
+          : widget.audio.artist);
+  late final albumController = TextEditingController(
+      text: widget.snapshot.supported
+          ? widget.snapshot.album
+          : widget.audio.album);
 
   String? picturePath;
   Directory? _stagedArtwork;
   bool saving = false;
   bool _lookingUp = false;
   bool _pickingPicture = false;
+  AudioMetadataEdit? _pendingSyncEdit;
+  AudioMetadataCommitProof? _pendingSyncProof;
+  AudioMetadataCommitProof? _baselineProof;
+  late String _baselinePath = widget.openingPath;
+  late MetadataFileSnapshot _baseline = widget.snapshot;
+  bool _needsBaselineRefresh = false;
   bool get _busy => saving || _lookingUp || _pickingPicture;
 
   @override
@@ -83,7 +131,7 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
   Future<void> _removeStagedArtwork(Directory? directory) async {
     if (directory == null) return;
     try {
-      for (final extension in const ['png', 'jpg', 'webp']) {
+      for (final extension in const ['png', 'jpg', 'webp', 'gif']) {
         final file = File(path_util.join(directory.path, 'cover.$extension'));
         if (await file.exists()) await file.delete();
       }
@@ -157,7 +205,7 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
       picker
         ..title = ui("选择专辑图片")
         ..filterSpecification = {
-          ui("图片文件"): "*.jpg;*.jpeg;*.png;*.webp;*.bmp",
+          ui("图片文件"): "*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.gif",
           ui("所有文件"): "*.*",
         };
 
@@ -210,17 +258,86 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
     setState(() {
       saving = true;
     });
+    AudioMetadataEdit? attemptedEdit;
+    var synchronizedCommit = false;
     try {
-      await widget.saveMetadata(
-        widget.audio,
-        AudioMetadataEdit(
-          fileName: fileName,
-          title: title,
-          artist: artist,
-          album: album,
-          picturePath: picturePath,
-        ),
+      final pending = _pendingSyncEdit;
+      if (pending != null) {
+        // Native rename may have succeeded before journal/index persistence
+        // failed, leaving audio.path at its old location. Re-enter the pending
+        // transaction first; its exact prior edit retries sync without writing
+        // the audio again. Fresh file preflight would reject that missing path.
+        await widget.saveMetadata(widget.audio, pending);
+        _pendingSyncEdit = null;
+        synchronizedCommit = true;
+        if (!mounted) return;
+        if (fileName == pending.fileName &&
+            title == pending.title &&
+            artist == pending.artist &&
+            album == pending.album &&
+            picturePath == pending.picturePath) {
+          showAppNotice(ui("已更新歌曲信息"), kind: AppNoticeKind.success);
+          Navigator.of(context).pop(true);
+          return;
+        }
+        // Preserve any additional draft edits made after the failed sync.
+        // They are a new transaction against the successfully recovered file.
+        _baselinePath = widget.audio.path;
+        _baselineProof = _pendingSyncProof;
+        _pendingSyncProof = null;
+        _needsBaselineRefresh = true;
+      }
+      if (_needsBaselineRefresh) {
+        final proof = _baselineProof;
+        final baseline = await widget.inspect(_baselinePath);
+        if (!mounted) return;
+        if (proof == null ||
+            proof.path != _baselinePath ||
+            proof.fingerprint != baseline.fingerprint ||
+            proof.sourceKey != baseline.sourceKey ||
+            proof.title != baseline.title ||
+            proof.artist != baseline.artist ||
+            proof.album != baseline.album) {
+          throw const AudioMetadataEditException('TAG_SOURCE_CHANGED', '');
+        }
+        _baseline = baseline;
+        _needsBaselineRefresh = false;
+      }
+      if (widget.audio.path != _baselinePath) {
+        throw const AudioMetadataEditException('TAG_SOURCE_CHANGED', '');
+      }
+      final inspectedPath = widget.audio.path;
+      final current = await widget.inspect(inspectedPath);
+      if (!mounted) return;
+      if (widget.audio.path != inspectedPath) {
+        throw const AudioMetadataEditException('TAG_SOURCE_CHANGED', '');
+      }
+      if (current.readOnly) {
+        throw const AudioMetadataEditException('TAG_SOURCE_READ_ONLY', '');
+      }
+      if (!_baseline.sameFile(current)) {
+        throw const AudioMetadataEditException('TAG_SOURCE_CHANGED', '');
+      }
+      if (current.supported &&
+          picturePath == null &&
+          fileName == path_util.basename(inspectedPath) &&
+          title == current.title &&
+          artist == current.artist &&
+          album == current.album) {
+        Navigator.of(context).pop(synchronizedCommit);
+        return;
+      }
+      attemptedEdit = AudioMetadataEdit(
+        fileName: fileName,
+        title: title,
+        artist: artist,
+        album: album,
+        picturePath: picturePath,
+        // Bind the native write too: a file can change after this preflight.
+        // A committed retry synchronizes the prior write before a new edit.
+        expectedFingerprint: current.fingerprint,
       );
+      await widget.saveMetadata(widget.audio, attemptedEdit);
       if (!mounted) return;
       showAppNotice(ui("已更新歌曲信息"), kind: AppNoticeKind.success);
       Navigator.of(context).pop(true);
@@ -231,6 +348,8 @@ class _AudioMetadataDialogState extends State<_AudioMetadataDialog> {
       });
       if (err is AudioMetadataEditException) {
         if (err.fileWasUpdated) {
+          _pendingSyncEdit = attemptedEdit ?? _pendingSyncEdit;
+          _pendingSyncProof = err.committedProof ?? _pendingSyncProof;
           showAppNotice(ui(err.userMessage),
               context: context, kind: AppNoticeKind.warning);
         } else {

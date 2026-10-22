@@ -1,6 +1,7 @@
 import 'package:desktop_lyric/font_policy.dart';
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:dan_player/app_preference.dart';
 
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
@@ -18,11 +19,13 @@ import 'package:dan_player/component/playlist_ui_actions.dart';
 import 'package:dan_player/library/playlist.dart';
 import 'package:dan_player/page/now_playing_page/component/segment_loop_dialog.dart';
 import 'package:dan_player/page/now_playing_page/component/queue_stop_status.dart';
+import 'package:dan_player/page/now_playing_page/component/queue_upcoming_preview.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/play_service/queue_duration_summary.dart';
 import 'package:dan_player/play_service/queue_order.dart';
+import 'package:dan_player/play_service/queue_album_layout.dart';
 import 'package:dan_player/online/online_library.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
@@ -41,6 +44,7 @@ class CurrentPlaylistView extends StatefulWidget {
       this.showTitle = true,
       this.immersive = false,
       this.shrinkWrap = false,
+      this.showUpcomingPreviewAllowed = false,
       this.onOpenDetails,
       this.playbackService,
       this.pickM3uFile,
@@ -49,6 +53,10 @@ class CurrentPlaylistView extends StatefulWidget {
   final bool showTitle;
   final bool immersive;
   final bool shrinkWrap;
+
+  /// Only the lyrics page opts in. Queue dialogs keep their editing space
+  /// regardless of the user's lyrics-page preview preference.
+  final bool showUpcomingPreviewAllowed;
   final ValueChanged<Audio>? onOpenDetails;
 
   /// Keeps the production view on the singleton while allowing its shared
@@ -74,7 +82,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   final _searchSummaryKey = GlobalKey();
   int? _lastIndex;
   double _rowHeight = 0;
-  bool _alignQueued = false;
+  int _alignmentGeneration = 0;
   bool _savingQueue = false;
   bool _exportingQueue = false;
   final _searchController = TextEditingController();
@@ -87,6 +95,155 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   int _searchGeneration = 0;
   bool _searchPending = false;
   bool? _alignmentAfterSearch;
+  bool _groupAlbums = false;
+  final _collapsedAlbums = <int>{};
+  List<Audio>? _albumQueue;
+  int _albumRevision = -1;
+  List<QueueAlbumBlock> _albumBlocks = const [];
+  List<int>? _rowIndices;
+  List<QueueAlbumRow> _rows = const [];
+
+  List<QueueAlbumBlock> _blocks(List<Audio> queue) {
+    if (!identical(queue, _albumQueue) ||
+        _albumRevision != AudioLibrary.sortRevision) {
+      _albumQueue = queue;
+      _albumRevision = AudioLibrary.sortRevision;
+      _albumBlocks = queueAlbumBlocks(queue, playbackService.queueOccurrenceId);
+      _collapsedAlbums.retainAll(_albumBlocks.map((block) => block.id));
+      _rowIndices = null;
+    }
+    return _albumBlocks;
+  }
+
+  List<QueueAlbumRow> _displayRows(List<Audio> queue, List<int> visible) {
+    final blocks = _groupAlbums ? _blocks(queue) : const <QueueAlbumBlock>[];
+    if (!identical(visible, _rowIndices)) {
+      _rowIndices = visible;
+      _rows = queueAlbumRows(visible, blocks, _collapsedAlbums,
+          grouping: _groupAlbums, searching: _query.isNotEmpty);
+    }
+    return _rows;
+  }
+
+  bool _expandIndex(int index) {
+    if (!_groupAlbums) return false;
+    for (final block in _blocks(playbackService.playlist.value)) {
+      if (block.contains(index) && _collapsedAlbums.remove(block.id)) {
+        _rowIndices = null;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _locateOccurrence(int occurrence) {
+    if (!mounted) return;
+    final queue = playbackService.playlist.value;
+    final index = _occurrenceIndex(occurrence, 0, queue.length);
+    if (index < 0) return;
+    if (_query.isNotEmpty) {
+      _searchController.clear();
+      _updateQuery('');
+    }
+    setState(() {
+      _expandIndex(index);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(queue, playbackService.playlist.value)) {
+        _alignToIndex(index, animate: true);
+      }
+    });
+  }
+
+  int _occurrenceIndex(int occurrence, int start, int end) {
+    for (var i = start; i < end; i++) {
+      if (playbackService.queueOccurrenceId(i) == occurrence) return i;
+    }
+    return -1;
+  }
+
+  void _alignToIndex(int index, {required bool animate}) {
+    if (!scrollController.hasClients) return;
+    final queue = playbackService.playlist.value;
+    final row = _displayRows(queue, _visibleIndices(queue))
+        .indexWhere((row) => row.queueIndex == index);
+    if (row < 0) return;
+    final target = _alignmentOffset(row);
+    if (animate && AppMotion.enabled(context, MotionKind.feedback)) {
+      unawaited(scrollController.animateTo(target,
+          duration: AppMotion.standard, curve: AppMotion.standardCurve));
+    } else {
+      scrollController.jumpTo(target);
+    }
+  }
+
+  Widget _albumHeader(QueueAlbumBlock block, int currentIndex) {
+    final collapsed = _collapsedAlbums.contains(block.id);
+    final scheme = Theme.of(context).colorScheme;
+    final owner = block.owner == '未知专辑艺术家' ? ui(block.owner) : block.owner;
+    final label = '${block.title} · $owner · ${ui('{0} 首歌曲', [block.count])}';
+    final isCurrent = block.contains(currentIndex);
+    final stopTarget = playbackService.queueStopBoundary.target;
+    final stopsHere = stopTarget != null &&
+        _occurrenceIndex(stopTarget, block.start, block.end) >= 0;
+    return Semantics(
+        button: true,
+        toggled: !collapsed,
+        child: Tooltip(
+            message: label,
+            child: Material(
+                color: scheme.surfaceContainerHighest
+                    .withValues(alpha: widget.immersive ? .35 : .7),
+                borderRadius: AppShape.controlRadius,
+                child: AppItemInkWell(
+                    key: ValueKey('queue-album-${block.id}'),
+                    borderRadius: AppShape.controlRadius,
+                    onTap: () => setState(() {
+                          if (!_collapsedAlbums.add(block.id))
+                            _collapsedAlbums.remove(block.id);
+                          _rowIndices = null;
+                        }),
+                    child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        child: Row(children: [
+                          AnimatedRotation(
+                              turns: collapsed ? -.25 : 0,
+                              duration: AppMotion.duration(context,
+                                  MotionKind.feedback, AppMotion.quick),
+                              child: Icon(Icons.expand_more,
+                                  color: scheme.primary)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text(block.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style:
+                                        Theme.of(context).textTheme.titleSmall),
+                                Text('$owner · ${ui('{0} 首歌曲', [block.count])}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall),
+                              ])),
+                          if (isCurrent)
+                            Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: Icon(Symbols.equalizer,
+                                    size: 18, color: scheme.primary)),
+                          if (stopsHere)
+                            Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: Tooltip(
+                                    message: ui('播完此条后停止'),
+                                    child: Icon(Symbols.stop_circle,
+                                        size: 18, color: scheme.primary))),
+                        ]))))));
+  }
 
   List<int> _visibleIndices(List<Audio> queue) {
     if (!identical(queue, _searchQueue) ||
@@ -163,6 +320,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
       _searchController.clear();
       _updateQuery('');
     }
+    setState(() {
+      _expandIndex(playbackService.playlistIndex);
+    });
     _scheduleAlignment(force: true);
   }
 
@@ -509,12 +669,15 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     final index = queue.isEmpty ? -1 : playbackService.playlistIndex;
     if (!force && _lastIndex == index) return;
     _lastIndex = index;
-    if (_alignQueued) return;
-    _alignQueued = true;
+    // An explicit locate can clear the search after a playback notification
+    // already queued alignment. Run the latest request after that search reset;
+    // an earlier callback must neither swallow it nor move the new results.
+    final generation = ++_alignmentGeneration;
     final alignmentQuery = _query;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _alignQueued = false;
-      if (!mounted || alignmentQuery != _query) return;
+      if (!mounted ||
+          generation != _alignmentGeneration ||
+          alignmentQuery != _query) return;
       if (_searchPending) {
         _alignmentAfterSearch = animate;
         return;
@@ -522,20 +685,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
       if (!scrollController.hasClients) return;
       final latestQueue = playbackService.playlist.value;
       if (latestQueue.isEmpty) return;
-      final visibleIndex =
-          _visibleIndices(latestQueue).indexOf(playbackService.playlistIndex);
-      if (visibleIndex < 0) return;
-      final target = _alignmentOffset(visibleIndex);
-      final reduced = !AppMotion.enabled(context, MotionKind.feedback);
-      if (animate && !reduced) {
-        scrollController.animateTo(
-          target,
-          duration: AppMotion.standard,
-          curve: AppMotion.standardCurve,
-        );
-      } else {
-        scrollController.jumpTo(target);
-      }
+      _alignToIndex(playbackService.playlistIndex, animate: animate);
     });
   }
 
@@ -553,7 +703,12 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     _scheduleAlignment(animate: false, force: true);
   }
 
-  void _toNowPlaying() => _scheduleAlignment();
+  void _toNowPlaying() {
+    if (playbackService.playlistIndex != _lastIndex &&
+        _expandIndex(playbackService.playlistIndex) &&
+        mounted) setState(() {});
+    _scheduleAlignment();
+  }
 
   void _onQueueChanged() {
     ++_searchGeneration;
@@ -584,6 +739,9 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     playbackService.removeListener(_toNowPlaying);
     playbackService.playlist.removeListener(_onQueueChanged);
     playbackService = next;
+    _albumQueue = null;
+    _collapsedAlbums.clear();
+    _rowIndices = null;
     playbackService.addListener(_toNowPlaying);
     playbackService.playlist.addListener(_onQueueChanged);
     ++_searchGeneration;
@@ -615,10 +773,12 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
             playbackService.queueStopBoundary,
             OnlineLibrary.instance,
             AudioLibrary.changes,
+            AppPreference.instance.showQueueUpcoming,
           ]),
           builder: (context, _) {
             final queue = playbackService.playlist.value;
             final visibleIndices = _visibleIndices(queue);
+            final displayRows = _displayRows(queue, visibleIndices);
             final searchSummary = _searchPending
                 ? ui('正在搜索队列…')
                 : ui('找到 {0} / {1} 首 · 搜索不改变队列',
@@ -649,6 +809,20 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                         suppressStretch: widget.immersive,
                         child: Row(spacing: 4, children: [
                           _organizeMenu(queue, currentIndex),
+                          IconButton(
+                              key: const ValueKey('queue-group-albums'),
+                              tooltip: ui(_groupAlbums ? '显示逐首队列' : '按专辑折叠队列'),
+                              isSelected: _groupAlbums,
+                              onPressed: queue.isEmpty
+                                  ? null
+                                  : () => setState(() {
+                                        _groupAlbums = !_groupAlbums;
+                                        _rowIndices = null;
+                                        _scheduleAlignment(
+                                            animate: false, force: true);
+                                      }),
+                              icon: const Icon(Icons.album_outlined),
+                              selectedIcon: const Icon(Icons.album)),
                           IconButton(
                               tooltip: ui('收听会话'),
                               onPressed: () =>
@@ -726,6 +900,12 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                           ),
                         ]))),
                 QueueStopStatus(playbackService: playbackService),
+                if (widget.showUpcomingPreviewAllowed &&
+                    queue.isNotEmpty &&
+                    AppPreference.instance.showQueueUpcoming.value)
+                  QueueUpcomingPreview(
+                      playbackService: playbackService,
+                      onLocate: _locateOccurrence),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
                   child: TextField(
@@ -809,9 +989,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                           heightFactor: 1,
                           child: Padding(
                               padding: const EdgeInsets.all(16),
-                              child: Text(ui(_searchPending
-                                      ? '正在搜索队列…'
-                                      : '队列中没有匹配的歌曲'),
+                              child: Text(
+                                  ui(_searchPending ? '正在搜索队列…' : '队列中没有匹配的歌曲'),
                                   textAlign: TextAlign.center)))
                       : _QueueScrollbar(
                           controller: scrollController,
@@ -823,18 +1002,27 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: _QueueScrollbar.edgeInset,
                                 vertical: 6),
-                            itemCount: visibleIndices.length,
+                            itemCount: displayRows.length,
                             itemExtent: _rowHeight,
-                            itemBuilder: (context, index) => _PlaylistViewItem(
-                              key: ValueKey(visibleIndices[index]),
-                              queue: queue,
-                              immersive: widget.immersive,
-                              item: queue[visibleIndices[index]],
-                              index: visibleIndices[index],
-                              current: visibleIndices[index] == currentIndex,
-                              playbackService: playbackService,
-                              onOpenDetails: widget.onOpenDetails,
-                            ),
+                            itemBuilder: (context, rowIndex) {
+                              final row = displayRows[rowIndex];
+                              if (row.block != null)
+                                return _albumHeader(row.block!, currentIndex);
+                              final index = row.queueIndex!;
+                              return _PlaylistViewItem(
+                                key: ValueKey((
+                                  'queue-occurrence',
+                                  playbackService.queueOccurrenceId(index)
+                                )),
+                                queue: queue,
+                                immersive: widget.immersive,
+                                item: queue[index],
+                                index: index,
+                                current: index == currentIndex,
+                                playbackService: playbackService,
+                                onOpenDetails: widget.onOpenDetails,
+                              );
+                            },
                           ),
                         ),
             );

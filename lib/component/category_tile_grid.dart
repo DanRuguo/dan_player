@@ -1,6 +1,8 @@
 import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/animated_artwork.dart';
 import 'package:dan_player/component/category_pointer_glow.dart';
+import 'package:dan_player/library/artwork_animation_provider.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
@@ -343,8 +345,12 @@ class _CategoryTileState extends State<_CategoryTile> {
       MusicCategoryGroup group, ArtworkSize target) async {
     ImageProvider? provider = await widget.covers.imageFor(group);
     if (provider != null && mounted) {
-      provider = ArtworkImageProvider(provider, target,
+      final animated = mayAnimateArtwork(provider);
+      final source =
+          provider is AnimatedArtworkSource ? provider.source : provider;
+      provider = ArtworkImageProvider(source, target,
           revision: widget.covers.coverIdFor(group));
+      if (animated) provider = AnimatedArtworkSource(provider);
       var failed = false;
       await precacheImage(provider, context, onError: (_, __) => failed = true);
       if (failed) provider = null;
@@ -458,12 +464,16 @@ class _CategoryTileState extends State<_CategoryTile> {
                           artworkKey: _request!,
                           loadArtwork: () => _artwork!,
                           placeholder: placeholder,
-                          imageBuilder: (image) => Image(
-                              image: image,
-                              fit: BoxFit.cover,
-                              gaplessPlayback: true,
-                              filterQuality: FilterQuality.medium,
-                              errorBuilder: (_, __, ___) => placeholder),
+                          imageBuilder: (image) => mayAnimateArtwork(image)
+                              ? AnimatedArtwork(
+                                  image: image,
+                                  errorBuilder: (_, __, ___) => placeholder)
+                              : Image(
+                                  image: image,
+                                  fit: BoxFit.cover,
+                                  gaplessPlayback: true,
+                                  filterQuality: FilterQuality.medium,
+                                  errorBuilder: (_, __, ___) => placeholder),
                         )))),
             AnimatedPositioned(
                 duration: duration,

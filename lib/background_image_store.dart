@@ -9,6 +9,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/library/cover_image_import.dart';
+import 'package:dan_player/library/artwork_animation_provider.dart';
 import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as path;
 
@@ -122,10 +123,10 @@ class BackgroundImageStore {
       bytes.add(chunk);
     }
     final encoded = bytes.takeBytes();
-    if (!_supportedHeader(encoded)) {
+    if (!coverImages && !_supportedHeader(encoded)) {
       throw const BackgroundImageException('仅支持静态 PNG、JPEG、WebP 和 BMP 图片。');
     }
-    if (_animatedHeader(encoded)) {
+    if (!coverImages && _animatedHeader(encoded)) {
       throw const BackgroundImageException('暂不支持动图；可为静态图片开启轻缓动态效果。');
     }
 
@@ -251,14 +252,21 @@ class BackgroundImageStore {
   /// original and all references even if it is temporarily unreadable.
   Future<ImageProvider?> reloadImage(String id) async {
     final old = _images.remove(id);
-    if (old != null) await (await old)?.evict();
+    if (old != null) await _evictImage(await old);
     final image = await _readImage(id);
-    if (image != null) await image.evict();
+    await _evictImage(image);
     _images[id] = Future.value(image);
     while (_images.length > 6) {
       _images.remove(_images.keys.first);
     }
     return image;
+  }
+
+  Future<void> _evictImage(ImageProvider? image) async {
+    await image?.evict();
+    // Passive first frames and active GIF codecs have distinct cache keys.
+    // An explicit repair/reload must retire both representations.
+    if (image is AnimatedArtworkSource) await image.source.evict();
   }
 
   Future<ImageProvider?> _readImage(String id) async {
@@ -269,7 +277,10 @@ class BackgroundImageStore {
           FileSystemEntityType.file) {
         return null;
       }
-      return FileImage(file);
+      final ImageProvider image = FileImage(file);
+      return coverImages && id.endsWith('.gif')
+          ? AnimatedArtworkSource(image)
+          : image;
     } catch (_) {
       return null;
     }

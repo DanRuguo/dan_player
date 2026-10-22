@@ -2,24 +2,270 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:crypto/crypto.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/playlist_text_encoding.dart';
 import 'package:path/path.dart' as p;
+import 'package:xml/xml.dart';
+import 'package:xml/xml_events.dart';
 
 const m3uMaxBytes = 2 * 1024 * 1024;
 const m3uMaxEntries = 20000;
 final _windows = p.Context(style: p.Style.windows);
 
 class M3uEntry {
-  const M3uEntry(this.path, {this.title = '', this.duration = 0});
+  const M3uEntry(this.path,
+      {this.title = '',
+      this.duration = 0,
+      this.artist = '',
+      this.album = '',
+      this.track = 0});
   final String path;
   final String title;
   final int duration;
+  final String artist, album;
+  final int track;
 }
 
 class M3uDocument {
-  const M3uDocument(this.entries, {this.skipped = 0});
+  const M3uDocument(this.entries, {this.skipped = 0, this.sourceFingerprint});
   final List<M3uEntry> entries;
   final int skipped;
+  final String? sourceFingerprint;
+}
+
+void _checkPlaylistSize(String text) {
+  if (utf8.encode(text).length > m3uMaxBytes) {
+    throw const FormatException('歌单文件超过 2 MiB，无法导入。');
+  }
+}
+
+/// PLS numbers define order, even when metadata precedes FileN or physical
+/// lines are shuffled. Repeated recordings at different numbers are retained.
+M3uDocument parsePls(String text, {required String playlistPath}) {
+  _checkPlaylistSize(text);
+  final records = <int, Map<String, String>>{};
+  var inPlaylist = false, foundPlaylist = false;
+  for (final raw
+      in const LineSplitter().convert(text.replaceFirst('\uFEFF', ''))) {
+    final line = raw.trim();
+    if (line.isEmpty || line.startsWith(';') || line.startsWith('#')) continue;
+    if (line.startsWith('[')) {
+      inPlaylist = line.toLowerCase() == '[playlist]';
+      foundPlaylist |= inPlaylist;
+      continue;
+    }
+    if (!inPlaylist) continue;
+    final equals = line.indexOf('=');
+    if (equals < 0) continue;
+    final key = line.substring(0, equals).trim().toLowerCase();
+    final value = line.substring(equals + 1).trim();
+    final match = RegExp(r'^(file|title|length)(\d+)$').firstMatch(key);
+    if (match == null) {
+      if (key == 'numberofentries') {
+        final count = int.tryParse(value);
+        if (count == null || count < 0)
+          throw const FormatException('PLS 歌单格式无效。');
+        if (count > m3uMaxEntries)
+          throw const FormatException('歌单超过 20000 条，请拆分后导入。');
+      }
+      continue;
+    }
+    final index = int.tryParse(match.group(2)!);
+    if (index == null || index > m3uMaxEntries)
+      throw const FormatException('歌单超过 20000 条，请拆分后导入。');
+    if (index < 1) throw const FormatException('PLS 歌单格式无效。');
+    (records[index] ??= {})[match.group(1)!] = value;
+  }
+  if (!foundPlaylist) throw const FormatException('PLS 歌单格式无效。');
+  final entries = <M3uEntry>[];
+  var skipped = 0;
+  for (final index in records.keys.toList()..sort()) {
+    final record = records[index]!;
+    final path =
+        _interchangePath(record['file'] ?? '', playlistPath: playlistPath);
+    if (path == null) {
+      skipped++;
+      continue;
+    }
+    final duration = int.tryParse(record['length'] ?? '') ?? 0;
+    entries.add(M3uEntry(path,
+        title: record['title'] ?? '', duration: duration > 0 ? duration : 0));
+  }
+  return M3uDocument(List.unmodifiable(entries), skipped: skipped);
+}
+
+const _xspfNamespace = 'http://xspf.org/ns/0/';
+const _xmlBaseNamespace = 'http://www.w3.org/XML/1998/namespace';
+const _xspfError = FormatException('XSPF 歌单格式无效或包含不支持的 XML 结构。');
+
+bool _xmlScalar(int value) =>
+    value == 9 ||
+    value == 10 ||
+    value == 13 ||
+    (value >= 0x20 && value <= 0xd7ff) ||
+    (value >= 0xe000 && value <= 0xfffd) ||
+    (value >= 0x10000 && value <= 0x10ffff);
+
+/// Standard XML escapes remain usable in filenames. Custom/unknown entities,
+/// malformed references and illegal numeric characters are never substituted.
+class _PlaylistEntities extends XmlDefaultEntityMapping {
+  const _PlaylistEntities() : super.xml();
+  @override
+  String decode(String input) {
+    final output = StringBuffer();
+    var start = 0;
+    while (true) {
+      final amp = input.indexOf('&', start);
+      if (amp < 0) {
+        output.write(input.substring(start));
+        break;
+      }
+      output.write(input.substring(start, amp));
+      final end = input.indexOf(';', amp + 1);
+      if (end < 0 || end - amp > 16) throw _xspfError;
+      final name = input.substring(amp + 1, end);
+      if (!RegExp(r'^(amp|lt|gt|apos|quot|#[0-9]+|#x[0-9a-fA-F]+)$')
+          .hasMatch(name)) throw _xspfError;
+      final decoded = super.decodeEntity(name);
+      if (decoded == null || !decoded.runes.every(_xmlScalar)) throw _xspfError;
+      output.write(decoded);
+      start = end + 1;
+    }
+    return output.toString();
+  }
+}
+
+/// XSPF is parsed as bounded XML, never as a collection of matching descendant
+/// names: vendor extensions cannot inject tracks or alternate metadata.
+M3uDocument parseXspf(String text, {required String playlistPath}) {
+  _checkPlaylistSize(text);
+  text = text.replaceFirst('\uFEFF', '');
+  if (!text.runes.every(_xmlScalar)) throw _xspfError;
+  try {
+    const entities = _PlaylistEntities();
+    var depth = 0, nodes = 0;
+    for (final event in parseEvents(text,
+        entityMapping: entities,
+        validateDocument: true,
+        validateNesting: true)) {
+      if (++nodes > 300000 || event is XmlDoctypeEvent) throw _xspfError;
+      if (event is XmlStartElementEvent) {
+        nodes += event.attributes.length;
+        if (event.attributes.length > 64 ||
+            depth >= 32 ||
+            event.attributes.map((a) => a.name).toSet().length !=
+                event.attributes.length) throw _xspfError;
+        if (!event.isSelfClosing) depth++;
+      } else if (event is XmlEndElementEvent) {
+        depth--;
+      }
+    }
+    final root = XmlDocument.parse(text, entityMapping: entities).rootElement;
+    if (root.name.local != 'playlist' ||
+        root.name.namespaceUri != _xspfNamespace ||
+        !{'0', '1'}.contains(root.getAttribute('version'))) throw _xspfError;
+    final lists = _xspfChildren(root, 'trackList').toList();
+    if (lists.length != 1) throw _xspfError;
+    final rootBase = _xspfBase(root, Uri.file(playlistPath, windows: true));
+    final listBase = _xspfBase(lists.single, rootBase);
+    final entries = <M3uEntry>[];
+    var skipped = 0, count = 0;
+    for (final track in _xspfChildren(lists.single, 'track')) {
+      if (++count > m3uMaxEntries)
+        throw const FormatException('歌单超过 20000 条，请拆分后导入。');
+      final trackBase = _xspfBase(track, listBase);
+      String? path;
+      for (final location in _xspfChildren(track, 'location')) {
+        final uri =
+            _xspfUri(_xspfText(location), _xspfBase(location, trackBase));
+        if (uri == null ||
+            uri.scheme != 'file' ||
+            uri.hasQuery ||
+            uri.hasFragment) continue;
+        path = _interchangePath(uri.toString());
+        if (path != null) break;
+      }
+      if (path == null) {
+        skipped++;
+        continue;
+      }
+      String field(String name) {
+        final values = _xspfChildren(track, name).toList();
+        if (values.length > 1) throw _xspfError;
+        return values.isEmpty ? '' : _xspfText(values.single);
+      }
+
+      final duration = int.tryParse(field('duration')) ?? 0;
+      final number = int.tryParse(field('trackNum')) ?? 0;
+      entries.add(M3uEntry(path,
+          title: field('title'),
+          artist: field('creator'),
+          album: field('album'),
+          duration: duration > 0 ? duration ~/ 1000 : 0,
+          track: number > 0 ? number : 0));
+    }
+    return M3uDocument(List.unmodifiable(entries), skipped: skipped);
+  } on XmlException {
+    throw _xspfError;
+  }
+}
+
+Iterable<XmlElement> _xspfChildren(XmlElement parent, String name) =>
+    parent.childElements.where((node) =>
+        node.name.local == name && node.name.namespaceUri == _xspfNamespace);
+
+String _xspfText(XmlElement node) {
+  if (node.childElements.isNotEmpty) throw _xspfError;
+  return node.innerText.trim();
+}
+
+Uri? _xspfBase(XmlElement node, Uri? parent) {
+  // xml is predefined by XML Namespaces; xml 6.x only resolves explicitly
+  // declared prefixes, so the ordinary xml:base spelling needs this lookup.
+  final base = node.getAttribute('xml:base') ??
+      node.getAttribute('base', namespace: _xmlBaseNamespace);
+  return base == null ? parent : _xspfUri(base, parent, allowEmpty: true);
+}
+
+Uri? _xspfUri(String value, Uri? base, {bool allowEmpty = false}) {
+  if ((!allowEmpty && value.isEmpty) ||
+      value.contains(RegExp(r'[\x00-\x1f\x7f]')) ||
+      RegExp(r'%(?![0-9a-fA-F]{2})').hasMatch(value)) return null;
+  try {
+    // Strawberry also writes percent-escaped native drive paths. Decode only
+    // this path case, then re-encode as a file URI before resolving descendants.
+    // decodeComponent expects ASCII URI text. Decode escaped byte runs only,
+    // so exporters that leave IRI Unicode literal can mix it with %20/%25.
+    final decoded = value.replaceAllMapped(RegExp(r'(?:%[0-9a-fA-F]{2})+'),
+        (match) => Uri.decodeComponent(match[0]!));
+    if (RegExp(r'^[a-z]:[/\\]', caseSensitive: false).hasMatch(decoded) ||
+        decoded.startsWith(r'\\')) return Uri.file(decoded, windows: true);
+    final reference = Uri.parse(value);
+    final result =
+        reference.hasScheme ? reference : base?.resolveUri(reference);
+    return result == null || result.hasQuery || result.hasFragment
+        ? null
+        : result;
+  } on FormatException {
+    return null;
+  } on ArgumentError {
+    return null;
+  }
+}
+
+String? _interchangePath(String value, {String? playlistPath}) {
+  if (value.isEmpty) return null;
+  final resolved = _localPath(value, playlistPath: playlistPath);
+  if (resolved == null ||
+      resolved.startsWith(r'\\?\') ||
+      resolved.contains(RegExp(r'[<>"|?*]')) ||
+      resolved
+          .substring(RegExp(r'^[a-z]:', caseSensitive: false).hasMatch(resolved)
+              ? 2
+              : 0)
+          .contains(':')) return null;
+  return resolved;
 }
 
 /// M3U is a list of references. Reading it never opens or fetches the songs.
@@ -144,22 +390,46 @@ const _audioExtensions = {
   '.mka',
 };
 
-Future<M3uDocument> readM3uFile(File file) async {
+Future<List<int>> _readPlaylistBytes(File file) async {
   final bytes = await file
       .openRead(0, m3uMaxBytes + 1)
       .fold<List<int>>(<int>[], (buffer, chunk) => buffer..addAll(chunk));
   if (bytes.length > m3uMaxBytes) {
     throw const FormatException('歌单文件超过 2 MiB，无法导入。');
   }
+  return bytes;
+}
+
+Future<String> readPlaylistSourceFingerprint(File file) async =>
+    sha256.convert(await _readPlaylistBytes(file)).toString();
+
+Future<M3uDocument> readM3uFile(File file) =>
+    _readPlaylist(file, m3uOnly: true);
+
+Future<M3uDocument> readLocalPlaylistFile(File file) => _readPlaylist(file);
+
+Future<M3uDocument> _readPlaylist(File file, {bool m3uOnly = false}) async {
+  final bytes = await _readPlaylistBytes(file);
   final location = file.absolute.path;
   return Isolate.run(() {
-    late final String text;
-    try {
-      text = utf8.decode(bytes);
-    } on FormatException {
-      throw const FormatException('请将歌单另存为 UTF-8 编码的 M3U8 文件。');
+    final text = m3uOnly
+        ? decodeM3uText(bytes, playlistPath: location)
+        : decodeLocalPlaylistText(bytes, playlistPath: location);
+    final M3uDocument document;
+    switch (m3uOnly ? '.m3u' : _windows.extension(location).toLowerCase()) {
+      case '.m3u':
+      case '.m3u8':
+        document = parseM3u(text, playlistPath: location);
+      case '.pls':
+        document = parsePls(text, playlistPath: location);
+      case '.xspf':
+        document = parseXspf(text, playlistPath: location);
+      default:
+        throw const FormatException('请选择 M3U、M3U8、PLS 或 XSPF 歌单。');
     }
-    return parseM3u(text, playlistPath: location);
+    return M3uDocument(document.entries,
+        skipped: document.skipped,
+        sourceFingerprint: sha256.convert(bytes).toString());
   });
 }
 
@@ -182,6 +452,9 @@ Future<List<Audio>> resolveM3uEntries(
               ? _windows.basenameWithoutExtension(entry.path)
               : entry.title,
           'duration': entry.duration,
+          if (entry.artist.isNotEmpty) 'artist': entry.artist,
+          if (entry.album.isNotEmpty) 'album': entry.album,
+          if (entry.track > 0) 'track': entry.track,
           'metadata_pending': true,
         }));
   }

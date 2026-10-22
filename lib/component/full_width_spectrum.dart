@@ -5,6 +5,8 @@ import 'dart:math' as math;
 
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/desktop_integration.dart';
+import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/spectrum_level_motion.dart';
 import 'package:dan_player/rendering_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +28,7 @@ class FullWidthSpectrum extends StatelessWidget {
       height: height,
       maximumBars:
           RenderingPreferencesScope.of(context).spectrumDensity.maximumBars,
+      style: RenderingPreferencesScope.of(context).spectrumStyle,
       samples: playback.frequencySpectrumStream,
       readLevels: () => playback.frequencySpectrumLevels,
       hidden: DesktopIntegration.instance.isHidden,
@@ -70,8 +73,8 @@ bool lyricSpectrumVisibleAt(
 
 /// The real spectrum view, separated from the player singleton so rendering
 /// and subscription lifetimes can also be tested without opening native audio.
-/// Samples are already smoothed by BASS; this view never fabricates frequencies
-/// or advances a separate animation clock.
+/// BASS supplies real samples. Pixel cells interpolate their visual levels
+/// with a finite, gated animation; audio and FFT sampling clocks are unchanged.
 class FullWidthSpectrumView extends StatefulWidget {
   const FullWidthSpectrumView({
     super.key,
@@ -79,6 +82,7 @@ class FullWidthSpectrumView extends StatefulWidget {
     required this.readLevels,
     this.height = 72,
     this.maximumBars = 112,
+    this.style = SpectrumStyle.rounded,
     this.hidden,
     this.coverRect,
     this.activity,
@@ -86,6 +90,7 @@ class FullWidthSpectrumView extends StatefulWidget {
   }) : assert(height >= 0);
 
   final int maximumBars;
+  final SpectrumStyle style;
   final Stream<List<double>> samples;
   final List<double> Function() readLevels;
   final double height;
@@ -99,8 +104,8 @@ class FullWidthSpectrumView extends StatefulWidget {
 }
 
 class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
-    with WidgetsBindingObserver {
-  final _levels = ValueNotifier<List<double>>(const []);
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  late final _levels = SpectrumLevelMotion(vsync: this);
   StreamSubscription<List<double>>? _subscription;
   Stream<List<double>>? _listeningTo;
   AppLifecycleState? _lifecycle;
@@ -167,6 +172,9 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
           treeVisible: _treeVisible,
           nativeHidden: widget.hidden?.value ?? false,
         );
+    _levels.animate = enabled &&
+        widget.style == SpectrumStyle.pixel &&
+        preferences.animations.allows(MotionKind.feedback);
     // Native hide and preference changes may arrive without another frame.
     // Release native FFT demand synchronously under the current policy.
     final activation = ++_activationGeneration;
@@ -199,6 +207,7 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
   @override
   void deactivate() {
     _attached = false;
+    _levels.animate = false;
     _activationGeneration++;
     _syncSubscription(false);
     super.deactivate();
@@ -219,20 +228,7 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
   }
 
   void _setLevels(List<double> values) {
-    final previous = _levels.value;
-    var changed = values.length != previous.length;
-    if (!changed) {
-      for (var index = 0; index < values.length; index++) {
-        if (_safeLevel(values[index]) != previous[index]) {
-          changed = true;
-          break;
-        }
-      }
-    }
-    if (!changed) return;
-    // Take a snapshot even when an external producer reuses its input buffer.
-    // Unchanged frames (including paused zeroes) need no allocation or paint.
-    _levels.value = List<double>.unmodifiable(values.map(_safeLevel));
+    _levels.update(values);
   }
 
   void _detach() {
@@ -286,6 +282,7 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
                   ? FrequencySpectrumPainter(
                       levels: _levels,
                       maximumBars: widget.maximumBars,
+                      style: widget.style,
                       pixelRatio: MediaQuery.devicePixelRatioOf(context),
                       startColor: scheme.primary,
                       endColor: scheme.tertiary,
@@ -294,6 +291,7 @@ class _FullWidthSpectrumViewState extends State<FullWidthSpectrumView>
                       levels: _levels,
                       coverRect: widget.coverRect!,
                       maximumBars: widget.maximumBars,
+                      style: widget.style,
                       pixelRatio: MediaQuery.devicePixelRatioOf(context),
                       startColor: scheme.primary,
                       endColor: scheme.tertiary,
@@ -349,6 +347,71 @@ class SpectrumProgressSection extends StatelessWidget {
 
 double _safeLevel(double value) => value.isFinite ? value.clamp(0.0, 1.0) : 0;
 
+double _safePixelRatio(double value) =>
+    value.isFinite && value > 0 ? value.clamp(.25, 16) : 1;
+
+/// Physical-pixel-aligned cells with a fixed allocation ceiling, independent
+/// of window height or an oversized caller-provided bar count.
+@immutable
+class PixelSpectrumGeometry {
+  const PixelSpectrumGeometry._(this.columns, this.rows, this.cells);
+  static const maximumColumns = 112;
+  static const maximumRows = 24;
+  static const maximumCells = maximumColumns * maximumRows;
+  static const empty = PixelSpectrumGeometry._(0, 0, []);
+
+  final int columns;
+  final int rows;
+
+  /// Column-major, bottom to top. Computed once, never per FFT frame.
+  final List<Rect> cells;
+
+  factory PixelSpectrumGeometry.fit(Size size,
+      {required int columns, double pixelRatio = 1}) {
+    if (!size.width.isFinite ||
+        !size.height.isFinite ||
+        size.isEmpty ||
+        size.width > 65536 ||
+        size.height > 65536 ||
+        columns <= 0) return empty;
+    final ratio = _safePixelRatio(pixelRatio);
+    final width = (size.width * ratio).floor();
+    final height = (size.height * ratio).floor();
+    if (width < 1 || height < 1) return empty;
+    final count = math.min(columns.clamp(1, maximumColumns), width);
+    final gap = math.min((2 * ratio).round(), (width / count * .4).floor());
+    final barWidth = (width - gap * (count - 1)) / count;
+    final rowGap = math.min(height - 1, math.max(1, (barWidth * .25).round()));
+    var blockHeight = math.min(height, math.max(1, (barWidth * .7).round()));
+    var rows = (height + rowGap) ~/ (blockHeight + rowGap);
+    if (rows > maximumRows) {
+      rows = maximumRows;
+      blockHeight = math.max(1, (height - rowGap * (rows - 1)) ~/ rows);
+    }
+    final cells = <Rect>[];
+    for (var column = 0; column < count; column++) {
+      final left = (column * (barWidth + gap)).round();
+      final right =
+          math.min(width, (column * (barWidth + gap) + barWidth).round());
+      for (var row = 0; row < rows; row++) {
+        final bottom = height - row * (blockHeight + rowGap);
+        cells.add(Rect.fromLTRB(left / ratio, (bottom - blockHeight) / ratio,
+            right / ratio, bottom / ratio));
+      }
+    }
+    return PixelSpectrumGeometry._(count, rows, List.unmodifiable(cells));
+  }
+
+  int litRows(double level) => (_safeLevel(level) * rows).floor();
+
+  /// The frontier cell fades continuously instead of snapping at an integer
+  /// row threshold. Whole cells retain their pixel-aligned geometry.
+  double cellOpacity(double level, int row) {
+    final t = (_safeLevel(level) * rows - row).clamp(0.0, 1.0);
+    return t * t * (3 - 2 * t);
+  }
+}
+
 /// FFT arrivals repaint this surface directly, without rebuilding or laying out
 /// a widget per 33ms sample. Horizontal geometry and the shader survive frames.
 class FrequencySpectrumPainter extends CustomPainter {
@@ -361,6 +424,7 @@ class FrequencySpectrumPainter extends CustomPainter {
     this.fixedBarCount,
     this.sampleStart = 0,
     this.sampleEnd = 1,
+    this.style = SpectrumStyle.rounded,
   }) : super(repaint: levels);
 
   final ValueListenable<List<double>> levels;
@@ -371,10 +435,12 @@ class FrequencySpectrumPainter extends CustomPainter {
   final int? fixedBarCount;
   final double sampleStart;
   final double sampleEnd;
+  final SpectrumStyle style;
   final _paint = Paint();
   Size? _geometrySize;
   List<_SpectrumBar> _bars = const [];
   _SpectrumMesh? _mesh;
+  _PixelSpectrumMesh? _pixelMesh;
 
   double sampleAt(double position) {
     final frame = levels.value;
@@ -392,9 +458,9 @@ class FrequencySpectrumPainter extends CustomPainter {
 
   void _layoutBars(Size size) {
     if (size == _geometrySize) return;
-    final count =
-        (fixedBarCount ?? (size.width / 5 * maximumBars / 112).floor())
-            .clamp(1, maximumBars);
+    final budget = maximumBars.clamp(1, 112);
+    final count = (fixedBarCount ?? (size.width / 5 * budget / 112).floor())
+        .clamp(1, budget);
     final gap = math.min(2.0, size.width / count * .4);
     final barWidth = (size.width - gap * (count - 1)) / count;
     _bars = List.generate(count, (index) {
@@ -412,18 +478,31 @@ class FrequencySpectrumPainter extends CustomPainter {
       end: Alignment.topRight,
       colors: [startColor, endColor],
     ).createShader(Offset.zero & size);
-    _mesh = _SpectrumMesh(_bars, .5 / pixelRatio);
+    if (style == SpectrumStyle.pixel) {
+      _pixelMesh = _PixelSpectrumMesh(PixelSpectrumGeometry.fit(size,
+          columns: count, pixelRatio: pixelRatio));
+      _paint.isAntiAlias = false;
+    } else {
+      _mesh = _SpectrumMesh(_bars, .5 / _safePixelRatio(pixelRatio));
+    }
     _geometrySize = size;
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (size.isEmpty || !size.width.isFinite || !size.height.isFinite) return;
+    if (size.isEmpty ||
+        !size.width.isFinite ||
+        !size.height.isFinite ||
+        size.width > 65536 ||
+        size.height > 65536) return;
     _layoutBars(size);
     final baselineHeight = math.min(2.0, size.height);
     canvas.save();
     canvas.clipRect(Offset.zero & size);
-    if (size.height >= 2 && _bars.first.width >= 2) {
+    if (style == SpectrumStyle.pixel) {
+      _paint.color = Colors.white;
+      _pixelMesh!.paint(canvas, sampleAt, _paint);
+    } else if (size.height >= 2 && _bars.first.width >= 2) {
       _paint.color = Colors.white;
       _mesh!.paint(canvas, size, _bars, sampleAt, _paint);
     } else {
@@ -453,6 +532,7 @@ class FrequencySpectrumPainter extends CustomPainter {
       oldDelegate.fixedBarCount != fixedBarCount ||
       oldDelegate.sampleStart != sampleStart ||
       oldDelegate.sampleEnd != sampleEnd ||
+      oldDelegate.style != style ||
       oldDelegate.pixelRatio != pixelRatio ||
       oldDelegate.endColor != endColor;
 }
@@ -468,6 +548,7 @@ class CoverSpectrumPainter extends CustomPainter {
     required this.endColor,
     this.pixelRatio = 1,
     this.maximumBars = 112,
+    this.style = SpectrumStyle.rounded,
   }) : super(repaint: levels);
 
   final ValueListenable<List<double>> levels;
@@ -476,6 +557,7 @@ class CoverSpectrumPainter extends CustomPainter {
   final Color endColor;
   final double pixelRatio;
   final int maximumBars;
+  final SpectrumStyle style;
   Size? _layoutSize;
   List<FrequencySpectrumPainter> _edges = const [];
 
@@ -516,26 +598,33 @@ class CoverSpectrumPainter extends CustomPainter {
             maximumBars: edgeCount,
             fixedBarCount: edgeCount,
             sampleStart: edge / 4,
-            sampleEnd: (edge + 1) / 4);
+            sampleEnd: (edge + 1) / 4,
+            style: style);
       }, growable: false);
       _layoutSize = size;
     }
     canvas.save();
     canvas.clipRect(Offset.zero & size);
+    double coordinate(double value) => style == SpectrumStyle.pixel
+        ? (value * _safePixelRatio(pixelRatio)).round() /
+            _safePixelRatio(pixelRatio)
+        : value;
     for (var edge = 0; edge < 4; edge++) {
       canvas.save();
       final amplitude = room[edge];
       switch (edge) {
         case 0:
-          canvas.translate(coverRect.left + inset, 0);
+          canvas.translate(coordinate(coverRect.left + inset), 0);
         case 1:
-          canvas.translate(size.width, coverRect.top + inset);
+          canvas.translate(
+              coordinate(size.width), coordinate(coverRect.top + inset));
           canvas.rotate(math.pi / 2);
         case 2:
-          canvas.translate(coverRect.right - inset, size.height);
+          canvas.translate(
+              coordinate(coverRect.right - inset), coordinate(size.height));
           canvas.rotate(math.pi);
         case 3:
-          canvas.translate(0, coverRect.bottom - inset);
+          canvas.translate(0, coordinate(coverRect.bottom - inset));
           canvas.rotate(-math.pi / 2);
       }
       _edges[edge].paint(canvas, Size(edge.isEven ? width : height, amplitude));
@@ -551,7 +640,65 @@ class CoverSpectrumPainter extends CustomPainter {
       oldDelegate.startColor != startColor ||
       oldDelegate.endColor != endColor ||
       oldDelegate.pixelRatio != pixelRatio ||
+      oldDelegate.style != style ||
       oldDelegate.maximumBars != maximumBars;
+}
+
+/// One indexed draw per strip. At most 2,688 rectangles / 10,752 vertices;
+/// geometry and storage survive frames, and silence draws no cells.
+class _PixelSpectrumMesh {
+  _PixelSpectrumMesh(this.geometry)
+      : positions = Float32List(geometry.cells.length * 8),
+        colors = Int32List(geometry.cells.length * 4),
+        indices = Uint16List(geometry.cells.length * 6) {
+    for (var cell = 0; cell < geometry.cells.length; cell++) {
+      final vertex = cell * 4;
+      final offset = cell * 6;
+      indices.setRange(offset, offset + 6,
+          [vertex, vertex + 1, vertex + 2, vertex, vertex + 2, vertex + 3]);
+    }
+  }
+  final PixelSpectrumGeometry geometry;
+  final Float32List positions;
+  final Int32List colors;
+  final Uint16List indices;
+
+  void paint(Canvas canvas, double Function(double) sample, Paint paint) {
+    var active = 0;
+    for (var column = 0; column < geometry.columns; column++) {
+      final position =
+          geometry.columns == 1 ? .5 : column / (geometry.columns - 1);
+      final edgeFade = math.sin(math.pi * position).clamp(.18, 1.0);
+      final level = _safeLevel(sample(position) * edgeFade);
+      final lit = (level * geometry.rows).ceil();
+      for (var row = 0; row < lit; row++) {
+        final alpha =
+            ((.35 + edgeFade * .65) * geometry.cellOpacity(level, row) * 255)
+                .round();
+        if (alpha == 0) continue;
+        final color = (alpha << 24) | 0xffffff;
+        final cell = geometry.cells[column * geometry.rows + row];
+        final offset = active * 8;
+        positions[offset] = cell.left;
+        positions[offset + 1] = cell.top;
+        positions[offset + 2] = cell.right;
+        positions[offset + 3] = cell.top;
+        positions[offset + 4] = cell.right;
+        positions[offset + 5] = cell.bottom;
+        positions[offset + 6] = cell.left;
+        positions[offset + 7] = cell.bottom;
+        colors.fillRange(active * 4, (active + 1) * 4, color);
+        active++;
+      }
+    }
+    if (active == 0) return;
+    final vertices = graphics.Vertices.raw(graphics.VertexMode.triangles,
+        Float32List.sublistView(positions, 0, active * 8),
+        colors: Int32List.sublistView(colors, 0, active * 4),
+        indices: Uint16List.sublistView(indices, 0, active * 6));
+    canvas.drawVertices(vertices, BlendMode.modulate, paint);
+    vertices.dispose();
+  }
 }
 
 class _SpectrumBar {
