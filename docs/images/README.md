@@ -28,14 +28,20 @@
 | 歌词 | [歌词外观](feature-lyric-appearance-dark.png) · [迷你歌词](feature-mini-lyrics-dark.png) |
 | 歌词编辑 | [快捷点按文本](lyric-tap-text-zh.png) · [窄窗逐字打点](lyric-tap-words-narrow-zh.png) · [传统代码编辑](lyric-code-editor-zh.png) · [逐字预览](lyric-editor-preview-zh.png) |
 | 播放条与频谱 | [播放条](feature-player-bar-dark.png) · [固定虚构频谱帧](feature-spectrum-dark.png) |
+| 歌词页待播预览 | [中文](feature-upcoming-zh.png) · [English](feature-upcoming-en.png) · [日本語](feature-upcoming-ja.png) · [한국어](feature-upcoming-ko.png) |
+| 频谱样式互动指南 | [中文](feature-spectrum-guide-zh.png) · [English](feature-spectrum-guide-en.png) · [日本語](feature-spectrum-guide-ja.png) · [한국어](feature-spectrum-guide-ko.png) |
 
-## 更新预览
+## 展示说明
 
 说明书图片展示播放器的真实组件与字体，资源数值、目录和曲目采用虚构示例。界面动效在说明书中可由用户主动试用，静态图仅展示某一状态，不作为播放、GPU 或动画性能验证。
 
 搜索历史图片加载播放器字体与 Material Symbols 图标字体，展示内容区域、居中换行、超长文本省略和示例历史；中文图展示强调色删除状态，英文／日文使用浅色主题，中文／韩文使用深色主题。这些图片不包含原生窗口边框或底部播放条。
 
 歌词编辑的四张图使用虚构曲目和真实产品字体，展示宽窗、窄窗、正文、逐字与预览状态，不代表真实声卡试听。
+
+四语待播图片使用当前的 `CurrentPlaylistView`、`QueueUpcomingPreview` 与 `BackgroundLayer`，加载播放器深色主题和实际字体，展示四项双列、半透明卡片及完整队列。歌名、作者、专辑和渐变封面均为虚构示例；这是歌词页的队列视图，播放条弹出的列表不显示待播预览。
+
+四语频谱指南图片并排展示实际 `PlayerGuideDemo` 中的圆头音柱与像素音柱，使用生产频谱绘制组件和固定演示数据。图片截取互动演示的一帧，不播放音频、不读取听歌记录，也不代表性能测量。
 
 更新主要页面、功能预览或三栏排行图片时，使用播放器当前界面与固定示例数据，将需要展示的截图更新到本目录。
 

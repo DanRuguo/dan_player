@@ -55,7 +55,7 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 <p align="center">
   <a href="#download">Download</a> ·
-  <a href="#features">Features</a> ·
+  <a href="#features">Highlights</a> ·
   <a href="#screenshots">Interface gallery</a> ·
   <a href="#quick-start">Getting started</a> ·
   <a href="#development">Development</a>
@@ -68,12 +68,10 @@ Local playback comes first, with online music and custom sources alongside it.</
 | Release | Best for | Download |
 | --- | --- | --- |
 | **Latest stable** | Everyday use and upgrades; check the release page for its version | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/latest) |
-| **26.0.6 · Release history** | Taskbar lyrics and player manual release notes | [26.0.6 release assets](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
-| **26.0.5 · Previous** | Previous release and the separate FFmpeg component | [Previous release assets](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
 **Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. Desktop lyrics run in a separate process launched from the same executable.
 
-The current portable ZIP includes FFmpeg for previews and trimming, the offline Japanese reading dictionary and their notices. Extract the whole ZIP to use them. The slim installer omits these components and preserves already installed copies; the player also offers explicit downloads with pinned size and SHA-256 verification. FFmpeg uses the [separate 26.0.5 package](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5); the dictionary is available separately on the [26.1.1 release page](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1).
+The current portable ZIP includes FFmpeg, three offline Japanese reading datasets (the main dictionary, vocabulary supplement and kanji-reading supplement), and their licenses for previews, trimming and offline readings. The slim installer excludes these two component categories and preserves components already installed. You can download them manually from the player, with fixed-size and SHA-256 verification. FFmpeg uses the [standalone 26.0.5 component](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5); the reading data is available separately on the [26.1.1 release page](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1).
 
 > **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through the app's backup and restore settings before upgrading.
 
@@ -82,7 +80,7 @@ The current portable ZIP includes FFmpeg for previews and trimming, the offline 
 <details>
 <summary><strong>Verify a download with SHA-256</strong></summary>
 
-Download the program and `SHA256SUMS` from the same Release page. Calculate the SHA-256 of the installer or ZIP and compare it with the checksum file and the GitHub asset digest. Replace the example filename below with the name of the file you downloaded:
+Download the program and its matching checksum from the same Release: use `SHA256SUMS` for the portable ZIP and the matching `.exe.sha256` file for the installer. Calculate the file's SHA-256 and also compare it with the GitHub asset digest. Replace the example filename below with your downloaded filename:
 
 ```powershell
 Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
@@ -94,50 +92,36 @@ Matching hashes confirm that the file matches the published asset; they do not m
 
 <a id="features"></a>
 
-## Features
+## Highlights
 
-From finding a track to organizing an entire collection, everyday tools work around the same music library.
+- **Library and search:** Browse artists, albums, formats and folders; use multiword, pinyin and typo-tolerant search, CUE tracks, multi-disc ordering, batch metadata editing and library health checks.
+- **Playlists and queues:** Nested and smart playlists, drag ordering, saved queues and undo; import local audio references from M3U, M3U8, PLS or XSPF, and export M3U8 or a folder with music files.
+- **Up next:** Up to four translucent cards use two columns in wide windows and one in narrow windows. Click to locate the exact queue entry, or expand to see up to ten determined upcoming tracks. The setting controls only the lyrics-page preview; the playback-bar popup has none.
+- **Playback and segments:** Equalizer, loudness normalization, independent pitch shifting, speed changes that preserve pitch, per-track resume, A–B loops and library-wide bookmarks; optional crossfade, a same-album crossfade exemption, and skipping leading or trailing silence.
+- **Lyric editing and reading:** Word highlighting, translation, Japanese readings, full-text search and timing adjustment; tap-to-time and text editors with revisions, locking and ruby layout for long lines.
+- **Artwork and categories:** Embedded or same-folder artwork and animated GIFs; soft contour glow and local water-drop refraction on the large playback cover, plus category tile glow, mixed sizes and custom ordering.
+- **Spectrum and motion:** Rounded bars or smoothly changing pixel spectra around artwork and along the progress bar; ten animation controls, reduced motion, hidden-view suspension, refresh-rate and power-saving settings. Interactive guides demonstrate spectra, progress and lyrics.
+- **Desktop experience:** Four languages, light/dark themes, artwork colors, shortcuts and a mini player; highlighted desktop or taskbar lyrics, with one/two-line taskbar layouts and optional playback buttons. The two lyric surfaces are mutually exclusive.
+- **Statistics and organization:** Ratings, personal tags, listening rankings, folder notes and storage breakdowns; compilations grouped by album artist, separate music/cache categories and optional CPU/GPU/memory monitoring.
+- **Backup and restore:** Select music, library data, playlists, statistics, settings and caches for a `.bak` file, with optional encryption, selective restore and cancellation; shared music files are stored once.
 
-| Area | What you can do |
-| --- | --- |
-| **Library & search** | Browse by artist, album, format or folder; search tracks, edit metadata in batches and check library health. |
-| **Playlists & queues** | Organize nested playlists, reorder by dragging, use smart conditions and exchange M3U8 playlists; save queues, undo changes and recover playlists. |
-| **Lyrics** | Match, edit, revise, lock and synchronize lyrics; search their full text and read them in desktop lyrics or the mini player. |
-| **Playback & navigation** | Play CUE tracks, use the equalizer and loudness normalization, resume individual tracks and loop A–B segments; save positions or segments and manage them in All bookmarks. |
-| **Personal music data** | Add personal ratings and tags, filter your collection, and explore listening times, track rankings, library composition and disk usage. |
-| **Windows experience** | Enjoy artwork-based colors, light and dark themes, and four interface languages; use keyboard shortcuts, a mini window, taskbar previews and playback diagnostics. |
-
-These features are included in the 26.0.5 stable release; see the corresponding [Release notes](https://github.com/DanRuguo/dan_player/releases) for what is included in a published package.
+Lyrics and comments use local content and caches first by default. Automatic online access is optional; manual searches, refreshes and batch caching can still make network requests.
 
 Online music and custom sources complement local listening. Custom services provide capabilities such as search and lyrics according to what they explicitly declare. See the [custom music source API](docs/custom-music-source-api.md) for integration details.
 
-Main, desktop and taskbar lyrics share letter spacing. Generated Japanese readings align with kanji, preserve the original lyrics and existing annotations, and use a separate derived cache; settings also offer bulk processing of saved lyrics. With automatic online access on, generation tries online first and falls back offline. With it off, explicitly choose online or offline in the reading tools or bulk dialog. Online generation needs your own Yahoo! JAPAN Client ID and sends the text to that service; credentials are stored only on your computer.
-
-### 26.0.6
-
-- Taskbar lyrics offer one or two lines, word highlighting, available-area switching, system colors and optional capsule playback buttons. Opening them closes desktop lyrics, and vice versa.
-- Music and cache folders support display notes, browsing, recoverable moves and storage statistics. Cache categories share the statistics page's refresh action.
-- The feature guide now explains common operations and both lyric editing workflows, with interactive progress and lyric animation examples. First-use onboarding points to the manual.
-- Optional CPU/GPU/memory monitoring shares its display mode and interval across backup settings, the sidebar and lyrics. It samples only while a selected surface is visible and keeps navigation in place when space permits.
-
-- Plain-text saving in tap-to-time lyrics now explains that translations and pronunciation cannot go into the plain-text copy, and saves only the main text. Line and word timing can still retain those tracks.
-- The text editor avoids repeated parsing and temporary JSON allocations while rebuilding long lossless lyrics. New wide and narrow renders show both editing methods.
-- Lyrics and comments use local content and caches first by default. Automatic online access can be enabled in settings; manual search, refresh and batch caching remain available.
-
-### New in 26.0.5
-
-- **Search history:** the search box sits higher, with deduplicated, centered history chips that wrap and hide older entries in small windows. Click to search again; right-click or long-press, then click × to delete.
-- **Lyrics and comments:** local content and caches take priority by default, with optional automatic online access. Manual lyric search, comment refresh, loading more comments, and changing a comment category or source can still make requests. The refresh icon spins during updates, with a shared result bubble on success or failure.
-- **Playback interaction:** improved progress-bar multitouch, cancelled drags and recovery after a failed seek. An old drag cannot seek a new playback session. Lyric dragging rebuilds less content, and playlist view changes survive scrolling during transition capture.
-- **Category tiles:** rectangular artwork supports 1×1, 2×1, 1×2 and 2×2 sizes, custom drag ordering and optional gap filling. Captions sit directly on the artwork and choose light or dark text from its colors.
-- **Backup and restore:** choose local music by folder, library index, playlists, statistics, settings and cached resources for a single `.bak` file, with optional password encryption. Choose folders and data again when restoring, or select everything at once. Keep your password safe. Each encrypted backup must be smaller than about 64 GiB; split larger collections by folder.
-- **Performance and onboarding:** switch to power saving or high performance, then restore the previous related settings when turning the mode off. Refresh-rate and spectrum-density settings, a first-use guide and a shorter splash sequence are also available.
-
-Playlist view controls, the volume panel, menus, native blur switching and window-size restoration have also been improved. Tile layout and caption sampling run on demand and use caches; tile animations stop refreshing when complete. Actual power use depends on your device and settings.
+Main, desktop and taskbar lyrics share letter spacing. Generated Japanese readings align with kanji, preserve the original lyrics and existing annotations, and use a separate derived cache; settings also offer bulk processing of saved lyrics. With automatic online access on, generation tries online first and falls back offline. With it off, explicitly choose online or offline in the reading tools or bulk dialog. Online generation needs your own Yahoo! JAPAN Client ID and sends the text to that service; credentials are stored only on your computer. Offline dictionaries have limits with unknown words, names and ambiguous readings; review and revise the result when needed.
 
 <a id="screenshots"></a>
 
 ## Interface gallery
+
+### Up next and spectrum guide
+
+These renders use actual components, the English interface and fictional data. The spectrum is a guide demonstration, not a live audio sample.
+
+| Four translucent upcoming cards | Rounded and pixel spectrum guide |
+| --- | --- |
+| ![English upcoming preview with four translucent cards in two columns](docs/images/feature-upcoming-en.png) | ![English interactive guide showing rounded and pixel spectra](docs/images/feature-spectrum-guide-en.png) |
 
 ### Manual and on-demand monitoring
 
@@ -193,11 +177,13 @@ These real component renders use the Chinese interface, fictional resource sampl
 
 **Add music.** Import audio files or folders, then browse them from the music, category and playlist pages. Organize your collection with nested playlists and drag-to-reorder.
 
-**Keep your own ratings and tags.** In the 26.0.5 release, open the category page and choose **Personal library → Songs** to see tracks you have rated or given personal tags. Filter by date, rating or tag. Personal ratings and tags are stored in player data and **are not written to music files**. The metadata-editing and batch-tag tools do change file metadata, so review the changes before saving.
+**Keep your own ratings and tags.** Open the category page and choose **Personal library → Songs** to see tracks you have rated or given personal tags. Filter by date, rating or tag. Personal ratings and tags are stored in player data and **are not written to music files**. The metadata-editing and batch-tag tools do change file metadata, so review the changes before saving.
 
 **Save a favorite moment.** In the Now Playing page, open the playback bookmarks dialog from the More menu to save the current position or an A–B segment. Find your saved entries under **Personal library → All bookmarks** on the category page. The play button there starts at the saved position; to restore an A–B loop, select that segment in the corresponding track's playback bookmarks dialog.
 
 **Back up your data.** Use backup and restore in Settings to save selected player data and local music, with optional encryption and selective restoration. Updating the program and backing up your data are separate operations: application files in the installation directory do not replace backups of your library, playlists and settings.
+
+Split large collections by folder. Keep the password safe; each encrypted backup must be smaller than about 64 GiB.
 
 <details>
 <summary><strong>Common keyboard shortcuts</strong></summary>
@@ -228,33 +214,18 @@ The linked gallery and API documentation are currently in Chinese. Replace the s
 Built with **Flutter, Rust and BASS**. Development requires Flutter, Rust and the Visual Studio Desktop development with C++ workload. See [pubspec.yaml](pubspec.yaml) for Dart constraints and [pubspec.lock](pubspec.lock) / [rust/Cargo.lock](rust/Cargo.lock) for resolved dependencies. The Windows workflow is defined in [Windows CI](.github/workflows/windows_ci.yml).
 
 <details>
-<summary><strong>Source layout, debugging & focused checks</strong></summary>
+<summary><strong>Source layout, debugging and focused checks</strong></summary>
 
 | Directory | Purpose |
 | --- | --- |
 | [lib/](lib/) | Main interface, library, playback services and data models |
-| [third_party/desktop_lyric/](third_party/desktop_lyric/) | Shared desktop-lyrics path dependency and Windows host |
-| [rust/](rust/), [rust_builder/](rust_builder/) | Tag processing, Flutter/Rust bridging and Cargokit build support |
-| [windows/](windows/) | Main Windows host, taskbar and system integration |
-| [installer/](installer/) | Inno installer, native components and installation transaction tests |
-| [test/](test/), [test/support/](test/support/) | Dart/Widget regressions, isolated fixtures and rendering helpers |
-| [integration_test/](integration_test/), [test_driver/](test_driver/) | Windows Profile display entry points and drivers |
-| [scripts/](scripts/) | Dependency preparation, build, verification and release scripts |
-| [assets/](assets/), [shaders/](shaders/) | Product assets, fonts and shaders |
-| [docs/](docs/) | API documentation, configuration examples and public UI images |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | Shared desktop lyrics, fonts and Windows host |
+| [rust/](rust/), [rust_builder/](rust_builder/) | Tag processing, Flutter/Rust bridging and Cargokit support |
+| [windows/](windows/), [installer/](installer/) | Windows integration and native Inno installer components |
+| [scripts/](scripts/) | Dependency preparation, building, signing and artifact verification |
+| [assets/](assets/), [shaders/](shaders/), [docs/](docs/) | Interface assets, shaders, API documentation and public images |
 
-Choose entry points for the change. Ordinary `flutter test` does not include `integration_test/`:
-
-| Check | Entry point and scope |
-| --- | --- |
-| Dart/Widget | `flutter test --no-pub test/<module>_test.dart`; respect storage fixture injection instead of overriding mocked directories globally |
-| Rust | `cargo test --manifest-path rust/Cargo.toml --locked` |
-| Windows display | [verify_native_display_regressions.ps1](scripts/verify_native_display_regressions.ps1) runs selected Profile display regressions; see [integration_test/](integration_test/) for other entry points |
-| Windows C++ | Focused targets are defined in the [main host CMake](windows/runner/CMakeLists.txt) and [desktop-lyrics CMake](third_party/desktop_lyric/windows/runner/CMakeLists.txt) |
-| Installer | [verify_installer_native.ps1](scripts/verify_installer_native.ps1) checks native components; [installer/tests/](installer/tests/) also contains UI, install, update and uninstall sandbox scripts |
-| Release policies | Offline regressions in [test_validation_pipeline.ps1](scripts/test_validation_pipeline.ps1), [CI continuation](scripts/test_windows_ci_resume.py) and [classification audit](scripts/test_audit_classification_metadata.py) |
-
-Run the following from the repository root. Use an isolated data directory so debugging does not affect your everyday library and settings:
+Run from the repository root with an isolated data directory so debugging does not affect your everyday library and settings:
 
 ```powershell
 $env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-local/readme-debug'))
@@ -262,22 +233,16 @@ flutter pub get
 flutter run -d windows
 ```
 
-Prepare the BASS runtime before launching; the relevant scripts are `scripts/prepare_bass_runtime.ps1` and `scripts/prepare_bass_fx_runtime.ps1`. Machine-specific SDK, runtime-cache and signing paths belong in a local `DEVELOPMENT.md` outside the source repository.
+Prepare the BASS runtime before launching; see `scripts/prepare_bass_runtime.ps1` and `scripts/prepare_bass_fx_runtime.ps1`. Keep machine-specific SDK, cache and signing paths outside the source repository.
 
-Keep checks focused and batch related changes by module. Do not run the full regression suite, build and signing process after every feature. For example, statistics and detail-layout changes can be checked with:
-
-```powershell
-flutter test test/statistics_visualization_test.dart test/detail_diagnostics_layout_test.dart --no-pub
-```
-
-Use `scripts/verify_interaction_regressions.ps1` at integration checkpoints. UI changes must be reviewed using rendered production Flutter widgets. Public images are generated with `scripts/render_public_ui.ps1` and isolated fictional data; rendering checks cover languages, window widths and text scaling. Widget rendering does not replace testing on real audio devices and Windows desktop integration.
+Prepare isolated fixtures for the current change and select existing entry points for focused Dart/Widget, Rust or Windows checks; do not restore retired historical test suites. Use `flutter test --no-pub <test-entry>` for Dart and `cargo test --manifest-path rust/Cargo.toml --locked <test-filter>` for Rust. Render actual UI components at the affected languages, widths and text scales; native captures need a separate verification window. Widget rendering does not replace real audio-device or Windows desktop integration checks.
 
 </details>
 
 <details>
 <summary><strong>Windows builds & releases</strong></summary>
 
-The existing release scripts expect a workspace with the source in `dan_player/`, a sibling `tool/` directory for toolchains and caches, and `dist/` for output. `build_windows_release.ps1` checks dependencies, runs release gates, builds the Windows app, and verifies fonts and runtime libraries.
+The release scripts expect the source in `dan_player/`, a sibling `tool/` directory for toolchains and caches, and `dist/` for output. `build_windows_release.ps1` prepares dependencies, checks reusable source and artifact receipts, builds Windows binaries, verifies fonts and runtimes, and optionally signs or assembles packages. It does not replace focused regression checks.
 
 ```powershell
 # From the source repository in the workspace described above, without a signing certificate:
@@ -287,6 +252,8 @@ The existing release scripts expect a workspace with the source in `dan_player/`
 `-SkipPackaging` skips portable-package assembly; `-NoRestore` reuses restored dependencies. Signed releases require a separately configured certificate. Build the installer with `scripts/build_windows_installer.ps1`; verify the portable package and installer with `verify_local_release.ps1` and `verify_windows_installer.ps1`, respectively.
 
 Reuse valid checks and build artifacts for the same code state; rerun only the necessary stages after a failure. After signing, verify the source commit, test receipts, artifact SHA-256 and signatures, then perform only the required GitHub publishing steps. Previews remain prereleases and do not replace the stable Latest release. Simplify the process without removing essential verification.
+
+Default local assembly does not include FFmpeg. To bundle it, prepare the fixed runtime described by `scripts/ffmpeg_runtime_manifest.json`, then use `scripts/assemble_windows_release.ps1 -IncludeOptionalComponents`. `prepare_ffmpeg_runtime.ps1` only verifies and copies an existing cache; it does not download it.
 
 </details>
 
@@ -302,6 +269,6 @@ The main player and desktop lyrics share font resources, with one common selecti
 
 Dan Player is based on [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player). Thanks to the original author for the player foundation, library structure and lyrics experience. We also acknowledge [desktop_lyric](https://github.com/Ferry-200/desktop_lyric), [music_api_dart](https://github.com/Ferry-200/music_api_dart), [BASS](https://www.un4seen.com/bass.html), [Lofty](https://crates.io/crates/lofty), [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge), [Flutter](https://flutter.dev/) and Material Design.
 
-Offline dictionary licenses and provenance: [IPADIC](licenses/IPADIC/PROVENANCE.md) and [Lindera](licenses/LINDERA/LICENSE). Online readings: [Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/).
+Offline dictionary licenses and provenance: [IPADIC](licenses/IPADIC/PROVENANCE.md) / [EDRDG](licenses/EDRDG/PROVENANCE.md) and [Lindera](licenses/LINDERA/LICENSE). Online readings: [Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/).
 
 <sub>Badges are provided by <a href="https://shields.io/">Shields.io</a>. Downloads count Release asset downloads, not unique users or installations. Framework badges identify the technologies used, not minimum supported versions.</sub>

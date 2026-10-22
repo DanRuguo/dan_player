@@ -55,7 +55,7 @@
 
 <p align="center">
   <a href="#download">下载与安装</a> ·
-  <a href="#features">功能</a> ·
+  <a href="#features">特色</a> ·
   <a href="#screenshots">界面一览</a> ·
   <a href="#quick-start">开始使用</a> ·
   <a href="#development">开发与构建</a>
@@ -70,12 +70,10 @@
 | 版本 | 适用场景 | 下载 |
 | --- | --- | --- |
 | **最新稳定版** | 日常使用与升级，版本以发布页为准 | [安装器、便携 ZIP 与校验文件](https://github.com/DanRuguo/dan_player/releases/latest) |
-| **26.0.6 · 历史版本** | 查看任务栏歌词与操作说明书的发行记录 | [26.0.6 发行文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.6) |
-| **26.0.5 · 旧版** | 查看上一正式版及独立 FFmpeg 组件 | [历史发行文件](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5) |
 
 **安装版**运行安装器，支持原位升级；**便携版**完整解压 ZIP 后运行 `Dan Player.exe`，不要只复制一个 EXE。桌面歌词由同一程序启动独立进程。
 
-当前便携包包含试听与裁剪所需的 FFmpeg、离线日语假名字典及许可，完整解压后即可使用。精简安装器不附带这两项，并保留已经安装的组件；也可从播放器中手动下载，校验固定大小和 SHA-256。FFmpeg 沿用 [26.0.5 的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，日语词典在 [26.1.1 发布页](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1)单独提供。
+当前便携包包含 FFmpeg、三份离线日语注音数据（主词典、词汇补充、汉字读音补充）及许可，完整解压后即可用于试听、裁剪与离线注音。精简安装器不附带这两类组件，并保留已经安装的组件；也可从播放器中手动下载，校验固定大小和 SHA-256。FFmpeg 沿用 [26.0.5 的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，注音数据在 [26.1.1 发布页](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1)单独提供。
 
 > **下载与签名说明**：自有程序使用 RCEIT.Inc 自签名证书，Windows 仍可能显示信任提示；安装器不会自动安装信任证书。旧签名版本请手动下载新安装器升级。预览版不替换稳定版 Latest；升级前建议通过播放器的“备份与恢复”保存个人资料。
 
@@ -85,7 +83,7 @@
 <details>
 <summary><strong>核对下载文件的 SHA-256</strong></summary>
 
-从同一 Release 下载程序及 `SHA256SUMS` 校验文件，计算安装器或 ZIP 的 SHA-256，与校验文件及 GitHub 资产摘要核对。将下面的占位文件名替换为实际下载文件名：
+从同一 Release 下载程序及对应校验文件：便携 ZIP 对照 `SHA256SUMS`，安装器对照同名 `.exe.sha256`。计算文件的 SHA-256，同时与 GitHub 资产摘要核对。将下面的占位文件名替换为实际下载文件名：
 
 ```powershell
 Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA256
@@ -97,50 +95,36 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 <a id="features"></a>
 
-## 功能
+## 特色
 
-从找到一首歌，到整理整套收藏，常用操作都围绕同一份曲库展开。
+- **曲库与搜索：** 按艺术家、专辑、格式和文件夹浏览，支持多词、拼音和容错搜索、CUE 分轨、多碟专辑排序、元数据批量编辑与曲库健康检查。
+- **歌单与队列：** 嵌套歌单、智能条件、拖动排序、队列保存与撤销；导入 M3U／M3U8／PLS／XSPF 的本地音频引用，导出 M3U8 或连同音乐文件整理到文件夹。
+- **接下来播放：** 最多四首半透明卡片，宽窗双列、窄窗单列，点击定位到对应队列项，展开可查看最多十首已确定的待播歌曲；设置仅控制歌词页预览，播放条弹出列表不显示预览。
+- **播放与片段：** 均衡器、响度均衡、独立升降调、保持音高变速、逐曲续播、A–B 循环与全库书签；可选交叉淡化、同专辑免交叉，以及跳过曲首／曲尾静音。
+- **歌词创作与阅读：** 逐字强调、翻译、日语假名、全文搜索和时间校准；快捷点按与传统文本两种编辑方式，支持修订、锁定及长行注音布局。
+- **封面与分类：** 内嵌或同目录图片、动态 GIF 封面；播放大封面支持柔和轮廓辉光与局部水滴折射，分类磁贴保留流光、多种尺寸与自定义排列。
+- **频谱与动效：** 进度条和封面频谱支持圆头音柱与平滑像素样式；共用十类动画管理、减少动画与隐藏停钟，提供刷新率及省电设置；特色指南可互动体验频谱、进度和歌词。
+- **桌面体验：** 四语言、明暗主题、封面取色、快捷键与迷你播放器；桌面／任务栏歌词支持逐字强调，任务栏可选单双行和播放按钮，两种歌词互斥显示。
+- **统计与个人整理：** 评分、个人标签、听歌排行、文件夹备注与占用统计；合辑按专辑艺术家归组，音乐与缓存分类清晰，CPU／GPU／内存监控按需显示。
+- **备份与恢复：** 选择本地音乐、曲库、歌单、统计、设置与缓存保存为 `.bak`，支持密码加密、选择性恢复及取消；共享音乐文件去重保存。
 
-| 方向 | 主要能力 |
-| --- | --- |
-| **曲库与检索** | 按艺术家、专辑、格式和文件夹浏览；搜索歌曲，批量整理元数据，检查曲库健康。 |
-| **歌单与队列** | 嵌套歌单、拖动排序、智能条件与 M3U8 导入导出；队列保存、撤销，以及歌单回收。 |
-| **歌词与阅读** | 歌词匹配、编辑、修订、锁定和时间校准；全文检索、桌面歌词与迷你播放器。 |
-| **播放与定位** | CUE 分轨、均衡器与响度均衡、逐曲续播、A–B 循环；保存时间点或片段，并在全库书签中集中管理。 |
-| **个人音乐资料** | 个人评分、标签与筛选；查看听歌时段、歌曲排行、曲库构成和文件占用。 |
-| **Windows 桌面体验** | 随封面变化的配色、明暗主题、四语言界面；快捷键、迷你窗口、任务栏预览与播放诊断。 |
-
-以上功能已包含在 26.0.5 正式版中；具体更新请查看对应 [Release 更新说明](https://github.com/DanRuguo/dan_player/releases)。
+歌词与评论默认优先读取本地内容和缓存；自动联网可在设置中开启，手动搜索、刷新与批量缓存仍可发起网络请求。
 
 联网音乐与自定义歌源可作为本地曲库的补充。自定义服务按实际声明的能力提供检索、歌词等功能，接入方式见 [自定义歌源 API](docs/custom-music-source-api.md)。
 
-歌词字间距由主歌词、桌面与任务栏共用。日语假名按汉字位置显示，保留原歌词和已有注音，仅保存独立的派生缓存；设置中也可批量处理已缓存歌词。自动联网开启时优先联网、失败回退离线；关闭时需在阅读工具或批量窗口明确选择联网或离线。联网注音需配置自己的 Yahoo! JAPAN Client ID，选用联网时会将待注音文本发送给该服务；凭据只保存在本机。
-
-### 26.0.6
-
-- 任务栏歌词支持单/双行、逐词高亮、空区切换、系统配色与可选胶囊播放按钮；与桌面歌词互斥。
-- 音乐与缓存文件夹支持显示备注、浏览、可恢复剪切和占用统计；缓存分类与统计页共用刷新。
-- 特色操作指南按完整使用流程讲解常用功能及两种歌词编辑，附进度与歌词动效互动演示；首次引导结束提示入口。
-- 按需 CPU/GPU/内存监控可在备份与恢复、侧栏和歌词页显示，共用显示方式及刷新间隔，仅可见时采样；侧栏空位充足时保持导航位置。
-
-- 快捷点按歌词的纯文本保存会说明翻译与注音不会写入纯文本副本，并只保存正文；逐句和逐字流程仍可保留辅助内容。
-- 传统歌词编辑器减少长篇无损歌词在界面重建时的重复解析与临时内存分配；新增两种编辑方式的宽窄窗渲染示例。
-- 歌词与评论默认优先读取本地内容及缓存。可在设置中开启自动联网；手动搜索、刷新与批量缓存仍可随时发起。
-
-### 26.0.5 新增体验
-
-- **搜索与历史：** 搜索框上移，历史胶囊自动去重、居中换行，窄窗自动隐藏较早记录。点击重搜；右键或长按后，再点击 × 删除。
-- **歌词与评论：** 默认优先读取本地内容与缓存；可选开启自动联网。手动搜词、更新评论、加载更多或切换评论分类／来源仍可联网。评论更新期间图标旋转，完成或失败显示统一气泡。
-- **播放交互：** 改进进度条多点触控、拖动取消与失败恢复；切换播放会话后旧拖动不会误跳转。减少歌词拖动时的重建，保留歌单追踪捕获期间的视图切换。
-- **分类磁贴：** 矩形封面支持 1×1、2×1、1×2、2×2，自定义拖动排序和可选自动填隙；文字直接显示在封面内，按图像明暗自动选择文字颜色。
-- **备份与恢复：** 将本地音乐按文件夹、曲库索引、歌单、统计、设置与缓存资源按需保存到一个 `.bak` 文件，可选密码加密；恢复时可重新选择文件夹和资料项目，也可一键全选。请妥善保存密码；单个加密备份须小于约 64 GiB，更大的收藏可分文件夹备份。
-- **性能与引导：** 一键省电或高性能，关闭后恢复之前的相关设置；支持刷新率与频谱档位设置，首次使用提供功能引导，开屏等待更短。
-
-同时改进歌单视图、音量面板、菜单交互、原生模糊切换及窗口尺寸恢复。磁贴布局与文字采样按需计算并缓存，磁贴动画结束后停止该动画的刷新；实际功耗取决于设备和设置。
+歌词字间距由主歌词、桌面与任务栏共用。日语假名按汉字位置显示，保留原歌词和已有注音，仅保存独立的派生缓存；设置中也可批量处理已缓存歌词。自动联网开启时优先联网、失败回退离线；关闭时需在阅读工具或批量窗口明确选择联网或离线。联网注音需配置自己的 Yahoo! JAPAN Client ID，选用联网时会将待注音文本发送给该服务；凭据只保存在本机。 离线词典对未知词、人名和多音字的识别有局限，可检查并修订结果。
 
 <a id="screenshots"></a>
 
 ## 界面一览
+
+### 待播预览与频谱指南
+
+以下使用实际组件、中文界面及虚构数据渲染；频谱是指南演示，不是实时音频采样。
+
+| 四首半透明待播卡片 | 圆头音柱与像素频谱互动指南 |
+| --- | --- |
+| ![中文待播预览：四首半透明卡片与双列布局](docs/images/feature-upcoming-zh.png) | ![中文特色指南：圆头音柱与像素频谱演示](docs/images/feature-spectrum-guide-zh.png) |
 
 ### 说明书与按需监控
 
@@ -196,11 +180,13 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 **添加音乐。** 导入音乐文件或文件夹后，在音乐、分类和歌单页浏览；使用嵌套歌单与拖动排序组织收藏。
 
-**整理个人偏好。** 26.0.5 可进入“分类 → 个人整理 → 歌曲”，查看评过分或添加过个人标签的歌曲，并按日期、评分、标签筛选。个人评分和标签保存在播放器资料中，**不会写入音乐文件**；“编辑信息”和“批量编辑标签”则会修改文件元数据，保存前请核对变更预览。
+**整理个人偏好。** 进入“分类 → 个人整理 → 歌曲”，查看评过分或添加过个人标签的歌曲，并按日期、评分、标签筛选。个人评分和标签保存在播放器资料中，**不会写入音乐文件**；“编辑信息”和“批量编辑标签”则会修改文件元数据，保存前请核对变更预览。
 
 **记住喜欢的片段。** 在正在播放页面的“更多 → 播放书签”中保存当前位置或 A–B 片段，再到“分类 → 个人整理 → 全库书签”集中查找。全库书签中的播放按钮从保存的起点播放；恢复片段循环时，在对应歌曲的“播放书签”中选择该 A–B 书签。
 
 **备份自己的资料。** 设置中的“备份与恢复”可按需保存播放器资料和本地音乐，并支持加密及选择性恢复。程序升级与资料备份是不同操作，安装目录中的程序文件不能替代曲库、歌单与设置备份。
+
+备份可按文件夹拆分；请妥善保存密码，单个加密备份须小于约 64 GiB。
 
 <details>
 <summary><strong>常用快捷键</strong></summary>
@@ -237,26 +223,11 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 | 目录 | 用途 |
 | --- | --- |
 | [lib/](lib/) | 主界面、曲库、播放服务与数据模型 |
-| [third_party/desktop_lyric/](third_party/desktop_lyric/) | 通过 path 依赖共用的桌面歌词组件、字体资源与 Windows 宿主 |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | 共用的桌面歌词组件、字体资源与 Windows 宿主 |
 | [rust/](rust/)、[rust_builder/](rust_builder/) | 标签处理、Flutter/Rust 桥接与 Cargokit 构建支持 |
-| [windows/](windows/) | 主程序的 Windows 窗口、任务栏与系统集成 |
-| [installer/](installer/) | Inno 安装器、原生组件与安装事务测试 |
-| [test/](test/)、[test/support/](test/support/) | Dart/Widget 回归、隔离夹具与渲染辅助 |
-| [integration_test/](integration_test/)、[test_driver/](test_driver/) | Windows Profile 原生显示入口与驱动 |
-| [scripts/](scripts/) | 依赖准备、构建、校验与发布脚本 |
-| [assets/](assets/)、[shaders/](shaders/) | 产品界面资源与着色器 |
-| [docs/](docs/) | 接口说明、配置示例与公开界面图片 |
-
-按改动选择实际入口；普通 `flutter test` 不包含 `integration_test/`：
-
-| 检查范围 | 入口与边界 |
-| --- | --- |
-| Dart/Widget | `flutter test --no-pub test/<模块>_test.dart`；存储测试遵循各自夹具注入，不全局覆盖模拟目录 |
-| Rust | `cargo test --manifest-path rust/Cargo.toml --locked` |
-| Windows 原生显示 | [verify_native_display_regressions.ps1](scripts/verify_native_display_regressions.ps1) 运行精选 Profile 显示回归；其他入口见 [integration_test/](integration_test/) |
-| Windows C++ | 定向目标见 [主宿主 CMake](windows/runner/CMakeLists.txt) 与 [桌面歌词 CMake](third_party/desktop_lyric/windows/runner/CMakeLists.txt) |
-| 安装器 | [verify_installer_native.ps1](scripts/verify_installer_native.ps1) 检查原生组件；[installer/tests/](installer/tests/) 另含 UI、新装、更新与卸载沙箱脚本 |
-| 发布策略 | [test_validation_pipeline.ps1](scripts/test_validation_pipeline.ps1)、[CI 续测](scripts/test_windows_ci_resume.py) 与 [分类审计](scripts/test_audit_classification_metadata.py) 的离线回归 |
+| [windows/](windows/)、[installer/](installer/) | Windows 集成与 Inno 安装器原生组件 |
+| [scripts/](scripts/) | 依赖准备、构建、签名与产物校验 |
+| [assets/](assets/)、[shaders/](shaders/)、[docs/](docs/) | 界面资源、着色器、接口说明与公开图片 |
 
 在仓库根目录执行，使用独立资料目录，避免调试影响日常曲库与设置：
 
@@ -266,22 +237,16 @@ flutter pub get
 flutter run -d windows
 ```
 
-运行前需准备 BASS 运行库，相关脚本为 `scripts/prepare_bass_runtime.ps1` 与 `scripts/prepare_bass_fx_runtime.ps1`。本机 SDK、运行库缓存和签名配置路径只记录在源码仓库外的 `DEVELOPMENT.md`。
+运行前需准备 BASS 运行库，见 `scripts/prepare_bass_runtime.ps1` 与 `scripts/prepare_bass_fx_runtime.ps1`。本机 SDK、缓存和签名路径不放入源码仓库。
 
-按模块集中验证，只运行与改动有关的检查；不要每增加一个功能就完整回归、构建和签名。例如统计与详情布局改动可运行：
-
-```powershell
-flutter test test/statistics_visualization_test.dart test/detail_diagnostics_layout_test.dart --no-pub
-```
-
-集成收尾使用 `scripts/verify_interaction_regressions.ps1`。UI 改动须使用真实 Flutter 控件渲染核对；公开图片通过 `scripts/render_public_ui.ps1` 与隔离虚构资料生成，覆盖语言、窗口宽度和文字缩放。控件渲染不替代真实音频设备与 Windows 桌面集成检查。
+按当前改动准备隔离夹具，选择实际存在的入口做定向 Dart/Widget、Rust 或 Windows 验证；不恢复已退役的历史测试集合。Dart 使用 `flutter test --no-pub <测试入口>`，Rust 使用 `cargo test --manifest-path rust/Cargo.toml --locked <测试筛选>`。UI 应用真实组件核对直接受影响的语言、窗宽和文字缩放；原生采帧使用独立验收窗口。控件渲染不替代真实音频设备或 Windows 桌面集成检查。
 
 </details>
 
 <details>
 <summary><strong>Windows 构建与发行</strong></summary>
 
-现有发布脚本使用工作区布局：源码在 `dan_player/`，同级 `tool/` 放置工具链和缓存，`dist/` 接收产物。`build_windows_release.ps1` 检查依赖、运行发布门禁、构建 Windows 程序并校验字体与运行库。
+现有发布脚本使用工作区布局：源码在 `dan_player/`，同级 `tool/` 放置工具链和缓存，`dist/` 接收产物。`build_windows_release.ps1` 准备依赖、核对可复用来源与产物、编译 Windows 程序、检查字体及运行库，并按参数签名或组装；它不代替定向回归验证。
 
 ```powershell
 # 使用上述工作区布局，在源码仓库运行；无签名证书时：
@@ -291,6 +256,8 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 `-SkipPackaging` 跳过便携包组装；`-NoRestore` 使用已恢复的依赖。正式签名需要单独配置证书。安装器使用 `scripts/build_windows_installer.ps1`，便携包和安装器分别由 `verify_local_release.ps1`、`verify_windows_installer.ps1` 核验。
 
 同一代码状态复用已通过的检查与构建产物，失败只重试必要阶段；签名后核对源码提交、测试收据、产物 SHA-256 与签名，再执行必要的 GitHub 发布流程。预览版保持 prerelease，不替换稳定版 Latest，不以省略校验来精简流程。
+
+本地默认组装不包含 FFmpeg。需要随包附带时，先按 `scripts/ffmpeg_runtime_manifest.json` 准备固定运行库，再用 `scripts/assemble_windows_release.ps1 -IncludeOptionalComponents` 组装。`prepare_ffmpeg_runtime.ps1` 只校验并复制已有缓存，不自动下载。
 
 </details>
 
@@ -306,6 +273,6 @@ flutter test test/statistics_visualization_test.dart test/detail_diagnostics_lay
 
 Dan Player 基于 [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) 修改，感谢原作者提供的播放器基础、曲库结构和歌词体验。同时感谢 [desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge) 及 [Flutter](https://flutter.dev/) 与 Material Design。
 
-离线假名字典的许可与来源见 [IPADIC](licenses/IPADIC/PROVENANCE.md) 和 [Lindera](licenses/LINDERA/LICENSE)。联网注音：[Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/)。
+离线假名字典的许可与来源见 [IPADIC](licenses/IPADIC/PROVENANCE.md) / [EDRDG](licenses/EDRDG/PROVENANCE.md) 和 [Lindera](licenses/LINDERA/LICENSE)。联网注音：[Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/)。
 
 <sub>徽章由 <a href="https://shields.io/">Shields.io</a> 提供。下载量统计 Release 附件的下载次数，不等于用户数或安装量；技术徽章仅说明使用的技术，不声明最低支持版本。</sub>
