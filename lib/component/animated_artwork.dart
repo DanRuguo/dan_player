@@ -16,10 +16,16 @@ class AnimatedArtwork extends StatefulWidget {
       required this.image,
       required this.errorBuilder,
       this.hidden,
+      this.takeInitialFrame,
       this.frameDecorator});
   final ImageProvider image;
   final ImageErrorWidgetBuilder errorBuilder;
   final ValueListenable<bool>? hidden;
+
+  /// Transfers one owned, already decoded frame into a new image source.
+  /// The caller must relinquish the returned [ImageInfo]. The regular stream
+  /// replaces it with its first frame without changing the animation clock.
+  final ImageInfo? Function()? takeInitialFrame;
   final Widget Function(BuildContext, ui.Image?, Widget)? frameDecorator;
   @override
   State<AnimatedArtwork> createState() => _AnimatedArtworkState();
@@ -31,6 +37,7 @@ class _AnimatedArtworkState extends State<AnimatedArtwork>
   ImageStreamListener? _listener;
   ImageProvider? _resolved;
   ImageInfo? _info;
+  bool _usingInitialFrame = false;
   final _retired = <ImageInfo>[];
   Object? _error;
   StackTrace? _trace;
@@ -42,6 +49,7 @@ class _AnimatedArtworkState extends State<AnimatedArtwork>
   @override
   void initState() {
     super.initState();
+    _adoptInitialFrame();
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     _hidden = widget.hidden ?? DesktopIntegration.instance.isHidden;
@@ -72,8 +80,33 @@ class _AnimatedArtworkState extends State<AnimatedArtwork>
     if (widget.image != oldWidget.image) {
       _detach();
       _resolved = null;
+      _adoptInitialFrame();
+    } else if (_info == null) {
+      _adoptInitialFrame();
+    } else {
+      // A request revision can resolve to the same provider. Consume any
+      // redundant seed without rewinding the GIF or retaining another frame.
+      widget.takeInitialFrame?.call()?.dispose();
     }
     _sync();
+  }
+
+  void _adoptInitialFrame() {
+    final initial = widget.takeInitialFrame?.call();
+    if (initial == null) return;
+    final previous = _info;
+    _info = initial;
+    _usingInitialFrame = true;
+    _error = null;
+    _trace = null;
+    if (previous != null) _retire(previous);
+  }
+
+  void _retire(ImageInfo previous) {
+    _retired.add(previous);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_retired.remove(previous)) previous.dispose();
+    });
   }
 
   void _detach() {
@@ -120,14 +153,12 @@ class _AnimatedArtworkState extends State<AnimatedArtwork>
       final previous = _info;
       setState(() {
         _info = info;
+        _usingInitialFrame = false;
         _error = null;
         _trace = null;
       });
       if (previous != null) {
-        _retired.add(previous);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_retired.remove(previous)) previous.dispose();
-        });
+        _retire(previous);
       }
       if (!motion)
         scheduleMicrotask(() {
@@ -136,6 +167,12 @@ class _AnimatedArtworkState extends State<AnimatedArtwork>
     }, onError: (Object error, StackTrace? trace) {
       if (!mounted || !identical(stream, _stream)) return;
       setState(() {
+        if (_usingInitialFrame) {
+          final initial = _info;
+          _info = null;
+          _usingInitialFrame = false;
+          if (initial != null) _retire(initial);
+        }
         _error = error;
         _trace = trace;
       });

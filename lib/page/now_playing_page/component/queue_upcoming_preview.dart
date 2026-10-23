@@ -118,6 +118,8 @@ class QueueUpcomingPreview extends StatelessWidget {
                                       child: AudioArtwork(
                                           audio: item.audio,
                                           size: 40,
+                                          animateFirstFrame: true,
+                                          loading: const SizedBox.expand(),
                                           placeholder: ColoredBox(
                                               color: scheme
                                                   .surfaceContainerHighest,
@@ -193,6 +195,9 @@ class QueueUpcomingPreview extends StatelessWidget {
                                               child: AudioArtwork(
                                                   audio: item.audio,
                                                   size: 32,
+                                                  animateFirstFrame: true,
+                                                  loading:
+                                                      const SizedBox.expand(),
                                                   placeholder: ColoredBox(
                                                       color: scheme
                                                           .surfaceContainerHighest,

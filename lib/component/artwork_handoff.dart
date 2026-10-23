@@ -17,6 +17,7 @@ class ArtworkHandoff extends StatefulWidget {
     required this.loadArtwork,
     required this.imageBuilder,
     required this.placeholder,
+    this.onFirstFrameReady,
     this.loading,
     this.animateFirstFrame = false,
     this.hidden,
@@ -28,6 +29,12 @@ class ArtworkHandoff extends StatefulWidget {
   final Future<ImageProvider?> Function() loadArtwork;
   final Widget Function(ImageProvider) imageBuilder;
   final Widget placeholder;
+
+  /// Called once for an accepted request, before its decoded image is released.
+  /// The [ImageInfo] is borrowed only during this callback. Clone it to retain
+  /// a frame; the handoff still owns and disposes the supplied instance.
+  final void Function(ImageProvider provider, ImageInfo image)?
+      onFirstFrameReady;
   final Widget? loading;
   final bool animateFirstFrame;
   final ValueListenable<bool>? hidden;
@@ -175,9 +182,16 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
         late final ImageStreamListener listener;
         var accepted = false;
         listener = ImageStreamListener((image, synchronousCall) {
-          image.dispose();
-          if (accepted || !_isCurrent(request)) return;
+          if (accepted || !_isCurrent(request)) {
+            image.dispose();
+            return;
+          }
           accepted = true;
+          try {
+            widget.onFirstFrameReady?.call(provider, image);
+          } finally {
+            image.dispose();
+          }
           _timeout?.cancel();
           _timeout = null;
           var animateInitial = _displayed == null &&

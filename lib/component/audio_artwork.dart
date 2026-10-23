@@ -56,6 +56,42 @@ class AudioArtwork extends StatefulWidget {
 class _AudioArtworkState extends State<AudioArtwork> {
   Object? _requestKey;
   Future<ImageProvider?>? _future;
+  ImageProvider? _readyProvider;
+  ImageInfo? _readyFrame;
+
+  void _rememberFirstFrame(ImageProvider provider, ImageInfo frame) {
+    _releaseFirstFrame();
+    final actual =
+        provider is FirstFrameArtworkProvider ? provider.source : provider;
+    if (!mayAnimateArtwork(actual)) return;
+    _readyProvider = provider;
+    _readyFrame = frame.clone();
+  }
+
+  ImageInfo? _takeFirstFrame(ImageProvider provider) {
+    if (provider != _readyProvider) return null;
+    final frame = _readyFrame;
+    _readyProvider = null;
+    _readyFrame = null;
+    return frame;
+  }
+
+  void _releaseFirstFrame() {
+    _readyFrame?.dispose();
+    _readyFrame = null;
+    _readyProvider = null;
+  }
+
+  void _releaseUnusedFirstFrameAfterMount() {
+    final frame = _readyFrame;
+    if (frame == null) return;
+    // A retained outgoing provider may have committed immediately before the
+    // next request. Give that child this frame to take its seed, then release
+    // an unconsumed seed even if the replacement fails or has no artwork.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (identical(frame, _readyFrame)) _releaseFirstFrame();
+    });
+  }
 
   @override
   void initState() {
@@ -94,6 +130,7 @@ class _AudioArtworkState extends State<AudioArtwork> {
 
   @override
   void dispose() {
+    _releaseFirstFrame();
     CoverCache.instance.changes.removeListener(_coverChanged);
     AppSettings.instance.networkProxy.removeListener(_networkProxyChanged);
     AppSettings.instance.customMusicSources
@@ -133,6 +170,7 @@ class _AudioArtworkState extends State<AudioArtwork> {
     );
     final request = (source, target);
     if (_requestKey == request) return;
+    _releaseUnusedFirstFrameAfterMount();
     _requestKey = request;
     _future = Future<ImageProvider?>.sync(() => widget.loadArtwork == null
         ? audio.artworkForSize(target)
@@ -140,43 +178,52 @@ class _AudioArtworkState extends State<AudioArtwork> {
   }
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(
-        dimension: widget.size,
-        child: ArtworkHandoff(
-          key: ValueKey(widget.retainWhileLoading ? null : widget.audio.path),
-          artworkKey: _requestKey!,
-          loadArtwork: () async {
-            final provider = await _future!;
-            return provider != null && mayAnimateArtwork(provider)
-                ? FirstFrameArtworkProvider(provider)
-                : provider;
-          },
-          placeholder: widget.placeholder,
-          loading: widget.loading,
-          animateFirstFrame: widget.animateFirstFrame,
-          imageBuilder: (provider) {
-            final actual = provider is FirstFrameArtworkProvider
-                ? provider.source
-                : provider;
-            final Widget child = mayAnimateArtwork(actual) ||
-                    widget.artworkDecorator != null
-                ? AnimatedArtwork(
-                    image: actual,
-                    errorBuilder: (_, __, ___) => widget.placeholder,
-                    frameDecorator: widget.artworkDecorator == null
-                        ? null
-                        : (context, frame, child) => widget.artworkDecorator!(
-                            context, actual, frame, child))
-                : Image(
-                    image: actual,
-                    fit: BoxFit.cover,
-                    filterQuality: FilterQuality.high,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, __, ___) => widget.placeholder);
-            return child;
-          },
-        ),
-      );
+  Widget build(BuildContext context) {
+    final requestKey = _requestKey!;
+    return SizedBox.square(
+      dimension: widget.size,
+      child: ArtworkHandoff(
+        key: ValueKey(widget.retainWhileLoading ? null : widget.audio.path),
+        artworkKey: requestKey,
+        onFirstFrameReady: (provider, frame) {
+          if (mounted && _requestKey == requestKey) {
+            _rememberFirstFrame(provider, frame);
+          }
+        },
+        loadArtwork: () async {
+          final provider = await _future!;
+          return provider != null && mayAnimateArtwork(provider)
+              ? FirstFrameArtworkProvider(provider)
+              : provider;
+        },
+        placeholder: widget.placeholder,
+        loading: widget.loading,
+        animateFirstFrame: widget.animateFirstFrame,
+        imageBuilder: (provider) {
+          final actual = provider is FirstFrameArtworkProvider
+              ? provider.source
+              : provider;
+          final Widget child =
+              mayAnimateArtwork(actual) || widget.artworkDecorator != null
+                  ? AnimatedArtwork(
+                      image: actual,
+                      takeInitialFrame: () => _takeFirstFrame(provider),
+                      errorBuilder: (_, __, ___) => widget.placeholder,
+                      frameDecorator: widget.artworkDecorator == null
+                          ? null
+                          : (context, frame, child) => widget.artworkDecorator!(
+                              context, actual, frame, child))
+                  : Image(
+                      image: actual,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.high,
+                      gaplessPlayback: true,
+                      errorBuilder: (_, __, ___) => widget.placeholder);
+          return child;
+        },
+      ),
+    );
+  }
 }
 
 /// Direct file/network/memory art (e.g. a custom playlist cover). Decode size is
