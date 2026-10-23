@@ -190,6 +190,7 @@ class LyricService extends ChangeNotifier {
     final previous = _previousJapanesePreferences;
     final next = _japanesePreferences.value;
     _previousJapanesePreferences = next;
+    if (previous.copyWith(lastManualMode: next.lastManualMode) == next) return;
     // A preference update does not renew a completed manual authorization.
     _manualJapaneseMode = null;
     if (!next.enabled) _manualJapaneseReadings = false;
@@ -436,9 +437,13 @@ class LyricService extends ChangeNotifier {
     if (!AppSettings.instance.automaticOnlineLyrics.value) {
       _automaticLookup?.cancel();
     }
-    // A remembered manual choice is not a new network authorization.
-    _manualJapaneseMode = null;
+    // Preserve the existing one-track request/display. This does not start a
+    // new request or turn a remembered batch-dialog mode into authorization.
+    final explicitReadings =
+        _manualJapaneseMode == JapaneseReadingRequestMode.online ||
+            _manualJapaneseMode == JapaneseReadingRequestMode.offline;
     if (!_disposed &&
+        !explicitReadings &&
         _rawLyricFuture != null &&
         (_japanesePreferences.value.enabled || _manualJapaneseReadings)) {
       _reprojectJapaneseReadings();

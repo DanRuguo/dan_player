@@ -61,6 +61,43 @@ class CoverContourPixels {
   final int height;
 }
 
+/// A conservative occupancy map of the actual generated mask, not a guess
+/// from artwork colour or Sobel strength at a single point.
+class CoverContourCoverage {
+  CoverContourCoverage(Uint8List rgba, this.width, this.height)
+      : _columns = (width + _tile - 1) ~/ _tile,
+        _occupied = Uint8List(
+            ((width + _tile - 1) ~/ _tile) * ((height + _tile - 1) ~/ _tile)) {
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        if (rgba[(y * width + x) * 4 + 3] != 0) {
+          _occupied[(y ~/ _tile) * _columns + x ~/ _tile] = 1;
+          isEmpty = false;
+        }
+      }
+    }
+  }
+  static const _tile = 16;
+  final int width, height, _columns;
+  final Uint8List _occupied;
+  bool isEmpty = true;
+
+  bool isClear(Rect rect) {
+    if (!rect.isFinite || rect.isEmpty) return false;
+    if (isEmpty) return true;
+    final left = rect.left.floor().clamp(0, width - 1) ~/ _tile;
+    final right = (rect.right.ceil() - 1).clamp(0, width - 1) ~/ _tile;
+    final top = rect.top.floor().clamp(0, height - 1) ~/ _tile;
+    final bottom = (rect.bottom.ceil() - 1).clamp(0, height - 1) ~/ _tile;
+    for (var y = top; y <= bottom; y++) {
+      for (var x = left; x <= right; x++) {
+        if (_occupied[y * _columns + x] != 0) return false;
+      }
+    }
+    return true;
+  }
+}
+
 /// A small Gaussian prefilter suppresses compression grain before Sobel edges.
 /// Alpha is retained so transparent cover margins cannot become glowing boxes.
 Uint8List extractCoverContours(CoverContourPixels input) {
@@ -141,6 +178,7 @@ class CoverContourLease {
   }
   final _MaskEntry _entry;
   late final Future<ui.Image?> image;
+  CoverContourCoverage? get coverage => _entry.coverage;
   bool _closed = false;
   void dispose() {
     if (_closed) return;
@@ -165,6 +203,7 @@ class _MaskEntry {
   bool retired = false;
   VoidCallback? cancelRead;
   ui.Image? mask;
+  CoverContourCoverage? coverage;
 }
 
 abstract final class CoverContourCache {
@@ -263,6 +302,7 @@ abstract final class CoverContourCache {
       mask = await decoded.future;
       if (entry.retired) return;
       entry.mask = mask;
+      entry.coverage = CoverContourCoverage(pixels, width, height);
       entry.result.complete(mask);
       mask = null;
     } catch (_) {

@@ -1,4 +1,20 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '试一试：封面动效': [
+    'Try it: cover effects',
+    '試してみる：カバーの動き',
+    '체험: 표지 효과'
+  ],
+  '在示例封面上移动鼠标查看细线辉光与水滴折射，轻点可显示一次水波。移开鼠标后恢复原图；效果遵循当前动画设置。': [
+    'Move the pointer across the sample cover to see fine-edge glow and water-drop refraction. Tap for a brief ripple. Moving away restores the image; effects follow your current animation settings.',
+    'サンプルのカバー上でマウスを動かすと、細い輪郭の光と水滴のような屈折を試せます。軽く押すと一度だけ波紋が広がります。マウスを離すと元の画像に戻り、現在のアニメーション設定に従います。',
+    '예제 표지 위로 포인터를 움직여 가는 윤곽 빛과 물방울 굴절을 확인하세요. 가볍게 누르면 물결이 한 번 나타납니다. 포인터를 치우면 원래 이미지로 돌아가며 현재 애니메이션 설정을 따릅니다.'
+  ],
+  '示例封面': [
+    'Sample cover',
+    'サンプルカバー',
+    '예제 표지'
+  ],
+  '恢复示例封面': ['Reset sample cover', 'サンプルカバーを戻す', '예제 표지 초기화'],
   '试一试：频谱动效': [
     'Try it: spectrum animation',
     '試してみる：スペクトラムの動き',

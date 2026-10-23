@@ -24,6 +24,7 @@ class WaveformProgress extends StatefulWidget {
       required this.duration,
       required this.trackIdentity,
       required this.onSeek,
+      this.seekRevision,
       this.enabled = true,
       this.hidden,
       this.bookmarks = const [],
@@ -39,6 +40,7 @@ class WaveformProgress extends StatefulWidget {
   final double duration;
   final Object? trackIdentity;
   final ValueChanged<double> onSeek;
+  final ValueListenable<int>? seekRevision;
   final bool enabled;
   final ValueListenable<bool>? hidden;
   final WaveformService? service;
@@ -214,6 +216,7 @@ class _WaveformProgressState extends State<WaveformProgress>
       duration: widget.duration,
       trackIdentity: widget.trackIdentity,
       onSeek: widget.onSeek,
+      seekRevision: widget.seekRevision,
       enabled: widget.enabled,
       hidden: widget.hidden,
       waveform: _projectedPeaks,

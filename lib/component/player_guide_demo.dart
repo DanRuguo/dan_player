@@ -7,6 +7,7 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/viewport_visibility.dart';
 import 'package:dan_player/component/player_guide_playlist_demo.dart';
+import 'package:dan_player/component/player_guide_cover_demo.dart';
 import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/play_service/playback_transition_preferences.dart';
@@ -23,7 +24,8 @@ enum PlayerGuideDemoKind {
   playlists,
   transitions,
   statistics,
-  spectrum
+  spectrum,
+  cover
 }
 
 /// Small, local examples: no audio, network, library or preferences are changed.
@@ -82,6 +84,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
         PlayerGuideDemoKind.transitions => MotionKind.layout,
         PlayerGuideDemoKind.statistics => MotionKind.layout,
         PlayerGuideDemoKind.spectrum => MotionKind.feedback,
+        PlayerGuideDemoKind.cover => MotionKind.feedback,
       };
 
   @override
@@ -243,7 +246,10 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: DecoratedBox(
-            key: widget.kind == PlayerGuideDemoKind.playlists ? null : _surface,
+            key: widget.kind == PlayerGuideDemoKind.playlists ||
+                    widget.kind == PlayerGuideDemoKind.cover
+                ? null
+                : _surface,
             decoration: ShapeDecoration(
                 color: colors.surfaceContainerLow,
                 shape: AppShape.surface
@@ -262,6 +268,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                             PlayerGuideDemoKind.transitions => '试一试：歌曲过渡',
                             PlayerGuideDemoKind.statistics => '试一试：收听趋势',
                             PlayerGuideDemoKind.spectrum => '试一试：频谱动效',
+                            PlayerGuideDemoKind.cover => '试一试：封面动效',
                           }),
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 6),
@@ -284,6 +291,11 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                         StatisticsListeningTrends(snapshot: _statisticsSnapshot)
                       else if (widget.kind == PlayerGuideDemoKind.spectrum)
                         _spectrum(context)
+                      else if (widget.kind == PlayerGuideDemoKind.cover)
+                        PlayerGuideCoverDemo(
+                            viewportKey: _surface,
+                            motionEnabled: _motionGate,
+                            isHidden: _hidden)
                       else
                         AnimatedBuilder(
                             animation: _animation,

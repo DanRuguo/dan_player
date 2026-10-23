@@ -34,6 +34,12 @@ class BassPlaybackVolume {
   final BassSetVolumeAttribute setAttribute;
   final BassSlideVolumeAttribute slideAttribute;
 
+  /// A playable mixer's source VOL is baked into its queued PCM. Its final
+  /// VOL is only a mute gate: all nonzero gain and peak protection stay on the
+  /// individual sources, including both sides of a transition.
+  void muteOutput(int stream, {required bool muted}) =>
+      _set(stream, playbackAttribute, muted ? 0 : 1);
+
   /// ReplayGain stays in the DSP chain. Factor its former combined target so
   /// peak protection retains exactly the same total gain at every user volume.
   static double playbackMultiplier(double volume, ReplayGainTags tags,

@@ -505,6 +505,8 @@ class BassPlayer {
   // Device 0 and a decoding mixer let native integration tests exercise this
   // exact pipeline without acquiring or changing a user's audio endpoint.
   final bool _offlineOutput;
+  final bool _bufferedOfflineOutput;
+  bool get _decodingOfflineMixer => _offlineOutput && !_bufferedOfflineOutput;
   static const int _bassAttribFreq = 1;
   static const int _bassDataFft4096 = 0x80000004;
   static const int _bassDataFftRemoveDc = 0x40;
@@ -595,7 +597,15 @@ class BassPlayer {
   int? _fstream;
   bool get hasSource => !_freed && _fstream != null;
   double _userVolumeDsp = 1;
+  double _lastAudibleVolumeDsp = 1;
   double _volumeDspBase = 1;
+  bool get _hasSharedMuteGate =>
+      !_decodingOfflineMixer &&
+      !wasapiExclusive &&
+      _streamUsesMixer &&
+      _sharedMixer != null;
+  double get _sharedSourceVolume =>
+      _userVolumeDsp == 0 ? _lastAudibleVolumeDsp : _userVolumeDsp;
   ReplayGainPreferences _replayGain = const ReplayGainPreferences();
   ReplayGainTags _replayGainTags = const ReplayGainTags();
 
@@ -839,7 +849,7 @@ class BassPlayer {
         : _bass.BASS_ChannelIsActive(_fstream!);
     // Output diagnostics below also call BASS; preserve the source error first.
     _stateNativeError = _bass.BASS_ErrorGetCode();
-    if (!_offlineOutput && !wasapiExclusive && _sharedMixer != null) {
+    if (!_decodingOfflineMixer && !wasapiExclusive && _sharedMixer != null) {
       final output = _bass.BASS_ChannelIsActive(_sharedMixer!);
       if (output == BASS.BASS_ACTIVE_PAUSED) return PlayerState.paused;
       if (output == BASS.BASS_ACTIVE_PAUSED_DEVICE ||
@@ -893,7 +903,14 @@ class BassPlayer {
         BassPlaybackVolume.playbackAttribute,
         volDsp,
       );
-      return output != 0 && volDsp.value.isFinite ? dsp * volDsp.value : null;
+      if (output == 0 || !volDsp.value.isFinite) return null;
+      final sourceGain = dsp * volDsp.value;
+      if (!_hasSharedMuteGate) return sourceGain;
+      final gate = _bass.BASS_ChannelGetAttribute(
+          _sharedMixer!, BassPlaybackVolume.playbackAttribute, volDsp);
+      return gate != 0 && volDsp.value.isFinite
+          ? sourceGain * volDsp.value
+          : null;
     } finally {
       ffi.malloc.free(volDsp);
     }
@@ -1203,8 +1220,7 @@ class BassPlayer {
     // previous audible-volume response; exclusive WASAPI data already includes
     // the mixer's volume and must not be multiplied a second time.
     if (!wasapiExclusive &&
-        _sharedMixer == null &&
-        _bass.BASS_ChannelGetAttribute(_fstream!,
+        _bass.BASS_ChannelGetAttribute(_sharedMixer ?? _fstream!,
                 BassPlaybackVolume.playbackAttribute, _frequencyBuffer) ==
             BASS.TRUE) {
       final gain = _frequencyBuffer.value;
@@ -1336,17 +1352,31 @@ class BassPlayer {
             _offlineOutput ? 0 : -1, 48000, 0, ffi.nullptr, ffi.nullptr) ==
         0) {
       final code = _bass.BASS_ErrorGetCode();
-      if (code == BASS.BASS_ERROR_ALREADY) return;
-      throw PlaybackProblem(
-          code == BASS.BASS_ERROR_BUSY
-              ? PlaybackProblemKind.exclusiveDenied
-              : PlaybackProblemKind.deviceInitialization,
-          '无法初始化音频设备。',
-          nativeCode: code);
+      if (code != BASS.BASS_ERROR_ALREADY) {
+        throw PlaybackProblem(
+            code == BASS.BASS_ERROR_BUSY
+                ? PlaybackProblemKind.exclusiveDenied
+                : PlaybackProblemKind.deviceInitialization,
+            '无法初始化音频设备。',
+            nativeCode: code);
+      }
+    }
+    if (_bufferedOfflineOutput) {
+      // An already initialized device need not become this thread's current
+      // device. Explicitly pin the QA path even when BASS_Init reports ALREADY.
+      final selectDevice = _bassLib.lookupFunction<
+          ffi.Int32 Function(ffi.Uint32), int Function(int)>('BASS_SetDevice');
+      final currentDevice =
+          _bassLib.lookupFunction<ffi.Uint32 Function(), int Function()>(
+              'BASS_GetDevice');
+      if (selectDevice(0) == 0 || currentDevice() != 0) {
+        throw StateError('Buffered offline output requires NoSound device 0');
+      }
     }
   }
 
   void _startDevice() {
+    if (_bufferedOfflineOutput) _bassInit();
     final error = startBassDeviceOnce(
         start: _bass.BASS_Start,
         errorCode: _bass.BASS_ErrorGetCode,
@@ -1361,8 +1391,17 @@ class BassPlayer {
   /// load bass.dll from the exe's path\\BASS
   /// ensure that there's bass.dll at path of .exe\\BASS
   /// leave the device's output freq as it is
-  BassPlayer({String? runtimeDirectory, bool offlineOutput = false})
-      : _offlineOutput = offlineOutput {
+  BassPlayer(
+      {String? runtimeDirectory,
+      bool offlineOutput = false,
+      bool bufferedOfflineOutput = false})
+      : _offlineOutput = offlineOutput,
+        _bufferedOfflineOutput = bufferedOfflineOutput {
+    // This native QA mode exercises the real playable mixer buffer while
+    // BASS_Init remains pinned to NoSound device 0, never a physical endpoint.
+    if (bufferedOfflineOutput && !offlineOutput) {
+      throw ArgumentError('bufferedOfflineOutput requires offlineOutput');
+    }
     final directory = runtimeDirectory ??
         path.join(path.dirname(Platform.resolvedExecutable), 'BASS');
     _bassLibraryPath = path.join(directory, 'bass.dll');
@@ -1427,6 +1466,7 @@ class BassPlayer {
       _bassInit();
     } catch (err) {
       LOGGER.e("[bass init] $err");
+      if (_bufferedOfflineOutput) rethrow;
     }
   }
 
@@ -1657,7 +1697,10 @@ class BassPlayer {
             ..sourceFormat(format?.sampleRate);
       if (_eqEnabled && !equalizer.apply(handle, _eqGains)) return false;
       final base = _playbackVolume.initialize(
-          handle, _userVolumeDsp, result.replayGain, _replayGain);
+          handle,
+          _hasSharedMuteGate ? _sharedSourceVolume : _userVolumeDsp,
+          result.replayGain,
+          _replayGain);
       // bass.h BASS_ATTRIB_SRC=8: preserve music quality when a persistent
       // 48kHz mixer receives a source at another sample rate (64-point sinc).
       _bass.BASS_ChannelSetAttribute(handle, 8, 4);
@@ -1722,7 +1765,7 @@ class BassPlayer {
     final current = _fstream;
     final locked = source != null &&
         restoreSharedBuffer &&
-        !_offlineOutput &&
+        !_decodingOfflineMixer &&
         !wasapiExclusive &&
         mixer != null &&
         mixer == _sharedMixer &&
@@ -2119,7 +2162,12 @@ class BassPlayer {
       // and tempo wrapper. Set the target before publishing/playing the source
       // so a previous stream's unfinished slide cannot leak into the new song.
       final openedDspBase = _playbackVolume.initialize(
-          uncommittedHandle, _userVolumeDsp, openedReplayGain, _replayGain);
+          uncommittedHandle,
+          useMixer && !exclusive && !_decodingOfflineMixer
+              ? _sharedSourceVolume
+              : _userVolumeDsp,
+          openedReplayGain,
+          _replayGain);
       onBeforeCommit?.call();
       // A metadata rename may land while this same source is rebuilding its
       // output. Keep the verified new location rather than restoring a stale
@@ -2230,6 +2278,14 @@ class BassPlayer {
       throw ArgumentError.value(
           volume, 'volume', 'Must be finite and nonnegative');
     }
+    if (_hasSharedMuteGate && volume == 0) {
+      _playbackVolume.muteOutput(_sharedMixer!, muted: true);
+      // Keep mixing/consuming the same timeline at the last nonzero source
+      // gain. Queuing zero PCM here would produce delayed silence after a
+      // quick unmute. Never flush, rewind or pause the mixer for a mute.
+      _userVolumeDsp = 0;
+      return;
+    }
     if (_fstream != null) {
       _playbackVolume.target(_fstream!, volume, _replayGainTags, _replayGain,
           dspBase: _volumeDspBase, smooth: playerState == PlayerState.playing);
@@ -2242,7 +2298,11 @@ class BassPlayer {
             smooth: playerState == PlayerState.playing);
       }
     }
+    if (_hasSharedMuteGate) {
+      _playbackVolume.muteOutput(_sharedMixer!, muted: false);
+    }
     _userVolumeDsp = volume;
+    if (volume > 0) _lastAudibleVolumeDsp = volume;
   }
 
   /// The decoder position diagnoses the cause of an inactive stream. In
@@ -2262,7 +2322,10 @@ class BassPlayer {
         // Only change the final factor, so buffered old samples and newly
         // decoded samples can never receive mismatched ReplayGain factors.
         _playbackVolume.target(
-            _fstream!, _userVolumeDsp, _replayGainTags, preferences,
+            _fstream!,
+            _hasSharedMuteGate ? _sharedSourceVolume : _userVolumeDsp,
+            _replayGainTags,
+            preferences,
             dspBase: _volumeDspBase,
             smooth: playerState == PlayerState.playing);
       }
@@ -2352,11 +2415,19 @@ class BassPlayer {
         48000,
         2,
         BASS.BASS_SAMPLE_FLOAT |
-            (_offlineOutput ? BASS.BASS_STREAM_DECODE : 0) |
+            (_decodingOfflineMixer ? BASS.BASS_STREAM_DECODE : 0) |
             BassMixLibrary.nonstop |
             BassMixLibrary.resume);
     if (mixer == 0) {
       throw _sourceOpenException(_bass.BASS_ErrorGetCode(), isUrl: false);
+    }
+    try {
+      if (!_decodingOfflineMixer) {
+        _playbackVolume.muteOutput(mixer, muted: _userVolumeDsp == 0);
+      }
+    } catch (_) {
+      _bass.BASS_StreamFree(mixer);
+      rethrow;
     }
     _sharedMixer = mixer;
   }
@@ -2510,7 +2581,8 @@ class BassPlayer {
       }
       if (_mix!.setChannelPaused(_fstream!, false) ==
               BassMixLibrary.errorValue ||
-          (!_offlineOutput && _bass.BASS_ChannelStart(_sharedMixer!) == 0)) {
+          (!_decodingOfflineMixer &&
+              _bass.BASS_ChannelStart(_sharedMixer!) == 0)) {
         throw _sourceOpenException(_bass.BASS_ErrorGetCode(),
             isUrl: _sourceIsUrl);
       }
@@ -2558,7 +2630,7 @@ class BassPlayer {
       return;
     }
 
-    final paused = _offlineOutput && _streamUsesMixer
+    final paused = _decodingOfflineMixer && _streamUsesMixer
         ? _mix!.setChannelPaused(_fstream!, true) != BassMixLibrary.errorValue
         : _bass.BASS_ChannelPause(_sharedMixer ?? _fstream!) != 0;
     if (!paused) {

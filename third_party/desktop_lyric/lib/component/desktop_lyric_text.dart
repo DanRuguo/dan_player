@@ -340,7 +340,8 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
             _retargetSize ?? _previousLayout!.size, _layout!.size, progress)!;
         final presented = _DesktopLyricTextLayout.interpolate(
             _previousLayout!, _layout!, progress,
-            sourceShaping: _previousShaping);
+            sourceShaping: _previousShaping,
+            horizontalMotion: _glyphMotions[0]);
         _previousLayout?.ruby?.dispose();
         _previousLayout = presented;
         _retargetSize = presentedSize;
@@ -363,7 +364,8 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
           if (wasMoving) {
             final presented = _DesktopLyricTextLayout.interpolate(
                 _previousLayout!, _layout!, progress,
-                sourceShaping: _previousShaping);
+                sourceShaping: _previousShaping,
+                horizontalMotion: _glyphMotions[0]);
             _previousLayout?.ruby?.dispose();
             _previousLayout = presented;
             _layout?.ruby?.dispose();
@@ -527,6 +529,15 @@ class _DesktopLyricTextShaping {
       required Locale? locale,
       required this.fontPolicy})
       : words = _DesktopLyricTextLayout._shapedWords(text, words) {
+    // Index the existing grapheme-merged timing words once. A spacing morph
+    // queries these UTF-16 offsets for each word on every presentation frame.
+    final starts = <int>[];
+    var sourceOffset = 0;
+    for (final word in this.words) {
+      starts.add(sourceOffset);
+      sourceOffset += word.content.length;
+    }
+    wordSourceStarts = List<int>.unmodifiable(starts);
     rubyStyle = style.copyWith(color: playedColor);
     rubyDirection = direction;
     rubyScaler = scaler;
@@ -635,6 +646,7 @@ class _DesktopLyricTextShaping {
   late final Locale? rubyLocale;
   LyricRubyShaping? rubyShaping;
   final List<DesktopLyricWord> words;
+  late final List<int> wordSourceStarts;
   final bool vertical;
   final Color playedColor, unplayedColor;
   late final double fontSize;
@@ -675,12 +687,39 @@ class _GlyphPaint {
 class _DesktopLyricTextLayout {
   _DesktopLyricTextLayout.interpolate(
       _DesktopLyricTextLayout from, _DesktopLyricTextLayout to, double progress,
-      {_DesktopLyricTextShaping? sourceShaping})
+      {_DesktopLyricTextShaping? sourceShaping,
+      LyricGlyphMorph? horizontalMotion})
       : shaping = sourceShaping ?? to.shaping {
     size = Size.lerp(from.size, to.size, progress)!;
     if (from.ruby != null && to.ruby != null) {
       ruby = LyricRubyLayout.interpolate(from.ruby!, to.ruby!, progress,
           retainSourcePainter: sourceShaping != null);
+    }
+    if (!vertical) {
+      // Ellipsis can split or remove a selection box as spacing/width changes.
+      // The actual presentation is indexed by authored glyph ranges, never by
+      // a positional zip of the two endpoints' selection boxes.
+      final motion = horizontalMotion;
+      if (motion == null) {
+        wordBoxes.addAll(to.wordBoxes);
+      } else {
+        final shift = Offset((size.width - motion.sourceSize.width) / 2, 0);
+        for (var word = 0; word < words.length; word++) {
+          final start = shaping.wordSourceStarts[word];
+          wordBoxes.add([
+            for (final box in motion.boxes(
+                start, start + words[word].content.length, progress))
+              (
+                rect: box.shift(shift),
+                rtl: to.wordBoxes[word].firstOrNull?.rtl ??
+                    from.wordBoxes[word].firstOrNull?.rtl ??
+                    false,
+                horizontal: true,
+              )
+          ]);
+        }
+      }
+      return;
     }
     for (var index = 0; index < to.glyphs.length; index++) {
       final previous = from.glyphs[index], target = to.glyphs[index];
@@ -982,6 +1021,13 @@ class DesktopLyricTextPainter extends CustomPainter {
   int get cachedStrokePainterCount => _layout.vertical
       ? _layout.glyphs.where((glyph) => glyph.stroke != null).length
       : (_layout.stroke == null ? 0 : 1);
+  @visibleForTesting
+  List<int> get wordSourceStarts => _layout.shaping.wordSourceStarts;
+  @visibleForTesting
+  int debugPrefixScanSteps = 0;
+  @visibleForTesting
+  List<LyricGlyphCell> get presentedGlyphCells =>
+      List.unmodifiable(_glyphMotions[0]?.cells ?? const <LyricGlyphCell>[]);
   List<DesktopLyricGlyph> get glyphs =>
       List.unmodifiable(_layout.glyphs.map((glyph) => glyph.glyph));
 
@@ -1091,14 +1137,20 @@ class DesktopLyricTextPainter extends CustomPainter {
     for (var index = 0; index < _layout.words.length; index++) {
       final progress = progressForWord(index);
       if (progress <= 0) continue;
-      final extent = _layout.wordExtents[index];
+      final targetExtent = _layout.wordExtents[index];
+      final presented = _presentedWordBoxes(index);
+      // A word leaving the bounded paragraph keeps its current playback tint
+      // while its old glyphs fade out; an empty target must not erase it early.
+      final extent = targetExtent > 0
+          ? targetExtent
+          : presented.fold<double>(0, (sum, box) => sum + box.rect.width);
       if (extent <= 0) continue;
       final edges = LyricWordEffects.revealEdges(
           progress: progress,
           extent: extent,
           softness: _layout.wordSoftness[index]);
       var offset = 0.0;
-      for (final box in _presentedWordBoxes(index)) {
+      for (final box in presented) {
         final vertical = _layout.vertical && !box.horizontal;
         final end = offset + (vertical ? box.rect.height : box.rect.width);
         if (progress >= 1 || edges.start >= end) {
@@ -1153,17 +1205,16 @@ class DesktopLyricTextPainter extends CustomPainter {
       int index) {
     final morph = _glyphMotions[0];
     if (vertical || morph == null) return _layout.wordBoxes[index];
-    var start = 0;
-    for (var word = 0; word < index; word++) {
-      start += _layout.words[word].content.length;
-    }
+    final start = _layout.shaping.wordSourceStarts[index];
     final shift = Offset((_paintSize.width - morph.sourceSize.width) / 2, 0);
     return [
       for (final box in morph.boxes(
           start, start + _layout.words[index].content.length, _layoutProgress))
         (
           rect: box.shift(shift),
-          rtl: _layout.wordBoxes[index].firstOrNull?.rtl ?? false,
+          rtl: _layout.wordBoxes[index].firstOrNull?.rtl ??
+              _previousLayout?.wordBoxes[index].firstOrNull?.rtl ??
+              false,
           horizontal: true
         )
     ];

@@ -79,6 +79,7 @@ class _CompactPlayerState extends State<CompactPlayer> {
     VoidCallback? onPlayPause,
     VoidCallback? onNext,
     ValueChanged<double>? onSeek,
+    ValueListenable<int>? seekRevision,
   }) =>
       CompactPlayerView(
         title: title,
@@ -99,6 +100,7 @@ class _CompactPlayerState extends State<CompactPlayer> {
         onPlayPause: onPlayPause,
         onNext: onNext,
         onSeek: onSeek,
+        seekRevision: seekRevision,
         onRestore: () => _windowAction(_controller.exit),
         onTogglePinned: () => _windowAction(_controller.togglePinned),
         onMinimize: () => _windowAction(windowManager.minimize),
@@ -157,6 +159,7 @@ class _CompactPlayerState extends State<CompactPlayer> {
                         ? null
                         : playback.nextAudio,
                     onSeek: audio == null ? null : playback.seek,
+                    seekRevision: playback.manualSeekRevision,
                   );
                 },
               );
@@ -196,6 +199,7 @@ class CompactPlayerView extends StatefulWidget {
     this.onPlayPause,
     this.onNext,
     this.onSeek,
+    this.seekRevision,
     this.onRestore,
     this.onTogglePinned,
     this.onMinimize,
@@ -225,6 +229,7 @@ class CompactPlayerView extends StatefulWidget {
   final VoidCallback? onPlayPause;
   final VoidCallback? onNext;
   final ValueChanged<double>? onSeek;
+  final ValueListenable<int>? seekRevision;
   final VoidCallback? onRestore;
   final VoidCallback? onTogglePinned;
   final VoidCallback? onMinimize;
@@ -259,6 +264,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     widget.hidden?.addListener(_syncPositionActivity);
+    widget.seekRevision?.addListener(_cancelForNewSeek);
   }
 
   @override
@@ -325,6 +331,7 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
 
   @override
   void dispose() {
+    widget.seekRevision?.removeListener(_cancelForNewSeek);
     _detachPosition();
     widget.hidden?.removeListener(_syncPositionActivity);
     _preferences?.removeListener(_syncPositionActivity);
@@ -379,6 +386,20 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
     _livePosition.value = widget.readPosition?.call() ?? _livePosition.value;
   }
 
+  void _cancelForNewSeek() {
+    if (_seekPointer == null && !_dragging) return;
+    final pointer = _seekPointer;
+    _seekPointer = null;
+    _ignoreAdjustmentCycle = false;
+    setState(() {
+      _dragging = false;
+      _dragTrackIdentity = null;
+      _dragPosition = null;
+    });
+    _livePosition.value = widget.readPosition?.call() ?? _livePosition.value;
+    if (pointer != null) WidgetsBinding.instance.cancelPointer(pointer);
+  }
+
   void _finishSeek(double value) {
     if (_ignoreAdjustmentCycle) {
       _ignoreAdjustmentCycle = false;
@@ -431,6 +452,11 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
   @override
   void didUpdateWidget(CompactPlayerView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.seekRevision, widget.seekRevision)) {
+      oldWidget.seekRevision?.removeListener(_cancelForNewSeek);
+      widget.seekRevision?.addListener(_cancelForNewSeek);
+      _cancelForNewSeek();
+    }
     if (!identical(oldWidget.hidden, widget.hidden)) {
       oldWidget.hidden?.removeListener(_syncPositionActivity);
       widget.hidden?.addListener(_syncPositionActivity);

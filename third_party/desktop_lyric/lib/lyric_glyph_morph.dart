@@ -23,13 +23,21 @@ class LyricGlyphMorphFrame {
 /// cached paragraph geometry moves; source offsets always refer to the author.
 class LyricGlyphCell {
   LyricGlyphCell(this.start, this.end, this.source, this.from, this.to,
-      {required this.coloured});
+      {required this.coloured,
+      this.fromOpacity = 1,
+      this.toOpacity = 1,
+      _LyricGlyphAtlas? atlas})
+      : _atlas = atlas;
   final int start, end;
   final Rect source;
   final Rect from, to;
   final bool coloured;
+  final double fromOpacity, toOpacity;
+  final _LyricGlyphAtlas? _atlas;
   late final Rect sourceClip;
   Rect at(double progress) => Rect.lerp(from, to, progress)!;
+  double opacityAt(double progress) =>
+      fromOpacity + (toOpacity - fromOpacity) * progress;
 }
 
 /// A finite paragraph geometry transition. The paragraph is recorded once.
@@ -44,9 +52,13 @@ class LyricGlyphMorph {
       double alignmentX = -1,
       double pixelRatio = 1})
       : _atlas = _LyricGlyphAtlas(from, pixelRatio),
-        cells = _cells(from, to, targetOffset, alignmentX),
+        _completeSource = false,
         fromSize = from.size,
-        toSize = to.size;
+        toSize = to.size {
+    cells = _cells(from, to, targetOffset, alignmentX);
+    _completeSource = _coversText(cells, from.text!.toPlainText());
+    _addRevealed(to, targetOffset, alignmentX);
+  }
 
   LyricGlyphMorph.retarget(
       LyricGlyphMorph previous, TextPainter target, double presentedProgress,
@@ -54,11 +66,15 @@ class LyricGlyphMorph {
       Offset fromOffset = Offset.zero,
       double alignmentX = -1})
       : _atlas = previous._atlas.retain(),
+        _revealAtlas = previous._revealAtlas?.retain(),
+        _completeSource = previous._completeSource,
         fromSize =
             Size.lerp(previous.fromSize, previous.toSize, presentedProgress)!,
-        toSize = target.size,
-        cells = _retargetCells(previous, target, presentedProgress,
-            targetOffset, fromOffset, alignmentX);
+        toSize = target.size {
+    cells = _retargetCells(previous, target, presentedProgress, targetOffset,
+        fromOffset, alignmentX);
+    _addRevealed(target, targetOffset, alignmentX);
+  }
 
   static List<LyricGlyphCell> _retargetCells(
       LyricGlyphMorph previous,
@@ -70,21 +86,26 @@ class LyricGlyphMorph {
     final lines = target.computeLineMetrics();
     return [
       for (final cell in previous.cells)
-        LyricGlyphCell(
-            cell.start,
-            cell.end,
-            cell.source,
-            cell.at(progress).shift(fromOffset),
-            _placedSelection(target, cell.start, cell.end, alignmentX, lines)
-                    ?.shift(targetOffset) ??
-                cell.at(progress).shift(fromOffset),
-            coloured: cell.coloured)
-          ..sourceClip = cell.sourceClip
+        () {
+          final presented = cell.at(progress).shift(fromOffset);
+          final destination =
+              _placedSelection(target, cell.start, cell.end, alignmentX, lines);
+          final visible = destination != null && !destination.isEmpty;
+          return LyricGlyphCell(cell.start, cell.end, cell.source, presented,
+              visible ? destination.shift(targetOffset) : presented,
+              coloured: cell.coloured,
+              fromOpacity: cell.opacityAt(progress),
+              toOpacity: visible ? 1 : 0,
+              atlas: cell._atlas)
+            ..sourceClip = cell.sourceClip;
+        }()
     ];
   }
 
   final _LyricGlyphAtlas _atlas;
-  final List<LyricGlyphCell> cells;
+  _LyricGlyphAtlas? _revealAtlas;
+  bool _completeSource;
+  late List<LyricGlyphCell> cells;
   final Size fromSize, toSize;
   Size get sourceSize => _atlas.size;
   bool _disposed = false;
@@ -92,6 +113,53 @@ class LyricGlyphMorph {
   final _colourSources = <LyricGlyphCell, ({Rect bounds, Rect clip})>{};
 
   late final bool _hasColourCells = cells.any((cell) => cell.coloured);
+  late final bool _hasVisibilityChanges = cells.any((cell) =>
+      cell.fromOpacity != 1 || cell.toOpacity != 1 || cell._atlas != null);
+
+  void _addRevealed(TextPainter target, Offset offset, double alignmentX) {
+    if (_completeSource) return;
+    final targetCells = _cells(target, target, Offset.zero, alignmentX);
+    var sourceIndex = 0;
+    final missing = <int>{};
+    for (final cell in targetCells) {
+      while (
+          sourceIndex < cells.length && cells[sourceIndex].end <= cell.start) {
+        sourceIndex++;
+      }
+      if (sourceIndex == cells.length || cells[sourceIndex].start > cell.start)
+        missing.add(cell.start);
+    }
+    if (missing.isEmpty) return;
+    // One unbounded source owns all newly exposed clusters, even after repeated
+    // width edits. Its lazy atlas remains bounded instead of recording a new
+    // full paragraph for every small pointer movement.
+    final atlas =
+        _revealAtlas ??= _LyricGlyphAtlas.unbounded(target, _atlas.ratio);
+    final revealed = _cells(atlas.revealSource!, target, offset, alignmentX);
+    cells = [
+      ...cells,
+      for (final cell in revealed)
+        if (missing.contains(cell.start) && cell.toOpacity > 0)
+          LyricGlyphCell(cell.start, cell.end, cell.source, cell.to, cell.to,
+              coloured: cell.coloured, fromOpacity: 0, atlas: atlas)
+            ..sourceClip = cell.sourceClip,
+    ]..sort((a, b) => a.start.compareTo(b.start));
+    _completeSource = _coversText(cells, target.text!.toPlainText());
+  }
+
+  static bool _coversText(List<LyricGlyphCell> cells, String text) {
+    var index = 0, start = 0;
+    for (final cluster in text.characters) {
+      final end = start + cluster.length;
+      while (index < cells.length && cells[index].end <= start) index++;
+      if (cluster.trim().isNotEmpty &&
+          (index == cells.length ||
+              cells[index].start > start ||
+              cells[index].end < end)) return false;
+      start = end;
+    }
+    return true;
+  }
 
   void _syncColourSources(TextPainter paragraph, Object identity) {
     if (!_hasColourCells || _colourLayoutIdentity == identity) return;
@@ -150,10 +218,9 @@ class LyricGlyphMorph {
       final target = _placedSelection(to, start, end, alignmentX, targetLines)
           ?.shift(targetOffset);
       final presented = _placedSelection(from, start, end, alignmentX, lines);
-      if (source != null &&
-          target != null &&
-          !source.isEmpty &&
-          !target.isEmpty) {
+      if (source != null && !source.isEmpty) {
+        final visible = target != null && !target.isEmpty;
+        final destination = visible ? target : presented!;
         final previous = result.isEmpty ? null : result.last;
         // Selection boxes for a ligature can coincide. Keep the entire shaped
         // cluster in one cell instead of drawing or clipping its ink twice.
@@ -166,11 +233,13 @@ class LyricGlyphMorph {
               end,
               previous.source.expandToInclude(source),
               previous.from.expandToInclude(presented!),
-              previous.to.expandToInclude(target),
-              coloured: previous.coloured || _coloured(cluster));
+              previous.to.expandToInclude(destination),
+              coloured: previous.coloured || _coloured(cluster),
+              toOpacity: visible ? 1 : 0);
         } else {
-          result.add(LyricGlyphCell(start, end, source, presented!, target,
-              coloured: _coloured(cluster)));
+          result.add(LyricGlyphCell(
+              start, end, source, presented!, destination,
+              coloured: _coloured(cluster), toOpacity: visible ? 1 : 0));
         }
       }
       start = end;
@@ -257,7 +326,7 @@ class LyricGlyphMorph {
         for (var index = _firstCell(start);
             index < cells.length && cells[index].start < end;
             index++)
-          cells[index].at(progress)
+          if (cells[index].opacityAt(progress) > 0) cells[index].at(progress)
       ];
 
   Rect? bounds(int start, int end, double progress) {
@@ -282,20 +351,94 @@ class LyricGlyphMorph {
       Object? colourLayoutIdentity,
       Offset Function(LyricGlyphCell cell, Rect presented)? displacement}) {
     if (_disposed) return;
-    if (nativeParagraph && shader == null && _atlas.hasNativeParagraph) {
+    if (!_hasVisibilityChanges) {
+      _paintCells(canvas, cells, _atlas,
+          progress: progress,
+          tint: tint,
+          shader: shader,
+          nativeParagraph: nativeParagraph,
+          start: start,
+          end: end,
+          colourPaint: colourPaint,
+          colourParagraph: colourParagraph,
+          colourLayoutIdentity: colourLayoutIdentity,
+          displacement: displacement);
+      return;
+    }
+    final groups = <(_LyricGlyphAtlas, double), List<LyricGlyphCell>>{};
+    for (var index = _firstCell(start);
+        index < cells.length && cells[index].start < (end ?? 0x7fffffff);
+        index++) {
+      final cell = cells[index];
+      if (cell.start < start) continue;
+      final opacity = cell.opacityAt(progress).clamp(0.0, 1.0);
+      if (opacity <= 0) continue;
+      groups.putIfAbsent((cell._atlas ?? _atlas, opacity), () => []).add(cell);
+    }
+    for (final entry in groups.entries) {
+      final (atlas, opacity) = entry.key;
+      if (opacity < 1) {
+        Rect? bounds;
+        for (final cell in entry.value) {
+          final presented = cell.at(progress);
+          final shift = presented.topLeft -
+              cell.source.topLeft +
+              (displacement?.call(cell, presented) ?? Offset.zero);
+          // Native replay uses leading edges; atlas replay uses centres.
+          // Keep both inside the fade layer so a changing advance cannot
+          // clip a stem while its opacity is interpolating.
+          final centerShift = presented.center -
+              cell.source.center +
+              (displacement?.call(cell, presented) ?? Offset.zero);
+          final ink = cell.sourceClip
+              .shift(shift)
+              .expandToInclude(cell.sourceClip.shift(centerShift));
+          bounds = bounds == null ? ink : bounds.expandToInclude(ink);
+        }
+        canvas.saveLayer(bounds?.intersect(canvas.getLocalClipBounds()),
+            Paint()..color = Colors.white.withValues(alpha: opacity));
+      }
+      _paintCells(canvas, entry.value, atlas,
+          progress: progress,
+          tint: tint,
+          shader: shader,
+          nativeParagraph: nativeParagraph,
+          colourPaint: identical(atlas, _atlas) ? colourPaint : null,
+          colourParagraph: identical(atlas, _atlas) ? colourParagraph : null,
+          colourLayoutIdentity: colourLayoutIdentity,
+          displacement: displacement);
+      if (opacity < 1) canvas.restore();
+    }
+  }
+
+  void _paintCells(
+      Canvas canvas, List<LyricGlyphCell> selected, _LyricGlyphAtlas atlas,
+      {required double progress,
+      Color? tint,
+      drawing.Shader? shader,
+      required bool nativeParagraph,
+      int start = 0,
+      int? end,
+      void Function(Canvas canvas)? colourPaint,
+      TextPainter? colourParagraph,
+      Object? colourLayoutIdentity,
+      Offset Function(LyricGlyphCell cell, Rect presented)? displacement}) {
+    if (nativeParagraph && shader == null && atlas.hasNativeParagraph) {
       // Reuse the native paragraph replay used below for colour glyphs. Plain
       // spacing must keep the same raster source as the resting paragraph.
       final groups = <Offset, Path>{};
       final clip = canvas.getLocalClipBounds();
-      for (var index = _firstCell(start);
-          index < cells.length && cells[index].start < (end ?? 0x7fffffff);
+      for (var index = identical(selected, cells) ? _firstCell(start) : 0;
+          index < selected.length &&
+              selected[index].start < (end ?? 0x7fffffff);
           index++) {
-        final cell = cells[index];
+        final cell = selected[index];
         if (cell.start < start) continue;
         final presented = cell.at(progress);
         // Selection width includes tracking space, not a larger glyph. Its
         // leading visual edge is the translation of the unchanged source ink.
-        final movement = presented.topLeft - cell.source.topLeft +
+        final movement = presented.topLeft -
+            cell.source.topLeft +
             (displacement?.call(cell, presented) ?? Offset.zero);
         final needed = cell.sourceClip.intersect(clip.shift(-movement));
         if (!needed.isEmpty) {
@@ -303,7 +446,7 @@ class LyricGlyphMorph {
         }
       }
       if (groups.isEmpty) return;
-      final source = _atlas.nativePictureFor(tint);
+      final source = atlas.nativePictureFor(tint);
       for (final entry in groups.entries) {
         canvas.save();
         canvas.translate(entry.key.dx, entry.key.dy);
@@ -328,10 +471,10 @@ class LyricGlyphMorph {
       List<Rect> colouredSources,
       List<drawing.RSTransform> colouredPoses
     })>{};
-    for (var index = _firstCell(start);
-        index < cells.length && cells[index].start < (end ?? 0x7fffffff);
+    for (var index = identical(selected, cells) ? _firstCell(start) : 0;
+        index < selected.length && selected[index].start < (end ?? 0x7fffffff);
         index++) {
-      final cell = cells[index];
+      final cell = selected[index];
       if (cell.start < start) continue;
       final presented = cell.at(progress);
       final colourSource = colourPaint == null ? null : _colourSources[cell];
@@ -345,8 +488,8 @@ class LyricGlyphMorph {
         colourGroups.putIfAbsent(movement, Path.new).addRect(needed);
         continue;
       }
-      for (final tileKey in _atlas.keysFor(needed)) {
-        final tileBounds = _atlas.boundsFor(tileKey);
+      for (final tileKey in atlas.keysFor(needed)) {
+        final tileBounds = atlas.boundsFor(tileKey);
         final piece = sourceClip.intersect(tileBounds);
         if (piece.isEmpty) continue;
         inkBounds = inkBounds == null
@@ -362,11 +505,11 @@ class LyricGlyphMorph {
                 ));
         final relative = piece.shift(-tileBounds.topLeft);
         final uv = Rect.fromLTRB(
-            relative.left * _atlas.ratio,
-            relative.top * _atlas.ratio,
-            relative.right * _atlas.ratio,
-            relative.bottom * _atlas.ratio);
-        final pose = drawing.RSTransform(1 / _atlas.ratio, 0,
+            relative.left * atlas.ratio,
+            relative.top * atlas.ratio,
+            relative.right * atlas.ratio,
+            relative.bottom * atlas.ratio);
+        final pose = drawing.RSTransform(1 / atlas.ratio, 0,
             piece.left + movement.dx, piece.top + movement.dy);
         if (cell.coloured) {
           hasColour = true;
@@ -402,13 +545,13 @@ class LyricGlyphMorph {
       final batch = entry.value;
       if (batch.sources.isEmpty) continue;
       canvas.drawAtlas(
-          _atlas.tileFor(entry.key).image,
+          atlas.tileFor(entry.key).image,
           batch.poses,
           batch.sources,
           null,
           null,
           null,
-          _atlas.inkPaint(shader == null ? tint : Colors.white));
+          atlas.inkPaint(shader == null ? tint : Colors.white));
     }
     if (shader != null) {
       canvas.drawRect(
@@ -423,13 +566,13 @@ class LyricGlyphMorph {
       final batch = entry.value;
       if (batch.colouredSources.isEmpty) continue;
       canvas.drawAtlas(
-          _atlas.tileFor(entry.key).image,
+          atlas.tileFor(entry.key).image,
           batch.colouredPoses,
           batch.colouredSources,
           null,
           null,
           null,
-          _atlas.colourPaint(shader == null ? tint : Colors.white));
+          atlas.colourPaint(shader == null ? tint : Colors.white));
     }
     if (shader != null && hasColour) {
       // A colour glyph keeps its RGB. Playback owns its opacity exactly once,
@@ -447,6 +590,7 @@ class LyricGlyphMorph {
     if (_disposed) return;
     _disposed = true;
     _atlas.release();
+    _revealAtlas?.release();
   }
 }
 
@@ -457,10 +601,26 @@ class _AtlasTile {
 }
 
 class _LyricGlyphAtlas {
+  factory _LyricGlyphAtlas.unbounded(TextPainter source, double pixelRatio) {
+    final painter = TextPainter(
+        text: source.text,
+        textAlign: source.textAlign,
+        textDirection: source.textDirection,
+        textScaler: source.textScaler,
+        strutStyle: source.strutStyle,
+        locale: source.locale,
+        maxLines: source.maxLines,
+        textWidthBasis: source.textWidthBasis,
+        textHeightBehavior: source.textHeightBehavior)
+      ..layout();
+    return _LyricGlyphAtlas(painter, pixelRatio)..revealSource = painter;
+  }
+
   _LyricGlyphAtlas(TextPainter painter, double pixelRatio)
       : size = painter.size,
         ratio = pixelRatio.clamp(1.0, 3.0),
-        _sourceText = painter.text is TextSpan ? painter.text as TextSpan : null,
+        _sourceText =
+            painter.text is TextSpan ? painter.text as TextSpan : null,
         originalAlpha = painter.text?.style?.color?.a ?? 1 {
     final recorder = drawing.PictureRecorder();
     painter.paint(Canvas(recorder), Offset.zero);
@@ -487,6 +647,7 @@ class _LyricGlyphAtlas {
         textHeightBehavior: heightBehavior);
   }
   final Size size;
+  TextPainter? revealSource;
   final double ratio, originalAlpha;
   final TextSpan? _sourceText;
   late final TextPainter Function(TextSpan text) _createNativePainter;
@@ -643,6 +804,7 @@ class _LyricGlyphAtlas {
     _tiles.clear();
     _nativePicture?.dispose();
     _nativePainter?.dispose();
+    revealSource?.dispose();
     picture.dispose();
   }
 }

@@ -20,6 +20,7 @@ class RectangleProgressIndicator extends StatefulWidget {
     this.hidden,
     this.trackIdentity,
     this.onSeek,
+    this.seekRevision,
   });
 
   final Size size;
@@ -34,6 +35,7 @@ class RectangleProgressIndicator extends StatefulWidget {
   final ValueListenable<bool>? hidden;
   final Object? trackIdentity;
   final ValueChanged<double>? onSeek;
+  final ValueListenable<int>? seekRevision;
 
   @override
   State<RectangleProgressIndicator> createState() =>
@@ -138,6 +140,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     widget.hidden?.addListener(_syncActivity);
+    widget.seekRevision?.addListener(_cancelForNewSeek);
   }
 
   @override
@@ -161,6 +164,11 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
   @override
   void didUpdateWidget(RectangleProgressIndicator oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.seekRevision, widget.seekRevision)) {
+      oldWidget.seekRevision?.removeListener(_cancelForNewSeek);
+      widget.seekRevision?.addListener(_cancelForNewSeek);
+      _cancelForNewSeek();
+    }
     if (!identical(oldWidget.hidden, widget.hidden)) {
       oldWidget.hidden?.removeListener(_syncActivity);
       widget.hidden?.addListener(_syncActivity);
@@ -211,6 +219,15 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
     _dragIdentity = null;
     progress.value = _latestFraction;
     _finishPointerHint();
+  }
+
+  void _cancelForNewSeek() {
+    if (_seekPointer == null && !_dragging) return;
+    final pointer = _seekPointer;
+    _latestFraction =
+        _fraction(widget.readPosition?.call() ?? _latestFraction * _length);
+    _cancelSeek();
+    if (pointer != null) WidgetsBinding.instance.cancelPointer(pointer);
   }
 
   void _commitSeek() {
@@ -473,6 +490,7 @@ class _RectangleProgressIndicatorState extends State<RectangleProgressIndicator>
 
   @override
   void dispose() {
+    widget.seekRevision?.removeListener(_cancelForNewSeek);
     _disposed = true;
     _detach();
     widget.hidden?.removeListener(_syncActivity);

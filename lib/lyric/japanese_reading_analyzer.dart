@@ -50,6 +50,9 @@ class JapaneseReadingAnalyzerPolicy {
   final JapaneseOnlineReadingAnalyzer _online;
   bool _observeSettings = false, _observing = false;
   int _generation = 0;
+  JapaneseReadingRequestMode? _activeMode;
+  String? _observedClientId;
+  bool _observedEnabled = false;
 
   String _onlineNamespace() =>
       'online/${sha256.convert(utf8.encode(_clientId()))}';
@@ -71,58 +74,90 @@ class JapaneseReadingAnalyzerPolicy {
   void _attach() {
     if (!_observeSettings || _observing) return;
     _observing = true;
-    // Permission/configuration changes abort only network work. A manual
-    // cancellation also revokes this owner's native work through cancel().
-    AppSettings.instance.automaticOnlineLyrics.addListener(_online.cancel);
-    AppSettings.instance.japaneseReadings.addListener(_online.cancel);
+    _observedClientId = _clientId();
+    _observedEnabled = AppSettings.instance.japaneseReadings.value.enabled;
+    AppSettings.instance.automaticOnlineLyrics
+        .addListener(_handleAutomaticOnlineChange);
+    AppSettings.instance.japaneseReadings.addListener(_handlePreferencesChange);
+  }
+
+  void _handleAutomaticOnlineChange() {
+    if (_activeMode == JapaneseReadingRequestMode.automatic &&
+        !_onlineAllowed()) {
+      cancel();
+    }
+  }
+
+  void _handlePreferencesChange() {
+    final preferences = AppSettings.instance.japaneseReadings.value;
+    final disabled = _observedEnabled && !preferences.enabled;
+    final clientChanged = _observedClientId != _clientId();
+    _observedClientId = _clientId();
+    _observedEnabled = preferences.enabled;
+    // Remembering a batch-dialog mode does not change a running request.
+    // A real OFF action revokes either mode; client changes affect online work.
+    if (disabled ||
+        (clientChanged &&
+            _activeMode != null &&
+            _activeMode != JapaneseReadingRequestMode.offline)) {
+      cancel();
+    }
   }
 
   Future<JapanesePhoneticBatch> analyzeWithMode(
       List<String> chunks, JapaneseReadingRequestMode mode) async {
     _attach();
     final generation = ++_generation;
+    _activeMode = mode;
     bool current() => generation == _generation;
-    if (!canAnalyze(mode)) {
-      return const JapanesePhoneticBatch([], available: false);
-    }
-    final clientId = _clientId();
-    final online =
-        mode != JapaneseReadingRequestMode.offline && clientId.isNotEmpty;
-    if (mode == JapaneseReadingRequestMode.online && clientId.isEmpty) {
-      return const JapanesePhoneticBatch([], available: false);
-    }
-    if (online) {
-      final result = await _online.analyze(chunks,
-          clientId: clientId,
-          stillCurrent: () =>
-              current() &&
-              _clientId() == clientId &&
-              (mode == JapaneseReadingRequestMode.online || _onlineAllowed()));
-      if (!current()) return const JapanesePhoneticBatch([], available: false);
-      if (result.available &&
-          _clientId() == clientId &&
-          (mode == JapaneseReadingRequestMode.online || _onlineAllowed())) {
-        return result;
+    try {
+      if (!canAnalyze(mode)) {
+        return const JapanesePhoneticBatch([], available: false);
       }
+      final clientId = _clientId();
+      final online =
+          mode != JapaneseReadingRequestMode.offline && clientId.isNotEmpty;
+      if (mode == JapaneseReadingRequestMode.online && clientId.isEmpty) {
+        return const JapanesePhoneticBatch([], available: false);
+      }
+      if (online) {
+        final result = await _online.analyze(chunks,
+            clientId: clientId,
+            stillCurrent: () =>
+                current() &&
+                _clientId() == clientId &&
+                (mode == JapaneseReadingRequestMode.online ||
+                    _onlineAllowed()));
+        if (!current())
+          return const JapanesePhoneticBatch([], available: false);
+        if (result.available &&
+            _clientId() == clientId &&
+            (mode == JapaneseReadingRequestMode.online || _onlineAllowed())) {
+          return result;
+        }
+      }
+      if (!current() || !canAnalyze(mode)) {
+        return const JapanesePhoneticBatch([], available: false);
+      }
+      if (!await _hasDictionary()) {
+        return const JapanesePhoneticBatch([],
+            available: false, dictionaryMissing: true);
+      }
+      if (!current() || !canAnalyze(mode)) {
+        return const JapanesePhoneticBatch([], available: false);
+      }
+      final result = await _offline(chunks);
+      return current() && canAnalyze(mode)
+          ? result
+          : const JapanesePhoneticBatch([], available: false);
+    } finally {
+      if (current()) _activeMode = null;
     }
-    if (!current() || !canAnalyze(mode)) {
-      return const JapanesePhoneticBatch([], available: false);
-    }
-    if (!await _hasDictionary()) {
-      return const JapanesePhoneticBatch([],
-          available: false, dictionaryMissing: true);
-    }
-    if (!current() || !canAnalyze(mode)) {
-      return const JapanesePhoneticBatch([], available: false);
-    }
-    final result = await _offline(chunks);
-    return current() && canAnalyze(mode)
-        ? result
-        : const JapanesePhoneticBatch([], available: false);
   }
 
   void cancel() {
     _generation++;
+    _activeMode = null;
     _online.cancel();
     _cancelOffline();
   }
@@ -130,8 +165,10 @@ class JapaneseReadingAnalyzerPolicy {
   void dispose() {
     cancel();
     if (_observing) {
-      AppSettings.instance.automaticOnlineLyrics.removeListener(_online.cancel);
-      AppSettings.instance.japaneseReadings.removeListener(_online.cancel);
+      AppSettings.instance.automaticOnlineLyrics
+          .removeListener(_handleAutomaticOnlineChange);
+      AppSettings.instance.japaneseReadings
+          .removeListener(_handlePreferencesChange);
       _observing = false;
     }
   }

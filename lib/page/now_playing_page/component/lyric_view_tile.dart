@@ -1733,6 +1733,12 @@ class LyricWordHighlightPainter extends CustomPainter
   @visibleForTesting
   int get movingWordCount => _movingWords().length;
 
+  // Assertion-only work counters keep rendering cost checks out of release.
+  @visibleForTesting
+  int debugPosePasses = 0;
+  @visibleForTesting
+  int debugPoseEvaluations = 0;
+
   @visibleForTesting
   Rect get paintedTextBounds {
     final lines = _layout.base.computeLineMetrics();
@@ -1777,6 +1783,10 @@ class LyricWordHighlightPainter extends CustomPainter
       ];
 
   List<_TimedLyricPose> _movingWords() {
+    assert(() {
+      debugPosePasses++;
+      return true;
+    }());
     if (reducedMotion || activation <= 0) {
       return const [];
     }
@@ -1784,6 +1794,10 @@ class LyricWordHighlightPainter extends CustomPainter
     for (var index = 0; index < _layout.words.length; index++) {
       final word = _layout.words[index];
       if (!_layout.movingIndices.contains(index)) continue;
+      assert(() {
+        debugPoseEvaluations++;
+        return true;
+      }());
       final pose = LyricWordEffects.timedPose(
         elapsedMilliseconds: (position - word.start).inMicroseconds / 1000,
         phase: word.phase,
@@ -1812,6 +1826,99 @@ class LyricWordHighlightPainter extends CustomPainter
       ));
     }
     return result;
+  }
+
+  // Prune only clearly disjoint ink before issuing per-word Canvas calls.
+  // Unusual transforms retain the original path; null disables this broad phase.
+  Rect? _conservativeInkCullClip(Canvas canvas) {
+    final clip = canvas.getLocalClipBounds();
+    if (!clip.isFinite) return null;
+    final matrix = canvas.getTransform();
+    for (final value in matrix) {
+      if (!value.isFinite) return null;
+    }
+    if (matrix[1] != 0 ||
+        matrix[2] != 0 ||
+        matrix[3] != 0 ||
+        matrix[4] != 0 ||
+        matrix[6] != 0 ||
+        matrix[7] != 0 ||
+        matrix[8] != 0 ||
+        matrix[9] != 0 ||
+        matrix[11] != 0 ||
+        matrix[15] != 1 ||
+        matrix[0].abs() < .5 ||
+        matrix[5].abs() < .5 ||
+        matrix[0].abs() > 8 ||
+        matrix[5].abs() > 8 ||
+        matrix[12].abs() > 32768 ||
+        matrix[13].abs() > 32768 ||
+        clip.left.abs() > 32768 ||
+        clip.top.abs() > 32768 ||
+        clip.right.abs() > 32768 ||
+        clip.bottom.abs() > 32768) {
+      return null;
+    }
+    return clip;
+  }
+
+  bool _inkClipMayBeVisible(
+    Rect? localClip,
+    Rect inkClip,
+    int wordIndex,
+    Map<int, _TimedLyricPose> poses, {
+    double followY = 0,
+  }) {
+    if (localClip == null ||
+        !inkClip.isFinite ||
+        !followY.isFinite ||
+        followY.abs() > 32768 ||
+        inkClip.left.abs() > 32768 ||
+        inkClip.top.abs() > 32768 ||
+        inkClip.right.abs() > 32768 ||
+        inkClip.bottom.abs() > 32768) {
+      return true;
+    }
+    var left = inkClip.left;
+    var top = inkClip.top;
+    var right = inkClip.right;
+    var bottom = inkClip.bottom;
+    final pose = poses[wordIndex];
+    if (pose != null) {
+      if (!pose.scale.isFinite ||
+          !pose.scaleY.isFinite ||
+          !pose.lift.isFinite ||
+          !pose.anchorX.isFinite ||
+          pose.scale < .5 ||
+          pose.scale > 2 ||
+          pose.scaleY < .5 ||
+          pose.scaleY > 2 ||
+          pose.anchorX.abs() > 32768 ||
+          pose.lift.abs() > 32768) return true;
+      final centerY = _layout.words[wordIndex].bounds.center.dy;
+      if (!centerY.isFinite || centerY.abs() > 32768) return true;
+      left = pose.anchorX + (left - pose.anchorX) * pose.scale;
+      right = pose.anchorX + (right - pose.anchorX) * pose.scale;
+      top = centerY - pose.lift + (top - centerY) * pose.scaleY;
+      bottom = centerY - pose.lift + (bottom - centerY) * pose.scaleY;
+    }
+    top += followY;
+    bottom += followY;
+    if (!left.isFinite ||
+        !top.isFinite ||
+        !right.isFinite ||
+        !bottom.isFinite ||
+        left.abs() > 32768 ||
+        top.abs() > 32768 ||
+        right.abs() > 32768 ||
+        bottom.abs() > 32768) return true;
+    // Broad phase only: retain every near boundary and execute its old calls.
+    final mapped = Rect.fromLTRB(left, top, right, bottom).inflate(2);
+    final visible = mapped.right >= localClip.left &&
+        mapped.left <= localClip.right &&
+        mapped.bottom >= localClip.top &&
+        mapped.top <= localClip.bottom;
+    return visible;
   }
 
   void _paintWordInk(Canvas canvas, int index, int boxIndex) {
@@ -1865,9 +1972,9 @@ class LyricWordHighlightPainter extends CustomPainter
     canvas.save();
     canvas.translate(inkOffset.dx, inkOffset.dy);
     final ruby = _layout.ruby;
-    final poses = ruby == null
-        ? null
-        : {for (final pose in _movingWords()) pose.index: pose};
+    // Alignment and ruby replay the same paragraph through several clips.
+    // Sample its media-time poses once, then reuse them for every painted row.
+    final poses = {for (final pose in _movingWords()) pose.index: pose};
     void primary() {
       if (glyphMorph != null) {
         _paintInk(canvas, size, poses: poses);
@@ -1892,7 +1999,7 @@ class LyricWordHighlightPainter extends CustomPainter
         tint: playedColor,
         visibility: rubyVisibility,
         rasterScale: rubyRasterScale,
-        displacement: (glyph) => _rubyDisplacement(glyph, poses!),
+        displacement: (glyph) => _rubyDisplacement(glyph, poses),
       );
     }
     canvas.restore();
@@ -2048,9 +2155,13 @@ class LyricWordHighlightPainter extends CustomPainter
       return;
     }
     final wordPoses = poses ?? {for (final pose in moving) pose.index: pose};
+    final inkCullClip = _conservativeInkCullClip(canvas);
     for (var index = 0; index < _layout.words.length; index++) {
       final word = _layout.words[index];
       for (var box = 0; box < word.boxes.length; box++) {
+        if (!_inkClipMayBeVisible(
+            inkCullClip, _layout.wordInkClips[index][box], index, wordPoses))
+          continue;
         canvas.save();
         final pose = wordPoses[index];
         if (pose != null) {
@@ -2276,8 +2387,14 @@ class LyricWordHighlightPainter extends CustomPainter
     // The original glyphs carry their own ink color. Keep all draws in the
     // outer filter's display list; a nested alpha-mask layer can be culled by
     // Windows Impeller before the 1.5x source is projected back to the row.
+    final inkCullClip = _conservativeInkCullClip(canvas);
     for (var index = 0; index < _layout.followPieces.length; index++) {
       final piece = _layout.followPieces[index];
+      if (!_inkClipMayBeVisible(
+          inkCullClip, _layout.followInkClips[index], piece.word, wordPoses,
+          followY: wave.offset(
+              _layout.followSlots[piece.slot].phase, _layout.fontSize)))
+        continue;
       canvas.save();
       transform(piece.word, piece.slot);
       canvas.clipRect(_layout.followInkClips[index], doAntiAlias: false);

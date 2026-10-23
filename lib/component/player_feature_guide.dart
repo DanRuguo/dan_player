@@ -620,6 +620,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           _demo('appearance', PlayerGuideDemoKind.spectrum),
                           _text(
                               '播放页大封面支持鼠标附近的细线辉光和水滴折射，可在“背景与动效”关闭“封面轮廓辉光”；它们与分类页流光一起受“交互反馈动画”控制。减少动画或隐藏窗口时停止效果，鼠标移开后恢复原图。'),
+                          _demo('appearance', PlayerGuideDemoKind.cover),
                           _text(
                               '歌单与歌曲封面可使用 GIF，导入上限为 1024 × 1024、120 帧，复杂动画可能达到解码预算。动态封面受“动态 GIF 封面”和“主题与封面渐变”控制；关闭或减少动画时显示首帧，隐藏时暂停。背景图片仍使用静态图。'),
                           _text(

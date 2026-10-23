@@ -46,6 +46,7 @@ class NowPlayingProgress extends StatelessWidget {
         ),
         enabled: playback.nowPlaying != null && playback.canEditQueue,
         onSeek: playback.seek,
+        seekRevision: playback.manualSeekRevision,
         hidden: hidden,
       ),
     );

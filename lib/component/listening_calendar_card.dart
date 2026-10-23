@@ -37,7 +37,7 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   _ListeningActivityRange _range = _ListeningActivityRange.daily;
   late final ScrollController _scroll = _CalendarScrollController(_scrollBy);
-  String? _selectedDay;
+  final _selectedDay = ValueNotifier<String?>(null);
   String? _positionedRange;
   late final AnimationController _rangeFade =
       AnimationController(vsync: this, duration: AppMotion.standard, value: 1);
@@ -155,6 +155,7 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
     (_rangeOpacity as CurvedAnimation).dispose();
     _rangeFade.dispose();
     _scroll.dispose();
+    _selectedDay.dispose();
     super.dispose();
   }
 
@@ -234,12 +235,10 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
         }
       });
     }
-    final selected = calendar.weeks
-        .expand((week) => week)
-        .where((day) => day.key == _selectedDay && day.inRange);
-    final selectedDay =
-        selected.isEmpty ? calendar.thisWeek.last : selected.first;
     final daily = _range == _ListeningActivityRange.daily;
+    final selectableDays = daily
+        ? const <String, ListeningCalendarDay>{}
+        : {for (final day in calendar.daysInRange) day.key: day};
     final recent = widget.recentActivitySnapshot ??
         widget.statistics.recentActivity(widget.now ?? DateTime.now());
     final countValue = daily ? recent.playCount : calendar.rangePlayCount;
@@ -279,7 +278,7 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                       if (selected && range != _range) {
                         setState(() {
                           _range = range;
-                          _selectedDay = null;
+                          _selectedDay.value = null;
                         });
                         final duration = _durationFor(MotionKind.transitions);
                         if (duration == Duration.zero) {
@@ -458,15 +457,21 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                               ]),
                             ]),
                         const SizedBox(height: 10),
-                        Semantics(
-                            liveRegion: true,
-                            child: Text(_detail(selectedDay),
-                                key: const ValueKey(
-                                    'statistics-calendar-detail'),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: scheme.primary))),
+                        ValueListenableBuilder<String?>(
+                            valueListenable: _selectedDay,
+                            builder: (context, key, _) {
+                              final day =
+                                  selectableDays[key] ?? calendar.thisWeek.last;
+                              return Semantics(
+                                  liveRegion: true,
+                                  child: Text(_detail(day),
+                                      key: const ValueKey(
+                                          'statistics-calendar-detail'),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(color: scheme.primary)));
+                            }),
                         const SizedBox(height: 4),
                         Text(ui('颜色按真实每日时长显示；悬停或点击查看详情，最近一周在右侧。'),
                             style: Theme.of(context)
@@ -545,7 +550,7 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
               label: Text(ui('最投入的一天 · {0} · {1}',
                   [best.key, _duration(best.milliseconds)])),
               onPressed: () {
-                setState(() => _selectedDay = best.key);
+                _selectedDay.value = best.key;
                 if (_scroll.hasClients) {
                   final index = calendar.weeks.indexWhere(
                       (week) => week.any((day) => day.key == best.key));
@@ -682,48 +687,17 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                                     width: cellWidth,
                                     height: cellHeight,
                                     child: day.inRange
-                                        ? Tooltip(
-                                            message: _detail(day),
-                                            child: Semantics(
-                                                label: _detail(day),
-                                                button: true,
-                                                selected:
-                                                    _selectedDay == day.key,
-                                                child: Material(
-                                                    color: day.hasDurationRecord
-                                                        ? _color(scheme,
-                                                            day.intensity)
-                                                        : scheme
-                                                            .surfaceContainerLow,
-                                                    shape:
-                                                        RoundedRectangleBorder(
-                                                            borderRadius:
-                                                                BorderRadius.circular(
-                                                                    3),
-                                                            side: BorderSide(
-                                                                color: _selectedDay ==
-                                                                        day.key
-                                                                    ? scheme
-                                                                        .primary
-                                                                    : day
-                                                                            .hasDurationRecord
-                                                                        ? Colors
-                                                                            .transparent
-                                                                        : scheme
-                                                                            .outlineVariant,
-                                                                width: _selectedDay ==
-                                                                        day.key
-                                                                    ? 2
-                                                                    : 1)),
-                                                    child: InkWell(
-                                                        key: ValueKey(
-                                                            'listening-day-${day.key}'),
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                                3),
-                                                        onTap: () => setState(
-                                                            () => _selectedDay =
-                                                                day.key)))))
+                                        ? _ListeningCalendarDayCell(
+                                            dayKey: day.key,
+                                            detail: _detail(day),
+                                            color: day.hasDurationRecord
+                                                ? _color(scheme, day.intensity)
+                                                : scheme.surfaceContainerLow,
+                                            borderColor: day.hasDurationRecord
+                                                ? Colors.transparent
+                                                : scheme.outlineVariant,
+                                            selectedColor: scheme.primary,
+                                            selection: _selectedDay)
                                         : const SizedBox.shrink())),
                         ])),
                 ]),
@@ -766,6 +740,77 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
           ]);
         });
   }
+}
+
+/// Only the old and new selected dates rebuild. Selecting a day must not
+/// recreate the full calendar, summary projections or unrelated ink effects.
+class _ListeningCalendarDayCell extends StatefulWidget {
+  const _ListeningCalendarDayCell(
+      {required this.dayKey,
+      required this.detail,
+      required this.color,
+      required this.borderColor,
+      required this.selectedColor,
+      required this.selection});
+  final String dayKey, detail;
+  final Color color, borderColor, selectedColor;
+  final ValueNotifier<String?> selection;
+
+  @override
+  State<_ListeningCalendarDayCell> createState() =>
+      _ListeningCalendarDayCellState();
+}
+
+class _ListeningCalendarDayCellState extends State<_ListeningCalendarDayCell> {
+  late bool _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.selection.value == widget.dayKey;
+    widget.selection.addListener(_selectionChanged);
+  }
+
+  void _selectionChanged() {
+    final selected = widget.selection.value == widget.dayKey;
+    if (selected != _selected) setState(() => _selected = selected);
+  }
+
+  @override
+  void didUpdateWidget(_ListeningCalendarDayCell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selection != oldWidget.selection) {
+      oldWidget.selection.removeListener(_selectionChanged);
+      widget.selection.addListener(_selectionChanged);
+    }
+    _selected = widget.selection.value == widget.dayKey;
+  }
+
+  @override
+  void dispose() {
+    widget.selection.removeListener(_selectionChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+      message: widget.detail,
+      child: Semantics(
+          label: widget.detail,
+          button: true,
+          selected: _selected,
+          child: Material(
+              color: widget.color,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(3),
+                  side: BorderSide(
+                      color:
+                          _selected ? widget.selectedColor : widget.borderColor,
+                      width: _selected ? 2 : 1)),
+              child: InkWell(
+                  key: ValueKey('listening-day-${widget.dayKey}'),
+                  borderRadius: BorderRadius.circular(3),
+                  onTap: () => widget.selection.value = widget.dayKey))));
 }
 
 // Native horizontal pointer signals resolve through this position. Only their

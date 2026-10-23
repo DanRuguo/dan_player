@@ -78,6 +78,7 @@ class MiniNowPlaying extends StatelessWidget {
                       size: Size(constraints.maxWidth, constraints.maxHeight),
                       initialPosition: playback.position,
                       readPosition: () => playback.position,
+                      seekRevision: playback.manualSeekRevision,
                       hidden: DesktopIntegration.instance.isHidden,
                       trackIdentity: (
                         playback.nowPlaying?.path,

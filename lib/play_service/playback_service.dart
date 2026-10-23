@@ -638,6 +638,11 @@ class PlaybackService extends ChangeNotifier {
   final ValueNotifier<String?> resolvingAudioPath = ValueNotifier(null);
   int _sourceRequestToken = 0;
   int _manualSeekRevision = 0;
+  final _manualSeekChanges = ValueNotifier<int>(0);
+
+  /// Successful explicit positioning invalidates older pointer previews. Pause,
+  /// rejected seeks and ordinary position samples do not revoke a held drag.
+  ValueListenable<int> get manualSeekRevision => _manualSeekChanges;
   int _transportCommandRevision = 0;
   final _playbackIntent =
       ValueNotifier<Object>((command: 0, source: 0, seek: 0, closed: false));
@@ -828,6 +833,7 @@ class PlaybackService extends ChangeNotifier {
       seek: _manualSeekRevision,
       closed: _closed,
     );
+    _manualSeekChanges.value = _manualSeekRevision;
   }
 
   // An explicit pause while a source opens must survive the async hand-off.
@@ -2929,5 +2935,6 @@ class PlaybackService extends ChangeNotifier {
     resolvingAudioPath.dispose();
     diagnosticsRevision.dispose();
     _playbackIntent.dispose();
+    _manualSeekChanges.dispose();
   }
 }

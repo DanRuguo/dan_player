@@ -73,6 +73,7 @@ class DetailProgressSlider extends StatefulWidget {
     required this.duration,
     required this.trackIdentity,
     required this.onSeek,
+    this.seekRevision,
     this.enabled = true,
     this.hidden,
     this.waveform,
@@ -89,6 +90,7 @@ class DetailProgressSlider extends StatefulWidget {
   final double duration;
   final Object? trackIdentity;
   final ValueChanged<double> onSeek;
+  final ValueListenable<int>? seekRevision;
   final bool enabled;
   final ValueListenable<bool>? hidden;
 
@@ -191,6 +193,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     widget.hidden?.addListener(_syncActivity);
+    widget.seekRevision?.addListener(_cancelForNewSeek);
   }
 
   @override
@@ -216,6 +219,11 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   @override
   void didUpdateWidget(covariant DetailProgressSlider oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.seekRevision, widget.seekRevision)) {
+      oldWidget.seekRevision?.removeListener(_cancelForNewSeek);
+      widget.seekRevision?.addListener(_cancelForNewSeek);
+      _cancelForNewSeek();
+    }
     if (!identical(oldWidget.hidden, widget.hidden)) {
       oldWidget.hidden?.removeListener(_syncActivity);
       widget.hidden?.addListener(_syncActivity);
@@ -486,6 +494,19 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _receive(widget.readPosition(), immediate: true);
   }
 
+  void _cancelForNewSeek() {
+    if (_pointer == null && !_dragging) return;
+    final pointer = _pointer;
+    _pointer = null;
+    _dragIdentity = null;
+    _ignoreAdjustmentCycle = false;
+    setState(() => _dragging = false);
+    _receive(widget.readPosition(), immediate: true);
+    // Also revoke a touch still waiting in the arena, before it can start a
+    // fresh preview from the same older contact on its next movement.
+    if (pointer != null) WidgetsBinding.instance.cancelPointer(pointer);
+  }
+
   void _commitSeek(double target, {double? origin, bool remember = true}) {
     // A direct bookmark lives outside the Slider's pointer filter. It must
     // respect the same pending/accepted drag owner as keyboard and menu input.
@@ -595,6 +616,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
 
   @override
   void dispose() {
+    widget.seekRevision?.removeListener(_cancelForNewSeek);
     _detach();
     WidgetsBinding.instance.removeObserver(this);
     widget.hidden?.removeListener(_syncActivity);
