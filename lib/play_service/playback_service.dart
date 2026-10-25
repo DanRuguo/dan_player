@@ -1238,6 +1238,36 @@ class PlaybackService extends ChangeNotifier {
     return true;
   }
 
+  /// Apply a captured multi-selection atomically. Deferred menu actions cannot
+  /// reinterpret stale row indices after queue replacement, sorting or undo.
+  bool editQueueOccurrences(Iterable<int> occurrenceIds,
+      {required QueueBatchAction action, required List<Audio> expectedQueue}) {
+    if (!canEditQueue || !identical(expectedQueue, playlist.value)) {
+      return false;
+    }
+    final selected = occurrenceIds.toSet();
+    if (selected.isEmpty) return false;
+    final indices = <int>[
+      for (var index = 0; index < _queueOccurrences.length; index++)
+        if (selected.contains(_queueOccurrences[index].id)) index,
+    ];
+    if (indices.length != selected.length) return false;
+    final edit =
+        QueueEdit.batch(_queueOccurrences, _currentQueueIndex, indices, action);
+    if (edit == null) return false;
+    final retained = edit.items.map((entry) => entry.id).toSet();
+    _commitQueueEdit(
+        edit,
+        !shuffle.value
+            ? edit.items
+            : action == QueueBatchAction.remove
+                ? _backupOccurrences
+                    .where((entry) => retained.contains(entry.id))
+                    .toList()
+                : _backupOccurrences);
+    return true;
+  }
+
   bool keepOnlyCurrentQueueItem() {
     if (!canEditQueue || nowPlaying == null) return false;
     final current = queueIndexForTrack(playlist.value, nowPlaying!.path,

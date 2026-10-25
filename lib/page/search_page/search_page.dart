@@ -396,6 +396,10 @@ class LocalSearchHelpDialog extends StatelessWidget {
               'added:>=2026-01-01 lastplayed:2026-09-01..2026-09-26'
             ),
             (
+              '相对日期：今天、昨天或 N 天前',
+              'added:>=today-7d lastplayed:<today-30d\nlastplayed:yesterday | lastplayed:today'
+            ),
+            (
               '播放次数、完成次数、跳过次数与累计收听时长',
               'playcount:<5 completed:>=1 skipped:0 listened:>=30:00'
             ),
@@ -417,6 +421,9 @@ class LocalSearchHelpDialog extends StatelessWidget {
           Text(ui('未知数值与尚未读完的元数据不会被排除条件误当成“不符合”；has 查询已读字段是否存在，旧统计归属不明时保持未知。')),
           const SizedBox(height: 12),
           Text(ui('入库日沿用个人乐库记录，旧曲目可能保留创建日期回填；文件大小是扫描快照，搜索不会重新读取音乐文件。')),
+          const SizedBox(height: 12),
+          Text(ui(
+              'today-Nd 表示本机日历的 N 天前，支持 0–36500 天且不早于 1970 年。相对日期在每次搜索时计算，也可与固定日期组成范围。')),
           const SizedBox(height: 12),
           Text(ui('普通搜索支持拼音、首字母、西文重音与全角字母；拼写接近的结果排在直接匹配之后。')),
           const SizedBox(height: 12),

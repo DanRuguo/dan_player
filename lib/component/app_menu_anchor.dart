@@ -1,10 +1,11 @@
 import 'dart:async';
+import 'package:dan_player/component/app_menu_motion.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 /// Attach a cascading menu to the button's bottom, or its top when there is
 /// insufficient space above, using the panel that has just been laid out.
-/// Material still owns focus, hover, scrolling, animation and screen fitting.
+/// Material still owns focus, hover, dismissal and screen fitting.
 class AppSubmenuButton extends StatefulWidget {
   const AppSubmenuButton({
     super.key,
@@ -37,6 +38,7 @@ class AppSubmenuButton extends StatefulWidget {
 
 class _AppSubmenuButtonState extends State<AppSubmenuButton> {
   RenderBox? _panel;
+  int _opening = 0;
 
   double _panelHeight() {
     if (_panel?.attached != true) {
@@ -91,6 +93,8 @@ class _AppSubmenuButtonState extends State<AppSubmenuButton> {
 
   @override
   Widget build(BuildContext context) {
+    final useRootOverlay =
+        AppMenuPanel.resolveRootOverlay(context, widget.useRootOverlay);
     final menuStyle = widget.menuStyle ?? const MenuStyle();
     final mediaQuery = MediaQuery.of(context);
     final padding = (menuStyle.padding?.resolve(const {}) ??
@@ -98,22 +102,33 @@ class _AppSubmenuButtonState extends State<AppSubmenuButton> {
             const EdgeInsets.symmetric(vertical: 8))
         .resolve(Directionality.of(context));
     return SubmenuButton(
+      clipBehavior: Clip.none,
       leadingIcon: widget.leadingIcon,
       trailingIcon: widget.trailingIcon,
       style: widget.style,
       controller: widget.controller,
       focusNode: widget.focusNode,
-      onOpen: widget.onOpen,
+      onOpen: () {
+        AppMenuPanel.settleAncestor(context);
+        setState(() => _opening++);
+        widget.onOpen?.call();
+      },
       onClose: widget.onClose,
-      useRootOverlay: widget.useRootOverlay,
-      // Preserve the application's existing instant cascading menus; the
-      // containing MenuAnchor retains its own entrance/exit animation.
-      menuStyle: menuStyle.copyWith(
-        padding: WidgetStatePropertyAll(padding),
-        alignment: _SubmenuEdgeAlignment(_panelHeight,
-            (anchor) => _allowedTop(anchor, mediaQuery), padding.top),
+      useRootOverlay: useRootOverlay,
+      menuStyle: appMenuShellStyle(context, menuStyle).copyWith(
+        alignment: _SubmenuEdgeAlignment(
+            _panelHeight, (anchor) => _allowedTop(anchor, mediaQuery), 0),
       ),
-      menuChildren: widget.menuChildren,
+      menuChildren: [
+        if (widget.menuChildren.isNotEmpty)
+          AppMenuPanel(
+            key: ValueKey(_opening),
+            style: menuStyle.copyWith(padding: WidgetStatePropertyAll(padding)),
+            useRootOverlay: useRootOverlay,
+            reservedPadding: const EdgeInsets.all(8),
+            children: widget.menuChildren,
+          ),
+      ],
       child: widget.child,
     );
   }
@@ -171,6 +186,7 @@ class AppMenuAnchor extends StatefulWidget {
       this.alignmentOffset = Offset.zero,
       this.reservedPadding = EdgeInsets.zero,
       this.style,
+      this.onOpen,
       this.onClose});
   final List<Widget> menuChildren;
   final MenuAnchorChildBuilder builder;
@@ -178,13 +194,14 @@ class AppMenuAnchor extends StatefulWidget {
   final Offset alignmentOffset;
   final EdgeInsetsGeometry reservedPadding;
   final MenuStyle? style;
-  final VoidCallback? onClose;
+  final VoidCallback? onOpen, onClose;
   @override
   State<AppMenuAnchor> createState() => _AppMenuAnchorState();
 }
 
 class _AppMenuAnchorState extends State<AppMenuAnchor> {
   final _controller = _SerialMenuController();
+  int _opening = 0;
   @override
   void dispose() {
     _controller.disposed = true;
@@ -192,22 +209,40 @@ class _AppMenuAnchorState extends State<AppMenuAnchor> {
   }
 
   @override
-  Widget build(BuildContext context) => MenuAnchor(
-      controller: _controller,
-      useRootOverlay: widget.useRootOverlay,
-      consumeOutsideTap: widget.consumeOutsideTap,
-      crossAxisUnconstrained: widget.crossAxisUnconstrained,
-      alignmentOffset: widget.alignmentOffset,
-      reservedPadding: widget.reservedPadding,
-      style: widget.style,
-      menuChildren: widget.menuChildren,
-      builder: widget.builder,
-      onAnimationStatusChanged: (status) =>
-          _controller.closing = status == AnimationStatus.reverse,
-      onClose: () {
-        _controller.closed();
-        widget.onClose?.call();
-      });
+  Widget build(BuildContext context) {
+    final useRootOverlay =
+        AppMenuPanel.resolveRootOverlay(context, widget.useRootOverlay);
+    return MenuAnchor(
+        clipBehavior: Clip.none,
+        controller: _controller,
+        useRootOverlay: useRootOverlay,
+        consumeOutsideTap: widget.consumeOutsideTap,
+        crossAxisUnconstrained: widget.crossAxisUnconstrained,
+        alignmentOffset: widget.alignmentOffset,
+        reservedPadding: widget.reservedPadding,
+        style: appMenuShellStyle(context, widget.style),
+        menuChildren: [
+          if (widget.menuChildren.isNotEmpty)
+            AppMenuPanel(
+              key: ValueKey(_opening),
+              style: widget.style,
+              useRootOverlay: useRootOverlay,
+              reservedPadding: widget.reservedPadding,
+              children: widget.menuChildren,
+            ),
+        ],
+        builder: widget.builder,
+        onOpen: () {
+          setState(() => _opening++);
+          widget.onOpen?.call();
+        },
+        onAnimationStatusChanged: (status) =>
+            _controller.closing = status == AnimationStatus.reverse,
+        onClose: () {
+          _controller.closed();
+          widget.onClose?.call();
+        });
+  }
 }
 
 class _SerialMenuController extends MenuController {

@@ -22,6 +22,8 @@ class _LyricLineViewState extends State<LyricLineView>
   int _lastClockRevision = -1;
   bool _layoutPending = false;
   bool _reduced = false;
+  bool _tickerEnabled = true;
+  bool _lifecycleHidden = false;
   Object? _legacyIdentity;
   Object? _layoutIdentity;
   int _legacyStartMilliseconds = 0;
@@ -29,6 +31,10 @@ class _LyricLineViewState extends State<LyricLineView>
   @override
   void initState() {
     super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _lifecycleHidden = lifecycle == AppLifecycleState.hidden ||
+        lifecycle == AppLifecycleState.paused ||
+        lifecycle == AppLifecycleState.detached;
     WidgetsBinding.instance.addObserver(this);
     _attach();
   }
@@ -73,8 +79,30 @@ class _LyricLineViewState extends State<LyricLineView>
     if (mounted) setState(() {});
   }
 
+  bool get _visible => _tickerEnabled && !_lifecycleHidden;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleHidden = state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached;
+    ++_layoutGeneration;
+    _layoutPending = false;
+    if (_lifecycleHidden) {
+      _controller.playbackClock.setVisualSamplingDemand(this, false);
+    } else {
+      _scheduleLineLayout();
+    }
+    if (mounted) setState(() {});
+  }
+
   void _syncScroll({bool force = false}) {
-    if (!mounted || _layoutPending || !scrollController.hasClients) return;
+    if (!mounted ||
+        !_visible ||
+        _layoutPending ||
+        !scrollController.hasClients) {
+      return;
+    }
     final clock = _controller.playbackClock;
     if (_reduced && !force && _lastClockRevision == clock.revision) return;
     _lastClockRevision = clock.revision;
@@ -114,6 +142,10 @@ class _LyricLineViewState extends State<LyricLineView>
       _legacyStartMilliseconds = _controller.playbackClock.positionMilliseconds;
     }
     final generation = ++_layoutGeneration;
+    if (!_visible) {
+      _layoutPending = false;
+      return;
+    }
     _layoutPending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || generation != _layoutGeneration) return;
@@ -128,10 +160,11 @@ class _LyricLineViewState extends State<LyricLineView>
     final settings = context.watch<TextDisplayController>();
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reduced = !AppMotion.enabled(context, MotionKind.lyrics) ||
         features.disableAnimations ||
         features.reduceMotion ||
-        !TickerMode.valuesOf(context).enabled;
+        !_visible;
     return LayoutBuilder(builder: (context, constraints) {
       final identity = (
         constraints.biggest,
@@ -154,13 +187,29 @@ class _LyricLineViewState extends State<LyricLineView>
       return Padding(
         padding: EdgeInsets.symmetric(
             horizontal: _controller.vertical.value ? 8 : 16),
-        child: SingleChildScrollView(
-          key: const ValueKey('desktop-lyric-scroll'),
-          physics: const NeverScrollableScrollPhysics(),
-          controller: scrollController,
-          scrollDirection:
-              _controller.vertical.value ? Axis.vertical : Axis.horizontal,
-          child: Center(child: LyricLineDisplayArea(controller: _controller)),
+        child: NotificationListener<ScrollMetricsNotification>(
+          onNotification: (notification) {
+            if (notification.depth == 0 &&
+                notification.metrics.axis ==
+                    (_controller.vertical.value
+                        ? Axis.vertical
+                        : Axis.horizontal)) {
+              // Finite text/ruby transitions resize this viewport's content
+              // after its settings build. Metrics notifications are already
+              // coalesced after layout; use the current media clock even while
+              // paused, without adding a sampler or replaying an old offset.
+              _syncScroll(force: true);
+            }
+            return false;
+          },
+          child: SingleChildScrollView(
+            key: const ValueKey('desktop-lyric-scroll'),
+            physics: const NeverScrollableScrollPhysics(),
+            controller: scrollController,
+            scrollDirection:
+                _controller.vertical.value ? Axis.vertical : Axis.horizontal,
+            child: Center(child: LyricLineDisplayArea(controller: _controller)),
+          ),
         ),
       );
     });

@@ -103,6 +103,7 @@ class _CoverPointerScopeState extends State<CoverPointerScope>
     with WidgetsBindingObserver {
   late final position = _FramePointer(project: _pointWithinScope);
   bool _enabled = true;
+  bool _geometryRefreshScheduled = false;
 
   @override
   void initState() {
@@ -126,6 +127,29 @@ class _CoverPointerScopeState extends State<CoverPointerScope>
     super.didChangeDependencies();
     _enabled = !appToolbarReduceMotion(context);
     if (!_enabled) position.clear();
+  }
+
+  @override
+  void didUpdateWidget(CoverPointerScope oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.child != widget.child) _refreshGeometry();
+  }
+
+  void _refreshGeometry() {
+    if (!_enabled || position.value == null) return;
+    // A toolbar can move the whole grid while each tile keeps its local rect.
+    // Reproject the retained hardware sample after that layout, once. There is
+    // no idle clock, and ordinary pointer moves keep their existing pacing.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.postFrameCallbacks) {
+      position.refresh();
+    } else if (!_geometryRefreshScheduled) {
+      _geometryRefreshScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _geometryRefreshScheduled = false;
+        if (mounted && _enabled && position.value != null) position.refresh();
+      });
+    }
   }
 
   @override
@@ -154,25 +178,32 @@ class _CoverPointerScopeState extends State<CoverPointerScope>
   @override
   Widget build(BuildContext context) => _CoverPointerData(
       position: position,
-      child: NotificationListener<ScrollNotification>(
+      child: NotificationListener<ScrollMetricsNotification>(
           onNotification: (_) {
-            position.clear();
+            _refreshGeometry();
             return false;
           },
-          child: Listener(
-              behavior: HitTestBehavior.translucent,
-              onPointerMove: _pressedMove,
-              child: MouseRegion(
-                  opaque: false,
-                  hitTestBehavior: HitTestBehavior.translucent,
-                  onEnter: _enabled
-                      ? (event) => position.move(event.position, event.device)
-                      : null,
-                  onHover: _enabled
-                      ? (event) => position.move(event.position, event.device)
-                      : null,
-                  onExit: (event) => position.exit(event.device),
-                  child: widget.child))));
+          child: NotificationListener<ScrollNotification>(
+              onNotification: (_) {
+                position.clear();
+                return false;
+              },
+              child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerMove: _pressedMove,
+                  child: MouseRegion(
+                      opaque: false,
+                      hitTestBehavior: HitTestBehavior.translucent,
+                      onEnter: _enabled
+                          ? (event) =>
+                              position.move(event.position, event.device)
+                          : null,
+                      onHover: _enabled
+                          ? (event) =>
+                              position.move(event.position, event.device)
+                          : null,
+                      onExit: (event) => position.exit(event.device),
+                      child: widget.child)))));
 }
 
 /// Reuse a tile's existing layout clock when it moves under a stationary mouse.

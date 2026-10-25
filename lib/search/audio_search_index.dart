@@ -183,8 +183,9 @@ class AudioSearchIndex {
     void Function()? checkCancelled,
     PlaybackStatistics? statistics,
     Future<Map<String, PersonalTrack>> Function()? loadPersonal,
+    DateTime? now,
   }) async {
-    final parsed = AudioSearchQuery.parse(query);
+    final parsed = AudioSearchQuery.parse(query, now: now);
     checkCancelled?.call();
     var historyRevision = 0;
     final recorder = statistics ?? PlaybackStatistics.instance;

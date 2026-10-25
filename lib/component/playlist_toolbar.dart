@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:dan_player/component/app_menu_motion.dart';
 import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'package:dan_player/component/app_action_icon.dart';
 import 'package:dan_player/component/app_motion.dart';
@@ -842,16 +843,8 @@ class _ToolbarMenuState<T> extends State<_ToolbarMenu<T>> {
         requestFocus: true,
         constraints: BoxConstraints.tightFor(width: menuWidth),
         menuPadding: const EdgeInsets.symmetric(vertical: 6),
-        popUpAnimationStyle: widget.reduced
-            ? AnimationStyle.noAnimation
-            : AnimationStyle(
-                duration: AppMotion.duration(
-                    context, MotionKind.feedback, AppMotion.quick),
-                reverseDuration: AppMotion.duration(
-                    context, MotionKind.feedback, AppMotion.quick),
-                curve: AppMotion.standardCurve,
-                reverseCurve: Curves.easeInCubic,
-              ),
+        popUpAnimationStyle:
+            appMenuAnimationStyle(context, reduced: widget.reduced),
         items: [
           for (final item in widget.items)
             if (item == null)

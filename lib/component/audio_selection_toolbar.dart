@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/local_lyric_batch_dialog.dart';
 import 'package:dan_player/component/personal_library_dialog.dart';
 import 'dart:async';
@@ -199,7 +200,7 @@ class AudioSelectionMenu extends StatelessWidget {
           child: _selectionMenuLabel(context, label),
         );
 
-    return MenuAnchor(
+    return AppMenuAnchor(
       crossAxisUnconstrained: false,
       reservedPadding: _selectionMenuPadding(context),
       menuChildren: [
@@ -374,7 +375,7 @@ class SelectionRangeMenuButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return MenuAnchor(
+    return AppMenuAnchor(
         crossAxisUnconstrained: false,
         reservedPadding: _selectionMenuPadding(context),
         menuChildren: selectionRangeMenuItems(context,

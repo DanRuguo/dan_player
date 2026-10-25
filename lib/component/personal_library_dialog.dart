@@ -526,7 +526,7 @@ class _PersonalLibraryDialogState extends State<PersonalLibraryDialog> {
                 ? a.displayTitle.compareTo(b.displayTitle)
                 : (_direction == SortDirection.ascending ? order : -order);
           });
-    final rating = MenuAnchor(
+    final rating = AppMenuAnchor(
       style: const MenuStyle(shape: WidgetStatePropertyAll(AppShape.control)),
       menuChildren: [
         for (var i = 0; i <= 5; i++)

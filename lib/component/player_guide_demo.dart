@@ -7,6 +7,9 @@ import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/viewport_visibility.dart';
 import 'package:dan_player/component/player_guide_playlist_demo.dart';
+import 'package:dan_player/component/player_guide_queue_tools_demo.dart';
+import 'package:dan_player/component/statistics_listening_weekdays.dart';
+import 'package:dan_player/statistics/listening_weekdays.dart';
 import 'package:dan_player/component/player_guide_cover_demo.dart';
 import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/desktop_integration.dart';
@@ -25,7 +28,8 @@ enum PlayerGuideDemoKind {
   transitions,
   statistics,
   spectrum,
-  cover
+  cover,
+  queueTools
 }
 
 /// Small, local examples: no audio, network, library or preferences are changed.
@@ -76,6 +80,8 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
           listeningDayKey(DateTime(2026, 10, 7 - day)):
               day % 6 == 0 ? 0 : (day % 9 + 1) * 600000,
       });
+  static final _weekdaySnapshot =
+      ListeningWeekdays.fromDays(_statisticsSnapshot.comparisons[90]!.current);
 
   MotionKind get _motion => switch (widget.kind) {
         PlayerGuideDemoKind.progress => MotionKind.layout,
@@ -85,6 +91,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
         PlayerGuideDemoKind.statistics => MotionKind.layout,
         PlayerGuideDemoKind.spectrum => MotionKind.feedback,
         PlayerGuideDemoKind.cover => MotionKind.feedback,
+        PlayerGuideDemoKind.queueTools => MotionKind.layout,
       };
 
   @override
@@ -269,6 +276,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                             PlayerGuideDemoKind.statistics => '试一试：收听趋势',
                             PlayerGuideDemoKind.spectrum => '试一试：频谱动效',
                             PlayerGuideDemoKind.cover => '试一试：封面动效',
+                            PlayerGuideDemoKind.queueTools => '试一试：队列多选整理',
                           }),
                           style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 6),
@@ -288,7 +296,14 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                       else if (widget.kind == PlayerGuideDemoKind.transitions)
                         _transitions(context)
                       else if (widget.kind == PlayerGuideDemoKind.statistics)
-                        StatisticsListeningTrends(snapshot: _statisticsSnapshot)
+                        Column(children: [
+                          StatisticsListeningTrends(
+                              snapshot: _statisticsSnapshot),
+                          StatisticsListeningWeekdays(
+                              snapshot: _weekdaySnapshot),
+                        ])
+                      else if (widget.kind == PlayerGuideDemoKind.queueTools)
+                        const PlayerGuideQueueToolsDemo()
                       else if (widget.kind == PlayerGuideDemoKind.spectrum)
                         _spectrum(context)
                       else if (widget.kind == PlayerGuideDemoKind.cover)

@@ -143,6 +143,11 @@ const Map<String, List<String>> uiCatalogD = {
     '拡張子を使用します。形式不明のオンライン楽曲は最後になります。',
     '파일 확장자를 사용합니다. 형식이 없는 온라인 곡은 마지막에 표시됩니다.'
   ],
+  '按含扩展名的本地文件名排序，数字按数值比较；CUE 使用源文件名，联网曲目排在最后。': [
+    'Sorts local file names including extensions, comparing numbers numerically. CUE tracks use the source file name; online tracks appear last.',
+    '拡張子を含むローカルファイル名で並べ替え、数字は数値順に比較します。CUE は音源ファイル名を使用し、オンライン楽曲は最後になります。',
+    '확장자를 포함한 로컬 파일 이름으로 정렬하며 숫자는 수치 순서로 비교합니다. CUE는 원본 파일 이름을 사용하고 온라인 곡은 마지막에 표시됩니다.'
+  ],
   '只使用已有语言标签，不根据名称猜测语言。': [
     'Uses existing language tags only, without guessing from names.',
     '既存の言語タグのみ使用し、名前からは推測しません。',

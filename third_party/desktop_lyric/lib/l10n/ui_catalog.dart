@@ -1,4 +1,5 @@
 import 'catalog_statistics_trends.dart';
+import 'catalog_stats_guide_2610.dart';
 import 'catalog_lyric_playback_tools.dart';
 import 'catalog_directory_storage.dart';
 import 'catalog_personal_statistics.dart';
@@ -94,6 +95,7 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogLyricPlaybackTools,
   ...catalogOnboardingGuidePrompt,
   ...catalogStatisticsTrends,
+  ...catalogStatsGuide2610,
   ...catalogDirectoryStorage,
   ...catalogPersonalStatistics,
   ...catalogPlayerFeatureGuide,

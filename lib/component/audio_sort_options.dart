@@ -18,4 +18,5 @@ IconData audioSortIcon(AudioSortField field) => switch (field) {
       AudioSortField.format => Icons.audio_file_outlined,
       AudioSortField.language => Icons.language,
       AudioSortField.source => Icons.cloud_outlined,
+      AudioSortField.filename => Icons.insert_drive_file_outlined,
     };

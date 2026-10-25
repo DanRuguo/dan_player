@@ -6,6 +6,9 @@ import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_item_ink_well.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_sort_button.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
+import 'package:dan_player/component/audio_selection_toolbar.dart';
+import 'package:dan_player/component/multi_selection_range.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:dan_player/component/touch_gestures.dart';
@@ -13,6 +16,7 @@ import 'package:dan_player/component/listening_tools_dialog.dart';
 import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/playlist_name_dialog.dart';
+import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
 import 'package:dan_player/component/playlist_folder_export_dialog.dart';
 import 'package:dan_player/component/playlist_ui_actions.dart';
@@ -24,6 +28,8 @@ import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
 import 'package:dan_player/search/audio_search_index.dart';
 import 'package:dan_player/play_service/queue_duration_summary.dart';
+import 'package:dan_player/play_service/queue_edits.dart';
+import 'package:dan_player/play_service/queue_selection.dart';
 import 'package:dan_player/play_service/queue_order.dart';
 import 'package:dan_player/play_service/queue_album_layout.dart';
 import 'package:dan_player/online/online_library.dart';
@@ -85,6 +91,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   int _alignmentGeneration = 0;
   bool _savingQueue = false;
   bool _exportingQueue = false;
+  bool _selectionBusy = false;
+  final _selection = QueueSelection();
   final _searchController = TextEditingController();
   String _query = '';
   List<Audio>? _filteredQueue;
@@ -505,16 +513,18 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   }
 
   KeyEventResult _queueShortcut(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent ||
-        !HardwareKeyboard.instance.isControlPressed ||
-        HardwareKeyboard.instance.isAltPressed) {
-      return KeyEventResult.ignored;
-    }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final focused = FocusManager.instance.primaryFocus?.context;
     if (focused?.widget is EditableText ||
         focused?.findAncestorWidgetOfExactType<EditableText>() != null) {
       return KeyEventResult.ignored;
     }
+    if (_selection.enabled && event.logicalKey == LogicalKeyboardKey.escape) {
+      _selection.exit();
+      return KeyEventResult.handled;
+    }
+    if (!HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isAltPressed) return KeyEventResult.ignored;
     final redo = event.logicalKey == LogicalKeyboardKey.keyY ||
         event.logicalKey == LogicalKeyboardKey.keyZ &&
             HardwareKeyboard.instance.isShiftPressed;
@@ -531,23 +541,32 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     return KeyEventResult.handled;
   }
 
-  Future<void> _saveQueue({bool searchResults = false}) async {
+  Future<void> _saveQueue(
+      {bool searchResults = false, List<Audio>? selected}) async {
     if (_savingQueue || playbackService.playlist.value.isEmpty) return;
     final queue = playbackService.playlist.value;
     // Capture occurrences before opening the name form. A queue replacement or
     // filter change while the form is open must not change what this click saves.
-    final snapshot = searchResults
-        ? [for (final index in _visibleIndices(queue)) queue[index]]
-        : List<Audio>.from(queue);
+    final snapshot = selected ??
+        (searchResults
+            ? [for (final index in _visibleIndices(queue)) queue[index]]
+            : List<Audio>.from(queue));
     if (snapshot.isEmpty) return;
-    final initialName = searchResults
-        ? ui('搜索结果 {0}', [_query.characters.take(80).toString()])
-        : ui('播放队列 {0}', [DateTime.now().toIso8601String().substring(0, 10)]);
+    final initialName = selected != null
+        ? ui('队列所选歌曲')
+        : searchResults
+            ? ui('搜索结果 {0}', [_query.characters.take(80).toString()])
+            : ui('播放队列 {0}',
+                [DateTime.now().toIso8601String().substring(0, 10)]);
     setState(() => _savingQueue = true);
     var created = false;
     try {
       final name = await showPlaylistNameDialog(context,
-          title: ui(searchResults ? '将搜索结果保存为歌单' : '将队列保存为歌单'),
+          title: ui(selected != null
+              ? '将所选保存为新歌单'
+              : searchResults
+                  ? '将搜索结果保存为歌单'
+                  : '将队列保存为歌单'),
           confirmLabel: ui('保存'),
           initialName: initialName);
       if (name == null || !mounted) return;
@@ -572,16 +591,22 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   }
 
   Future<void> _exportQueue(
-      {bool searchResults = false, bool musicFolder = false}) async {
+      {bool searchResults = false,
+      bool musicFolder = false,
+      List<Audio>? selected}) async {
     if (_exportingQueue) return;
     final queue = playbackService.playlist.value;
-    final snapshot = searchResults
-        ? [for (final index in _visibleIndices(queue)) queue[index]]
-        : List<Audio>.from(queue);
+    final snapshot = selected ??
+        (searchResults
+            ? [for (final index in _visibleIndices(queue)) queue[index]]
+            : List<Audio>.from(queue));
     if (snapshot.isEmpty) return;
-    final name = searchResults
-        ? ui('搜索结果 {0}', [_query.characters.take(80).toString()])
-        : ui('播放队列 {0}', [DateTime.now().toIso8601String().substring(0, 10)]);
+    final name = selected != null
+        ? ui('队列所选歌曲')
+        : searchResults
+            ? ui('搜索结果 {0}', [_query.characters.take(80).toString()])
+            : ui('播放队列 {0}',
+                [DateTime.now().toIso8601String().substring(0, 10)]);
     setState(() => _exportingQueue = true);
     try {
       // The shared exporter captures metadata and paths synchronously before
@@ -596,6 +621,187 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     } finally {
       if (mounted) setState(() => _exportingQueue = false);
     }
+  }
+
+  List<int> _queueOccurrenceIds(List<Audio> queue) => [
+        for (var i = 0; i < queue.length; i++)
+          if (playbackService.queueOccurrenceId(i) case final int id) id,
+      ];
+
+  void _selectionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _toggleSelection(int index, List<Audio> queue, List<int> visibleIds) {
+    if (!identical(queue, playbackService.playlist.value)) return;
+    final id = playbackService.queueOccurrenceId(index);
+    if (id != null) {
+      _selection.toggle(id, visibleIds,
+          extend: HardwareKeyboard.instance.isShiftPressed);
+    }
+  }
+
+  Future<void> _saveSelected(List<Audio> snapshot) async {
+    if (_selectionBusy || snapshot.isEmpty) return;
+    setState(() => _selectionBusy = true);
+    try {
+      await showAddAudiosToPlaylistDialog(context, snapshot);
+    } finally {
+      if (mounted) setState(() => _selectionBusy = false);
+    }
+  }
+
+  Widget _selectionToolbar(
+      List<Audio> queue, List<int> visibleIds, int current) {
+    final allIds = _queueOccurrenceIds(queue);
+    final selectedIds = _selection.ordered(allIds);
+    final selectedSet = selectedIds.toSet();
+    final selected = <Audio>[
+      for (var i = 0; i < queue.length; i++)
+        if (selectedSet.contains(playbackService.queueOccurrenceId(i)))
+          queue[i],
+    ];
+    final hidden =
+        selectedIds.length - visibleIds.where(selectedSet.contains).length;
+    final revision = _selection.revision;
+    final hasCurrent =
+        selectedSet.contains(playbackService.queueOccurrenceId(current));
+    final editable =
+        selected.length > (hasCurrent ? 1 : 0) && playbackService.canEditQueue;
+    bool stillCurrent() =>
+        mounted &&
+        identical(queue, playbackService.playlist.value) &&
+        revision == _selection.revision;
+    VoidCallback guarded(VoidCallback action) => () {
+          if (stillCurrent()) action();
+        };
+    VoidCallback? range(MultiSelectRange kind) =>
+        _selection.canSelectRange(visibleIds, kind)
+            ? guarded(() => _selection.selectRange(visibleIds, kind))
+            : null;
+    Widget action(String id, String label, IconData icon, VoidCallback run,
+            {bool enabled = true}) =>
+        MenuItemButton(
+            key: ValueKey('queue-selection-$id'),
+            onPressed: enabled ? guarded(run) : null,
+            leadingIcon: Icon(icon),
+            child: _menuLabel(label));
+    void edit(QueueBatchAction action) =>
+        playbackService.editQueueOccurrences(selectedIds,
+            action: action, expectedQueue: queue);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Tooltip(
+            message: ui('点击勾选，Shift+点击连续选择；隐藏的已选歌曲仍参与操作'),
+            child: Text(
+                hidden > 0
+                    ? ui('已选 {0} 首，其中 {1} 首未显示', [selected.length, hidden])
+                    : ui('已选 {0} 首', [selected.length]),
+                key: const ValueKey('queue-selection-summary'),
+                style: Theme.of(context).textTheme.labelLarge)),
+        if (hasCurrent)
+          Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(ui('移动或移除时保留正在播放的歌曲；保存和导出包含它。'),
+                  style: Theme.of(context).textTheme.bodySmall)),
+        const SizedBox(height: 4),
+        Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              AppMenuAnchor(
+                  crossAxisUnconstrained: false,
+                  menuChildren: [
+                    action('move-next', '移到下一首', Symbols.playlist_play,
+                        () => edit(QueueBatchAction.moveNext),
+                        enabled: editable && current >= 0),
+                    action('move-last', '移到队尾', Symbols.queue_music,
+                        () => edit(QueueBatchAction.moveLast),
+                        enabled: editable),
+                    action('remove', '从播放队列移除', Symbols.playlist_remove,
+                        () => edit(QueueBatchAction.remove),
+                        enabled: editable),
+                    const Divider(),
+                    action(
+                        'save-playlist',
+                        '将所选保存为新歌单',
+                        Symbols.playlist_add,
+                        () =>
+                            unawaited(_saveQueue(selected: List.of(selected))),
+                        enabled: selected.isNotEmpty && !_savingQueue),
+                    action('playlist', '加入歌单…', Symbols.playlist_add,
+                        () => unawaited(_saveSelected(List.of(selected))),
+                        enabled: selected.isNotEmpty && !_selectionBusy),
+                    action(
+                        'export-m3u',
+                        '导出所选为 M3U8…',
+                        Symbols.save_alt,
+                        () => unawaited(
+                            _exportQueue(selected: List.of(selected))),
+                        enabled: selected.isNotEmpty && !_exportingQueue),
+                    action(
+                        'export-folder',
+                        '导出所选音乐文件夹…',
+                        Symbols.folder_copy,
+                        () => unawaited(_exportQueue(
+                            selected: List.of(selected), musicFolder: true)),
+                        enabled: selected.isNotEmpty && !_exportingQueue),
+                  ],
+                  builder: (context, controller, _) => FilledButton.tonal(
+                      key: const ValueKey('queue-selection-actions'),
+                      onPressed: selected.isEmpty
+                          ? null
+                          : () => controller.isOpen
+                              ? controller.close()
+                              : controller.open(),
+                      style: appToolbarControlStyle(context,
+                          primary: true, tonal: true),
+                      child: AppToolbarLabel(
+                          label: ui('处理所选'), icon: Symbols.playlist_play))),
+              SelectionRangeMenuButton(
+                  onBetween: range(MultiSelectRange.between),
+                  onAbove: range(MultiSelectRange.above),
+                  onBelow: range(MultiSelectRange.below)),
+              IconButton.filledTonal(
+                  key: const ValueKey('queue-selection-toggle-all'),
+                  tooltip: ui(visibleIds.isNotEmpty &&
+                          selectedSet.containsAll(visibleIds)
+                      ? '取消全选当前结果'
+                      : '全选当前结果'),
+                  onPressed: visibleIds.isEmpty
+                      ? null
+                      : guarded(() => _selection.toggleAll(visibleIds)),
+                  style: appToolbarControlStyle(context,
+                      primary: true, tonal: true, iconOnly: true),
+                  icon: Icon(visibleIds.isNotEmpty &&
+                          selectedSet.containsAll(visibleIds)
+                      ? Symbols.deselect
+                      : Symbols.select_all)),
+              IconButton(
+                  key: const ValueKey('queue-selection-invert'),
+                  tooltip: ui('反选当前列表'),
+                  onPressed: visibleIds.isEmpty
+                      ? null
+                      : guarded(() => _selection.invert(visibleIds)),
+                  style: appToolbarControlStyle(context, iconOnly: true),
+                  icon: const Icon(Symbols.select_check_box)),
+              IconButton(
+                  key: const ValueKey('queue-selection-clear'),
+                  tooltip: ui('取消全部选择'),
+                  onPressed: selected.isEmpty ? null : _selection.clear,
+                  style: appToolbarControlStyle(context, iconOnly: true),
+                  icon: const Icon(Symbols.deselect)),
+              IconButton(
+                  key: const ValueKey('queue-selection-exit'),
+                  tooltip: ui('退出多选'),
+                  onPressed: _selection.exit,
+                  style: appToolbarControlStyle(context, iconOnly: true),
+                  icon: const Icon(Symbols.close)),
+            ]),
+      ]),
+    );
   }
 
   Widget _exportMenu(List<Audio> queue, List<int> visibleIndices) =>
@@ -711,6 +917,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   }
 
   void _onQueueChanged() {
+    _selection.retain(_queueOccurrenceIds(playbackService.playlist.value));
     ++_searchGeneration;
     _searchPending = false;
     _alignmentAfterSearch = null;
@@ -727,6 +934,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
         ? -1
         : playbackService.playlistIndex;
     scrollController = ScrollController();
+    _selection.addListener(_selectionChanged);
     playbackService.addListener(_toNowPlaying);
     playbackService.playlist.addListener(_onQueueChanged);
   }
@@ -736,6 +944,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
     super.didUpdateWidget(oldWidget);
     final next = _resolvePlaybackService();
     if (identical(next, playbackService)) return;
+    _selection.exit();
     playbackService.removeListener(_toNowPlaying);
     playbackService.playlist.removeListener(_onQueueChanged);
     playbackService = next;
@@ -779,6 +988,13 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
             final queue = playbackService.playlist.value;
             final visibleIndices = _visibleIndices(queue);
             final displayRows = _displayRows(queue, visibleIndices);
+            final visibleIds = <int>[
+              for (final row in displayRows)
+                if (row.queueIndex case final int index)
+                  if (playbackService.queueOccurrenceId(index)
+                      case final int id)
+                    id,
+            ];
             final searchSummary = _searchPending
                 ? ui('正在搜索队列…')
                 : ui('找到 {0} / {1} 首 · 搜索不改变队列',
@@ -808,6 +1024,16 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                         controller: _toolbarScroll,
                         suppressStretch: widget.immersive,
                         child: Row(spacing: 4, children: [
+                          IconButton(
+                              key: const ValueKey('queue-selection-enter'),
+                              tooltip: ui('多选整理队列'),
+                              isSelected: _selection.enabled,
+                              onPressed: queue.isEmpty
+                                  ? null
+                                  : () => _selection.enabled
+                                      ? _selection.exit()
+                                      : _selection.enter(),
+                              icon: const Icon(Symbols.checklist)),
                           _organizeMenu(queue, currentIndex),
                           IconButton(
                               key: const ValueKey('queue-group-albums'),
@@ -901,6 +1127,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                         ]))),
                 QueueStopStatus(playbackService: playbackService),
                 if (widget.showUpcomingPreviewAllowed &&
+                    !_selection.enabled &&
                     queue.isNotEmpty &&
                     AppPreference.instance.showQueueUpcoming.value)
                   QueueUpcomingPreview(
@@ -965,6 +1192,8 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                 : () => _saveQueue(searchResults: true),
                             icon: const Icon(Symbols.playlist_add)),
                       ])),
+                if (_selection.enabled)
+                  _selectionToolbar(queue, visibleIds, currentIndex),
               ],
             );
             final songs = Container(
@@ -1021,6 +1250,19 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                 current: index == currentIndex,
                                 playbackService: playbackService,
                                 onOpenDetails: widget.onOpenDetails,
+                                selecting: _selection.enabled,
+                                selected: _selection.contains(
+                                    playbackService.queueOccurrenceId(index)),
+                                onToggleSelection: () =>
+                                    _toggleSelection(index, queue, visibleIds),
+                                onStartSelection: () {
+                                  if (!mounted ||
+                                      !identical(queue,
+                                          playbackService.playlist.value))
+                                    return;
+                                  _selection.enter(
+                                      playbackService.queueOccurrenceId(index));
+                                },
                               );
                             },
                           ),
@@ -1070,6 +1312,7 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
   @override
   void dispose() {
     ++_searchGeneration;
+    _selection.dispose();
     playbackService.removeListener(_toNowPlaying);
     playbackService.playlist.removeListener(_onQueueChanged);
     _searchController.dispose();
@@ -1305,6 +1548,10 @@ class _PlaylistViewItem extends StatelessWidget {
     required this.current,
     required this.immersive,
     required this.playbackService,
+    required this.selecting,
+    required this.selected,
+    required this.onToggleSelection,
+    required this.onStartSelection,
     this.onOpenDetails,
   });
 
@@ -1313,6 +1560,8 @@ class _PlaylistViewItem extends StatelessWidget {
   final int index;
   final bool current;
   final bool immersive;
+  final bool selecting, selected;
+  final VoidCallback onToggleSelection, onStartSelection;
   final PlaybackService playbackService;
   final ValueChanged<Audio>? onOpenDetails;
 
@@ -1346,16 +1595,20 @@ class _PlaylistViewItem extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final titleStyle = theme.textTheme.bodyLarge?.copyWith(
-      color: current
-          ? (immersive ? scheme.primary : scheme.onPrimaryContainer)
-          : scheme.onSurface,
+      color: selected
+          ? scheme.onSecondaryContainer
+          : current
+              ? (immersive ? scheme.primary : scheme.onPrimaryContainer)
+              : scheme.onSurface,
       fontWeight: current ? FontWeight.w700 : FontWeight.w600,
     );
     final metadataStyle = theme.textTheme.bodyMedium?.copyWith(
-      color: current
-          ? (immersive ? scheme.primary : scheme.onPrimaryContainer)
-              .withValues(alpha: .78)
-          : scheme.onSurfaceVariant,
+      color: selected
+          ? scheme.onSecondaryContainer.withValues(alpha: .78)
+          : current
+              ? (immersive ? scheme.primary : scheme.onPrimaryContainer)
+                  .withValues(alpha: .78)
+              : scheme.onSurfaceVariant,
     );
     final durationText = Duration(seconds: item.duration).toStringHMMSS();
     final stopTarget = playbackService.queueStopBoundary.target;
@@ -1380,6 +1633,12 @@ class _PlaylistViewItem extends StatelessWidget {
           leadingIcon: const Icon(Symbols.play_arrow),
           child: Text(ui("播放")),
         ),
+        if (!selecting)
+          MenuItemButton(
+              key: ValueKey('queue-selection-start-$index'),
+              onPressed: onStartSelection,
+              leadingIcon: const Icon(Symbols.checklist),
+              child: Text(ui('多选整理队列'))),
         MenuItemButton(
           onPressed: !current &&
                   playbackService.canEditQueue &&
@@ -1454,21 +1713,28 @@ class _PlaylistViewItem extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: TweenAnimationBuilder<Color?>(
           tween: ColorTween(
-            end: current && !immersive
-                ? scheme.primaryContainer.withValues(alpha: .82)
-                : Colors.transparent,
+            end: selected
+                ? scheme.secondaryContainer.withValues(alpha: .78)
+                : current && !immersive
+                    ? scheme.primaryContainer.withValues(alpha: .82)
+                    : Colors.transparent,
           ),
           duration: reduced ? Duration.zero : AppMotion.quick,
           curve: AppMotion.standardCurve,
           builder: (context, color, child) => Material(
             color: color,
-            borderRadius: AppShape.controlRadius,
+            shape: RoundedRectangleBorder(
+                borderRadius: AppShape.controlRadius,
+                side: BorderSide(
+                    color: selected
+                        ? scheme.primary.withValues(alpha: .22)
+                        : Colors.transparent)),
             child: child,
           ),
           child: AppItemInkWell(
             key: ValueKey('current-playlist-item-$index'),
             borderRadius: AppShape.controlRadius,
-            onTap: _playOccurrence,
+            onTap: selecting ? onToggleSelection : _playOccurrence,
             onSecondaryTapDown: (details) =>
                 controller.open(position: details.localPosition),
             onLongPress: () => controller.open(position: const Offset(16, 28)),
@@ -1480,6 +1746,18 @@ class _PlaylistViewItem extends StatelessWidget {
                   final showDuration = constraints.maxWidth >= 380;
                   return Row(
                     children: [
+                      if (selecting)
+                        SizedBox.square(
+                            dimension: 48,
+                            child: Center(
+                                child: Checkbox(
+                                    key: ValueKey('queue-select-$index'),
+                                    value: selected,
+                                    visualDensity: VisualDensity.standard,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.padded,
+                                    semanticLabel: item.displayTitle,
+                                    onChanged: (_) => onToggleSelection()))),
                       Stack(
                         clipBehavior: Clip.none,
                         children: [
@@ -1543,9 +1821,11 @@ class _PlaylistViewItem extends StatelessWidget {
                           durationText,
                           maxLines: 1,
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: current
-                                ? scheme.onPrimaryContainer
-                                : scheme.primary,
+                            color: selected
+                                ? scheme.onSecondaryContainer
+                                : current
+                                    ? scheme.onPrimaryContainer
+                                    : scheme.primary,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),

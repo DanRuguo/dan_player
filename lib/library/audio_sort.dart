@@ -22,7 +22,8 @@ enum AudioSortField {
   fileSize('文件大小', '文件与来源'),
   format('文件格式', '文件与来源'),
   language('语言标签', '歌曲信息'),
-  source('来源', '文件与来源');
+  source('来源', '文件与来源'),
+  filename('文件名', '文件与来源');
 
   const AudioSortField(this.label, this.group);
   final String label;
@@ -33,6 +34,7 @@ enum AudioSortField {
         modified => '使用本地文件的修改时间；联网曲目没有此信息。',
         fileSize => '使用最近索引的本地字节数，不重新扫描；联网不算本地占用。',
         format => '使用本地文件扩展名；未提供格式的联网曲目排在最后。',
+        filename => '按含扩展名的本地文件名排序，数字按数值比较；CUE 使用源文件名，联网曲目排在最后。',
         language => '只使用已有语言标签，不根据名称猜测语言。',
         original => '保留原有乐库顺序。',
         track => '先按碟号，再按音轨排序；未填写的编号排在最后。',
@@ -101,6 +103,37 @@ String? _fileFormat(Audio audio) {
       : name.substring(dot + 1).toLowerCase();
 }
 
+final _fileNameParts = RegExp(r'[0-9]+|[^0-9]+');
+final _leadingFileNameZeroes = RegExp(r'^0+(?=[0-9])');
+
+// A tagged, sendable descriptor keeps natural ordering specific to filenames.
+// Capture the parts once so folder workers need neither Audio nor file access.
+({List<String> fileName})? _fileNameSortKey(Audio audio) {
+  if (audio.isOnline) return null;
+  final name = audio.localFilePath.replaceAll('\\', '/').split('/').last;
+  if (name.trim().isEmpty) return null;
+  return (
+    fileName: List<String>.unmodifiable(_fileNameParts.allMatches(name).map(
+        (match) => match.group(0)!.replaceFirst(_leadingFileNameZeroes, ''))),
+  );
+}
+
+int _compareFileNameParts(List<String> a, List<String> b) {
+  for (var i = 0; i < a.length && i < b.length; i++) {
+    final left = a[i], right = b[i];
+    final leftDigit = left.codeUnitAt(0) >= 48 && left.codeUnitAt(0) <= 57;
+    final rightDigit = right.codeUnitAt(0) >= 48 && right.codeUnitAt(0) <= 57;
+    // Compare digit strings by length, then value, without an integer limit.
+    final result = leftDigit && rightDigit
+        ? (left.length == right.length
+            ? left.compareTo(right)
+            : left.length.compareTo(right.length))
+        : left.localeCompareTo(right);
+    if (result != 0) return result;
+  }
+  return a.length.compareTo(b.length);
+}
+
 /// Immutable descriptor for one existing sort field. Capturing this value
 /// never transfers unrelated Audio state or resolves additional metadata.
 Object? audioSortKey(Audio? audio, AudioSortField field) {
@@ -130,6 +163,7 @@ Object? audioSortKey(Audio? audio, AudioSortField field) {
           ? null
           : audio.fileSizeBytes,
     AudioSortField.format => _fileFormat(audio),
+    AudioSortField.filename => _fileNameSortKey(audio),
     AudioSortField.source =>
       audio.isOnline ? '联网 · ${audio.sourceLabel}' : '本地',
   };
@@ -143,6 +177,10 @@ int _compareValues(Object? a, Object? b, SortDirection direction) {
         : compareSortNumbers(a.$2, b.$2, direction: direction);
   }
   return _compareKnown(a, b, (left, right) {
+    if (left is ({List<String> fileName}) &&
+        right is ({List<String> fileName})) {
+      return _compareFileNameParts(left.fileName, right.fileName);
+    }
     if (left is num && right is num) return left.compareTo(right);
     return (left as String).localeCompareTo(right as String);
   }, direction);

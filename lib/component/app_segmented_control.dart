@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -158,7 +159,7 @@ class AppSegmentedControl<T> extends StatelessWidget {
       }
       final popupWidth = math.max(
           44.0, math.min(360.0, MediaQuery.sizeOf(context).width - 32));
-      return MenuAnchor(
+      return AppMenuAnchor(
         style: MenuStyle(
           shape: const WidgetStatePropertyAll(AppShape.control),
           maximumSize:

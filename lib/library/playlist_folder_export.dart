@@ -3,44 +3,95 @@ import 'dart:isolate';
 
 import 'package:dan_player/data/stream_file_transfer.dart';
 import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/audio_trim.dart';
+import 'package:dan_player/library/playlist_audio_conversion.dart';
 import 'package:dan_player/library/playlist_exchange.dart';
 import 'package:path/path.dart' as p;
+
+export 'package:dan_player/library/playlist_audio_conversion.dart'
+    show
+        PlaylistFolderExportFormat,
+        PlaylistFolderExportQuality,
+        PlaylistFolderExportOptions,
+        PlaylistFolderExportException;
 
 final _windows = p.Context(style: p.Style.windows);
 
 class PlaylistFolderExportPlan {
-  PlaylistFolderExportPlan._(List<M3uEntry> entries, this.skipped)
-      : entries = List.unmodifiable(entries),
-        uniqueFileCount =
-            entries.map((e) => e.path.toLowerCase()).toSet().length;
+  PlaylistFolderExportPlan._(this._candidates, this._unsupported, this.options)
+      : _sources = List.unmodifiable(_candidates
+            .where((source) => options.convertsAudio || !source.isCue)) {
+    entries = List.unmodifiable(_sources.map((source) => M3uEntry(source.path,
+        title: '${source.artist} - ${source.title}',
+        duration: source.duration)));
+  }
 
-  final List<M3uEntry> entries;
-  final int skipped;
-  final int uniqueFileCount;
+  final List<PlaylistAudioExportSource> _candidates, _sources;
+  final int _unsupported;
+  final PlaylistFolderExportOptions options;
+  late final List<M3uEntry> entries;
+  int get skipped => _unsupported + _candidates.length - _sources.length;
+  int get uniqueFileCount =>
+      _sources.map((source) => source.identity).toSet().length;
+  int get cueTrackCount => _sources.where((source) => source.isCue).length;
+  int get availableCueTrackCount =>
+      _candidates.where((source) => source.isCue).length;
+  int get availableEntryCount => _candidates.length;
+
+  /// Re-select a format without re-reading mutable library metadata.
+  PlaylistFolderExportPlan withOptions(PlaylistFolderExportOptions options) =>
+      PlaylistFolderExportPlan._(_candidates, _unsupported, options);
 }
 
 /// Capture mutable library metadata before any confirmation or native picker.
-/// CUE occurrences cannot be copied as separate recordings without conversion.
-PlaylistFolderExportPlan snapshotPlaylistFolderExport(List<Audio> audios) {
+/// Keep CUE candidates so the confirmation can enable conversion later.
+PlaylistFolderExportPlan snapshotPlaylistFolderExport(
+  List<Audio> audios, {
+  PlaylistFolderExportOptions options = const PlaylistFolderExportOptions(),
+}) {
   if (audios.length > m3uMaxEntries) {
     throw const FormatException('导出文件夹超过 20000 项，请拆分后导出。');
   }
-  final entries = <M3uEntry>[];
+  final candidates = <PlaylistAudioExportSource>[];
   for (final audio in audios) {
-    if (!audio.isLocal ||
-        audio.isCueTrack ||
-        !isM3uLocalAudioPath(audio.path)) {
+    if (!audio.isLocal || !isM3uLocalAudioPath(audio.localFilePath)) {
       continue;
     }
-    var source = audio.path;
+    var source = audio.localFilePath;
     if (source.toLowerCase().startsWith('file:')) {
       source = Uri.parse(source).toFilePath(windows: true);
     }
-    entries.add(M3uEntry(_windows.normalize(source),
-        title: '${audio.artist} - ${audio.displayTitle}',
-        duration: audio.duration));
+    source = _windows.normalize(source);
+    final cue = audio.cueTrack;
+    final tags = <String, String>{
+      // Local display titles deliberately use filenames. Preserve the actual
+      // embedded title when writing tags, independently of that UI policy.
+      'title': audio.title.trim().isEmpty ? audio.displayTitle : audio.title,
+      'artist': audio.artist,
+      'album': audio.album,
+      if (audio.albumArtist?.isNotEmpty == true)
+        'album_artist': audio.albumArtist!,
+      if (audio.composer?.isNotEmpty == true) 'composer': audio.composer!,
+      if (audio.language?.isNotEmpty == true) 'language': audio.language!,
+      if (audio.track > 0 || cue != null)
+        'track': '${cue?.number ?? audio.track}',
+      if (audio.discNumber case final disc?) 'disc': '$disc',
+    };
+    candidates.add(PlaylistAudioExportSource(
+      identity: cue == null
+          ? source.toLowerCase()
+          : '${cue.identity.toLowerCase()}|${source.toLowerCase()}|${cue.startFrame}|${cue.endFrame}',
+      path: source,
+      title: audio.displayTitle,
+      artist: audio.artist,
+      duration: audio.duration,
+      tags: tags,
+      startFrame: cue?.startFrame,
+      endFrame: cue?.endFrame,
+    ));
   }
-  return PlaylistFolderExportPlan._(entries, audios.length - entries.length);
+  return PlaylistFolderExportPlan._(List.unmodifiable(candidates),
+      audios.length - candidates.length, options);
 }
 
 class PlaylistFolderExportCancelled implements Exception {
@@ -49,8 +100,13 @@ class PlaylistFolderExportCancelled implements Exception {
 
 class PlaylistFolderExportCancellation {
   bool _cancelled = false;
+  final _audio = AudioTrimCancellation();
   bool get isCancelled => _cancelled;
-  void cancel() => _cancelled = true;
+  void cancel() {
+    _cancelled = true;
+    _audio.cancel();
+  }
+
   void _check() {
     if (_cancelled) throw const PlaylistFolderExportCancelled();
   }
@@ -62,16 +118,25 @@ class PlaylistFolderExportProgress {
       required this.totalFiles,
       required this.completedBytes,
       required this.totalBytes,
-      this.preparing = false});
+      this.preparing = false,
+      this.converting = false,
+      this.currentTitle,
+      this.currentFraction = 0});
   final int copiedFiles, totalFiles, completedBytes, totalBytes;
-  final bool preparing;
+  final bool preparing, converting;
+  final String? currentTitle;
+  final double currentFraction;
   double? get fraction => preparing
       ? null
-      : totalBytes > 0
-          ? (completedBytes / totalBytes).clamp(0.0, 1.0)
-          : totalFiles == 0
+      : converting
+          ? totalFiles == 0
               ? 0
-              : copiedFiles / totalFiles;
+              : ((copiedFiles + currentFraction) / totalFiles).clamp(0.0, 1.0)
+          : totalBytes > 0
+              ? (completedBytes / totalBytes).clamp(0.0, 1.0)
+              : totalFiles == 0
+                  ? 0
+                  : copiedFiles / totalFiles;
 }
 
 class PlaylistFolderExportResult {
@@ -95,24 +160,35 @@ Future<PlaylistFolderExportResult> runPlaylistFolderExport(
   String name = 'Dan Player',
   required PlaylistFolderExportCancellation cancellation,
   void Function(PlaylistFolderExportProgress)? onProgress,
+  Future<String> Function(String) resolveTool = audioToolPath,
 }) async {
   cancellation._check();
   if (plan.entries.isEmpty) {
     throw const FormatException('所选歌曲中没有可导出的本地文件。');
   }
-  final sources = <String, M3uEntry>{};
-  for (final entry in plan.entries) {
-    sources.putIfAbsent(entry.path.toLowerCase(), () => entry);
+  final sources = <String, PlaylistAudioExportSource>{};
+  for (final source in plan._sources) {
+    sources.putIfAbsent(source.identity, () => source);
   }
   final stats = <String, FileStat>{};
   var totalBytes = 0, completedBytes = 0, copiedFiles = 0;
-  void publish({bool preparing = false, int currentBytes = 0}) {
-    onProgress?.call(PlaylistFolderExportProgress(
-        copiedFiles: copiedFiles,
-        totalFiles: sources.length,
-        completedBytes: completedBytes + currentBytes,
-        totalBytes: totalBytes,
-        preparing: preparing));
+  void publish(
+      {bool preparing = false,
+      int currentBytes = 0,
+      String? currentTitle,
+      double currentFraction = 0}) {
+    // A detached UI must not interrupt process ownership or disk publication.
+    try {
+      onProgress?.call(PlaylistFolderExportProgress(
+          copiedFiles: copiedFiles,
+          totalFiles: sources.length,
+          completedBytes: completedBytes + currentBytes,
+          totalBytes: totalBytes,
+          preparing: preparing,
+          converting: plan.options.convertsAudio,
+          currentTitle: currentTitle,
+          currentFraction: currentFraction));
+    } catch (_) {}
   }
 
   publish(preparing: true);
@@ -135,16 +211,20 @@ Future<PlaylistFolderExportResult> runPlaylistFolderExport(
     final names = <String, String>{};
     var index = 0;
     for (final entry in sources.entries) {
+      final source = entry.value;
+      final fileName = plan.options.convertsAudio
+          ? '${_cleanName(source.isCue ? source.title : _windows.basenameWithoutExtension(source.path))}${plan.options.format.extension}'
+          : _windows.basename(source.path);
       names[entry.key] = '${(++index).toString().padLeft(5, '0')}_'
-          '${_safeFileName(_windows.basename(entry.value.path))}';
+          '${_safeFileName(fileName)}';
     }
     final playlistPath = p.join(staging.path, 'playlist.m3u8');
     // Validate the complete M3U before copying any music (including UTF-8
     // byte limits). Every generated reference points inside this folder.
     final exportedEntries = [
-      for (final entry in plan.entries)
-        M3uEntry(p.join(staging.path, names[entry.path.toLowerCase()]!),
-            title: entry.title, duration: entry.duration)
+      for (var i = 0; i < plan.entries.length; i++)
+        M3uEntry(p.join(staging.path, names[plan._sources[i].identity]!),
+            title: plan.entries[i].title, duration: plan.entries[i].duration)
     ];
     late final String m3u;
     try {
@@ -162,7 +242,34 @@ Future<PlaylistFolderExportResult> runPlaylistFolderExport(
       final expected = stats[entry.key]!;
       final before = await source.stat();
       _checkUnchanged(expected, before);
-      final sink = File(p.join(staging.path, names[entry.key]!)).openWrite();
+      final output = p.join(staging.path, names[entry.key]!);
+      if (plan.options.convertsAudio) {
+        publish(currentTitle: entry.value.title);
+        try {
+          await convertPlaylistAudio(entry.value, output, plan.options,
+              cancellation: cancellation._audio,
+              resolveTool: resolveTool,
+              onProgress: (fraction) => publish(
+                  currentTitle: entry.value.title, currentFraction: fraction));
+        } on AudioTrimException catch (error) {
+          cancellation._check();
+          throw switch (error.code) {
+            'tools' => const PlaylistFolderExportException(
+                'tools', '音频转换需要 FFmpeg 组件，请先安装或修复。'),
+            'timeout' => const PlaylistFolderExportException(
+                'timeout', '音频转换超时，未生成目标文件夹。'),
+            _ => const PlaylistFolderExportException(
+                'process', '音频转换失败，请检查源文件是否完整或选择其他格式。'),
+          };
+        }
+        cancellation._check();
+        _checkUnchanged(expected, await source.stat());
+        completedBytes += expected.size;
+        copiedFiles++;
+        publish();
+        continue;
+      }
+      final sink = File(output).openWrite();
       var closed = false;
       try {
         final received = await writeStreamToFileSink(source.openRead(), sink,

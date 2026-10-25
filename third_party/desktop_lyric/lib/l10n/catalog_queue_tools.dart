@@ -1,4 +1,36 @@
 const Map<String, List<String>> catalogQueueTools = {
+  '将所选保存为新歌单': [
+    'Save selection as a new playlist',
+    '選択した曲を新しいプレイリストに保存',
+    '선택한 곡을 새 재생목록으로 저장'
+  ],
+  '多选整理队列': ['Select and organize queue', 'キューを複数選択して整理', '여러 곡을 선택해 대기열 정리'],
+  '队列所选歌曲': ['Selected queue tracks', 'キューで選択した曲', '대기열에서 선택한 곡'],
+  '已选 {0} 首，其中 {1} 首未显示': [
+    '{0} selected, including {1} hidden',
+    '{0} 曲を選択中（うち {1} 曲は非表示）',
+    '{0}곡 선택됨, 그중 {1}곡은 숨겨짐'
+  ],
+  '点击勾选，Shift+点击连续选择；隐藏的已选歌曲仍参与操作': [
+    'Click to select; Shift-click to select a range. Actions include hidden selected tracks.',
+    'クリックで選択、Shift+クリックで範囲選択。非表示の選択済みの曲も操作対象です。',
+    '클릭하여 선택하고 Shift+클릭으로 범위를 선택하세요. 숨겨진 선택 곡도 작업에 포함됩니다.'
+  ],
+  '移动或移除时保留正在播放的歌曲；保存和导出包含它。': [
+    'Moving or removing keeps the current track in place. Saving and exporting include it.',
+    '移動や削除では再生中の曲をそのまま残します。保存とエクスポートには含まれます。',
+    '이동하거나 제거할 때 현재 재생 곡은 유지됩니다. 저장과 내보내기에는 포함됩니다.'
+  ],
+  '移到队尾': ['Move to end of queue', 'キューの末尾に移動', '대기열 끝으로 이동'],
+  '处理所选': ['Selected actions', '選択した曲の操作', '선택한 곡 작업'],
+  '导出所选音乐文件夹…': [
+    'Export selected music folder…',
+    '選択した曲をフォルダーに出力…',
+    '선택한 음악을 폴더로 내보내기…'
+  ],
+  '全选当前结果': ['Select all current results', '現在の結果をすべて選択', '현재 결과 모두 선택'],
+  '取消全选当前结果': ['Deselect current results', '現在の結果の選択を解除', '현재 결과 선택 해제'],
+  '取消全部选择': ['Clear all selections', '選択をすべて解除', '모든 선택 해제'],
   '显示待播预览': ['Show upcoming tracks', '次の曲のプレビューを表示', '다음 재생 곡 미리보기 표시'],
   '在歌词页的队列上方显示接下来播放的歌曲，可展开查看最多 10 项。播放条弹出列表不显示。': [
     'Show upcoming tracks above the queue on the lyrics page. Expand to view up to 10 items. The playback bar’s popup queue does not show this preview.',

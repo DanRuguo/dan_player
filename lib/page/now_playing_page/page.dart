@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/detail_volume_panel.dart';
 import 'component/sleep_timer_submenu.dart';
 import 'package:dan_player/component/listening_tools_dialog.dart';
@@ -205,7 +206,7 @@ class NowPlayingMoreAction extends StatelessWidget {
 
     return ListenableBuilder(
       listenable: OnlineLibrary.instance,
-      builder: (context, _) => MenuAnchor(
+      builder: (context, _) => AppMenuAnchor(
           menuChildren: [
             if (nowPlaying != null)
               MenuItemButton(

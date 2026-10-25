@@ -1,4 +1,19 @@
 const Map<String, List<String>> catalogAdvancedSearch2606 = {
+  '日期条件无效，请使用 YYYY-MM-DD、today、yesterday 或 today-Nd。': [
+    'Invalid date filter. Use YYYY-MM-DD, today, yesterday or today-Nd.',
+    '日付の条件が無効です。YYYY-MM-DD、today、yesterday、today-Nd を使用してください。',
+    '날짜 조건이 올바르지 않습니다. YYYY-MM-DD, today, yesterday 또는 today-Nd를 사용하세요.'
+  ],
+  '相对日期：今天、昨天或 N 天前': [
+    'Relative dates: today, yesterday or N days ago',
+    '相対日付：今日、昨日、N 日前',
+    '상대 날짜: 오늘, 어제 또는 N일 전'
+  ],
+  'today-Nd 表示本机日历的 N 天前，支持 0–36500 天且不早于 1970 年。相对日期在每次搜索时计算，也可与固定日期组成范围。': [
+    'today-Nd means N calendar days ago in your local time zone. Use 0–36500 days, no earlier than 1970. Relative dates are calculated for each search and can be combined with fixed dates in a range.',
+    'today-Nd はローカル暦の N 日前を表します。0～36500 日に対応し、1970 年以降に限ります。相対日付は検索のたびに計算され、固定日付と組み合わせて範囲を指定できます。',
+    'today-Nd는 현지 달력 기준 N일 전을 뜻합니다. 0~36500일을 지원하며 1970년 이전은 지정할 수 없습니다. 상대 날짜는 검색할 때마다 계산되며 고정 날짜와 함께 범위로 사용할 수 있습니다.'
+  ],
   "搜索引号未闭合。": ["Close the search quote.", "検索の引用符を閉じてください。", "검색 따옴표를 닫으세요."],
   "搜索条件缺少内容。": ["Enter a filter value.", "検索条件を入力してください。", "필터 값을 입력하세요."],
   "格式条件无效。": ["Invalid format filter.", "形式の条件が無効。", "잘못된 형식 조건."],

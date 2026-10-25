@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:collection';
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -137,7 +138,7 @@ class _LyricSourceMenuButtonState extends State<LyricSourceMenuButton> {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    return MenuAnchor(
+    return AppMenuAnchor(
       useRootOverlay: true,
       consumeOutsideTap: true,
       style: const MenuStyle(

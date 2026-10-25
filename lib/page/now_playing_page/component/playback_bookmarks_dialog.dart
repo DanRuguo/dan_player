@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_menu_motion.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/library/playback_bookmarks.dart';
 import 'package:dan_player/play_service/playback_service.dart';
@@ -75,9 +76,7 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
       if (mounted) {
         setState(() {
           _newerVersion = error is UnsupportedError;
-          _error = _newerVersion
-              ? '书签由更新版本创建，请更新播放器后再打开。'
-              : '无法读取书签，请重试';
+          _error = _newerVersion ? '书签由更新版本创建，请更新播放器后再打开。' : '无法读取书签，请重试';
         });
       }
     } finally {
@@ -371,6 +370,9 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                                                                     .labelMedium),
                                                           ])))),
                                           PopupMenuButton<String>(
+                                              popUpAnimationStyle:
+                                                  appMenuAnimationStyle(
+                                                      context),
                                               enabled: !_busy,
                                               tooltip: ui('更多'),
                                               icon:

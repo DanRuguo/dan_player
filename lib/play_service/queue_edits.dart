@@ -1,3 +1,5 @@
+enum QueueBatchAction { moveNext, moveLast, remove }
+
 /// Queue operations use occurrence indices: equal tracks may occur more than
 /// once, and moving/removing one must not silently select another occurrence.
 class QueueEdit<T> {
@@ -5,6 +7,43 @@ class QueueEdit<T> {
 
   final List<T> items;
   final int currentIndex;
+
+  /// One edit in original queue order. The active occurrence is excluded from
+  /// movement/removal, even when another selected item refers to the same song.
+  static QueueEdit<T>? batch<T>(List<T> items, int current,
+      Iterable<int> indices, QueueBatchAction action) {
+    if (current < -1 ||
+        current >= items.length ||
+        (action == QueueBatchAction.moveNext && current < 0)) {
+      return null;
+    }
+    final selected = indices.toSet();
+    if (selected.any((index) => index < 0 || index >= items.length)) {
+      return null;
+    }
+    selected.remove(current);
+    if (selected.isEmpty) return null;
+    final kept = <T>[];
+    final moved = <T>[];
+    var nextCurrent = -1;
+    for (var index = 0; index < items.length; index++) {
+      if (selected.contains(index)) {
+        moved.add(items[index]);
+      } else {
+        if (index == current) nextCurrent = kept.length;
+        kept.add(items[index]);
+      }
+    }
+    if (action != QueueBatchAction.remove) {
+      kept.insertAll(
+          action == QueueBatchAction.moveNext ? nextCurrent + 1 : kept.length,
+          moved);
+    }
+    if (QueueSnapshot._sameItems(items, kept) && current == nextCurrent) {
+      return null;
+    }
+    return QueueEdit(kept, nextCurrent);
+  }
 
   /// Validate a permutation before publishing a suffix-only edit. Every
   /// occurrence, including repeated tracks, must appear exactly once.

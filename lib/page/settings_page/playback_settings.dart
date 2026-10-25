@@ -283,7 +283,7 @@ class PlaybackRateMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return MenuAnchor(
+    return AppMenuAnchor(
       style: const MenuStyle(shape: WidgetStatePropertyAll(AppShape.control)),
       menuChildren: [
         for (final value in PlaybackRate.presets)

@@ -27,8 +27,11 @@ class AudioSearchQuery {
               const {'duration', 'bitrate', 'samplerate', 'filesize', 'track'}
                   .contains(term.value)));
 
-  factory AudioSearchQuery.parse(String query) {
+  factory AudioSearchQuery.parse(String query, {DateTime? now}) {
     final source = _searchWidth(query.trim());
+    // One calendar day per submitted query, even when it contains several
+    // relative terms or scoring later yields across midnight.
+    final referenceTime = now ?? DateTime.now();
     final text = normalizeSearchText(source);
     final tokens = <_QueryToken>[];
     final terms = <AudioSearchTerm>[];
@@ -45,7 +48,7 @@ class AudioSearchQuery {
         structured = true;
       } else {
         final term = _parseSearchTerm(
-            normalizeSearchText(value), hadQuote, leadingQuote);
+            normalizeSearchText(value), hadQuote, leadingQuote, referenceTime);
         terms.add(term);
         tokens.add(_QueryToken('term', term));
         structured |= term.field.isNotEmpty || term.negative || term.literal;
@@ -122,7 +125,7 @@ class AudioSearchQuery {
 }
 
 AudioSearchTerm _parseSearchTerm(
-    String input, bool literal, bool leadingQuote) {
+    String input, bool literal, bool leadingQuote, DateTime referenceTime) {
   var value = input;
   final negative = !leadingQuote && value.startsWith('-') && value.length > 1;
   if (negative) value = value.substring(1);
@@ -162,7 +165,7 @@ AudioSearchTerm _parseSearchTerm(
     }
   } else if (field == 'added' || field == 'lastplayed') {
     if (!(field == 'lastplayed' && value == 'never')) {
-      date = AudioSearchDate.parse(value);
+      date = AudioSearchDate.parse(value, now: referenceTime);
     }
   } else if (field == 'has' &&
       !const {
@@ -396,10 +399,26 @@ class AudioSearchNumber {
 class AudioSearchDate {
   const AudioSearchDate._(this.start, this.end);
   final int? start, end;
-  factory AudioSearchDate.parse(String value) {
-    Never invalid() =>
-        throw const AudioSearchQueryException('日期条件无效，请使用 YYYY-MM-DD。');
+  factory AudioSearchDate.parse(String value, {DateTime? now}) {
+    Never invalid() => throw const AudioSearchQueryException(
+        '日期条件无效，请使用 YYYY-MM-DD、today、yesterday 或 today-Nd。');
+    final localNow = (now ?? DateTime.now()).toLocal();
     int day(String input) {
+      final relative = RegExp(r'^today-(\d{1,5})d$').firstMatch(input);
+      if (input == 'today' || input == 'yesterday' || relative != null) {
+        final days = input == 'today'
+            ? 0
+            : input == 'yesterday'
+                ? 1
+                : int.parse(relative!.group(1)!);
+        if (days > 36500) invalid();
+        // Calendar arithmetic preserves local midnight across daylight-saving
+        // changes. Subtracting a 24-hour Duration would change that boundary.
+        final date =
+            DateTime(localNow.year, localNow.month, localNow.day - days);
+        if (date.year < 1970) invalid();
+        return date.millisecondsSinceEpoch;
+      }
       if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(input)) invalid();
       final parsed = DateTime.tryParse(input);
       if (parsed == null ||

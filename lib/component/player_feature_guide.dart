@@ -353,6 +353,12 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           const SizedBox(height: 8),
                           _text(
                               '播放列表“整理队列”可去重、清理当前曲目前后或重排待播项，并保留当前播放。队列获得焦点时 Ctrl + Z 撤销，Ctrl + Y 或 Ctrl + Shift + Z 重做；替换播放来源或切换随机会结束这段整理历史。移除停止目标后再撤销整理，不会恢复停止目标。'),
+                          _paragraph(context, '按出现项多选整理队列'),
+                          _text(
+                              '队列顶栏可进入多选，点击勾选，Shift+点击连续选择；范围菜单按当前可见顺序选择。相同歌曲的多次出现各自独立。筛选隐藏的已选项仍参与操作，顶栏会显示隐藏数量；操作前先核对所选范围。'),
+                          _text(
+                              '可将所选移到下一首、移到队尾或移除，并撤销最近一次队列编辑。移动或移除保留当前播放项，另存歌单和导出则包含它；这些操作不改原歌单或音频文件。'),
+                          _demo('queue', PlayerGuideDemoKind.queueTools),
                           _paragraph(context, '导出队列与搜索结果'),
                           _text(
                               '在播放队列顶栏点“导出队列或搜索结果”图标，选择“导出队列为 M3U8”或“导出队列音乐文件夹”。输入搜索词后，菜单还可选择“导出搜索结果为 M3U8”或“导出搜索结果音乐文件夹”。文件选择窗口打开前会固定所选范围的歌曲与顺序，保留重复引用；之后切歌或修改搜索不会改变这次导出。'),
@@ -430,6 +436,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                         ]),
                         _section(context, 'batch-edit', '多选与批量整理',
                             Icons.checklist_outlined, [
+                          _text('本节针对曲库与歌单的多选；队列多选会保留隐藏的已选项，见“播放队列与停止目标”。'),
                           _text(
                               '从歌曲菜单进入“多选”，再勾选歌曲；顶部可全选、反选或退出。“更多”可按当前排序选中一项及上方或下方全部，也可圈定已选两项之间（含两端）。操作只处理当前可见所选，保留显示顺序；操作成功或离开页面后退出多选，取消或失败可继续选择。'),
                           _flow(context, 'batch', ['选择歌曲', '预览修改', '应用预览']),
@@ -441,6 +448,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '没有可读取的内嵌封面时，会尝试歌曲同目录的 cover、folder、front、album 或 albumart 图片，支持 JPG、JPEG、PNG、WebP、BMP 和 GIF。添加或更换图片后可刷新曲库或重新读取封面；开启自动刷新后会跟随文件变化，不改写音乐文件。'),
                           _text(
                               '多碟专辑可使用“音轨”排序，先按碟号、再按音轨排列；智能歌单和待播队列的专辑音轨排序也遵循此顺序。旧曲库首次刷新会补读支持格式的碟号标签，未填写的编号排在最后，不从文件名猜测。'),
+                          _text(
+                              '“文件名”排序按本地文件名称排列，数字按自然顺序比较，例如 2 在 10 前；同源 CUE 分轨保留原顺序，网络歌曲与缺失文件名始终排在最后。它不改文件名或原有歌单顺序。'),
                         ]),
                         _section(context, 'storage', '文件夹与缓存管理',
                             Icons.folder_copy_outlined, [
@@ -604,7 +613,11 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '“导入本地歌单”支持 M3U、M3U8、PLS 和 XSPF。先预览可导入与缺失歌曲，再确认加入；保留原顺序和重复次数，跳过网络地址。预览期间文件变化时需重新读取，避免导入过时内容。'),
                           const SizedBox(height: 8),
                           _text(
-                              'M3U8 导出保存歌曲路径引用；“导出音乐文件夹”会复制本地音频并生成相对路径歌单，适合搬到另一台设备。在线歌曲与 CUE 分轨会明确跳过；同一源文件只复制一次，歌单仍保留顺序和重复引用。原文件不移动、不转码。'),
+                              'M3U8 只保存歌曲路径；“导出音乐文件夹”默认原样复制，也可批量转换为 MP3、Opus 或 FLAC。转换模式包含 CUE 分轨，原样模式跳过分轨；在线歌曲始终跳过。输出相对路径歌单保留顺序与重复引用，同一源文件或相同分轨只输出一次。'),
+                          _text(
+                              '先选择格式，再选 MP3／Opus 的码率；FLAC 不会恢复有损音频丢失的音质。转换需 FFmpeg，缺少时可从提示安装或修复。核对歌曲、输出文件和跳过数量后选择新文件夹；取消或失败不会留下半成品目标文件夹，原文件保持不变。'),
+                          _text(
+                              '原样复制保留文件内全部资料；转换仅保留基本文字标签，不保内嵌封面、歌词或侧车文件。MP3 输出 44.1 kHz、Opus 输出 48 kHz，单声道保留，其余最多双声道；FLAC 保留采样率和声道。'),
                           const SizedBox(height: 8),
                           _text(
                               '歌词页“更多”中的本曲设置、响度与峰值分析、音频文件校验用于查看与调整当前歌曲。分析和校验只读取源文件；响度分析给出参考增益，不会自动改写音频。'),
@@ -698,6 +711,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           _text(
                               '时间范围菜单的“按严格一周”按本周周一至周日对照上一周；“近 7 天”是截至昨天的滚动区间。今天只计截至展示时间的记录，未来日期与缺失记录按 0 占位并提示；本周未结束时增减仍是暂时结果。曲线菜单可选择本期、前期或两期对比。'),
                           _demo('statistics', PlayerGuideDemoKind.statistics),
+                          _text(
+                              '“星期收听习惯”使用最近 90 个完整日历日，不含今天；可比较各星期累计时长，或切换有收听日均，查看每个活跃日通常听多久。各行区分有收听、已记零时长和缺失天数；缺失不等于没有听过，没有可计算记录时显示“—”。'),
                           _paragraph(context, '5. 排行：播放最多与收听最久'),
                           _text(
                               '在排行上方选择“歌曲”“艺术家”或“专辑”，两张排行分别显示累计播放次数与累计收听时长的前 10 项。听过几次与听了多久是不同指标；排行使用全部已保存历史，不随日历或趋势的范围改变。艺术家与专辑只汇总已明确归属的记录，同名专辑按艺术家区分；旧版未明确归属的总数仍保留并单独提示。排行用于查看，不会直接开始播放。'),
@@ -793,6 +808,11 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               'search-words',
                               'qingtian zjl\ncafe → Café\ncaliforna → California',
                               '多个词可跨字段匹配；例如用歌曲拼音与歌手首字母一起缩小本地结果。'),
+                          _code(
+                              context,
+                              'search-relative-dates',
+                              'added:>=today-7d\nlastplayed:yesterday',
+                              '日期筛选支持 today、yesterday 和 today-Nd，按提交搜索时的本机日历日期计算，可与其他条件组合。'),
                           _text(
                               '字段、数值范围、OR 和排除条件可组合筛选本地音乐。完整语法、单位、未知资料的处理及示例沿用“本地筛选用法”，不额外联网。'),
                           const SizedBox(height: 8),

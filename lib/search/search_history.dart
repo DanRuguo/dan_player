@@ -64,8 +64,10 @@ class SearchHistoryStore extends ValueNotifier<List<String>> {
         final text = query.trim();
         if (text.isEmpty) return;
         await _load();
-        if (value.contains(text)) return;
-        final next = [text, ...value].take(maxEntries).toList();
+        if (value.isNotEmpty && value.first == text) return;
+        final next = [text, ...value.where((entry) => entry != text)]
+            .take(maxEntries)
+            .toList();
         // The canonical presentation budget also bounds long, full-row terms.
         // The current (possibly tiny) window is deliberately not this budget.
         await _save(next.take(capacity(next).clamp(1, maxEntries)).toList());

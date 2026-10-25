@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:dan_player/component/statistics_listening_weekdays.dart';
+import 'package:dan_player/statistics/listening_weekdays.dart';
 import 'package:path/path.dart' as path;
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/directory_storage_card.dart';
@@ -64,6 +66,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   late PlaybackStatistics _displayStats;
   StatisticsDisplaySnapshot? _displaySnapshot;
   ListeningTrendsSnapshot? _listeningTrends;
+  ListeningWeekdays? _listeningWeekdays;
   RecentListeningActivity? _recentListening;
   String _rankingGroup = 'tracks';
   // The detached display adapter changes only with a new session capture.
@@ -192,6 +195,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
             capturedAt: next.capturedAt,
             currentDayMilliseconds: _displayStats.dailyMilliseconds[
                 listeningDayKey(localCalendarDate(next.capturedAt))]);
+    _listeningWeekdays = _listeningTrends == null
+        ? null
+        : ListeningWeekdays.fromDays(
+            _listeningTrends!.comparisons[90]!.current);
     previous.dispose();
   }
 
@@ -350,6 +357,23 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                     order: 2,
                                     child: StatisticsListeningTrends(
                                         snapshot: _listeningTrends!)))),
+                  ),
+                ),
+                SliverPadding(
+                  key: const ValueKey('statistics-weekdays-section'),
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  sliver: SliverToBoxAdapter(
+                    child: StatisticsResize(
+                      child: _listeningWeekdays == null
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              padding: const EdgeInsets.only(bottom: 20),
+                              child: AppEntrance(
+                                  identity: 'statistics-weekdays',
+                                  order: 2,
+                                  child: StatisticsListeningWeekdays(
+                                      snapshot: _listeningWeekdays!))),
+                    ),
                   ),
                 ),
                 SliverPadding(
@@ -680,7 +704,7 @@ class _DailyListeningDistributionState
               ),
         ),
         const SizedBox(height: 16),
-        _HourlyListeningChart(
+        HourlyListeningChart(
           key: ValueKey(_history),
           values: _history
               ? List<int>.of(widget.statistics.hourlyMilliseconds)
@@ -712,8 +736,8 @@ class _DailyListeningDistributionState
   }
 }
 
-class _HourlyListeningChart extends StatefulWidget {
-  const _HourlyListeningChart(
+class HourlyListeningChart extends StatefulWidget {
+  const HourlyListeningChart(
       {super.key,
       required this.values,
       required this.peakHours,
@@ -726,20 +750,21 @@ class _HourlyListeningChart extends StatefulWidget {
   final List<String>? ranges;
 
   @override
-  State<_HourlyListeningChart> createState() => _HourlyListeningChartState();
+  State<HourlyListeningChart> createState() => _HourlyListeningChartState();
 }
 
-class _HourlyListeningChartState extends State<_HourlyListeningChart> {
+class _HourlyListeningChartState extends State<HourlyListeningChart> {
   final ScrollController _scrollController = ScrollController();
-  int? _selectedHour;
+  final _selectedHour = ValueNotifier<int?>(null);
 
   int _value(int hour) =>
       hour < widget.values.length ? math.max(0, widget.values[hour]) : 0;
 
-  int? get _visibleSelection => _selectedHour ?? widget.peakHours.firstOrNull;
+  int? get _visibleSelection =>
+      _selectedHour.value ?? widget.peakHours.firstOrNull;
 
   void _selectHour(int hour, {bool reveal = false}) {
-    setState(() => _selectedHour = hour);
+    _selectedHour.value = hour;
     if (!reveal || !_scrollController.hasClients) return;
     final position = _scrollController.position;
     final width = position.viewportDimension + position.maxScrollExtent;
@@ -751,6 +776,7 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
 
   @override
   void dispose() {
+    _selectedHour.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -760,8 +786,6 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final maximum = widget.values.fold(0, math.max);
-    final selectedHour = _visibleSelection;
-    final selectedIsPeak = widget.peakHours.contains(selectedHour);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -831,109 +855,128 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
                               children: [
                                 for (var hour = 0; hour < 24; hour++)
                                   Expanded(
-                                    child: Semantics(
-                                      key: ValueKey('listening-hour-$hour'),
-                                      button: true,
-                                      selected: hour == selectedHour,
-                                      label: ui("{0}，收听 {1}{2}", [
-                                        (widget.ranges?[hour] ??
-                                            _hourRange(hour)),
-                                        _formatListeningDuration(_value(hour),
-                                            precise: true),
-                                        widget.peakHours.contains(hour)
-                                            ? ' · ${ui("最高时段")}'
-                                            : ''
-                                      ]),
-                                      onTap: () => _selectHour(hour),
-                                      excludeSemantics: true,
-                                      child: Tooltip(
-                                        message:
-                                            '${(widget.ranges?[hour] ?? _hourRange(hour))} · '
-                                            '${_formatListeningDuration(_value(hour), precise: true)}'
-                                            '${widget.peakHours.contains(hour) ? ' · ${ui("最高时段")}' : ''}',
-                                        child: InkWell(
+                                    child: _HourlySelectionCell(
+                                      hour: hour,
+                                      selection: _selectedHour,
+                                      fallback: widget.peakHours.firstOrNull,
+                                      builder: (context, selected) {
+                                        final selectedHour =
+                                            selected ? hour : null;
+                                        return Semantics(
+                                          key: ValueKey('listening-hour-$hour'),
+                                          button: true,
+                                          selected: hour == selectedHour,
+                                          label: ui("{0}，收听 {1}{2}", [
+                                            (widget.ranges?[hour] ??
+                                                _hourRange(hour)),
+                                            _formatListeningDuration(
+                                                _value(hour),
+                                                precise: true),
+                                            widget.peakHours.contains(hour)
+                                                ? ' · ${ui("最高时段")}'
+                                                : ''
+                                          ]),
                                           onTap: () => _selectHour(hour),
-                                          borderRadius:
-                                              BorderRadius.circular(6),
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              SizedBox(
-                                                height: plotHeight,
-                                                child: Align(
-                                                  alignment:
-                                                      Alignment.bottomCenter,
-                                                  child: SizedBox(
-                                                    width:
-                                                        chartWidth / 24 * 0.58,
-                                                    height: maximum == 0
-                                                        ? 0
-                                                        : plotHeight *
-                                                            _value(hour) /
-                                                            maximum,
-                                                    child: DecoratedBox(
-                                                      key: ValueKey(
-                                                          'listening-bar-$hour'),
-                                                      decoration: BoxDecoration(
-                                                        color:
-                                                            StatisticsMagnitudeColor
-                                                                .resolve(
-                                                          scheme,
-                                                          maximum == 0
-                                                              ? 0
-                                                              : _value(hour) /
-                                                                  maximum,
-                                                        ),
-                                                        borderRadius:
-                                                            const BorderRadius
-                                                                .vertical(
-                                                          top: Radius.circular(
-                                                              4),
+                                          excludeSemantics: true,
+                                          child: Tooltip(
+                                            message:
+                                                '${(widget.ranges?[hour] ?? _hourRange(hour))} · '
+                                                '${_formatListeningDuration(_value(hour), precise: true)}'
+                                                '${widget.peakHours.contains(hour) ? ' · ${ui("最高时段")}' : ''}',
+                                            child: InkWell(
+                                              onTap: () => _selectHour(hour),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  SizedBox(
+                                                    height: plotHeight,
+                                                    child: Align(
+                                                      alignment: Alignment
+                                                          .bottomCenter,
+                                                      child: SizedBox(
+                                                        width: chartWidth /
+                                                            24 *
+                                                            0.58,
+                                                        height: maximum == 0
+                                                            ? 0
+                                                            : plotHeight *
+                                                                _value(hour) /
+                                                                maximum,
+                                                        child: DecoratedBox(
+                                                          key: ValueKey(
+                                                              'listening-bar-$hour'),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color:
+                                                                StatisticsMagnitudeColor
+                                                                    .resolve(
+                                                              scheme,
+                                                              maximum == 0
+                                                                  ? 0
+                                                                  : _value(
+                                                                          hour) /
+                                                                      maximum,
+                                                            ),
+                                                            borderRadius:
+                                                                const BorderRadius
+                                                                    .vertical(
+                                                              top: Radius
+                                                                  .circular(4),
+                                                            ),
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
                                                   ),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 6),
-                                              Container(
-                                                key: ValueKey(
-                                                    'listening-hour-label-$hour'),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
+                                                  const SizedBox(height: 6),
+                                                  Container(
+                                                    key: ValueKey(
+                                                        'listening-hour-label-$hour'),
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
                                                         horizontal: 3,
                                                         vertical: 4),
-                                                decoration: BoxDecoration(
-                                                  borderRadius:
-                                                      BorderRadius.circular(5),
-                                                  border: Border.all(
-                                                    color: hour == selectedHour
-                                                        ? scheme.primary
-                                                        : Colors.transparent,
-                                                  ),
-                                                ),
-                                                child: Text(
-                                                  widget.labels?[hour] ??
-                                                      hour
-                                                          .toString()
-                                                          .padLeft(2, '0'),
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .labelSmall
-                                                      ?.copyWith(
-                                                        fontSize: 12,
-                                                        color: scheme.primary,
-                                                        fontWeight: hour ==
+                                                    decoration: BoxDecoration(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              5),
+                                                      border: Border.all(
+                                                        color: hour ==
                                                                 selectedHour
-                                                            ? FontWeight.bold
-                                                            : FontWeight.normal,
+                                                            ? scheme.primary
+                                                            : Colors
+                                                                .transparent,
                                                       ),
-                                                ),
+                                                    ),
+                                                    child: Text(
+                                                      widget.labels?[hour] ??
+                                                          hour
+                                                              .toString()
+                                                              .padLeft(2, '0'),
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .labelSmall
+                                                          ?.copyWith(
+                                                            fontSize: 12,
+                                                            color:
+                                                                scheme.primary,
+                                                            fontWeight: hour ==
+                                                                    selectedHour
+                                                                ? FontWeight
+                                                                    .bold
+                                                                : FontWeight
+                                                                    .normal,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ],
+                                            ),
                                           ),
-                                        ),
-                                      ),
+                                        );
+                                      },
                                     ),
                                   ),
                               ],
@@ -956,59 +999,126 @@ class _HourlyListeningChartState extends State<_HourlyListeningChart> {
           },
         ),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            IconButton(
-              tooltip: ui("前一个时段"),
-              onPressed: () => _selectHour(
-                ((selectedHour ?? 0) + 23) % 24,
-                reveal: true,
-              ),
-              icon: const Icon(Icons.chevron_left_rounded),
-            ),
-            Expanded(
-              child: Semantics(
-                liveRegion: true,
-                child: Column(
-                  key: const ValueKey('listening-hour-selection'),
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      selectedHour == null
-                          ? ui("选择一个时段")
-                          : (widget.ranges?[selectedHour] ??
-                              _hourRange(selectedHour)),
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: selectedHour == null ? null : scheme.primary),
-                    ),
-                    Text(
-                      selectedHour == null
-                          ? ui("点击、长按或悬停柱状条查看时长")
-                          : '${_formatListeningDuration(_value(selectedHour), precise: true)}'
-                              '${selectedIsPeak ? ' · ${ui("最高时段")}' : ''}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: selectedHour == null
-                                ? scheme.onSurfaceVariant
-                                : scheme.primary,
-                          ),
-                    ),
-                  ],
+        ValueListenableBuilder<int?>(
+          valueListenable: _selectedHour,
+          builder: (context, _, __) {
+            final selectedHour = _visibleSelection;
+            final selectedIsPeak = widget.peakHours.contains(selectedHour);
+            return Row(
+              children: [
+                IconButton(
+                  tooltip: ui("前一个时段"),
+                  onPressed: () => _selectHour(
+                    ((selectedHour ?? 0) + 23) % 24,
+                    reveal: true,
+                  ),
+                  icon: const Icon(Icons.chevron_left_rounded),
                 ),
-              ),
-            ),
-            IconButton(
-              tooltip: ui("后一个时段"),
-              onPressed: () => _selectHour(
-                ((selectedHour ?? -1) + 1) % 24,
-                reveal: true,
-              ),
-              icon: const Icon(Icons.chevron_right_rounded),
-            ),
-          ],
+                Expanded(
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Column(
+                      key: const ValueKey('listening-hour-selection'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          selectedHour == null
+                              ? ui("选择一个时段")
+                              : (widget.ranges?[selectedHour] ??
+                                  _hourRange(selectedHour)),
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(
+                                  color: selectedHour == null
+                                      ? null
+                                      : scheme.primary),
+                        ),
+                        Text(
+                          selectedHour == null
+                              ? ui("点击、长按或悬停柱状条查看时长")
+                              : '${_formatListeningDuration(_value(selectedHour), precise: true)}'
+                                  '${selectedIsPeak ? ' · ${ui("最高时段")}' : ''}',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: selectedHour == null
+                                        ? scheme.onSurfaceVariant
+                                        : scheme.primary,
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: ui("后一个时段"),
+                  onPressed: () => _selectHour(
+                    ((selectedHour ?? -1) + 1) % 24,
+                    reveal: true,
+                  ),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );
   }
+}
+
+/// A selection change rebuilds only its old and new hour. New parent snapshots,
+/// theme, font or language still replace the builder through normal updates.
+class _HourlySelectionCell extends StatefulWidget {
+  const _HourlySelectionCell(
+      {required this.hour,
+      required this.selection,
+      required this.fallback,
+      required this.builder});
+  final int hour;
+  final int? fallback;
+  final ValueNotifier<int?> selection;
+  final Widget Function(BuildContext, bool) builder;
+
+  @override
+  State<_HourlySelectionCell> createState() => _HourlySelectionCellState();
+}
+
+class _HourlySelectionCellState extends State<_HourlySelectionCell> {
+  late bool _selected;
+  bool get _current =>
+      (widget.selection.value ?? widget.fallback) == widget.hour;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = _current;
+    widget.selection.addListener(_changed);
+  }
+
+  void _changed() {
+    final selected = _current;
+    if (selected != _selected) setState(() => _selected = selected);
+  }
+
+  @override
+  void didUpdateWidget(_HourlySelectionCell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selection != oldWidget.selection) {
+      oldWidget.selection.removeListener(_changed);
+      widget.selection.addListener(_changed);
+    }
+    _selected = _current;
+  }
+
+  @override
+  void dispose() {
+    widget.selection.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _selected);
 }
 
 double _statisticsTextScale(BuildContext context) =>

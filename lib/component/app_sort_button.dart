@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:dan_player/component/app_menu_motion.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -292,16 +293,7 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
           maxHeight: math.max(48, math.min(480, size.height - 48)),
         ),
         menuPadding: const EdgeInsets.symmetric(vertical: 6),
-        popUpAnimationStyle: reduced
-            ? AnimationStyle.noAnimation
-            : AnimationStyle(
-                duration: AppMotion.duration(
-                    context, MotionKind.feedback, AppMotion.quick),
-                reverseDuration: AppMotion.duration(
-                    context, MotionKind.feedback, AppMotion.quick),
-                curve: AppMotion.standardCurve,
-                reverseCurve: Curves.easeInCubic,
-              ),
+        popUpAnimationStyle: appMenuAnimationStyle(context, reduced: reduced),
         items: _menuItems(),
       );
     } finally {
@@ -339,7 +331,7 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
     const arrow = Icon(Icons.expand_more, size: 18);
     // showMenu captures these inherited themes from the trigger. Only its
     // popup scroll viewport uses the retained shader stretch; page scrolls
-    // keep their existing raster path and the 120 ms popup animation remains.
+    // keep their existing raster path, independent of the popup animation.
     return AppStableStretchScope(
       child: ScrollbarTheme(
         data: ScrollbarTheme.of(context).copyWith(

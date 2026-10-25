@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/page/now_playing_page/component/detail_progress_slider.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/utils.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -176,58 +177,28 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
   }
 }
 
-class _SegmentPosition extends StatefulWidget {
+class _SegmentPosition extends StatelessWidget {
   const _SegmentPosition(
       {super.key, required this.service, required this.available});
   final PlaybackService service;
   final bool available;
 
   @override
-  State<_SegmentPosition> createState() => _SegmentPositionState();
-}
-
-class _SegmentPositionState extends State<_SegmentPosition> {
-  double? _dragPosition;
-
-  @override
-  Widget build(BuildContext context) {
-    final service = widget.service;
-    final maximum = widget.available ? service.length : 1.0;
-    return StreamBuilder<double>(
-      stream: service.positionStream,
-      initialData: widget.available ? service.position : 0,
-      builder: (context, snapshot) {
-        final raw = _dragPosition ?? snapshot.data ?? 0;
-        final value = raw.isFinite ? raw.clamp(0.0, maximum) : 0.0;
-        return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(ui('当前位置：{0}', [_SegmentLoopDialogState._time(value)]),
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(color: Theme.of(context).colorScheme.primary)),
-              Slider(
-                  key: const ValueKey('segment-loop-position'),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  value: value,
-                  max: maximum,
-                  label: _SegmentLoopDialogState._time(value),
-                  semanticFormatterCallback: _SegmentLoopDialogState._time,
-                  onChanged: widget.available
-                      ? (value) => setState(() => _dragPosition = value)
-                      : null,
-                  onChangeEnd: widget.available
-                      ? (value) {
-                          service.seek(value);
-                          setState(() => _dragPosition = null);
-                        }
-                      : null),
-            ]);
-      },
-    );
-  }
+  Widget build(BuildContext context) => DetailProgressSlider(
+        key: const ValueKey('segment-loop-position'),
+        positions: service.positionStream,
+        readPosition: () => service.position,
+        duration: service.length,
+        // The same file can be opened again while this dialog stays mounted.
+        // Reuse the timeline's pointer cancellation and newer-seek ownership.
+        trackIdentity: (service.nowPlaying?.path, service.playbackSessionToken),
+        seekRevision: service.manualSeekRevision,
+        onSeek: service.seek,
+        enabled: available,
+        loopStart: service.segmentLoop.start,
+        loopEnd: service.segmentLoop.end,
+        loopEnabled: service.segmentLoop.enabled,
+      );
 }
 
 class _SegmentControlPair extends StatelessWidget {

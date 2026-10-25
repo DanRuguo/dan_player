@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:flutter/material.dart';
@@ -93,7 +94,7 @@ class PageScaffold extends StatelessWidget {
                 if (foldedColumn.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(left: 16.0),
-                    child: MenuAnchor(
+                    child: AppMenuAnchor(
                       style: menuStyle,
                       menuChildren: foldedColumn,
                       builder: (_, controller, __) => IconButton.filledTonal(

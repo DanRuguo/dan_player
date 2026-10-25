@@ -83,8 +83,12 @@ class AudioSearchSnapshot {
     final id = audio.isOnline
         ? 'online:${audio.onlineProvider}:${audio.onlineId}'
         : audio.stableTrackId;
+    // A new, explicitly attributed play is usable even when this song remains
+    // a candidate for an older ambiguous bucket. Never merge that bucket's
+    // totals into the known record, or hide the known record behind it.
+    final recorded = history[id];
+    if (recorded != null) return recorded;
     if (uncertain.contains(id)) return null;
-    return history[id] ??
-        (count: 0, completed: 0, skipped: 0, listened: 0, last: 0);
+    return (count: 0, completed: 0, skipped: 0, listened: 0, last: 0);
   }
 }

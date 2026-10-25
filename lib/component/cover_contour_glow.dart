@@ -608,28 +608,37 @@ class _CoverBaseClipper extends CustomClipper<Path> {
 /// displacement has compact circular support inside it; the rest of the art
 /// is never re-rasterized from the low-resolution contour mask.
 class CoverRefractionMesh {
-  CoverRefractionMesh() {
+  static Uint16List _indicesForSide(int side) {
+    final result = Uint16List((side - 1) * (side - 1) * 6);
     var at = 0;
-    for (var y = 0; y < divisions; y++) {
-      for (var x = 0; x < divisions; x++) {
-        final a = y * (divisions + 1) + x;
+    for (var y = 0; y < side - 1; y++) {
+      for (var x = 0; x < side - 1; x++) {
+        final a = y * side + x;
         final b = a + 1;
-        final c = a + divisions + 1;
-        indices[at++] = a;
-        indices[at++] = b;
-        indices[at++] = c;
-        indices[at++] = b;
-        indices[at++] = c + 1;
-        indices[at++] = c;
+        final c = a + side;
+        result[at++] = a;
+        result[at++] = b;
+        result[at++] = c;
+        result[at++] = b;
+        result[at++] = c + 1;
+        result[at++] = c;
       }
     }
+    return result;
   }
+
   static const divisions = 20;
   static const maximumVertices = (divisions + 1) * (divisions + 1);
   static const maximumDisplacement = 4.0;
-  final positions = Float32List(maximumVertices * 2);
-  final textureCoordinates = Float32List(maximumVertices * 2);
-  final indices = Uint16List(divisions * divisions * 6);
+  late final positions = Float32List(maximumVertices * 2);
+  late final textureCoordinates = Float32List(maximumVertices * 2);
+  late final indices = _indicesForSide(divisions + 1);
+  static const _glowSide = divisions + 3;
+  static final _glowIndices = _indicesForSide(_glowSide);
+  // Vertices.raw copies these into its native geometry. The image and mask
+  // reuse bounded scratch buffers; every draw still owns/disposes its vertices.
+  late final _glowPositions = Float32List(_glowSide * _glowSide * 2);
+  late final _glowCoordinates = Float32List(_glowPositions.length);
   static final _identity =
       Float64List.fromList([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   double radius = 0;
@@ -737,10 +746,11 @@ class CoverRefractionMesh {
       Size size, ui.Image frame, Offset center, double amount,
       {FilterQuality filterQuality = FilterQuality.high}) {
     final region = _refractionRegion(size, center, amount);
-    if (region == null ||
-        !region.outerRect.overlaps(Offset.zero & size) ||
-        !update(size, Size(frame.width.toDouble(), frame.height.toDouble()),
-            center, amount)) return null;
+    if (region == null || !region.outerRect.overlaps(Offset.zero & size))
+      return null;
+    radius = radiusFor(size);
+    // The widened mesh below is the actual draw. Building the legacy inner
+    // mesh here would calculate another 441 samples that are never consumed.
     // Keep triangle coverage beyond the hard replacement clip. When a mesh
     // edge coincides with a fractional clip, GPU coverage can differ inside
     // the fade layer and leak the background through transparent artwork.
@@ -758,10 +768,9 @@ class CoverRefractionMesh {
         applyBoxFit(BoxFit.cover, imageSize, size).source,
         Offset.zero & imageSize);
     final radius = radiusFor(size);
-    const side = divisions + 3;
-    final positions = Float32List(side * side * 2);
-    final coordinates = Float32List(positions.length);
-    final triangles = Uint16List((side - 1) * (side - 1) * 6);
+    const side = _glowSide;
+    final positions = _glowPositions;
+    final coordinates = _glowCoordinates;
     double axis(int at) => at == 0
         ? -extent
         : at == side - 1
@@ -779,23 +788,11 @@ class CoverRefractionMesh {
             source.top + sample.dy / size.height * source.height;
       }
     }
-    at = 0;
-    for (var y = 0; y < side - 1; y++) {
-      for (var x = 0; x < side - 1; x++) {
-        final a = y * side + x;
-        triangles[at++] = a;
-        triangles[at++] = a + 1;
-        triangles[at++] = a + side;
-        triangles[at++] = a + 1;
-        triangles[at++] = a + side + 1;
-        triangles[at++] = a + side;
-      }
-    }
     return _RefractionDraw(
         ui.ImageShader(frame, TileMode.clamp, TileMode.clamp, _identity,
             filterQuality: filterQuality),
         ui.Vertices.raw(VertexMode.triangles, positions,
-            textureCoordinates: coordinates, indices: triangles),
+            textureCoordinates: coordinates, indices: _glowIndices),
         Offset.zero & size,
         region ?? Rect.fromCircle(center: center, radius: extent));
   }

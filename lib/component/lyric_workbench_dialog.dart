@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_menu_motion.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -357,6 +358,8 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                                       label: Text(ui('恢复原始歌词'))),
                                 if (document?.history.isNotEmpty == true)
                                   PopupMenuButton<int>(
+                                      popUpAnimationStyle:
+                                          appMenuAnimationStyle(context),
                                       enabled: !busy,
                                       tooltip: ui('恢复之前的版本'),
                                       onSelected: (index) =>

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_dialog_actions.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
@@ -123,7 +124,7 @@ class _FontManagementDialogState extends State<FontManagementDialog> {
           Text(language?.nativeName ?? ui('所有语言'),
               style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 5),
-          MenuAnchor(
+          AppMenuAnchor(
               style: MenuStyle(
                   shape: const WidgetStatePropertyAll(AppShape.control),
                   maximumSize:

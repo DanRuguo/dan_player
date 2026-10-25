@@ -1462,6 +1462,35 @@ class _TimedLyricLayout {
 
   late final bool completeWordInk;
   late final Set<int> movingIndices;
+  late final _movingWordOrder = movingIndices.toList()..sort();
+
+  // Keep elapsed-time floating-point operations far below one microsecond of
+  // precision loss. Unusual provider timestamps retain the original traversal.
+  static const _indexedTimeLimit = 1 << 40;
+  late final LyricSourceRangeIndex? _poseTimeIndex = () {
+    for (final index in _movingWordOrder) {
+      final word = words[index];
+      if (word.start.inMicroseconds.abs() > _indexedTimeLimit ||
+          word.length.inMicroseconds.abs() > _indexedTimeLimit) {
+        return null;
+      }
+    }
+    return LyricSourceRangeIndex([
+      for (final index in _movingWordOrder) words[index].poseInterval,
+    ]);
+  }();
+
+  List<int> movingWordsAt(Duration position) {
+    final micros = position.inMicroseconds;
+    if (micros.abs() > _indexedTimeLimit) return _movingWordOrder;
+    final index = _poseTimeIndex;
+    if (index == null) return _movingWordOrder;
+    return [
+      for (final candidate in index.overlapping(micros, micros + 1))
+        _movingWordOrder[candidate],
+    ];
+  }
+
   late final List<List<Rect>> wordInkClips = () {
     final partitions = lyricFollowClipPartitions(
       [
@@ -1612,6 +1641,22 @@ class _TimedWordShape {
   final double extent;
   final Rect bounds;
   bool phraseEnd = false;
+  ({int start, int end}) get poseInterval {
+    final milliseconds = length.inMilliseconds;
+    // These are outer bounds, not new motion timings. Round out to whole
+    // milliseconds and retain both endpoints; the original floating-point
+    // sample below still decides the pose. A nonzero phase only narrows this
+    // interval. The +1 converts its inclusive end to the index's half-open form.
+    final lead =
+        LyricWordEffects.presentationLeadMs(milliseconds, phraseEnd).ceil();
+    final tail =
+        LyricWordEffects.presentationTailMs(milliseconds, phraseEnd).ceil();
+    return (
+      start: start.inMicroseconds - lead * 1000,
+      end: start.inMicroseconds + (milliseconds + tail) * 1000 + 1,
+    );
+  }
+
   Duration get motionStart =>
       start -
       Duration(
@@ -1791,15 +1836,16 @@ class LyricWordHighlightPainter extends CustomPainter
       return const [];
     }
     final result = <_TimedLyricPose>[];
-    for (var index = 0; index < _layout.words.length; index++) {
+    final sampledPosition = position;
+    for (final index in _layout.movingWordsAt(sampledPosition)) {
       final word = _layout.words[index];
-      if (!_layout.movingIndices.contains(index)) continue;
       assert(() {
         debugPoseEvaluations++;
         return true;
       }());
       final pose = LyricWordEffects.timedPose(
-        elapsedMilliseconds: (position - word.start).inMicroseconds / 1000,
+        elapsedMilliseconds:
+            (sampledPosition - word.start).inMicroseconds / 1000,
         phase: word.phase,
         phraseEnd: word.phraseEnd,
         durationMilliseconds: word.length.inMilliseconds,
@@ -1976,6 +2022,8 @@ class LyricWordHighlightPainter extends CustomPainter
     // Sample its media-time poses once, then reuse them for every painted row.
     final poses = {for (final pose in _movingWords()) pose.index: pose};
     void primary() {
+      // Ruby has already clipped a row. Empty output needs no alignment replay.
+      if (canvas.getLocalClipBounds().isEmpty) return;
       if (glyphMorph != null) {
         _paintInk(canvas, size, poses: poses);
       } else {
@@ -2082,6 +2130,8 @@ class LyricWordHighlightPainter extends CustomPainter
   }
 
   void _paintInk(Canvas canvas, Size size, {Map<int, _TimedLyricPose>? poses}) {
+    // Alignment and ruby clips can intersect to nothing before word traversal.
+    if (canvas.getLocalClipBounds().isEmpty) return;
     final morph = glyphMorph;
     if (morph != null) {
       _paintMorphInk(canvas, morph, poses);

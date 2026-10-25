@@ -142,6 +142,26 @@ class _PlaybackTransitionSettingsState extends State<PlaybackTransitionSettings>
                                 _preferences.value.copyWith(mode: mode);
                             unawaited(_save());
                           })),
+                  ValueListenableBuilder(
+                    valueListenable: AppSettings.instance.silenceSkipping,
+                    builder: (context, silence, _) => silence.enabled &&
+                            preferences.enabled
+                        ? Padding(
+                            key: const ValueKey(
+                                'playback-transition-silence-conflict'),
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(
+                                ui(
+                                    '已启用“跳过头尾静音”，自动过渡当前使用常规切换。此处选择会保留；关闭跳过静音后，后续歌曲可使用所选过渡。'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant)))
+                        : const SizedBox.shrink(),
+                  ),
                   if (preferences.mode == PlaybackTransitionMode.crossfade) ...[
                     const Padding(
                         padding: EdgeInsets.symmetric(vertical: 12),
