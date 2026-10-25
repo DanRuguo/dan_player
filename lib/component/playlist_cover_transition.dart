@@ -1,10 +1,8 @@
-import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:dan_player/component/app_toolbar_style.dart';
 import 'category_cover_flight.dart';
 import 'category_tile_layout.dart';
 import 'cover_image_readiness.dart';
@@ -317,6 +315,8 @@ class _PlaylistCoverTransitionHostState
   int _rasterCaptureCount = 0, _reusedImageCount = 0;
   BoxConstraints? _viewportConstraints;
 
+  bool get _allowsMotion => coverFlightMotionAllowed(context);
+
   @override
   void initState() {
     super.initState();
@@ -339,7 +339,7 @@ class _PlaylistCoverTransitionHostState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_busy && appToolbarReduceMotion(context, kind: MotionKind.tracking)) {
+    if (_busy && !_allowsMotion) {
       // Dependency changes run during build; clear this frame without setState.
       _retireForMotionPolicy(notify: false);
     }
@@ -347,7 +347,14 @@ class _PlaylistCoverTransitionHostState
 
   @override
   void didChangeAccessibilityFeatures() {
-    if (_busy && appToolbarReduceMotion(context, kind: MotionKind.tracking)) {
+    if (_busy && !_allowsMotion) {
+      _retireForMotionPolicy();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_busy && !_allowsMotion) {
       _retireForMotionPolicy();
     }
   }
@@ -433,7 +440,7 @@ class _PlaylistCoverTransitionHostState
         sourceScroll.pixels <= sourceScroll.minScrollExtent + 1;
     if (_busy || _burstCooldown != null) {
       final retained = <_CoverFlight>[];
-      if (!appToolbarReduceMotion(context, kind: MotionKind.tracking)) {
+      if (_allowsMotion) {
         final oldFlights = {for (final flight in _flights) flight.id: flight};
         for (final entry
             in visible.take(PlaylistCoverTransitionHost.maximumSnapshots)) {
@@ -471,8 +478,7 @@ class _PlaylistCoverTransitionHostState
           atStart: atStart, animate: retained.isNotEmpty, instant: true);
       return;
     }
-    if (appToolbarReduceMotion(context, kind: MotionKind.tracking) ||
-        _hostBox == null) {
+    if (!_allowsMotion || _hostBox == null) {
       update();
       return;
     }

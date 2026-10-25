@@ -1,3 +1,5 @@
+export 'package:desktop_lyric/lyric_spacing_scale.dart';
+import 'package:desktop_lyric/lyric_spacing_scale.dart';
 export 'package:desktop_lyric/lyric_content_reveal.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -12,15 +14,15 @@ import 'lyric_follow_words.dart';
 /// word highlighting; these durations only describe presentation transitions.
 abstract final class LyricMotion {
   static const lineDuration = AppMotion.lyricLine;
-  static const spacingDuration = AppMotion.standard;
+  static const spacingDuration = LyricSpacingMotion.duration;
 
   static double spacingScale(double progress) =>
-      .96 + .04 * progress.clamp(0.0, 1.0);
+      LyricSpacingMotion.scale(progress);
   static const scrollDuration = AppMotion.lyricScroll;
   static const seekScrollDuration = AppMotion.emphasized;
   static const springScrollDuration = AppMotion.lyricSpring;
   static const manualScrollGrace = Duration(seconds: 4);
-  static const curve = Cubic(0.22, 0.0, 0.16, 1.0);
+  static const curve = LyricSpacingMotion.curve;
   // Start from rest so a new line never spends most of its travel in the
   // first few display frames; accelerate before settling into the anchor.
   // Keep this separate from the shared line/title fade curve: a scroll must
@@ -409,94 +411,6 @@ abstract interface class LyricLineReadingGeometry {
   double readingPaintY(double layoutY, double lineHeight);
 }
 
-/// The target layout enters as one group. A held search glyph is its vertical
-/// scale origin; other rows keep the normal top origin. Read cached geometry
-/// only after child layout, rather than relaying paint ticks to the viewport.
-class LyricSpacingScale extends Transform {
-  LyricSpacingScale({
-    super.key,
-    required double scale,
-    required Alignment alignment,
-    required bool moving,
-    this.readingIdentity,
-    this.readingY,
-    required super.child,
-  }) : super(
-          transform: Matrix4.diagonal3Values(scale, scale, 1),
-          alignment: alignment,
-          filterQuality: moving ? FilterQuality.low : null,
-        );
-
-  final Object? readingIdentity;
-  final double? Function(RenderBox ancestor)? readingY;
-
-  @override
-  RenderTransform createRenderObject(BuildContext context) =>
-      _RenderLyricSpacingScale(
-        transform: transform,
-        baseAlignment: alignment! as Alignment,
-        filterQuality: filterQuality,
-        readingIdentity: readingIdentity,
-        readingY: readingY,
-      );
-
-  @override
-  void updateRenderObject(BuildContext context, RenderTransform renderObject) {
-    (renderObject as _RenderLyricSpacingScale)
-      ..transform = transform
-      ..filterQuality = filterQuality
-      ..configureReading(readingIdentity, readingY, alignment! as Alignment);
-  }
-}
-
-class _RenderLyricSpacingScale extends RenderTransform {
-  _RenderLyricSpacingScale({
-    required super.transform,
-    required Alignment baseAlignment,
-    required super.filterQuality,
-    required Object? readingIdentity,
-    required double? Function(RenderBox ancestor)? readingY,
-  })  : _baseAlignment = baseAlignment,
-        _readingIdentity = readingIdentity,
-        _readingY = readingY,
-        super(alignment: baseAlignment);
-
-  Alignment _baseAlignment;
-  Object? _readingIdentity;
-  double? Function(RenderBox ancestor)? _readingY;
-  double? _anchorY;
-
-  void configureReading(Object? identity,
-      double? Function(RenderBox ancestor)? readY, Alignment baseAlignment) {
-    // Closures change when the finite presentation rebuilds. Only changing the
-    // owner invalidates layout; width and auxiliary reveals propagate child
-    // layout changes through the existing render tree themselves.
-    _readingY = readY;
-    _baseAlignment = baseAlignment;
-    if (_readingIdentity != identity) {
-      _readingIdentity = identity;
-      _anchorY = null;
-      markNeedsLayout();
-    }
-    _updatePivot();
-  }
-
-  void _updatePivot() {
-    final anchor = _anchorY;
-    alignment =
-        _readingIdentity != null && anchor != null && hasSize && size.height > 0
-            ? Alignment(_baseAlignment.x, anchor / size.height * 2 - 1)
-            : _baseAlignment;
-  }
-
-  @override
-  void performLayout() {
-    super.performLayout();
-    _anchorY = _readingIdentity == null ? null : _readingY?.call(this);
-    _updatePivot();
-  }
-}
-
 typedef LyricSpacingRestoration = ({int revision, double spacing});
 
 class _VisibleSpacingSnapshot {
@@ -679,7 +593,8 @@ class LyricLineMotion extends ImplicitlyAnimatedWidget {
 // The visible geometry and the value used by ImplicitlyAnimatedWidget when a
 // transition is interrupted must use the same interpolation. Settling before
 // the final tick keeps the retained image filter from shifting its last pixel.
-double _settledGeometryProgress(double t) => (t / .995).clamp(0.0, 1.0);
+double _settledGeometryProgress(double t) =>
+    LyricSpacingMotion.settledGeometryProgress(t);
 
 class _SettledScaleTween extends Tween<double> {
   _SettledScaleTween({super.begin});

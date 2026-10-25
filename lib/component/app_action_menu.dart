@@ -67,8 +67,17 @@ class _AppActionMenuState<T> extends State<AppActionMenu<T>> {
 
   bool get _available => widget.enabled && (widget.canOpen?.call() ?? true);
 
-  void _show(MenuController controller) {
-    if (_open || !_available) return;
+  void _toggle(MenuController controller) {
+    if (_open) {
+      // The trigger belongs to the anchor's tap region, so outside dismissal
+      // does not handle a second click. Also retire a not-yet-mounted snapshot
+      // so two activations within one frame cannot open it afterwards.
+      _request++;
+      controller.close();
+      if (_open) setState(() => _open = false);
+      return;
+    }
+    if (!_available) return;
     final items = widget.itemBuilder(context);
     if (items.isEmpty) return;
     final width = widget.widthBuilder?.call(context) ?? widget.width;
@@ -204,7 +213,7 @@ class _AppActionMenuState<T> extends State<AppActionMenu<T>> {
         // the live backdrop filter; the overlay remains outside this boundary.
         return RepaintBoundary(
           child: widget.builder(context,
-              widget.enabled ? () => _show(controller) : null, _focus, _open),
+              widget.enabled ? () => _toggle(controller) : null, _focus, _open),
         );
       },
     );

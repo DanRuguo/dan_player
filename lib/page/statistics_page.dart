@@ -756,6 +756,8 @@ class HourlyListeningChart extends StatefulWidget {
 class _HourlyListeningChartState extends State<HourlyListeningChart> {
   final ScrollController _scrollController = ScrollController();
   final _selectedHour = ValueNotifier<int?>(null);
+  (double, double)? _chartGeometry;
+  bool _revealPending = false, _revealScheduled = false;
 
   int _value(int hour) =>
       hour < widget.values.length ? math.max(0, widget.values[hour]) : 0;
@@ -765,7 +767,11 @@ class _HourlyListeningChartState extends State<HourlyListeningChart> {
 
   void _selectHour(int hour, {bool reveal = false}) {
     _selectedHour.value = hour;
-    if (!reveal || !_scrollController.hasClients) return;
+    if (reveal) _revealHour(hour);
+  }
+
+  void _revealHour(int hour) {
+    if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
     final width = position.viewportDimension + position.maxScrollExtent;
     final offset = ((hour + 0.5) * width / 24 - position.viewportDimension / 2)
@@ -784,6 +790,7 @@ class _HourlyListeningChartState extends State<HourlyListeningChart> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final canReveal = TickerMode.valuesOf(context).enabled;
     final scheme = Theme.of(context).colorScheme;
     final maximum = widget.values.fold(0, math.max);
     return Column(
@@ -823,6 +830,26 @@ class _HourlyListeningChartState extends State<HourlyListeningChart> {
             );
             final chartWidth = math.max(constraints.maxWidth, slotMinimum * 24);
             final scrollable = chartWidth > constraints.maxWidth;
+            final geometry = (constraints.maxWidth, chartWidth);
+            if (_chartGeometry != geometry) {
+              _chartGeometry = geometry;
+              _revealPending = true;
+            }
+            if (_revealPending && canReveal && !_revealScheduled) {
+              _revealScheduled = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _revealScheduled = false;
+                if (!mounted || !TickerMode.valuesOf(this.context).enabled) {
+                  return;
+                }
+                _revealPending = false;
+                final hour = _visibleSelection;
+                // Resolve the current selection after layout, including a
+                // resize while hidden. Ordinary rebuilds preserve browsing;
+                // the default peak stays a fallback, not a pinned selection.
+                if (hour != null) _revealHour(hour);
+              });
+            }
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

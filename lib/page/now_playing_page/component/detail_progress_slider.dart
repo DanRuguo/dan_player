@@ -232,6 +232,9 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     if (oldWidget.trackIdentity != widget.trackIdentity ||
         sourceChanged ||
         !_enabled) {
+      // A contact still waiting in the arena belongs to the previous source
+      // too; it must not start a new drag after this replacement.
+      _cancelForNewSeek();
       _undoPosition = null;
       _hoverPosition.value = null;
       _dragging = false;
@@ -375,6 +378,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
           }
         });
       } else {
+        _cancelForNewSeek();
         _dragging = false;
         _dragIdentity = null;
         _hoverPosition.value = null;

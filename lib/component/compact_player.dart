@@ -307,14 +307,10 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
         // Preserve the last valid visual sample, just as the former
         // StreamBuilder did, without surfacing a transient native read error.
       });
-    } else if (_dragging) {
+    } else {
       // Hide/minimize can interrupt capture without a pointer cancel. Retain
-      // native progress, not a pending preview, and never seek on its late end.
-      setState(() {
-        _dragging = false;
-        _dragPosition = null;
-        _dragTrackIdentity = null;
-      });
+      // native progress and retire even a contact still waiting in the arena.
+      _cancelForNewSeek();
     }
   }
 
@@ -472,6 +468,9 @@ class _CompactPlayerViewState extends State<CompactPlayerView>
     if (oldWidget.trackIdentity != widget.trackIdentity ||
         !identical(oldWidget.positions, widget.positions) ||
         !_canSeek) {
+      // Retire pending contacts as well as accepted drags before a later move
+      // can capture this replacement source as its own.
+      _cancelForNewSeek();
       _dragPosition = null;
       _dragTrackIdentity = null;
       _dragging = false;

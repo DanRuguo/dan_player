@@ -130,7 +130,8 @@ class OnlineMusicService {
         _customSearchSweepTimeout = const Duration(seconds: 8),
         _searchRequestTimeout = _requestTimeout,
         _retryDelay = const Duration(milliseconds: 220),
-        _httpClientFactory = HttpClient.new;
+        _httpClientFactory = HttpClient.new,
+        _now = DateTime.now;
 
   /// Search-only fixture seam. Both hooks are mandatory so an omitted fake can
   /// never silently issue a real provider request in tests.
@@ -144,6 +145,7 @@ class OnlineMusicService {
     Duration customSearchSweepTimeout = const Duration(seconds: 8),
     Duration retryDelay = Duration.zero,
     HttpClient Function()? httpClientFactory,
+    DateTime Function()? now,
   })  : _sourcePreferences = sourcePreferences,
         _customProfiles = customProfiles ?? (() => const []),
         _qqSearchOverride = qqSearch,
@@ -153,7 +155,8 @@ class OnlineMusicService {
         _customSearchSweepTimeout = customSearchSweepTimeout,
         _searchRequestTimeout = _requestTimeout,
         _retryDelay = retryDelay,
-        _httpClientFactory = httpClientFactory ?? HttpClient.new;
+        _httpClientFactory = httpClientFactory ?? HttpClient.new,
+        _now = now ?? DateTime.now;
 
   /// Fixture seam for the owned raw Netease HTTP/parser path. QQ is disabled
   /// and no other real provider can be contacted by this constructor.
@@ -170,7 +173,8 @@ class OnlineMusicService {
         _customSearchSweepTimeout = const Duration(seconds: 8),
         _searchRequestTimeout = requestTimeout,
         _retryDelay = retryDelay,
-        _httpClientFactory = httpClientFactory;
+        _httpClientFactory = httpClientFactory,
+        _now = DateTime.now;
 
   static final OnlineMusicService instance = OnlineMusicService._();
 
@@ -186,12 +190,42 @@ class OnlineMusicService {
   final Duration _searchRequestTimeout;
   final Duration _retryDelay;
   final HttpClient Function() _httpClientFactory;
+  final DateTime Function() _now;
+  // Access-ordered, bounded in count and UTF-16 key/URL payload. Profiles are
+  // immutable shared references; no background expiry timer is needed.
+  static const _maximumStreamUrls = 128;
+  static const _maximumStreamUrlBytes = 512 * 1024;
   final Map<String, _ResolvedUrl> _streamCache = {};
+  int _streamResolutionGeneration = 0;
   CustomMusicSourceCancellation? _pendingCustomStreamResolution;
 
   void cancelPendingStreamResolution() {
+    _streamResolutionGeneration++;
     _pendingCustomStreamResolution?.cancel();
     _pendingCustomStreamResolution = null;
+  }
+
+  static int _streamUrlBytes(String key, _ResolvedUrl value) =>
+      (key.length + value.url.toString().length) * 2;
+
+  void _pruneExpiredStreamUrls(DateTime now) =>
+      _streamCache.removeWhere((_, value) => !value.expiresAt.isAfter(now));
+
+  void _rememberStreamUrl(String key, _ResolvedUrl value) {
+    final now = _now();
+    _pruneExpiredStreamUrls(now);
+    _streamCache.remove(key);
+    final bytes = _streamUrlBytes(key, value);
+    if (!value.expiresAt.isAfter(now) || bytes > _maximumStreamUrlBytes) return;
+    var retainedBytes = _streamCache.entries.fold<int>(
+        0, (total, entry) => total + _streamUrlBytes(entry.key, entry.value));
+    while (_streamCache.isNotEmpty &&
+        (_streamCache.length >= _maximumStreamUrls ||
+            retainedBytes + bytes > _maximumStreamUrlBytes)) {
+      final oldest = _streamCache.keys.first;
+      retainedBytes -= _streamUrlBytes(oldest, _streamCache.remove(oldest)!);
+    }
+    _streamCache[key] = value;
   }
 
   /// Whether a user can try downloading. Unknown per-track availability is
@@ -758,6 +792,8 @@ class OnlineMusicService {
   Future<Uri> resolveStreamUrl(Audio audio, {bool forceRefresh = false}) async {
     _validateOnlineAudio(audio);
     cancelPendingStreamResolution();
+    final generation = _streamResolutionGeneration;
+    _pruneExpiredStreamUrls(_now());
     final customProfileId =
         CustomMusicSourceProfile.profileIdFromProvider(audio.onlineProvider);
     final initialCustom = _customProfileFor(audio.onlineProvider);
@@ -799,7 +835,9 @@ class OnlineMusicService {
     if (!forceRefresh &&
         cached != null &&
         cacheMatchesProfile &&
-        cached.expiresAt.isAfter(DateTime.now())) {
+        cached.expiresAt.isAfter(_now())) {
+      _streamCache.remove(audio.path);
+      _streamCache[audio.path] = cached;
       return cached.url;
     }
     if (cached != null && !cacheMatchesProfile) {
@@ -807,7 +845,7 @@ class OnlineMusicService {
     }
 
     try {
-      final now = DateTime.now();
+      final now = _now();
       final custom = initialCustom;
       late final Uri url;
       var expiresAt = now.add(const Duration(minutes: 10));
@@ -856,11 +894,13 @@ class OnlineMusicService {
             ),
         };
       }
-      _streamCache[audio.path] = _ResolvedUrl(
-        url,
-        expiresAt,
-        profileScope: custom,
-      );
+      // A superseded built-in request can still finish (its dependency has no
+      // cancellation handle). Return to its owner as before, but never evict a
+      // newer cache entry or consume capacity with that late result.
+      if (generation == _streamResolutionGeneration) {
+        _rememberStreamUrl(
+            audio.path, _ResolvedUrl(url, expiresAt, profileScope: custom));
+      }
       return url;
     } catch (error) {
       throw _mapError(error, operation: "获取播放地址", provider: audio.sourceLabel);
@@ -1370,7 +1410,9 @@ class OnlineMusicService {
       );
     }
     if (!identical(current, expected)) {
-      _streamCache.remove(audio.path);
+      if (identical(_streamCache[audio.path]?.profileScope, expected)) {
+        _streamCache.remove(audio.path);
+      }
       throw OnlineMusicException(
         OnlineMusicFailureKind.unavailable,
         '自定义歌源配置已改变，请重新$operation',

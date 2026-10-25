@@ -7,6 +7,7 @@ import 'package:desktop_lyric/message.dart';
 import 'package:desktop_lyric/font_policy.dart';
 import 'package:desktop_lyric/lyric_ruby.dart';
 import 'package:desktop_lyric/lyric_glyph_morph.dart';
+import 'package:desktop_lyric/lyric_spacing_scale.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 
@@ -150,21 +151,12 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
   Object? _shapeIdentity;
   _DesktopLyricTextShaping? _shaping;
   _DesktopLyricTextLayout? _layout;
-  _DesktopLyricTextShaping? _previousShaping;
-  _DesktopLyricTextLayout? _previousLayout;
   Object? _spacingBaseIdentity;
   double? _lastSpacing;
-  Size? _retargetSize;
-  final _glyphMotions = <int, LyricGlyphMorph>{};
-  final _strokeMotions = <int, LyricGlyphMorph>{};
-  double _retargetProgress = 1;
-  static const _spacingCurve = Cubic(.22, 0, .16, 1);
   bool _lifecycleHidden = false;
   late final AnimationController _spacingMotion =
-      AnimationController(vsync: this, duration: AppMotion.lyricLine, value: 1)
-        ..addStatusListener((status) {
-          if (status == AnimationStatus.completed) _releasePrevious();
-        });
+      AnimationController(
+          vsync: this, duration: LyricSpacingMotion.duration, value: 1);
   bool _reduced = true;
   int _wordEndMilliseconds = 0;
 
@@ -179,23 +171,9 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
     _attachClock();
   }
 
-  void _releasePrevious() {
-    for (final morph in [..._glyphMotions.values, ..._strokeMotions.values]) {
-      morph.dispose();
-    }
-    _glyphMotions.clear();
-    _strokeMotions.clear();
-    _previousLayout?.ruby?.dispose();
-    _previousShaping?.dispose();
-    _previousShaping = null;
-    _previousLayout = null;
-    _retargetSize = null;
-  }
-
   void _finishSpacing() {
     _spacingMotion.stop();
     _spacingMotion.value = 1;
-    _releasePrevious();
   }
 
   @override
@@ -331,106 +309,29 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
       widget.maxHorizontalWidth,
     );
     if (_identity != identity) {
-      // A retained paragraph is relaid out in place when only its width
-      // changes. Continue from the last presented geometry before mutating
-      // that target, just as a second spacing edit does.
-      if (_shapeIdentity == shapeIdentity && _previousLayout != null) {
-        final progress = _spacingCurve.transform(_spacingMotion.value);
-        final presentedSize = Size.lerp(
-            _retargetSize ?? _previousLayout!.size, _layout!.size, progress)!;
-        final presented = _DesktopLyricTextLayout.interpolate(
-            _previousLayout!, _layout!, progress,
-            sourceShaping: _previousShaping,
-            horizontalMotion: _glyphMotions[0]);
-        _previousLayout?.ruby?.dispose();
-        _previousLayout = presented;
-        _retargetSize = presentedSize;
-        _retargetProgress = progress;
-        _spacingMotion.forward(from: 0);
-      }
+      final spacingChanged = _lastSpacing != null &&
+          _lastSpacing != widget.verticalLetterSpacing &&
+          _spacingBaseIdentity == spacingBaseIdentity &&
+          spacingAllowed;
       if (_shapeIdentity != shapeIdentity) {
-        final spacingChanged = _lastSpacing != null &&
-            _lastSpacing != widget.verticalLetterSpacing &&
-            _spacingBaseIdentity == spacingBaseIdentity &&
-            spacingAllowed;
+        _layout?.ruby?.dispose();
+        _shaping?.dispose();
+        _shaping = shape(widget.verticalLetterSpacing);
+        _shapeIdentity = shapeIdentity;
         if (spacingChanged) {
-          final progress = _spacingCurve.transform(_spacingMotion.value);
-          final presentedSize = _previousLayout == null
-              ? _layout!.size
-              : Size.lerp(_retargetSize ?? _previousLayout!.size, _layout!.size,
-                  progress)!;
-          final wasMoving = _previousLayout != null;
-          _spacingMotion.stop();
-          if (wasMoving) {
-            final presented = _DesktopLyricTextLayout.interpolate(
-                _previousLayout!, _layout!, progress,
-                sourceShaping: _previousShaping,
-                horizontalMotion: _glyphMotions[0]);
-            _previousLayout?.ruby?.dispose();
-            _previousLayout = presented;
-            _layout?.ruby?.dispose();
-            _shaping?.dispose();
-          } else {
-            _previousShaping = _shaping;
-            _previousLayout = _layout;
-          }
-          _retargetProgress = progress;
-          _retargetSize = wasMoving ? presentedSize : null;
+          // Match the main lyric page: the new target enters as one group.
+          // Another spacing edit restarts this finite entrance, never an old
+          // glyph snapshot. Font or language changes retain their direct path.
           _spacingMotion.forward(from: 0);
         } else {
           _finishSpacing();
-          _layout?.ruby?.dispose();
-          _shaping?.dispose();
         }
-        _shaping = shape(widget.verticalLetterSpacing);
-        _shapeIdentity = shapeIdentity;
+      } else {
+        // A width-only relayout keeps shaped paragraphs and any current
+        // entrance's progress; resizing must not replay from transparent.
+        _layout?.ruby?.dispose();
       }
-      if (identical(_layout?.shaping, _shaping)) _layout?.ruby?.dispose();
       _layout = geometry(_shaping!);
-      if (_previousShaping != null) {
-        final from = _previousLayout!;
-        void cache(int key, TextPainter source, TextPainter target,
-            Map<int, LyricGlyphMorph> motions,
-            {bool centered = false}) {
-          final existing = motions[key];
-          final offset = centered
-              ? Offset((source.width - target.width) / 2, 0)
-              : Offset.zero;
-          final next = existing == null
-              ? LyricGlyphMorph(
-                  from: source,
-                  to: target,
-                  targetOffset: offset,
-                  pixelRatio: MediaQuery.devicePixelRatioOf(context))
-              : LyricGlyphMorph.retarget(existing, target, _retargetProgress,
-                  targetOffset: centered
-                      ? Offset(
-                          (existing.sourceSize.width - target.width) / 2, 0)
-                      : Offset.zero);
-          existing?.dispose();
-          motions[key] = next;
-        }
-
-        if (!widget.vertical) {
-          cache(0, from.highlight!, _layout!.highlight!, _glyphMotions,
-              centered: true);
-          if (from.stroke != null && _layout!.stroke != null) {
-            cache(0, from.stroke!, _layout!.stroke!, _strokeMotions,
-                centered: true);
-          }
-        } else {
-          for (var index = 0; index < from.glyphs.length; index++) {
-            if (!from.glyphs[index].glyph.horizontal) continue;
-            cache(index, from.glyphs[index].highlight,
-                _layout!.glyphs[index].highlight, _glyphMotions);
-            if (from.glyphs[index].stroke != null &&
-                _layout!.glyphs[index].stroke != null) {
-              cache(index, from.glyphs[index].stroke!,
-                  _layout!.glyphs[index].stroke!, _strokeMotions);
-            }
-          }
-        }
-      }
       _lastSpacing = widget.verticalLetterSpacing;
       _spacingBaseIdentity = spacingBaseIdentity;
       _identity = identity;
@@ -446,42 +347,48 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
       }
     }
     _syncSamplingDemand();
+    var size = _layout!.size;
+    final readingExtent = (_layout!.ruby?.extent ?? 0) +
+        (widget.vertical ? 0 : (_layout!.ruby?.extraLeading ?? 0));
+    size = widget.vertical
+        ? Size(math.max(0,
+            size.width - readingExtent * (1 - widget.rubyVisibility)), size.height)
+        : Size(size.width, math.max(0,
+            size.height - readingExtent * (1 - widget.rubyVisibility)));
+    // Retain the same target paragraph and wrapper through the terminal frame.
+    // Only the finite outer pose changes on spacing animation ticks.
     return AnimatedBuilder(
       animation: _spacingMotion,
-      builder: (context, _) {
-        final progress = _spacingCurve.transform(_spacingMotion.value);
-        final previous = _previousLayout;
-        var size = previous == null
-            ? _layout!.size
-            : Size.lerp(
-                _retargetSize ?? previous.size, _layout!.size, progress)!;
-        final readingExtent = (_layout!.ruby?.extent ?? 0) +
-            (widget.vertical ? 0 : (_layout!.ruby?.extraLeading ?? 0));
-        size = widget.vertical
-            ? Size(
-                math.max(0,
-                    size.width - readingExtent * (1 - widget.rubyVisibility)),
-                size.height)
-            : Size(
-                size.width,
-                math.max(0,
-                    size.height - readingExtent * (1 - widget.rubyVisibility)));
-        return SizedBox.fromSize(
-          size: size,
-          child: RepaintBoundary(
-              child: CustomPaint(
+      child: SizedBox.fromSize(
+        size: size,
+        child: RepaintBoundary(
+          child: CustomPaint(
             painter: DesktopLyricTextPainter._(
                 layout: _layout!,
-                previousLayout: previous,
-                glyphMotions: _glyphMotions,
-                strokeMotions: _strokeMotions,
-                layoutProgress: progress,
                 clock: widget.clock,
                 rubyVisibility: widget.rubyVisibility,
                 reducedMotion: reducedMotion),
             isComplex: true,
             willChange: widget.words.isNotEmpty && !reducedMotion,
-          )),
+          ),
+        ),
+      ),
+      builder: (context, child) {
+        final progress =
+            LyricSpacingMotion.curve.transform(_spacingMotion.value);
+        return Opacity(
+          opacity: progress,
+          alwaysIncludeSemantics: true,
+          child: LyricSpacingScale(
+            scale: LyricSpacingMotion.scale(
+                LyricSpacingMotion.settledGeometryProgress(progress)),
+            alignment: Alignment.topCenter,
+            moving: _spacingMotion.value < 1,
+            // Reuse the paragraph boundary's display list. A second image
+            // filter changes native glyph sampling as scale reaches identity.
+            movingFilterQuality: null,
+            child: child!,
+          ),
         );
       },
     );
@@ -497,7 +404,6 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
     _shaping?.dispose();
     _layout?.ruby?.dispose();
     _spacingMotion.dispose();
-    _releasePrevious();
     super.dispose();
   }
 }
@@ -685,64 +591,6 @@ class _GlyphPaint {
 /// Each width owns independent geometry, so replacing a layout never mutates
 /// the old painter's boxes or makes shouldRepaint miss a retained paragraph.
 class _DesktopLyricTextLayout {
-  _DesktopLyricTextLayout.interpolate(
-      _DesktopLyricTextLayout from, _DesktopLyricTextLayout to, double progress,
-      {_DesktopLyricTextShaping? sourceShaping,
-      LyricGlyphMorph? horizontalMotion})
-      : shaping = sourceShaping ?? to.shaping {
-    size = Size.lerp(from.size, to.size, progress)!;
-    if (from.ruby != null && to.ruby != null) {
-      ruby = LyricRubyLayout.interpolate(from.ruby!, to.ruby!, progress,
-          retainSourcePainter: sourceShaping != null);
-    }
-    if (!vertical) {
-      // Ellipsis can split or remove a selection box as spacing/width changes.
-      // The actual presentation is indexed by authored glyph ranges, never by
-      // a positional zip of the two endpoints' selection boxes.
-      final motion = horizontalMotion;
-      if (motion == null) {
-        wordBoxes.addAll(to.wordBoxes);
-      } else {
-        final shift = Offset((size.width - motion.sourceSize.width) / 2, 0);
-        for (var word = 0; word < words.length; word++) {
-          final start = shaping.wordSourceStarts[word];
-          wordBoxes.add([
-            for (final box in motion.boxes(
-                start, start + words[word].content.length, progress))
-              (
-                rect: box.shift(shift),
-                rtl: to.wordBoxes[word].firstOrNull?.rtl ??
-                    from.wordBoxes[word].firstOrNull?.rtl ??
-                    false,
-                horizontal: true,
-              )
-          ]);
-        }
-      }
-      return;
-    }
-    for (var index = 0; index < to.glyphs.length; index++) {
-      final previous = from.glyphs[index], target = to.glyphs[index];
-      glyphs.add(_GlyphPaint(
-          sourceShaping == null ? target.shaping : sourceShaping.glyphs[index],
-          bounds: Rect.lerp(previous.bounds, target.bounds, progress)!,
-          paintOffset:
-              Offset.lerp(previous.paintOffset, target.paintOffset, progress)!,
-          scale: previous.scale + (target.scale - previous.scale) * progress));
-    }
-    for (var word = 0; word < to.wordBoxes.length; word++) {
-      wordBoxes.add([
-        for (var box = 0; box < to.wordBoxes[word].length; box++)
-          (
-            rect: Rect.lerp(from.wordBoxes[word][box].rect,
-                to.wordBoxes[word][box].rect, progress)!,
-            rtl: to.wordBoxes[word][box].rtl,
-            horizontal: to.wordBoxes[word][box].horizontal,
-          )
-      ]);
-    }
-  }
-
   _DesktopLyricTextLayout(
       {required this.shaping,
       required double? maxVerticalUnitWidth,
@@ -967,34 +815,19 @@ class _DesktopLyricTextLayout {
 class DesktopLyricTextPainter extends CustomPainter {
   DesktopLyricTextPainter._(
       {required _DesktopLyricTextLayout layout,
-      _DesktopLyricTextLayout? previousLayout,
-      double layoutProgress = 1,
-      Map<int, LyricGlyphMorph> glyphMotions = const {},
-      Map<int, LyricGlyphMorph> strokeMotions = const {},
       this.rubyVisibility = 1,
       required this.clock,
       required this.reducedMotion})
-      : _layout = previousLayout != null && layout.vertical
-            ? _DesktopLyricTextLayout.interpolate(
-                previousLayout, layout, layoutProgress)
-            : layout,
-        _previousLayout = layout.vertical ? null : previousLayout,
-        _glyphMotions = glyphMotions,
-        _strokeMotions = strokeMotions,
-        _layoutProgress = layoutProgress,
-        super(
-            repaint: layout.words.isNotEmpty && !reducedMotion ? clock : null);
+      : _layout = layout,
+        super(repaint: layout.words.isNotEmpty && !reducedMotion ? clock : null);
 
   final _DesktopLyricTextLayout _layout;
-  final _DesktopLyricTextLayout? _previousLayout;
-  final Map<int, LyricGlyphMorph> _glyphMotions, _strokeMotions;
-  Size _paintSize = Size.zero;
-  final double _layoutProgress;
   final double rubyVisibility;
+  // Spacing animates the outer group; this painter retains one target layout.
   @visibleForTesting
-  double get layoutProgress => _layoutProgress;
+  double get layoutProgress => 1;
   @visibleForTesting
-  bool get retainsPreviousLayout => _layoutProgress < 1;
+  bool get retainsPreviousLayout => false;
   final PlaybackClock clock;
   final bool reducedMotion;
 
@@ -1026,8 +859,7 @@ class DesktopLyricTextPainter extends CustomPainter {
   @visibleForTesting
   int debugPrefixScanSteps = 0;
   @visibleForTesting
-  List<LyricGlyphCell> get presentedGlyphCells =>
-      List.unmodifiable(_glyphMotions[0]?.cells ?? const <LyricGlyphCell>[]);
+  List<LyricGlyphCell> get presentedGlyphCells => const [];
   List<DesktopLyricGlyph> get glyphs =>
       List.unmodifiable(_layout.glyphs.map((glyph) => glyph.glyph));
 
@@ -1062,29 +894,7 @@ class DesktopLyricTextPainter extends CustomPainter {
   }
 
   @override
-  void paint(Canvas canvas, Size size) {
-    _paintSize = size;
-    final previous = _previousLayout;
-    if (previous == null || _layoutProgress >= 1 || _glyphMotions.isNotEmpty) {
-      _paintLayout(canvas);
-      return;
-    }
-    void endpoint(_DesktopLyricTextLayout layout, double opacity) {
-      if (opacity <= 0) return;
-      canvas.save();
-      canvas.translate((size.width - layout.size.width) / 2, 0);
-      canvas.saveLayer(Offset.zero & layout.size,
-          Paint()..color = Colors.white.withValues(alpha: opacity));
-      DesktopLyricTextPainter._(
-              layout: layout, clock: clock, reducedMotion: reducedMotion)
-          ._paintLayout(canvas);
-      canvas.restore();
-      canvas.restore();
-    }
-
-    endpoint(previous, 1 - _layoutProgress);
-    endpoint(_layout, _layoutProgress);
-  }
+  void paint(Canvas canvas, Size size) => _paintLayout(canvas);
 
   void _paintLayout(Canvas canvas) {
     final ruby = _layout.ruby;
@@ -1100,20 +910,7 @@ class DesktopLyricTextPainter extends CustomPainter {
       ruby.paintPrimary(canvas, () => _paintPrimaryLayout(canvas),
           visibility: rubyVisibility);
     }
-    ruby.paint(canvas,
-        visibility: rubyVisibility,
-        displacement: !vertical && _glyphMotions[0] != null
-            ? (glyph) {
-                final motion = _glyphMotions[0]!;
-                final presented = motion.bounds(
-                    glyph.span.start, glyph.span.end, _layoutProgress);
-                if (presented == null) return Offset.zero;
-                final center = (_paintSize.width - motion.sourceSize.width) / 2;
-                return Offset(
-                    presented.center.dx + center - glyph.source.center.dx,
-                    presented.top - glyph.source.top);
-              }
-            : null);
+    ruby.paint(canvas, visibility: rubyVisibility);
     canvas.restore();
   }
 
@@ -1138,9 +935,7 @@ class DesktopLyricTextPainter extends CustomPainter {
       final progress = progressForWord(index);
       if (progress <= 0) continue;
       final targetExtent = _layout.wordExtents[index];
-      final presented = _presentedWordBoxes(index);
-      // A word leaving the bounded paragraph keeps its current playback tint
-      // while its old glyphs fade out; an empty target must not erase it early.
+      final presented = _layout.wordBoxes[index];
       final extent = targetExtent > 0
           ? targetExtent
           : presented.fold<double>(0, (sum, box) => sum + box.rect.width);
@@ -1201,89 +996,18 @@ class DesktopLyricTextPainter extends CustomPainter {
     }
   }
 
-  List<({Rect rect, bool rtl, bool horizontal})> _presentedWordBoxes(
-      int index) {
-    final morph = _glyphMotions[0];
-    if (vertical || morph == null) return _layout.wordBoxes[index];
-    final start = _layout.shaping.wordSourceStarts[index];
-    final shift = Offset((_paintSize.width - morph.sourceSize.width) / 2, 0);
-    return [
-      for (final box in morph.boxes(
-          start, start + _layout.words[index].content.length, _layoutProgress))
-        (
-          rect: box.shift(shift),
-          rtl: _layout.wordBoxes[index].firstOrNull?.rtl ??
-              _previousLayout?.wordBoxes[index].firstOrNull?.rtl ??
-              false,
-          horizontal: true
-        )
-    ];
-  }
-
   void _paintGlyphs(Canvas canvas,
       {required bool played, bool stroke = false}) {
-    final motions = stroke ? _strokeMotions : _glyphMotions;
-    if (motions.isEmpty) {
-      if (stroke) {
-        _layout.paintStroke(canvas);
-      } else {
-        _layout.paint(canvas, played: played);
-      }
-      return;
-    }
-    final tint = stroke
-        ? null
-        : played
-            ? _layout.shaping.playedColor
-            : _layout.shaping.unplayedColor;
-    if (!vertical) {
-      final morph = motions[0]!;
-      canvas.save();
-      canvas.translate((_paintSize.width - morph.sourceSize.width) / 2, 0);
-      morph.paint(canvas,
-          progress: _layoutProgress,
-          tint: tint,
-          colourParagraph: (_previousLayout ?? _layout).base,
-          colourLayoutIdentity: _previousLayout ?? _layout,
-          colourPaint: stroke
-              ? null
-              : (source) =>
-                  (_previousLayout ?? _layout).paint(source, played: played));
-      canvas.restore();
-      return;
-    }
-    for (final (index, glyph) in _layout.glyphs.indexed) {
-      canvas.save();
-      canvas.translate(glyph.paintOffset.dx, glyph.paintOffset.dy);
-      canvas.scale(glyph.scale, glyph.scale);
-      final morph = motions[index];
-      if (morph != null) {
-        morph.paint(canvas,
-            progress: _layoutProgress,
-            tint: tint,
-            colourParagraph: glyph.base,
-            colourLayoutIdentity: glyph.base,
-            colourPaint: stroke
-                ? null
-                : (source) => (played ? glyph.highlight : glyph.base)
-                    .paint(source, Offset.zero));
-      } else {
-        (stroke
-                ? glyph.stroke
-                : played
-                    ? glyph.highlight
-                    : glyph.base)
-            ?.paint(canvas, Offset.zero);
-      }
-      canvas.restore();
+    if (stroke) {
+      _layout.paintStroke(canvas);
+    } else {
+      _layout.paint(canvas, played: played);
     }
   }
 
   @override
   bool shouldRepaint(DesktopLyricTextPainter oldDelegate) =>
       !identical(_layout, oldDelegate._layout) ||
-      !identical(_previousLayout, oldDelegate._previousLayout) ||
-      _layoutProgress != oldDelegate._layoutProgress ||
       !identical(clock, oldDelegate.clock) ||
       reducedMotion != oldDelegate.reducedMotion ||
       rubyVisibility != oldDelegate.rubyVisibility;

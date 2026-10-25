@@ -52,6 +52,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _surface = GlobalKey();
   final _motionGate = ValueNotifier(false);
+  final _contentVisible = ValueNotifier(false);
   late final AnimationController _animation =
       AnimationController(vsync: this, value: _initialValue(widget.kind));
   late ValueListenable<bool> _hidden;
@@ -150,14 +151,14 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
   bool get _canAnimate {
     final features =
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
-    return _visible &&
-        _treeVisible &&
-        _lifecycleVisible &&
-        !_hidden.value &&
+    return _canShowContent &&
         !features.disableAnimations &&
         !features.reduceMotion &&
         AppMotion.enabled(context, _motion);
   }
+
+  bool get _canShowContent =>
+      _visible && _treeVisible && _lifecycleVisible && !_hidden.value;
 
   void _settle() {
     if (!_animation.isAnimating) return;
@@ -167,6 +168,8 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
 
   void _applyVisibility() {
     if (!mounted) return;
+    final visible = _canShowContent;
+    if (_contentVisible.value != visible) _contentVisible.value = visible;
     final enabled = _canAnimate;
     if (_motionGate.value != enabled) _motionGate.value = enabled;
     if (!enabled) _settle();
@@ -242,6 +245,7 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
     widget.layoutChanges?.removeListener(_layoutChanged);
     _animation.dispose();
     _motionGate.dispose();
+    _contentVisible.dispose();
     super.dispose();
   }
 
@@ -296,12 +300,18 @@ class _PlayerGuideDemoState extends State<PlayerGuideDemo>
                       else if (widget.kind == PlayerGuideDemoKind.transitions)
                         _transitions(context)
                       else if (widget.kind == PlayerGuideDemoKind.statistics)
-                        Column(children: [
-                          StatisticsListeningTrends(
-                              snapshot: _statisticsSnapshot),
-                          StatisticsListeningWeekdays(
-                              snapshot: _weekdaySnapshot),
-                        ])
+                        ValueListenableBuilder(
+                            valueListenable: _contentVisible,
+                            child: Column(children: [
+                              StatisticsListeningTrends(
+                                  snapshot: _statisticsSnapshot),
+                              StatisticsListeningWeekdays(
+                                  snapshot: _weekdaySnapshot),
+                            ]),
+                            // Child controls keep their own animation kinds;
+                            // only leaving the visible demo settles the subtree.
+                            builder: (context, visible, child) =>
+                                TickerMode(enabled: visible, child: child!))
                       else if (widget.kind == PlayerGuideDemoKind.queueTools)
                         const PlayerGuideQueueToolsDemo()
                       else if (widget.kind == PlayerGuideDemoKind.spectrum)
