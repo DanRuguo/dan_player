@@ -84,7 +84,7 @@ class RenderingSettings extends StatelessWidget {
         controlKey: const ValueKey('surface-blur'),
         icon: Icons.blur_on,
         title: Text(ui('界面面板毛玻璃')),
-        subtitle: Text(ui('控制播放条等面板的模糊效果；窗口背景单独设置。')),
+        subtitle: Text(ui('控制播放条、右键及选项菜单等面板的模糊效果；窗口背景单独设置。')),
         value: value.surfaceBlur,
         onChanged: (v) =>
             _update((current) => current.copyWith(surfaceBlur: v)),

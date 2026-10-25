@@ -332,7 +332,10 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
     // showMenu captures these inherited themes from the trigger. Only its
     // popup scroll viewport uses the retained shader stretch; page scrolls
     // keep their existing raster path, independent of the popup animation.
-    return AppStableStretchScope(
+    // Keep button ink/arrow repaints local; the original PopupRoute and its
+    // visual geometry, labels and opening animation remain unchanged.
+    return RepaintBoundary(
+        child: AppStableStretchScope(
       child: ScrollbarTheme(
         data: ScrollbarTheme.of(context).copyWith(
           interactive: true,
@@ -382,6 +385,6 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
           ),
         ),
       ),
-    );
+    ));
   }
 }

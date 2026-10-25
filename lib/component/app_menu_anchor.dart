@@ -186,6 +186,7 @@ class AppMenuAnchor extends StatefulWidget {
       this.alignmentOffset = Offset.zero,
       this.reservedPadding = EdgeInsets.zero,
       this.style,
+      this.childFocusNode,
       this.onOpen,
       this.onClose});
   final List<Widget> menuChildren;
@@ -194,6 +195,7 @@ class AppMenuAnchor extends StatefulWidget {
   final Offset alignmentOffset;
   final EdgeInsetsGeometry reservedPadding;
   final MenuStyle? style;
+  final FocusNode? childFocusNode;
   final VoidCallback? onOpen, onClose;
   @override
   State<AppMenuAnchor> createState() => _AppMenuAnchorState();
@@ -215,6 +217,7 @@ class _AppMenuAnchorState extends State<AppMenuAnchor> {
     return MenuAnchor(
         clipBehavior: Clip.none,
         controller: _controller,
+        childFocusNode: widget.childFocusNode,
         useRootOverlay: useRootOverlay,
         consumeOutsideTap: widget.consumeOutsideTap,
         crossAxisUnconstrained: widget.crossAxisUnconstrained,

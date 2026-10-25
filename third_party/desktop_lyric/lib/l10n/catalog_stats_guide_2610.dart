@@ -13,6 +13,14 @@ const Map<String, List<String>> catalogStatsGuide2610 = {
   '星期收听习惯': ['Listening by weekday', '曜日別のリスニング傾向', '요일별 청취 습관'],
   '累计时长': ['Total time', '累計時間', '누적 시간'],
   '有收听日均': ['Per active day', '聴いた日の平均', '청취한 날의 평균'],
+  '1 分钟': ['1 minute', '1 分', '1분'],
+  '1 秒': ['1 second', '1 秒', '1초'],
+  '有效天数 {0}': ['Active days: {0}', '聴いた日数：{0}', '청취한 날: {0}일'],
+  '有效天数指有收听记录且时长大于零的天数；日均只除以这些天数。': [
+    'Active days have recorded listening above zero. The daily average divides only by these days.',
+    '聴いた日数は、0より長いリスニングが記録された日数です。日平均はこの日数で割ります。',
+    '청취한 날은 0보다 긴 청취 시간이 기록된 날입니다. 일평균은 이 날수만 분모로 사용합니다.'
+  ],
   '星期一': ['Monday', '月曜日', '월요일'],
   '星期二': ['Tuesday', '火曜日', '화요일'],
   '星期三': ['Wednesday', '水曜日', '수요일'],
@@ -98,11 +106,11 @@ const Map<String, List<String>> catalogStatsGuide2610 = {
     'そのままコピーではファイル内の全情報を保持します。変換は基本的な文字タグのみを保持し、埋め込み画像・歌詞・付随ファイルは保持しません。MP3は44.1 kHz、Opusは48 kHzで、モノラルを保ち、その他は最大2チャンネルです。FLACはサンプルレートとチャンネル数を保持します。',
     '원본 복사는 파일 내부의 모든 정보를 유지합니다. 변환은 기본 텍스트 태그만 유지하며 내장 표지, 가사, 외부 부속 파일은 유지하지 않습니다. MP3는 44.1 kHz, Opus는 48 kHz이며 모노는 유지하고 나머지는 최대 2채널입니다. FLAC은 샘플 레이트와 채널 수를 유지합니다.'
   ],
-  '“星期收听习惯”使用最近 90 个完整日历日，不含今天；可比较各星期累计时长，或切换有收听日均，查看每个活跃日通常听多久。各行区分有收听、已记零时长和缺失天数；缺失不等于没有听过，没有可计算记录时显示“—”。':
+  '“星期收听习惯”用折线比较最近 90 个完整日历日的各星期累计时长或有收听日均，不含今天。悬停或点按查看时长和有效天数，也可聚焦图表后用方向键、Home 和 End。有效天数只计有收听的日期；缺失不当作零，没有可计算记录时留空并显示“—”。':
       [
-    'Listening by Weekday uses the last 90 completed calendar days, excluding today. Compare totals or switch to per-active-day averages. Each row separates active, recorded-zero and missing days. Missing does not mean never listened; “—” marks values that cannot be calculated.',
-    '「曜日別のリスニング傾向」は今日を除いた直近90日間を使います。曜日ごとの累計時間や聴いた日の平均を比較できます。各行で聴いた日・記録が0の日・記録なしの日を区別します。記録なしは未再生を意味せず、計算できない値は「—」です。',
-    '요일별 청취 습관은 오늘을 제외한 최근 완료된 90일을 사용합니다. 누적 시간이나 청취한 날의 평균을 비교할 수 있습니다. 각 행은 청취한 날, 0으로 기록된 날, 기록 없는 날을 구분합니다. 기록 없음은 듣지 않았다는 뜻이 아니며 계산할 수 없으면 “—”로 표시합니다.'
+    'Listening by Weekday plots totals or per-active-day averages over the last 90 completed calendar days, excluding today. Hover or tap to inspect time and active days, or focus the chart and use arrow keys, Home and End. Only days with listening count as active. Missing data is not zero; unavailable values leave gaps and show “—”.',
+    '「曜日別のリスニング傾向」は今日を除いた直近90日間の曜日別累計時間や聴いた日の平均を折れ線で表示します。ホバーやタップで時間と聴いた日数を確認でき、グラフにフォーカスして矢印キー・Home・Endでも選べます。聴いた日のみを日数に数え、記録なしは0とせず、計算できない値は空白と「—」で示します。',
+    '요일별 청취 습관은 오늘을 제외한 최근 완료된 90일의 요일별 누적 시간이나 청취한 날의 평균을 꺾은선으로 표시합니다. 마우스를 올리거나 눌러 시간과 청취한 날수를 확인하고, 차트에 초점을 둔 뒤 방향키, Home, End로 선택할 수 있습니다. 청취한 날짜만 유효한 날로 세며, 기록 없음은 0으로 보지 않습니다. 계산할 수 없는 값은 선을 끊고 “—”로 표시합니다.'
   ],
   '日期筛选支持 today、yesterday 和 today-Nd，按提交搜索时的本机日历日期计算，可与其他条件组合。': [
     'Date filters accept today, yesterday and today-Nd, using the local calendar date when the search is submitted. Combine them with other conditions.',

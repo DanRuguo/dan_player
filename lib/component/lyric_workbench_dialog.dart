@@ -1,4 +1,4 @@
-import 'package:dan_player/component/app_menu_motion.dart';
+import 'package:dan_player/component/app_action_menu.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
@@ -36,6 +36,7 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
   bool busy = true;
   String? error;
   LyricDocument? document;
+  int? _historyMenuRevision;
 
   @override
   void initState() {
@@ -357,62 +358,90 @@ class _LyricWorkbenchDialogState extends State<LyricWorkbenchDialog> {
                                       icon: const Icon(Symbols.restore),
                                       label: Text(ui('恢复原始歌词'))),
                                 if (document?.history.isNotEmpty == true)
-                                  PopupMenuButton<int>(
-                                      popUpAnimationStyle:
-                                          appMenuAnimationStyle(context),
-                                      enabled: !busy,
-                                      tooltip: ui('恢复之前的版本'),
-                                      onSelected: (index) =>
-                                          _change((revision) async {
-                                            await store.restoreVersion(
-                                                widget.audio, index,
-                                                expectedRevision: revision);
-                                          }),
-                                      itemBuilder: (_) => [
-                                            for (var i =
-                                                    document!.history.length -
-                                                        1;
-                                                i >= 0;
-                                                i--)
-                                              PopupMenuItem(
-                                                  value: i,
-                                                  child:
-                                                      Text(ui('版本 {0} · {1}', [
-                                                    document!.history[i]
-                                                        ['revision'],
-                                                    ui(document!.history[i]
-                                                                ['edited'] !=
-                                                            null
-                                                        ? '人工修订'
-                                                        : '原始副本')
-                                                  ]))),
-                                          ],
-                                      child: Container(
-                                          constraints: const BoxConstraints(
-                                              minHeight: 44),
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16, vertical: 12),
-                                          decoration: BoxDecoration(
-                                              border: Border.all(
-                                                  color: scheme.outline),
-                                              borderRadius:
-                                                  AppShape.controlRadius),
-                                          child: Row(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                Icon(Symbols.history,
-                                                    size: 20,
-                                                    color: scheme.primary),
-                                                const SizedBox(width: 8),
-                                                Flexible(
-                                                    child: Text(ui('恢复之前的版本'),
-                                                        textAlign:
-                                                            TextAlign.center,
-                                                        style: TextStyle(
-                                                            color: scheme
-                                                                .primary))),
+                                  AppActionMenu<int>(
+                                    enabled: !busy,
+                                    semanticLabel: ui('恢复之前的版本'),
+                                    alignment: AlignmentDirectional.topStart,
+                                    alignmentOffset: Offset.zero,
+                                    onSelected: (index) {
+                                      if (busy ||
+                                          document?.revision !=
+                                              _historyMenuRevision ||
+                                          index < 0 ||
+                                          index >=
+                                              (document?.history.length ?? 0)) {
+                                        return;
+                                      }
+                                      _change((revision) async {
+                                        await store.restoreVersion(
+                                            widget.audio, index,
+                                            expectedRevision: revision);
+                                      });
+                                    },
+                                    itemBuilder: (_) {
+                                      _historyMenuRevision = document?.revision;
+                                      return [
+                                        for (var i =
+                                                document!.history.length - 1;
+                                            i >= 0;
+                                            i--)
+                                          AppActionMenuItem(
+                                              value: i,
+                                              child: Text(ui('版本 {0} · {1}', [
+                                                document!.history[i]
+                                                    ['revision'],
+                                                ui(document!.history[i]
+                                                            ['edited'] !=
+                                                        null
+                                                    ? '人工修订'
+                                                    : '原始副本')
                                               ]))),
+                                      ];
+                                    },
+                                    builder: (context, show, focus, _) =>
+                                        Tooltip(
+                                            message: ui('恢复之前的版本'),
+                                            child: InkWell(
+                                                focusNode: focus,
+                                                onTap: show,
+                                                borderRadius:
+                                                    AppShape.controlRadius,
+                                                child: Container(
+                                                    constraints:
+                                                        const BoxConstraints(
+                                                            minHeight: 44),
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 16,
+                                                        vertical: 12),
+                                                    decoration: BoxDecoration(
+                                                        border: Border.all(
+                                                            color:
+                                                                scheme.outline),
+                                                        borderRadius: AppShape
+                                                            .controlRadius),
+                                                    child: Row(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .center,
+                                                        children: [
+                                                          Icon(Symbols.history,
+                                                              size: 20,
+                                                              color: scheme
+                                                                  .primary),
+                                                          const SizedBox(
+                                                              width: 8),
+                                                          Flexible(
+                                                              child: Text(
+                                                                  ui('恢复之前的版本'),
+                                                                  textAlign:
+                                                                      TextAlign
+                                                                          .center,
+                                                                  style: TextStyle(
+                                                                      color: scheme
+                                                                          .primary))),
+                                                        ])))),
+                                  ),
                               ]),
                             ]),
                           ],

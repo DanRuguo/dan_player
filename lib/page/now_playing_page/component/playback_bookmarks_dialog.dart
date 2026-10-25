@@ -1,4 +1,4 @@
-import 'package:dan_player/component/app_menu_motion.dart';
+import 'package:dan_player/component/app_action_menu.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/library/playback_bookmarks.dart';
 import 'package:dan_player/play_service/playback_service.dart';
@@ -369,15 +369,22 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                                                                     .textTheme
                                                                     .labelMedium),
                                                           ])))),
-                                          PopupMenuButton<String>(
-                                              popUpAnimationStyle:
-                                                  appMenuAnimationStyle(
-                                                      context),
+                                          AppActionMenu<String>(
+                                              key: ValueKey(
+                                                  'bookmark-menu-${bookmark.id}'),
                                               enabled: !_busy,
-                                              tooltip: ui('更多'),
-                                              icon:
-                                                  const Icon(Symbols.more_vert),
+                                              semanticLabel: ui('更多'),
+                                              alignment:
+                                                  AlignmentDirectional.topStart,
+                                              alignmentOffset: Offset.zero,
                                               onSelected: (action) {
+                                                if (!mounted ||
+                                                    _busy ||
+                                                    !_items.any((item) =>
+                                                        item.id ==
+                                                        bookmark.id)) {
+                                                  return;
+                                                }
                                                 if (action == 'rename') {
                                                   _rename(bookmark);
                                                 } else {
@@ -386,15 +393,24 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                                                 }
                                               },
                                               itemBuilder: (_) => [
-                                                    PopupMenuItem(
+                                                    AppActionMenuItem(
                                                         value: 'rename',
                                                         child:
                                                             Text(ui('重命名书签'))),
-                                                    PopupMenuItem(
+                                                    AppActionMenuItem(
                                                         value: 'remove',
                                                         child:
                                                             Text(ui('删除书签'))),
-                                                  ]),
+                                                  ],
+                                              builder:
+                                                  (context, show, focus, _) =>
+                                                      IconButton(
+                                                        focusNode: focus,
+                                                        tooltip: ui('更多'),
+                                                        onPressed: show,
+                                                        icon: const Icon(
+                                                            Symbols.more_vert),
+                                                      )),
                                         ]));
                                   })),
                       ]))),

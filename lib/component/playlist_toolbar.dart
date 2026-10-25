@@ -1,10 +1,9 @@
 import 'dart:math' as math;
 
-import 'package:dan_player/component/app_menu_motion.dart';
+import 'package:dan_player/component/app_action_menu.dart';
 import 'package:dan_player/component/app_playback_mode_controls.dart';
 import 'package:dan_player/component/app_action_icon.dart';
 import 'package:dan_player/component/app_motion.dart';
-import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_sort_button.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
@@ -785,32 +784,7 @@ class _ToolbarMenu<T> extends StatefulWidget {
 }
 
 class _ToolbarMenuState<T> extends State<_ToolbarMenu<T>> {
-  final _anchor = GlobalKey();
-  bool _open = false;
-  RelativeRect? _lastPosition;
-
-  RelativeRect _position(BuildContext _, BoxConstraints constraints) {
-    if (!mounted) return _lastPosition ?? RelativeRect.fill;
-    final button = _anchor.currentContext?.findRenderObject();
-    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
-    if (button is! RenderBox ||
-        overlay is! RenderBox ||
-        !button.attached ||
-        !overlay.attached) {
-      return _lastPosition ?? RelativeRect.fill;
-    }
-    final bottomLeft = button.localToGlobal(Offset(0, button.size.height + 6),
-        ancestor: overlay);
-    _lastPosition = RelativeRect.fromRect(
-      Rect.fromLTWH(bottomLeft.dx, bottomLeft.dy, button.size.width, 0),
-      Offset.zero & overlay.size,
-    );
-    return _lastPosition!;
-  }
-
-  Future<void> _show() async {
-    if (_open || !widget.enabled || !widget.isCurrentMode()) return;
-    final scheme = Theme.of(context).colorScheme;
+  double _menuWidth(BuildContext context) {
     final theme = Theme.of(context);
     final menuTheme = PopupMenuTheme.of(context);
     final labelStyle = menuTheme.labelTextStyle?.resolve({}) ??
@@ -827,64 +801,47 @@ class _ToolbarMenuState<T> extends State<_ToolbarMenu<T>> {
           contentWidth, text.width + 24 + 20 + 10 + (item.checked ? 26 : 0));
       text.dispose();
     }
-    final menuWidth = math.min(contentWidth.ceilToDouble(),
+    return math.min(contentWidth.ceilToDouble(),
         math.max(44.0, math.min(340.0, MediaQuery.sizeOf(context).width - 32)));
-    setState(() => _open = true);
-    T? result;
-    try {
-      result = await showMenu<T>(
-        context: context,
-        positionBuilder: _position,
-        shape: AppShape.control,
-        color: scheme.surfaceContainer,
-        surfaceTintColor: Colors.transparent,
-        shadowColor: scheme.shadow.withValues(alpha: .18),
-        elevation: 4,
-        requestFocus: true,
-        constraints: BoxConstraints.tightFor(width: menuWidth),
-        menuPadding: const EdgeInsets.symmetric(vertical: 6),
-        popUpAnimationStyle:
-            appMenuAnimationStyle(context, reduced: widget.reduced),
-        items: [
-          for (final item in widget.items)
-            if (item == null)
-              const PopupMenuDivider(height: 10)
-            else
-              PopupMenuItem<T>(
-                key: item.key,
-                value: item.value,
-                enabled: item.onSelected != null,
-                height: 48,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    Icon(item.icon,
-                        size: 20,
-                        color: item.onSelected == null
-                            ? scheme.onSurface.withValues(alpha: .38)
-                            : scheme.onSurfaceVariant),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: Text(item.label,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            semanticsLabel: item.label)),
-                    if (item.checked) ...[
-                      const SizedBox(width: 8),
-                      Icon(Icons.check, size: 18, color: scheme.primary),
-                    ],
-                  ],
-                ),
-              ),
-        ],
-      );
-    } finally {
-      // Native focus/navigation failures must not permanently lock this menu.
-      if (mounted) setState(() => _open = false);
-    }
-    if (!mounted) return;
-    if (result == null || !widget.enabled || !widget.isCurrentMode()) return;
+  }
+
+  List<AppActionMenuItem<T>?> _menuItems(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return [
+      for (final item in widget.items)
+        if (item == null)
+          null
+        else
+          AppActionMenuItem<T>(
+            key: item.key,
+            value: item.value,
+            enabled: item.onSelected != null,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Icon(item.icon,
+                    size: 20,
+                    color: item.onSelected == null
+                        ? scheme.onSurface.withValues(alpha: .38)
+                        : scheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: Text(item.label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        semanticsLabel: item.label)),
+                if (item.checked) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check, size: 18, color: scheme.primary),
+                ],
+              ],
+            ),
+          ),
+    ];
+  }
+
+  void _select(T result) {
+    if (!mounted || !widget.enabled || !widget.isCurrentMode()) return;
     // Read the current items, not the opening snapshot: a read-only/busy policy
     // change while the menu is open must not dispatch an obsolete action.
     for (final item in widget.items) {
@@ -898,34 +855,44 @@ class _ToolbarMenuState<T> extends State<_ToolbarMenu<T>> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return ConstrainedBox(
-      key: _anchor,
-      constraints: BoxConstraints(maxWidth: widget.maxWidth),
-      child: widget.label == null
-          ? IconButton(
-              tooltip: widget.tooltip,
-              onPressed: widget.enabled ? _show : null,
-              style: _controlStyle(context,
-                  reduced: widget.reduced, iconOnly: true),
-              icon: Icon(widget.icon),
-            )
-          : Tooltip(
-              message: widget.tooltip,
-              child: OutlinedButton(
-                onPressed: widget.enabled ? _show : null,
-                style: _controlStyle(context, reduced: widget.reduced),
-                child: _ButtonLabel(
-                  label: widget.label!,
-                  icon: widget.icon,
-                  trailing: AnimatedRotation(
-                    turns: _open ? .5 : 0,
-                    duration: widget.reduced ? Duration.zero : AppMotion.quick,
-                    curve: AppMotion.standardCurve,
-                    child: const Icon(Icons.expand_more, size: 18),
+    return AppActionMenu<T>(
+      enabled: widget.enabled,
+      canOpen: widget.isCurrentMode,
+      semanticLabel: widget.tooltip,
+      widthBuilder: _menuWidth,
+      itemBuilder: _menuItems,
+      onSelected: _select,
+      builder: (context, show, focus, open) => ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: widget.maxWidth),
+        child: widget.label == null
+            ? IconButton(
+                tooltip: widget.tooltip,
+                onPressed: show,
+                focusNode: focus,
+                style: _controlStyle(context,
+                    reduced: widget.reduced, iconOnly: true),
+                icon: Icon(widget.icon),
+              )
+            : Tooltip(
+                message: widget.tooltip,
+                child: OutlinedButton(
+                  onPressed: show,
+                  focusNode: focus,
+                  style: _controlStyle(context, reduced: widget.reduced),
+                  child: _ButtonLabel(
+                    label: widget.label!,
+                    icon: widget.icon,
+                    trailing: AnimatedRotation(
+                      turns: open ? .5 : 0,
+                      duration:
+                          widget.reduced ? Duration.zero : AppMotion.quick,
+                      curve: AppMotion.standardCurve,
+                      child: const Icon(Icons.expand_more, size: 18),
+                    ),
                   ),
                 ),
               ),
-            ),
+      ),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_menu_surface.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:flutter/material.dart';
@@ -73,7 +74,7 @@ class AppMenuPanel extends StatefulWidget {
 class _AppMenuPanelState extends State<AppMenuPanel>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final _motion =
-      AnimationController(vsync: this, duration: AppMotion.long);
+      AnimationController(vsync: this, duration: AppMotion.emphasized);
   final _scroll = ScrollController();
   bool _started = false;
   AppLifecycleState? _lifecycle;
@@ -173,7 +174,7 @@ class _AppMenuPanelState extends State<AppMenuPanel>
             const RoundedRectangleBorder(
                 borderRadius: BorderRadius.all(Radius.circular(4))))
         .copyWith(side: resolve((s) => s.side));
-    final panel = Material(
+    final panel = AppMenuSurface(
       color: resolve((s) => s.backgroundColor) ??
           theme.colorScheme.surfaceContainer,
       surfaceTintColor:
@@ -181,7 +182,6 @@ class _AppMenuPanelState extends State<AppMenuPanel>
       shadowColor: resolve((s) => s.shadowColor) ?? theme.colorScheme.shadow,
       elevation: resolve((s) => s.elevation) ?? 3,
       shape: shape,
-      clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
         constraints: constraints,
         child: Padding(

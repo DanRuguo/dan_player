@@ -45,9 +45,9 @@ const catalogPerformancePresets = <String, List<String>>{
     "끄면 재생 막대의 스펙트럼 샘플링과 그리기를 중지합니다. 재생 제어는 계속 사용할 수 있습니다."
   ],
   "界面面板毛玻璃": ["Panel blur", "パネルのぼかし", "패널 흐림 효과"],
-  "控制播放条等面板的模糊效果；窗口背景单独设置。": [
-    "Controls blur on panels such as the playback bar. Window backgrounds have separate settings.",
-    "再生バーなどのパネルのぼかしを設定します。ウィンドウ背景は別に設定します。",
-    "재생 막대 등 패널의 흐림 효과를 설정합니다. 창 배경은 별도로 설정합니다."
+  "控制播放条、右键及选项菜单等面板的模糊效果；窗口背景单独设置。": [
+    "Controls blur on the playback bar, context menus and option menus. Window backgrounds have separate settings.",
+    "再生バー、コンテキストメニュー、オプションメニューなどのぼかしを設定します。ウィンドウ背景は別に設定します。",
+    "재생 막대, 컨텍스트 메뉴 및 옵션 메뉴 등의 흐림 효과를 설정합니다. 창 배경은 별도로 설정합니다."
   ]
 };
