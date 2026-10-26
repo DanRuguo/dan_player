@@ -1,4 +1,9 @@
 const Map<String, List<String>> catalogPlayerFeatureGuide = {
+  '完整便携包解压后已带 FFmpeg 与离线注音组件，请保留随包的 tool 文件夹。安装器仅安装核心播放器；需要转码或离线假名时，可在设置中安装对应组件。更新核心播放器会保留已安装的组件。': [
+    'The full portable package includes FFmpeg and offline reading components after extraction; keep its tool folder. The installer contains only the core player. Install the relevant components in Settings when you need conversion or offline Japanese readings. Updating the core player preserves installed components.',
+    '完全版のポータブルパッケージには FFmpeg とオフライン読み仮名用コンポーネントが含まれています。展開後も tool フォルダーを残してください。インストーラーにはプレーヤー本体のみが含まれます。変換やオフラインの読み仮名が必要な場合は、設定から対応するコンポーネントを追加できます。本体を更新しても、追加済みのコンポーネントは保持されます。',
+    '전체 포터블 패키지에는 FFmpeg와 오프라인 읽기 구성 요소가 포함되어 있으므로 압축을 푼 뒤에도 tool 폴더를 유지하세요. 설치 프로그램에는 플레이어 본체만 포함됩니다. 변환이나 오프라인 일본어 읽기가 필요하면 설정에서 해당 구성 요소를 설치하세요. 본체를 업데이트해도 설치된 구성 요소는 유지됩니다.'
+  ],
   '试一试：封面动效': [
     'Try it: cover effects',
     '試してみる：カバーの動き',

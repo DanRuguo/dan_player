@@ -129,16 +129,10 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
     }
     final address = _address.text.trim();
     final portText = _port.text.trim();
-    String input = address;
-    if (portText.isNotEmpty) {
-      final port = int.tryParse(portText);
-      if (port == null || port < 1 || port > 65535) return null;
-      final base =
-          Uri.tryParse(address.contains('://') ? address : 'http://$address');
-      if (base == null || base.host.isEmpty) return null;
-      input = base.replace(port: port).toString();
-    }
-    final normalized = NetworkProxyPreferences.normalizeCustomProxy(input);
+    final port = portText.isEmpty ? null : int.tryParse(portText);
+    if (portText.isNotEmpty && port == null) return null;
+    final normalized =
+        NetworkProxyPreferences.normalizeCustomProxy(address, port: port);
     if (normalized == null) return null;
     return NetworkProxyPreferences(
         mode: NetworkProxyMode.custom, customProxyUrl: normalized);

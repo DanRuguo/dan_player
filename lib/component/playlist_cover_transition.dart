@@ -379,7 +379,7 @@ class _PlaylistCoverTransitionHostState
   }
 
   _CoverGeometry? _geometry(_PlaylistCoverTransitionMarkerState marker,
-      {bool visibleOnly = true}) {
+      {bool visibleOnly = true, bool inspectImage = false}) {
     final host = _hostBox;
     final render = marker._boundary.currentContext?.findRenderObject();
     if (host == null ||
@@ -400,7 +400,10 @@ class _PlaylistCoverTransitionHostState
           viewport.getTransformTo(host), Offset.zero & viewport.size));
     }
     if (visibleOnly && !visible.overlaps(rect)) return null;
-    return _CoverGeometry(rect, marker.widget.borderRadius, render);
+    // Only capture sources need an image-presence snapshot. Moving targets
+    // query geometry on every paint; readiness has its own bounded checks.
+    return _CoverGeometry(rect, marker.widget.borderRadius, render,
+        hadImage: inspectImage && hasDecodedCoverImage(render));
   }
 
   _CoverGeometry? _movingTarget(Object id) {
@@ -425,7 +428,8 @@ class _PlaylistCoverTransitionHostState
     if (!mounted) return;
     final visible = <(Object, _CoverGeometry)>[
       for (final entry in _markers.entries)
-        if (_geometry(entry.value) case final geometry?) (entry.key, geometry),
+        if (_geometry(entry.value, inspectImage: true) case final geometry?)
+          (entry.key, geometry),
     ]..sort((a, b) {
         final vertical = a.$2.rect.top.compareTo(b.$2.rect.top);
         return vertical != 0
@@ -1069,8 +1073,8 @@ class _PlaylistCoverTransitionMarkerState
 }
 
 class _CoverGeometry {
-  _CoverGeometry(this.rect, this.radius, this.boundary)
-      : hadImage = hasDecodedCoverImage(boundary);
+  _CoverGeometry(this.rect, this.radius, this.boundary,
+      {required this.hadImage});
   final bool hadImage;
   final Rect rect;
   final BorderRadius radius;

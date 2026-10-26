@@ -224,7 +224,8 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
               trailing: const Icon(Icons.expand_more, size: 18))));
 
   Widget _chart(BuildContext context, ListeningTrendComparison current,
-          ColorScheme scheme) =>
+          ColorScheme scheme,
+          {required bool canReveal}) =>
       LayoutBuilder(builder: (context, constraints) {
         final scale = MediaQuery.textScalerOf(context).scale(12) / 12;
         final width = _calendarWeek
@@ -236,11 +237,15 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
             _weekGeometry = geometry;
             _revealWeekSelection = true;
           }
-          if (_revealWeekSelection && !_weekRevealScheduled) {
+          if (_revealWeekSelection && canReveal && !_weekRevealScheduled) {
             _weekRevealScheduled = true;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _weekRevealScheduled = false;
-              if (!mounted || !_calendarWeek) return;
+              if (!mounted ||
+                  !_calendarWeek ||
+                  !TickerMode.valuesOf(this.context).enabled) {
+                return;
+              }
               _revealWeekSelection = false;
               _select(_index, reveal: true);
             });
@@ -476,7 +481,8 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                   const SizedBox(height: 8),
                   Text(ui('每日最高 {0}', [_duration(_maximum.round())]),
                       style: theme.textTheme.bodySmall),
-                  _chart(context, current, scheme),
+                  _chart(context, current, scheme,
+                      canReveal: TickerMode.valuesOf(context).enabled),
                   const SizedBox(height: 8),
                   ValueListenableBuilder(
                       valueListenable: _selection,

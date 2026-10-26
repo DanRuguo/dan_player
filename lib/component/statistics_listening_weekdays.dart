@@ -30,7 +30,7 @@ class _StatisticsListeningWeekdaysState
   final _focus = FocusNode();
   final _scroll = ScrollController();
   (double, double)? _chartGeometry;
-  bool _revealScheduled = false;
+  bool _revealPending = false, _revealScheduled = false;
   static const _names = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
   static const _shortNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -81,6 +81,7 @@ class _StatisticsListeningWeekdaysState
 
   Widget _chart(BuildContext context, List<double?> values) {
     final theme = Theme.of(context), scheme = theme.colorScheme;
+    final canReveal = TickerMode.valuesOf(context).enabled;
     return LayoutBuilder(builder: (context, constraints) {
       final labelStyle = theme.textTheme.labelSmall!;
       final text = TextPainter(
@@ -115,15 +116,18 @@ class _StatisticsListeningWeekdaysState
       final geometry = (constraints.maxWidth - axisWidth - 8, width);
       if (_chartGeometry != geometry) {
         _chartGeometry = geometry;
-        if (!_revealScheduled) {
-          _revealScheduled = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _revealScheduled = false;
-            if (mounted && TickerMode.valuesOf(context).enabled) {
-              _select(_selection.value, reveal: true);
-            }
-          });
-        }
+        _revealPending = true;
+      }
+      if (_revealPending && canReveal && !_revealScheduled) {
+        _revealScheduled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _revealScheduled = false;
+          if (!mounted || !TickerMode.valuesOf(this.context).enabled) return;
+          // Hidden layout retains the request. Returning without a geometry
+          // change must still preserve the user's manual horizontal browsing.
+          _revealPending = false;
+          _select(_selection.value, reveal: true);
+        });
       }
       final plot = GestureDetector(
         behavior: HitTestBehavior.opaque,

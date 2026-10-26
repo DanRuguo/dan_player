@@ -144,6 +144,9 @@ class _LyricLineViewState extends State<LyricLineView>
     final generation = ++_layoutGeneration;
     if (!_visible) {
       _layoutPending = false;
+      // TickerMode can retain the scroll view without a lifecycle event or
+      // another clock callback. Release only this overflow consumer's lease.
+      _controller.playbackClock.setVisualSamplingDemand(this, false);
       return;
     }
     _layoutPending = true;

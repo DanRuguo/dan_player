@@ -8,6 +8,14 @@ bool _pressedHoverDevice(PointerMoveEvent event) =>
     event.kind == PointerDeviceKind.mouse ||
     event.kind == PointerDeviceKind.stylus;
 
+bool _pointerMotionAllowed(BuildContext context) {
+  final lifecycle = WidgetsBinding.instance.lifecycleState;
+  return !appToolbarReduceMotion(context) &&
+      lifecycle != AppLifecycleState.hidden &&
+      lifecycle != AppLifecycleState.paused &&
+      lifecycle != AppLifecycleState.detached;
+}
+
 /// Consume the most recent hardware sample once per rendered frame. Gaming
 /// mice can deliver hundreds of samples between frames; none need a separate
 /// walk of the mounted grid's coordinate transforms.
@@ -112,10 +120,16 @@ class _CoverPointerScopeState extends State<CoverPointerScope>
   }
 
   @override
-  void didChangeAccessibilityFeatures() {
-    // Native reduceMotion is not a MediaQuery field. Retire the shared sample
-    // even when no inherited dependency changes or new pointer input arrives.
-    final enabled = !appToolbarReduceMotion(context);
+  void didChangeAccessibilityFeatures() => _syncMotionPolicy();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      _syncMotionPolicy();
+
+  void _syncMotionPolicy() {
+    // Native motion policy and window visibility can change without a build.
+    // Retire both published and pending samples before the next visible frame.
+    final enabled = _pointerMotionAllowed(context);
     if (_enabled == enabled) return;
     _enabled = enabled;
     if (!enabled) position.clear();
@@ -125,7 +139,7 @@ class _CoverPointerScopeState extends State<CoverPointerScope>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _enabled = !appToolbarReduceMotion(context);
+    _enabled = _pointerMotionAllowed(context);
     if (!_enabled) position.clear();
   }
 
@@ -248,8 +262,14 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow>
   }
 
   @override
-  void didChangeAccessibilityFeatures() {
-    final enabled = !appToolbarReduceMotion(context);
+  void didChangeAccessibilityFeatures() => _syncMotionPolicy();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      _syncMotionPolicy();
+
+  void _syncMotionPolicy() {
+    final enabled = _pointerMotionAllowed(context);
     if (_enabled == enabled) return;
     _enabled = enabled;
     if (!enabled) _position.clear();
@@ -259,7 +279,7 @@ class _CategoryPointerGlowState extends State<CategoryPointerGlow>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _enabled = !appToolbarReduceMotion(context);
+    _enabled = _pointerMotionAllowed(context);
     if (!_enabled) _position.clear();
     final motion = context
         .dependOnInheritedWidgetOfExactType<CoverPointerMotion>()

@@ -181,7 +181,12 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
     _lifecycleHidden = state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached;
-    if (_lifecycleHidden) _finishSpacing();
+    if (_lifecycleHidden) {
+      _finishSpacing();
+      // A hidden engine need not build again. Retire this text's sampler now;
+      // other visible consumers retain their independent clock demand.
+      widget.clock.setVisualSamplingDemand(this, false);
+    }
     if (mounted) setState(() {});
   }
 
@@ -213,6 +218,7 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
     widget.clock.setVisualSamplingDemand(
         this,
         !_reduced &&
+            !_lifecycleHidden &&
             widget.words.isNotEmpty &&
             widget.clock.positionMilliseconds < _wordEndMilliseconds);
   }
@@ -682,12 +688,22 @@ class _DesktopLyricTextLayout {
     }
     size = Size(columnWidth + (ruby?.extent ?? 0), top);
     var offset = 0;
+    var firstGlyph = 0;
     for (final word in words) {
       final start = offset.clamp(0, text.length);
       offset += word.content.length;
       final end = offset.clamp(0, text.length);
       final boxes = <({Rect rect, bool rtl, bool horizontal})>[];
-      for (final glyph in glyphs) {
+      // Source offsets are ordered even when authored times overlap or move
+      // backwards. Revisit only units crossing this word's source range; a
+      // narrow-window relayout need not scan the whole column for every word.
+      while (firstGlyph < glyphs.length &&
+          glyphs[firstGlyph].glyph.end <= start) {
+        firstGlyph++;
+      }
+      for (var glyphIndex = firstGlyph; glyphIndex < glyphs.length; glyphIndex++) {
+        final glyph = glyphs[glyphIndex];
+        if (glyph.glyph.start >= end) break;
         if (glyph.glyph.horizontal) {
           final selectionStart = math.max(start, glyph.glyph.start);
           final selectionEnd = math.min(end, glyph.glyph.end);
