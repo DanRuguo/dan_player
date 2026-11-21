@@ -78,6 +78,13 @@ class _NextTransitionPlan {
   final TrackPlaybackSettings settings;
 }
 
+final Expando<Future<void> Function()> _preferenceFlushers = Expando();
+
+/// Flushes any pending debounced mode or equalizer preference write on a real
+/// [PlaybackService], while remaining a safe no-op for test doubles.
+Future<void> flushPlaybackPreferenceSave(PlaybackService service) =>
+    _preferenceFlushers[service]?.call() ?? Future<void>.value();
+
 /// 只通知 now playing 变更
 class PlaybackService extends ChangeNotifier {
   final PlayService playService;
@@ -117,17 +124,24 @@ class PlaybackService extends ChangeNotifier {
   PlaybackService.forTesting(PlayService owner,
       {required BassPlayer player,
       required SmtcFlutter smtc,
-      required void Function(Audio) applyAudioTheme})
+      required void Function(Audio) applyAudioTheme,
+      Future<void> Function()? savePreferences})
       : this._(owner,
-            player: player, smtc: smtc, applyAudioTheme: applyAudioTheme);
+            player: player,
+            smtc: smtc,
+            applyAudioTheme: applyAudioTheme,
+            savePreferences: savePreferences);
 
   PlaybackService._(this.playService,
       {BassPlayer? player,
       SmtcFlutter? smtc,
-      void Function(Audio)? applyAudioTheme})
+      void Function(Audio)? applyAudioTheme,
+      Future<void> Function()? savePreferences})
       : _injectedPlayer = player,
         _applyAudioTheme = applyAudioTheme,
+        _savePreferences = savePreferences ?? AppPreference.instance.save,
         _smtc = smtc ?? SmtcFlutter() {
+    _preferenceFlushers[this] = flushPreferenceSave;
     queueStopBoundary.addListener(_onQueueStopChanged);
     segmentLoop.addListener(_practiceChanged);
     AppSettings.instance.playbackTransitions
@@ -231,6 +245,7 @@ class PlaybackService extends ChangeNotifier {
 
   final BassPlayer? _injectedPlayer;
   final void Function(Audio)? _applyAudioTheme;
+  final Future<void> Function() _savePreferences;
   late final BassPlayer _player = _injectedPlayer ?? _createPlayer();
 
   BassPlayer _createPlayer() {
@@ -567,6 +582,7 @@ class PlaybackService extends ChangeNotifier {
     final applied = _player.setEqEnabled(enabled);
     _eqEnabled.value = _player.eqEnabled;
     _pref.eqEnabled = _player.eqEnabled;
+    _schedulePreferenceSave();
     return applied;
   }
 
@@ -575,6 +591,7 @@ class PlaybackService extends ChangeNotifier {
     _player.setEqBandGain(band, gain);
     _pref.eqGains = _player.eqGains;
     diagnosticsRevision.value++;
+    _schedulePreferenceSave(delay: const Duration(milliseconds: 400));
   }
 
   void applyEqGains(List<double> gains) {
@@ -582,6 +599,7 @@ class PlaybackService extends ChangeNotifier {
     _player.setEqGains(gains);
     _pref.eqGains = _player.eqGains;
     diagnosticsRevision.value++;
+    _schedulePreferenceSave();
   }
 
   Audio? nowPlaying;
@@ -1575,23 +1593,43 @@ class PlaybackService extends ChangeNotifier {
   Timer? _modeSaveTimer;
   Future<void> _modeWrite = Future.value();
 
-  void _scheduleModePreferenceSave() {
+  void _scheduleModePreferenceSave() => _schedulePreferenceSave();
+
+  void _schedulePreferenceSave({
+    Duration delay = const Duration(milliseconds: 150),
+  }) {
+    if (_closed) return;
     _modeSaveTimer?.cancel();
-    _modeSaveTimer = Timer(const Duration(milliseconds: 150), () {
+    _modeSaveTimer = Timer(delay, () {
       _modeSaveTimer = null;
       _writeModePreferences();
     });
   }
 
-  void _writeModePreferences() {
-    _modeWrite = _modeWrite.then((_) => AppPreference.instance.save(),
-        onError: (_) => AppPreference.instance.save());
+  /// Flushes any pending debounced mode or equalizer preference write.
+  Future<void> flushPreferenceSave() {
+    if (_modeSaveTimer != null) {
+      _modeSaveTimer!.cancel();
+      _modeSaveTimer = null;
+      _writeModePreferences();
+    }
+    return _modeWrite;
   }
 
-  late final _sleepTimer = SleepTimerController(onElapsed: _sleepTimerElapsed);
+  void _writeModePreferences() {
+    _modeWrite = _modeWrite.then((_) => _savePreferences(),
+        onError: (_) => _savePreferences());
+  }
+
+  late final _sleepTimer = SleepTimerController(
+    onElapsed: _sleepTimerElapsed,
+    onFadeFactor: _applySleepFadeFactor,
+  );
+  double? _sleepFadeBaseVolume;
   ValueNotifier<Duration?> get sleepTimerRemaining => _sleepTimer.remaining;
   ValueNotifier<bool> get sleepTimerPaused => _sleepTimer.paused;
   ValueNotifier<bool> get sleepTimerFinishCurrent => _sleepTimer.finishCurrent;
+  ValueNotifier<bool> get sleepTimerFadeOut => _sleepTimer.fadeOut;
   final ValueNotifier<bool> stopAfterCurrent = ValueNotifier(false);
 
   void startSleepTimer(Duration duration) {
@@ -1601,7 +1639,42 @@ class PlaybackService extends ChangeNotifier {
   void adjustSleepTimer(Duration delta) => _sleepTimer.adjust(delta);
   void toggleSleepTimerPaused() => _sleepTimer.togglePaused();
   void setSleepTimerFinishCurrent(bool enabled) =>
-      sleepTimerFinishCurrent.value = enabled;
+      _sleepTimer.setFinishCurrent(enabled);
+  void setSleepTimerFadeOut(bool enabled) => _sleepTimer.setFadeOut(enabled);
+
+  void _restoreSleepFadeVolume() {
+    final base = _sleepFadeBaseVolume;
+    if (base == null) return;
+    _sleepFadeBaseVolume = null;
+    if (_closed) return;
+    try {
+      _player.setVolumeDsp(base);
+    } catch (error, trace) {
+      LOGGER.w('[sleep fade restore] $error', stackTrace: trace);
+    }
+  }
+
+  void _applySleepFadeFactor(double factor) {
+    if (_closed) return;
+    final clamped = factor.clamp(0.0, 1.0);
+    if (clamped >= 0.9999) {
+      _restoreSleepFadeVolume();
+      return;
+    }
+    if (resolvingAudioPath.value != null ||
+        isChangingOutput.value ||
+        (playerState != PlayerState.playing &&
+            playerState != PlayerState.stalled)) {
+      return;
+    }
+    final base = _sleepFadeBaseVolume ??= _pref.volumeDsp;
+    if (base <= 0) return;
+    try {
+      _player.setVolumeDsp((base * clamped).clamp(0.0, base));
+    } catch (error, trace) {
+      LOGGER.w('[sleep fade] $error', stackTrace: trace);
+    }
+  }
 
   void _sleepTimerElapsed(bool finishCurrent) {
     if (_closed) return;
@@ -1643,6 +1716,7 @@ class PlaybackService extends ChangeNotifier {
       // revokes its right to resume playback when the preview closes.
       _publishPlaybackIntent(transportCommand: true);
     }
+    _restoreSleepFadeVolume();
     showAppNotice(ui('睡眠定时已到，播放已暂停'));
   }
 
@@ -1674,6 +1748,7 @@ class PlaybackService extends ChangeNotifier {
   /// 修改解码时的音量（不影响 Windows 系统音量）
   void setVolumeDsp(double volume) {
     if (_closed) return;
+    _sleepFadeBaseVolume = null;
     _player.setVolumeDsp(volume);
     _pref.volumeDsp = volume;
     if (volume > 0) _pref.lastAudibleVolumeDsp = volume;

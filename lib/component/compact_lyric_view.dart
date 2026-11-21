@@ -1,5 +1,6 @@
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/component/window_chrome_theme.dart';
 import 'package:dan_player/lyric/compact_lyric_frame.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -217,7 +218,10 @@ class _CompactLyricViewState extends State<CompactLyricView>
                   animation: animation,
                   child: child,
                   builder: (context, child) => Transform.translate(
-                    offset: Offset(0, 4 * (1 - animation.value)),
+                    offset: snapOffsetToPhysicalPixel(
+                      Offset(0, 4 * (1 - animation.value)),
+                      MediaQuery.devicePixelRatioOf(context),
+                    ),
                     child: child,
                   ),
                 ),

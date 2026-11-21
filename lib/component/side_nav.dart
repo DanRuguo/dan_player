@@ -557,7 +557,7 @@ class _RetiredResizeInputBox extends RenderProxyBox {
   bool hitTestSelf(Offset position) => _blocked;
 }
 
-class _ContinuousNavigation extends StatelessWidget {
+class _ContinuousNavigation extends StatefulWidget {
   const _ContinuousNavigation({
     required this.width,
     required this.selectedIndex,
@@ -568,12 +568,103 @@ class _ContinuousNavigation extends StatelessWidget {
   final ValueChanged<int> onDestinationSelected;
 
   @override
+  State<_ContinuousNavigation> createState() => _ContinuousNavigationState();
+}
+
+class _ContinuousNavigationState extends State<_ContinuousNavigation>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  final _scrollController = ScrollController();
+  late final _indicatorController = AnimationController(
+    vsync: this,
+    duration: AppMotion.emphasized,
+    value: 1.0,
+  );
+  late double _fromIndex =
+      widget.selectedIndex >= 0 ? widget.selectedIndex.toDouble() : 0.0;
+  late double _toIndex = _fromIndex;
+  bool _hasSelection = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _hasSelection = widget.selectedIndex >= 0;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  bool _canAnimate(BuildContext context) {
+    final features =
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    return AppMotion.enabled(context, MotionKind.transitions) &&
+        !features.disableAnimations &&
+        !features.reduceMotion &&
+        TickerMode.valuesOf(context).enabled;
+  }
+
+  double get _currentIndicatorIndex {
+    final t = AppMotion.emphasizedCurve
+        .transform(_indicatorController.value.clamp(0.0, 1.0));
+    return lerpDouble(_fromIndex, _toIndex, t)!;
+  }
+
+  void _settleIfDisabled() {
+    if (!mounted) return;
+    if (!_canAnimate(context) && _indicatorController.isAnimating) {
+      _fromIndex = _toIndex;
+      _indicatorController.value = 1.0;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _settleIfDisabled();
+  }
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    _settleIfDisabled();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ContinuousNavigation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectedIndex != oldWidget.selectedIndex) {
+      if (widget.selectedIndex < 0) {
+        _hasSelection = false;
+        _indicatorController.value = 1.0;
+      } else {
+        final next = widget.selectedIndex.toDouble();
+        if (_hasSelection && _canAnimate(context)) {
+          _fromIndex = _currentIndicatorIndex;
+          _toIndex = next;
+          _indicatorController.forward(from: 0.0);
+        } else {
+          _fromIndex = next;
+          _toIndex = next;
+          _indicatorController.value = 1.0;
+        }
+        _hasSelection = true;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _indicatorController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final scheme = WindowChromeTheme.colorSchemeOf(context);
     final foreground = WindowChromeTheme.foregroundOf(context);
     final motion = SidebarMotionScope.maybeOf(context)!;
     final compact = motion.compact;
+    final width = widget.width;
     return LayoutBuilder(builder: (context, constraints) {
       final availableHeight = constraints.maxHeight.isFinite
           ? constraints.maxHeight
@@ -583,123 +674,167 @@ class _ContinuousNavigation extends StatelessWidget {
           ((availableHeight - blockHeight) / 2 - _navVisualTopBias)
               .clamp(24.0, 240.0)
               .toDouble();
-      return ListView.builder(
-        key: const ValueKey('continuous-side-nav-list'),
-        padding: EdgeInsets.only(top: topPadding, bottom: 24),
-        itemCount: destinations.length,
-        itemExtent: _drawerDestinationHeight,
-        itemBuilder: (context, index) {
-          final destination = destinations[index];
-          final selected = index == selectedIndex;
-          final mode = motion.mode;
-          final surfaceWidth = lerpDouble(width - 32, 44, mode)!;
-          final surfaceHeight = lerpDouble(56, 44, mode)!;
-          final left = lerpDouble(14, (width - 44) / 2, mode)!;
-          final radius = surfaceHeight / 2;
-          // Lay out the full label at its final width. Fade it in as the
-          // moving icon clears its text area; never squeeze partial glyphs.
-          final labelOpacity = motion.labelOpacity;
-          return Tooltip(
-            message: compact ? destination.label : '',
-            excludeFromSemantics: true,
-            waitDuration: const Duration(milliseconds: 350),
-            child: Semantics(
-              selected: selected,
-              button: true,
-              label: destination.label,
-              child: Stack(children: [
-                PositionedDirectional(
-                  start: left,
-                  top: (_drawerDestinationHeight - surfaceHeight) / 2,
-                  width: surfaceWidth,
-                  height: surfaceHeight,
-                  child: Material(
-                    // Geometry already follows _mode. A second implicit
-                    // ShapeBorder tween would leave a circular clip behind
-                    // while the icon and label are moving into a wider pill.
-                    animationDuration: Duration.zero,
-                    color: selected
-                        ? scheme.primaryContainer.withValues(
-                            alpha:
-                                Theme.of(context).brightness == Brightness.dark
-                                    ? 0.68
-                                    : 0.78)
-                        : Colors.transparent,
-                    shape: mode == 1
-                        ? const CircleBorder()
-                        : RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(radius)),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      key: ValueKey('continuous-nav-${destination.desPath}'),
-                      // Restoring a revoked resize can move this row beneath
-                      // the mouse. That fresh hover follows the feedback gate.
-                      hoverDuration: appToolbarReduceMotion(context)
-                          ? Duration.zero
-                          : null,
-                      onTap: () => onDestinationSelected(index),
-                      customBorder: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(radius)),
-                      child: Stack(alignment: Alignment.center, children: [
+      final mode = motion.mode;
+      final surfaceWidth = lerpDouble(width - 32, 44, mode)!;
+      final surfaceHeight = lerpDouble(56, 44, mode)!;
+      final left = lerpDouble(14, (width - 44) / 2, mode)!;
+      final radius = surfaceHeight / 2;
+      final indicatorColor =
+          scheme.primaryContainer.withValues(alpha: isDark ? 0.68 : 0.78);
+      final indicatorBorder = Border.all(
+        color: scheme.primary.withValues(alpha: isDark ? 0.22 : 0.16),
+      );
+      final labelOpacity = motion.labelOpacity;
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          if (widget.selectedIndex >= 0)
+            ClipRect(
+              child: IgnorePointer(
+                child: ExcludeSemantics(
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge(
+                        [_indicatorController, _scrollController]),
+                    builder: (context, _) {
+                      final scrollOffset = _scrollController.hasClients
+                          ? _scrollController.offset
+                          : 0.0;
+                      final top = topPadding +
+                          _currentIndicatorIndex * _drawerDestinationHeight +
+                          (_drawerDestinationHeight - surfaceHeight) / 2 -
+                          scrollOffset;
+                      return Stack(children: [
                         PositionedDirectional(
-                          start: lerpDouble(12, 8, mode)!,
-                          width: 28,
-                          top: 0,
-                          bottom: 0,
-                          child: AppEntrance(
-                            identity: ('nav-icon', destination.desPath),
-                            order: index,
-                            translate: false,
-                            child: Icon(destination.icon,
-                                size: 28,
-                                color: selected
-                                    ? scheme.onPrimaryContainer
-                                    : foreground),
+                          start: left,
+                          top: top,
+                          width: surfaceWidth,
+                          height: surfaceHeight,
+                          child: DecoratedBox(
+                            key: const ValueKey('continuous-nav-indicator'),
+                            decoration: BoxDecoration(
+                              color: indicatorColor,
+                              border: indicatorBorder,
+                              shape: mode == 1
+                                  ? BoxShape.circle
+                                  : BoxShape.rectangle,
+                              borderRadius: mode == 1
+                                  ? null
+                                  : BorderRadius.circular(radius),
+                            ),
                           ),
                         ),
-                      ]),
-                    ),
+                      ]);
+                    },
                   ),
                 ),
-                if (!compact)
-                  PositionedDirectional(
-                    start: 66,
-                    end: 26,
-                    top: 4,
-                    bottom: 4,
-                    child: IgnorePointer(
-                      child: ExcludeSemantics(
-                        child: Opacity(
-                          key: ValueKey(
-                              'nav-label-opacity-${destination.desPath}'),
-                          opacity: labelOpacity,
-                          child: Align(
-                            alignment: AlignmentDirectional.centerStart,
-                            child: Text(
-                              destination.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.fade,
-                              softWrap: false,
-                              style: sideNavLabelStyle(context,
-                                  color: selected
-                                      ? scheme.onPrimaryContainer
-                                      : foreground,
-                                  selected: selected),
+              ),
+            ),
+          ListView.builder(
+            key: const ValueKey('continuous-side-nav-list'),
+            controller: _scrollController,
+            padding: EdgeInsets.only(top: topPadding, bottom: 24),
+            itemCount: destinations.length,
+            itemExtent: _drawerDestinationHeight,
+            itemBuilder: (context, index) {
+              final destination = destinations[index];
+              final selected = index == widget.selectedIndex;
+              return Tooltip(
+                message: compact ? destination.label : '',
+                excludeFromSemantics: true,
+                waitDuration: const Duration(milliseconds: 350),
+                child: Semantics(
+                  selected: selected,
+                  button: true,
+                  label: destination.label,
+                  child: Stack(children: [
+                    PositionedDirectional(
+                      start: left,
+                      top: (_drawerDestinationHeight - surfaceHeight) / 2,
+                      width: surfaceWidth,
+                      height: surfaceHeight,
+                      child: Material(
+                        // Geometry already follows _mode. A second implicit
+                        // ShapeBorder tween would leave a circular clip behind
+                        // while the icon and label are moving into a wider pill.
+                        animationDuration: Duration.zero,
+                        type: MaterialType.transparency,
+                        shape: mode == 1
+                            ? const CircleBorder()
+                            : RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(radius)),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          key:
+                              ValueKey('continuous-nav-${destination.desPath}'),
+                          // Restoring a revoked resize can move this row beneath
+                          // the mouse. That fresh hover follows the feedback gate.
+                          hoverDuration: appToolbarReduceMotion(context)
+                              ? Duration.zero
+                              : null,
+                          onTap: () => widget.onDestinationSelected(index),
+                          customBorder: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(radius)),
+                          child: Stack(alignment: Alignment.center, children: [
+                            PositionedDirectional(
+                              start: lerpDouble(12, 8, mode)!,
+                              width: 28,
+                              top: 0,
+                              bottom: 0,
+                              child: AppEntrance(
+                                identity: ('nav-icon', destination.desPath),
+                                order: index,
+                                translate: false,
+                                child: Icon(destination.icon,
+                                    size: 28,
+                                    color: selected
+                                        ? scheme.onPrimaryContainer
+                                        : foreground),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      ),
+                    ),
+                    if (!compact)
+                      PositionedDirectional(
+                        start: 66,
+                        end: 26,
+                        top: 4,
+                        bottom: 4,
+                        child: IgnorePointer(
+                          child: ExcludeSemantics(
+                            child: Opacity(
+                              key: ValueKey(
+                                  'nav-label-opacity-${destination.desPath}'),
+                              opacity: labelOpacity,
+                              child: Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: Text(
+                                  destination.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.fade,
+                                  softWrap: false,
+                                  style: sideNavLabelStyle(context,
+                                      color: selected
+                                          ? scheme.onPrimaryContainer
+                                          : foreground,
+                                      selected: selected),
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-              ]),
-            ),
-          );
-        },
+                  ]),
+                ),
+              );
+            },
+          ),
+        ],
       );
     });
   }
 }
-
 class _CenteredNavigationDrawer extends StatelessWidget {
   const _CenteredNavigationDrawer({
     required this.selectedIndex,

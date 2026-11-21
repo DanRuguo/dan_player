@@ -265,6 +265,15 @@ class DesktopLyricDisplayMessage extends Message {
   Map<String, dynamic> _toJson() => {'vertical': vertical};
 }
 
+/// desktop lyric -> player. Brings the main Dan Player window to the foreground.
+/// Additive message safely ignored by older hosts.
+class ShowMainWindowMessage extends Message {
+  const ShowMainWindowMessage();
+
+  @override
+  Map<String, dynamic> _toJson() => const {};
+}
+
 /// desktop lyric -> player. The player persists the chosen orientation and
 /// sends its canonical setting back, without touching playback or lyric data.
 class DesktopLyricDisplayChangedMessage extends Message {

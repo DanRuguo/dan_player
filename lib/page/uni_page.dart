@@ -12,6 +12,7 @@ import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/adaptive_grid_drag.dart';
 import 'package:dan_player/component/audio_columns.dart';
+import 'package:dan_player/component/playing_audio_list_row.dart';
 import 'package:dan_player/ui_layout_preferences.dart';
 import 'package:dan_player/page/uni_page_components.dart';
 import 'package:dan_player/page/page_scaffold.dart';
@@ -227,6 +228,7 @@ class UniPage<T> extends StatefulWidget {
     required this.enableContentViewSwitch,
     this.sortMethods,
     this.locateTo,
+    this.locateRequest = 0,
     this.multiSelectController,
     this.multiSelectViewActions,
     this.enableAudioColumns = false,
@@ -252,6 +254,7 @@ class UniPage<T> extends StatefulWidget {
   final List<SortMethodDesc<T>>? sortMethods;
 
   final T? locateTo;
+  final int locateRequest;
 
   final MultiSelectController<T>? multiSelectController;
   final List<Widget>? multiSelectViewActions;
@@ -271,6 +274,8 @@ class _UniPageState<T> extends State<UniPage<T>> {
   final _gridKey = GlobalKey();
   final _contentKey = GlobalKey();
   int _locateGeneration = 0;
+  int _pulseToken = 0;
+  final _locatedPulse = ValueNotifier<LocatedTrackPulse?>(null);
 
   SortMethodDesc<T>? _preferredSortMethod() {
     final methods = widget.sortMethods;
@@ -282,8 +287,16 @@ class _UniPageState<T> extends State<UniPage<T>> {
   @override
   void dispose() {
     _locateGeneration++;
+    _locatedPulse.dispose();
     scrollController.dispose();
     super.dispose();
+  }
+
+  void _emitLocatePulse() {
+    final target = widget.locateTo;
+    if (target is Audio) {
+      _locatedPulse.value = (path: target.path, token: ++_pulseToken);
+    }
   }
 
   @override
@@ -317,6 +330,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
             box is RenderBox) {
           _jumpTo((grid.gridDelegate as CompactMusicGridDelegate)
               .offsetForIndex(targetAt, box.size.width));
+          _emitLocatePulse();
         }
         return;
       }
@@ -335,6 +349,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
           _jumpTo(RenderAbstractViewport.of(child)
               .getOffsetToReveal(child, 0)
               .offset);
+          _emitLocatePulse();
           return;
         }
         if ((index - targetAt).abs() < distance) {
@@ -357,6 +372,8 @@ class _UniPageState<T> extends State<UniPage<T>> {
       // external controller mutation from scheduling frames indefinitely.
       if (attempt < 31 && scrollController.offset != previousOffset) {
         _scheduleLocate(generation, attempt + 1);
+      } else {
+        _emitLocatePulse();
       }
     });
     WidgetsBinding.instance.ensureVisualUpdate();
@@ -387,6 +404,11 @@ class _UniPageState<T> extends State<UniPage<T>> {
     currSortMethod = _preferredSortMethod();
     currSortMethod?.method(widget.contentList, currSortOrder);
     _reconcileSelection();
+    if (widget.locateTo != null &&
+        (widget.locateTo != oldWidget.locateTo ||
+            widget.locateRequest != oldWidget.locateRequest)) {
+      _scheduleLocate(++_locateGeneration);
+    }
   }
 
   void _reconcileSelection() {
@@ -473,7 +495,7 @@ class _UniPageState<T> extends State<UniPage<T>> {
           );
     return SelectionPageLifecycle(
         onLeave: () => widget.multiSelectController?.exitMultiSelect(),
-        child: page);
+        child: LocatedTrackPulseScope(pulse: _locatedPulse, child: page));
   }
 
   Widget result(

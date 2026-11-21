@@ -2396,12 +2396,13 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                                           blurEnabled: false,
                                           // Keep clear and blurred lyric rows on
                                           // the same supersampled paint path while
-                                          // font size and hover states change.
-                                          samplingEnabled: !reduced &&
-                                              !highContrast &&
-                                              (_preferences
-                                                      ?.value.surfaceBlur ??
-                                                  true),
+                                          // font size, scroll and hover change.
+                                          // Viewport overlays own blur (blurEnabled
+                                          // is false here), so anti-jitter glyph
+                                          // sampling stays active even when frosted
+                                          // surface blur is disabled.
+                                          samplingEnabled:
+                                              !reduced && !highContrast,
                                           child: _tileCache[index],
                                         ),
                                       ),
@@ -2536,21 +2537,31 @@ class _RenderLyricAnchorColumn extends RenderFlex {
   set index(int value) {
     if (_index == value) return;
     _index = value;
-    markNeedsLayout();
+    // Focus changes are paint-only; read already-laid-out child bounds directly
+    // instead of forcing a full multi-hundred-row RenderFlex layout pass.
+    if (!_reportGeometry()) {
+      markNeedsLayout();
+    }
+  }
+
+  bool _reportGeometry() {
+    if (!hasSize) return false;
+    if (_index < 0) return true;
+    var child = firstChild;
+    for (var i = 0; i < _index && child != null; i++) {
+      child = childAfter(child);
+    }
+    if (child == null || !child.hasSize) return false;
+    onGeometry((
+      top: (child.parentData! as FlexParentData).offset.dy,
+      height: child.size.height,
+    ));
+    return true;
   }
 
   @override
   void performLayout() {
     super.performLayout();
-    var child = firstChild;
-    for (var i = 0; i < _index && child != null; i++) {
-      child = childAfter(child);
-    }
-    if (child != null && _index >= 0) {
-      onGeometry((
-        top: (child.parentData! as FlexParentData).offset.dy,
-        height: child.size.height,
-      ));
-    }
+    _reportGeometry();
   }
 }

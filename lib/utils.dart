@@ -17,6 +17,29 @@ extension StringHMMSS on Duration {
   }
 }
 
+/// Sums positive track durations in seconds, ignoring zero/negative unknowns.
+int sumKnownDurationSeconds(Iterable<int> durations) {
+  var total = 0;
+  for (final seconds in durations) {
+    if (seconds > 0) total += seconds;
+  }
+  return total;
+}
+
+/// Formats a collection's total known duration as `M:SS` or `H:MM:SS`,
+/// returning null when no positive duration is available.
+String? formatCollectionDurationSeconds(int totalSeconds) {
+  if (totalSeconds <= 0) return null;
+  final hours = totalSeconds ~/ 3600;
+  final minutes = (totalSeconds % 3600) ~/ 60;
+  final seconds = totalSeconds % 60;
+  final ss = seconds.toString().padLeft(2, '0');
+  if (hours > 0) {
+    return '$hours:${minutes.toString().padLeft(2, '0')}:$ss';
+  }
+  return '$minutes:$ss';
+}
+
 /// 把 dec 表示成两位 hex
 String _toHexString(int dec) {
   assert(dec >= 0 && dec <= 0xff);

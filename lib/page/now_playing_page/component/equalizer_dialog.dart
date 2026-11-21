@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dan_player/component/eq_presets_dialog.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -5,6 +7,7 @@ import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -93,6 +96,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
       playbackService.applyEqGains(_adjusted!);
       playbackService.setEqEnabled(_adjustedEnabled!);
     }
+    unawaited(flushPlaybackPreferenceSave(playbackService));
     super.dispose();
   }
 
@@ -347,6 +351,7 @@ class _BandSlider extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 color: enabled ? scheme.onSurface : scheme.outline,
+                fontFeatures: tabularFiguresFeatures,
               ),
             ),
             SizedBox(
@@ -371,6 +376,7 @@ class _BandSlider extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 color: enabled ? scheme.onSurfaceVariant : scheme.outline,
+                fontFeatures: tabularFiguresFeatures,
               ),
             ),
           ],

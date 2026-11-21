@@ -15,7 +15,10 @@ use std::{
 use image::imageops;
 use lofty::config::WriteOptions;
 use lofty::file::{FileType, TaggedFile};
-use lofty::id3::v2::{BinaryFrame, Frame, FrameId, Id3v2Tag};
+use lofty::id3::v2::{
+    BinaryFrame, Frame, FrameFlags, FrameId, Id3v2Tag, SyncTextContentType, SynchronizedTextFrame,
+    TimestampFormat,
+};
 use lofty::picture::{Picture, PictureType};
 use lofty::prelude::{Accessor, AudioFile, ItemKey, TagExt, TaggedFileExt};
 use lofty::probe::Probe;
@@ -1756,13 +1759,21 @@ impl Audio {
 }
 
 fn is_supported_audio_path(path: &Path) -> bool {
-    if is_metadata_transaction_path(path) {
+    if is_metadata_transaction_path(path) || is_apple_double_path(path) {
         return false;
     }
     path.extension()
         .map(|extension| extension.to_ascii_lowercase())
         .and_then(|extension| SUPPORT_FORMAT.get(&extension.to_string_lossy()))
         .is_some()
+}
+
+/// macOS writes `._<filename>` AppleDouble metadata files onto external/exFAT
+/// and SMB volumes. They share the audio extension but are not playable audio.
+fn is_apple_double_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.starts_with("._"))
 }
 
 /// Recovery copies intentionally stay beside the source so replacement can be
@@ -1942,17 +1953,255 @@ pub fn get_picture_from_path(path: String, width: u32, height: u32) -> Option<Ve
 
 const MAX_LOCAL_LYRIC_BYTES: usize = 2 * 1024 * 1024;
 
-fn _get_lyric_from_lofty(path: &String) -> Option<String> {
-    if let Ok(tagged_file) = read_tagged_file_by_content(path) {
-        for tag in ordered_tags(&tagged_file) {
-            if let Some(lyric) = tag
-                .get(&ItemKey::Lyrics)
-                .and_then(|item| item.value().text())
-                .filter(|value| !value.trim().is_empty() && value.len() <= MAX_LOCAL_LYRIC_BYTES)
-            {
-                return Some(lyric.to_string());
+/// Detects timed lyric text (standard/enhanced LRC `[mm:ss]`, QRC/KRC/YRC
+/// `[start,duration]`, or TTML `<tt`). Used only for embedded tag precedence;
+/// Dart's local lyric parser still validates and parses the final document.
+fn looks_like_timed_lyrics(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('<') && trimmed.contains("<tt") {
+        return true;
+    }
+    for line in text.lines() {
+        let bytes = line.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() && (bytes[index] == b' ' || bytes[index] == b'\t') {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b'[' {
+            continue;
+        }
+        let start = index + 1;
+        let mut cursor = start;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor == start || cursor >= bytes.len() {
+            continue;
+        }
+        let sep = bytes[cursor];
+        if sep != b':' && sep != b',' {
+            continue;
+        }
+        cursor += 1;
+        let second_start = cursor;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor == second_start || cursor >= bytes.len() {
+            continue;
+        }
+        if sep == b',' {
+            if bytes[cursor] == b']' {
+                return true;
+            }
+            continue;
+        }
+        if bytes[cursor] == b'.' {
+            cursor += 1;
+            let frac_start = cursor;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+                cursor += 1;
+            }
+            if cursor == frac_start || cursor >= bytes.len() {
+                continue;
             }
         }
+        if bytes[cursor] == b']' {
+            return true;
+        }
+    }
+    false
+}
+
+fn decode_id3v2_sylt(data: &[u8]) -> Option<String> {
+    if data.len() < 7 || data.len() > MAX_LOCAL_LYRIC_BYTES {
+        return None;
+    }
+    let frame = SynchronizedTextFrame::parse(data, FrameFlags::default())
+        .ok()
+        .or_else(|| {
+            // Some legacy files place spaces/NUL in the three language bytes.
+            // Substitute a neutral code on a temporary slice for decoding only.
+            if data[1..4].iter().any(|c| !c.is_ascii_alphabetic()) {
+                let mut copy = data.to_vec();
+                copy[1..4].copy_from_slice(b"eng");
+                SynchronizedTextFrame::parse(&copy, FrameFlags::default()).ok()
+            } else {
+                None
+            }
+        })?;
+    if frame.timestamp_format != TimestampFormat::MS
+        || !matches!(
+            frame.content_type,
+            SyncTextContentType::Lyrics | SyncTextContentType::Other
+        )
+    {
+        return None;
+    }
+    let mut output = String::new();
+    let mut has_text = false;
+    for (timestamp_ms, raw_text) in frame.content {
+        let cleaned = raw_text.replace("\r\n", "\n").replace('\r', "\n");
+        let text = cleaned.trim_matches('\n');
+        let minutes = timestamp_ms / 60_000;
+        let seconds = (timestamp_ms / 1_000) % 60;
+        let millis = timestamp_ms % 1_000;
+        if !text.trim().is_empty() {
+            has_text = true;
+        }
+        for (line_index, segment) in text.split('\n').enumerate() {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            if line_index == 0 {
+                let _ = std::fmt::Write::write_fmt(
+                    &mut output,
+                    format_args!("[{minutes:02}:{seconds:02}.{millis:03}]{segment}"),
+                );
+            } else {
+                output.push_str(segment);
+            }
+            if output.len() > MAX_LOCAL_LYRIC_BYTES {
+                return None;
+            }
+        }
+    }
+    (has_text && !output.trim().is_empty() && output.len() <= MAX_LOCAL_LYRIC_BYTES)
+        .then_some(output)
+}
+
+fn select_embedded_lyric_from_tags(tags: &[&Tag]) -> Option<String> {
+    let mut synced_primary: Option<String> = None;
+    let mut synced_extra: Option<String> = None;
+    let mut plain_primary: Option<String> = None;
+    let mut plain_unsynced: Option<String> = None;
+    let mut plain_synced_fallback: Option<String> = None;
+
+    for tag in tags {
+        for item in tag.items() {
+            match item.key() {
+                ItemKey::Lyrics => {
+                    let Some(value) = item
+                        .value()
+                        .text()
+                        .filter(|v| !v.trim().is_empty() && v.len() <= MAX_LOCAL_LYRIC_BYTES)
+                    else {
+                        continue;
+                    };
+                    if looks_like_timed_lyrics(value) {
+                        synced_primary.get_or_insert_with(|| value.to_string());
+                    } else {
+                        plain_primary.get_or_insert_with(|| value.to_string());
+                    }
+                }
+                ItemKey::Unknown(key) if key.eq_ignore_ascii_case("SYNCEDLYRICS") => {
+                    let Some(value) = item
+                        .value()
+                        .text()
+                        .filter(|v| !v.trim().is_empty() && v.len() <= MAX_LOCAL_LYRIC_BYTES)
+                    else {
+                        continue;
+                    };
+                    if looks_like_timed_lyrics(value) {
+                        synced_extra.get_or_insert_with(|| value.to_string());
+                    } else {
+                        // A SYNCEDLYRICS comment containing plain text still
+                        // falls back as plain lyrics rather than being lost.
+                        plain_synced_fallback.get_or_insert_with(|| value.to_string());
+                    }
+                }
+                ItemKey::Unknown(key) if key.eq_ignore_ascii_case("UNSYNCEDLYRICS") => {
+                    let Some(value) = item
+                        .value()
+                        .text()
+                        .filter(|v| !v.trim().is_empty() && v.len() <= MAX_LOCAL_LYRIC_BYTES)
+                    else {
+                        continue;
+                    };
+                    if looks_like_timed_lyrics(value) {
+                        synced_extra.get_or_insert_with(|| value.to_string());
+                    } else {
+                        plain_unsynced.get_or_insert_with(|| value.to_string());
+                    }
+                }
+                ItemKey::Unknown(key) if key.eq_ignore_ascii_case("SYLT") => {
+                    if synced_extra.is_some() {
+                        continue;
+                    }
+                    if let lofty::tag::ItemValue::Binary(bytes) = item.value() {
+                        if let Some(decoded) = decode_id3v2_sylt(bytes) {
+                            synced_extra = Some(decoded);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    synced_primary
+        .or(synced_extra)
+        .or(plain_primary)
+        .or(plain_unsynced)
+        .or(plain_synced_fallback)
+}
+
+fn read_id3v2_sylt_from_file(path: &Path, file_type: FileType) -> Option<String> {
+    if !matches!(
+        file_type,
+        FileType::Mpeg | FileType::Aac | FileType::Aiff | FileType::Wav
+    ) {
+        return None;
+    }
+    let mut file = BufReader::new(fs::File::open(path).ok()?);
+    let options = lofty::config::ParseOptions::default().read_properties(false);
+    let id3v2 = match file_type {
+        FileType::Mpeg => lofty::mpeg::MpegFile::read_from(&mut file, options)
+            .ok()?
+            .id3v2()
+            .cloned(),
+        FileType::Aac => lofty::aac::AacFile::read_from(&mut file, options)
+            .ok()?
+            .id3v2()
+            .cloned(),
+        FileType::Aiff => lofty::iff::aiff::AiffFile::read_from(&mut file, options)
+            .ok()?
+            .id3v2()
+            .cloned(),
+        FileType::Wav => lofty::iff::wav::WavFile::read_from(&mut file, options)
+            .ok()?
+            .id3v2()
+            .cloned(),
+        _ => None,
+    }?;
+    for frame in &id3v2 {
+        if let Frame::Binary(binary) = frame {
+            if binary.id().as_str().eq_ignore_ascii_case("SYLT") {
+                if let Some(decoded) = decode_id3v2_sylt(&binary.data) {
+                    return Some(decoded);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn _get_lyric_from_lofty(path: &String) -> Option<String> {
+    if let Ok(tagged_file) = read_tagged_file_by_content(path) {
+        let tags = ordered_tags(&tagged_file);
+        let selected = select_embedded_lyric_from_tags(&tags);
+        if selected.as_deref().is_some_and(looks_like_timed_lyrics) {
+            return selected;
+        }
+        // Lofty's generic Tag conversion omits binary SYLT frames. Only probe
+        // the native ID3v2 header when no synced lyrics were already found.
+        if tagged_file.tag(TagType::Id3v2).is_some() {
+            if let Some(sylt) = read_id3v2_sylt_from_file(Path::new(path), tagged_file.file_type())
+            {
+                return Some(sylt);
+            }
+        }
+        return selected;
     }
 
     None
@@ -2283,6 +2532,105 @@ mod tests {
             .save_to_path(&audio, WriteOptions::default())
             .unwrap();
         assert!(_get_lyric_from_lofty(&audio_path).is_none());
+    }
+
+    #[test]
+    fn embedded_lyrics_vorbis_and_sylt_precedence() {
+        // Vorbis UNSYNCEDLYRICS fallback when LYRICS is absent.
+        let mut vorbis = Tag::new(TagType::VorbisComments);
+        vorbis.insert_unchecked(TagItem::new(
+            ItemKey::Unknown("UNSYNCEDLYRICS".into()),
+            lofty::tag::ItemValue::Text("Plain from UNSYNCEDLYRICS".into()),
+        ));
+        assert_eq!(
+            select_embedded_lyric_from_tags(&[&vorbis]).as_deref(),
+            Some("Plain from UNSYNCEDLYRICS")
+        );
+
+        // Plain SYNCEDLYRICS falls back as plain lyrics, below plain LYRICS/UNSYNCEDLYRICS.
+        let mut plain_synced = Tag::new(TagType::VorbisComments);
+        plain_synced.insert_unchecked(TagItem::new(
+            ItemKey::Unknown("SYNCEDLYRICS".into()),
+            lofty::tag::ItemValue::Text("Not valid LRC".into()),
+        ));
+        assert_eq!(
+            select_embedded_lyric_from_tags(&[&plain_synced]).as_deref(),
+            Some("Not valid LRC")
+        );
+        plain_synced.insert_text(ItemKey::Lyrics, "Plain LYRICS wins".into());
+        assert_eq!(
+            select_embedded_lyric_from_tags(&[&plain_synced]).as_deref(),
+            Some("Plain LYRICS wins")
+        );
+
+        // Valid synced SYNCEDLYRICS beats plain LYRICS.
+        let mut synced_wins = Tag::new(TagType::VorbisComments);
+        synced_wins.insert_text(ItemKey::Lyrics, "Plain LYRICS".into());
+        synced_wins.insert_unchecked(TagItem::new(
+            ItemKey::Unknown("SYNCEDLYRICS".into()),
+            lofty::tag::ItemValue::Text("[00:01.25]Synced line".into()),
+        ));
+        assert_eq!(
+            select_embedded_lyric_from_tags(&[&synced_wins]).as_deref(),
+            Some("[00:01.25]Synced line")
+        );
+
+        // Synced LYRICS takes precedence over SYNCEDLYRICS.
+        let mut lyrics_synced = Tag::new(TagType::VorbisComments);
+        lyrics_synced.insert_text(ItemKey::Lyrics, "[00:02.00]Primary synced".into());
+        lyrics_synced.insert_unchecked(TagItem::new(
+            ItemKey::Unknown("SYNCEDLYRICS".into()),
+            lofty::tag::ItemValue::Text("[00:01.00]Secondary synced".into()),
+        ));
+        assert_eq!(
+            select_embedded_lyric_from_tags(&[&lyrics_synced]).as_deref(),
+            Some("[00:02.00]Primary synced")
+        );
+
+        // End-to-end MP3 ID3v2 SYLT frame decoded to LRC and preferred over plain USLT.
+        let directory = test_directory("local_lyrics_embedded_sylt");
+        let audio = directory.join("sylt.mp3");
+        write_minimal_mpeg_with_legacy_id3v1(&audio);
+        let mut id3 = Id3v2Tag::new();
+        id3.insert(Frame::UnsynchronizedText(
+            lofty::id3::v2::UnsynchronizedTextFrame::new(
+                lofty::TextEncoding::UTF8,
+                *b"eng",
+                String::new(),
+                "Plain USLT line".into(),
+            ),
+        ));
+        let sylt = SynchronizedTextFrame::new(
+            lofty::TextEncoding::UTF8,
+            *b"jpn",
+            TimestampFormat::MS,
+            SyncTextContentType::Lyrics,
+            None,
+            vec![
+                (1_500, "夜の歌".into()),
+                (65_040, "次の行".into()),
+            ],
+        );
+        id3.insert(Frame::Binary(BinaryFrame::new(
+            FrameId::Valid(std::borrow::Cow::Borrowed("SYLT")),
+            sylt.as_bytes().unwrap(),
+        )));
+        id3.save_to_path(&audio, WriteOptions::default()).unwrap();
+        let audio_path = audio.to_string_lossy().into_owned();
+        assert_eq!(
+            _get_lyric_from_lofty(&audio_path).as_deref(),
+            Some("[00:01.500]夜の歌\n[01:05.040]次の行")
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn apple_double_metadata_files_are_not_supported_audio() {
+        assert!(!is_supported_audio_path(Path::new("._song.mp3")));
+        assert!(!is_supported_audio_path(Path::new(r"C:\Music\._track.flac")));
+        assert!(is_supported_audio_path(Path::new(".hidden.mp3")));
+        assert!(is_supported_audio_path(Path::new("...intro.flac")));
+        assert!(is_supported_audio_path(Path::new("normal._remix.mp3")));
     }
 
     #[test]

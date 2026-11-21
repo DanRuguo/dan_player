@@ -2,22 +2,39 @@ import 'dart:math' as math;
 
 import 'package:dan_player/component/artwork_pulse.dart';
 import 'package:dan_player/component/background_image_motion.dart';
+import 'package:dan_player/component/cached_artwork_blur.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Two independently moving copies of the real, blurred artwork. Unlike a
 /// palette approximation this preserves spatial colour and luminance detail.
-/// Each layer is raster-isolated; phase updates only repaint transforms.
+/// [FluidArtwork.blurred] snapshots and blurs the cover once and paints both
+/// counter-rotating layers from that single texture.
 class FluidArtwork extends StatefulWidget {
   const FluidArtwork({
     super.key,
     required this.phase,
-    required this.child,
+    required Widget this.child,
     this.active,
     this.readLowFrequency,
-  });
+  })  : image = null,
+        blur = 0;
+
+  /// Single-snapshot fluid renderer: blurs [image] once instead of mounting two
+  /// duplicate [CachedArtworkBlur] trees inside a [Flow].
+  const FluidArtwork.blurred({
+    super.key,
+    required ImageProvider this.image,
+    required this.blur,
+    required this.phase,
+    this.active,
+    this.readLowFrequency,
+  }) : child = null;
+
   final ValueListenable<double> phase;
-  final Widget child;
+  final Widget? child;
+  final ImageProvider? image;
+  final double blur;
   final ValueListenable<bool>? active;
 
   /// Reads the existing spectrum cache; never requests audio capture or FFT.
@@ -65,15 +82,28 @@ class _FluidArtworkState extends State<FluidArtwork> {
   }
 
   @override
-  Widget build(BuildContext context) => Flow(
-        delegate: ArtworkFlowDelegate(widget.phase,
-            pulse: widget.readLowFrequency == null ? null : _pulse),
-        clipBehavior: Clip.hardEdge,
-        children: [
-          RepaintBoundary(child: widget.child),
-          RepaintBoundary(child: widget.child)
-        ],
+  Widget build(BuildContext context) {
+    final pulse = widget.readLowFrequency == null ? null : _pulse;
+    if (widget.image case final image?) {
+      return RepaintBoundary(
+        child: CachedArtworkBlur(
+          image: image,
+          blur: widget.blur,
+          phase: widget.phase,
+          layered: true,
+          pulse: pulse,
+        ),
       );
+    }
+    return Flow(
+      delegate: ArtworkFlowDelegate(widget.phase, pulse: pulse),
+      clipBehavior: Clip.hardEdge,
+      children: [
+        RepaintBoundary(child: widget.child),
+        RepaintBoundary(child: widget.child),
+      ],
+    );
+  }
 
   @override
   void dispose() {
@@ -87,8 +117,13 @@ class ArtworkFlowDelegate extends FlowDelegate {
   final ValueListenable<double> phase;
   final ArtworkPulse? pulse;
 
-  Matrix4 transform(Size size, int layer) {
-    final t = phase.value * math.pi * 2;
+  static Matrix4 layerTransform(
+    Size size,
+    double phaseValue,
+    int layer, {
+    ArtworkPulse? pulse,
+  }) {
+    final t = phaseValue * math.pi * 2;
     final angle = layer == 0 ? .15 * math.sin(t) : -.22 * math.sin(t + .8);
     final dx = size.width * .055 * math.sin(t + layer * 2.1);
     final dy = size.height * .055 * math.cos(t * 2 + layer * 1.3);
@@ -104,6 +139,9 @@ class ArtworkFlowDelegate extends FlowDelegate {
       ..scaleByDouble(scale, scale, 1, 1)
       ..translateByDouble(-size.width / 2, -size.height / 2, 0, 1);
   }
+
+  Matrix4 transform(Size size, int layer) =>
+      layerTransform(size, phase.value, layer, pulse: pulse);
 
   @override
   void paintChildren(FlowPaintingContext context) {

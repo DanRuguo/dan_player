@@ -21,6 +21,39 @@ class LyricReadingResultRow extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
 
+  static final _digitPattern = RegExp(r'[0-9]');
+  static final _timeWidthCache = <Object, double>{};
+
+  static double _measureTimeWidth(
+      String time, TextStyle style, TextScaler scaler) {
+    final normalized = time.replaceAll(_digitPattern, '0');
+    final key = (
+      normalized,
+      style.fontFamily,
+      style.fontSize,
+      style.fontWeight,
+      style.letterSpacing,
+      scaler,
+    );
+    final cached = _timeWidthCache.remove(key);
+    if (cached != null) {
+      _timeWidthCache[key] = cached;
+      return cached;
+    }
+    final painter = TextPainter(
+        text: TextSpan(text: normalized, style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler)
+      ..layout();
+    final width = painter.width;
+    painter.dispose();
+    if (_timeWidthCache.length >= 64) {
+      _timeWidthCache.remove(_timeWidthCache.keys.first);
+    }
+    _timeWidthCache[key] = width;
+    return width;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -36,7 +69,8 @@ class LyricReadingResultRow extends StatelessWidget {
             ? theme.disabledColor
             : selected
                 ? scheme.primary
-                : scheme.onSurfaceVariant);
+                : scheme.onSurfaceVariant,
+        fontFeatures: const [FontFeature.tabularFigures()]);
     return Material(
         color: selected
             ? scheme.secondaryContainer.withValues(alpha: .45)
@@ -55,15 +89,11 @@ class LyricReadingResultRow extends StatelessWidget {
               final time = timestamp;
               var inlineTime = false;
               if (time != null) {
-                final painter = TextPainter(
-                    text: TextSpan(text: time, style: timeStyle),
-                    textDirection: TextDirection.ltr,
-                    textScaler: MediaQuery.textScalerOf(context))
-                  ..layout();
+                final timeWidth = _measureTimeWidth(
+                    time, timeStyle, MediaQuery.textScalerOf(context));
                 final textWidth =
-                    constraints.maxWidth - 24 - 12 - painter.width - 12;
+                    constraints.maxWidth - 24 - 12 - timeWidth - 12;
                 inlineTime = textWidth >= constraints.maxWidth * .45;
-                painter.dispose();
               }
               final content = Row(children: [
                 Icon(icon, size: 24, color: color),

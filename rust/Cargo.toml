@@ -37,3 +37,9 @@ lindera-dictionary = { version = "=6.2.0", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

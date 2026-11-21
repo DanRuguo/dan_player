@@ -10,6 +10,7 @@ import 'package:dan_player/component/app_sort_button.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/audio_sort_options.dart';
 import 'package:dan_player/component/audio_tile.dart';
+import 'package:dan_player/component/playing_audio_list_row.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/audio_sort.dart';
@@ -19,7 +20,11 @@ import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/page/uni_page_components.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/statistics/library_statistics.dart';
+import 'package:dan_player/utils.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:dan_player/component/category_labels.dart';
 
@@ -37,6 +42,7 @@ class CategoryDetailPage extends StatefulWidget {
     this.onAddToPlaylist,
     this.trackBuilder,
     this.classificationScanner,
+    this.nowPlayingPath,
   });
 
   final MusicCategoryKind kind;
@@ -47,6 +53,7 @@ class CategoryDetailPage extends StatefulWidget {
   final FutureOr<void> Function(List<Audio> audios)? onAddToPlaylist;
   final CategoryTrackBuilder? trackBuilder;
   final MusicClassificationScanner? classificationScanner;
+  final ValueListenable<String?>? nowPlayingPath;
 
   @override
   State<CategoryDetailPage> createState() => _CategoryDetailPageState();
@@ -55,6 +62,11 @@ class CategoryDetailPage extends StatefulWidget {
 class _CategoryDetailPageState extends State<CategoryDetailPage> {
   final _selection = MultiSelectController<Audio>();
   final _search = TextEditingController();
+  final _scrollController = ScrollController();
+  final _listKey = GlobalKey();
+  int _locateGeneration = 0;
+  int _pulseToken = 0;
+  final _locatedPulse = ValueNotifier<LocatedTrackPulse?>(null);
   MusicCategories? _snapshot;
   MusicClassificationSnapshot _classifications =
       const MusicClassificationSnapshot.empty();
@@ -202,6 +214,133 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
     }
   }
 
+  int _findPlayingAudioIndex(List<Audio> tracks, String? playingPath) {
+    if (playingPath == null || playingPath.isEmpty) return -1;
+    return tracks.indexWhere((audio) => audio.path == playingPath);
+  }
+
+  void _locatePlaying(MusicCategoryGroup group, String playingPath) {
+    if (_findPlayingAudioIndex(_visibleTracks(group), playingPath) < 0 &&
+        _query.isNotEmpty &&
+        _findPlayingAudioIndex(group.audios, playingPath) >= 0) {
+      setState(() {
+        _query = '';
+        _search.clear();
+      });
+    }
+    _locatedPulse.value = (path: playingPath, token: ++_pulseToken);
+    _scheduleLocatePlaying(playingPath, ++_locateGeneration);
+  }
+
+  void _jumpScrollTo(double offset) {
+    if (!_scrollController.hasClients) return;
+    _scrollController.jumpTo(offset.clamp(
+      _scrollController.position.minScrollExtent,
+      _scrollController.position.maxScrollExtent,
+    ));
+  }
+
+  RenderSliverMultiBoxAdaptor? _listSliver() {
+    RenderSliverMultiBoxAdaptor? result;
+    void visit(RenderObject child) {
+      if (child is RenderSliverMultiBoxAdaptor) {
+        result = child;
+      } else if (result == null) {
+        child.visitChildren(visit);
+      }
+    }
+
+    final root = _listKey.currentContext?.findRenderObject();
+    if (root != null) visit(root);
+    return result;
+  }
+
+  void _scheduleLocatePlaying(
+    String playingPath,
+    int generation, [
+    int attempt = 0,
+  ]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          generation != _locateGeneration ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      final group = _group;
+      if (group == null) return;
+      final audioIndex =
+          _findPlayingAudioIndex(_visibleTracks(group), playingPath);
+      if (audioIndex < 0) return;
+      final targetAt = audioIndex + 2;
+      final sliver = _listSliver();
+      if (sliver == null) return;
+      RenderBox? nearest;
+      var distance = double.infinity;
+      var totalHeight = 0.0;
+      var count = 0;
+      for (var child = sliver.firstChild;
+          child != null;
+          child = sliver.childAfter(child)) {
+        final index = sliver.indexOf(child);
+        if (index == targetAt) {
+          _jumpScrollTo(RenderAbstractViewport.of(child)
+              .getOffsetToReveal(child, 0)
+              .offset);
+          return;
+        }
+        if ((index - targetAt).abs() < distance) {
+          nearest = child;
+          distance = (index - targetAt).abs().toDouble();
+        }
+        totalHeight += child.size.height;
+        count++;
+      }
+      if (nearest == null || count == 0 || totalHeight <= 0) return;
+      final anchorOffset = RenderAbstractViewport.of(nearest)
+          .getOffsetToReveal(nearest, 0)
+          .offset;
+      final offset = anchorOffset +
+          (targetAt - sliver.indexOf(nearest)) * totalHeight / count;
+      final previousOffset = _scrollController.offset;
+      _jumpScrollTo(offset);
+      if (attempt < 31 && _scrollController.offset != previousOffset) {
+        _scheduleLocatePlaying(playingPath, generation, attempt + 1);
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  Widget _locatePlayingButton(BuildContext context, MusicCategoryGroup group) {
+    Widget buildButton(String? playingPath) {
+      final hasMatch = _findPlayingAudioIndex(group.audios, playingPath) >= 0;
+      return IconButton.outlined(
+        key: const ValueKey('category-locate-current'),
+        onPressed: hasMatch ? () => _locatePlaying(group, playingPath!) : null,
+        style: appToolbarControlStyle(context, iconOnly: true),
+        tooltip: ui('定位当前歌曲'),
+        icon: const Icon(Symbols.my_location),
+      );
+    }
+
+    final injected = widget.nowPlayingPath;
+    if (injected != null) {
+      return ValueListenableBuilder<String?>(
+        valueListenable: injected,
+        builder: (context, playingPath, _) => buildButton(playingPath),
+      );
+    }
+    return PlaybackReadyBuilder(
+      waitingBuilder: (_) => buildButton(null),
+      readyBuilder: (_) {
+        final playback = PlayService.instance.playbackService;
+        return ListenableBuilder(
+          listenable: playback,
+          builder: (context, _) => buildButton(playback.nowPlaying?.path),
+        );
+      },
+    );
+  }
+
   Future<void> _add(List<Audio> queue) async {
     if (queue.isEmpty) return;
     final snapshot = List<Audio>.of(queue);
@@ -215,7 +354,9 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
   @override
   Widget build(BuildContext context) {
     return SelectionPageLifecycle(
-        onLeave: _selection.exitMultiSelect, child: _buildPage(context));
+        onLeave: _selection.exitMultiSelect,
+        child: LocatedTrackPulseScope(
+            pulse: _locatedPulse, child: _buildPage(context)));
   }
 
   Widget _buildPage(BuildContext context) {
@@ -248,8 +389,15 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
         final selecting = _selection.enableMultiSelectView;
         return PageScaffold(
           title: ui(widget.kind.label),
-          subtitle: ui("{0} 首 · {1}",
-              [group.audios.length, categorySourceSummary(group)]),
+          subtitle: [
+            ui("{0} 首 · {1}",
+                [group.audios.length, categorySourceSummary(group)]),
+            if (formatCollectionDurationSeconds(
+                  sumKnownDurationSeconds(group.audios.map((a) => a.duration)),
+                )
+                case final totalDuration?)
+              totalDuration,
+          ].join(' · '),
           actions: const [],
           responsiveActions: AppContentTransition(
             identity: selecting,
@@ -260,6 +408,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
               runSpacing: 8,
               children: [
                 if (!selecting) const AppPlaybackModeControls(),
+                if (!selecting) _locatePlayingButton(context, group),
                 if (selecting)
                   AudioMultiSelectionActions(
                     controller: _selection,
@@ -314,7 +463,10 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
             ),
           ),
           body: AppContentScrollbar(
-            builder: (context, controller) => ListView.builder(
+            controller: _scrollController,
+            builder: (context, controller) => KeyedSubtree(
+              key: _listKey,
+              child: ListView.builder(
               controller: controller,
               key: PageStorageKey(('category-tracks', group.id)),
               padding: const EdgeInsets.only(bottom: 96),
@@ -375,8 +527,9 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                       ValueKey(('category-audio', group.id, audio, audioIndex)),
                   child: widget.trackBuilder?.call(
                           context, audio, () => _play(audioIndex, queue)) ??
-                      Material(
-                        type: MaterialType.transparency,
+                      PlayingAudioListRow(
+                        audioPath: audio.path,
+                        nowPlayingPath: widget.nowPlayingPath,
                         child: AudioTile(
                           audioIndex: audioIndex,
                           playlist: queue,
@@ -386,6 +539,7 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                 );
               },
             ),
+            ),
           ),
         );
       },
@@ -394,7 +548,10 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
 
   @override
   void dispose() {
+    _locateGeneration++;
+    _locatedPulse.dispose();
     AudioLibrary.changes.removeListener(_refresh);
+    _scrollController.dispose();
     _search.dispose();
     _selection.dispose();
     super.dispose();

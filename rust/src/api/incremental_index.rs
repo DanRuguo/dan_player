@@ -186,6 +186,26 @@ struct DiscoveredFile {
     folder_cover_stamp: Option<String>,
 }
 
+/// OS-managed trash, volume-metadata and macOS archive sidecar folders never
+/// contain user library tracks and can fail enumeration with Access Denied when
+/// scanning a drive root or removable volume.
+fn is_ignored_system_directory(name: &std::ffi::OsStr) -> bool {
+    let Some(text) = name.to_str() else {
+        return false;
+    };
+    const IGNORED: &[&str] = &[
+        "$RECYCLE.BIN",
+        "System Volume Information",
+        "__MACOSX",
+        ".Spotlight-V100",
+        ".Trashes",
+        ".fseventsd",
+    ];
+    IGNORED
+        .iter()
+        .any(|candidate| text.eq_ignore_ascii_case(candidate))
+}
+
 fn collect(
     directory: &Path,
     visited: &mut HashSet<PathBuf>,
@@ -222,6 +242,9 @@ fn collect(
         control.check()?;
         let kind = entry.file_type()?;
         if kind.is_dir() {
+            if is_ignored_system_directory(&entry.file_name()) {
+                continue;
+            }
             collect(
                 &entry.path(),
                 visited,
@@ -1385,5 +1408,24 @@ mod tests {
         calls.store(0, Ordering::Relaxed);
         assert_eq!(f.scan(Some(&first), false, &calls), first);
         assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn scan_skips_os_metadata_directories_and_apple_double_files() {
+        let f = Fixture::new();
+        f.file("album/real.mp3");
+        let real = f.0.join("album").join("real.mp3");
+        f.file("album/._real.mp3");
+        f.file("__MACOSX/album/ghost.mp3");
+        f.file("$RECYCLE.BIN/deleted.flac");
+        f.file("System Volume Information/system.wav");
+        let calls = AtomicUsize::new(0);
+        let result = f.scan(None, true, &calls);
+        let found: Vec<&str> = songs(&result)
+            .into_iter()
+            .filter_map(|song| song["path"].as_str())
+            .collect();
+        assert_eq!(found, vec![real.to_string_lossy().as_ref()]);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 }

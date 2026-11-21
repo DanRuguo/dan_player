@@ -69,12 +69,16 @@ class Krc extends Lyric {
 class KrcLine extends SyncLyricLine {
   KrcLine(super.start, super.length, super.words, [super.translation]);
 
+  static final _headerPattern = RegExp(r'^\[(\d+),(\d+)\]');
+  static final _wordTagPattern = RegExp(r'<(\d+),(\d+),\d+>');
+
   static KrcLine? fromLine(String line, [String? translation]) {
-    final header = RegExp(r'^\[(\d+),(\d+)\]').firstMatch(line.trimLeft());
+    final trimmed = line.trimLeft();
+    final header = _headerPattern.firstMatch(trimmed);
     if (header == null) return null;
     final start = Duration(milliseconds: int.parse(header[1]!));
-    final content = line.trimLeft().substring(header.end);
-    final tags = RegExp(r'<(\d+),(\d+),\d+>')
+    final content = trimmed.substring(header.end);
+    final tags = _wordTagPattern
         .allMatches(content)
         .toList(growable: false);
     final words = <KrcWord>[

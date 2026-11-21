@@ -9,7 +9,11 @@ import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/component/cover_repair_dialog.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
+import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/playing_audio_list_row.dart';
 import 'package:dan_player/page/uni_page.dart';
+import 'package:dan_player/utils.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
@@ -17,7 +21,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 class AlbumDetailPage extends StatefulWidget {
-  const AlbumDetailPage({super.key, required this.album})
+  const AlbumDetailPage({super.key, required this.album, this.nowPlayingPath})
       : groupId = null,
         initialGroup = null;
 
@@ -25,11 +29,13 @@ class AlbumDetailPage extends StatefulWidget {
     super.key,
     required this.groupId,
     this.initialGroup,
+    this.nowPlayingPath,
   }) : album = null;
 
   final Album? album;
   final String? groupId;
   final MusicCategoryGroup? initialGroup;
+  final ValueListenable<String?>? nowPlayingPath;
 
   @override
   State<AlbumDetailPage> createState() => _AlbumDetailPageState();
@@ -137,20 +143,35 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       title: currentGroup.title,
       subtitle: [
         ui("{0} 首作品", [currentGroup.audios.length]),
+        if (formatCollectionDurationSeconds(
+              sumKnownDurationSeconds(
+                  currentGroup.audios.map((audio) => audio.duration)),
+            )
+            case final totalDuration?)
+          totalDuration,
         if (currentGroup.subtitle != null) currentGroup.subtitle!,
       ].join(' · '),
       secondaryContent: secondaryContent,
       secondaryContentSearchText: (audio) =>
           '${audio.displayTitle}\n${audio.artist}\n${audio.album}',
       secondaryContentBuilder:
-          (context, audio, i, visibleContent, multiSelectController) =>
-              AudioTile(
-        leading: Text(
-            (audio.track > 0 ? audio.track : i + 1).toString().padLeft(2, '0')),
-        audioIndex: i,
-        playlist: visibleContent,
-        multiSelectController: _selection,
-      ),
+          (context, audio, i, visibleContent, multiSelectController) {
+        final tile = AudioTile(
+          leading: Text((audio.track > 0 ? audio.track : i + 1)
+              .toString()
+              .padLeft(2, '0')),
+          audioIndex: i,
+          playlist: visibleContent,
+          multiSelectController: _selection,
+        );
+        return MusicGridScope.of(context)
+            ? tile
+            : PlayingAudioListRow(
+                audioPath: audio.path,
+                nowPlayingPath: widget.nowPlayingPath,
+                child: tile,
+              );
+      },
       tertiaryContentTitle: ui("艺术家"),
       tertiaryContent: artists,
       tertiaryContentBuilder: (context, artist, i, multiSelectController) =>
@@ -164,6 +185,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       enablePlayAll: true,
       enableShufflePlay: true,
       enableAddAllToPlaylist: true,
+      enableLocatePlaying: true,
+      nowPlayingPath: widget.nowPlayingPath,
       extraActions: [
         IconButton.outlined(
           style: appToolbarControlStyle(context, iconOnly: true),

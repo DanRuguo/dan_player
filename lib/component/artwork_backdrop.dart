@@ -5,7 +5,6 @@ import 'package:dan_player/component/artwork_handoff.dart';
 import 'package:dan_player/component/artwork_dither.dart';
 import 'package:dan_player/component/artwork_vignette.dart';
 import 'package:dan_player/component/fluid_artwork.dart';
-import 'package:dan_player/component/cached_artwork_blur.dart';
 import 'package:dan_player/library/artwork_image_provider.dart';
 import 'package:dan_player/library/artwork_size.dart';
 import 'package:flutter/foundation.dart';
@@ -143,23 +142,22 @@ class _ArtworkBackdropState extends State<ArtworkBackdrop> {
                                     ? const Duration(milliseconds: 16)
                                     : BackgroundImageMotion.frameInterval,
                                 phaseBuilder: widget.fluid
-                                    ? (phase, active, child) => FluidArtwork(
-                                        phase: phase,
-                                        active: active,
-                                        readLowFrequency:
-                                            widget.readLowFrequency,
-                                        child: CachedArtworkBlur(
-                                            image: provider,
-                                            blur: widget.blur,
-                                            phase: phase))
+                                    ? (phase, active, child) =>
+                                        FluidArtwork.blurred(
+                                          image: provider,
+                                          blur: widget.blur,
+                                          phase: phase,
+                                          active: active,
+                                          readLowFrequency:
+                                              widget.readLowFrequency,
+                                        )
                                     : null,
                                 // The frozen texture is only needed while
                                 // the layered background actually moves.
                                 // Static artwork can keep the same blur and
                                 // overlays without re-snapshotting on resize.
                                 child: widget.fluid && widget.motion
-                                    ? CachedArtworkBlur(
-                                        image: provider, blur: widget.blur)
+                                    ? const SizedBox.expand()
                                     : ImageFiltered(
                                         imageFilter: ui.ImageFilter.blur(
                                           sigmaX: widget.blur.clamp(0, 100),

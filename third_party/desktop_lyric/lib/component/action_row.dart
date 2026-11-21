@@ -81,6 +81,9 @@ class ActionRow extends StatelessWidget {
               source.vertical.value = next;
               send(DesktopLyricDisplayChangedMessage(vertical: next));
             }, key: const ValueKey('desktop-lyric-direction')),
+            button(ui("显示主窗口"), Symbols.open_in_new,
+                () => send(const ShowMainWindowMessage()),
+                key: const ValueKey('desktop-lyric-show-main')),
             button(ui("锁定歌词；可在播放器中解锁"), Symbols.lock, () async {
               try {
                 await source.setLocked(true);

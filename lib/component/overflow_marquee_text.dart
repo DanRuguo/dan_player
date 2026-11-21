@@ -1,6 +1,7 @@
 import 'package:desktop_lyric/font_policy.dart';
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -50,9 +51,45 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
   Locale? _measuredLocale;
   TextDirection? _measuredDirection;
   String? _measuredText;
+  double? _measuredDpr;
+  ui.Image? _rasterStrip;
+  double _rasterDpr = 1.0;
   double _width = 0;
 
   static const _gap = 36.0;
+  static const _maxRasterWidth = 4096;
+  static const _maxRasterHeight = 512;
+
+  void _disposeRasterStrip() {
+    _rasterStrip?.dispose();
+    _rasterStrip = null;
+  }
+
+  void _ensureRasterStrip(TextPainter painter, double dpr) {
+    if (_rasterStrip != null && _rasterDpr == dpr) return;
+    _disposeRasterStrip();
+    if (!dpr.isFinite || dpr <= 0 || painter.width <= 0 || painter.height <= 0) {
+      return;
+    }
+    final physWidth = (painter.width * dpr).ceil();
+    final physHeight = (painter.height * dpr).ceil();
+    if (physWidth <= 0 ||
+        physHeight <= 0 ||
+        physWidth > _maxRasterWidth ||
+        physHeight > _maxRasterHeight) {
+      return;
+    }
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder)..scale(dpr, dpr);
+    painter.paint(canvas, Offset.zero);
+    final picture = recorder.endRecording();
+    try {
+      _rasterStrip = picture.toImageSync(physWidth, physHeight);
+      _rasterDpr = dpr;
+    } finally {
+      picture.dispose();
+    }
+  }
   double get _overflowDistance => math.max(0, _textPainter!.width - _width);
   double get _cycle => _textPainter!.width + _gap;
 
@@ -201,6 +238,7 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
     final scaler = MediaQuery.textScalerOf(context);
     final direction = Directionality.of(context);
     final locale = Localizations.maybeLocaleOf(context);
+    final dpr = MediaQuery.devicePixelRatioOf(context);
     final text = widget.text.replaceAll(RegExp(r'[\r\n]+'), ' ');
     return LayoutBuilder(builder: (context, constraints) {
       final measurementChanged = _measuredPolicy != policy ||
@@ -210,12 +248,17 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
           _measuredDirection != direction ||
           _measuredLocale != locale;
       final widthChanged = _width != constraints.maxWidth;
+      if (_measuredDpr != dpr) {
+        _measuredDpr = dpr;
+        _disposeRasterStrip();
+      }
       if (measurementChanged || widthChanged) {
         _reset();
         _width = constraints.maxWidth;
         // Natural single-line shaping has no viewport-width constraint. A
         // resize still resets its reading pose, but only clips the same glyphs.
         if (measurementChanged) {
+          _disposeRasterStrip();
           _textPainter?.dispose();
           _measuredText = text;
           _measuredPolicy = policy;
@@ -235,6 +278,7 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
             _width.isFinite && _width > 0 && _textPainter!.width > _width + .5;
       }
       if (!_overflow || !_motionAllowed) {
+        _disposeRasterStrip();
         _reset();
         return AppFontText(text,
             style: widget.style,
@@ -243,6 +287,7 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
             softWrap: false,
             overflow: TextOverflow.ellipsis);
       }
+      _ensureRasterStrip(_textPainter!, dpr);
       _syncClock();
       return Semantics(
           label: widget.text,
@@ -251,7 +296,14 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
               child: CustomPaint(
                   size: Size(_width, _textPainter!.height),
                   painter: _MarqueePainter(
-                      _textPainter!, _pose, _width, direction, _gap))));
+                    _textPainter!,
+                    _pose,
+                    _width,
+                    direction,
+                    _gap,
+                    rasterStrip: _rasterStrip,
+                    rasterDpr: _rasterDpr,
+                  ))));
     });
   }
 
@@ -260,6 +312,7 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
     _stop();
     _ticker?.dispose();
     _pose.dispose();
+    _disposeRasterStrip();
     _textPainter?.dispose();
     widget.hidden?.removeListener(_syncClock);
     _preferences?.removeListener(_syncClock);
@@ -269,12 +322,51 @@ class _OverflowMarqueeTextState extends State<OverflowMarqueeText>
 }
 
 class _MarqueePainter extends CustomPainter {
-  _MarqueePainter(this.text, this.pose, this.width, this.direction, this.gap)
-      : super(repaint: pose);
+  _MarqueePainter(
+    this.text,
+    this.pose,
+    this.width,
+    this.direction,
+    this.gap, {
+    required this.rasterStrip,
+    required this.rasterDpr,
+  }) : super(repaint: pose);
   final TextPainter text;
   final ValueListenable<({double offset, bool wrapping})> pose;
   final double width, gap;
   final TextDirection direction;
+  final ui.Image? rasterStrip;
+  final double rasterDpr;
+
+  /// Exposed for widget tests verifying pre-rasterized marquee glyph locking.
+  @visibleForTesting
+  bool get usesRasterStrip => rasterStrip != null;
+
+  void _paintLine(Canvas canvas, double x, bool moving) {
+    final strip = rasterStrip;
+    if (moving && strip != null) {
+      final src = Rect.fromLTWH(
+        0,
+        0,
+        strip.width.toDouble(),
+        strip.height.toDouble(),
+      );
+      final dst = Rect.fromLTWH(
+        x,
+        0,
+        strip.width / rasterDpr,
+        strip.height / rasterDpr,
+      );
+      canvas.drawImageRect(
+        strip,
+        src,
+        dst,
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      return;
+    }
+    text.paint(canvas, Offset(x, 0));
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -296,10 +388,14 @@ class _MarqueePainter extends CustomPainter {
     final x = direction == TextDirection.ltr
         ? -value.offset
         : width - text.width + value.offset;
-    text.paint(canvas, Offset(x, 0));
+    final moving = value.offset > 0 || value.wrapping;
+    _paintLine(canvas, x, moving);
     if (value.wrapping) {
-      text.paint(canvas,
-          Offset(x + (direction == TextDirection.ltr ? cycle : -cycle), 0));
+      _paintLine(
+        canvas,
+        x + (direction == TextDirection.ltr ? cycle : -cycle),
+        moving,
+      );
     }
     canvas.drawRect(
         bounds,
@@ -326,5 +422,7 @@ class _MarqueePainter extends CustomPainter {
       !identical(pose, oldDelegate.pose) ||
       width != oldDelegate.width ||
       direction != oldDelegate.direction ||
-      gap != oldDelegate.gap;
+      gap != oldDelegate.gap ||
+      !identical(rasterStrip, oldDelegate.rasterStrip) ||
+      rasterDpr != oldDelegate.rasterDpr;
 }

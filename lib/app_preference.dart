@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:dan_player/category_presentation.dart';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/data/settings_file_writer.dart';
 import 'package:dan_player/playlist_view.dart';
 import 'package:dan_player/page/now_playing_page/component/lyric_view_controls.dart';
 import 'package:dan_player/page/now_playing_page/page.dart';
@@ -232,12 +234,10 @@ class AppPreference {
   var nowPlayingPagePref = NowPlayingPagePreference(
       NowPlayingViewMode.withLyric, LyricTextAlign.left, 22.0, 18.0);
 
-  Future<void> save({bool throwOnError = false}) async {
-    try {
-      final supportPath = (await getAppDataDir()).path;
-      final appPreferencePath = "$supportPath\\app_preference.json";
+  Future<void> _saveQueue = Future<void>.value();
+  int _saveGeneration = 0;
 
-      Map prefMap = {
+  Map<String, Object?> _encodePreferenceMap() => {
         "categoryPresentation": categoryPresentation.toMap(),
         "playlistTilePresentation": playlistTilePresentation.toMap(),
         "audiosPagePref": audiosPagePref.toMap(),
@@ -262,13 +262,40 @@ class AppPreference {
         "showQueueUpcoming": showQueueUpcoming.value,
       };
 
-      final prefJson = json.encode(prefMap);
-      final output = await File(appPreferencePath).create(recursive: true);
-      await output.writeAsString(prefJson);
-    } catch (err, trace) {
-      LOGGER.e(err, stackTrace: trace);
-      if (throwOnError) rethrow;
+  /// Serializes writes and commits atomically via a temporary `.pending` file
+  /// so concurrent callers or sudden exits cannot truncate `app_preference.json`.
+  Future<void> save({bool throwOnError = false}) {
+    final generation = ++_saveGeneration;
+    final completer = Completer<void>();
+
+    Future<void> run() async {
+      // If a newer save already queued before this slot ran, let the newer
+      // snapshot perform the write unless this caller needs its own error path.
+      if (!throwOnError && generation != _saveGeneration) return;
+      final supportPath = (await getAppDataDir()).path;
+      if (!throwOnError && generation != _saveGeneration) return;
+      final appPreferencePath = "$supportPath\\app_preference.json";
+      final prefJson = json.encode(_encodePreferenceMap());
+      writeSettingsFile(File(appPreferencePath), prefJson);
     }
+
+    _saveQueue = _saveQueue.then((_) async {
+      try {
+        await run();
+        if (!completer.isCompleted) completer.complete();
+      } catch (err, trace) {
+        LOGGER.e(err, stackTrace: trace);
+        if (!completer.isCompleted) {
+          if (throwOnError) {
+            completer.completeError(err, trace);
+          } else {
+            completer.complete();
+          }
+        }
+      }
+    });
+
+    return completer.future;
   }
 
   static Future<void> read() async {

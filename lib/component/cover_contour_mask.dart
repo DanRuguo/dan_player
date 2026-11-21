@@ -77,6 +77,8 @@ class CoverContourCoverage {
       }
     }
   }
+  CoverContourCoverage._fromOccupied(
+      this.width, this.height, this._columns, this._occupied, this.isEmpty);
   static const _tile = 16;
   final int width, height, _columns;
   final Uint8List _occupied;
@@ -154,7 +156,10 @@ Uint8List extractCoverContours(CoverContourPixels input) {
           smooth[i + width - 1] +
           2 * smooth[i + width] +
           smooth[i + width + 1];
-      final strength = math.sqrt((gx * gx + gy * gy).toDouble()) / 4;
+      final sq = gx * gx + gy * gy;
+      // sqrt(784) / 4 == 7.0, so (strength - 7) <= 0 guarantees alpha == 0.
+      if (sq <= 784) continue;
+      final strength = math.sqrt(sq.toDouble()) / 4;
       final alpha = ((strength - 7) * 3.2).round().clamp(0, 220) *
           input.rgba[i * 4 + 3] ~/
           255;
@@ -166,6 +171,40 @@ Uint8List extractCoverContours(CoverContourPixels input) {
     }
   }
   return output;
+}
+
+class _CoverContourWorkResult {
+  const _CoverContourWorkResult(
+      this.pixels, this.occupied, this.columns, this.isEmpty);
+  final Uint8List pixels;
+  final Uint8List occupied;
+  final int columns;
+  final bool isEmpty;
+}
+
+_CoverContourWorkResult _extractCoverContoursWithCoverage(
+    CoverContourPixels input) {
+  final pixels = extractCoverContours(input);
+  if (pixels.isEmpty) {
+    return _CoverContourWorkResult(pixels, Uint8List(0), 0, true);
+  }
+  const tile = CoverContourCoverage._tile;
+  final width = input.width;
+  final height = input.height;
+  final columns = (width + tile - 1) ~/ tile;
+  final occupied = Uint8List(columns * ((height + tile - 1) ~/ tile));
+  var isEmpty = true;
+  for (var y = 0; y < height; y++) {
+    final tileRow = (y ~/ tile) * columns;
+    final rowBase = y * width;
+    for (var x = 0; x < width; x++) {
+      if (pixels[(rowBase + x) * 4 + 3] != 0) {
+        occupied[tileRow + x ~/ tile] = 1;
+        isEmpty = false;
+      }
+    }
+  }
+  return _CoverContourWorkResult(pixels, occupied, columns, isEmpty);
 }
 
 /// The caller owns a clone. Closing a pending lease cancels work when it has
@@ -271,38 +310,46 @@ abstract final class CoverContourCache {
           1.0, coverContourMaximumSide / math.max(source.width, source.height));
       final width = math.max(1, (source.width * scale).round());
       final height = math.max(1, (source.height * scale).round());
-      final recorder = ui.PictureRecorder();
-      Canvas(recorder).drawImageRect(
-          source,
-          Rect.fromLTWH(
-              0, 0, source.width.toDouble(), source.height.toDouble()),
-          Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
-          Paint()..filterQuality = FilterQuality.medium);
-      final picture = recorder.endRecording();
-      try {
-        small = await picture.toImage(width, height);
-      } finally {
-        picture.dispose();
+      if (source.width == width && source.height == height) {
+        // _ContourFrameProvider already decoded to the bounded contour size;
+        // read back directly instead of allocating a redundant GPU copy.
+        small = source;
+        source = null;
+      } else {
+        final recorder = ui.PictureRecorder();
+        Canvas(recorder).drawImageRect(
+            source,
+            Rect.fromLTWH(
+                0, 0, source.width.toDouble(), source.height.toDouble()),
+            Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+            Paint()..filterQuality = FilterQuality.medium);
+        final picture = recorder.endRecording();
+        try {
+          small = await picture.toImage(width, height);
+        } finally {
+          picture.dispose();
+        }
+        source.dispose();
+        source = null;
       }
-      source.dispose();
-      source = null;
       if (entry.retired) return;
       final rgba =
           await small.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
       small.dispose();
       small = null;
       if (rgba == null || entry.retired) return;
-      final pixels = await compute(extractCoverContours,
+      final work = await compute(_extractCoverContoursWithCoverage,
           CoverContourPixels(rgba.buffer.asUint8List(), width, height),
           debugLabel: 'cover-contours');
-      if (entry.retired || pixels.isEmpty) return;
+      if (entry.retired || work.pixels.isEmpty) return;
       final decoded = Completer<ui.Image>();
-      ui.decodeImageFromPixels(
-          pixels, width, height, ui.PixelFormat.rgba8888, decoded.complete);
+      ui.decodeImageFromPixels(work.pixels, width, height,
+          ui.PixelFormat.rgba8888, decoded.complete);
       mask = await decoded.future;
       if (entry.retired) return;
       entry.mask = mask;
-      entry.coverage = CoverContourCoverage(pixels, width, height);
+      entry.coverage = CoverContourCoverage._fromOccupied(
+          width, height, work.columns, work.occupied, work.isEmpty);
       entry.result.complete(mask);
       mask = null;
     } catch (_) {

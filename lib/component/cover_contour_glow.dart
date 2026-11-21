@@ -639,6 +639,7 @@ class CoverRefractionMesh {
   // reuse bounded scratch buffers; every draw still owns/disposes its vertices.
   late final _glowPositions = Float32List(_glowSide * _glowSide * 2);
   late final _glowCoordinates = Float32List(_glowPositions.length);
+  final _relativeGlowCache = <(double, double), (Float64List, Float64List)>{};
   static final _identity =
       Float64List.fromList([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   double radius = 0;
@@ -758,6 +759,39 @@ class CoverRefractionMesh {
         region: region.outerRect, filterQuality: filterQuality);
   }
 
+  (Float64List, Float64List) _relativeGlowGrid(double radius, double extent) {
+    final key = (radius, extent);
+    final cached = _relativeGlowCache[key];
+    if (cached != null) return cached;
+    if (_relativeGlowCache.length >= 4) {
+      _relativeGlowCache.remove(_relativeGlowCache.keys.first);
+    }
+    const side = _glowSide;
+    final relPositions = Float64List(side * side * 2);
+    final relSamples = Float64List(side * side * 2);
+    double axis(int at) => at == 0
+        ? -extent
+        : at == side - 1
+            ? extent
+            : ((at - 1) / divisions * 2 - 1) * radius;
+    var at = 0;
+    for (var y = 0; y < side; y++) {
+      final ay = axis(y);
+      for (var x = 0; x < side; x++) {
+        final ax = axis(x);
+        final relative = Offset(ax, ay);
+        final sample = refractedPoint(relative, Offset.zero, radius, 1);
+        relPositions[at] = ax;
+        relSamples[at++] = sample.dx;
+        relPositions[at] = ay;
+        relSamples[at++] = sample.dy;
+      }
+    }
+    final entry = (relPositions, relSamples);
+    _relativeGlowCache[key] = entry;
+    return entry;
+  }
+
   // One continuous mask surface, including the undeformed outer glow. Splitting
   // it into independently clipped inside/outside paths creates coverage seams.
   _RefractionDraw _prepareGlow(
@@ -768,25 +802,24 @@ class CoverRefractionMesh {
         applyBoxFit(BoxFit.cover, imageSize, size).source,
         Offset.zero & imageSize);
     final radius = radiusFor(size);
-    const side = _glowSide;
+    final (relPositions, relSamples) = _relativeGlowGrid(radius, extent);
     final positions = _glowPositions;
     final coordinates = _glowCoordinates;
-    double axis(int at) => at == 0
-        ? -extent
-        : at == side - 1
-            ? extent
-            : ((at - 1) / divisions * 2 - 1) * radius;
-    var at = 0;
-    for (var y = 0; y < side; y++) {
-      for (var x = 0; x < side; x++) {
-        final position = center + Offset(axis(x), axis(y));
-        final sample = refractedPoint(position, center, radius, 1);
-        positions[at] = position.dx;
-        coordinates[at++] = source.left + sample.dx / size.width * source.width;
-        positions[at] = position.dy;
-        coordinates[at++] =
-            source.top + sample.dy / size.height * source.height;
-      }
+    final cx = center.dx;
+    final cy = center.dy;
+    final sourceLeft = source.left;
+    final sourceTop = source.top;
+    final sourceWidth = source.width;
+    final sourceHeight = source.height;
+    final width = size.width;
+    final height = size.height;
+    for (var at = 0; at < positions.length; at += 2) {
+      positions[at] = cx + relPositions[at];
+      coordinates[at] =
+          sourceLeft + (cx + relSamples[at]) / width * sourceWidth;
+      positions[at + 1] = cy + relPositions[at + 1];
+      coordinates[at + 1] =
+          sourceTop + (cy + relSamples[at + 1]) / height * sourceHeight;
     }
     return _RefractionDraw(
         ui.ImageShader(frame, TileMode.clamp, TileMode.clamp, _identity,
@@ -882,6 +915,7 @@ class CoverContourPainter extends CustomPainter {
   final double Function() opacity;
   final double Function()? maskOpacity;
   final Color color;
+  static final _softBlur = ui.ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -982,8 +1016,7 @@ class CoverContourPainter extends CustomPainter {
     try {
       for (final soft in [true, false]) {
         final layer = Paint();
-        if (soft)
-          layer.imageFilter = ui.ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2);
+        if (soft) layer.imageFilter = _softBlur;
         canvas.saveLayer(glowBounds, layer);
         final tintFilter = ColorFilter.mode(
             tint.withValues(alpha: glowAlpha.clamp(0, 1) * (soft ? .45 : .82)),

@@ -55,7 +55,9 @@ class DesktopLyricTaskbarOptions extends StatelessWidget {
             required ValueChanged<double> onChanged}) =>
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('$label  ${current.round()}',
-              style: TextStyle(color: foreground)),
+              style: TextStyle(
+                  color: foreground,
+                  fontFeatures: const [FontFeature.tabularFigures()])),
           SliderTheme(
               data: SliderThemeData(
                 activeTrackColor: primary,

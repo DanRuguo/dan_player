@@ -132,7 +132,8 @@ class OnlineArtworkRequest {
         }
         final request = await client.getUrl(uri).timeout(totalTimeout);
         request.followRedirects = false;
-        request.headers.set(HttpHeaders.userAgentHeader, 'Dan-Player/26.0.4');
+        request.headers.set(
+            HttpHeaders.userAgentHeader, 'Dan-Player/${AppSettings.version}');
         if (_isCurrentCustomOrigin(uri, customProfile)) {
           for (final entry in customProfile!.publicHeaders.entries) {
             request.headers.set(entry.key, entry.value);

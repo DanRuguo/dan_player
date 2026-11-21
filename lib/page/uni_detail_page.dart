@@ -12,13 +12,18 @@ import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/music_grid.dart';
+import 'package:dan_player/component/playing_audio_list_row.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/page/uni_page_components.dart';
 import 'package:dan_player/component/app_playback_mode_controls.dart';
+import 'package:dan_player/play_service/play_service.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -66,6 +71,8 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
     this.multiSelectController,
     this.multiSelectViewActions,
     this.enableMultiSelectAddToPlaylist = false,
+    this.enableLocatePlaying = false,
+    this.nowPlayingPath,
     this.extraActions = const [],
   }) : assert(!enableMultiSelectAddToPlaylist || multiSelectController != null);
 
@@ -111,6 +118,8 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
   final MultiSelectController<S>? multiSelectController;
   final List<Widget>? multiSelectViewActions;
   final bool enableMultiSelectAddToPlaylist;
+  final bool enableLocatePlaying;
+  final ValueListenable<String?>? nowPlayingPath;
   final List<Widget> extraActions;
 
   @override
@@ -119,11 +128,16 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
 
 class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
   final _coverFlightKey = GlobalKey();
+  final _scrollViewportKey = GlobalKey();
+  final _scrollController = ScrollController();
   late SortMethodDesc<S>? currSortMethod = _preferredSortMethod();
   late SortOrder currSortOrder = widget.pref.sortOrder;
   late ContentView currContentView = widget.pref.contentView;
   final TextEditingController _search = TextEditingController();
   String _query = '';
+  int _locateGeneration = 0;
+  int _pulseToken = 0;
+  final _locatedPulse = ValueNotifier<LocatedTrackPulse?>(null);
 
   SortMethodDesc<S>? _preferredSortMethod() {
     final methods = widget.sortMethods;
@@ -155,8 +169,154 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
 
   @override
   void dispose() {
+    _locateGeneration++;
+    _locatedPulse.dispose();
+    _scrollController.dispose();
     _search.dispose();
     super.dispose();
+  }
+
+  int _findPlayingAudioIndex(List<S> items, String? playingPath) {
+    if (playingPath == null || playingPath.isEmpty) return -1;
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (item is Audio && item.path == playingPath) return i;
+    }
+    return -1;
+  }
+
+  void _locatePlaying(String playingPath) {
+    final visibleIndex =
+        _findPlayingAudioIndex(_visibleSecondaryContent(), playingPath);
+    if (visibleIndex < 0 &&
+        _query.isNotEmpty &&
+        _findPlayingAudioIndex(widget.secondaryContent, playingPath) >= 0) {
+      setState(() {
+        _query = '';
+        _search.clear();
+      });
+    }
+    _locatedPulse.value = (path: playingPath, token: ++_pulseToken);
+    _scheduleLocatePlaying(playingPath, ++_locateGeneration);
+  }
+
+  void _jumpScrollTo(double offset) {
+    if (!_scrollController.hasClients) return;
+    _scrollController.jumpTo(offset.clamp(
+      _scrollController.position.minScrollExtent,
+      _scrollController.position.maxScrollExtent,
+    ));
+  }
+
+  RenderSliverMultiBoxAdaptor? _firstContentSliver() {
+    RenderSliverMultiBoxAdaptor? result;
+    void visit(RenderObject child) {
+      if (child is RenderSliverMultiBoxAdaptor) {
+        result = child;
+      } else if (result == null) {
+        child.visitChildren(visit);
+      }
+    }
+
+    final root = _scrollViewportKey.currentContext?.findRenderObject();
+    if (root != null) visit(root);
+    return result;
+  }
+
+  void _scheduleLocatePlaying(
+    String playingPath,
+    int generation, [
+    int attempt = 0,
+  ]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          generation != _locateGeneration ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      final targetAt =
+          _findPlayingAudioIndex(_visibleSecondaryContent(), playingPath);
+      if (targetAt < 0) return;
+      if (currContentView == ContentView.table) {
+        final box = _scrollViewportKey.currentContext?.findRenderObject();
+        if (box is RenderBox) {
+          _jumpScrollTo(CompactMusicGridDelegate.of(context)
+              .offsetForIndex(targetAt, box.size.width));
+        }
+        return;
+      }
+      if (MediaQuery.textScalerOf(context).scale(14) <= 14) {
+        _jumpScrollTo(targetAt * 64.0);
+        return;
+      }
+      final sliver = _firstContentSliver();
+      if (sliver == null) return;
+      RenderBox? nearest;
+      var distance = double.infinity;
+      var totalHeight = 0.0;
+      var count = 0;
+      for (var child = sliver.firstChild;
+          child != null;
+          child = sliver.childAfter(child)) {
+        final index = sliver.indexOf(child);
+        if (index == targetAt) {
+          _jumpScrollTo(RenderAbstractViewport.of(child)
+              .getOffsetToReveal(child, 0)
+              .offset);
+          return;
+        }
+        if ((index - targetAt).abs() < distance) {
+          nearest = child;
+          distance = (index - targetAt).abs().toDouble();
+        }
+        totalHeight += child.size.height;
+        count++;
+      }
+      if (nearest == null || count == 0 || totalHeight <= 0) return;
+      final anchorOffset = RenderAbstractViewport.of(nearest)
+          .getOffsetToReveal(nearest, 0)
+          .offset;
+      final offset = anchorOffset +
+          (targetAt - sliver.indexOf(nearest)) * totalHeight / count;
+      final previousOffset = _scrollController.offset;
+      _jumpScrollTo(offset);
+      if (attempt < 31 && _scrollController.offset != previousOffset) {
+        _scheduleLocatePlaying(playingPath, generation, attempt + 1);
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  Widget _locatePlayingAction(BuildContext context) {
+    Widget buildButton(String? playingPath) {
+      final hasMatch =
+          _findPlayingAudioIndex(widget.secondaryContent, playingPath) >= 0;
+      return IconButton.outlined(
+        key: const ValueKey('detail-locate-current'),
+        style: appToolbarControlStyle(context, iconOnly: true),
+        tooltip: ui('定位当前歌曲'),
+        icon: const Icon(Symbols.my_location),
+        onPressed: hasMatch ? () => _locatePlaying(playingPath!) : null,
+      );
+    }
+
+    final injected = widget.nowPlayingPath;
+    if (injected != null) {
+      return ValueListenableBuilder<String?>(
+        valueListenable: injected,
+        builder: (context, playingPath, _) => buildButton(playingPath),
+      );
+    }
+    return PlaybackReadyBuilder(
+      waitingBuilder: (_) => buildButton(null),
+      readyBuilder: (_) {
+        final playback = PlayService.instance.playbackService;
+        return ListenableBuilder(
+          listenable: playback,
+          builder: (context, _) => buildButton(playback.nowPlaying?.path),
+        );
+      },
+    );
   }
 
   List<S> _visibleSecondaryContent() {
@@ -216,6 +376,9 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
 
     final List<Widget> actions = [];
     actions.addAll(widget.extraActions);
+    if (widget.enableLocatePlaying) {
+      actions.add(_locatePlayingAction(context));
+    }
     if (widget.enablePlayAll || widget.enableShufflePlay) {
       actions.add(const AppPlaybackModeControls());
     }
@@ -294,8 +457,10 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
           }
         : const <Key, int>{};
     final searchEnabled = widget.secondaryContentSearchText != null;
-    return AppEntranceScope(
-      child: ColoredBox(
+    return LocatedTrackPulseScope(
+      pulse: _locatedPulse,
+      child: AppEntranceScope(
+        child: ColoredBox(
         color: scheme.surface,
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -358,7 +523,10 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                           borderRadius: AppShape.surfaceRadius,
                           type: MaterialType.transparency,
                           child: AppContentScrollbar(
-                            builder: (context, controller) => CustomScrollView(
+                            controller: _scrollController,
+                            builder: (context, controller) => KeyedSubtree(
+                              key: _scrollViewportKey,
+                              child: CustomScrollView(
                               key: const ValueKey('uni-detail-content-scroll'),
                               controller: controller,
                               slivers: [
@@ -462,11 +630,13 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                                     padding: EdgeInsets.only(bottom: 96.0)),
                               ],
                             ),
+                            ),
                           ),
                         ),
                       ),
                     ],
                   )),
+          ),
         ),
       ),
     );
@@ -623,7 +793,11 @@ class _UniDetailPageHeader extends StatelessWidget {
               subtitle,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 14, color: scheme.onSurface),
+              style: TextStyle(
+                fontSize: 14,
+                color: scheme.onSurface,
+                fontFeatures: tabularFiguresFeatures,
+              ),
             ),
           ),
         ],

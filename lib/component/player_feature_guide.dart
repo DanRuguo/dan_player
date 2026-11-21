@@ -294,6 +294,10 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               _paragraph(context, '分类页：从专辑与艺术家开始'),
                               _text(
                                   '分类页可按专辑、艺术家、码率、时长、语言、格式或来源浏览，“个人整理”集中查看评分与标签。搜索框筛选当前分类组；点封面进入详情，再搜索或排序歌曲，点歌按详情里可见的结果播放。切换分类类型会清空分类搜索，浏览分类不会改动音乐标签。'),
+                              _text(
+                                  '音乐页、专辑、艺术家与分类详情页均高亮正在播放的歌曲；点击页头的定位图标可直接滚到当前播放的曲目，如被当前搜索筛选隐藏会自动清除筛选再定位。'),
+                              _text(
+                                  '点击页头的定位图标时，目标曲目行会短暂以主题色高亮脉冲提示位置；专辑、艺术家与分类详情页顶部同时显示合集总时长。'),
                               _link(
                                   context,
                                   'guide-basic-music-page',
@@ -370,7 +374,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           _text('按数量包含本曲，确认时固定目标条目；重排后仍止于该条，删除目标会取消该停止目标。'),
                           const SizedBox(height: 8),
                           _text(
-                              '倒计时可延长、缩短、暂停或继续，也可选择到时播完本曲再停。按数量、播完本曲与队尾目标一次只保留一种；新设目标前先关闭 A-B 和单曲循环。已有目标被循环阻挡时，队列会提示原因，关闭循环即可继续前进。倒计时真正触发停止后，队列目标也会清除。'),
+                              '倒计时可延长、缩短、暂停或继续，也可选择到时播完本曲再停，并默认在结束前 5 秒平滑淡出音量（暂停后自动恢复原音量）。按数量、播完本曲与队尾目标一次只保留一种；新设目标前先关闭 A-B 和单曲循环。已有目标被循环阻挡时，队列会提示原因，关闭循环即可继续前进。倒计时真正触发停止后，队列目标也会清除。'),
                           _link(context, 'guide-session-settings', '打开会话恢复设置',
                               () => _setting(context, 'library', 'session')),
                         ]),
@@ -477,6 +481,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           const SizedBox(height: 8),
                           _text(
                               '联网注音需要您自己的 Yahoo! JAPAN Client ID；离线词典缺失时可手动安装组件，也可在设置中批量处理已缓存歌词。生成假名按汉字位置显示并存入独立缓存，保留原歌词和已有注音；自动读音仅供参考。'),
+                          _text(
+                              '支持读取内嵌歌词（含 ID3v2 SYLT 与 Vorbis/APE 同步歌词标签），并优先识别歌词原文中作者手写的行内注音，如 漢字(かな)、漢字（かな）或 漢字《かな》；无须联网或词典也可直接显示。'),
                           _demo('lyrics', PlayerGuideDemoKind.lyrics),
                           const SizedBox(height: 8),
                           _text(
@@ -593,9 +599,13 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '“跳过头尾静音”默认关闭，在下次加载本地歌曲时生效，可设置静音阈值和每端检测时长。启用后使用常规切换，保留原文件和完整时间轴；手动定位、A-B 循环或切换输出会恢复本曲完整范围。无法确认精确定位的格式保留原样。'),
                           _text(
                               '选择交叉淡入淡出后，可开启“同专辑保持连续输出”。自动接续同一明确专辑的歌曲时不混叠两曲，跨专辑仍使用设定的淡化时长；专辑或归属信息缺失时不会猜测。此开关默认关闭。'),
+                          _text(
+                              '开启 WASAPI 独占输出或跳过头尾静音时，歌曲过渡设置会实时提示实际生效方式并保留您的原选择，关闭冲突选项后自动恢复。'),
                           const SizedBox(height: 8),
                           _text(
                               '歌词页“更多 → 均衡器”调整频段；ReplayGain 在设置中读取已有响度标签，可按曲目或专辑均衡。已有响度分析与文件校验说明见“导出与音频检查”。'),
+                          _text(
+                              '回放增益除标准 ReplayGain 标签外，还兼容 Opus R128 增益标签、MP4 自由格式标签（含 iTunes 命名空间与大小写变体）及 ID3v2.4 RVA2 帧；本地封面补充识别同目录同名曲目封面、artwork/coverart/frontcover 等常用命名以及 Windows 媒体播放器大图。'),
                           _link(
                               context,
                               'guide-speed-pitch-settings',
@@ -640,6 +650,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '歌单与歌曲封面可使用 GIF，导入上限为 1024 × 1024、120 帧，复杂动画可能达到解码预算。动态封面受“动态 GIF 封面”和“主题与封面渐变”控制；关闭或减少动画时显示首帧，隐藏时暂停。背景图片仍使用静态图。'),
                           _text(
                               '主题、桌面歌词、任务栏歌词和性能选项已有各自说明；下面直接定位到对应设置。桌面歌词与任务栏歌词互斥，任务栏空区不足时会隐藏显示。'),
+                          _text(
+                              '全屏歌词页在键鼠静止数秒后会自动隐藏指针，移动鼠标、滚轮、按键、切出窗口或打开弹窗时会立即恢复。'),
                           _link(context, 'guide-theme-settings', '打开主题设置',
                               () => _setting(context, 'appearance', 'theme')),
                           _link(
@@ -655,6 +667,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                             Icons.desktop_windows_outlined, [
                           _text(
                               '在设置中开启桌面歌词或任务栏歌词，两种模式自动互斥，共用当前歌词。桌面歌词的外观面板可调整样式，也可切换到任务栏。'),
+                          _text(
+                              '悬停桌面歌词操作栏可一键“显示主窗口”回到播放器，横排与竖排方向也在“桌面歌词显示”和“歌词体验”设置间实时同步。'),
                           const SizedBox(height: 8),
                           _text(
                               '任务栏设置可选位置、切换空区、单/双行、配色与独立描边。歌词文字保持点击穿透；播放/暂停与可选下一首只有按钮区域接收点击。安全空间不足时自动隐藏。'),

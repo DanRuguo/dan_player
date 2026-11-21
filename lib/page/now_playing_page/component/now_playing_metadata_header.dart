@@ -11,18 +11,56 @@ const _titleStyle = TextStyle(fontWeight: FontWeight.w600, fontSize: 24);
 const _metadataChrome = 19.0;
 const _metadataDivider = 21.0;
 
+const _headerMeasureCacheCapacity = 32;
+final _headerMeasureCache = <Object, Size>{};
+
+/// Clears the bounded header text layout cache (for isolated tests).
+@visibleForTesting
+void clearNowPlayingMetadataHeaderMeasureCache() => _headerMeasureCache.clear();
+
+@visibleForTesting
+int get nowPlayingMetadataHeaderMeasureCacheLength =>
+    _headerMeasureCache.length;
+
 Size _measureHeaderText(BuildContext context, String text, TextStyle style) {
+  final singleLine = text.replaceAll(RegExp(r'[\r\n]+'), ' ');
+  final merged = DefaultTextStyle.of(context).style.merge(style);
+  final policy = AppFontScope.of(context);
+  final direction = Directionality.of(context);
+  final scaler = MediaQuery.textScalerOf(context);
+  final locale = Localizations.maybeLocaleOf(context);
+  final key = (
+    singleLine,
+    merged.fontSize,
+    merged.fontWeight,
+    merged.fontStyle,
+    merged.fontFamily,
+    merged.height,
+    merged.letterSpacing,
+    merged.wordSpacing,
+    policy,
+    direction,
+    scaler,
+    locale,
+  );
+  final cached = _headerMeasureCache.remove(key);
+  if (cached != null) {
+    _headerMeasureCache[key] = cached;
+    return cached;
+  }
   final painter = TextPainter(
-      text: appFontSpan(text.replaceAll(RegExp(r'[\r\n]+'), ' '),
-          style: DefaultTextStyle.of(context).style.merge(style),
-          policy: AppFontScope.of(context)),
-      textDirection: Directionality.of(context),
-      textScaler: MediaQuery.textScalerOf(context),
-      locale: Localizations.maybeLocaleOf(context),
+      text: appFontSpan(singleLine, style: merged, policy: policy),
+      textDirection: direction,
+      textScaler: scaler,
+      locale: locale,
       maxLines: 1)
     ..layout();
   final size = painter.size;
   painter.dispose();
+  if (_headerMeasureCache.length >= _headerMeasureCacheCapacity) {
+    _headerMeasureCache.remove(_headerMeasureCache.keys.first);
+  }
+  _headerMeasureCache[key] = size;
   return size;
 }
 

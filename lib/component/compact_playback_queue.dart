@@ -864,6 +864,9 @@ class _QueueFanState extends State<_QueueFan>
                       alignment: layout.leansLeft
                           ? Alignment.centerRight
                           : Alignment.centerLeft,
+                      filterQuality: (scale - 1.0).abs() > 1e-4
+                          ? FilterQuality.medium
+                          : null,
                       child: card,
                     ),
                   ),
@@ -909,12 +912,18 @@ class _QueueFanState extends State<_QueueFan>
               child: AnimatedBuilder(
                 animation: _reveal,
                 child: _rows(),
-                builder: (context, rows) => Transform.scale(
-                  scale: .8 +
-                      .2 * AppMotion.standardCurve.transform(_reveal.value),
-                  alignment: widget.layout.origin,
-                  child: Opacity(opacity: _reveal.value, child: rows),
-                ),
+                builder: (context, rows) {
+                  final revealScale = .8 +
+                      .2 * AppMotion.standardCurve.transform(_reveal.value);
+                  return Transform.scale(
+                    scale: revealScale,
+                    alignment: widget.layout.origin,
+                    filterQuality: (revealScale - 1.0).abs() > 1e-4
+                        ? FilterQuality.medium
+                        : null,
+                    child: Opacity(opacity: _reveal.value, child: rows),
+                  );
+                },
               ),
             ),
           ),

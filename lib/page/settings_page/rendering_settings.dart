@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:desktop_lyric/frame_pacing.dart';
 import 'package:dan_player/rendering_preferences.dart';
@@ -99,6 +100,18 @@ class RenderingSettings extends StatelessWidget {
         onChanged: (v) =>
             _update((current) => current.copyWith(animatedArtwork: v)),
       ),
+      if (value.animatedArtwork && !value.animations.allows(MotionKind.theme))
+        Padding(
+          key: const ValueKey('animated-artwork-motion-conflict'),
+          padding: const EdgeInsets.only(top: 8, left: 4, right: 4),
+          child: Text(
+            ui('当前已关闭“主题与封面渐变”，动态 GIF 封面暂时显示首帧；此处开关会保留，重新开启后恢复。'),
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+        ),
       const SizedBox(height: 16),
       SettingsSwitchTile(
         controlKey: const ValueKey('cover-contour-glow'),
@@ -109,6 +122,19 @@ class RenderingSettings extends StatelessWidget {
         onChanged: (v) =>
             _update((current) => current.copyWith(coverContourGlow: v)),
       ),
+      if (value.coverContourGlow &&
+          !value.animations.allows(MotionKind.feedback))
+        Padding(
+          key: const ValueKey('cover-contour-glow-motion-conflict'),
+          padding: const EdgeInsets.only(top: 8, left: 4, right: 4),
+          child: Text(
+            ui('当前已关闭“交互反馈动画”，封面轮廓辉光与折射暂时停用；此处开关会保留，重新开启后恢复。'),
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+        ),
       const SizedBox(height: 16),
       _FrameRateSettings(value: value, update: _update),
       const SizedBox(height: 16),

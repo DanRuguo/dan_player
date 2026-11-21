@@ -51,8 +51,11 @@ class NowPlayingBarControls extends StatelessWidget {
           style: style,
           onPressed: onPrevious,
           icon: const Icon(Symbols.skip_previous)),
-      IconButton.filled(
+      _TactilePlayPauseButton(
         key: const ValueKey('bar-play-pause'),
+        isPlaying: isPlaying,
+        isBuffering: isBuffering,
+        reduceMotion: reduce,
         tooltip: isBuffering
             ? ui('正在获取播放地址')
             : isPlaying
@@ -68,15 +71,6 @@ class NowPlayingBarControls extends StatelessWidget {
                 states.contains(WidgetState.disabled)
                     ? scheme.onSurface.withValues(alpha: .38)
                     : scheme.onPrimaryContainer)),
-        icon: AnimatedSwitcher(
-            duration: reduce ? Duration.zero : AppMotion.quick,
-            child: isBuffering
-                ? const SizedBox.square(
-                    key: ValueKey('buffering'),
-                    dimension: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : Icon(isPlaying ? Symbols.pause : Symbols.play_arrow,
-                    key: ValueKey(isPlaying))),
       ),
       IconButton(
           key: const ValueKey('bar-next'),
@@ -102,5 +96,86 @@ class NowPlayingBarControls extends StatelessWidget {
           ),
         ),
     ]);
+  }
+}
+
+class _TactilePlayPauseButton extends StatefulWidget {
+  const _TactilePlayPauseButton({
+    super.key,
+    required this.isPlaying,
+    required this.isBuffering,
+    required this.reduceMotion,
+    required this.tooltip,
+    required this.onPressed,
+    required this.style,
+  });
+
+  final bool isPlaying;
+  final bool isBuffering;
+  final bool reduceMotion;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final ButtonStyle style;
+
+  @override
+  State<_TactilePlayPauseButton> createState() =>
+      _TactilePlayPauseButtonState();
+}
+
+class _TactilePlayPauseButtonState extends State<_TactilePlayPauseButton> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed != value && mounted) setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onPressed != null && !widget.isBuffering;
+    final pressed = enabled && !widget.reduceMotion && _pressed;
+    return Listener(
+      onPointerDown: enabled ? (_) => _setPressed(true) : null,
+      onPointerUp: (_) => _setPressed(false),
+      onPointerCancel: (_) => _setPressed(false),
+      child: AnimatedScale(
+        scale: pressed ? 0.94 : 1.0,
+        duration: widget.reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 90),
+        curve: Curves.easeOutCubic,
+        child: IconButton.filled(
+          tooltip: widget.tooltip,
+          onPressed: widget.onPressed,
+          style: widget.style,
+          icon: AnimatedSwitcher(
+            duration: widget.reduceMotion ? Duration.zero : AppMotion.quick,
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) => widget.reduceMotion
+                ? child
+                : FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(
+                      scale: Tween<double>(begin: 0.80, end: 1.0)
+                          .animate(animation),
+                      child: child,
+                    ),
+                  ),
+            child: widget.isBuffering
+                ? SizedBox.square(
+                    key: const ValueKey('buffering'),
+                    dimension: 20,
+                    child: widget.reduceMotion
+                        ? const Icon(Icons.hourglass_top_rounded, size: 20)
+                        : const CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    widget.isPlaying ? Symbols.pause : Symbols.play_arrow,
+                    key: ValueKey(widget.isPlaying),
+                  ),
+          ),
+        ),
+      ),
+    );
   }
 }

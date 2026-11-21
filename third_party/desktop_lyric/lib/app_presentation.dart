@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:desktop_lyric/app_motion.dart';
+import 'package:desktop_lyric/component/text_pixel_snap.dart';
 import 'package:desktop_lyric/ui_language.dart';
 
 enum AppNoticeKind { info, success, warning, error }
@@ -672,6 +673,7 @@ class _NoticeBubble extends StatelessWidget {
         ),
     };
     final reduced = !AppMotion.enabled(context, MotionKind.transitions);
+    final dpr = MediaQuery.devicePixelRatioOf(context);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: reduced ? 1 : 0, end: 1),
       duration: reduced ? Duration.zero : AppMotion.quick,
@@ -679,7 +681,8 @@ class _NoticeBubble extends StatelessWidget {
       builder: (context, value, child) => Opacity(
           opacity: value,
           child: Transform.translate(
-              offset: Offset(0, (1 - value) * 6), child: child)),
+              offset: snapOffsetToPhysicalPixel(Offset(0, (1 - value) * 6), dpr),
+              child: child)),
       child: AnimatedOpacity(
         opacity: closing ? 0 : 1,
         duration: reduced ? Duration.zero : AppMotion.quick,

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric_timeline.dart';
@@ -7,7 +9,7 @@ class Qrc extends Lyric {
 
   static Qrc fromQrcText(String qrc, [String? transRawStr]) {
     final List<QrcLine> lines = [];
-    final splited = qrc.split("\n");
+    final splited = const LineSplitter().convert(qrc);
     for (final item in splited) {
       final qrcLine = QrcLine.fromLine(item);
 
@@ -18,7 +20,7 @@ class Qrc extends Lyric {
 
     if (transRawStr != null) {
       final translated = <Duration, String>{};
-      for (final raw in transRawStr.split('\n')) {
+      for (final raw in const LineSplitter().convert(transRawStr)) {
         for (final line in LrcLine.fromLineAll(raw)) {
           if (line.content.isNotEmpty) translated[line.start] = line.content;
         }
@@ -41,12 +43,16 @@ class Qrc extends Lyric {
 class QrcLine extends SyncLyricLine {
   QrcLine(super.start, super.length, super.words, [super.translation]);
 
+  static final _headerPattern = RegExp(r'^\[(\d+),(\d+)\]');
+  static final _wordPattern = RegExp(r'(.*?)\((\d+),(\d+)\)');
+
   static QrcLine? fromLine(String line, [String? translation]) {
-    final header = RegExp(r'^\[(\d+),(\d+)\]').firstMatch(line.trimLeft());
+    final trimmed = line.trimLeft();
+    final header = _headerPattern.firstMatch(trimmed);
     if (header == null) return null;
-    final content = line.trimLeft().substring(header.end);
+    final content = trimmed.substring(header.end);
     final words = <QrcWord>[
-      for (final match in RegExp(r'(.*?)\((\d+),(\d+)\)').allMatches(content))
+      for (final match in _wordPattern.allMatches(content))
         QrcWord(Duration(milliseconds: int.parse(match[2]!)),
             Duration(milliseconds: int.parse(match[3]!)), match[1]!),
     ];

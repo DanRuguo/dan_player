@@ -216,6 +216,11 @@ void Worker::Run() {
   {
     ComPtr<Analyzer> analyzer;
     OfflineReader offline;
+    // Circuit breaker: avoid repeating failing WinRT activation or COM calls
+    // on every chunk when Windows has no Japanese phonetic analyzer installed.
+    bool winrt_activation_checked = false;
+    bool winrt_circuit_open = false;
+    int winrt_consecutive_misses = 0;
     for (;;) {
       std::shared_ptr<Job> job;
       {
@@ -227,19 +232,41 @@ void Worker::Run() {
       }
       Reply reply;
       reply.id = job->id;
-      if (SUCCEEDED(initialized) && !analyze_ && !analyzer && !job->cancelled) {
-        RoGetActivationFactory(
-            HStringReference(RuntimeClass_Windows_Globalization_JapanesePhoneticAnalyzer).Get(),
-            IID_PPV_ARGS(&analyzer));
+      if (SUCCEEDED(initialized) && !analyze_ && !analyzer &&
+          !winrt_activation_checked && !winrt_circuit_open && !job->cancelled) {
+        winrt_activation_checked = true;
+        if (FAILED(RoGetActivationFactory(
+                HStringReference(RuntimeClass_Windows_Globalization_JapanesePhoneticAnalyzer).Get(),
+                IID_PPV_ARGS(&analyzer)))) {
+          winrt_circuit_open = true;
+        }
       }
-      reply.available = (analyze_ || analyzer || offline.available()) && ValidChunks(job->chunks);
+      const bool winrt_ready = analyzer != nullptr && !winrt_circuit_open;
+      reply.available = (analyze_ || winrt_ready || offline.available()) && ValidChunks(job->chunks);
       if (reply.available) {
         for (const auto& text : job->chunks) {
           if (job->cancelled) break;
-          auto chunk = analyze_ ? analyze_(text)
-                               : analyzer ? Analyze(analyzer.Get(), text) : Chunk{};
+          Chunk chunk;
+          bool winrt_tried = false;
+          if (analyze_) {
+            chunk = analyze_(text);
+          } else if (analyzer && !winrt_circuit_open) {
+            winrt_tried = true;
+            chunk = Analyze(analyzer.Get(), text);
+            if (chunk) {
+              winrt_consecutive_misses = 0;
+            }
+          }
           if (!analyze_ && !chunk && !job->cancelled) {
             chunk = offline.Read(text, job->dictionary_path, &reply.dictionary_missing);
+            if (winrt_tried && chunk) {
+              // WinRT failed on a chunk the offline dictionary handled cleanly.
+              // After two consecutive misses, bypass WinRT for the session.
+              if (++winrt_consecutive_misses >= 2) {
+                winrt_circuit_open = true;
+                analyzer.Reset();
+              }
+            }
           }
           reply.chunks.push_back(std::move(chunk));
         }

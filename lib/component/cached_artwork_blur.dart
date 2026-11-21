@@ -1,19 +1,28 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:dan_player/component/artwork_mesh_painter.dart';
+import 'package:dan_player/component/artwork_pulse.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 /// Flatten only the decoded, blurred artwork before it is rotated/scaled.
 /// Moving a live ImageFilter can change its raster-cache/filter bounds at the
 /// viewport edge. A bounded texture keeps those edges and the blur stable.
 class CachedArtworkBlur extends StatefulWidget {
-  const CachedArtworkBlur(
-      {super.key, required this.image, required this.blur, this.phase});
+  const CachedArtworkBlur({
+    super.key,
+    required this.image,
+    required this.blur,
+    this.phase,
+    this.layered = false,
+    this.pulse,
+  });
   final ImageProvider image;
   final double blur;
   final ValueListenable<double>? phase;
+  final bool layered;
+  final ArtworkPulse? pulse;
 
   @override
   State<CachedArtworkBlur> createState() => _CachedArtworkBlurState();
@@ -21,14 +30,21 @@ class CachedArtworkBlur extends StatefulWidget {
 
 class _CachedArtworkBlurState extends State<CachedArtworkBlur> {
   final _snapshot = SnapshotController();
-  late final _painter = ArtworkMeshPainter(widget.phase);
+  late final _painter = ArtworkMeshPainter(
+    widget.phase,
+    layered: widget.layered,
+    pulse: widget.pulse,
+  );
   int _generation = 0;
   bool _pending = false;
 
   @override
   void didUpdateWidget(CachedArtworkBlur oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _painter.phase = widget.phase;
+    _painter
+      ..phase = widget.phase
+      ..layered = widget.layered
+      ..pulse = widget.pulse;
     if (oldWidget.image != widget.image || oldWidget.blur != widget.blur) {
       _generation++;
       _pending = false;

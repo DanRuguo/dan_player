@@ -7,6 +7,7 @@ import 'package:dan_player/component/playback_pitch_control.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_rate.dart';
+import 'package:dan_player/play_service/playback_transition_preferences.dart';
 import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/utils.dart';
 import 'package:flutter/material.dart';
@@ -69,7 +70,10 @@ class _PlaybackSettingsState extends State<PlaybackSettings> {
     unawaited(_save());
   }
 
-  Widget _panel({required PlayerExperiencePreferences preferences}) {
+  Widget _panel({
+    required PlayerExperiencePreferences preferences,
+    required PlaybackTransitionPreferences transitions,
+  }) {
     final ready = PlayService.playbackReady.value;
     final playback = ready ? PlayService.instance.playbackService : null;
     return PlaybackSettingsPanel(
@@ -78,6 +82,7 @@ class _PlaybackSettingsState extends State<PlaybackSettings> {
       pitchAvailable: playback?.supportsPlaybackPitch ?? true,
       onPitchChanged: _pitch,
       exclusive: playback?.wasapiExclusive.value ?? preferences.exclusiveOutput,
+      crossfadeSelected: transitions.mode == PlaybackTransitionMode.crossfade,
       changingOutput: playback?.isChangingOutput.value ?? false,
       rateAvailable: playback?.supportsPlaybackRate ?? true,
       unavailableReason: playback?.tempoUnavailableReason,
@@ -94,21 +99,30 @@ class _PlaybackSettingsState extends State<PlaybackSettings> {
     UiLanguageScope.watch(context);
     return ValueListenableBuilder(
       valueListenable: AppSettings.instance.experience,
-      builder: (context, preferences, _) => PlaybackReadyBuilder(
-        waitingBuilder: (_) => _panel(preferences: preferences),
-        readyBuilder: (_) {
-          final playback = PlayService.instance.playbackService;
-          return ListenableBuilder(
-            listenable: Listenable.merge([
-              playback,
-              playback.playbackRate,
-              playback.playbackPitch,
-              playback.wasapiExclusive,
-              playback.isChangingOutput,
-            ]),
-            builder: (_, __) => _panel(preferences: preferences),
-          );
-        },
+      builder: (context, preferences, _) => ValueListenableBuilder(
+        valueListenable: AppSettings.instance.playbackTransitions,
+        builder: (context, transitions, _) => PlaybackReadyBuilder(
+          waitingBuilder: (_) => _panel(
+            preferences: preferences,
+            transitions: transitions,
+          ),
+          readyBuilder: (_) {
+            final playback = PlayService.instance.playbackService;
+            return ListenableBuilder(
+              listenable: Listenable.merge([
+                playback,
+                playback.playbackRate,
+                playback.playbackPitch,
+                playback.wasapiExclusive,
+                playback.isChangingOutput,
+              ]),
+              builder: (_, __) => _panel(
+                preferences: preferences,
+                transitions: transitions,
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -131,6 +145,7 @@ class PlaybackSettingsPanel extends StatelessWidget {
     this.playbackPitch = 0,
     this.pitchAvailable = true,
     this.onPitchChanged,
+    this.crossfadeSelected = false,
   });
 
   final double playbackRate;
@@ -146,6 +161,7 @@ class PlaybackSettingsPanel extends StatelessWidget {
   final double playbackPitch;
   final bool pitchAvailable;
   final ValueChanged<double>? onPitchChanged;
+  final bool crossfadeSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -201,6 +217,15 @@ class PlaybackSettingsPanel extends StatelessWidget {
             value: exclusive,
             onChanged: changingOutput ? null : onExclusiveChanged,
           ),
+          if (exclusive && crossfadeSelected) ...[
+            const SizedBox(height: 8),
+            Text(
+              ui("已选择交叉淡入淡出；开启 WASAPI 独占输出后将改用连续输出，关闭独占后恢复淡入淡出。"),
+              key: const ValueKey('playback-exclusive-crossfade-conflict'),
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
           if (deferred) ...[
             const SizedBox(height: 8),
             Text(ui("尚未播放歌曲，以上设置将在开始播放时应用。")),

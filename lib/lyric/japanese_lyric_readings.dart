@@ -1,3 +1,4 @@
+import 'package:dan_player/lyric/inline_furigana.dart';
 import 'package:dan_player/lyric/japanese_phonetic_channel.dart';
 import 'package:dan_player/lyric/japanese_lyric_cache.dart';
 import 'package:dan_player/lyric/japanese_reading_analyzer.dart';
@@ -467,26 +468,48 @@ class JapaneseReadingProjector {
     cancel();
     final generation = _generation;
     bool current() => generation == _generation && stillCurrent();
+    final inlineLines = <int, InlineFuriganaLine>{};
+    for (var index = 0; index < source.lines.length; index++) {
+      final text = lyricPrimaryText(source.lines[index]);
+      final inline = extractInlineFurigana(text);
+      if (inline != null) {
+        inlineLines[index] = inline;
+      }
+    }
     Map<int, JapaneseCachedReading>? incompleteSaved;
-    JapaneseReadingProjection result(JapaneseReadingResult reason) =>
-        JapaneseReadingProjection(
-            incompleteSaved != null &&
-                    (reason == JapaneseReadingResult.unchanged ||
-                        reason == JapaneseReadingResult.unavailable ||
-                        reason == JapaneseReadingResult.dictionaryMissing)
-                ? _displayCopy(source, incompleteSaved)
-                : source,
-            reason);
+    JapaneseReadingProjection result(JapaneseReadingResult reason) {
+      if (inlineLines.isNotEmpty &&
+          (reason == JapaneseReadingResult.unchanged ||
+              reason == JapaneseReadingResult.unavailable ||
+              reason == JapaneseReadingResult.dictionaryMissing)) {
+        return JapaneseReadingProjection(
+          _displayCopy(source, incompleteSaved ?? const {},
+              inlineLines: inlineLines),
+          JapaneseReadingResult.applied,
+        );
+      }
+      return JapaneseReadingProjection(
+          incompleteSaved != null &&
+                  (reason == JapaneseReadingResult.unchanged ||
+                      reason == JapaneseReadingResult.unavailable ||
+                      reason == JapaneseReadingResult.dictionaryMissing)
+              ? _displayCopy(source, incompleteSaved, inlineLines: inlineLines)
+              : source,
+          reason);
+    }
     if (!current()) return result(JapaneseReadingResult.stale);
-    if (!enabled && !force) return result(JapaneseReadingResult.unchanged);
+    if (!enabled && !force) {
+      return JapaneseReadingProjection(source, JapaneseReadingResult.unchanged);
+    }
     var totalUnits = 0;
     for (final line in source.lines) {
       totalUnits += lyricPrimaryText(line).length;
       if (totalUnits > maximumInputUnits) {
-        return result(JapaneseReadingResult.tooLarge);
+        return JapaneseReadingProjection(source, JapaneseReadingResult.tooLarge);
       }
     }
     if (!force &&
+        inlineLines.isEmpty &&
         !isJapaneseReadingLanguage(language) &&
         !source.lines.any((line) => _hasKana(lyricPrimaryText(line)))) {
       return result(JapaneseReadingResult.unchanged);
@@ -495,16 +518,24 @@ class JapaneseReadingProjector {
     final candidateTexts = <int, String>{};
     var inputUnits = 0;
     for (var index = 0; index < source.lines.length; index++) {
+      if (inlineLines.containsKey(index)) continue;
       final line = source.lines[index];
       final text = lyricPrimaryText(line);
       if (!_hasHan(text)) continue;
       inputUnits += text.length;
       if (inputUnits > maximumInputUnits) {
-        return result(JapaneseReadingResult.tooLarge);
+        return JapaneseReadingProjection(source, JapaneseReadingResult.tooLarge);
       }
       candidateTexts[index] = text;
     }
-    if (candidateTexts.isEmpty) return result(JapaneseReadingResult.unchanged);
+    if (candidateTexts.isEmpty) {
+      return inlineLines.isNotEmpty
+          ? JapaneseReadingProjection(
+              _displayCopy(source, const {}, inlineLines: inlineLines),
+              JapaneseReadingResult.applied,
+            )
+          : result(JapaneseReadingResult.unchanged);
+    }
     List<String> allowedNamespaces() =>
         _policy?.cacheNamespacesFor(requestMode) ?? _cacheNamespaces();
     final namespaces = List<String>.of(allowedNamespaces());
@@ -549,7 +580,8 @@ class JapaneseReadingProjector {
         };
         if (saved.isEmpty) continue;
         if (verifyCoverage &&
-            !hasCompleteJapaneseReadings(_displayCopy(source, saved))) {
+            !hasCompleteJapaneseReadings(
+                _displayCopy(source, saved, inlineLines: inlineLines))) {
           incompleteSaved ??= saved;
           continue;
         }
@@ -561,7 +593,8 @@ class JapaneseReadingProjector {
             (requestMode != JapaneseReadingRequestMode.online ||
                 namespace == namespaces.first && allowed.first == namespace)) {
           return JapaneseReadingProjection(
-              _displayCopy(source, saved), JapaneseReadingResult.applied);
+              _displayCopy(source, saved, inlineLines: inlineLines),
+              JapaneseReadingResult.applied);
         }
         if (namespace == 'offline') offlineSaved = saved;
       }
@@ -633,7 +666,8 @@ class JapaneseReadingProjector {
         lookupNamespace = completeNamespace;
       } else if (!canAnalyze) {
         if (offlineSaved != null) {
-          return JapaneseReadingProjection(_displayCopy(source, offlineSaved),
+          return JapaneseReadingProjection(
+              _displayCopy(source, offlineSaved, inlineLines: inlineLines),
               JapaneseReadingResult.applied);
         }
         if (cachedOnly && listEquals(namespaces, allowedNamespaces())) {
@@ -686,7 +720,8 @@ class JapaneseReadingProjector {
       if (!current()) return result(JapaneseReadingResult.stale);
       if (!batch.available || batch.words.length != chunks.length) {
         if (offlineSaved != null && batch.cacheNamespace == 'offline') {
-          return JapaneseReadingProjection(_displayCopy(source, offlineSaved),
+          return JapaneseReadingProjection(
+              _displayCopy(source, offlineSaved, inlineLines: inlineLines),
               JapaneseReadingResult.applied);
         }
         return result(batch.dictionaryMissing
@@ -695,7 +730,8 @@ class JapaneseReadingProjector {
       }
       if (batch.cacheNamespace == 'offline' && offlineSaved != null) {
         return JapaneseReadingProjection(
-            _displayCopy(source, offlineSaved), JapaneseReadingResult.applied);
+            _displayCopy(source, offlineSaved, inlineLines: inlineLines),
+            JapaneseReadingResult.applied);
       }
       if (offset == 0 && readings.isEmpty) {
         storageNamespace = batch.cacheNamespace;
@@ -762,7 +798,8 @@ class JapaneseReadingProjector {
     if (generated.isEmpty) {
       if (dictionaryMissing && offlineSaved != null) {
         return JapaneseReadingProjection(
-            _displayCopy(source, offlineSaved), JapaneseReadingResult.applied);
+            _displayCopy(source, offlineSaved, inlineLines: inlineLines),
+            JapaneseReadingResult.applied);
       }
       return result(unavailableChunk
           ? dictionaryMissing
@@ -784,10 +821,15 @@ class JapaneseReadingProjector {
       }
     }
     return JapaneseReadingProjection(
-        _displayCopy(source, generated), JapaneseReadingResult.applied);
+        _displayCopy(source, generated, inlineLines: inlineLines),
+        JapaneseReadingResult.applied);
   }
 
-  Lyric _displayCopy(Lyric source, Map<int, JapaneseCachedReading> generated) {
+  Lyric _displayCopy(
+    Lyric source,
+    Map<int, JapaneseCachedReading> generated, {
+    Map<int, InlineFuriganaLine> inlineLines = const {},
+  }) {
     final copy = source is PlainLyric
         ? (PlainLyric(source.text)
           ..lines.single.romanization = source.lines.single.romanization)
@@ -801,6 +843,11 @@ class JapaneseReadingProjector {
       // Old exact-source caches may also contain readings for translations.
       // Keep their persisted bytes, but expose only spans the primary paints.
       line.japaneseReadingSpans = _primarySpans(primary, entry.value.spans);
+    }
+    for (final entry in inlineLines.entries) {
+      if (entry.key >= 0 && entry.key < copy.lines.length) {
+        applyInlineFuriganaToLine(copy.lines[entry.key], entry.value);
+      }
     }
     return copy;
   }

@@ -162,6 +162,28 @@ class _PlaybackTransitionSettingsState extends State<PlaybackTransitionSettings>
                                             .onSurfaceVariant)))
                         : const SizedBox.shrink(),
                   ),
+                  ValueListenableBuilder(
+                    valueListenable: AppSettings.instance.experience,
+                    builder: (context, experience, _) =>
+                        experience.exclusiveOutput &&
+                                preferences.mode ==
+                                    PlaybackTransitionMode.crossfade
+                            ? Padding(
+                                key: const ValueKey(
+                                    'playback-transition-exclusive-conflict'),
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Text(
+                                    ui(
+                                        '当前已开启 WASAPI 独占输出，交叉淡入淡出将改用连续输出；此处选择会保留，切回共享输出后生效。'),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant)))
+                            : const SizedBox.shrink(),
+                  ),
                   if (preferences.mode == PlaybackTransitionMode.crossfade) ...[
                     const Padding(
                         padding: EdgeInsets.symmetric(vertical: 12),

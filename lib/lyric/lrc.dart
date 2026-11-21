@@ -28,6 +28,8 @@ class LrcLine extends UnsyncLyricLine {
     return {"time": start.toString(), "content": content}.toString();
   }
 
+  static final _timestampPattern = RegExp(r'\[(\d+):(\d+)(?:[.:](\d+))?\]');
+
   /// line: [mm:ss.msmsms]content
   static LrcLine? fromLine(String line, [int? offset]) =>
       fromLineAll(line, offset).firstOrNull;
@@ -47,7 +49,7 @@ class LrcLine extends UnsyncLyricLine {
     }
     final times = <Duration>[];
     var cursor = left;
-    final pattern = RegExp(r'\[(\d+):(\d+)(?:\.(\d+))?\]');
+    final pattern = _timestampPattern;
     const maxTimestampMillis = 9007199254740991;
     while (true) {
       final tag = pattern.matchAsPrefix(line, cursor);
@@ -139,12 +141,16 @@ class Lrc extends Lyric {
     return Lrc(combinedLines, source);
   }
 
+  static final _lineBreakPattern = RegExp(r'\r\n|\r|\n');
+  static final _offsetPattern =
+      RegExp(r'\[\s*offset\s*:\s*([+-]?\d+)\s*\]', caseSensitive: false);
+
   /// 如果separator为null，不合并歌词；否则，合并相同时间戳的歌词
   static Lrc? fromLrcText(String lrc, LrcSource source, {String? separator}) {
-    var lrcLines = lrc.split("\n");
+    var lrcLines = lrc.split(_lineBreakPattern);
 
     int? offsetInMilliseconds;
-    final offsetPattern = RegExp(r'\[\s*offset\s*:\s*([+-]?\d+)\s*\]');
+    final offsetPattern = _offsetPattern;
     for (var line in lrcLines) {
       final matched = offsetPattern.firstMatch(line);
       if (matched == null) continue;

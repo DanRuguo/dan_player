@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/anchored_menu_action.dart';
 import 'package:dan_player/component/personal_library_dialog.dart';
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/component/app_action_icon.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/audio_artwork.dart';
@@ -453,7 +454,10 @@ class _AudioTileState extends State<AudioTile> {
             durationText,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: scheme.primary),
+            style: TextStyle(
+              color: scheme.primary,
+              fontFeatures: tabularFiguresFeatures,
+            ),
           );
           final sourceStatus = !audio.isOnline
               ? null
@@ -666,7 +670,10 @@ class _AudioTileState extends State<AudioTile> {
                                   text: durationText,
                                   style: DefaultTextStyle.of(context)
                                       .style
-                                      .merge(TextStyle(color: metadataColor)),
+                                      .merge(TextStyle(
+                                        color: metadataColor,
+                                        fontFeatures: tabularFiguresFeatures,
+                                      )),
                                 ),
                                 textDirection: Directionality.of(context),
                                 textScaler: MediaQuery.textScalerOf(context),

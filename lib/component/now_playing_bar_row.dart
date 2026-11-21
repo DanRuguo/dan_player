@@ -59,11 +59,13 @@ class NowPlayingBarRow extends StatelessWidget {
                           spectrum!,
                         ],
                       ]),
-                      Text(subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: scheme.onSurfaceVariant, fontSize: 12.5)),
+                      if (subtitle.isNotEmpty)
+                        Text(subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: scheme.onSurfaceVariant,
+                                fontSize: 12.5)),
                     ],
                   ),
                 )),

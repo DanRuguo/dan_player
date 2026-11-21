@@ -48,6 +48,8 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
   bool _alignEnd = true;
   bool _anchorScheduled = false;
   _ListeningActivityRange? _widthRange;
+  Object? _heatmapLabelWidthKey;
+  double? _heatmapLabelWidth;
 
   Duration _durationFor(MotionKind kind) {
     final features =
@@ -302,7 +304,12 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                               ? '${dateTime(recent.start)} – ${dateTime(recent.now)}'
                               : '${listeningDayKey(calendar.start)} – ${listeningDayKey(calendar.today)}',
                           key: const ValueKey('statistics-activity-range'),
-                          style: Theme.of(context).textTheme.bodySmall),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ])),
                       const SizedBox(height: 16),
                       LayoutBuilder(builder: (context, constraints) {
                         final scale =
@@ -470,7 +477,11 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                                       style: Theme.of(context)
                                           .textTheme
                                           .bodySmall
-                                          ?.copyWith(color: scheme.primary)));
+                                          ?.copyWith(
+                                              color: scheme.primary,
+                                              fontFeatures: const [
+                                                FontFeature.tabularFigures()
+                                              ])));
                             }),
                         const SizedBox(height: 4),
                         Text(ui('颜色按真实每日时长显示；悬停或点击查看详情，最近一周在右侧。'),
@@ -538,7 +549,11 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                             style: Theme.of(context)
                                 .textTheme
                                 .bodySmall
-                                ?.copyWith(color: scheme.primary))),
+                                ?.copyWith(
+                                    color: scheme.primary,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures()
+                                    ]))),
                   ])),
           ]),
       if (best != null)
@@ -604,6 +619,9 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                               .headlineSmall
                               ?.copyWith(
                                   fontWeight: FontWeight.w600,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures()
+                                  ],
                                   color: key ==
                                               'statistics-activity-duration' ||
                                           key == 'statistics-activity-active'
@@ -622,21 +640,47 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
         .labelSmall
         ?.copyWith(color: scheme.onSurfaceVariant);
     final labels = [ui('周一'), '', ui('周三'), '', ui('周五'), '', ''];
-    final measure = TextPainter(
-        textDirection: Directionality.of(context), textScaler: scaler);
-    var labelWidth = 0.0;
-    for (final label in labels) {
-      measure.text = TextSpan(text: label, style: labelStyle);
-      measure.layout();
-      labelWidth = math.max(labelWidth, measure.width);
+    final direction = Directionality.of(context);
+    final labelWidthKey = (uiLanguage.value, labelStyle, scaler, direction);
+    double labelWidth;
+    if (_heatmapLabelWidthKey == labelWidthKey && _heatmapLabelWidth != null) {
+      labelWidth = _heatmapLabelWidth!;
+    } else {
+      final measure = TextPainter(textDirection: direction, textScaler: scaler);
+      var measured = 0.0;
+      for (final label in labels) {
+        if (label.isEmpty) continue;
+        measure.text = TextSpan(text: label, style: labelStyle);
+        measure.layout();
+        measured = math.max(measured, measure.width);
+      }
+      measure.dispose();
+      labelWidth = measured + 8;
+      _heatmapLabelWidthKey = labelWidthKey;
+      _heatmapLabelWidth = labelWidth;
     }
-    measure.dispose();
-    labelWidth += 8;
     final gridAvailable = math.max(0.0, available - labelWidth);
     final targetCellWidth =
         math.max(cellHeight, gridAvailable / calendar.weeks.length - 4);
     final changedRange = _widthRange != _range;
     _widthRange = _range;
+    // Compute month labels and per-day tooltip strings once per layout rather
+    // than every frame of the cell-width resize animation (up to 371 cells).
+    final monthLabels = <int, String>{};
+    for (var index = 0; index < calendar.weeks.length; index++) {
+      final first =
+          calendar.weeks[index].where((day) => day.inRange).firstOrNull;
+      if (first != null &&
+          (index == 0 || first.date.day <= 7) &&
+          (monthLabels.isEmpty || index - monthLabels.keys.last >= 3)) {
+        monthLabels[index] = ui('{0}月', [first.date.month]);
+      }
+    }
+    final dayDetails = <String, String>{
+      for (final week in calendar.weeks)
+        for (final day in week)
+          if (day.inRange) day.key: _detail(day),
+    };
     return TweenAnimationBuilder<double>(
         key: const ValueKey('calendar-cell-width'),
         duration:
@@ -645,16 +689,6 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
         tween: Tween(begin: targetCellWidth, end: targetCellWidth),
         builder: (context, cellWidth, _) {
           final weekWidth = cellWidth + 4;
-          final monthLabels = <int, String>{};
-          for (var index = 0; index < calendar.weeks.length; index++) {
-            final first =
-                calendar.weeks[index].where((day) => day.inRange).firstOrNull;
-            if (first != null &&
-                (index == 0 || first.date.day <= 7) &&
-                (monthLabels.isEmpty || index - monthLabels.keys.last >= 3)) {
-              monthLabels[index] = ui('{0}月', [first.date.month]);
-            }
-          }
           final grid = SizedBox(
               width: calendar.weeks.length * weekWidth,
               child: Column(children: [
@@ -689,7 +723,7 @@ class _ListeningCalendarCardState extends State<ListeningCalendarCard>
                                     child: day.inRange
                                         ? _ListeningCalendarDayCell(
                                             dayKey: day.key,
-                                            detail: _detail(day),
+                                            detail: dayDetails[day.key]!,
                                             color: day.hasDurationRecord
                                                 ? _color(scheme, day.intensity)
                                                 : scheme.surfaceContainerLow,

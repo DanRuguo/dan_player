@@ -3,6 +3,7 @@ uniform vec2 uSize;
 uniform vec2 uSourceFraction;
 // Time-only trigonometry is shared by every pixel and supplied by the CPU.
 uniform vec3 uTime;
+uniform float uOpacity;
 uniform sampler2D uArtwork;
 out vec4 fragColor;
 
@@ -14,5 +15,5 @@ void main() {
   vec2 displacement = vec2(
     0.12 * envelope * uTime.y * sin(2.0 * pi * p.y + t),
     0.10 * envelope * uTime.z * cos(2.0 * pi * p.x - t));
-  fragColor = texture(uArtwork, clamp(p + displacement, 0.0, 1.0) * uSourceFraction);
+  fragColor = texture(uArtwork, clamp(p + displacement, 0.0, 1.0) * uSourceFraction) * uOpacity;
 }

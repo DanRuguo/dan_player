@@ -88,7 +88,7 @@ class DetailTransportButtonStyle extends ButtonStyle {
       const WidgetStatePropertyAll(Colors.transparent);
 }
 
-class DetailTransportButton extends StatelessWidget {
+class DetailTransportButton extends StatefulWidget {
   const DetailTransportButton({
     super.key,
     required this.tooltip,
@@ -105,28 +105,66 @@ class DetailTransportButton extends StatelessWidget {
   final bool buffering;
 
   @override
+  State<DetailTransportButton> createState() => _DetailTransportButtonState();
+}
+
+class _DetailTransportButtonState extends State<DetailTransportButton> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed != value && mounted) setState(() => _pressed = value);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final reduced = !AppMotion.enabled(context, MotionKind.feedback);
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: buffering ? null : onPressed,
-      style: DetailTransportButtonStyle(
-          primary: primary,
-          scheme: Theme.of(context).colorScheme,
-          reducedMotion: reduced),
-      icon: AnimatedSwitcher(
-        duration: reduced ? Duration.zero : AppMotion.quick,
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        child: buffering
-            ? SizedBox.square(
-                key: const ValueKey('buffering'),
-                dimension: 24,
-                child: reduced
-                    ? const Icon(Icons.hourglass_top_rounded, size: 24)
-                    : const CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(icon, key: ValueKey(icon)),
+    final features =
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    final reduced = !AppMotion.enabled(context, MotionKind.feedback) ||
+        features.disableAnimations ||
+        features.reduceMotion;
+    final enabled = !widget.buffering && widget.onPressed != null;
+    final scaleDown = enabled && !reduced && _pressed;
+    return Listener(
+      onPointerDown: enabled ? (_) => _setPressed(true) : null,
+      onPointerUp: (_) => _setPressed(false),
+      onPointerCancel: (_) => _setPressed(false),
+      child: AnimatedScale(
+        scale: scaleDown ? (widget.primary ? 0.94 : 0.96) : 1.0,
+        duration:
+            reduced ? Duration.zero : const Duration(milliseconds: 90),
+        curve: Curves.easeOutCubic,
+        child: IconButton(
+          tooltip: widget.tooltip,
+          onPressed: widget.buffering ? null : widget.onPressed,
+          style: DetailTransportButtonStyle(
+              primary: widget.primary,
+              scheme: Theme.of(context).colorScheme,
+              reducedMotion: reduced),
+          icon: AnimatedSwitcher(
+            duration: reduced ? Duration.zero : AppMotion.quick,
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) => reduced
+                ? child
+                : FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(
+                      scale: Tween<double>(begin: 0.80, end: 1.0)
+                          .animate(animation),
+                      child: child,
+                    ),
+                  ),
+            child: widget.buffering
+                ? SizedBox.square(
+                    key: const ValueKey('buffering'),
+                    dimension: 24,
+                    child: reduced
+                        ? const Icon(Icons.hourglass_top_rounded, size: 24)
+                        : const CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(widget.icon, key: ValueKey(widget.icon)),
+          ),
+        ),
       ),
     );
   }

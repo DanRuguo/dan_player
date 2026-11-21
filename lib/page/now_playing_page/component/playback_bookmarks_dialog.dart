@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_action_menu.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/library/playback_bookmarks.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/utils.dart';
@@ -367,7 +368,10 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                                                                 style: Theme.of(
                                                                         context)
                                                                     .textTheme
-                                                                    .labelMedium),
+                                                                    .labelMedium
+                                                                    ?.copyWith(
+                                                                        fontFeatures:
+                                                                            tabularFiguresFeatures)),
                                                           ])))),
                                           AppActionMenu<String>(
                                               key: ValueKey(

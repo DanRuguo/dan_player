@@ -1,3 +1,6 @@
+import 'catalog_snapshot1_2612.dart';
+import 'catalog_snapshot2_2612.dart';
+import 'catalog_snapshot3_2612.dart';
 import 'catalog_statistics_trends.dart';
 import 'catalog_stats_guide_2610.dart';
 import 'catalog_lyric_playback_tools.dart';
@@ -92,6 +95,9 @@ import 'catalog_search_history.dart';
 import 'catalog_comments_feedback_2605.dart';
 
 final Map<String, List<String>> uiCatalog = Map.unmodifiable({
+  ...catalogSnapshot12612,
+  ...catalogSnapshot22612,
+  ...catalogSnapshot32612,
   ...catalogLyricPlaybackTools,
   ...catalogOnboardingGuidePrompt,
   ...catalogStatisticsTrends,

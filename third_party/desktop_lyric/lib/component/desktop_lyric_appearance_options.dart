@@ -186,8 +186,9 @@ String _colorLabel(int color) =>
 
 const _sliderPadding = EdgeInsets.symmetric(horizontal: 2);
 
-TextStyle _sliderValueStyle(Color foreground) =>
-    TextStyle(color: foreground.withValues(alpha: .72));
+TextStyle _sliderValueStyle(Color foreground) => TextStyle(
+    color: foreground.withValues(alpha: .72),
+    fontFeatures: const [FontFeature.tabularFigures()]);
 
 SliderThemeData _sliderTheme(Color primary) => SliderThemeData(
       thumbColor: primary,

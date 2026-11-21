@@ -4,6 +4,7 @@ import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_menu_surface.dart';
 import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:flutter/material.dart';
 
 /// PopupRoute applies additional Intervals to its curve. Keep it monotonic so
@@ -76,6 +77,7 @@ class _AppMenuPanelState extends State<AppMenuPanel>
   late final _motion =
       AnimationController(vsync: this, duration: AppMotion.emphasized);
   final _scroll = ScrollController();
+  final _scaling = ValueNotifier<bool>(false);
   bool _started = false;
   AppLifecycleState? _lifecycle;
 
@@ -89,9 +91,18 @@ class _AppMenuPanelState extends State<AppMenuPanel>
     super.initState();
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
+    _motion.addListener(_syncScaling);
   }
 
-  void _settle() => _motion.value = 1;
+  void _syncScaling() {
+    final active = _motion.value < 1;
+    if (_scaling.value != active) _scaling.value = active;
+  }
+
+  void _settle() {
+    _motion.value = 1;
+    _syncScaling();
+  }
 
   @override
   void didChangeDependencies() {
@@ -100,6 +111,7 @@ class _AppMenuPanelState extends State<AppMenuPanel>
       _settle();
     } else if (!_started) {
       _motion.forward();
+      _syncScaling();
     }
     _started = true;
   }
@@ -118,6 +130,8 @@ class _AppMenuPanelState extends State<AppMenuPanel>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _motion.removeListener(_syncScaling);
+    _scaling.dispose();
     _motion.dispose();
     _scroll.dispose();
     super.dispose();
@@ -182,25 +196,28 @@ class _AppMenuPanelState extends State<AppMenuPanel>
       shadowColor: resolve((s) => s.shadowColor) ?? theme.colorScheme.shadow,
       elevation: resolve((s) => s.elevation) ?? 3,
       shape: shape,
-      child: ConstrainedBox(
-        constraints: constraints,
-        child: Padding(
-          padding: padding,
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-                scrollbars: false,
-                overscroll: false,
-                physics: const ClampingScrollPhysics()),
-            child: PrimaryScrollController(
-              controller: _scroll,
-              child: AppScrollbar(
+      child: CrispScaleSnapshot(
+        active: _scaling,
+        child: ConstrainedBox(
+          constraints: constraints,
+          child: Padding(
+            padding: padding,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(
+                  scrollbars: false,
+                  overscroll: false,
+                  physics: const ClampingScrollPhysics()),
+              child: PrimaryScrollController(
                 controller: _scroll,
-                child: SingleChildScrollView(
+                child: AppScrollbar(
                   controller: _scroll,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: widget.children,
+                  child: SingleChildScrollView(
+                    controller: _scroll,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: widget.children,
+                    ),
                   ),
                 ),
               ),

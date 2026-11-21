@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
@@ -419,8 +420,10 @@ class _GlowPainter extends CustomPainter {
         circle ? Rect.fromLTWH(0, 0, size.width, size.width) : rect;
     final edgeDistance = circle
         ? coverRect.width / 2 - (point - coverRect.center).distance
-        : [point.dx, point.dy, size.width - point.dx, size.height - point.dy]
-            .reduce((a, b) => a < b ? a : b);
+        : math.min(
+            math.min(point.dx, point.dy),
+            math.min(size.width - point.dx, size.height - point.dy),
+          );
     // Circle captions are outside the artwork and must not light its edge.
     if (circle && edgeDistance < 0) return;
     canvas.save();
@@ -430,8 +433,10 @@ class _GlowPainter extends CustomPainter {
       canvas.clipRect(rect);
     }
     final radius = size.shortestSide.clamp(60.0, 140.0);
-    final paint = Paint()
-      ..shader = RadialGradient(colors: [
+    final glowBounds = Rect.fromCircle(center: point, radius: radius);
+    final clippedGlow = glowBounds.intersect(rect);
+    if (!clippedGlow.isEmpty) {
+      final glowShader = RadialGradient(colors: [
         Colors.white.withValues(alpha: .18),
         color.withValues(alpha: .08),
         Colors.transparent,
@@ -439,8 +444,13 @@ class _GlowPainter extends CustomPainter {
         0,
         .35,
         1
-      ]).createShader(Rect.fromCircle(center: point, radius: radius));
-    canvas.drawRect(rect, paint);
+      ]).createShader(glowBounds);
+      try {
+        canvas.drawRect(clippedGlow, Paint()..shader = glowShader);
+      } finally {
+        glowShader.dispose();
+      }
+    }
     // Two narrow contrast strokes keep the reveal visible over both pale and
     // dark artwork. They stay inside the cover and only paint near the pointer;
     // unlike a blur/shadow this needs no offscreen layer or continuous ticker.
@@ -449,25 +459,32 @@ class _GlowPainter extends CustomPainter {
       final border = coverRect.deflate(1.75);
       final halo = Rect.fromCircle(
           center: point, radius: coverRect.shortestSide.clamp(56.0, 100.0));
-      void stroke(Color tint, double width) {
-        final edgePaint = Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = width
-          ..shader = RadialGradient(
+      if (halo.overlaps(coverRect)) {
+        void stroke(Color tint, double width) {
+          final edgeShader = RadialGradient(
             colors: [tint, tint.withValues(alpha: 0)],
           ).createShader(halo);
-        if (circle) {
-          canvas.drawOval(border, edgePaint);
-        } else {
-          canvas.drawRect(border, edgePaint);
+          try {
+            final edgePaint = Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = width
+              ..shader = edgeShader;
+            if (circle) {
+              canvas.drawOval(border, edgePaint);
+            } else {
+              canvas.drawRect(border, edgePaint);
+            }
+          } finally {
+            edgeShader.dispose();
+          }
         }
-      }
 
-      stroke(Colors.black.withValues(alpha: .72 * edgeStrength), 3.5);
-      stroke(
-          Color.lerp(color, Colors.white, .72)!
-              .withValues(alpha: .96 * edgeStrength),
-          1.5);
+        stroke(Colors.black.withValues(alpha: .72 * edgeStrength), 3.5);
+        stroke(
+            Color.lerp(color, Colors.white, .72)!
+                .withValues(alpha: .96 * edgeStrength),
+            1.5);
+      }
     }
     canvas.restore();
   }

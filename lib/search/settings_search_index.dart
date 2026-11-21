@@ -24,7 +24,7 @@ const settingsSectionTitles = <String, String>{
 const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("library", "folders", "文件夹管理", ["本地音乐文件夹"]),
   SettingsSearchEntry("library", "refresh", "刷新音乐库", ["增量刷新", "完整刷新"]),
-  SettingsSearchEntry("library", "session", "恢复上次播放会话", []),
+  SettingsSearchEntry("library", "session", "恢复上次播放会话", ["播放队列", "断点续播"]),
   SettingsSearchEntry(
       "library", "playback", "播放速度", ["WASAPI 独占输出", "升降调", "原调"]),
   SettingsSearchEntry(
@@ -34,9 +34,9 @@ const settingsSearchEntries = <SettingsSearchEntry>[
       "library", "resume", "按曲记忆播放位置", ["仅长音频", "长音频最短时长", "清除自动记忆位置"]),
   SettingsSearchEntry("library", "gain", "ReplayGain 音量均衡",
       ["依据标签峰值限制增益", "ReplayGain 预增益", "无标签补偿"]),
-  SettingsSearchEntry("library", "sleep", "播放时防止自动休眠", []),
-  SettingsSearchEntry("library", "watch", "自动更新音乐库", []),
-  SettingsSearchEntry("library", "artists", "自定义艺术家分隔符", []),
+  SettingsSearchEntry("library", "sleep", "播放时防止自动休眠", ["防止休眠"]),
+  SettingsSearchEntry("library", "watch", "自动更新音乐库", ["自动扫描", "增量刷新"]),
+  SettingsSearchEntry("library", "artists", "自定义艺术家分隔符", ["艺术家", "分隔符"]),
   SettingsSearchEntry("library", "health", "曲库健康与搬迁", ["重定位音乐目录"]),
   SettingsSearchEntry("lyrics", "automatic", "自动联网", ["歌曲评论"]),
   SettingsSearchEntry("lyrics", "source", "首选歌词来源", ["本地", "联网"]),
@@ -61,13 +61,14 @@ const settingsSearchEntries = <SettingsSearchEntry>[
       "lyrics", "platforms", "平台直连与公开 API", ["QQ音乐", "网易云音乐", "LRCLIB"]),
   SettingsSearchEntry(
       "lyrics", "custom", "第三方源", ["添加歌源", "歌词API", "导入", "导出"]),
-  SettingsSearchEntry("appearance", "language", "界面语言", []),
+  SettingsSearchEntry(
+      "appearance", "language", "界面语言", ["中文", "English", "日本語", "한국어"]),
   SettingsSearchEntry("appearance", "theme", "主题模式", ["修改主题", "专辑封面动态配色"]),
   SettingsSearchEntry("appearance", "font", "字体管理",
       ["自定义字体", "统一字体", "按语言选择", "桌面歌词", "任务栏歌词", "混合文字按语种使用字体"]),
   SettingsSearchEntry("appearance", "layout", "界面布局",
       ["音乐列表样式", "紧凑歌单", "开屏底部内容", "加载进度", "经典列表", "资源管理器分栏"]),
-  SettingsSearchEntry("appearance", "sidebar", "侧栏宽度", []),
+  SettingsSearchEntry("appearance", "sidebar", "侧栏宽度", ["侧边栏"]),
   SettingsSearchEntry("appearance", "simple-playback-bar-playlist", "简易播放条播放列表",
       ["播放列表", "歌曲封面", "文件名", "Dock"]),
   SettingsSearchEntry("appearance", "queue-upcoming", "显示待播预览",
@@ -99,7 +100,18 @@ const settingsSearchEntries = <SettingsSearchEntry>[
     "播放时图标旋转",
     "滚动边缘拉伸"
   ]),
-  SettingsSearchEntry("desktop", "desktop-lyrics", "桌面歌词显示", []),
+  SettingsSearchEntry("desktop", "desktop-lyrics", "桌面歌词显示", [
+    "桌面歌词竖排",
+    "原文字号",
+    "译文字号",
+    "歌词字间距",
+    "文字不透明度",
+    "背景不透明度",
+    "文字描边",
+    "跟随播放器主题",
+    "文字颜色",
+    "任务栏上方单行歌词"
+  ]),
   SettingsSearchEntry("desktop", "integration", "桌面与快捷键", [
     "托盘菜单高斯模糊",
     "任务栏缩略图播放控制",
@@ -118,7 +130,7 @@ const settingsSearchEntries = <SettingsSearchEntry>[
     "任务栏歌曲预览",
     "任务栏播放进度"
   ]),
-  SettingsSearchEntry("desktop", "shortcuts", "应用内快捷键", []),
+  SettingsSearchEntry("desktop", "shortcuts", "应用内快捷键", ["快捷键", "热键", "播放", "暂停"]),
   SettingsSearchEntry(
       "backup", "backup", "播放器备份与恢复", ["创建播放器备份", "从备份恢复", "密码加密"]),
   SettingsSearchEntry("backup", "close-behavior", "退出后操作",
@@ -145,7 +157,7 @@ const settingsSearchEntries = <SettingsSearchEntry>[
       ["系统代理", "直连", "自定义 HTTP 代理", "测试 GitHub 连接"]),
   SettingsSearchEntry("about", "uninstall", "应用管理", ["卸载 Dan Player"]),
   SettingsSearchEntry("about", "issues", "报告问题", []),
-  SettingsSearchEntry("about", "about", "关于", []),
+  SettingsSearchEntry("about", "about", "关于", ["版本号", "Dan Player"]),
 ];
 
 // Translations are indexed without changing the active UI language. No widgets,

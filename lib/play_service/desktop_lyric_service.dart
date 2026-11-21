@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:dan_player/app_launch_mode.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
@@ -40,6 +41,7 @@ class DesktopLyricService extends ChangeNotifier {
     ValueListenable<bool>? playbackReady,
     Duration Function()? elapsed,
     LyricDisplayCoordinator? displayCoordinator,
+    Future<void> Function()? onShowMainWindow,
   })  : _startProcess = startProcess ??
             ((executable, arguments) => Process.start(executable, arguments)),
         _executableExists =
@@ -51,6 +53,8 @@ class DesktopLyricService extends ChangeNotifier {
         _elapsed = elapsed,
         _displayCoordinator =
             displayCoordinator ?? LyricDisplayCoordinator.shared,
+        _onShowMainWindow =
+            onShowMainWindow ?? (() => DesktopIntegration.instance.showWindow()),
         _saveAppearance = saveAppearance ??
             (() => AppSettings.instance
                 .saveSettings(throwOnError: true, captureWindowSize: false)) {
@@ -72,6 +76,7 @@ class DesktopLyricService extends ChangeNotifier {
   final ValueListenable<bool> _playbackReady;
   final Duration Function()? _elapsed;
   final LyricDisplayCoordinator _displayCoordinator;
+  final Future<void> Function() _onShowMainWindow;
   late final Future<void> Function() _closeDisplay = stopDesktopLyric;
   final Stopwatch _syncClock = Stopwatch()..start();
 
@@ -346,6 +351,11 @@ class DesktopLyricService extends ChangeNotifier {
         _appearanceSaveTimer?.cancel();
         _appearanceSaveTimer = Timer(const Duration(milliseconds: 500),
             () => unawaited(flushAppearance()));
+      } else if (messageType ==
+          msg.getMessageTypeName<msg.ShowMainWindowMessage>()) {
+        unawaited(_onShowMainWindow().catchError((Object error, StackTrace trace) {
+          LOGGER.w('[desktop lyric show main window] $error', stackTrace: trace);
+        }));
       } else if (messageType ==
           msg.getMessageTypeName<msg.DesktopLyricDisplayChangedMessage>()) {
         final display = msg.DesktopLyricDisplayChangedMessage.fromJson(

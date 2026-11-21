@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:desktop_lyric/app_motion.dart';
 import 'package:desktop_lyric/component/desktop_lyric_text.dart';
+import 'package:desktop_lyric/component/text_pixel_snap.dart';
 import 'package:desktop_lyric/component/foreground.dart';
 
 import 'package:desktop_lyric/desktop_lyric_controller.dart';
@@ -317,19 +318,25 @@ class _DesktopLineEntranceState extends State<_DesktopLineEntrance>
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _animation,
-    child: widget.child,
-    builder: (context, child) => Opacity(
-      opacity: _animation.value,
-      child: Transform.translate(
-        offset: widget.vertical
-            ? Offset((1 - _animation.value) * 4, 0)
-            : Offset(0, (1 - _animation.value) * 4),
-        child: child,
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return AnimatedBuilder(
+      animation: _animation,
+      child: widget.child,
+      builder: (context, child) => Opacity(
+        opacity: _animation.value,
+        child: Transform.translate(
+          offset: snapOffsetToPhysicalPixel(
+            widget.vertical
+                ? Offset((1 - _animation.value) * 4, 0)
+                : Offset(0, (1 - _animation.value) * 4),
+            dpr,
+          ),
+          child: child,
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   @override
   void dispose() {

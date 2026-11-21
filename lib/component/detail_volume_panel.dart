@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/player_number_dialog.dart';
@@ -226,8 +227,9 @@ class _DetailVolumePanelState extends State<DetailVolumePanel> {
                         key: const ValueKey('volume-exact'),
                         onPressed: _exact,
                         child: Text('${(volume * 100).round()}%',
-                            style: theme.textTheme.labelLarge
-                                ?.copyWith(color: theme.colorScheme.primary)))),
+                            style: theme.textTheme.labelLarge?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontFeatures: tabularFiguresFeatures)))),
               ]),
               SliderTheme(
                   data: SliderTheme.of(context).copyWith(
@@ -268,7 +270,7 @@ class _DetailVolumePanelState extends State<DetailVolumePanel> {
                                                 .colorScheme.onPrimaryContainer
                                             : null),
                                 onPressed: () => _apply(percent / 100),
-                                child: Text('$percent'),
+                                child: Text('$percent', style: const TextStyle(fontFeatures: tabularFiguresFeatures)),
                               )))
                   ]),
             ])));

@@ -26,6 +26,8 @@ import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:desktop_lyric/component/now_playing_info.dart'
+    show formatDesktopNowPlayingSubtitle;
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:path/path.dart' as path;
 
@@ -64,14 +66,12 @@ class MiniNowPlaying extends StatelessWidget {
                 blur: 22.0,
                 child: LayoutBuilder(builder: (context, constraints) {
                   final playback = PlayService.instance.playbackService;
-                  final lyrics = PlayService.instance.lyricService;
                   return ListenableBuilder(
                     listenable: Listenable.merge([
                       playback,
                       playback.isBuffering,
                       playback.resolvingAudioPath,
                       playback.isChangingOutput,
-                      lyrics,
                     ]),
                     child: const _NowPlayingForeground(),
                     builder: (context, child) => RectangleProgressIndicator(
@@ -245,7 +245,10 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
                 title: nowPlaying?.displayTitle ?? 'Dan Player',
                 subtitle: nowPlaying == null
                     ? 'Enjoy music'
-                    : '${nowPlaying.artist} - ${nowPlaying.album}',
+                    : formatDesktopNowPlayingSubtitle(
+                        nowPlaying.artist,
+                        nowPlaying.album,
+                      ),
                 identity: nowPlaying?.path ?? 'idle',
                 forceShowQueue: simpleQueue,
                 spectrum: nowPlaying == null

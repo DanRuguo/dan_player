@@ -183,7 +183,10 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                             .titleMedium
                             ?.copyWith(
                                 color: Theme.of(context).colorScheme.primary,
-                                fontWeight: FontWeight.w600)),
+                                fontWeight: FontWeight.w600,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ])),
                     if (detail != null) ...[
                       const SizedBox(height: 4),
                       Text(detail,
@@ -265,21 +268,24 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
               previous: (index) => current.previous[index].milliseconds,
               centerSlots: _calendarWeek);
         }
-        final paint = CustomPaint(
-            painter: _TrendPainter(
-                data: current,
-                maximum: maximum,
-                geometry: _lineGeometry!,
-                selectedDay: _selection,
-                defaultSelection: _calendarWeek
-                    ? localCalendarDate(widget.snapshot.capturedAt).weekday - 1
-                    : _period - 1,
-                showCurrent: _showCurrent,
-                showPrevious: _showPrevious,
-                calendarWeek: _calendarWeek,
-                currentColor: scheme.primary,
-                previousColor: scheme.tertiary,
-                gridColor: scheme.outlineVariant));
+        final paint = RepaintBoundary(
+            child: CustomPaint(
+                painter: _TrendPainter(
+                    data: current,
+                    maximum: maximum,
+                    geometry: _lineGeometry!,
+                    selectedDay: _selection,
+                    defaultSelection: _calendarWeek
+                        ? localCalendarDate(widget.snapshot.capturedAt)
+                                .weekday -
+                            1
+                        : _period - 1,
+                    showCurrent: _showCurrent,
+                    showPrevious: _showPrevious,
+                    calendarWeek: _calendarWeek,
+                    currentColor: scheme.primary,
+                    previousColor: scheme.tertiary,
+                    gridColor: scheme.outlineVariant)));
         final input = MouseRegion(
             onHover: (event) => _select(_hit(event.localPosition.dx, width)),
             child: GestureDetector(
@@ -434,7 +440,8 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                   Text(
                       '${listeningDayKey(current.current.first.date)} – ${listeningDayKey(current.current.last.date)}',
                       key: const ValueKey('statistics-trends-date-range'),
-                      style: theme.textTheme.bodySmall),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()])),
                   const SizedBox(height: 12),
                   LayoutBuilder(builder: (context, constraints) {
                     final scale =
@@ -480,7 +487,8 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                   ]),
                   const SizedBox(height: 8),
                   Text(ui('每日最高 {0}', [_duration(_maximum.round())]),
-                      style: theme.textTheme.bodySmall),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()])),
                   _chart(context, current, scheme,
                       canReveal: TickerMode.valuesOf(context).enabled),
                   const SizedBox(height: 8),
@@ -488,7 +496,10 @@ class _StatisticsListeningTrendsState extends State<StatisticsListeningTrends> {
                       valueListenable: _selection,
                       builder: (context, _, child) => Text(_detail(_index),
                           key: const ValueKey('statistics-trends-selected-day'),
-                          style: theme.textTheme.bodySmall)),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ]))),
                   const SizedBox(height: 10),
                   Text(ui('悬停或点按查看日期；聚焦图表后可用方向键、Home 和 End。'),
                       style: theme.textTheme.bodySmall),

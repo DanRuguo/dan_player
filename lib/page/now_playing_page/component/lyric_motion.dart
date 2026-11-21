@@ -729,17 +729,21 @@ class _LyricLineMotionState extends AnimatedWidgetBaseState<LyricLineMotion>
     final fontSize = _fontSize!.transform(fontProgress);
     final translationFontSize = _translationFontSize!.transform(fontProgress);
     final alignment = _alignment!.evaluate(animation);
+    final scale = _scale!.evaluate(animation);
     final hasGeometryMotion =
-        _scale!.begin != _scale!.end || _alignment!.begin != _alignment!.end;
+        (_scale!.begin != _scale!.end || _alignment!.begin != _alignment!.end) &&
+            animation.value < 1.0;
+    final nonUnitScale = (scale - 1.0).abs() > 1e-4;
     return Opacity(
       opacity: _opacity!.evaluate(animation).clamp(0.0, 1.0),
       alwaysIncludeSemantics: true,
       child: Transform.scale(
-        scale: _scale!.evaluate(animation),
+        scale: scale,
         alignment: alignment,
-        filterQuality: widget.duration == Duration.zero || !hasGeometryMotion
+        filterQuality: widget.duration == Duration.zero ||
+                (!hasGeometryMotion && !nonUnitScale)
             ? null
-            : FilterQuality.low,
+            : FilterQuality.medium,
         child: RepaintBoundary(
             child: widget.builder(
           context,

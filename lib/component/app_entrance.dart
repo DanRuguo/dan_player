@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:flutter/material.dart';
 
 /// Remembers appearances within a page/chrome region, without painting a layer.
@@ -262,35 +263,46 @@ class _AppEntranceState extends State<AppEntrance>
   }
 
   @override
-  Widget build(BuildContext context) => _EntranceBoundary(
-        motion: _progress,
-        child: AnimatedBuilder(
-          animation: _progress,
-          // The child is built once per normal parent update, not every frame.
-          // Keep the same wrapper tree after settling to preserve child state.
-          child: widget.child,
-          builder: (context, child) => Transform.translate(
-            offset: Offset(
-              0,
-              widget.translate
-                  ? AppEntrance.distance * (1 - _progress.value)
-                  : 0,
-            ),
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return _EntranceBoundary(
+      motion: _progress,
+      child: AnimatedBuilder(
+        animation: _progress,
+        // The child is built once per normal parent update, not every frame.
+        // Keep the same wrapper tree after settling to preserve child state.
+        child: widget.child,
+        builder: (context, child) {
+          final progress = _progress.value;
+          final offset = widget.translate
+              ? snapOffsetToPhysicalPixel(
+                  Offset(0, AppEntrance.distance * (1 - progress)),
+                  dpr,
+                )
+              : Offset.zero;
+          final scale =
+              widget.initialScale + (1 - widget.initialScale) * progress;
+          return Transform.translate(
+            offset: offset,
             child: Opacity(
-              opacity: _progress.value,
+              opacity: progress,
               alwaysIncludeSemantics: true,
               child: widget.initialScale == 1
                   ? child
                   : Transform.scale(
-                      scale: widget.initialScale +
-                          (1 - widget.initialScale) * _progress.value,
+                      scale: scale,
                       alignment: Alignment.center,
+                      filterQuality: (scale - 1).abs() > 1e-4
+                          ? FilterQuality.medium
+                          : null,
                       child: child,
                     ),
             ),
-          ),
-        ),
-      );
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _EntranceBoundary extends InheritedWidget {

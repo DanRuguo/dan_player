@@ -282,6 +282,7 @@ class _PlaylistCoverTransitionHostState
   final _flights = <_CoverFlight>[];
   final _geometryMotion = ValueNotifier(0);
   Set<Object> _hidden = const {};
+  Set<Object> _hiddenWithImage = const {};
   late final _animation = AnimationController(
     vsync: this,
     duration: PlaylistCoverTransitionHost.duration,
@@ -472,6 +473,10 @@ class _PlaylistCoverTransitionHostState
           _handoff.value = 0;
           _flights.addAll(retained);
           _hidden = retained.map((flight) => flight.id).toSet();
+          _hiddenWithImage = {
+            for (final flight in retained)
+              if (flight.hadImage) flight.id,
+          };
           _animateArrival = false;
           _busy = true;
           _starting = true;
@@ -573,6 +578,10 @@ class _PlaylistCoverTransitionHostState
     setState(() {
       _starting = true;
       _hidden = _flights.map((flight) => flight.id).toSet();
+      _hiddenWithImage = {
+        for (final flight in _flights)
+          if (flight.hadImage) flight.id,
+      };
       _animation.value = 0;
       _handoff.value = 0;
     });
@@ -772,6 +781,7 @@ class _PlaylistCoverTransitionHostState
     }
     _flights.clear();
     _hidden = const {};
+    _hiddenWithImage = const {};
     final changed = _busy;
     _busy = false;
     _starting = false;
@@ -1064,9 +1074,9 @@ class _PlaylistCoverTransitionMarkerState
           key: _boundary,
           child: CoverImageReadinessObserver(
               onChanged: () => _owner?._imageMayBeReady(),
-              hidePlaceholder: scope?.hidden.contains(widget.entryId) == true &&
-                  scope!.owner._flights.any((flight) =>
-                      flight.id == widget.entryId && flight.hadImage),
+              hidePlaceholder:
+                  scope?.owner._hiddenWithImage.contains(widget.entryId) ==
+                      true,
               child: widget.child)),
     );
   }
@@ -1124,6 +1134,7 @@ class _CoverFlightsPainter extends CustomPainter {
     // at different positions overlap throughout the handoff.
     final progress =
         Curves.easeInOutCubic.transform((animation.value / .7).clamp(0.0, 1.0));
+    final paint = Paint()..filterQuality = FilterQuality.low;
     for (final flight in flights) {
       final destination = resolveTarget?.call(flight.id) ?? flight.target;
       final target = destination ?? flight.source;
@@ -1142,14 +1153,13 @@ class _CoverFlightsPainter extends CustomPainter {
       final sourceRect =
           Alignment.center.inscribe(fitted.source, Offset.zero & imageSize);
       canvas.save();
-      canvas.clipRRect(radius.toRRect(rect));
-      canvas.drawImageRect(
-          flight.image,
-          sourceRect,
-          rect,
-          Paint()
-            ..filterQuality = FilterQuality.low
-            ..color = Colors.white.withValues(alpha: opacity));
+      if (radius == BorderRadius.zero) {
+        canvas.clipRect(rect);
+      } else {
+        canvas.clipRRect(radius.toRRect(rect));
+      }
+      paint.color = Colors.white.withValues(alpha: opacity);
+      canvas.drawImageRect(flight.image, sourceRect, rect, paint);
       canvas.restore();
     }
     canvas.restore();

@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_presentation.dart';
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_window_mode_host.dart';
@@ -15,6 +16,24 @@ import 'package:desktop_lyric/ui_language.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 
 export 'package:dan_player/player_shortcut_preferences.dart';
+
+/// Computes the next playback seek target for keyboard stepping.
+///
+/// Forward jumps stay 1 second shy of track end when starting earlier in the
+/// track, preventing a final Right-arrow press from unintentionally skipping
+/// straight into the next song.
+double computeKeyboardSeekTarget({
+  required double position,
+  required double length,
+  required double delta,
+}) {
+  if (!position.isFinite || !length.isFinite || length <= 0) return 0.0;
+  final raw = position + delta;
+  if (delta > 0 && length > 1.0 && position < length - 1.0) {
+    return math.min(raw, length - 1.0).clamp(0.0, length).toDouble();
+  }
+  return raw.clamp(0.0, length).toDouble();
+}
 
 /// One source of truth for dispatch, settings, tooltips and help.
 List<PlayerShortcut> get playerShortcuts =>
@@ -179,7 +198,11 @@ class HotkeysHelper {
             final change = command == PlayerCommand.seekBack ? -5.0 : 5.0;
             final position = playback.position;
             if (!position.isFinite) return;
-            playback.seek((position + change).clamp(0.0, playback.length));
+            playback.seek(computeKeyboardSeekTarget(
+              position: position,
+              length: playback.length,
+              delta: change,
+            ));
           case PlayerCommand.volumeDown:
           case PlayerCommand.volumeUp:
             final change = command == PlayerCommand.volumeDown ? -0.05 : 0.05;

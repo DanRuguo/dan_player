@@ -1,4 +1,10 @@
-use std::{sync::Mutex, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Mutex,
+    },
+    time::Duration,
+};
 
 use flutter_rust_bridge::frb;
 use windows::{
@@ -28,6 +34,9 @@ pub struct SMTCFlutter {
     // The same short lock registers requests, commits metadata and closes the
     // controls. Cover I/O happens outside it; None permanently revokes display.
     display_revision: Mutex<Option<u64>>,
+    // Cached track duration (ms) so periodic position updates do not clear
+    // EndTime/MaxSeekTime on Windows 11 SMTC media flyouts.
+    last_duration_ms: AtomicU32,
 }
 
 pub enum SMTCControlEvent {
@@ -125,6 +134,7 @@ impl SMTCFlutter {
             return;
         }
         *revision = None;
+        self.last_duration_ms.store(0, Ordering::Relaxed);
         if let Ok(mut stored_token) = self.button_pressed_token.lock() {
             if let Some(token) = stored_token.take() {
                 let _ = self._smtc.RemoveButtonPressed(token);
@@ -190,6 +200,7 @@ impl SMTCFlutter {
             _player,
             button_pressed_token: Mutex::new(None),
             display_revision: Mutex::new(Some(0)),
+            last_duration_ms: AtomicU32::new(0),
         })
     }
 
@@ -205,8 +216,14 @@ impl SMTCFlutter {
 
     /// progress, duration: ms
     fn _update_time_properties(&self, progress: u32) -> Result<(), windows::core::Error> {
+        let duration = self.last_duration_ms.load(Ordering::Relaxed);
+        let (position_ms, end_ms) = timeline_bounds_ms(progress, duration);
         let time_properties = SystemMediaTransportControlsTimelineProperties::new()?;
-        time_properties.SetPosition(TimeSpan::from(Duration::from_millis(progress.into())))?;
+        time_properties.SetStartTime(TimeSpan { Duration: 0 })?;
+        time_properties.SetMinSeekTime(TimeSpan { Duration: 0 })?;
+        time_properties.SetEndTime(TimeSpan::from(Duration::from_millis(end_ms.into())))?;
+        time_properties.SetMaxSeekTime(TimeSpan::from(Duration::from_millis(end_ms.into())))?;
+        time_properties.SetPosition(TimeSpan::from(Duration::from_millis(position_ms.into())))?;
         self._smtc.UpdateTimelineProperties(&time_properties)?;
 
         Ok(())
@@ -310,11 +327,13 @@ impl SMTCFlutter {
         updater.ClearAll()?;
         updater.SetType(MediaPlaybackType::Music)?;
 
+        self.last_duration_ms.store(duration, Ordering::Relaxed);
         let time_properties = SystemMediaTransportControlsTimelineProperties::new()?;
         time_properties.SetStartTime(TimeSpan { Duration: 0 })?;
         time_properties.SetEndTime(TimeSpan::from(Duration::from_millis(duration.into())))?;
         time_properties.SetMinSeekTime(TimeSpan { Duration: 0 })?;
         time_properties.SetMaxSeekTime(TimeSpan::from(Duration::from_millis(duration.into())))?;
+        time_properties.SetPosition(TimeSpan { Duration: 0 })?;
         self._smtc.UpdateTimelineProperties(&time_properties)?;
 
         let music_properties = updater.MusicProperties()?;
@@ -337,5 +356,33 @@ impl SMTCFlutter {
         }
 
         Ok(())
+    }
+}
+
+/// Computes `(position_ms, end_ms)` for Windows SMTC timeline updates so a
+/// position tick never resets `EndTime`/`MaxSeekTime` back to zero.
+fn timeline_bounds_ms(progress_ms: u32, duration_ms: u32) -> (u32, u32) {
+    if duration_ms > 0 {
+        (progress_ms.min(duration_ms), duration_ms)
+    } else {
+        (progress_ms, progress_ms)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::timeline_bounds_ms;
+
+    #[test]
+    fn smtc_timeline_preserves_duration_and_clamps_position() {
+        assert_eq!(timeline_bounds_ms(12_345, 240_000), (12_345, 240_000));
+        assert_eq!(timeline_bounds_ms(260_000, 240_000), (240_000, 240_000));
+        assert_eq!(timeline_bounds_ms(0, 180_000), (0, 180_000));
+    }
+
+    #[test]
+    fn smtc_timeline_handles_unknown_duration_gracefully() {
+        assert_eq!(timeline_bounds_ms(5_000, 0), (5_000, 5_000));
+        assert_eq!(timeline_bounds_ms(0, 0), (0, 0));
     }
 }

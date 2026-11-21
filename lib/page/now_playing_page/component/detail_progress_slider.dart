@@ -850,11 +850,19 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                   switchOutCurve: Curves.easeInCubic,
                   transitionBuilder: (child, animation) => FadeTransition(
                       opacity: animation,
-                      child: ScaleTransition(
-                          alignment: Alignment.bottomCenter,
-                          scale: Tween<double>(begin: .8, end: 1)
-                              .animate(animation),
-                          child: child)),
+                      child: AnimatedBuilder(
+                          animation: animation,
+                          child: child,
+                          builder: (context, child) {
+                            final scale = .8 + .2 * animation.value;
+                            return Transform.scale(
+                                alignment: Alignment.bottomCenter,
+                                scale: scale,
+                                filterQuality: (scale - 1.0).abs() > 1e-4
+                                    ? FilterQuality.medium
+                                    : null,
+                                child: child);
+                          })),
                   child: !visible
                       ? const SizedBox.shrink()
                       : Material(

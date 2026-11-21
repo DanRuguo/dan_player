@@ -30,6 +30,8 @@ class _StatisticsListeningWeekdaysState
   final _focus = FocusNode();
   final _scroll = ScrollController();
   (double, double)? _chartGeometry;
+  Object? _axisMetricsKey;
+  ({double slot, double axisWidth, double height})? _axisMetrics;
   bool _revealPending = false, _revealScheduled = false;
   static const _names = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
   static const _shortNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -84,34 +86,62 @@ class _StatisticsListeningWeekdaysState
     final canReveal = TickerMode.valuesOf(context).enabled;
     return LayoutBuilder(builder: (context, constraints) {
       final labelStyle = theme.textTheme.labelSmall!;
-      final text = TextPainter(
-          textDirection: Directionality.of(context),
-          textScaler: MediaQuery.textScalerOf(context));
-      var slot = 44.0;
-      for (final name in _shortNames) {
-        text.text = TextSpan(text: ui(name), style: labelStyle);
-        text.layout();
-        slot = math.max(slot, text.width + 20);
-      }
+      final axisLabelStyle = labelStyle.copyWith(
+          color: scheme.onSurfaceVariant,
+          fontFeatures: const [FontFeature.tabularFigures()]);
       final maximum = values.fold<double>(0, (a, b) => math.max(a, b ?? 0));
       final maximumValue =
           values.any((value) => value != null) ? maximum : null;
       final maximumLabel = _axisDuration(maximumValue);
       final zeroLabel = _axisDuration(0);
-      text.text = TextSpan(text: maximumLabel, style: labelStyle);
-      text.layout();
-      final maximumLabelWidth = text.width;
-      text.text = TextSpan(text: zeroLabel, style: labelStyle);
-      text.layout();
-      final axisWidth = math.min(math.max(maximumLabelWidth, text.width),
-          math.min(85.0, constraints.maxWidth * .28));
-      text.text = TextSpan(text: maximumLabel, style: labelStyle);
-      text.layout(maxWidth: axisWidth);
-      final maximumLabelHeight = text.height;
-      text.text = TextSpan(text: zeroLabel, style: labelStyle);
-      text.layout(maxWidth: axisWidth);
-      final height = math.max(160.0, maximumLabelHeight + text.height + 32);
-      text.dispose();
+      final direction = Directionality.of(context);
+      final scaler = MediaQuery.textScalerOf(context);
+      final metricsKey = (
+        uiLanguage.value,
+        labelStyle,
+        direction,
+        scaler,
+        maximumLabel,
+        zeroLabel,
+        constraints.maxWidth,
+      );
+      var metrics = _axisMetrics;
+      if (_axisMetricsKey != metricsKey || metrics == null) {
+        final text = TextPainter(
+            textDirection: direction, textScaler: scaler);
+        var measuredSlot = 44.0;
+        for (final name in _shortNames) {
+          text.text = TextSpan(text: ui(name), style: labelStyle);
+          text.layout();
+          measuredSlot = math.max(measuredSlot, text.width + 20);
+        }
+        text.text = TextSpan(text: maximumLabel, style: axisLabelStyle);
+        text.layout();
+        final maximumLabelWidth = text.width;
+        text.text = TextSpan(text: zeroLabel, style: axisLabelStyle);
+        text.layout();
+        final measuredAxisWidth = math.min(
+            math.max(maximumLabelWidth, text.width),
+            math.min(85.0, constraints.maxWidth * .28));
+        text.text = TextSpan(text: maximumLabel, style: axisLabelStyle);
+        text.layout(maxWidth: measuredAxisWidth);
+        final maximumLabelHeight = text.height;
+        text.text = TextSpan(text: zeroLabel, style: axisLabelStyle);
+        text.layout(maxWidth: measuredAxisWidth);
+        final measuredHeight =
+            math.max(160.0, maximumLabelHeight + text.height + 32);
+        text.dispose();
+        metrics = (
+          slot: measuredSlot,
+          axisWidth: measuredAxisWidth,
+          height: measuredHeight,
+        );
+        _axisMetrics = metrics;
+        _axisMetricsKey = metricsKey;
+      }
+      final slot = metrics.slot;
+      final axisWidth = metrics.axisWidth;
+      final height = metrics.height;
       final width = math.max(constraints.maxWidth - axisWidth - 8, slot * 7);
       final geometry = (constraints.maxWidth - axisWidth - 8, width);
       if (_chartGeometry != geometry) {
@@ -214,8 +244,7 @@ class _StatisticsListeningWeekdaysState
                             softWrap: false,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.end,
-                            style: labelStyle.copyWith(
-                                color: scheme.onSurfaceVariant))),
+                            style: axisLabelStyle)),
                     Tooltip(
                         message: _duration(0),
                         child: Text(zeroLabel,
@@ -224,8 +253,7 @@ class _StatisticsListeningWeekdaysState
                             softWrap: false,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.end,
-                            style: labelStyle.copyWith(
-                                color: scheme.onSurfaceVariant))),
+                            style: axisLabelStyle)),
                   ],
                 ),
               ),
@@ -342,8 +370,9 @@ class _StatisticsListeningWeekdaysState
               Text(
                   '${listeningDayKey(data.start!)} – ${listeningDayKey(data.end!)}',
                   key: const ValueKey('statistics-weekdays-date-range'),
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant)),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
             ],
             const SizedBox(height: 12),
             AppContentTransition(
@@ -363,15 +392,21 @@ class _StatisticsListeningWeekdaysState
                     Text('${ui(_names[index])} · ${_duration(_value(day))}',
                         key: const ValueKey(
                             'statistics-weekdays-selected-value'),
-                        style: theme.textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w600)),
+                        style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures()
+                            ])),
                     Tooltip(
                       message: ui('有效天数指有收听记录且时长大于零的天数；日均只除以这些天数。'),
                       child: Text(ui('有效天数 {0}', [day.activeDays]),
                           key:
                               const ValueKey('statistics-weekdays-active-days'),
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant)),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ])),
                     ),
                   ],
                 );

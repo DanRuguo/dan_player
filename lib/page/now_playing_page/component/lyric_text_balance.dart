@@ -56,7 +56,8 @@ double layoutBalancedLyric(TextPainter painter, double maxWidth) {
       maxWidth <= 0 ||
       text.length > 512 ||
       text.contains('\n') ||
-      painter.textDirection == TextDirection.rtl) {
+      painter.textDirection == TextDirection.rtl ||
+      painter.maxIntrinsicWidth <= maxWidth) {
     return maxWidth;
   }
   final original = painter.computeLineMetrics();
@@ -324,6 +325,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
   Object? _shapeIdentity;
   Object? _rubyIdentity;
   double? _width;
+  double? _singleLineNaturalWidth;
   TextPainter? _painter;
   LyricRubyLayout? _ruby;
   LyricRubyShaping? _rubyShaping;
@@ -385,6 +387,9 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
       if (_identity != identity || (needsPainter && _painter == null)) {
         // Window resizing changes wrapping, not the glyph run. Keep the
         // native paragraph so its shaping cache survives the width sweep.
+        final sameShapeAndRuby = _painter != null &&
+            _shapeIdentity == shapeIdentity &&
+            _rubyIdentity == rubyIdentity;
         if (_painter == null || _shapeIdentity != shapeIdentity) {
           _painter?.dispose();
           _painter = TextPainter(
@@ -396,6 +401,7 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
               locale: locale,
               textHeightBehavior: textHeightBehavior);
           _shapeIdentity = shapeIdentity;
+          _singleLineNaturalWidth = null;
         }
         if (_rubyIdentity != rubyIdentity) {
           // An optional reading is an attachment, not a new primary shape.
@@ -417,35 +423,57 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
           _rubyIdentity = rubyIdentity;
         }
         final painter = _painter!;
-        _width = layoutBalancedLyric(painter, textMaxWidth);
-        _width = layoutRubyWordSafe(
-            painter, widget.rubySpans, textMaxWidth, _width!);
-        // The retained painter and its transparent Text child must use the
-        // same paragraph width, otherwise short centered/right-aligned ink
-        // paints at the paragraph's leading edge while the child is aligned.
-        if (_width!.isFinite) {
-          painter.layout(minWidth: _width!, maxWidth: _width!);
+        final fastSingleLineWidth = sameShapeAndRuby &&
+            widget.rubySpans.isEmpty &&
+            !widget.text.contains('\n') &&
+            textMaxWidth.isFinite &&
+            _singleLineNaturalWidth != null &&
+            _singleLineNaturalWidth! + 1.0 <= textMaxWidth;
+        if (fastSingleLineWidth) {
+          _width = textMaxWidth;
+          painter.layout(minWidth: textMaxWidth, maxWidth: textMaxWidth);
+          if (_slotsFollow != widget.wordFollow ||
+              (widget.wordFollow && paintAlign != TextAlign.left)) {
+            _slots = widget.wordFollow
+                ? lyricFollowWordSlots(painter, widget.text)
+                : const [];
+            _slotsFollow = widget.wordFollow;
+          }
+        } else {
+          _width = layoutBalancedLyric(painter, textMaxWidth);
+          _width = layoutRubyWordSafe(
+              painter, widget.rubySpans, textMaxWidth, _width!);
+          // The retained painter and its transparent Text child must use the
+          // same paragraph width, otherwise short centered/right-aligned ink
+          // paints at the paragraph's leading edge while the child is aligned.
+          if (_width!.isFinite) {
+            painter.layout(minWidth: _width!, maxWidth: _width!);
+          }
+          if (!widget.text.contains('\n')) {
+            _singleLineNaturalWidth = painter.maxIntrinsicWidth;
+          }
+          _slots = widget.wordFollow
+              ? lyricFollowWordSlots(painter, widget.text)
+              : const [];
+          _slotsFollow = widget.wordFollow;
+          _ruby?.dispose();
+          _ruby = widget.rubySpans.isEmpty
+              ? null
+              : LyricRubyLayout(
+                  primary: painter,
+                  spans: widget.rubySpans,
+                  style: widget.style,
+                  policy: fontPolicy,
+                  direction: direction,
+                  scaler: scaler,
+                  locale: locale,
+                  width: painter.width,
+                  shaping: _rubyShaping,
+                  primaryInset:
+                      lyricTopInkGuard(painter) - lyricVerticalInkGuard,
+                );
+          _bindRubyMotion();
         }
-        _slots = widget.wordFollow
-            ? lyricFollowWordSlots(painter, widget.text)
-            : const [];
-        _slotsFollow = widget.wordFollow;
-        _ruby?.dispose();
-        _ruby = widget.rubySpans.isEmpty
-            ? null
-            : LyricRubyLayout(
-                primary: painter,
-                spans: widget.rubySpans,
-                style: widget.style,
-                policy: fontPolicy,
-                direction: direction,
-                scaler: scaler,
-                locale: locale,
-                width: painter.width,
-                shaping: _rubyShaping,
-                primaryInset: lyricTopInkGuard(painter) - lyricVerticalInkGuard,
-              );
-        _bindRubyMotion();
         _color = widget.style.color;
         _identity = identity;
       } else if (_slotsFollow != widget.wordFollow) {

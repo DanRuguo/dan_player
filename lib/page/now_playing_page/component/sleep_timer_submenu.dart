@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/player_number_dialog.dart';
 import 'package:dan_player/play_service/play_service.dart';
@@ -76,6 +77,7 @@ class SleepTimerSubmenu extends StatelessWidget {
         service.sleepTimerRemaining,
         service.sleepTimerPaused,
         service.sleepTimerFinishCurrent,
+        service.sleepTimerFadeOut,
         service.stopAfterCurrent,
         service,
         service.queueStopBoundary,
@@ -128,6 +130,16 @@ class SleepTimerSubmenu extends StatelessWidget {
                     ? const Icon(Symbols.check)
                     : null,
                 child: label(ui('倒计时结束后播完本曲')),
+              ),
+              MenuItemButton(
+                key: const ValueKey('sleep-fade-out'),
+                onPressed: () => service
+                    .setSleepTimerFadeOut(!service.sleepTimerFadeOut.value),
+                leadingIcon: const Icon(Symbols.volume_down),
+                trailingIcon: service.sleepTimerFadeOut.value
+                    ? const Icon(Symbols.check)
+                    : null,
+                child: label(ui('结束前淡出音量')),
               ),
               const Divider(),
               MenuItemButton(
@@ -214,6 +226,7 @@ class SleepTimerSubmenu extends StatelessWidget {
                           ? '倒计时已暂停 {0}'
                           : "睡眠定时 {0}",
                       [formatSleepRemaining(remaining)]),
+              style: const TextStyle(fontFeatures: tabularFiguresFeatures),
             ),
           ),
         );

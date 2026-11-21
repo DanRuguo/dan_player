@@ -538,6 +538,10 @@ class LyricViewTile extends StatelessWidget {
                                                         .labelMedium
                                                         ?.copyWith(
                                                           color: scheme.primary,
+                                                          fontFeatures: const [
+                                                            FontFeature
+                                                                .tabularFigures(),
+                                                          ],
                                                         ),
                                                   ),
                                                 ),
@@ -835,6 +839,7 @@ abstract interface class TimedLyricReadingGeometry
 class _TimedLyricTextState extends State<_TimedLyricText>
     implements TimedLyricReadingGeometry {
   Object? _shapeIdentity;
+  Object? _layoutOwnerIdentity;
   Object? _layoutIdentity;
   _TimedLyricParagraph? _paragraph;
   _TimedLyricLayout? _layout;
@@ -957,17 +962,26 @@ class _TimedLyricTextState extends State<_TimedLyricText>
         // Reading projection replaces line objects, but only its attachments
         // change. Keep the primary native paragraph while timing and ruby
         // geometry continue to belong to the current authored line.
-        final identity = (shapeIdentity, widget.line, rubySpans, textMaxWidth);
+        final ownerIdentity = (shapeIdentity, widget.line, rubySpans);
+        final identity = (ownerIdentity, textMaxWidth);
         if (_layoutIdentity != identity) {
-          _layout?.dispose();
-          _paragraph!.setRubySpans(rubySpans);
-          _layout = _TimedLyricLayout(
-            line: widget.line,
-            style: widget.style,
-            paragraph: _paragraph!,
-            pixelRatio: pixelRatio,
-            maxWidth: textMaxWidth,
-          );
+          final reusableSingleLine = _layout != null &&
+              _layoutOwnerIdentity == ownerIdentity &&
+              !widget.line.content.contains('\n') &&
+              _layout!.base.maxIntrinsicWidth + 1.0 <= _layout!.maxWidth &&
+              _layout!.base.maxIntrinsicWidth + 1.0 <= textMaxWidth;
+          if (!reusableSingleLine) {
+            _layout?.dispose();
+            _paragraph!.setRubySpans(rubySpans);
+            _layout = _TimedLyricLayout(
+              line: widget.line,
+              style: widget.style,
+              paragraph: _paragraph!,
+              pixelRatio: pixelRatio,
+              maxWidth: textMaxWidth,
+            );
+            _layoutOwnerIdentity = ownerIdentity;
+          }
           _layoutIdentity = identity;
         }
         final layout = _layout!;
@@ -1199,7 +1213,20 @@ class _TimedLyricLayout {
         primaryInset: topInkGuard - lyricVerticalInkGuard,
       );
     }
+  }
 
+  bool _wordsInitialized = false;
+  bool _rubyMotionBound = false;
+  late List<_TimedWordShape> _words;
+  late bool _completeWordInk;
+  late Set<int> _movingIndices;
+
+  // Defer per-word selection boxes and lane assignment until a row actually
+  // activates, morphs, or is queried. Inactive rows in long karaoke tracks
+  // paint the base paragraph directly without touching HarfBuzz word boxes.
+  void _ensureWords() {
+    if (_wordsInitialized) return;
+    _wordsInitialized = true;
     // Timing providers sometimes split a surrogate/ZWJ cluster into separate
     // words. Keep that grapheme in one mask with its actual combined interval.
     final boundaries = <int>{0};
@@ -1210,7 +1237,7 @@ class _TimedLyricLayout {
     }
     var offset = 0;
     var completeInkCoverage = true;
-    words = [];
+    final builtWords = <_TimedWordShape>[];
     for (var index = 0; index < line.words.length; index++) {
       final startOffset = offset;
       var start = line.words[index].start;
@@ -1260,7 +1287,7 @@ class _TimedLyricLayout {
             boxHeightStyle: drawing.BoxHeightStyle.includeLineSpacingMiddle,
           );
           if (pieces.isNotEmpty) {
-            words.add(
+            builtWords.add(
               _TimedWordShape(
                 sourceStart: characterOffset,
                 sourceEnd: nextOffset,
@@ -1295,7 +1322,7 @@ class _TimedLyricLayout {
           _joiningLetter.hasMatch(
             line.content.substring(position - 1, position + 1),
           );
-      words.add(
+      builtWords.add(
         _TimedWordShape(
           sourceStart: startOffset,
           sourceEnd: offset,
@@ -1312,39 +1339,46 @@ class _TimedLyricLayout {
         ),
       );
     }
-    completeWordInk = completeInkCoverage && offset == line.content.length;
+    _words = builtWords;
+    _completeWordInk = completeInkCoverage && offset == line.content.length;
     final lastGroup = line.words.lastIndexWhere(
       (word) => word.content.trim().isNotEmpty,
     );
-    for (final word in words) {
+    for (final word in _words) {
       word.phraseEnd = word.group == lastGroup;
     }
     // Reserve four non-overlapping presentation lanes once per layout.
     // A fifth overlapping note keeps its reveal, but must neither suppress
     // all motion in the paragraph nor interrupt the four existing poses.
-    final ordered = [for (var i = 0; i < words.length; i++) i]..sort((a, b) {
-        final order = words[a].motionStart.compareTo(words[b].motionStart);
+    final ordered = [for (var i = 0; i < _words.length; i++) i]..sort((a, b) {
+        final order = _words[a].motionStart.compareTo(_words[b].motionStart);
         return order == 0 ? a.compareTo(b) : order;
       });
     final laneEnds = List<Duration?>.filled(4, null);
     final reservedGroups = <int>{};
-    movingIndices = <int>{};
+    final builtMoving = <int>{};
     for (final index in ordered) {
-      final word = words[index];
+      final word = _words[index];
       if (!word.canLift || word.length <= Duration.zero) continue;
       if (reservedGroups.contains(word.group)) {
-        movingIndices.add(index);
+        builtMoving.add(index);
         continue;
       }
       final lane = laneEnds.indexWhere(
         (end) => end == null || end <= word.motionStart,
       );
       if (lane < 0) continue;
-      movingIndices.add(index);
+      builtMoving.add(index);
       reservedGroups.add(word.group);
       laneEnds[lane] = word.motionEnd;
     }
-    ruby?.bindMotion(
+    _movingIndices = builtMoving;
+  }
+
+  void ensureRubyMotion() {
+    if (_rubyMotionBound || ruby == null) return;
+    _rubyMotionBound = true;
+    ruby!.bindMotion(
       phaseFor: (span) {
         var phase = 0.0;
         var count = 0;
@@ -1436,7 +1470,11 @@ class _TimedLyricLayout {
 
   TextPainter gradientInk(_LyricRevealInk key) => paragraph.gradientInk(key);
 
-  late final List<_TimedWordShape> words;
+  List<_TimedWordShape> get words {
+    _ensureWords();
+    return _words;
+  }
+
   final _readingGlyphYs = <int, double?>{};
 
   // Read tools alone query this existing paragraph. Cache a complete grapheme
@@ -1460,8 +1498,16 @@ class _TimedLyricLayout {
     });
   }
 
-  late final bool completeWordInk;
-  late final Set<int> movingIndices;
+  bool get completeWordInk {
+    _ensureWords();
+    return _completeWordInk;
+  }
+
+  Set<int> get movingIndices {
+    _ensureWords();
+    return _movingIndices;
+  }
+
   late final _movingWordOrder = movingIndices.toList()..sort();
 
   // Keep elapsed-time floating-point operations far below one microsecond of
@@ -2057,8 +2103,15 @@ class LyricWordHighlightPainter extends CustomPainter
     LyricRubyGlyph glyph,
     Map<int, _TimedLyricPose> poses,
   ) {
-    Rect? presented;
     final morph = glyphMorph;
+    if (morph == null && poses.isEmpty && follow == null) {
+      final alignedX = alignmentX == null
+          ? 0.0
+          : lyricAlignedOffset(_layout.base.width, glyph.lineWidth, alignmentX!);
+      return Offset(alignedX, 0);
+    }
+    _layout.ensureRubyMotion();
+    Rect? presented;
     if (morph != null && glyph.motionParts.isEmpty) {
       presented = morph.geometry.bounds(
         glyph.sourceStart,
@@ -2137,17 +2190,21 @@ class LyricWordHighlightPainter extends CustomPainter
       _paintMorphInk(canvas, morph, poses);
       return;
     }
+    if (activation <= 0) {
+      _layout.ink(baseColor, played: false).paint(canvas, Offset.zero);
+      return;
+    }
     if (!_layout.completeWordInk) {
       // A malformed imported timing can leave a visible grapheme without a
       // selection box. Preserve the entire paragraph instead of dropping it.
       _layout.ink(baseColor, played: false).paint(canvas, Offset.zero);
       return;
     }
-    if (activation <= 0 || reducedMotion) {
+    if (reducedMotion) {
       _layout
           .ink(
-            reducedMotion && activation > 0 ? playedColor : baseColor,
-            played: reducedMotion && activation > 0,
+            playedColor,
+            played: true,
           )
           .paint(canvas, Offset.zero);
       return;
@@ -2232,20 +2289,21 @@ class LyricWordHighlightPainter extends CustomPainter
     Map<int, _TimedLyricPose>? poses,
   ) {
     final geometry = morph.geometry;
-    if (!_layout.completeWordInk ||
+    if (activation <= 0 ||
+        !_layout.completeWordInk ||
         _layout.words.isEmpty ||
-        activation <= 0 ||
         reducedMotion) {
+      final usePlayed = reducedMotion && activation > 0;
       geometry.paint(
         canvas,
         progress: morph.progress,
-        tint: reducedMotion && activation > 0 ? playedColor : baseColor,
+        tint: usePlayed ? playedColor : baseColor,
         colourParagraph: _layout.base,
         colourLayoutIdentity: _layout,
         colourPaint: (source) => _layout
             .ink(
-              reducedMotion && activation > 0 ? playedColor : baseColor,
-              played: reducedMotion && activation > 0,
+              usePlayed ? playedColor : baseColor,
+              played: usePlayed,
             )
             .paint(source, Offset.zero),
       );

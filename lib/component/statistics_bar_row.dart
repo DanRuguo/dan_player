@@ -48,10 +48,9 @@ class StatisticsBarRow extends StatelessWidget {
     for (final value in values) {
       painter.text = TextSpan(
           text: value,
-          style: Theme.of(context)
-              .textTheme
-              .labelLarge
-              ?.copyWith(fontWeight: FontWeight.w600));
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()]));
       painter.layout();
       width = math.max(width, painter.width.ceilToDouble());
     }
@@ -82,10 +81,10 @@ class StatisticsBarRow extends StatelessWidget {
     final title = showTooltip
         ? Tooltip(message: '$label\n$detail', child: labelText)
         : labelText;
-    final amountStyle = Theme.of(context)
-        .textTheme
-        .labelLarge
-        ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600);
+    final amountStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+        color: scheme.primary,
+        fontWeight: FontWeight.w600,
+        fontFeatures: const [FontFeature.tabularFigures()]);
     final amount = showTooltip
         ? Text(valueLabel, textAlign: TextAlign.right, style: amountStyle)
         : RichText(
@@ -126,8 +125,10 @@ class StatisticsBarRow extends StatelessWidget {
             if (rank != null)
               SizedBox(
                   width: rankWidth,
-                  child:
-                      Text('$rank', style: TextStyle(color: scheme.primary))),
+                  child: Text('$rank',
+                      style: TextStyle(
+                          color: scheme.primary,
+                          fontFeatures: const [FontFeature.tabularFigures()]))),
             Expanded(
                 child: inline
                     ? Row(children: [

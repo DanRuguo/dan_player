@@ -21,6 +21,7 @@ class DesktopLyricBody extends StatefulWidget {
 }
 
 class _DesktopLyricBodyState extends State<DesktopLyricBody> {
+  static final _panelBlur = ImageFilter.blur(sigmaX: 18.0, sigmaY: 18.0);
   bool isHovering = false;
   bool _touchControlsVisible = false;
   bool _paletteWasActive = false;
@@ -56,36 +57,43 @@ class _DesktopLyricBodyState extends State<DesktopLyricBody> {
               final showControls = paletteActive
                   ? _paletteControlsVisible
                   : isHovering || _touchControlsVisible;
+              final features = WidgetsBinding
+                  .instance.platformDispatcher.accessibilityFeatures;
+              final animatePanel =
+                  AppMotion.enabled(context, MotionKind.feedback) &&
+                      TickerMode.valuesOf(context).enabled &&
+                      !features.disableAnimations &&
+                      !features.reduceMotion;
               return Stack(children: [
                 Positioned.fromRect(
                   rect: frame,
                   child: ClipRect(
                       child: TweenAnimationBuilder<double>(
-                    duration: !AppMotion.enabled(context, MotionKind.feedback)
-                        ? Duration.zero
-                        : AppMotion.standard,
+                    duration: animatePanel ? AppMotion.standard : Duration.zero,
                     curve: AppMotion.standardCurve,
                     tween: Tween(end: showControls ? 1 : 0),
                     builder: (context, value, child) => DecoratedBox(
                       key: const ValueKey('desktop-lyric-surface'),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(14.0),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(
-                              alpha: value * 0.22,
-                            ),
-                            blurRadius: 20.0,
-                            offset: const Offset(0.0, 8.0),
-                          ),
-                        ],
+                        boxShadow: value > 0
+                            ? [
+                                BoxShadow(
+                                  color: Colors.black.withValues(
+                                    alpha: value * 0.22,
+                                  ),
+                                  blurRadius: 20.0,
+                                  offset: const Offset(0.0, 8.0),
+                                ),
+                              ]
+                            : null,
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(14.0),
                         child: BackdropFilter(
                           enabled: source.renderingPolicy.value.panelBlur &&
                               (value > 0 || appearance.backgroundOpacity > 0),
-                          filter: ImageFilter.blur(sigmaX: 18.0, sigmaY: 18.0),
+                          filter: _panelBlur,
                           child: DecoratedBox(
                             key: const ValueKey('desktop-lyric-background'),
                             decoration: BoxDecoration(
@@ -94,11 +102,13 @@ class _DesktopLyricBodyState extends State<DesktopLyricBody> {
                                       (0.86 - appearance.backgroundOpacity) *
                                           value),
                               borderRadius: BorderRadius.circular(14.0),
-                              border: Border.all(
-                                color: Color(theme.onSurface).withValues(
-                                  alpha: value * 0.18,
-                                ),
-                              ),
+                              border: value > 0
+                                  ? Border.all(
+                                      color: Color(theme.onSurface).withValues(
+                                        alpha: value * 0.18,
+                                      ),
+                                    )
+                                  : null,
                             ),
                             child: Scaffold(
                               backgroundColor: Colors.transparent,
@@ -130,11 +140,12 @@ class _DesktopLyricBodyState extends State<DesktopLyricBody> {
                           });
                         },
                         child: Center(
-                            child: DesktopLyricForeground(
-                                isHovering: showControls,
-                                controller: source,
-                                windowLayout: window,
-                                sendMessage: widget.sendMessage)),
+                            child: RepaintBoundary(
+                                child: DesktopLyricForeground(
+                                    isHovering: showControls,
+                                    controller: source,
+                                    windowLayout: window,
+                                    sendMessage: widget.sendMessage))),
                       ),
                     ),
                   )),

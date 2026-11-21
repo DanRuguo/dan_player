@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'dart:io';
 
 import 'package:dan_player/library/library_mutation_gate.dart';
@@ -167,17 +169,58 @@ class LibraryWatch {
             _mediaOrArtwork(event.destination!));
   }
 
-  static bool _mediaOrArtwork(String path) =>
-      isM3uLocalAudioPath(path) ||
-      (const {
-            'cover',
-            'folder',
-            'front',
-            'album',
-            'albumart'
-          }.contains(p.windows.basenameWithoutExtension(path).toLowerCase()) &&
-          const {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'}
-              .contains(p.windows.extension(path).toLowerCase()));
+  static const _coverExtensions = {
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.bmp',
+    '.gif',
+  };
+
+  static const _standardCoverStems = {
+    'cover',
+    'folder',
+    'front',
+    'frontcover',
+    'album',
+    'albumart',
+    'albumcover',
+    'coverart',
+    'artwork',
+    'art',
+  };
+
+  static const _ignoredMetadataFiles = {
+    '.ds_store',
+    'thumbs.db',
+    'desktop.ini',
+  };
+
+  static final _excludedCoverStemTokens = RegExp(
+    r'(?:^|[^a-z0-9])(back|rear|tray|inlay|inside|booklet|cd|disc|disk|vinyl|media|obi|spine|matrix|banner|fanart|artist|small|thumb|thumbnail)(?:$|[^a-z0-9])',
+  );
+
+  @visibleForTesting
+  static bool isWatchedLibraryFile(String path) {
+    final name = p.windows.basename(path);
+    final lowerName = name.toLowerCase();
+    if (name.startsWith('._') || _ignoredMetadataFiles.contains(lowerName)) {
+      return false;
+    }
+    if (isM3uLocalAudioPath(path)) return true;
+    final ext = p.windows.extension(lowerName);
+    if (!_coverExtensions.contains(ext)) return false;
+    final stem = p.windows.basenameWithoutExtension(lowerName);
+    if (stem.isEmpty) return false;
+    if (_standardCoverStems.contains(stem)) return true;
+    // Match Windows Media Player large covers and same-folder track sidecar
+    // artwork (mirroring rust/src/api/folder_cover.rs) while ignoring back/small.
+    if (stem.startsWith('albumart') && stem.endsWith('_large')) return true;
+    return !_excludedCoverStemTokens.hasMatch(stem);
+  }
+
+  static bool _mediaOrArtwork(String path) => isWatchedLibraryFile(path);
 
   void _lost(String key, Object token, Object? error, StackTrace? trace) {
     if (!_watchCurrent(key, token)) return;

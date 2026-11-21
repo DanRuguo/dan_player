@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:dan_player/component/artwork_pulse.dart';
+import 'package:dan_player/component/fluid_artwork.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -8,17 +10,41 @@ import 'package:flutter/rendering.dart';
 /// Deforms the real blurred cover's texture coordinates, not a sampled colour
 /// palette. One shader draw over a fixed rectangle keeps every edge covered.
 /// Uses the existing background phase and owns no timer or image readback.
+///
+/// When [layered] is enabled, both counter-rotating fluid layers reuse the same
+/// blurred snapshot texture instead of snapshotting and blurring twice.
 class ArtworkMeshPainter extends SnapshotPainter {
-  ArtworkMeshPainter(ValueListenable<double>? phase) {
+  ArtworkMeshPainter(
+    ValueListenable<double>? phase, {
+    bool layered = false,
+    ArtworkPulse? pulse,
+  })  : _layered = layered,
+        _pulse = pulse {
     this.phase = phase;
     if (phase != null) _prepareShader();
   }
   static Future<ui.FragmentProgram>? _program;
   ui.FragmentShader? _shader;
+  ui.FragmentShader? _secondaryShader;
   bool _disposed = false;
   bool _preparing = false;
+  bool _layered;
+  ArtworkPulse? _pulse;
   @visibleForTesting
   bool get shaderReady => _shader != null;
+
+  set layered(bool value) {
+    if (_layered == value) return;
+    _layered = value;
+    notifyListeners();
+  }
+
+  set pulse(ArtworkPulse? value) {
+    if (identical(_pulse, value)) return;
+    _pulse = value;
+    notifyListeners();
+  }
+
   void _prepareShader() {
     if (_preparing || _shader != null) return;
     _preparing = true;
@@ -27,6 +53,7 @@ class ArtworkMeshPainter extends SnapshotPainter {
         .then((program) {
       if (_disposed) return;
       _shader = program.fragmentShader();
+      _secondaryShader = program.fragmentShader();
       notifyListeners();
     }, onError: (Object error, StackTrace stack) {
       // Unsupported backends keep the existing blurred-cover flow. Do not
@@ -61,44 +88,99 @@ class ArtworkMeshPainter extends SnapshotPainter {
           PaintingContextCallback painter) =>
       painter(context, offset);
 
+  void _drawPass(
+    Canvas canvas,
+    Size size,
+    ui.Image image,
+    Size sourceSize,
+    double opacity, {
+    required ui.FragmentShader? shader,
+  }) {
+    if (_phase == null || shader == null) {
+      final paint = Paint()..filterQuality = FilterQuality.medium;
+      if (opacity < 1.0) {
+        paint.color = Color.fromRGBO(255, 255, 255, opacity);
+      }
+      canvas.drawImageRect(
+        image,
+        Offset.zero & sourceSize,
+        Offset.zero & size,
+        paint,
+      );
+      return;
+    }
+    // These values are constant across both dimensions of the artwork.
+    // Compute them once per draw, rather than twice per output fragment.
+    final t = _phase!.value * math.pi * 2;
+    shader
+      ..setFloat(0, size.width)
+      ..setFloat(1, size.height)
+      ..setFloat(2, sourceSize.width / image.width)
+      ..setFloat(3, sourceSize.height / image.height)
+      ..setFloat(4, t)
+      ..setFloat(5, math.sin(t))
+      ..setFloat(6, math.sin(t * 2))
+      ..setFloat(7, opacity)
+      ..setImageSampler(0, image);
+    canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
+  }
+
   @override
   void paintSnapshot(PaintingContext context, Offset offset, Size size,
       ui.Image image, Size sourceSize, double pixelRatio) {
-    if (_phase == null || _shader == null) {
-      context.canvas.drawImageRect(image, Offset.zero & sourceSize,
-          offset & size, Paint()..filterQuality = FilterQuality.medium);
-      return;
-    }
-    if (_shader case final shader?) {
-      // These values are constant across both dimensions of the artwork.
-      // Compute them once per draw, rather than twice per output fragment.
-      final t = _phase!.value * math.pi * 2;
-      shader
-        ..setFloat(0, size.width)
-        ..setFloat(1, size.height)
-        ..setFloat(2, sourceSize.width / image.width)
-        ..setFloat(3, sourceSize.height / image.height)
-        ..setFloat(4, t)
-        ..setFloat(5, math.sin(t))
-        ..setFloat(6, math.sin(t * 2))
-        ..setImageSampler(0, image);
+    if (!_layered || _phase == null) {
       context.canvas.save();
       context.canvas.translate(offset.dx, offset.dy);
-      context.canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
+      _drawPass(
+        context.canvas,
+        size,
+        image,
+        sourceSize,
+        1.0,
+        shader: _shader,
+      );
       context.canvas.restore();
       return;
     }
+    final canvas = context.canvas;
+    final phaseValue = _phase!.value;
+    canvas.save();
+    canvas.clipRect(offset & size);
+    canvas.translate(offset.dx, offset.dy);
+    for (var layer = 0; layer < 2; layer++) {
+      final matrix = ArtworkFlowDelegate.layerTransform(
+        size,
+        phaseValue,
+        layer,
+        pulse: _pulse,
+      );
+      canvas.save();
+      canvas.transform(matrix.storage);
+      _drawPass(
+        canvas,
+        size,
+        image,
+        sourceSize,
+        layer == 0 ? 1.0 : .38,
+        shader: layer == 0 ? _shader : (_secondaryShader ?? _shader),
+      );
+      canvas.restore();
+    }
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant ArtworkMeshPainter oldPainter) =>
-      !identical(_phase, oldPainter._phase);
+      !identical(_phase, oldPainter._phase) ||
+      _layered != oldPainter._layered ||
+      !identical(_pulse, oldPainter._pulse);
 
   @override
   void dispose() {
     _disposed = true;
     _phase?.removeListener(notifyListeners);
     _shader?.dispose();
+    _secondaryShader?.dispose();
     super.dispose();
   }
 }

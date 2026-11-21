@@ -165,13 +165,63 @@ class ReplayGainTags {
         albumPeak: albumPeak ?? fallback.albumPeak,
       );
 
+  static const _freeformPrefixes = <String>[
+    '----:COM.APPLE.ITUNES:',
+    'COM.APPLE.ITUNES:',
+    '----:ORG.HYDROGENAUDIO.REPLAYGAIN:',
+    'ORG.HYDROGENAUDIO.REPLAYGAIN:',
+    '----:',
+  ];
+
+  static String _normalizeCommentKey(String rawKey) {
+    var key = rawKey.trim().toUpperCase();
+    for (final prefix in _freeformPrefixes) {
+      if (key.startsWith(prefix)) {
+        key = key.substring(prefix.length).trim();
+        break;
+      }
+    }
+    return key;
+  }
+
+  static double? _parseReplayGainNumber(String raw, {required bool isGain}) {
+    final trimmed = isGain
+        ? raw.replaceFirst(RegExp(r'\s*dB$', caseSensitive: false), '').trim()
+        : raw.trim();
+    var value = double.tryParse(trimmed);
+    if (value == null &&
+        !trimmed.contains('.') &&
+        trimmed.indexOf(',') > 0 &&
+        trimmed.indexOf(',') == trimmed.lastIndexOf(',')) {
+      value = double.tryParse(trimmed.replaceFirst(',', '.'));
+    }
+    if (value == null || !value.isFinite) return null;
+    if (isGain ? value < -60 || value > 30 : value <= 0 || value > 64) {
+      return null;
+    }
+    return value;
+  }
+
   factory ReplayGainTags.fromComments(Iterable<String> comments) {
     final fields = <String, double>{};
+    final r128Fields = <String, double>{};
     for (final comment in comments.take(512)) {
       if (comment.length > 8192) continue;
       final separator = comment.indexOf('=');
       if (separator <= 0) continue;
-      final key = comment.substring(0, separator).trim().toUpperCase();
+      final key = _normalizeCommentKey(comment.substring(0, separator));
+      final raw = comment.substring(separator + 1).trim();
+      // RFC 7845 Opus R128_*_GAIN uses Q7.8 signed integers relative to -23 LUFS.
+      // Shift by +5 dB to align with ReplayGain's -18 LUFS reference when
+      // explicit REPLAYGAIN_* comments are absent.
+      if (key == 'R128_TRACK_GAIN' || key == 'R128_ALBUM_GAIN') {
+        final q78 = int.tryParse(raw);
+        if (q78 == null || q78 < -32768 || q78 > 32767) continue;
+        final db = q78 / 256.0 + 5.0;
+        if (!db.isFinite || db < -60 || db > 30) continue;
+        r128Fields.putIfAbsent(key, () => db);
+        continue;
+      }
       final isGain =
           key == 'REPLAYGAIN_TRACK_GAIN' || key == 'REPLAYGAIN_ALBUM_GAIN';
       if (!isGain &&
@@ -179,21 +229,16 @@ class ReplayGainTags {
           key != 'REPLAYGAIN_ALBUM_PEAK') {
         continue;
       }
-      final raw = comment.substring(separator + 1).trim();
-      final number = isGain
-          ? raw.replaceFirst(RegExp(r'\s*dB$', caseSensitive: false), '')
-          : raw;
-      final value = double.tryParse(number);
-      if (value == null || !value.isFinite) continue;
-      if (isGain ? value < -60 || value > 30 : value <= 0 || value > 64) {
-        continue;
-      }
+      final value = _parseReplayGainNumber(raw, isGain: isGain);
+      if (value == null) continue;
       fields.putIfAbsent(key, () => value);
     }
     return ReplayGainTags(
-      trackGainDb: fields['REPLAYGAIN_TRACK_GAIN'],
+      trackGainDb:
+          fields['REPLAYGAIN_TRACK_GAIN'] ?? r128Fields['R128_TRACK_GAIN'],
       trackPeak: fields['REPLAYGAIN_TRACK_PEAK'],
-      albumGainDb: fields['REPLAYGAIN_ALBUM_GAIN'],
+      albumGainDb:
+          fields['REPLAYGAIN_ALBUM_GAIN'] ?? r128Fields['R128_ALBUM_GAIN'],
       albumPeak: fields['REPLAYGAIN_ALBUM_PEAK'],
     );
   }
@@ -226,6 +271,10 @@ class ReplayGainTags {
       if (offset > end) return empty;
     }
     final comments = <String>[];
+    double? rvaTrackGain;
+    double? rvaTrackPeak;
+    double? rvaAlbumGain;
+    double? rvaAlbumPeak;
     for (var frame = 0; frame < 4096 && offset + 10 <= end; frame++) {
       if (bytes[offset] == 0) break;
       final length = version == 4
@@ -236,6 +285,10 @@ class ReplayGainTags {
           bytes[offset + 1] == 0x58 &&
           bytes[offset + 2] == 0x58 &&
           bytes[offset + 3] == 0x58;
+      final isRva2 = bytes[offset] == 0x52 &&
+          bytes[offset + 1] == 0x56 &&
+          bytes[offset + 2] == 0x41 &&
+          bytes[offset + 3] == 0x32;
       if (isText && bytes[offset + 9] == 0 && length <= 8192) {
         final text = _decodeText(
             Uint8List.sublistView(bytes, offset + 10, offset + 10 + length));
@@ -244,10 +297,74 @@ class ReplayGainTags {
           final value = text!.substring(separator + 1).split('\u0000').first;
           comments.add('${text.substring(0, separator)}=$value');
         }
+      } else if (isRva2 && bytes[offset + 9] == 0 && length <= 4096) {
+        final parsed = _parseRva2(
+          Uint8List.sublistView(bytes, offset + 10, offset + 10 + length),
+        );
+        if (parsed != null) {
+          if (parsed.isAlbum) {
+            rvaAlbumGain ??= parsed.gainDb;
+            rvaAlbumPeak ??= parsed.peak;
+          } else {
+            rvaTrackGain ??= parsed.gainDb;
+            rvaTrackPeak ??= parsed.peak;
+          }
+        }
       }
       offset += 10 + length;
     }
-    return ReplayGainTags.fromComments(comments);
+    return ReplayGainTags.fromComments(comments).fillMissing(
+      ReplayGainTags(
+        trackGainDb: rvaTrackGain,
+        trackPeak: rvaTrackPeak,
+        albumGainDb: rvaAlbumGain,
+        albumPeak: rvaAlbumPeak,
+      ),
+    );
+  }
+
+  /// Bounded ID3v2.4 RVA2 frame reader for Master Volume (`0x01`) entries
+  /// identified as `track` or `album` (used by Quod Libet, Mutagen, etc.).
+  static ({bool isAlbum, double gainDb, double? peak})? _parseRva2(
+      Uint8List payload) {
+    final nul = payload.indexOf(0);
+    if (nul <= 0 || nul + 4 > payload.length) return null;
+    final id = latin1.decode(payload.sublist(0, nul)).trim().toLowerCase();
+    final bool isAlbum;
+    if (id == 'album') {
+      isAlbum = true;
+    } else if (id == 'track') {
+      isAlbum = false;
+    } else {
+      return null;
+    }
+    final data = ByteData.sublistView(payload);
+    var cursor = nul + 1;
+    for (var ch = 0; ch < 32 && cursor + 4 <= payload.length; ch++) {
+      final channel = payload[cursor];
+      final rawGain = data.getInt16(cursor + 1, Endian.big);
+      final peakBits = payload[cursor + 3];
+      cursor += 4;
+      final peakBytes = (peakBits + 7) >> 3;
+      if (peakBits > 64 || cursor + peakBytes > payload.length) return null;
+      if (channel == 0x01) {
+        final gainDb = rawGain / 512.0;
+        if (!gainDb.isFinite || gainDb < -60 || gainDb > 30) return null;
+        double? peak;
+        if (peakBits == 16 && peakBytes == 2) {
+          final peakRaw = data.getUint16(cursor, Endian.big);
+          if (peakRaw > 0) {
+            final normalized = peakRaw / 32768.0;
+            if (normalized.isFinite && normalized > 0 && normalized <= 64) {
+              peak = normalized;
+            }
+          }
+        }
+        return (isAlbum: isAlbum, gainDb: gainDb, peak: peak);
+      }
+      cursor += peakBytes;
+    }
+    return null;
   }
 
   static int? _synchsafe(Uint8List bytes, int offset) {

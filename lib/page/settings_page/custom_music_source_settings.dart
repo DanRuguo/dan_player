@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -570,10 +571,13 @@ class _CustomMusicSourceSettingsState extends State<CustomMusicSourceSettings>
                   key: ValueKey(profiles[index].id),
                   animation: _reorder,
                   builder: (context, child) => Transform.translate(
-                    offset: Offset(
-                        0,
-                        (_reorderOffsets[profiles[index].id] ?? 0) *
-                            Curves.easeInOutCubic.transform(_reorder.value)),
+                    offset: snapOffsetToPhysicalPixel(
+                      Offset(
+                          0,
+                          (_reorderOffsets[profiles[index].id] ?? 0) *
+                              Curves.easeInOutCubic.transform(_reorder.value)),
+                      MediaQuery.devicePixelRatioOf(context),
+                    ),
                     child: child,
                   ),
                   child: SizedBox(

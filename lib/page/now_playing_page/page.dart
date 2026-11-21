@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_menu_anchor.dart';
+import 'package:dan_player/component/auto_hide_cursor.dart';
 import 'package:dan_player/component/detail_volume_panel.dart';
 import 'component/sleep_timer_submenu.dart';
 import 'package:dan_player/component/listening_tools_dialog.dart';
@@ -91,34 +92,37 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // One cached, configurable layer covers both title bar and body.
-        // Cover changes repaint this layer, not the complete lyric/player UI.
-        const SceneBackground(scene: BackgroundScene.nowPlaying),
-        Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: const PreferredSize(
-            preferredSize: Size.fromHeight(56.0),
-            child: NowPlayingResourceTitleBar(),
+    return AutoHideCursor(
+      trackWindowFullscreen: true,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // One cached, configurable layer covers both title bar and body.
+          // Cover changes repaint this layer, not the complete lyric/player UI.
+          const SceneBackground(scene: BackgroundScene.nowPlaying),
+          Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: const PreferredSize(
+              preferredSize: Size.fromHeight(56.0),
+              child: NowPlayingResourceTitleBar(),
+            ),
+            body: ChangeNotifierProvider.value(
+              value: PlayService.instance.playbackService,
+              builder: (context, _) {
+                return ResponsiveBuilder2(builder: (context, screenType) {
+                  switch (screenType) {
+                    case ScreenType.small:
+                      return const _NowPlayingPage_Small();
+                    case ScreenType.medium:
+                    case ScreenType.large:
+                      return const _NowPlayingPage_Large();
+                  }
+                });
+              },
+            ),
           ),
-          body: ChangeNotifierProvider.value(
-            value: PlayService.instance.playbackService,
-            builder: (context, _) {
-              return ResponsiveBuilder2(builder: (context, screenType) {
-                switch (screenType) {
-                  case ScreenType.small:
-                    return const _NowPlayingPage_Small();
-                  case ScreenType.medium:
-                  case ScreenType.large:
-                    return const _NowPlayingPage_Large();
-                }
-              });
-            },
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
