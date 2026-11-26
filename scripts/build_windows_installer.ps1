@@ -92,7 +92,7 @@ $versionText = Get-Content -LiteralPath (Join-Path $installerRepository 'pubspec
 $match = [regex]::Match($versionText, '(?m)^version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9]+)?)\s*$')
 if (-not $match.Success) { throw 'Missing valid version in root pubspec.yaml' }
 $installerVersion = $match.Groups[1].Value
-$displayVersion = $installerVersion -replace '-snapshot\.(\d+)', ' snapshot$1'
+$displayVersion = $installerVersion -replace '-snapshot\.(\d+)', ' snapshot.$1'
 $numericVersion = ($installerVersion -split '[-+]')[0] + '.0'
 $nativeName = if ($QaBuild) { 'dan_installer_native_qa.dll' } else { 'dan_installer_native.dll' }
 $nativeFile = Join-Path $NativeDirectory $nativeName
