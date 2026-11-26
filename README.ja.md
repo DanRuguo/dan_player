@@ -12,8 +12,8 @@
 
 <p><strong>ローカルの音楽コレクションのために。</strong></p>
 
-<p>ライブラリ整理、歌詞表示、デスクトップでの操作にこだわった Windows x64 向け音楽プレーヤー。<br>
-ローカル再生を中心に、オンライン音楽やカスタムソースも利用できます。</p>
+<p>Material 3 Expressive を採用した Windows x64 向けのローカル優先音楽プレーヤー。<br>
+ライブラリ整理、日英の発音注釈付き歌詞、高音質再生、低負荷なデスクトップ連携を両立します。</p>
 
 <p align="center">
   <a href="https://github.com/DanRuguo/dan_player/releases/latest"><img src="https://img.shields.io/github/v/release/DanRuguo/dan_player?style=flat&amp;labelColor=374151&amp;label=stable&amp;logo=github&amp;logoColor=white&amp;color=2563EB" alt="最新の安定版"></a>
@@ -31,7 +31,7 @@
 
 <p>
   <a href="https://github.com/DanRuguo/dan_player/releases/latest"><strong>安定版をダウンロード</strong></a> ·
-  <a href="https://github.com/DanRuguo/dan_player/releases">過去のリリース</a> ·
+  <a href="https://github.com/DanRuguo/dan_player/releases">プレビュー版・全リリース</a> ·
   <a href="https://github.com/DanRuguo/dan_player/releases">更新内容</a> ·
   <a href="https://github.com/DanRuguo/dan_player/issues/new/choose">問題を報告</a>
 </p>
@@ -46,7 +46,11 @@
 </div>
 
 <p align="center">
-  <img src="docs/images/snapshot8-categories-ja.png" alt="カスタムジャケットを使ったアルバム分類" width="910">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/library-dark-wide.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/library-light-wide.png">
+    <img src="docs/images/library-light-wide.png" alt="架空データを使用した Dan Player の音楽ホーム画面と Material 3 Expressive コントロール" width="1200">
+  </picture>
 </p>
 
 <p align="center">
@@ -61,28 +65,29 @@
 
 ## ダウンロードとインストール
 
-| バージョン | 用途 | ダウンロード |
+| チャンネル | 用途 | ダウンロード |
 | --- | --- | --- |
-| **最新安定版** | 日常利用と更新。バージョンはリリースページで確認 | [インストーラー・ポータブル ZIP・チェックサム](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **最新安定版** | 日常利用と上書き更新 | [安定版インストーラー・ポータブル ZIP・チェックサム](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **プレビュー版（Snapshot）** | 最新の UI 刷新・発音ルビ・音声機能を試す | [プレビュー版と追加コンポーネント](https://github.com/DanRuguo/dan_player/releases) |
 
-**インストーラー版**はセットアップを実行してください。既存のインストールを更新できます。**ポータブル版**は ZIP 全体を展開して `Dan Player.exe` を起動してください。EXE だけを取り出さないでください。デスクトップ歌詞は同じ実行ファイルから別プロセスとして起動します。
+**インストーラー版**は Material 3 Expressive のセットアップ画面を備え、導入済みコンポーネントを保ったまま更新できます。**ポータブル版**は ZIP 全体を展開して `Dan Player.exe` を起動してください（EXE 単体だけをコピーしないでください）。デスクトップ歌詞は同じ実行ファイルから別プロセスとして起動します。
 
-スナップショット 8 のポータブル版には、音声用 FFmpeg 7.1.1 とオフラインの日本語読みデータ 3 種を同梱しています。軽量インストーラーを使用する場合は、必要なコンポーネントを設定から追加できます。プレーヤーはこのリリースから取得し、サイズと SHA-256 を照合して `tool` に配置した後、動作を確認します。1 MB 未満の英語 IPA 辞書は両方の版に内蔵しています。 [スナップショット 8 と追加コンポーネント](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.2-snapshot.8)
+完全ポータブル版には、ロスレス軽量化した**音声専用 FFmpeg 7.1.1** と**オフライン日本語読みデータ 3 種**（主辞書・語彙補完・漢字読み補完）およびライセンスを同梱しており、変換・切り出し・オフラインの読み仮名生成をすぐに利用できます。軽量インストーラーにはこの 2 種類の大型コンポーネントを含めませんが、設定から必要時に取得でき、ファイルサイズと SHA-256 を検証して `tool` に導入・再検証します（現在のプレビュー用コンポーネントは [v26.1.2-snapshot.8 のリリースページ](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.2-snapshot.8)で配布）。**1 MB 未満のオフライン英語国際音声記号（IPA）辞書は両エディションに内蔵されており、追加ダウンロードは不要です。**
 
-> **ダウンロードと署名について**：本プロジェクトの実行ファイルには RCEIT.Inc の自己署名証明書を使用しているため、Windows に信頼性の警告が表示される場合があります。インストーラーが信頼済み証明書を自動で登録することはありません。古い署名のバージョンから更新する場合は、新しいインストーラーを手動でダウンロードしてください。プレビュー版は Latest の安定版を置き換えません。更新前に、アプリのバックアップと復元設定から個人データを保存することをおすすめします。
+> **ダウンロードと署名について**：本プロジェクトの実行ファイルは RCEIT.Inc の自己署名証明書を使用しているため、Windows に信頼性の警告が表示される場合があります。インストーラーがルート証明書を自動登録することはありません。プレビュー版は Latest の安定版を置き換えません。更新前にバックアップと復元から個人データを保存することをおすすめします。
 
 <a id="download-verification"></a>
 
 <details>
 <summary><strong>SHA-256 でダウンロードしたファイルを確認する</strong></summary>
 
-同じ Release からプログラムと対応するチェックサムを取得します。ポータブル ZIP は `SHA256SUMS`、インストーラーは同名の `.exe.sha256` と照合してください。ファイルの SHA-256 を計算し、GitHub のアセットダイジェストとも確認します。以下のファイル名は実際のものに置き換えてください。
+同じ Release からプログラムと対応するチェックサムを取得し、ポータブル ZIP は `SHA256SUMS`、インストーラーは同名の `.exe.sha256` と照合してください。
 
 ```powershell
 Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 ```
 
-ハッシュの一致は公開アセットと同じ内容であることを示しますが、Windows が署名証明書を信頼することとは別です。入手元を確認し、不明なファイルを実行するためにシステムのセキュリティ機能を無効にしないでください。
+ハッシュの一致は公開アセットと同じ内容であることを示しますが、Windows による証明書の信頼とは別です。不明なファイルを実行するためにシステムのセキュリティ機能を無効にしないでください。
 
 </details>
 
@@ -90,49 +95,96 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 ## 特長
 
-- **ライブラリと検索：** アーティスト・アルバム・形式・フォルダー別の閲覧、複数語・ピンイン・入力ミスに対応した検索、CUE 分割、複数ディスクの曲順、メタデータ一括編集、ライブラリの状態確認。
-- **プレイリストとキュー：** 階層型・スマートプレイリストとドラッグ整列。キューの複数選択、Shift による範囲選択、検索結果の選択に対応し、次の曲・末尾への一括移動、削除、保存、書き出しができます。現在の再生を維持し、取り消し・やり直しにも対応。M3U／M3U8／PLS／XSPF のローカル音声参照を取り込めます。
-- **音声の一括書き出し：** 音楽フォルダーの書き出しで、元ファイルのコピーまたは MP3／Opus／FLAC への変換を選べます。音質プリセット、CUE 分割、進捗表示、キャンセルに対応し、順序と重複を保った相対パスの M3U8 を生成します。変換では基本的な文字タグを保持し、元ファイルは変更しません。埋め込み画像・歌詞・サイドカーファイルは移行しません。変換には FFmpeg が必要です。
-- **次に再生する曲：** 最大4曲を半透明カードで表示し、広い画面は2列、狭い画面は1列に。クリックでキュー内の該当項目へ移動し、展開すると再生順が確定した最大10曲を確認できます。設定は歌詞画面のプレビューだけに適用し、再生バーのポップアップには表示しません。
-- **再生と区間：** イコライザー、音量の均一化、独立した音程変更、音程を保つ速度変更、曲ごとの再開、A–B リピート、全曲のブックマーク。クロスフェード、同一アルバムでのクロスフェード無効化、曲頭・曲末の無音スキップを選べます。
-- **歌詞の編集と表示：** 単語の強調、翻訳、日本語ルビ、全文検索、時刻調整。タップ編集とテキスト編集、改訂・ロック、長い行のルビ配置に対応します。
-- **ジャケットと分類：** 埋め込み画像・同じフォルダーの画像・アニメーション GIF に対応。大きなジャケットには柔らかな輪郭の光、局所的な水滴屈折、タップ時の波紋を表示し、単色部分では見た目が変わらない描画を省きます。分類タイルには光の演出・複数サイズ・自由な並べ替えを用意しています。
-- **スペクトラムと動き：** シークバーとジャケット周囲に丸いバーまたは滑らかに変化するピクセル表示。10種類のアニメーション設定、動きの軽減、非表示時の停止、描画頻度と省電力設定を備え、操作ガイドでジャケットの効果・スペクトラム・再生位置・歌詞を試せます。
-- **デスクトップ操作：** 4言語、明暗テーマ、ジャケットに合わせた配色、ショートカット、ミニプレーヤー。デスクトップ／タスクバー歌詞の単語強調、タスクバーの1行・2行表示と再生ボタンに対応し、両歌詞表示は切り替えて使います。
-- **統計と個人整理：** 評価、個人タグ、再生ランキングに加え、直近90日間の完了した日付から曜日別の傾向を表示。合計時間と聴いた日あたりの平均を切り替えられます。コンピレーションはアルバムアーティストで分類し、音楽・キャッシュ別の集計、フォルダーのメモ、容量内訳、任意の CPU／GPU／メモリ監視も利用でき、ガイドではキューの複数選択・移動・取り消しを試せます。
-- **バックアップと復元：** 音楽、ライブラリ、プレイリスト、統計、設定、キャッシュを選んで `.bak` に保存。暗号化、選択復元、キャンセルに対応し、共有する音楽ファイルは重複保存しません。
+- **ライブラリと構文検索：** アーティスト・アルバム・ビットレート・長さ・言語・形式・ソース・フォルダー別の閲覧に加え、複数ディスクの見出しとサブタイトル、Opus／コンテナの実効ビットレート補完、CUE 分割、メタデータ一括編集、ライブラリの健全性確認に対応。検索画面には複数語・ピンイン・誤字許容一致、5 種のクイック絞り込みピル、ワンクリック履歴消去を備えます。
+- **4 表示プレイリストとキュー一括整理：** 階層型・スマートプレイリストとドラッグ整列を、リスト／グリッド／円形カバー／ツリーの 4 表示とカバー追従アニメーション付きで提供。キューは範囲選択・検索結果選択からの一括移動、削除、保存、書き出しと取り消し・やり直しに対応し、M3U／M3U8／PLS／XSPF を取り込めます。
+- **音声の一括変換・書き出し：** 元ファイルのコピーまたは MP3／Opus／FLAC 変換、音質プリセット、CUE 分割、進捗とキャンセルに対応し、順序と重複を保持した相対パス M3U8 を出力します（変換には FFmpeg が必要で、元ファイルは変更しません）。
+- **高品位再生と区間ツール：** 10 バンド EQ（Electronic／Acoustic／Commute などのプリセットと入出力に対応）、ReplayGain、独立ピッチ変更、音程維持の速度変更、WASAPI 排他出力、曲別レジューム、A–B リピート、全曲ブックマーク、クロスフェード（同一アルバム除外可）、曲頭・曲末の無音スキップを搭載。
+- **日英ルビ付き歌詞と 2 種類のエディター：** 単語単位の強調、ミリ秒許容の翻訳ペアリング、オフライン日本語ルビ、および**内蔵オフライン英語 IPA 発音表記**（標準・`/…/`・`[…]` の 3 スタイル、日英混在行での同時表示とオフライン一括生成に対応）。LRC／QRC／KRC／TTML（`itunes:timing` 対応）と埋め込み歌詞のフォールバック、2 パスシェーダーによる滑らかな上下端ブラー、タップ編集・コード編集を備えます。
+- **ジャケット演出とシームレス遷移：** 埋め込み画像・フォルダー内カバー・GIF に対応し、輪郭グロー・水滴屈折・タップ波紋を描画。分類切り替えは GPU オフスクリーン交差フェードで暗転ちらつきを抑え、アルバム詳細とアーティスト詳細は `192×192` で揃えた双方向カバー飛行と関連カード即再生に対応します。
+- **スペクトラム・動き・省電力：** 丸みのあるバーとピクセルスペクトラム、10 系統のアニメーション制御、視差効果の軽減、非表示時の描画停止、可変／固定フレームレート上限、省電力プリセット、任意の XAudio2 タッチ効果音を提供します。
+- **Material 3 Expressive デスクトップ連携：** 4 言語に応じた可変幅レイアウト、明暗テーマとカバー配色、ミニプレーヤー、カバーと再生操作を備えたアンチエイリアス対応システムトレイメニュー、排他切り替えのデスクトップ歌詞／タスクバー歌詞（起動直後の空の Windows SMTC 表示も抑止）。
+- **統計・容量内訳・15 日間ログ診断：** ヒーロー集計・KPI カード・24 時間分布・90 日間の曜日別傾向・メダル付きランキングに加え、音楽ファイルを書き換えない個人評価・タグ、共有の CPU／GPU／メモリ監視、キャッシュ分類表示、**15 日間自動整理・ミリ秒タイムスタンプ付き日次ログ**と個人パス秘匿を備えた「問題を報告」ポップアップを搭載。
+- **暗号化バックアップと選択復元：** 音楽フォルダー、ライブラリ、プレイリスト、統計、設定、キャッシュを選んで `.bak` に保存し、パスワード暗号化・重複排除・選択復元・キャンセルに対応します。
 
-歌詞とコメントは標準でローカル内容とキャッシュを優先します。自動通信は設定で有効にでき、手動検索・更新・一括キャッシュでも通信が発生します。
-
-オンライン音楽やカスタムソースも、ローカルでの再生を補う機能として利用できます。カスタムサービスは、明示的に宣言した機能に応じて検索や歌詞などを提供します。接続方法は[カスタム音楽ソース API](docs/custom-music-source-api.md)をご覧ください。
-
-メイン・デスクトップ・タスクバーの歌詞は字間を共有します。生成した読みは漢字の位置にルビで表示し、原歌詞や既存の読みを保持して、独立した派生キャッシュに保存します。保存済み歌詞の一括処理も設定から利用できます。自動通信が有効ならオンラインを優先し、失敗時はオフラインへ切り替えます。無効なら読書ツールや一括処理画面でオンライン／オフラインを明示的に選びます。オンライン生成にはご自身の Yahoo! JAPAN Client ID が必要で、対象テキストを同サービスへ送信します。認証情報はこの PC にのみ保存します。 オフライン辞書では未知語・人名・複数の読みを持つ語を正しく判定できない場合があります。必要に応じて結果を確認・修正してください。
+歌詞とコメントはローカルと保存済みキャッシュを優先します。自動オンライン取得は任意で有効化でき、一時的な通信失敗時は曲ごとに指数バックオフし、手動更新で即座に再試行します。連携仕様は[カスタム音楽ソース API](docs/custom-music-source-api.md)をご覧ください。
 
 <a id="screenshots"></a>
 
-## 画面ギャラリー
+## インターフェース
 
-検索では条件を指定したり、履歴からもう一度検索したりできます。「設定」の「更新とバージョン情報」から問題の報告を開くと、過去 15 日間のログをセッションや重大度で絞り込み、内容を編集してから GitHub の下書きを開けます。
+### 分類モザイクタイル・複数ディスク詳細・階層プレイリスト
 
-| 検索と履歴 | 問題を報告 |
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="分類モザイクタイルと Material 3 Expressive ツールバー（架空のデモデータ）" width="1200"></picture>
+
+| 階層プレイリストと 4 つの表示モード | 複数ディスク詳細と関連アーティスト即再生 |
 | --- | --- |
-| ![検索と履歴](docs/images/snapshot8-search-ja.png) | ![問題を報告](docs/images/snapshot8-report-ja.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/playlists-dark-wide.png"><img src="docs/images/playlists-light-wide.png" alt="円形カバーとサブプレイリストを備えたプレイリスト画面" width="600"></picture> | ![Disc 1/2 セクション見出し・合計時間・関連アーティストカードを表示するアルバム詳細](docs/images/feature-album-detail-dark.png) |
 
-[ほかの画面と機能の使用例](docs/images/README.md)
+### 日本語ルビ＋英語 IPA 歌詞・10 バンド EQ・スペクトラム
+
+| 日本語ルビ＋英語 IPA の歌詞表示 | 10 バンド EQ とシーン別プリセット |
+| --- | --- |
+| ![ジャケットの光演出と日本語かな・英語 IPA を同時表示する再生画面](docs/images/feature-now-playing-lyrics-dark.png) | ![帯域カプセルと Electronic / Acoustic / Commute プリセットを備えた 10 バンド EQ](docs/images/feature-equalizer-dark.png) |
+
+| 半透明カードで次の 4 曲を表示 | 丸いバーとピクセルのスペクトラムガイド |
+| --- | --- |
+| ![日本語 UI の次曲プレビュー：半透明の 4 枚のカードを 2 列に表示](docs/images/feature-upcoming-ja.png) | ![日本語 UI の操作ガイド：丸いバーとピクセルのスペクトラム](docs/images/feature-spectrum-guide-ja.png) |
+
+### 統合ルビ／IPA 設定・ミニプレーヤー・2 種類の歌詞編集
+
+| 歌詞の読み仮名・英語 IPA 統合設定 | ミニプレーヤーと対訳歌詞 |
+| --- | --- |
+| ![日本語ルビと内蔵英語 IPA のスタイル・一括生成をまとめた設定カード](docs/images/feature-lyric-annotations-light.png) | ![ミニプレーヤーでのカバー・対訳歌詞・カプセル操作](docs/images/feature-mini-lyrics-dark.png) |
+
+| タップ編集：本文・翻訳・発音の準備 | タップ編集：狭い画面での単語タイミング |
+| --- | --- |
+| ![タップ編集のテキスト・翻訳・読み入力](docs/images/lyric-tap-text-zh.png) | ![狭いウィンドウでの単語ごとのタイミング記録](docs/images/lyric-tap-words-narrow-zh.png) |
+
+| コード編集：QRC 歌詞コード | コード編集：単語同期プレビュー |
+| --- | --- |
+| ![QRC コード編集画面](docs/images/lyric-code-editor-zh.png) | ![単語単位の同期プレビュー画面](docs/images/lyric-editor-preview-zh.png) |
+
+### クイック検索・フォルダーツリー・再生統計
+
+| クイック検索ピルと履歴の一括消去 | フォルダーツリーと楽曲一覧 |
+| --- | --- |
+| ![日本語の検索ページ：クイック絞り込みピル、履歴消去、中央揃えの履歴チップ](docs/images/search-history-ja.png) | ![フォルダー階層ツリーとトラック一覧](docs/images/feature-folders-light.png) |
+
+| 音楽統計サマリーと 24 時間分布 | メダル付きランキングと再生傾向 |
+| --- | --- |
+| ![統計画面のヒーローバナー、KPI カード、24 時間グラフ](docs/images/feature-statistics-light.png) | ![統計画面のランキングと聴取傾向](docs/images/statistics-rankings-light.png) |
+
+### 外観設定・15 日間ログ問題報告・リソース監視・復元
+
+| 外観とグループ別設定 | 問題を報告ポップアップと 15 日間ログ |
+| --- | --- |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark-wide.png"><img src="docs/images/settings-light-wide.png" alt="グループ別設定と可変幅セグメントコントロール" width="600"></picture> | ![日本語 UI の問題を報告ダイアログ：分類ピル、個人パス秘匿、15 日間ミリ秒ログ](docs/images/feature-report-issue-ja.png) |
+
+| サイドバーと設定で共有するリソース監視 | キャッシュと一時ファイルの容量内訳 |
+| --- | --- |
+| ![サイドバーのスパークラインと設定画面の CPU・GPU・メモリ監視](docs/images/process-resource-locations.png) | ![キャッシュ・ユーザーデータ・一時ファイルの容量内訳](docs/images/cache-storage-statistics.png) |
+
+| 操作ガイド：日常のライブラリ操作 | 操作ガイド：シークとキュー整理デモ |
+| --- | --- |
+| ![音楽・分類・プレイリストの操作説明](docs/images/manual-common-library.png) | ![再生位置の体験デモとキュー整理ガイド](docs/images/manual-playback-demo.png) |
+
+| 初回ガイド：言語選択と再生体験 | 暗号化バックアップからの選択復元 |
+| --- | --- |
+| ![日本語の初回オンボーディング画面](docs/images/feature-onboarding-ja.png) | ![日本語のプレーヤーデータ・音楽フォルダー選択復元画面](docs/images/feature-restore-ja.png) |
+
+<sub>画像はすべて実際の Flutter ウィジェットと隔離されたデモデータによるオフスクリーン描画であり、実音声デバイスや Windows ネイティブ合成の検証結果ではありません。明暗テーマ・ウィンドウ幅・4 言語の全 64 枚は<a href="docs/images/README.md">画像ギャラリー</a>をご覧ください。</sub>
 
 <a id="quick-start"></a>
 
 ## 使い始める
 
-**音楽を追加する。** 音楽ファイルまたはフォルダーを取り込み、楽曲・分類・プレイリストの各画面から閲覧します。階層型プレイリストやドラッグでの並べ替えを使って整理できます。
+**音楽を追加する。** ファイルやフォルダーを取り込み、音楽・分類・プレイリスト・フォルダー画面から閲覧します。階層プレイリストとドラッグ操作で整理できます。
 
-**自分の評価とタグを付ける。** 分類画面の **「個人ライブラリ → 楽曲」** で、評価や個人タグを付けた曲を表示し、日付・評価・タグで絞り込めます。個人の評価とタグはプレーヤーのデータに保存され、**音楽ファイルには書き込まれません**。一方、メタデータ編集やタグの一括編集はファイルの内容を変更するため、保存前に変更のプレビューを確認してください。
+**個人の評価とタグを残す。** **「分類 → 個人ライブラリ → 楽曲」** で評価や個人タグを付けた曲を絞り込めます。個人の評価・タグはプレーヤーデータに保存され、**音楽ファイルには書き込まれません**（メタデータ編集や一括タグ編集はファイルタグを変更します）。
 
-**好きな瞬間を残す。** 再生中の画面で、その他メニューから再生ブックマークのダイアログを開き、現在位置または A–B 区間を保存します。保存した項目は、分類画面の **「個人ライブラリ → すべてのブックマーク」** で検索できます。この一覧の再生ボタンは保存した開始位置から再生します。A–B リピートを復元する場合は、該当する曲の再生ブックマークダイアログでその区間を選択してください。
+**お気に入りの区間を保存する。** 再生画面のその他メニューから再生ブックマークを開き、現在位置や A–B 区間を保存して **「分類 → 個人ライブラリ → すべてのブックマーク」** からいつでも呼び出せます。
 
-**データをバックアップする。** 設定のバックアップと復元機能で、プレーヤーのデータやローカル音楽を選んで保存できます。暗号化と選択的な復元にも対応しています。プログラムの更新と個人データのバックアップは別の操作です。インストール先のプログラムファイルは、ライブラリ・プレイリスト・設定のバックアップの代わりにはなりません。
-
-大きなコレクションはフォルダーごとに分けてください。パスワードは大切に保管し、暗号化バックアップ1個は約64 GiB未満に収めてください。
+**データをバックアップする。** 設定のバックアップと復元から、個人データとローカル音楽を暗号化 `.bak` として保存・選択復元できます（暗号化バックアップ 1 個は約 64 GiB 未満）。
 
 <details>
 <summary><strong>よく使うショートカット</strong></summary>
@@ -154,27 +206,27 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 [画像ギャラリー](docs/images/README.md) · [カスタム音楽ソース API](docs/custom-music-source-api.md) · [go-music-api 設定例](docs/examples/go-music-api-jamendo.json) · [すべてのリリース](https://github.com/DanRuguo/dan_player/releases)
 
-リンク先のギャラリーと API ドキュメントは現在、中国語で提供しています。設定例のサービスアドレスは、ご自身で配置したサービスのものに置き換えてください。問題を報告する際は、まず[既存の Issues](https://github.com/DanRuguo/dan_player/issues)を確認し、[報告テンプレート](https://github.com/DanRuguo/dan_player/issues/new/choose)を使用してください。プレーヤーのバージョン、再現手順、必要に応じて表示言語・ウィンドウサイズ・表示スケールを記載してください。再生に関する問題には、個人情報を除いた診断データを添付できます。私的な音楽ファイル、認証情報、個人の完全なディレクトリパスは公開しないでください。
+問題を報告する際は、[既存の Issues](https://github.com/DanRuguo/dan_player/issues) を確認するか、「設定 → 更新とバージョン情報 → 問題を報告」から過去 15 日間のタイムスタンプ付きログを絞り込み（個人ディレクトリパスは既定で秘匿）、[GitHub の下書き](https://github.com/DanRuguo/dan_player/issues/new/choose)を開いて送信してください。私的な音楽ファイルや認証情報は公開しないでください。
 
 <a id="development"></a>
 
 ## 開発とビルド
 
-**Flutter・Rust・BASS** を使用しています。開発には Flutter、Rust、および Visual Studio の「C++ によるデスクトップ開発」ワークロードが必要です。Dart の制約は [pubspec.yaml](pubspec.yaml)、解決済みの依存バージョンは [pubspec.lock](pubspec.lock) と [rust/Cargo.lock](rust/Cargo.lock) をご確認ください。Windows の継続的インテグレーションは [Windows CI](.github/workflows/windows_ci.yml) に定義しています。
+**Flutter・Rust・BASS** を使用しています。Dart 制約は [pubspec.yaml](pubspec.yaml)、依存バージョンは [pubspec.lock](pubspec.lock) と [rust/Cargo.lock](rust/Cargo.lock)、CI は [Windows CI](.github/workflows/windows_ci.yml) を参照してください。
 
 <details>
-<summary><strong>ソース構成・デバッグ・対象を絞った確認</strong></summary>
+<summary><strong>ソース構成・デバッグ・検証</strong></summary>
 
 | ディレクトリ | 用途 |
 | --- | --- |
-| [lib/](lib/) | 主 UI、ライブラリ、再生サービス、データモデル |
-| [third_party/desktop_lyric/](third_party/desktop_lyric/) | 共用のデスクトップ歌詞、フォント、Windows ホスト |
-| [rust/](rust/)、[rust_builder/](rust_builder/) | タグ処理、Flutter/Rust 連携、Cargokit |
-| [windows/](windows/)、[installer/](installer/) | Windows 統合と Inno インストーラーのネイティブ部分 |
-| [scripts/](scripts/) | 依存準備、ビルド、署名、成果物の検証 |
-| [assets/](assets/)、[shaders/](shaders/)、[docs/](docs/) | UI 素材、シェーダー、API ドキュメント、公開画像 |
+| [lib/](lib/) | 主 UI、ライブラリ、発音注釈歌詞、診断ログ、再生サービス、モデル |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | 共用のデスクトップ歌詞、4 言語カタログ、内蔵フォント、Windows ホスト |
+| [rust/](rust/)、[rust_builder/](rust_builder/) | タグ／カバー解析、辞書構築ツール、Flutter/Rust 連携、Cargokit |
+| [windows/](windows/)、[installer/](installer/) | Windows トレイ／タッチ音統合と Material 3 Expressive インストーラー |
+| [scripts/](scripts/) | ランタイム準備、モジュール作成、ビルド、署名、成果物検証 |
+| [assets/](assets/)、[shaders/](shaders/)、[docs/](docs/) | 内蔵英語 IPA 辞書、シェーダー、API 文書、公開ギャラリー画像 |
 
-普段のライブラリや設定に影響しないよう、独立したデータディレクトリを指定してリポジトリのルートから実行します。
+独立したデータディレクトリを指定して実行します：
 
 ```powershell
 $env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-local/readme-debug'))
@@ -182,42 +234,31 @@ flutter pub get
 flutter run -d windows
 ```
 
-起動前に BASS ランタイムを用意してください。関連スクリプトは `scripts/prepare_bass_runtime.ps1` と `scripts/prepare_bass_fx_runtime.ps1` です。端末固有の SDK・キャッシュ・署名のパスはソースリポジトリに含めません。
-
-今回の変更用に隔離したテストデータを用意し、存在する入口で Dart/Widget・Rust・Windows の必要な範囲を検証します。廃止済みのテスト一式は復元しません。Dart は `flutter test --no-pub <test-entry>`、Rust は `cargo test --manifest-path rust/Cargo.toml --locked <test-filter>` を使用します。UI は実際のコンポーネントで影響する言語・幅・文字倍率を確認し、ネイティブ画面の採取には独立した検証ウィンドウを使います。描画確認は実際の音声機器や Windows 統合の検証を代替しません。
+BASS ランタイムは `scripts/prepare_bass_runtime.ps1` と `scripts/prepare_bass_fx_runtime.ps1` で用意し、必要な範囲を `flutter test --no-pub <test-entry>` と `cargo test --manifest-path rust/Cargo.toml --locked <test-filter>` で確認します。
 
 </details>
 
 <details>
 <summary><strong>Windows ビルドとリリース</strong></summary>
 
-リリーススクリプトは、ソースを `dan_player/`、同階層のツールとキャッシュを `tool/`、成果物を `dist/` に置く構成を前提にしています。`build_windows_release.ps1` は依存準備、再利用可能なソース・成果物の記録確認、Windows ビルド、フォントとランタイムの検証、指定に応じた署名・パッケージ化を行います。変更対象の回帰検証を代替するものではありません。
-
 ```powershell
-# 上記のワークスペース構成で、署名証明書なしの場合にソースリポジトリから実行:
 .\scripts\build_windows_release.ps1 -SkipSigning
 ```
 
-`-SkipPackaging` はポータブルパッケージの作成を省略し、`-NoRestore` は復元済みの依存関係を再利用します。署名付きリリースには証明書の別途設定が必要です。インストーラーは `scripts/build_windows_installer.ps1` で作成し、ポータブル版とインストーラーはそれぞれ `verify_local_release.ps1`、`verify_windows_installer.ps1` で検証します。
-
-同じコード状態では、有効な検証結果とビルド成果物を再利用し、失敗した場合も必要な段階だけを再実行します。署名後にソースコミット、テストの検証記録、成果物の SHA-256 と署名を確認してから、必要な GitHub 公開手順のみを実行してください。プレビュー版は prerelease のままとし、安定版の Latest を置き換えません。手順の簡略化を理由に、重要な検証を省略しないでください。
-
-ローカルでの標準パッケージ化には FFmpeg を含めません。同梱する場合は `scripts/ffmpeg_runtime_manifest.json` に従って指定ランタイムを用意し、`scripts/assemble_windows_release.ps1 -IncludeOptionalComponents` を使います。`prepare_ffmpeg_runtime.ps1` は既存キャッシュの検証とコピーのみを行い、ダウンロードはしません。
+インストーラーは `scripts/build_windows_installer.ps1` で作成し、`verify_local_release.ps1` と `verify_windows_installer.ps1` で検証します。ポータブル版への追加コンポーネント同梱には `scripts/assemble_windows_release.ps1 -IncludeOptionalComponents` を使用します。
 
 </details>
-
-長期的に必要なドキュメントだけを維持します。ローカルの開発メモ、過去の QA 出力、一時ログ、ツールキャッシュ、個人データ、署名用秘密鍵はソースリポジトリに含めません。公開 UI 画像は `docs/images/` に集約し、画像を変更した際は参照も更新します。
 
 <a id="license"></a>
 
 ## ライセンスと謝辞
 
-本プロジェクトは [LICENSE](LICENSE) に従って配布します。サードパーティーのコンポーネントには、それぞれのライセンス条件が適用されます。BASS の利用と配布は公式ライセンスに従ってください。
+本プロジェクトは [LICENSE](LICENSE) に従って配布します。BASS の利用と配布は公式ライセンスに従ってください。
 
-メインプレーヤーとデスクトップ歌詞は同じフォント資源を使います。一括選択、4 言語別の選択、混在する文字の言語別フォントに対応します。内蔵の [Source Han Sans SC／JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md)、[Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md)、[Pretendard](licenses/PRETENDARD/PROVENANCE.md) は SIL Open Font License 1.1 に従って配布し、原版のライセンスと出典をポータブル版・インストーラーに同梱します。互換用の内部エイリアス `DanPingFangSC` は Source Han Sans SC を指し、Apple のフォントを含みません。
+内蔵の [Source Han Sans SC／JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md)、[Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md)、[Pretendard](licenses/PRETENDARD/PROVENANCE.md) は SIL Open Font License 1.1 で配布します（`DanPingFangSC` は Source Han Sans SC の互換エイリアスで、Apple フォントは含みません）。
 
-Dan Player は [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) を基に開発しています。プレーヤーの基盤、ライブラリ構造、歌詞表示を提供してくださった原作者に感謝します。また、[desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge)、[Flutter](https://flutter.dev/)、Material Design にも感謝します。
+[Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player) を基に開発しており、[desktop_lyric](https://github.com/Ferry-200/desktop_lyric)、[music_api_dart](https://github.com/Ferry-200/music_api_dart)、[BASS](https://www.un4seen.com/bass.html)、[Lofty](https://crates.io/crates/lofty)、[flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge)、[Flutter](https://flutter.dev/)、Material Design に感謝します。
 
-オフライン辞書のライセンスと出典：[IPADIC](licenses/IPADIC/PROVENANCE.md) / [EDRDG](licenses/EDRDG/PROVENANCE.md)・[Lindera](licenses/LINDERA/LICENSE)。オンラインの読み仮名：[Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/)。
+内蔵英語 IPA 辞書の出典：[CMUDict](licenses/CMUDICT/PROVENANCE.md)。オフライン日本語辞書の出典：[IPADIC](licenses/IPADIC/PROVENANCE.md) / [EDRDG](licenses/EDRDG/PROVENANCE.md)・[Lindera](licenses/LINDERA/LICENSE)。オンライン読み仮名：[Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/)。
 
-<sub>バッジは <a href="https://shields.io/">Shields.io</a> を利用しています。ダウンロード数は Release アセットのダウンロード回数であり、利用者数やインストール数ではありません。技術バッジは使用技術を示し、最低対応バージョンを示すものではありません。</sub>
+<sub>バッジは <a href="https://shields.io/">Shields.io</a> を利用しています。ダウンロード数は利用者数とは異なり、技術バッジは最低対応 OS バージョンを示すものではありません。</sub>

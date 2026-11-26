@@ -12,8 +12,8 @@
 
 <p><strong>Designed for your local music collection.</strong></p>
 
-<p>A Windows x64 music player for library organization, lyrics and desktop listening.<br>
-Local playback comes first, with online music and custom sources alongside it.</p>
+<p>A local-first Windows x64 music player crafted with Material 3 Expressive,<br>
+combining library organization, bilingual phonetic lyrics, high-fidelity playback and low-power desktop integration.</p>
 
 <p align="center">
   <a href="https://github.com/DanRuguo/dan_player/releases/latest"><img src="https://img.shields.io/github/v/release/DanRuguo/dan_player?style=flat&amp;labelColor=374151&amp;label=stable&amp;logo=github&amp;logoColor=white&amp;color=2563EB" alt="Latest stable release"></a>
@@ -31,7 +31,7 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 <p>
   <a href="https://github.com/DanRuguo/dan_player/releases/latest"><strong>Download stable</strong></a> ·
-  <a href="https://github.com/DanRuguo/dan_player/releases">Previous releases</a> ·
+  <a href="https://github.com/DanRuguo/dan_player/releases">Previews &amp; all releases</a> ·
   <a href="https://github.com/DanRuguo/dan_player/releases">Release notes</a> ·
   <a href="https://github.com/DanRuguo/dan_player/issues/new/choose">Report an issue</a>
 </p>
@@ -46,7 +46,11 @@ Local playback comes first, with online music and custom sources alongside it.</
 </div>
 
 <p align="center">
-  <img src="docs/images/snapshot8-categories-en.png" alt="Albums with custom artwork and mixed tile sizes" width="910">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/library-dark-wide.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/library-light-wide.png">
+    <img src="docs/images/library-light-wide.png" alt="Dan Player library page with Material 3 Expressive controls and floating playback bar, using fictional demo data" width="1200">
+  </picture>
 </p>
 
 <p align="center">
@@ -61,15 +65,16 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 ## Download & install
 
-| Release | Best for | Download |
+| Channel | Best for | Download |
 | --- | --- | --- |
-| **Latest stable** | Everyday use and upgrades; check the release page for its version | [Installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **Latest stable** | Everyday listening and in-place upgrades | [Stable installer, portable ZIP & checksums](https://github.com/DanRuguo/dan_player/releases/latest) |
+| **Preview (Snapshot)** | Trying the latest UI redesign, phonetic lyrics and audio features | [Snapshot releases & optional components](https://github.com/DanRuguo/dan_player/releases) |
 
-**Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. Desktop lyrics run in a separate process launched from the same executable.
+**Installer:** features a Material 3 Expressive setup wizard, supports in-place upgrades and preserves optional components already installed. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. Desktop lyrics run in a separate process launched from the same executable.
 
-The snapshot 8 portable ZIP includes the audio build of FFmpeg 7.1.1 and three offline Japanese reading datasets. With the slim installer, add either component in Settings. The player downloads it from this release, checks its size and SHA-256, installs it under `tool`, and verifies the installed files. Both editions include the English IPA dictionary, which is under 1 MB. [Snapshot 8 release and components](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.2-snapshot.8)
+The full portable ZIP bundles a lossless-slimmed **audio-only FFmpeg 7.1.1 runtime** and **three compact offline Japanese reading datasets** (main dictionary, vocabulary supplement and kanji-reading supplement) with licenses, ready for conversion, trimming and offline readings. The slim installer excludes those two larger packages; you can install either on demand in Settings, where the player verifies file size and SHA-256, installs into `tool`, and re-verifies the runtime (hosted on the [v26.1.2-snapshot.8 release page](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.2-snapshot.8)). **The offline English IPA dictionary is under 1 MB and is built directly into both editions—no extra download required.**
 
-> **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through the app's backup and restore settings before upgrading.
+> **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted root certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through Backup & Restore before upgrading.
 
 <a id="download-verification"></a>
 
@@ -90,49 +95,98 @@ Matching hashes confirm that the file matches the published asset; they do not m
 
 ## Highlights
 
-- **Library and search:** Browse artists, albums, formats and folders; use multiword, pinyin and typo-tolerant search, CUE tracks, multi-disc ordering, batch metadata editing and library health checks.
-- **Playlists and queues:** Nested and smart playlists and drag ordering. Select multiple queue entries, use Shift for ranges or select search results, then move them next or to the end, remove, save or export them. The current track keeps playing; edits support undo and redo. Import local audio references from M3U, M3U8, PLS or XSPF.
-- **Batch audio export:** Export a music folder by copying original files or converting to MP3, Opus or FLAC, with quality presets, CUE track splitting, progress and cancellation. A relative-path M3U8 preserves order and repeated entries. Conversion retains basic text tags and leaves originals untouched; embedded artwork, lyrics and sidecar files are not transferred. Conversion requires FFmpeg.
-- **Up next:** Up to four translucent cards use two columns in wide windows and one in narrow windows. Click to locate the exact queue entry, or expand to see up to ten determined upcoming tracks. The setting controls only the lyrics-page preview; the playback-bar popup has none.
-- **Playback and segments:** Equalizer, loudness normalization, independent pitch shifting, speed changes that preserve pitch, per-track resume, A–B loops and library-wide bookmarks; optional crossfade, a same-album crossfade exemption, and skipping leading or trailing silence.
-- **Lyric editing and reading:** Word highlighting, translation, Japanese readings, full-text search and timing adjustment; tap-to-time and text editors with revisions, locking and ruby layout for long lines.
-- **Artwork and categories:** Embedded or same-folder artwork and animated GIFs; soft contour glow, local water-drop refraction and tap ripples on the large playback cover. Uniform regions skip rendering that would leave them unchanged. Category tiles offer glow, mixed sizes and custom ordering.
-- **Spectrum and motion:** Rounded bars or smoothly changing pixel spectra around artwork and along the progress bar; ten animation controls, reduced motion, hidden-view suspension, refresh-rate and power-saving settings. Interactive guides demonstrate cover effects, spectra, progress and lyrics.
-- **Desktop experience:** Four languages, light/dark themes, artwork colors, shortcuts and a mini player; highlighted desktop or taskbar lyrics, with one/two-line taskbar layouts and optional playback buttons. The two lyric surfaces are mutually exclusive.
-- **Statistics and organization:** Ratings, personal tags, listening rankings and weekday habits across the last 90 complete dates, with total listening time or average per active day; compilations grouped by album artist, separate music/cache categories, folder notes, storage breakdowns and optional CPU/GPU/memory monitoring. The interactive guide demonstrates queue selection, moving and undo.
-- **Backup and restore:** Select music, library data, playlists, statistics, settings and caches for a `.bak` file, with optional encryption, selective restore and cancellation; shared music files are stored once.
+- **Library & structured search:** Browse artists, albums, bitrates, durations, languages, formats, sources and folders; supports multi-disc section headers and disc subtitles, Opus/container bitrate fallback, CUE tracks, batch metadata editing and library health checks. Search offers multiword, pinyin and typo-tolerant matching, five quick filter pills, and one-tap history clearing.
+- **Multi-view playlists & queue batch tools:** Nested playlists, smart rules and drag ordering across list, square grid, circle cover and tree views with cross-view cover flight tracking. Select multiple queue items, Shift-click ranges or pick search matches to move next/last, remove, save or export with full undo/redo. Import M3U, M3U8, PLS and XSPF local references.
+- **Batch audio conversion & export:** Copy originals or convert folders to MP3, Opus or FLAC with quality presets, CUE splitting, progress and cancellation, generating a relative-path M3U8 that preserves order and duplicates (conversion requires FFmpeg; originals stay untouched).
+- **High-fidelity playback & segments:** 10-band equalizer (including Electronic, Acoustic and Commute presets plus preset import/export), ReplayGain normalization, independent pitch shifting, pitch-preserving speed control, WASAPI exclusive output, per-track resume, A–B loops and library-wide bookmarks; optional crossfade, same-album crossfade exemption and leading/trailing silence skipping.
+- **Bilingual phonetic lyrics & editors:** Word-by-word highlighting, millisecond-tolerant bilingual translation alignment, offline Japanese furigana and **built-in offline English IPA phonetics** (plain, `/…/` or `[…]` styles, side-by-side in mixed CJK/English lines, with offline batch generation). Supports LRC, QRC, KRC, TTML (`itunes:timing`) and embedded synced/unsynced lyrics, paired with smooth two-pass shader viewport edge blur plus tap-to-time and code editors.
+- **Artwork glow & seamless transitions:** Embedded, multi-name folder covers and animated GIFs; soft contour glow, water-drop refraction and tap ripples on the Now Playing cover; GPU offscreen cross-dissolve on Categories to prevent dark-mode flashes, and pixel-aligned `192×192` Album ↔ Artist transitions with bidirectional cover flight and quick-play related cards.
+- **Spectrum, motion & power efficiency:** Rounded bars or smooth pixel spectra around artwork and along the progress bar; ten animation categories, reduced-motion support, hidden-window clock suspension, adaptive/fixed frame-rate caps, power-saving presets and optional XAudio2 touch feedback ticks.
+- **Material 3 Expressive desktop experience:** Adaptive four-language typography (`zh`/`en`/`ja`/`ko`), light/dark themes, dynamic cover colors, mini player, redesigned anti-aliased system tray menu with album art and transport controls, and mutually exclusive desktop/taskbar lyrics (with cold-start empty Windows SMTC suppression).
+- **Statistics, storage & issue diagnostics:** Gradient hero summary, KPI cards, 24-hour distribution, 90-day weekday habits and medal rankings; non-destructive personal ratings and tags, shared on-demand CPU/GPU/RAM monitors, storage category breakdowns, and a popup **Report an issue** dialog with **15-day auto-pruned millisecond-timestamped daily logs**, personal path redaction and clipboard fallback.
+- **Encrypted backup & selective restore:** Save selected music folders, library index, playlists, statistics, settings and caches into a `.bak` archive with optional password encryption, deduplication, selective restore and cancellation.
 
-Lyrics and comments use local content and caches first by default. Automatic online access is optional; manual searches, refreshes and batch caching can still make network requests.
+Lyrics and comments prioritize local files and saved caches by default. Automatic online lookup is opt-in (with per-track exponential backoff on transient timeouts and immediate retry on manual refresh). See the [custom music source API](docs/custom-music-source-api.md) for custom source integration.
 
-Online music and custom sources complement local listening. Custom services provide capabilities such as search and lyrics according to what they explicitly declare. See the [custom music source API](docs/custom-music-source-api.md) for integration details.
-
-Main, desktop and taskbar lyrics share letter spacing. Generated Japanese readings align with kanji, preserve the original lyrics and existing annotations, and use a separate derived cache; settings also offer bulk processing of saved lyrics. With automatic online access on, generation tries online first and falls back offline. With it off, explicitly choose online or offline in the reading tools or bulk dialog. Online generation needs your own Yahoo! JAPAN Client ID and sends the text to that service; credentials are stored only on your computer. Offline dictionaries have limits with unknown words, names and ambiguous readings; review and revise the result when needed.
+Japanese readings and English IPA phonetics are stored in separate derived caches without altering source lyrics. Online Japanese readings use your locally stored Yahoo! JAPAN Client ID; review and revise offline dictionary output for names or ambiguous words when needed.
 
 <a id="screenshots"></a>
 
 ## Interface gallery
 
-Use search filters or repeat a recent query. Open Report an issue under Update & About to review the last 15 days of logs. You can filter by session or severity and edit the report before opening a GitHub draft.
+### Category mosaic tiles, multi-disc albums & playlists
 
-| Search and recent queries | Report an issue |
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="Category mosaic cover tiles and Material 3 Expressive pill toolbar with fictional demo data" width="1200"></picture>
+
+| Nested playlists & four view modes | Multi-disc album detail & related artist card |
 | --- | --- |
-| ![Search and recent queries](docs/images/snapshot8-search-en.png) | ![Report an issue](docs/images/snapshot8-report-en.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/playlists-dark-wide.png"><img src="docs/images/playlists-light-wide.png" alt="Playlists page with circle covers and sub-playlists" width="600"></picture> | ![Multi-disc album detail showing Disc 1/2 headers, total duration and related artist quick-play card](docs/images/feature-album-detail-dark.png) |
 
-[More player screens and feature examples](docs/images/README.md)
+### Bilingual phonetic lyrics, 10-band equalizer & spectra
+
+| Immersive lyrics with Japanese furigana + English IPA | 10-band equalizer with Electronic / Acoustic / Commute presets |
+| --- | --- |
+| ![Now Playing lyrics showing cover glow, Japanese furigana and English IPA phonetics side by side](docs/images/feature-now-playing-lyrics-dark.png) | ![10-band equalizer dialog with tonal band capsules and scene presets](docs/images/feature-equalizer-dark.png) |
+
+| Four translucent upcoming cards | Rounded and pixel spectrum guide |
+| --- | --- |
+| ![English upcoming preview with four translucent cards in two columns](docs/images/feature-upcoming-en.png) | ![English interactive guide showing rounded and pixel spectra](docs/images/feature-spectrum-guide-en.png) |
+
+### Unified phonetic settings, mini player & two lyric editors
+
+| Unified lyric furigana & IPA settings | Mini player with bilingual lyrics |
+| --- | --- |
+| ![Settings card unifying Japanese furigana and built-in English IPA styles and batch generation](docs/images/feature-lyric-annotations-light.png) | ![Mini player with artwork, bilingual lyrics and pill controls](docs/images/feature-mini-lyrics-dark.png) |
+
+| Tap to time: prepare text & annotations | Tap to time: word timing in a narrow window |
+| --- | --- |
+| ![Tap lyric editor with lyrics, translation and pronunciation input](docs/images/lyric-tap-text-zh.png) | ![Tap lyric editor timing words in a narrow window](docs/images/lyric-tap-words-narrow-zh.png) |
+
+| Code editor: QRC lyric markup | Code editor: word-timed preview |
+| --- | --- |
+| ![Code lyric editor showing QRC markup](docs/images/lyric-code-editor-zh.png) | ![Code lyric editor showing synchronized word preview](docs/images/lyric-editor-preview-zh.png) |
+
+### Structured search, folder tree & listening statistics
+
+| Quick filter pills & clearable search history | Folder tree & directory tracks |
+| --- | --- |
+| ![English search page with quick syntax pills, clear action and centered history capsules](docs/images/search-history-en.png) | ![Folders page with directory tree and track list](docs/images/feature-folders-light.png) |
+
+| Listening statistics overview & 24-hour chart | Medal rankings & listening habits |
+| --- | --- |
+| ![Statistics overview with hero banner, KPI grid and 24-hour distribution](docs/images/feature-statistics-light.png) | ![Statistics rankings with medal badges and listening breakdown](docs/images/statistics-rankings-light.png) |
+
+### Appearance, 15-day diagnostic logs, resource monitors & backup
+
+| Appearance & grouped settings | Report an issue popup & 15-day timestamped logs |
+| --- | --- |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark-wide.png"><img src="docs/images/settings-light-wide.png" alt="Grouped settings with adaptive segmented controls" width="600"></picture> | ![English Report an issue dialog with category pills, path redaction and 15-day millisecond-timestamped logs](docs/images/feature-report-issue-en.png) |
+
+| Shared on-demand CPU/GPU/RAM monitoring | Cache & temporary storage breakdown |
+| --- | --- |
+| ![Sidebar sparklines and settings process resource monitor](docs/images/process-resource-locations.png) | ![Storage breakdown across caches, user data and temporary files](docs/images/cache-storage-statistics.png) |
+
+| Feature guide: everyday library operations | Feature guide: interactive seek & queue tools |
+| --- | --- |
+| ![Feature guide instructions for music, categories and playlists](docs/images/manual-common-library.png) | ![Interactive seek demonstration and queue guide](docs/images/manual-playback-demo.png) |
+
+| First-run guide: choose a language & try playback | Selective restore of encrypted backups |
+| --- | --- |
+| ![English first-run interactive onboarding guide](docs/images/feature-onboarding-en.png) | ![English selective restore dialog for player data and music folders](docs/images/feature-restore-en.png) |
+
+<sub>All renders are produced offscreen from actual Flutter widgets and isolated demonstration data to illustrate layout, themes and features rather than live audio hardware or native desktop compositing. Browse all 64 light/dark, wide/narrow and four-language renders in the <a href="docs/images/README.md">full interface gallery</a>.</sub>
 
 <a id="quick-start"></a>
 
 ## Getting started
 
-**Add music.** Import audio files or folders, then browse them from the music, category and playlist pages. Organize your collection with nested playlists and drag-to-reorder.
+**Add music.** Import audio files or folders, then browse them across the Music, Categories, Playlists and Folders pages. Organize collections with nested playlists and drag-to-reorder.
 
-**Keep your own ratings and tags.** Open the category page and choose **Personal library → Songs** to see tracks you have rated or given personal tags. Filter by date, rating or tag. Personal ratings and tags are stored in player data and **are not written to music files**. The metadata-editing and batch-tag tools do change file metadata, so review the changes before saving.
+**Keep your own ratings and tags.** Open **Categories → Personal library → Songs** to filter rated or tagged tracks by date, rating or tag. Personal ratings and tags stay in player data and **are never written to audio files**, whereas metadata and batch-tag editors modify file tags after showing a preview.
 
-**Save a favorite moment.** In the Now Playing page, open the playback bookmarks dialog from the More menu to save the current position or an A–B segment. Find your saved entries under **Personal library → All bookmarks** on the category page. The play button there starts at the saved position; to restore an A–B loop, select that segment in the corresponding track's playback bookmarks dialog.
+**Save a favorite moment.** Use **More → Playback bookmarks** on the Now Playing page to save a timestamp or an A–B loop, then revisit them under **Categories → Personal library → All bookmarks**.
 
-**Back up your data.** Use backup and restore in Settings to save selected player data and local music, with optional encryption and selective restoration. Updating the program and backing up your data are separate operations: application files in the installation directory do not replace backups of your library, playlists and settings.
-
-Split large collections by folder. Keep the password safe; each encrypted backup must be smaller than about 64 GiB.
+**Back up your data.** Use Backup & Restore in Settings to export selected player data and music folders with optional encryption and selective restoration (each encrypted `.bak` archive must be under ~64 GiB).
 
 <details>
 <summary><strong>Common keyboard shortcuts</strong></summary>
@@ -154,27 +208,27 @@ Split large collections by folder. Keep the password safe; each encrypted backup
 
 [Interface gallery](docs/images/README.md) · [Custom music source API](docs/custom-music-source-api.md) · [go-music-api configuration example](docs/examples/go-music-api-jamendo.json) · [All releases](https://github.com/DanRuguo/dan_player/releases)
 
-The linked gallery and API documentation are currently in Chinese. Replace the sample service address with your own deployment. Before reporting a problem, check [existing Issues](https://github.com/DanRuguo/dan_player/issues), then use the [issue templates](https://github.com/DanRuguo/dan_player/issues/new/choose). Include the player version, reproduction steps and, when relevant, interface language, window size or display scaling. For playback problems, attach a redacted diagnostic export. Do not upload private music files, credentials or complete personal directory paths.
+Before reporting a problem, check [existing Issues](https://github.com/DanRuguo/dan_player/issues), or open **Settings → Update & About → Report an issue** to filter the last 15 days of timestamped logs (with personal directory paths redacted by default) and open a pre-filled [GitHub issue draft](https://github.com/DanRuguo/dan_player/issues/new/choose). Never upload private audio files, credentials or unredacted personal paths.
 
 <a id="development"></a>
 
 ## Development & building
 
-Built with **Flutter, Rust and BASS**. Development requires Flutter, Rust and the Visual Studio Desktop development with C++ workload. See [pubspec.yaml](pubspec.yaml) for Dart constraints and [pubspec.lock](pubspec.lock) / [rust/Cargo.lock](rust/Cargo.lock) for resolved dependencies. The Windows workflow is defined in [Windows CI](.github/workflows/windows_ci.yml).
+Built with **Flutter, Rust and BASS**. Development requires Flutter, Rust and the Visual Studio Desktop development with C++ workload. See [pubspec.yaml](pubspec.yaml) for Dart constraints, [pubspec.lock](pubspec.lock) and [rust/Cargo.lock](rust/Cargo.lock) for resolved dependencies, and [Windows CI](.github/workflows/windows_ci.yml) for continuous integration.
 
 <details>
 <summary><strong>Source layout, debugging and focused checks</strong></summary>
 
 | Directory | Purpose |
 | --- | --- |
-| [lib/](lib/) | Main interface, library, playback services and data models |
-| [third_party/desktop_lyric/](third_party/desktop_lyric/) | Shared desktop lyrics, fonts and Windows host |
-| [rust/](rust/), [rust_builder/](rust_builder/) | Tag processing, Flutter/Rust bridging and Cargokit support |
-| [windows/](windows/), [installer/](installer/) | Windows integration and native Inno installer components |
-| [scripts/](scripts/) | Dependency preparation, building, signing and artifact verification |
-| [assets/](assets/), [shaders/](shaders/), [docs/](docs/) | Interface assets, shaders, API documentation and public images |
+| [lib/](lib/) | Main UI, library, phonetic lyrics, diagnostics logs, playback services and models |
+| [third_party/desktop_lyric/](third_party/desktop_lyric/) | Shared desktop lyrics, four-language catalogs, bundled fonts and Windows host |
+| [rust/](rust/), [rust_builder/](rust_builder/) | Tag/artwork readers, dictionary builders, Flutter/Rust bridge and Cargokit |
+| [windows/](windows/), [installer/](installer/) | Windows tray/touch-sound host and Material 3 Expressive native installer |
+| [scripts/](scripts/) | Runtime preparation, module assembly, builds, signing and verification |
+| [assets/](assets/), [shaders/](shaders/), [docs/](docs/) | Built-in English IPA dictionary, shaders, API docs and public gallery images |
 
-Run from the repository root with an isolated data directory so debugging does not affect your everyday library and settings:
+Run from the repository root with an isolated data directory:
 
 ```powershell
 $env:DAN_PLAYER_DATA_DIR = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path '../tool/qa-local/readme-debug'))
@@ -182,42 +236,35 @@ flutter pub get
 flutter run -d windows
 ```
 
-Prepare the BASS runtime before launching; see `scripts/prepare_bass_runtime.ps1` and `scripts/prepare_bass_fx_runtime.ps1`. Keep machine-specific SDK, cache and signing paths outside the source repository.
-
-Prepare isolated fixtures for the current change and select existing entry points for focused Dart/Widget, Rust or Windows checks; do not restore retired historical test suites. Use `flutter test --no-pub <test-entry>` for Dart and `cargo test --manifest-path rust/Cargo.toml --locked <test-filter>` for Rust. Render actual UI components at the affected languages, widths and text scales; native captures need a separate verification window. Widget rendering does not replace real audio-device or Windows desktop integration checks.
+Prepare the BASS runtime via `scripts/prepare_bass_runtime.ps1` and `scripts/prepare_bass_fx_runtime.ps1`. Run focused checks with `flutter test --no-pub <test-entry>` and `cargo test --manifest-path rust/Cargo.toml --locked <test-filter>`.
 
 </details>
 
 <details>
 <summary><strong>Windows builds & releases</strong></summary>
 
-The release scripts expect the source in `dan_player/`, a sibling `tool/` directory for toolchains and caches, and `dist/` for output. `build_windows_release.ps1` prepares dependencies, checks reusable source and artifact receipts, builds Windows binaries, verifies fonts and runtimes, and optionally signs or assembles packages. It does not replace focused regression checks.
+The release scripts expect the source in `dan_player/`, `tool/` for toolchains/caches, and `dist/` for output:
 
 ```powershell
-# From the source repository in the workspace described above, without a signing certificate:
 .\scripts\build_windows_release.ps1 -SkipSigning
 ```
 
-`-SkipPackaging` skips portable-package assembly; `-NoRestore` reuses restored dependencies. Signed releases require a separately configured certificate. Build the installer with `scripts/build_windows_installer.ps1`; verify the portable package and installer with `verify_local_release.ps1` and `verify_windows_installer.ps1`, respectively.
-
-Reuse valid checks and build artifacts for the same code state; rerun only the necessary stages after a failure. After signing, verify the source commit, test receipts, artifact SHA-256 and signatures, then perform only the required GitHub publishing steps. Previews remain prereleases and do not replace the stable Latest release. Simplify the process without removing essential verification.
-
-Default local assembly does not include FFmpeg. To bundle it, prepare the fixed runtime described by `scripts/ffmpeg_runtime_manifest.json`, then use `scripts/assemble_windows_release.ps1 -IncludeOptionalComponents`. `prepare_ffmpeg_runtime.ps1` only verifies and copies an existing cache; it does not download it.
+Build the installer with `scripts/build_windows_installer.ps1` and verify artifacts with `verify_local_release.ps1` and `verify_windows_installer.ps1`. Bundle optional components into portable archives via `scripts/assemble_windows_release.ps1 -IncludeOptionalComponents` after preparing the pinned FFmpeg and Japanese reading runtimes.
 
 </details>
 
-Maintain only necessary, long-lived documentation. Keep machine-local development notes, historical QA output, temporary logs, tool caches, personal data and signing private keys out of the source repository. Public interface images live in `docs/images/`; update their references when the assets change.
+Maintain only necessary long-lived documentation; keep local notes, QA output, tool caches, personal data and signing keys out of the source repository.
 
 <a id="license"></a>
 
 ## License & acknowledgments
 
-This project is distributed under [LICENSE](LICENSE). Third-party components retain their own licensing terms; BASS use and distribution must follow its official license.
+Distributed under [LICENSE](LICENSE). Third-party components retain their own terms; BASS use and distribution must follow its official license.
 
-The main player and desktop lyrics share font resources, with one common selection, separate choices for the four UI languages, and script-aware fonts for mixed text. Bundled [Source Han Sans SC / JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md), [Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md) and [Pretendard](licenses/PRETENDARD/PROVENANCE.md) are distributed under the SIL Open Font License 1.1; original licenses and provenance accompany both portable and installer packages. The internal compatibility alias `DanPingFangSC` refers to Source Han Sans SC, not an Apple font.
+Bundled [Source Han Sans SC / JP](licenses/SOURCE-HAN-SANS/PROVENANCE.md), [Google Sans](licenses/GOOGLE-SANS/PROVENANCE.md) and [Pretendard](licenses/PRETENDARD/PROVENANCE.md) are distributed under the SIL Open Font License 1.1 (`DanPingFangSC` aliases Source Han Sans SC and includes no Apple font).
 
-Dan Player is based on [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player). Thanks to the original author for the player foundation, library structure and lyrics experience. We also acknowledge [desktop_lyric](https://github.com/Ferry-200/desktop_lyric), [music_api_dart](https://github.com/Ferry-200/music_api_dart), [BASS](https://www.un4seen.com/bass.html), [Lofty](https://crates.io/crates/lofty), [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge), [Flutter](https://flutter.dev/) and Material Design.
+Based on [Ferry-200/coriander_player](https://github.com/Ferry-200/coriander_player), with thanks to [desktop_lyric](https://github.com/Ferry-200/desktop_lyric), [music_api_dart](https://github.com/Ferry-200/music_api_dart), [BASS](https://www.un4seen.com/bass.html), [Lofty](https://crates.io/crates/lofty), [flutter_rust_bridge](https://pub.dev/packages/flutter_rust_bridge), [Flutter](https://flutter.dev/) and Material Design.
 
-Offline dictionary licenses and provenance: [IPADIC](licenses/IPADIC/PROVENANCE.md) / [EDRDG](licenses/EDRDG/PROVENANCE.md) and [Lindera](licenses/LINDERA/LICENSE). Online readings: [Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/).
+Built-in English IPA dictionary provenance: [CMUDict](licenses/CMUDICT/PROVENANCE.md). Offline Japanese reading provenance: [IPADIC](licenses/IPADIC/PROVENANCE.md) / [EDRDG](licenses/EDRDG/PROVENANCE.md) and [Lindera](licenses/LINDERA/LICENSE). Online readings: [Web Services by Yahoo! JAPAN](https://developer.yahoo.co.jp/sitemap/).
 
-<sub>Badges are provided by <a href="https://shields.io/">Shields.io</a>. Downloads count Release asset downloads, not unique users or installations. Framework badges identify the technologies used, not minimum supported versions.</sub>
+<sub>Badges by <a href="https://shields.io/">Shields.io</a>. Asset download counts do not equal unique installations; technology badges do not declare minimum supported OS versions.</sub>
